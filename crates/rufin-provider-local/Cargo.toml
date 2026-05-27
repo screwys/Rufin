@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait = "0.1.89"
-lofty = "0.22.4"
+lofty = "0.24.0"
 percent-encoding = "2.3.2"
 rufin-core = { path = "../rufin-core" }
 rufin-provider = { path = "../rufin-provider" }

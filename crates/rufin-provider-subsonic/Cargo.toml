@@ -7,7 +7,7 @@ rust-version.workspace = true
 
 [dependencies]
 async-trait = "0.1.89"
-getrandom = "0.3.4"
+getrandom = "0.4.0"
 md5 = "0.8.0"
 reqwest = { version = "0.13.3", features = ["json"] }
 rufin-core = { path = "../rufin-core" }
