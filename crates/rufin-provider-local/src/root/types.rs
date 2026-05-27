@@ -649,7 +649,7 @@ fn read_track(path: PathBuf) -> Option<ScannedTrack> {
     let album =
         tag_string(tag, |tag| tag.album().map(|value| value.to_string())).unwrap_or(parent_name);
     let album_artist = tag
-        .and_then(|tag| tag.get_string(&ItemKey::AlbumArtist))
+        .and_then(|tag| tag.get_string(ItemKey::AlbumArtist))
         .map(ToString::to_string)
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| artist.clone());
@@ -683,8 +683,8 @@ fn read_track(path: PathBuf) -> Option<ScannedTrack> {
     let cover = embedded_cover(&path, tagged_file.as_ref(), tag)
         .or_else(|| path.parent().and_then(folder_cover).map(LocalCover::File));
     let year = tag
-        .and_then(|tag| tag.year())
-        .map(|year| year.min(u32::from(u16::MAX)) as u16)
+        .and_then(|tag| tag.date())
+        .map(|date| date.year)
         .unwrap_or_default();
     let duration_seconds = properties
         .map(|properties| properties.duration().as_secs().min(u64::from(u32::MAX)) as u32)

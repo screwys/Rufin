@@ -262,7 +262,7 @@ fn tag_string(tag: Option<&Tag>, read: impl FnOnce(&Tag) -> Option<String>) -> O
 fn artist_names(tag: Option<&Tag>, fallback: &str) -> Vec<String> {
     let tagged = tag
         .map(|tag| {
-            tag.get_strings(&ItemKey::TrackArtists)
+            tag.get_strings(ItemKey::TrackArtists)
                 .flat_map(split_credit_names)
                 .collect::<Vec<_>>()
         })
