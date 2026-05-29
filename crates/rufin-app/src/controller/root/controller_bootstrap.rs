@@ -33,10 +33,15 @@ impl AppController {
                 settings.auto_dj_enabled,
                 &settings.playback,
             );
+            let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
             let controller = Self {
+                settings: super::settings_controller::SettingsController::new(
+                    store.clone(),
+                    secrets.clone(),
+                ),
                 store,
                 runtime,
-                secrets: Arc::new(MemorySecretStore::new()),
+                secrets,
                 queue: Arc::new(Mutex::new(queue)),
                 playback: Arc::new(Mutex::new(Box::new(FakePlaybackBackend::new()))),
                 playback_snapshot: Arc::new(Mutex::new(playback_snapshot.clone())),
@@ -81,10 +86,15 @@ impl AppController {
             settings.auto_dj_enabled,
             &settings.playback,
         );
+        let secrets = platform_secret_store();
         let controller = Self {
+            settings: super::settings_controller::SettingsController::new(
+                store.clone(),
+                secrets.clone(),
+            ),
             store,
             runtime,
-            secrets: platform_secret_store(),
+            secrets,
             queue: Arc::new(Mutex::new(queue)),
             playback: Arc::new(Mutex::new(playback_backend(false))),
             playback_snapshot: Arc::new(Mutex::new(playback_snapshot.clone())),
@@ -130,10 +140,15 @@ impl AppController {
             panic!("failed to load memory snapshot: {error}");
         });
         let settings = load_settings_from_store(&store);
+        let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
         let controller = Self {
+            settings: super::settings_controller::SettingsController::new(
+                store.clone(),
+                secrets.clone(),
+            ),
             store,
             runtime,
-            secrets: Arc::new(MemorySecretStore::new()),
+            secrets,
             queue: Arc::new(Mutex::new(None)),
             playback: Arc::new(Mutex::new(Box::new(FakePlaybackBackend::new()))),
             playback_snapshot: Arc::new(Mutex::new(PlaybackSnapshot {

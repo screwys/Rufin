@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 use super::*;
 
 mod cache_lookup;
@@ -8,11 +6,7 @@ mod size_helpers;
 mod tiles;
 mod warming;
 
-use cache_lookup::*;
-use decode_queue::*;
 use size_helpers::*;
-use tiles::*;
-use warming::*;
 
 #[derive(Clone)]
 pub(in crate::ui) struct CoverBinding {

@@ -5,6 +5,7 @@ use std::{
     time::Duration,
 };
 
+use crate::controller::LoginRequest;
 use crate::i18n::tr;
 use crate::providers::StreamingProvider;
 use adw::prelude::*;
@@ -226,29 +227,29 @@ impl Shell {
                 status_input.set_visible(true);
                 login_for_click.set_sensitive(false);
                 shell.begin_first_run_connection(&message);
-                controller.login(
+                controller.login(LoginRequest {
                     provider,
-                    url_input.text().to_string(),
-                    username_input.text().to_string(),
-                    password_input.text().to_string(),
-                    trust_input.is_active(),
-                    None,
-                    None,
-                );
+                    server_url: url_input.text().to_string(),
+                    username: username_input.text().to_string(),
+                    password: password_input.text().to_string(),
+                    trust_invalid_cert: trust_input.is_active(),
+                    local_access_root: None,
+                    path_replace_from: None,
+                });
             }
         });
-        connect_add_server_status_watcher(
-            self,
-            &status,
-            &login,
-            &provider,
-            &local_folders,
-            &url,
-            &username,
-            &password,
+        connect_add_server_status_watcher(AddServerStatusWatcher {
+            shell: self,
+            status: &status,
+            login: &login,
+            provider: &provider,
+            local_folders: &local_folders,
+            url: &url,
+            username: &username,
+            password: &password,
             connect_attempt_started,
             on_connect_succeeded,
-        );
+        });
         actions.append(&login);
         content.append(&actions);
 
@@ -538,19 +539,32 @@ fn update_connect_button(
     login.set_sensitive(ready);
 }
 
-#[allow(clippy::too_many_arguments)]
-fn connect_add_server_status_watcher(
-    shell: &Rc<Shell>,
-    status: &gtk::Label,
-    login: &gtk::Button,
-    provider: &adw::ComboRow,
-    local_folders: &Rc<RefCell<Vec<PathBuf>>>,
-    url: &adw::EntryRow,
-    username: &adw::EntryRow,
-    password: &adw::PasswordEntryRow,
+struct AddServerStatusWatcher<'a> {
+    shell: &'a Rc<Shell>,
+    status: &'a gtk::Label,
+    login: &'a gtk::Button,
+    provider: &'a adw::ComboRow,
+    local_folders: &'a Rc<RefCell<Vec<PathBuf>>>,
+    url: &'a adw::EntryRow,
+    username: &'a adw::EntryRow,
+    password: &'a adw::PasswordEntryRow,
     connect_attempt_started: Rc<Cell<bool>>,
     on_connect_succeeded: Option<Rc<dyn Fn()>>,
-) {
+}
+
+fn connect_add_server_status_watcher(watcher: AddServerStatusWatcher<'_>) {
+    let AddServerStatusWatcher {
+        shell,
+        status,
+        login,
+        provider,
+        local_folders,
+        url,
+        username,
+        password,
+        connect_attempt_started,
+        on_connect_succeeded,
+    } = watcher;
     let shell = Rc::clone(shell);
     let status = status.clone();
     let login = login.clone();

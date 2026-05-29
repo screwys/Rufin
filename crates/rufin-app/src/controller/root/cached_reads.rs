@@ -427,87 +427,79 @@ pub(in crate::controller) fn restore_queue(
         }
     }
 }
-#[allow(clippy::too_many_arguments)]
+
+pub(in crate::controller) struct LoginActivationContext<'a> {
+    pub(in crate::controller) store: &'a StoreHandle,
+    pub(in crate::controller) queue: &'a Arc<Mutex<Option<QueueEngine>>>,
+    pub(in crate::controller) playback: &'a Arc<Mutex<Box<dyn PlaybackBackend>>>,
+    pub(in crate::controller) playback_snapshot: &'a Arc<Mutex<PlaybackSnapshot>>,
+    pub(in crate::controller) auto_dj_enabled: &'a Arc<Mutex<bool>>,
+    pub(in crate::controller) events: &'a Sender<ControllerEvent>,
+}
+
+#[derive(Clone, Copy)]
+pub(in crate::controller) struct LoginActivationRequest<'a> {
+    pub(in crate::controller) session: &'a ProviderSession,
+    pub(in crate::controller) trust_invalid_cert: bool,
+    pub(in crate::controller) local_access_root: Option<&'a Path>,
+    pub(in crate::controller) path_replace_from: Option<&'a str>,
+}
+
 pub(in crate::controller) fn activate_logged_in_server(
-    store: &StoreHandle,
-    queue: &Arc<Mutex<Option<QueueEngine>>>,
-    playback: &Arc<Mutex<Box<dyn PlaybackBackend>>>,
-    playback_snapshot: &Arc<Mutex<PlaybackSnapshot>>,
-    auto_dj_enabled: &Arc<Mutex<bool>>,
-    events: &Sender<ControllerEvent>,
-    session: &ProviderSession,
-    trust_invalid_cert: bool,
-    local_access_root: Option<&Path>,
-    path_replace_from: Option<&str>,
+    context: &LoginActivationContext<'_>,
+    request: LoginActivationRequest<'_>,
 ) -> Result<SavedServer, String> {
+    let session = request.session;
     let saved = SavedServer {
         server: session.server.clone(),
         user_id: session.user_id.clone(),
         username: session.username.clone(),
-        trust_invalid_cert,
+        trust_invalid_cert: request.trust_invalid_cert,
     };
-    store.with_store(|store| {
+    context.store.with_store(|store| {
         store.save_server(&saved)?;
-        if let Some(root) = local_access_root.and_then(Path::to_str) {
+        if let Some(root) = request.local_access_root.and_then(Path::to_str) {
             store.save_server_local_access(&ServerLocalAccess {
                 server_id: saved.server.id.clone(),
                 root_path: root.to_string(),
-                path_replace_from: trimmed_optional(path_replace_from),
+                path_replace_from: trimmed_optional(request.path_replace_from),
                 path_replace_to: Some(root.to_string()),
             })?;
         }
         store.set_active_server(&saved.server.id)?;
         Ok(())
     })?;
-    let mut settings = load_settings_from_store(store);
+    let mut settings = load_settings_from_store(context.store);
     settings.sources.selected = Some(LibrarySourceSelection::Server(saved.server.id.clone()));
     settings.migrate_defaults();
-    store.save_settings(&settings)?;
+    context.store.save_settings(&settings)?;
 
     activate_queue_for_saved_and_emit(
-        store,
-        queue,
-        playback,
-        playback_snapshot,
-        auto_dj_enabled,
-        events,
+        context.store,
+        context.queue,
+        context.playback,
+        context.playback_snapshot,
+        context.auto_dj_enabled,
+        context.events,
         &saved,
     )?;
-    let _sent = events.send(ControllerEvent::LoginStatus(
+    let _sent = context.events.send(ControllerEvent::LoginStatus(
         "Connected. Loading cached library...".to_string(),
     ));
-    emit_snapshot(store, events);
+    emit_snapshot(context.store, context.events);
     Ok(saved)
 }
-#[allow(clippy::too_many_arguments)]
+
 pub(in crate::controller) fn save_token_and_activate_logged_in_server(
-    store: &StoreHandle,
-    queue: &Arc<Mutex<Option<QueueEngine>>>,
-    playback: &Arc<Mutex<Box<dyn PlaybackBackend>>>,
-    playback_snapshot: &Arc<Mutex<PlaybackSnapshot>>,
-    auto_dj_enabled: &Arc<Mutex<bool>>,
-    events: &Sender<ControllerEvent>,
+    context: &LoginActivationContext<'_>,
     secrets: &Arc<dyn SecretStore>,
-    session: &ProviderSession,
-    trust_invalid_cert: bool,
-    local_access_root: Option<&Path>,
-    path_replace_from: Option<&str>,
+    request: LoginActivationRequest<'_>,
 ) -> Result<SavedServer, String> {
+    let session = request.session;
     secrets
         .save_token(&session.server.id, &session.access_token)
         .map_err(|error| error.to_string())?;
-    match activate_logged_in_server(
-        store,
-        queue,
-        playback,
-        playback_snapshot,
-        auto_dj_enabled,
-        events,
-        session,
-        trust_invalid_cert,
-        local_access_root,
-        path_replace_from,
-    ) {
+    match activate_logged_in_server(context, request) {
         Ok(saved) => Ok(saved),
         Err(error) => {
             if let Err(delete_error) = secrets.delete_token(&session.server.id) {

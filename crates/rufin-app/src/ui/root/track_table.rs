@@ -1,3 +1,4 @@
+use super::track_table_popover;
 use super::*;
 
 impl Shell {
@@ -157,13 +158,15 @@ impl Shell {
         });
 
         configure.set_popover(Some(&self.track_table_popover(
-            &table,
-            &model,
-            Rc::clone(&tracks),
-            &search,
-            &sort_button,
-            options.favorite_first,
-            server_search,
+            track_table_popover::TrackTablePopoverTarget {
+                table: &table,
+                model: &model,
+                tracks: Rc::clone(&tracks),
+                search: &search,
+                sort_button: &sort_button,
+                favorite_first: options.favorite_first,
+                server_search,
+            },
         )));
 
         let scroller = gtk::ScrolledWindow::new();

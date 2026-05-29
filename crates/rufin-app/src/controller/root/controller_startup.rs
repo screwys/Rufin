@@ -42,14 +42,18 @@ pub(in crate::controller) fn start_sync_thread(context: SyncContext, saved: Save
         match sync_result {
             Ok(()) => {
                 covers::start_external_metadata_cover_prefetch_thread(
-                    context.store.clone(),
-                    Arc::clone(&context.runtime),
-                    Arc::clone(&context.secrets),
-                    context.events.clone(),
-                    Arc::clone(&context.cover_in_flight),
-                    Arc::clone(&context.external_cover_prefetch_in_flight),
-                    Arc::clone(&context.cover_slots),
-                    saved.clone(),
+                    covers::ExternalCoverPrefetchRequest {
+                        store: context.store.clone(),
+                        runtime: Arc::clone(&context.runtime),
+                        secrets: Arc::clone(&context.secrets),
+                        events: context.events.clone(),
+                        cover_in_flight: Arc::clone(&context.cover_in_flight),
+                        external_cover_prefetch_in_flight: Arc::clone(
+                            &context.external_cover_prefetch_in_flight,
+                        ),
+                        cover_slots: Arc::clone(&context.cover_slots),
+                        saved: saved.clone(),
+                    },
                 );
                 let _sent = context.events.send(ControllerEvent::LoginStatus(
                     "Library sync complete".to_string(),

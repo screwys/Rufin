@@ -1,41 +1,26 @@
 use super::*;
 
 use super::{
-    AppController, CACHE_DATABASE_FILE_NAME, ControllerEvent, LOCAL_SOURCE_SERVER_ID,
-    LibrarySnapshot, RandomPlayAction, RandomPlayRequest, SETTINGS_FILE_NAME, SNAPSHOT_GRID_LIMIT,
-    SNAPSHOT_TRACK_LIMIT, StoreHandle, activate_logged_in_server,
-    app_cache_database_path_for_cache_dir, app_settings_path_for_config_dir, auto_dj_candidates,
-    cover_cache_dir_for_cache_dir, ensure_app_cache_dirs, home_refresh_completed_event,
-    load_settings_from_store, load_snapshot, lyrics_cache_dir_for_cache_dir,
-    playback_cache_dir_for_cache_dir, playback_snapshot_from_queue, prefetch_home_section,
-    promote_prefetched_home_section, refresh_home_section, refresh_home_sections,
-    refresh_home_sections_without_explore, refresh_playlist_pages, restore_queue,
+    AppController, ControllerEvent, LOCAL_SOURCE_SERVER_ID, LibrarySnapshot,
+    LoginActivationContext, LoginActivationRequest, SNAPSHOT_GRID_LIMIT, SNAPSHOT_TRACK_LIMIT,
+    StoreHandle, activate_logged_in_server, home_refresh_completed_event, load_snapshot,
+    prefetch_home_section, promote_prefetched_home_section, refresh_home_section,
+    refresh_home_sections, refresh_home_sections_without_explore, refresh_playlist_pages,
     save_token_and_activate_logged_in_server, sync_page_finished, sync_provider,
-    tmp_cache_dir_for_cache_dir,
 };
-use crate::external_scrobbling::ExternalScrobbleState;
-use crate::providers::JellyfinLyricsSearch;
 use rufin_core::{
-    Album, AlbumId, AppSettings, ArtistCredit, ArtistId, HomeSection, HomeSectionKind, ImageRef,
-    LibrarySourceSelection, LocalLibraryFolder, PlaybackSettings, Playlist, PlaylistId,
-    QueueEngine, RepeatMode, ServerId, ServerIdentity, ThemePreference, Track, TrackId,
+    AlbumId, AppSettings, ArtistCredit, HomeSection, HomeSectionKind, LibrarySourceSelection,
+    LocalLibraryFolder, Playlist, PlaylistId, ServerId, ServerIdentity, TrackId,
 };
 use rufin_playback::{
-    PlaybackBackend, PlaybackCommand, PlaybackError, PlaybackEvent, PlaybackState, PlaybackTrack,
+    PlaybackBackend, PlaybackCommand, PlaybackError, PlaybackEvent, PlaybackState,
 };
-use rufin_provider::{
-    FavoriteItemId, LyricLine, Lyrics, LyricsSource, MusicProvider, PagedRequest, PlayedFilter,
-    PlaylistEntry, ProviderSession,
-};
-use rufin_secrets::{MemorySecretStore, SecretStore};
-use rufin_store::{CachedArtistDetail, CoverCacheEntry, SavedServer, ServerLocalAccess};
+use rufin_provider::{MusicProvider, PagedRequest, PlaylistEntry, ProviderSession};
+use rufin_secrets::SecretStore;
+use rufin_store::SavedServer;
 use rufin_test_support::{FakeProvider, FakeScale};
-use std::collections::HashSet;
 use std::fs;
-use std::path::PathBuf;
-use std::sync::mpsc::{Receiver, channel};
-use std::sync::{Arc, Condvar, Mutex};
-use std::time::Duration;
+use std::sync::{Arc, Mutex};
 use tokio::runtime::Runtime;
 struct SaveFailingSecretStore;
 impl SecretStore for SaveFailingSecretStore {
@@ -229,16 +214,20 @@ pub(in crate::controller) fn activate_logged_in_server_selects_server_without_sa
         access_token: "token".to_string(),
     };
     activate_logged_in_server(
-        &controller.store,
-        &controller.queue,
-        &controller.playback,
-        &controller.playback_snapshot,
-        &controller.auto_dj_enabled,
-        &controller.events,
-        &session,
-        false,
-        None,
-        None,
+        &LoginActivationContext {
+            store: &controller.store,
+            queue: &controller.queue,
+            playback: &controller.playback,
+            playback_snapshot: &controller.playback_snapshot,
+            auto_dj_enabled: &controller.auto_dj_enabled,
+            events: &controller.events,
+        },
+        LoginActivationRequest {
+            session: &session,
+            trust_invalid_cert: false,
+            local_access_root: None,
+            path_replace_from: None,
+        },
     )
     .expect("activate logged-in server");
     let queue = wait_for_queue(&events).expect("server queue");
@@ -278,17 +267,21 @@ pub(in crate::controller) fn token_save_failure_does_not_persist_empty_server() 
         access_token: "token".to_string(),
     };
     let error = save_token_and_activate_logged_in_server(
-        &controller.store,
-        &controller.queue,
-        &controller.playback,
-        &controller.playback_snapshot,
-        &controller.auto_dj_enabled,
-        &controller.events,
+        &LoginActivationContext {
+            store: &controller.store,
+            queue: &controller.queue,
+            playback: &controller.playback,
+            playback_snapshot: &controller.playback_snapshot,
+            auto_dj_enabled: &controller.auto_dj_enabled,
+            events: &controller.events,
+        },
         &secrets,
-        &session,
-        false,
-        None,
-        None,
+        LoginActivationRequest {
+            session: &session,
+            trust_invalid_cert: false,
+            local_access_root: None,
+            path_replace_from: None,
+        },
     )
     .expect_err("token save should fail");
 

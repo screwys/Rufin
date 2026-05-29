@@ -152,18 +152,17 @@ impl AppController {
             delete_token_after_forget(secrets, saved.server.id);
         });
     }
-    #[allow(clippy::too_many_arguments)]
-    #[instrument(skip(self, password), fields(provider = provider.provider_id(), server_url = %server_url, username = %username, trust_invalid_cert = trust_invalid_cert))]
-    pub fn login(
-        &self,
-        provider: StreamingProvider,
-        server_url: String,
-        username: String,
-        password: String,
-        trust_invalid_cert: bool,
-        local_access_root: Option<PathBuf>,
-        path_replace_from: Option<String>,
-    ) {
+    #[instrument(skip(self, request), fields(provider = request.provider.provider_id(), server_url = %request.server_url, username = %request.username, trust_invalid_cert = request.trust_invalid_cert))]
+    pub fn login(&self, request: LoginRequest) {
+        let LoginRequest {
+            provider,
+            server_url,
+            username,
+            password,
+            trust_invalid_cert,
+            local_access_root,
+            path_replace_from,
+        } = request;
         let sync_context = self.sync_context();
         let store = sync_context.store.clone();
         let runtime = Arc::clone(&sync_context.runtime);
@@ -194,18 +193,24 @@ impl AppController {
                 }
             };
 
-            let saved = match save_token_and_activate_logged_in_server(
-                &store,
-                &queue,
-                &playback,
-                &playback_snapshot,
-                &auto_dj_enabled,
-                &events,
-                &secrets,
-                &session,
+            let activation_context = LoginActivationContext {
+                store: &store,
+                queue: &queue,
+                playback: &playback,
+                playback_snapshot: &playback_snapshot,
+                auto_dj_enabled: &auto_dj_enabled,
+                events: &events,
+            };
+            let activation_request = LoginActivationRequest {
+                session: &session,
                 trust_invalid_cert,
-                local_access_root.as_deref(),
-                path_replace_from.as_deref(),
+                local_access_root: local_access_root.as_deref(),
+                path_replace_from: path_replace_from.as_deref(),
+            };
+            let saved = match save_token_and_activate_logged_in_server(
+                &activation_context,
+                &secrets,
+                activation_request,
             ) {
                 Ok(saved) => saved,
                 Err(error) => {

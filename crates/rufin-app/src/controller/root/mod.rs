@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 use super::covers;
 pub use super::discovery::DiscoveredServer;
 pub use super::random::{RandomPlayAction, RandomPlayRequest};
@@ -82,6 +80,7 @@ mod refresh_commands;
 mod server_cache_commands;
 mod server_lifecycle_commands;
 mod server_local_access_commands;
+mod settings_controller;
 mod source_selection;
 mod sync_command;
 mod sync_requests;
@@ -95,40 +94,16 @@ mod startup_sync_tests;
 #[cfg(test)]
 mod test_support;
 
-pub(in crate::controller) use app_cache_commands::*;
-pub(in crate::controller) use auto_dj::*;
-pub(in crate::controller) use auto_dj_commands::*;
-pub(in crate::controller) use cached_library_api::*;
 pub(in crate::controller) use cached_reads::*;
 pub(crate) use cached_reads::{grouped_cover_refs_for_items, track_cover_refs_for_items};
-pub(in crate::controller) use controller_bootstrap::*;
-pub(in crate::controller) use controller_settings::*;
 pub(in crate::controller) use controller_startup::*;
-pub(in crate::controller) use folder_search_commands::*;
-pub(in crate::controller) use library_mutations::*;
-pub(in crate::controller) use local_source_commands::*;
-pub(in crate::controller) use lyrics_commands::*;
 #[cfg(test)]
 pub(in crate::controller) use lyrics_local_access_tests::{
     controller_from_store_for_test, saved_server, unique_test_dir,
 };
-pub(in crate::controller) use playback_advance::*;
-pub(in crate::controller) use playback_commands::*;
 pub(in crate::controller) use playback_queue::*;
-pub(in crate::controller) use playback_reporting::*;
-pub(in crate::controller) use playback_runtime::*;
-pub(in crate::controller) use playlist_commands::*;
-pub(in crate::controller) use queue_commands::*;
-pub(in crate::controller) use queue_mutation::*;
-pub(in crate::controller) use queue_state::*;
-pub(in crate::controller) use refresh_commands::*;
-pub(in crate::controller) use server_cache_commands::*;
-pub(in crate::controller) use server_lifecycle_commands::*;
-pub(in crate::controller) use server_local_access_commands::*;
-pub(in crate::controller) use source_selection::*;
 #[cfg(test)]
 pub(in crate::controller) use startup_sync_tests::RecordingPlaybackBackend;
-pub(in crate::controller) use sync_command::*;
 pub(in crate::controller) use sync_requests::*;
 #[cfg(test)]
 pub(in crate::controller) use test_support::*;
@@ -337,11 +312,24 @@ pub enum ControllerEvent {
     LoginStatus(String),
     Error(String),
 }
+
+#[derive(Clone, Debug)]
+pub struct LoginRequest {
+    pub provider: StreamingProvider,
+    pub server_url: String,
+    pub username: String,
+    pub password: String,
+    pub trust_invalid_cert: bool,
+    pub local_access_root: Option<PathBuf>,
+    pub path_replace_from: Option<String>,
+}
+
 #[derive(Clone)]
 pub struct AppController {
     pub(in crate::controller) store: StoreHandle,
     pub(in crate::controller) runtime: Arc<Runtime>,
     pub(in crate::controller) secrets: Arc<dyn SecretStore>,
+    settings: settings_controller::SettingsController,
     queue: Arc<Mutex<Option<QueueEngine>>>,
     playback: Arc<Mutex<Box<dyn PlaybackBackend>>>,
     playback_snapshot: Arc<Mutex<PlaybackSnapshot>>,

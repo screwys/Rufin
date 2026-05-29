@@ -1,5 +1,3 @@
-#![allow(unused_imports)]
-
 #[path = "../artist.rs"]
 mod artist;
 #[path = "../cards.rs"]
@@ -145,39 +143,15 @@ mod track_table_popover;
 #[cfg(test)]
 mod shell_tests;
 
-pub(in crate::ui) use album_detail_view::*;
 pub(in crate::ui) use build::*;
 pub(in crate::ui) use cover::{
     CoverBinding, CoverDecodeJob, CoverDecodePriority, CoverPathLookupIntent, CoverWarmJob,
-    DecodedCover, DecodedCoverOrderEntry, FirstRunCoverPrimeJob, record_cover_path_lookup_request,
+    DecodedCover, DecodedCoverOrderEntry, FirstRunCoverPrimeJob,
 };
 pub(in crate::ui) use cover_startup::*;
-pub(in crate::ui) use empty_states::*;
-pub(in crate::ui) use favorite_controls::*;
-pub(in crate::ui) use folder_route_state::*;
-pub(in crate::ui) use genre_detail_view::*;
-pub(in crate::ui) use grouped_detail_view::*;
 pub(in crate::ui) use home_refresh::*;
-pub(in crate::ui) use home_route_refresh::*;
-pub(in crate::ui) use home_visible_sections::*;
 pub(in crate::ui) use layout_rendering::*;
-pub(in crate::ui) use lyrics_highlight_timers::*;
-pub(in crate::ui) use lyrics_panel::*;
-pub(in crate::ui) use lyrics_playback_state::*;
-pub(in crate::ui) use new_playlist_dialog::*;
-pub(in crate::ui) use perf_recording::*;
-pub(in crate::ui) use playlist_detail_view::*;
-pub(in crate::ui) use playlist_rename_dialog::*;
-pub(in crate::ui) use responsive_layout_state::*;
-pub(in crate::ui) use responsive_route_render::*;
-pub(in crate::ui) use route_navigation::*;
-pub(in crate::ui) use route_rendering::*;
-pub(in crate::ui) use search_view::*;
 pub(in crate::ui) use shell_navigation::*;
-pub(in crate::ui) use sidebar_route_controls::*;
-pub(in crate::ui) use startup_reveal::*;
-pub(in crate::ui) use track_table::*;
-pub(in crate::ui) use track_table_popover::*;
 
 pub(in crate::ui) const GRID_ROUTE_PAGE_SIZE: usize = 16;
 pub(in crate::ui) const TRACK_ROUTE_PAGE_SIZE: usize = 64;

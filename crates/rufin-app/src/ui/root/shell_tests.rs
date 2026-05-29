@@ -4,9 +4,10 @@ use super::right_panel::{
 };
 use super::{
     AutoLyricsRequest, PlaylistEntryListState, PlaylistEntrySort, SnapshotRenderDecision,
-    auto_lyrics_request_for_settings, auto_lyrics_skip_action_enabled, current_playback_track_id,
-    playlist_drop_index, playlist_entries_for_state, seekbar_target_seconds,
-    snapshot_event_outcome,
+    auto_lyrics_request_for_settings, auto_lyrics_skip_action_enabled,
+    cover::record_cover_path_lookup_request, current_playback_track_id,
+    home_visible_sections::changed_visible_home_section_kinds, playlist_drop_index,
+    playlist_entries_for_state, seekbar_target_seconds, snapshot_event_outcome,
 };
 use rufin_core::{
     Album, AlbumId, AppSettings, ArtistId, HomeSection, HomeSectionKind, LibrarySourceSelection,
@@ -33,12 +34,12 @@ pub(in crate::ui) fn detail_cover_lookup_can_reuse_prefetched_grid_cover() {
 pub(in crate::ui) fn visible_cover_lookup_reuses_and_upgrades_warm_lookup() {
     let mut lookups = HashMap::new();
 
-    assert!(super::record_cover_path_lookup_request(
+    assert!(record_cover_path_lookup_request(
         &mut lookups,
         "album-art".to_string(),
         super::CoverPathLookupIntent::Warm,
     ));
-    assert!(!super::record_cover_path_lookup_request(
+    assert!(!record_cover_path_lookup_request(
         &mut lookups,
         "album-art".to_string(),
         super::CoverPathLookupIntent::Visible,
@@ -48,12 +49,12 @@ pub(in crate::ui) fn visible_cover_lookup_reuses_and_upgrades_warm_lookup() {
         Some(&super::CoverPathLookupIntent::Visible)
     );
 
-    assert!(super::record_cover_path_lookup_request(
+    assert!(record_cover_path_lookup_request(
         &mut lookups,
         "now-playing".to_string(),
         super::CoverPathLookupIntent::Visible,
     ));
-    assert!(!super::record_cover_path_lookup_request(
+    assert!(!record_cover_path_lookup_request(
         &mut lookups,
         "now-playing".to_string(),
         super::CoverPathLookupIntent::Warm,
@@ -94,11 +95,11 @@ pub(in crate::ui) fn home_refresh_targets_only_changed_visible_sections() {
     ];
 
     assert_eq!(
-        super::changed_visible_home_section_kinds(visible.clone(), &previous, &sections, false),
+        changed_visible_home_section_kinds(visible.clone(), &previous, &sections, false),
         vec![HomeSectionKind::MostPlayed]
     );
     assert_eq!(
-        super::changed_visible_home_section_kinds(visible, &previous, &sections, true),
+        changed_visible_home_section_kinds(visible, &previous, &sections, true),
         vec![HomeSectionKind::Explore, HomeSectionKind::MostPlayed]
     );
 }

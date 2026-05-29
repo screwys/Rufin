@@ -1,5 +1,3 @@
-use super::*;
-
 pub(in crate::ui) fn cover_size_from_cache_key(key: &str) -> Option<i32> {
     key.rsplit('/')
         .next()

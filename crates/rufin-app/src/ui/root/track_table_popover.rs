@@ -1,17 +1,29 @@
 use super::*;
 
+pub(in crate::ui) struct TrackTablePopoverTarget<'a> {
+    pub(in crate::ui) table: &'a gtk::ColumnView,
+    pub(in crate::ui) model: &'a gio::ListStore,
+    pub(in crate::ui) tracks: Rc<RefCell<Vec<Track>>>,
+    pub(in crate::ui) search: &'a gtk::SearchEntry,
+    pub(in crate::ui) sort_button: &'a gtk::Button,
+    pub(in crate::ui) favorite_first: bool,
+    pub(in crate::ui) server_search: bool,
+}
+
 impl Shell {
-    #[allow(clippy::too_many_arguments)]
     pub(in crate::ui) fn track_table_popover(
         self: &Rc<Self>,
-        table: &gtk::ColumnView,
-        model: &gio::ListStore,
-        tracks: Rc<RefCell<Vec<Track>>>,
-        search: &gtk::SearchEntry,
-        sort_button: &gtk::Button,
-        favorite_first: bool,
-        server_search: bool,
+        target: TrackTablePopoverTarget<'_>,
     ) -> gtk::Popover {
+        let TrackTablePopoverTarget {
+            table,
+            model,
+            tracks,
+            search,
+            sort_button,
+            favorite_first,
+            server_search,
+        } = target;
         let popover = gtk::Popover::new();
         let content = gtk::Box::new(gtk::Orientation::Vertical, 10);
         content.set_margin_top(12);

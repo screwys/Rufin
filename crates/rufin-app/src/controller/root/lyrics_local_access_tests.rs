@@ -738,10 +738,15 @@ pub(in crate::controller) fn controller_from_store_for_test(
     let queue = restore_queue(&store, snapshot.server.as_ref());
     let playback_snapshot =
         playback_snapshot_from_queue(queue.as_ref(), settings.auto_dj_enabled, &settings.playback);
+    let secrets: Arc<dyn SecretStore> = Arc::new(MemorySecretStore::new());
     let controller = AppController {
+        settings: super::settings_controller::SettingsController::new(
+            store.clone(),
+            secrets.clone(),
+        ),
         store,
         runtime,
-        secrets: Arc::new(MemorySecretStore::new()),
+        secrets,
         queue: Arc::new(Mutex::new(queue)),
         playback: Arc::new(Mutex::new(Box::new(
             rufin_playback::FakePlaybackBackend::new(),
