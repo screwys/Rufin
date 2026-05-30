@@ -25,6 +25,10 @@ pub enum StoreError {
     Json(#[from] serde_json::Error),
     #[error("io failed: {0}")]
     Io(#[from] std::io::Error),
+    #[error("unsupported store schema version: {0}")]
+    UnsupportedSchemaVersion(i64),
+    #[error("incomplete store schema version: {0}")]
+    IncompleteSchemaVersion(i64),
 }
 
 pub type StoreResult<T> = Result<T, StoreError>;

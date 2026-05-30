@@ -1,6 +1,109 @@
 use super::servers::*;
 use super::*;
 
+const SCHEMA_MIGRATIONS: &[SchemaMigration] = &[];
+const SCHEMA_VERSION_10_TABLES: &[&str] = &[
+    "queue_snapshots",
+    "servers",
+    "server_local_access",
+    "server_music_folders",
+    "track_music_folders",
+    "track_local_matches",
+    "server_library_preferences",
+    "active_server",
+    "sync_state",
+    "albums",
+    "tracks",
+    "artists",
+    "album_artists",
+    "genres",
+    "playlists",
+    "album_genres",
+    "track_genres",
+    "album_artist_links",
+    "track_artist_links",
+    "playlist_tracks",
+    "home_section_items",
+    "home_section_prefetch_items",
+    "lyrics_cache",
+    "cover_cache",
+    "external_image_lookup_misses",
+    "library_fts",
+];
+const SCHEMA_VERSION_10_COLUMNS: &[(&str, &str)] = &[
+    ("albums", "image_item_id"),
+    ("albums", "image_tag"),
+    ("albums", "release_date"),
+    ("albums", "date_added"),
+    ("albums", "last_played"),
+    ("albums", "play_count"),
+    ("albums", "user_rating"),
+    ("tracks", "image_item_id"),
+    ("tracks", "image_tag"),
+    ("tracks", "release_date"),
+    ("tracks", "date_added"),
+    ("tracks", "last_played"),
+    ("tracks", "play_count"),
+    ("tracks", "user_rating"),
+    ("tracks", "local_path"),
+    ("artists", "image_item_id"),
+    ("artists", "image_tag"),
+    ("artists", "last_played"),
+    ("artists", "play_count"),
+    ("artists", "user_rating"),
+    ("album_artists", "image_item_id"),
+    ("album_artists", "image_tag"),
+    ("album_artists", "last_played"),
+    ("album_artists", "play_count"),
+    ("album_artists", "user_rating"),
+    ("genres", "image_item_id"),
+    ("genres", "image_tag"),
+    ("playlists", "image_item_id"),
+    ("playlists", "image_tag"),
+    ("playlist_tracks", "entry_id"),
+    ("server_music_folders", "folder_id"),
+    ("track_music_folders", "folder_id"),
+    ("track_local_matches", "local_path"),
+    ("server_library_preferences", "selected_music_folder_id"),
+    ("lyrics_cache", "value"),
+    ("cover_cache", "path"),
+    ("external_image_lookup_misses", "reason"),
+];
+
+struct SchemaMigration {
+    from_version: i64,
+    run: fn(&Store) -> StoreResult<()>,
+}
+
+impl SchemaMigration {
+    fn to_version(&self) -> i64 {
+        self.from_version + 1
+    }
+}
+
+fn schema_migration_path_from(version: i64) -> Option<Vec<&'static SchemaMigration>> {
+    schema_migration_path(version, SCHEMA_VERSION, SCHEMA_MIGRATIONS)
+}
+
+fn schema_migration_path(
+    mut version: i64,
+    target_version: i64,
+    migrations: &'static [SchemaMigration],
+) -> Option<Vec<&'static SchemaMigration>> {
+    if version > target_version {
+        return None;
+    }
+    let mut path = Vec::new();
+    while version < target_version {
+        let migration = migrations
+            .iter()
+            .find(|migration| migration.from_version == version)?;
+        version = migration.to_version();
+        path.push(migration);
+    }
+    Some(path)
+}
+
 impl Store {
     pub fn open(path: impl AsRef<Path>) -> StoreResult<Self> {
         let path = path.as_ref();
@@ -10,7 +113,7 @@ impl Store {
             reset_database_files(path)?;
             store = Self::open_file(path)?;
         }
-        store.initialize_schema()?;
+        store.migrate()?;
         Ok(store)
     }
     pub fn open_memory() -> StoreResult<Self> {
@@ -21,6 +124,35 @@ impl Store {
         Ok(store)
     }
     pub fn migrate(&self) -> StoreResult<()> {
+        if !self.database_has_objects()? {
+            return self.initialize_schema();
+        }
+        let version = self.schema_version()?;
+        if version > SCHEMA_VERSION {
+            return Err(StoreError::UnsupportedSchemaVersion(version));
+        }
+        if version < SCHEMA_VERSION && !self.schema_is_complete_for_version(version)? {
+            return Err(StoreError::IncompleteSchemaVersion(version));
+        }
+        let Some(migrations) = schema_migration_path_from(version) else {
+            return Err(StoreError::UnsupportedSchemaVersion(version));
+        };
+        if !migrations.is_empty() {
+            self.connection.execute_batch("BEGIN IMMEDIATE")?;
+            let migration_result = (|| {
+                for migration in migrations {
+                    (migration.run)(self)?;
+                    self.connection
+                        .pragma_update(None, "user_version", migration.to_version())?;
+                }
+                Ok(())
+            })();
+            if let Err(error) = migration_result {
+                let _rollback_result = self.connection.execute_batch("ROLLBACK");
+                return Err(error);
+            }
+            self.connection.execute_batch("COMMIT")?;
+        }
         self.initialize_schema()
     }
     pub(super) fn open_file(path: &Path) -> StoreResult<Self> {
@@ -33,10 +165,19 @@ impl Store {
         if !self.database_has_objects()? {
             return Ok(false);
         }
-        if self.schema_version()? != SCHEMA_VERSION {
+        let version = self.schema_version()?;
+        if version > SCHEMA_VERSION {
             return Ok(true);
         }
-        self.current_schema_is_complete().map(|complete| !complete)
+        let schema_complete = if version == SCHEMA_VERSION {
+            self.current_schema_is_complete()?
+        } else {
+            self.schema_is_complete_for_version(version)?
+        };
+        if !schema_complete {
+            return Ok(true);
+        }
+        Ok(schema_migration_path_from(version).is_none())
     }
     pub(super) fn database_has_objects(&self) -> StoreResult<bool> {
         let exists = self.connection.query_row(
@@ -53,77 +194,27 @@ impl Store {
         Ok(exists)
     }
     pub(super) fn current_schema_is_complete(&self) -> StoreResult<bool> {
-        for table in [
-            "queue_snapshots",
-            "servers",
-            "server_local_access",
-            "server_music_folders",
-            "track_music_folders",
-            "track_local_matches",
-            "server_library_preferences",
-            "active_server",
-            "sync_state",
-            "albums",
-            "tracks",
-            "artists",
-            "album_artists",
-            "genres",
-            "playlists",
-            "album_genres",
-            "track_genres",
-            "album_artist_links",
-            "track_artist_links",
-            "playlist_tracks",
-            "home_section_items",
-            "home_section_prefetch_items",
-            "lyrics_cache",
-            "cover_cache",
-            "external_image_lookup_misses",
-            "library_fts",
-        ] {
+        self.schema_is_complete_for_version(SCHEMA_VERSION)
+    }
+    fn schema_is_complete_for_version(&self, version: i64) -> StoreResult<bool> {
+        match version {
+            10 => {
+                self.schema_has_required_parts(SCHEMA_VERSION_10_TABLES, SCHEMA_VERSION_10_COLUMNS)
+            }
+            _ => Ok(false),
+        }
+    }
+    fn schema_has_required_parts(
+        &self,
+        tables: &[&str],
+        columns: &[(&str, &str)],
+    ) -> StoreResult<bool> {
+        for table in tables {
             if !self.table_exists(table)? {
                 return Ok(false);
             }
         }
-        for (table, column) in [
-            ("albums", "image_item_id"),
-            ("albums", "image_tag"),
-            ("albums", "release_date"),
-            ("albums", "date_added"),
-            ("albums", "last_played"),
-            ("albums", "play_count"),
-            ("albums", "user_rating"),
-            ("tracks", "image_item_id"),
-            ("tracks", "image_tag"),
-            ("tracks", "release_date"),
-            ("tracks", "date_added"),
-            ("tracks", "last_played"),
-            ("tracks", "play_count"),
-            ("tracks", "user_rating"),
-            ("tracks", "local_path"),
-            ("artists", "image_item_id"),
-            ("artists", "image_tag"),
-            ("artists", "last_played"),
-            ("artists", "play_count"),
-            ("artists", "user_rating"),
-            ("album_artists", "image_item_id"),
-            ("album_artists", "image_tag"),
-            ("album_artists", "last_played"),
-            ("album_artists", "play_count"),
-            ("album_artists", "user_rating"),
-            ("genres", "image_item_id"),
-            ("genres", "image_tag"),
-            ("playlists", "image_item_id"),
-            ("playlists", "image_tag"),
-            ("playlist_tracks", "entry_id"),
-            ("server_music_folders", "folder_id"),
-            ("track_music_folders", "folder_id"),
-            ("track_local_matches", "local_path"),
-            ("server_library_preferences", "selected_music_folder_id"),
-            ("lyrics_cache", "value"),
-            ("cover_cache", "path"),
-            ("external_image_lookup_misses", "reason"),
-        ] {
+        for (table, column) in columns {
             if !self.table_has_column(table, column)? {
                 return Ok(false);
             }
@@ -911,4 +1002,37 @@ pub(super) fn clear_server_identity_cache_on_connection(
         params![server_id.as_str()],
     )?;
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn no_op_migration(_store: &Store) -> StoreResult<()> {
+        Ok(())
+    }
+
+    #[test]
+    fn schema_migration_path_requires_adjacent_steps() {
+        static MIGRATIONS: &[SchemaMigration] = &[
+            SchemaMigration {
+                from_version: 1,
+                run: no_op_migration,
+            },
+            SchemaMigration {
+                from_version: 2,
+                run: no_op_migration,
+            },
+        ];
+
+        let path = schema_migration_path(1, 3, MIGRATIONS).expect("migration path");
+        assert_eq!(
+            path.iter()
+                .map(|migration| migration.to_version())
+                .collect::<Vec<_>>(),
+            vec![2, 3]
+        );
+        assert!(schema_migration_path(1, 4, MIGRATIONS).is_none());
+        assert!(schema_migration_path(4, 3, MIGRATIONS).is_none());
+    }
 }

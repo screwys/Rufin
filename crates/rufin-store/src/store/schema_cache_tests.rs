@@ -137,6 +137,62 @@ fn incomplete_user_version_ten_file_store_resets_cache_database() {
     let _cleanup = fs::remove_file(sqlite_sidecar_path(&path, "-shm"));
 }
 #[test]
+fn current_file_store_reopens_without_dropping_servers() {
+    let path = std::env::temp_dir().join(format!(
+        "rufin-store-test-{}-{}.sqlite",
+        std::process::id(),
+        "preserve-current"
+    ));
+    let _cleanup = fs::remove_file(&path);
+    let saved = saved_server();
+    {
+        let store = Store::open(&path).expect("open store");
+        store.save_server(&saved).expect("save server");
+        store
+            .set_active_server(&saved.server.id)
+            .expect("set active server");
+    }
+
+    let store = Store::open(&path).expect("reopen store");
+    assert_eq!(store.schema_version().expect("schema version"), 10);
+    assert_eq!(
+        store.list_servers().expect("list servers"),
+        vec![saved.clone()]
+    );
+    assert_eq!(store.active_server().expect("active server"), Some(saved));
+    drop(store);
+    let _cleanup = fs::remove_file(&path);
+    let _cleanup = fs::remove_file(sqlite_sidecar_path(&path, "-wal"));
+    let _cleanup = fs::remove_file(sqlite_sidecar_path(&path, "-shm"));
+}
+#[test]
+fn future_user_version_file_store_resets_cache_database() {
+    let path = std::env::temp_dir().join(format!(
+        "rufin-store-test-{}-{}.sqlite",
+        std::process::id(),
+        "future"
+    ));
+    let _cleanup = fs::remove_file(&path);
+    let saved = saved_server();
+    {
+        let store = Store::open(&path).expect("open store");
+        store.save_server(&saved).expect("save server");
+    }
+    let connection = rusqlite::Connection::open(&path).expect("open future connection");
+    connection
+        .pragma_update(None, "user_version", 11)
+        .expect("set future schema version");
+    drop(connection);
+
+    let store = Store::open(&path).expect("open reset store");
+    assert_eq!(store.schema_version().expect("schema version"), 10);
+    assert!(store.list_servers().expect("list servers").is_empty());
+    drop(store);
+    let _cleanup = fs::remove_file(&path);
+    let _cleanup = fs::remove_file(sqlite_sidecar_path(&path, "-wal"));
+    let _cleanup = fs::remove_file(sqlite_sidecar_path(&path, "-shm"));
+}
+#[test]
 fn file_store_uses_wal_journal_mode() {
     let path = std::env::temp_dir().join(format!(
         "rufin-store-test-{}-{}.sqlite",
