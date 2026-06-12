@@ -1601,14 +1601,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/hashlink/hashlink-0.11.0.crate",
-        "sha256": "ea0b22561a9c04a7cb1a302c013e0259cd3b4bb619f145b32f72b8b4bcbed230",
-        "dest": "cargo/vendor/hashlink-0.11.0"
+        "url": "https://static.crates.io/crates/hashlink/hashlink-0.12.0.crate",
+        "sha256": "a5081f264ed7adee96ea4b4778b6bb9da0a7228b084587aa3bd3ff05da7c5a3b",
+        "dest": "cargo/vendor/hashlink-0.12.0"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"ea0b22561a9c04a7cb1a302c013e0259cd3b4bb619f145b32f72b8b4bcbed230\", \"files\": {}}",
-        "dest": "cargo/vendor/hashlink-0.11.0",
+        "contents": "{\"package\": \"a5081f264ed7adee96ea4b4778b6bb9da0a7228b084587aa3bd3ff05da7c5a3b\", \"files\": {}}",
+        "dest": "cargo/vendor/hashlink-0.12.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -2134,14 +2134,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.37.0.crate",
-        "sha256": "b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1",
-        "dest": "cargo/vendor/libsqlite3-sys-0.37.0"
+        "url": "https://static.crates.io/crates/libsqlite3-sys/libsqlite3-sys-0.38.1.crate",
+        "sha256": "f6c19a05435c21ac299d71b6a9c13db3e3f47c520517d58990a462a1397a61db",
+        "dest": "cargo/vendor/libsqlite3-sys-0.38.1"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"b1f111c8c41e7c61a49cd34e44c7619462967221a6443b0ec299e0ac30cfb9b1\", \"files\": {}}",
-        "dest": "cargo/vendor/libsqlite3-sys-0.37.0",
+        "contents": "{\"package\": \"f6c19a05435c21ac299d71b6a9c13db3e3f47c520517d58990a462a1397a61db\", \"files\": {}}",
+        "dest": "cargo/vendor/libsqlite3-sys-0.38.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -2966,14 +2966,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/rusqlite/rusqlite-0.39.0.crate",
-        "sha256": "a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e",
-        "dest": "cargo/vendor/rusqlite-0.39.0"
+        "url": "https://static.crates.io/crates/rusqlite/rusqlite-0.40.1.crate",
+        "sha256": "11438310b19e3109b6446c33d1ed5e889428cf2e278407bc7896bc4aaea43323",
+        "dest": "cargo/vendor/rusqlite-0.40.1"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"a0d2b0146dd9661bf67bb107c0bb2a55064d556eeb3fc314151b957f313bcd4e\", \"files\": {}}",
-        "dest": "cargo/vendor/rusqlite-0.39.0",
+        "contents": "{\"package\": \"11438310b19e3109b6446c33d1ed5e889428cf2e278407bc7896bc4aaea43323\", \"files\": {}}",
+        "dest": "cargo/vendor/rusqlite-0.40.1",
         "dest-filename": ".cargo-checksum.json"
     },
     {
