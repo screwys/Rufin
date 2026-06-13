@@ -279,11 +279,17 @@ mod tests {
         let first = snapshot.tracks[0].clone();
         let second = snapshot.tracks[1].clone();
         let seek_seconds = play_threshold_seconds(first.duration_seconds);
-        controller.play_tracks_now(vec![first, second]);
+        controller.play_tracks_now(vec![first.clone(), second]);
         let _queue = wait_for_queue(&events).expect("queue");
+        let _playback = wait_for_playback_track_position(&controller, &events, &first.id, 0);
 
         controller.seek_millis(u64::from(seek_seconds) * 1_000);
-        let _playback = wait_for_playback_position(&events, u64::from(seek_seconds) * 1_000);
+        let _playback = wait_for_playback_track_position(
+            &controller,
+            &events,
+            &first.id,
+            u64::from(seek_seconds) * 1_000,
+        );
         controller.next_track();
         let _queue = wait_for_queue(&events).expect("next queue");
 

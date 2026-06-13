@@ -1135,7 +1135,8 @@ pub(in crate::controller) fn cover_emit_position() {
     controller.play_now(snapshot.tracks[0].clone());
     let _playback = wait_for_playback_state(&controller, &events, PlaybackState::Playing);
     controller.seek_millis(12_345);
-    let playback = wait_for_playback_position(&events, 12_345);
+    let playback =
+        wait_for_playback_track_position(&controller, &events, &snapshot.tracks[0].id, 12_345);
     assert_eq!(playback.position_seconds, 12);
 }
 #[test]
@@ -1210,9 +1211,9 @@ pub(in crate::controller) fn cover_track_first() {
     controller.next_track();
     let _queue = wait_for_queue(&events).expect("next queue");
     controller.seek_millis(12_000);
-    let _playback = wait_for_playback_position(&events, 12_000);
+    let _playback = wait_for_playback_track_position(&controller, &events, &second.id, 12_000);
     controller.next_track();
-    let playback = wait_for_playback_position(&events, 0);
+    let playback = wait_for_playback_track_position(&controller, &events, &first.id, 0);
     assert_eq!(playback.current.expect("current").track_id, first.id);
     assert_ne!(playback.state, PlaybackState::Stopped);
 }
@@ -1227,9 +1228,9 @@ pub(in crate::controller) fn manual_ten_seconds() {
     controller.next_track();
     let _queue = wait_for_queue(&events).expect("next queue");
     controller.seek_millis(11_000);
-    let _playback = wait_for_playback_position(&events, 11_000);
+    let _playback = wait_for_playback_track_position(&controller, &events, &second.id, 11_000);
     controller.previous_track();
-    let playback = wait_for_playback_position(&events, 0);
+    let playback = wait_for_playback_track_position(&controller, &events, &second.id, 0);
     assert_eq!(playback.current.expect("current").track_id, second.id);
 }
 #[test]

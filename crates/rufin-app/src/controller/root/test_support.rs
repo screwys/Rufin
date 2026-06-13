@@ -370,41 +370,58 @@ pub(in crate::controller) fn wait_for_playback_state(
         }
     }
 }
-pub(in crate::controller) fn wait_for_playback_position(
+pub(in crate::controller) fn wait_for_playback_track_position(
+    controller: &AppController,
     events: &Receiver<ControllerEvent>,
+    track_id: &TrackId,
     position_millis: u64,
 ) -> super::PlaybackSnapshot {
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
     loop {
-        match events
-            .recv_timeout(Duration::from_secs(5))
-            .expect("controller event")
-        {
-            ControllerEvent::Playback(playback) if playback.position_millis == position_millis => {
-                return *playback;
+        assert!(
+            std::time::Instant::now() < deadline,
+            "timed out waiting for playback track position"
+        );
+        controller.poll_playback_events();
+        match events.recv_timeout(Duration::from_millis(50)) {
+            Ok(event) => match event {
+                ControllerEvent::Playback(playback)
+                    if playback.position_millis == position_millis
+                        && playback
+                            .current
+                            .as_ref()
+                            .is_some_and(|entry| &entry.track_id == track_id) =>
+                {
+                    return *playback;
+                }
+                ControllerEvent::Playback(_)
+                | ControllerEvent::Visualizer(_)
+                | ControllerEvent::Queue(_)
+                | ControllerEvent::Lyrics(_)
+                | ControllerEvent::LyricsSearchResults { .. }
+                | ControllerEvent::LyricsSearchFailed { .. }
+                | ControllerEvent::LyricsSaved { .. }
+                | ControllerEvent::FolderLoaded { .. }
+                | ControllerEvent::FolderLoadFailed { .. }
+                | ControllerEvent::HomeSectionPrefetched { .. }
+                | ControllerEvent::ServerDiscovery { .. }
+                | ControllerEvent::CoverReady { .. }
+                | ControllerEvent::CoverUnavailable { .. }
+                | ControllerEvent::CoverDeferred { .. } => {}
+                ControllerEvent::Snapshot(_)
+                | ControllerEvent::LibrarySyncStatus(_)
+                | ControllerEvent::LibraryDelta(_)
+                | ControllerEvent::HomeSectionsUpdated { .. }
+                | ControllerEvent::PlaylistChanged { .. }
+                | ControllerEvent::SmartPlaylistChanged { .. }
+                | ControllerEvent::FavoriteChanged { .. }
+                | ControllerEvent::LoginStatus(_) => {}
+                ControllerEvent::Error(error) => panic!("controller error: {error}"),
+            },
+            Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+            Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => {
+                panic!("controller event channel closed")
             }
-            ControllerEvent::Playback(_)
-            | ControllerEvent::Visualizer(_)
-            | ControllerEvent::Queue(_)
-            | ControllerEvent::Lyrics(_)
-            | ControllerEvent::LyricsSearchResults { .. }
-            | ControllerEvent::LyricsSearchFailed { .. }
-            | ControllerEvent::LyricsSaved { .. }
-            | ControllerEvent::FolderLoaded { .. }
-            | ControllerEvent::FolderLoadFailed { .. }
-            | ControllerEvent::HomeSectionPrefetched { .. }
-            | ControllerEvent::ServerDiscovery { .. }
-            | ControllerEvent::CoverReady { .. }
-            | ControllerEvent::CoverUnavailable { .. }
-            | ControllerEvent::CoverDeferred { .. } => {}
-            ControllerEvent::Snapshot(_)
-            | ControllerEvent::LibrarySyncStatus(_)
-            | ControllerEvent::LibraryDelta(_)
-            | ControllerEvent::HomeSectionsUpdated { .. }
-            | ControllerEvent::PlaylistChanged { .. }
-            | ControllerEvent::SmartPlaylistChanged { .. }
-            | ControllerEvent::FavoriteChanged { .. }
-            | ControllerEvent::LoginStatus(_) => {}
-            ControllerEvent::Error(error) => panic!("controller error: {error}"),
         }
     }
 }
