@@ -16,7 +16,7 @@ impl Shell {
         self.schedule_route_cover_warm_refs(image_refs, fetch_size, size, 0);
     }
 
-    pub(in crate::ui) fn schedule_warm_targets(
+    pub(in crate::ui::root) fn schedule_warm_targets(
         self: &Rc<Self>,
         targets: Vec<CoverWarmTarget>,
     ) -> usize {
@@ -228,7 +228,7 @@ impl Shell {
         jobs
     }
 
-    pub(in crate::ui) fn cover_warm_jobs_from_targets(
+    pub(in crate::ui::root) fn cover_warm_jobs_from_targets(
         &self,
         targets: Vec<CoverWarmTarget>,
     ) -> VecDeque<CoverWarmJob> {

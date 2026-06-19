@@ -164,9 +164,10 @@ mod startup_reveal;
 mod shell_tests;
 
 pub(in crate::ui) use build::*;
+pub(in crate::ui::root) use cover::*;
 pub(in crate::ui) use cover::{
-    CoverBinding, CoverDecodeJob, CoverWarmJob, DecodedCover, DecodedCoverOrderEntry,
-    cover_artwork_id_for_key, cover_request_id_for_key,
+    CoverBinding, CoverDecodeJob, DecodedCover, DecodedCoverOrderEntry, cover_artwork_id_for_key,
+    cover_request_id_for_key,
 };
 pub(in crate::ui) use cover_startup::*;
 pub(in crate::ui) use equalizer::{
