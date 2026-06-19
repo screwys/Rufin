@@ -28,15 +28,14 @@ use super::{
 use crate::controller::{
     LibraryCounts, LibraryHomeUpdate, LibrarySyncStatus, LyricsSearchResult, SearchRequestKey,
 };
+use domain::ExternalLyricsProvider;
 use domain::{
-    Album, AlbumId, AppSettings, ArtistId, Genre, GenreId, HomeBlockKind, HomeSection,
-    HomeSectionKind, ImageRef, LibraryLayout, LibrarySourceSelection, MusicFolderId, Playlist,
-    PlaylistId, QueueEntry, QueueEntryId, QueueSnapshot, RepeatMode, Route, SearchKind, ServerId,
-    ServerIdentity, ShuffleState, SidebarRouteItem, SmartPlaylist, SmartPlaylistDefinition,
-    SmartPlaylistId, SmartPlaylistMatchMode, SmartPlaylistRuleGroup, SmartPlaylistSortField, Track,
-    TrackId, TrackSortKey, TrackTableSettings,
+    Album, AlbumId, AppSettings, ArtistId, HomeSection, HomeSectionKind, ImageRef, LibraryLayout,
+    LibrarySourceSelection, MusicFolderId, Playlist, PlaylistId, QueueEntry, QueueEntryId,
+    QueueSnapshot, RepeatMode, Route, SearchKind, ServerId, ServerIdentity, SmartPlaylist,
+    SmartPlaylistDefinition, SmartPlaylistId, SmartPlaylistMatchMode, SmartPlaylistRuleGroup,
+    SmartPlaylistSortField, Track, TrackId, TrackSortKey, TrackTableSettings,
 };
-use domain::{ExternalLyricsProvider, LibraryListKey, LibraryListSettings};
 use gdk_pixbuf::{Colorspace, Pixbuf};
 use library::LibraryDelta;
 use source::{LyricLine, Lyrics, LyricsSource, PlaylistEntry, SearchResults};
@@ -659,426 +658,6 @@ pub(in crate::ui) fn shell_cover_artwork_id_ignores_size() {
         cover_request_id_for_key(grid, 220)
     );
 }
-#[test]
-pub(in crate::ui) fn shell_stay_cover() {
-    let mut library = test_library_snapshot();
-    let home_ref = test_image_ref("home");
-    let mut home_album = test_album("Home Artist", Some(ArtistId::fake(90)));
-    home_album.image_ref = Some(home_ref.clone());
-    library.home_sections = vec![HomeSection {
-        kind: HomeSectionKind::Explore,
-        albums: vec![home_album],
-        tracks: Vec::new(),
-    }];
-
-    let first_track_ref = test_image_ref("track-a");
-    let mut first_track = test_track("Route Artist", Some(ArtistId::fake(1)));
-    first_track.title = "A route track".to_string();
-    first_track.image_ref = Some(first_track_ref.clone());
-    let mut second_track = test_track("Route Artist", Some(ArtistId::fake(1)));
-    second_track.id = TrackId::fake(2);
-    second_track.title = "B route track".to_string();
-    second_track.image_ref = Some(test_image_ref("track-b"));
-    library.tracks = vec![second_track, first_track];
-
-    let first_album_ref = test_image_ref("album-a");
-    let mut first_album = test_album("Route Artist", Some(ArtistId::fake(2)));
-    first_album.title = "A route album".to_string();
-    first_album.image_ref = Some(first_album_ref.clone());
-    let mut second_album = test_album("Route Artist", Some(ArtistId::fake(2)));
-    second_album.id = AlbumId::fake(2);
-    second_album.title = "B route album".to_string();
-    second_album.image_ref = Some(test_image_ref("album-b"));
-    library.albums = vec![second_album, first_album];
-
-    let settings = AppSettings {
-        home_blocks: vec![HomeBlockKind::Explore],
-        ..Default::default()
-    };
-    let targets = super::startup_cover_targets(&library, &settings, 0);
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(target_refs.contains(&home_ref.item_id.as_str()));
-    assert!(!target_refs.contains(&first_track_ref.item_id.as_str()));
-    assert!(!target_refs.contains(&first_album_ref.item_id.as_str()));
-
-    let home_targets = super::startup_prime_targets(&library, &settings, 0);
-    let home_target_refs = home_targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-    assert!(home_target_refs.contains(&home_ref.item_id.as_str()));
-    assert!(!home_target_refs.contains(&first_track_ref.item_id.as_str()));
-    assert!(!home_target_refs.contains(&first_album_ref.item_id.as_str()));
-}
-
-#[test]
-pub(in crate::ui) fn shell_startup_playback_cover_target() {
-    let playback_ref = test_image_ref("playback");
-    let mut targets = Vec::new();
-    let player = super::PlaybackSnapshot {
-        current: Some(test_queue_entry("Now", playback_ref.clone())),
-        ..super::PlaybackSnapshot::default()
-    };
-
-    super::push_startup_playback_targets(&mut targets, &player);
-
-    assert_eq!(targets.len(), 1);
-    assert_eq!(targets[0].image_ref, playback_ref);
-    assert_eq!(targets[0].fetch_size, super::THUMB_COVER_SIZE);
-    assert_eq!(targets[0].size, super::player::BOTTOM_PLAYER_COVER_SIZE);
-}
-
-#[test]
-pub(in crate::ui) fn shell_startup_queue_cover_targets() {
-    let first_ref = test_image_ref("queue-first");
-    let second_ref = test_image_ref("queue-second");
-    let current_ref = test_image_ref("queue-current");
-    let skipped_ref = test_image_ref("queue-0");
-    let queue = QueueSnapshot {
-        server_id: ServerId::new("server:active"),
-        entries: vec![
-            test_queue_entry("Visible Song", first_ref.clone()),
-            test_queue_entry("Hidden Song", second_ref.clone()),
-        ],
-        current_index: Some(0),
-        repeat_mode: RepeatMode::Off,
-        shuffle: ShuffleState::default(),
-        shuffle_order: Vec::new(),
-        progress_seconds: 0,
-    };
-    let mut targets = Vec::new();
-
-    super::push_startup_queue_targets(
-        &mut targets,
-        Some(&queue),
-        "visible",
-        true,
-        false,
-        720,
-        Some(&ServerId::new("server:active")),
-    );
-
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-    assert_eq!(target_refs, vec![first_ref.item_id.as_str()]);
-
-    targets.clear();
-    super::push_startup_queue_targets(
-        &mut targets,
-        Some(&queue),
-        "",
-        false,
-        false,
-        720,
-        Some(&ServerId::new("server:active")),
-    );
-    assert!(targets.is_empty());
-
-    super::push_startup_queue_targets(
-        &mut targets,
-        Some(&queue),
-        "",
-        true,
-        false,
-        720,
-        Some(&ServerId::new("server:stale")),
-    );
-    assert!(targets.is_empty());
-
-    let entries = (0..12)
-        .map(|index| {
-            let image_ref = if index == 8 {
-                current_ref.clone()
-            } else if index == 0 {
-                skipped_ref.clone()
-            } else {
-                test_image_ref(&format!("queue-{index}"))
-            };
-            test_queue_entry(&format!("Track {index}"), image_ref)
-        })
-        .collect::<Vec<_>>();
-    let current_queue = QueueSnapshot {
-        server_id: ServerId::new("server:active"),
-        entries,
-        current_index: Some(8),
-        repeat_mode: RepeatMode::Off,
-        shuffle: ShuffleState::default(),
-        shuffle_order: Vec::new(),
-        progress_seconds: 0,
-    };
-    super::push_startup_queue_targets(
-        &mut targets,
-        Some(&current_queue),
-        "",
-        true,
-        false,
-        280,
-        Some(&ServerId::new("server:active")),
-    );
-
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-    assert!(target_refs.contains(&current_ref.item_id.as_str()));
-    assert!(!target_refs.contains(&skipped_ref.item_id.as_str()));
-
-    targets.clear();
-    let tall_first_ref = test_image_ref("queue-0");
-    let tall_entries = (0..30)
-        .map(|index| {
-            let image_ref = if index == 0 {
-                tall_first_ref.clone()
-            } else {
-                test_image_ref(&format!("queue-{index}"))
-            };
-            test_queue_entry(&format!("Track {index}"), image_ref)
-        })
-        .collect::<Vec<_>>();
-    let tall_queue = QueueSnapshot {
-        server_id: ServerId::new("server:active"),
-        entries: tall_entries,
-        current_index: Some(8),
-        repeat_mode: RepeatMode::Off,
-        shuffle: ShuffleState::default(),
-        shuffle_order: Vec::new(),
-        progress_seconds: 0,
-    };
-    super::push_startup_queue_targets(
-        &mut targets,
-        Some(&tall_queue),
-        "",
-        true,
-        false,
-        1028,
-        Some(&ServerId::new("server:active")),
-    );
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-    assert!(target_refs.contains(&tall_first_ref.item_id.as_str()));
-}
-
-#[test]
-pub(in crate::ui) fn shell_startup_queue_height_falls_back_before_allocation() {
-    assert_eq!(super::startup_queue_prime_height(0, 720, Some(640)), 720);
-    assert_eq!(super::startup_queue_prime_height(0, 0, Some(640)), 640);
-    assert_eq!(super::startup_queue_prime_height(0, 0, None), 900);
-}
-
-#[test]
-pub(in crate::ui) fn shell_warm_matrix() {
-    let mut library = test_library_snapshot();
-    library.server = Some(test_server("source"));
-    let first_track_ref = test_image_ref("track-a");
-    let mut first_track = test_track("Route Artist", Some(ArtistId::fake(1)));
-    first_track.title = "A route track".to_string();
-    first_track.image_ref = Some(first_track_ref.clone());
-    let mut second_track = test_track("Route Artist", Some(ArtistId::fake(1)));
-    second_track.id = TrackId::fake(2);
-    second_track.title = "B route track".to_string();
-    second_track.image_ref = Some(test_image_ref("track-b"));
-    library.tracks = vec![second_track, first_track];
-
-    let first_album_ref = test_image_ref("album-a");
-    let mut first_album = test_album("Route Artist", Some(ArtistId::fake(2)));
-    first_album.title = "A route album".to_string();
-    first_album.image_ref = Some(first_album_ref.clone());
-    let mut second_album = test_album("Route Artist", Some(ArtistId::fake(2)));
-    second_album.id = AlbumId::fake(2);
-    second_album.title = "B route album".to_string();
-    second_album.image_ref = Some(test_image_ref("album-b"));
-    library.albums = vec![second_album, first_album];
-
-    let settings = AppSettings::default();
-    let targets =
-        super::source_warm_targets(&library, &[], &settings, test_initial_route_metrics());
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(target_refs.contains(&first_track_ref.item_id.as_str()));
-    assert!(target_refs.contains(&first_album_ref.item_id.as_str()));
-    assert_eq!(
-        target_refs
-            .iter()
-            .filter(|item_id| **item_id == first_track_ref.item_id)
-            .count(),
-        1
-    );
-    assert!(
-        target_refs
-            .iter()
-            .position(|item_id| *item_id == first_track_ref.item_id)
-            < target_refs
-                .iter()
-                .position(|item_id| *item_id == first_album_ref.item_id)
-    );
-}
-
-#[test]
-pub(in crate::ui) fn shell_include_refs() {
-    let shared = test_image_ref("shared-art");
-    let genre_only = test_image_ref("genre-only");
-    let mut library = test_library_snapshot();
-    library.server = Some(test_server("source"));
-    let mut track = test_track("Route Artist", Some(ArtistId::fake(1)));
-    track.image_ref = Some(shared.clone());
-    library.tracks = vec![track];
-    library.genres = vec![Genre {
-        id: GenreId::fake(1),
-        name: "Genre".to_string(),
-        album_count: 1,
-        track_count: 1,
-        duration_seconds: 180,
-        image_refs: vec![shared.clone(), genre_only.clone()],
-        image_ref: Some(shared.clone()),
-    }];
-
-    let settings = AppSettings::default();
-    let targets =
-        super::source_warm_targets(&library, &[], &settings, test_initial_route_metrics());
-
-    assert_eq!(
-        targets
-            .iter()
-            .filter(|target| target.image_ref.item_id == shared.item_id)
-            .count(),
-        1
-    );
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.image_ref.item_id == genre_only.item_id)
-    );
-}
-
-#[test]
-pub(in crate::ui) fn shell_include_playlist() {
-    let playlist_ref = test_image_ref("playlist-group");
-    let smart_ref = test_image_ref("smart-group");
-    let mut library = test_library_snapshot();
-    library.server = Some(test_server("source"));
-    library.playlists = vec![test_playlist("Regular", playlist_ref.clone())];
-    let smart_playlists = vec![test_smart_playlist("Smart", smart_ref.clone())];
-
-    let settings = AppSettings::default();
-    let targets = super::source_warm_targets(
-        &library,
-        &smart_playlists,
-        &settings,
-        test_initial_route_metrics(),
-    );
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(target_refs.contains(&playlist_ref.item_id.as_str()));
-    assert!(target_refs.contains(&smart_ref.item_id.as_str()));
-}
-
-#[test]
-pub(in crate::ui) fn shell_warm_background_refs() {
-    let mut library = test_library_snapshot();
-    library.server = Some(test_server("source"));
-    let background_ref = test_image_ref("background-album");
-    library.albums = (0..24)
-        .map(|index| {
-            let mut album = test_album("Route Artist", Some(ArtistId::fake(index + 1)));
-            album.id = AlbumId::fake(index + 1);
-            album.title = format!("Album {index:02}");
-            album.image_ref = Some(if index == 23 {
-                background_ref.clone()
-            } else {
-                test_image_ref(&format!("album-{index:02}"))
-            });
-            album
-        })
-        .collect();
-
-    let targets = super::source_warm_targets(
-        &library,
-        &[],
-        &AppSettings::default(),
-        test_initial_route_metrics(),
-    );
-
-    assert!(
-        targets
-            .iter()
-            .any(|target| target.image_ref.item_id == background_ref.item_id)
-    );
-}
-
-#[test]
-pub(in crate::ui) fn shell_album_grid_warm_uses_album_metrics() {
-    let metrics = test_initial_route_metrics();
-    let album_settings = LibraryListSettings {
-        layout: LibraryLayout::Grid,
-        ..LibraryListSettings::for_key(LibraryListKey::Albums)
-    };
-    let track_settings = LibraryListSettings {
-        layout: LibraryLayout::Grid,
-        ..LibraryListSettings::for_key(LibraryListKey::Tracks)
-    };
-
-    assert_eq!(
-        super::source_route_cover_size(LibraryListKey::Albums, &album_settings, metrics),
-        Some((super::GRID_COVER_SIZE, metrics.album_grid_card_size))
-    );
-    assert_eq!(
-        super::source_route_cover_size(LibraryListKey::Tracks, &track_settings, metrics),
-        Some((super::GRID_COVER_SIZE, metrics.grid_card_size))
-    );
-    assert_ne!(metrics.album_grid_card_size, metrics.grid_card_size);
-}
-
-#[test]
-pub(in crate::ui) fn shell_warm_route() {
-    let genre_ref = test_image_ref("hidden-genre");
-    let playlist_ref = test_image_ref("hidden-playlist");
-    let mut library = test_library_snapshot();
-    library.server = Some(test_server("source"));
-    library.genres = vec![Genre {
-        id: GenreId::fake(1),
-        name: "Genre".to_string(),
-        album_count: 1,
-        track_count: 1,
-        duration_seconds: 180,
-        image_refs: vec![genre_ref.clone()],
-        image_ref: None,
-    }];
-    library.playlists = vec![test_playlist("Regular", playlist_ref.clone())];
-    let mut settings = AppSettings::default();
-    for entry in &mut settings.sidebar.route_items {
-        if matches!(
-            entry.item,
-            SidebarRouteItem::Genres | SidebarRouteItem::Playlists
-        ) {
-            entry.visible = false;
-        }
-    }
-
-    let targets =
-        super::source_warm_targets(&library, &[], &settings, test_initial_route_metrics());
-    let target_refs = targets
-        .iter()
-        .map(|target| target.image_ref.item_id.as_str())
-        .collect::<Vec<_>>();
-
-    assert!(!target_refs.contains(&genre_ref.item_id.as_str()));
-    assert!(!target_refs.contains(&playlist_ref.item_id.as_str()));
-}
-
 #[test]
 pub(in crate::ui) fn shell_clear_pending() {
     let first = ServerId::new("source:first");
@@ -1956,7 +1535,7 @@ pub(in crate::ui) fn test_library_snapshot() -> crate::controller::LibrarySnapsh
         search: SearchResults::default(),
     }
 }
-fn test_server(suffix: &str) -> ServerIdentity {
+pub(in crate::ui) fn test_server(suffix: &str) -> ServerIdentity {
     ServerIdentity {
         id: ServerId::new(format!("server:{suffix}")),
         provider: "test".to_string(),
@@ -1964,7 +1543,7 @@ fn test_server(suffix: &str) -> ServerIdentity {
         base_url: "http://localhost".to_string(),
     }
 }
-fn test_initial_route_metrics() -> super::InitialRouteCoverMetrics {
+pub(in crate::ui) fn test_initial_route_metrics() -> super::InitialRouteCoverMetrics {
     super::InitialRouteCoverMetrics {
         route_height: 720,
         app_height: 720,
@@ -1978,7 +1557,7 @@ fn test_initial_route_metrics() -> super::InitialRouteCoverMetrics {
 pub(in crate::ui) fn test_image_ref(suffix: &str) -> ImageRef {
     ImageRef::new(format!("local:cover:file%3A%2F%2F{suffix}"), None)
 }
-fn test_playlist(name: &str, image_ref: ImageRef) -> Playlist {
+pub(in crate::ui) fn test_playlist(name: &str, image_ref: ImageRef) -> Playlist {
     Playlist {
         id: PlaylistId::fake(1),
         name: name.to_string(),
@@ -1989,7 +1568,7 @@ fn test_playlist(name: &str, image_ref: ImageRef) -> Playlist {
         image_ref: None,
     }
 }
-fn test_smart_playlist(name: &str, image_ref: ImageRef) -> SmartPlaylist {
+pub(in crate::ui) fn test_smart_playlist(name: &str, image_ref: ImageRef) -> SmartPlaylist {
     SmartPlaylist {
         id: SmartPlaylistId::fake(1),
         name: name.to_string(),
@@ -2010,7 +1589,7 @@ fn test_smart_playlist(name: &str, image_ref: ImageRef) -> SmartPlaylist {
         image_ref: None,
     }
 }
-fn test_queue_entry(title: &str, image_ref: ImageRef) -> QueueEntry {
+pub(in crate::ui) fn test_queue_entry(title: &str, image_ref: ImageRef) -> QueueEntry {
     QueueEntry {
         id: QueueEntryId::new(format!("queue:{title}")),
         track_id: TrackId::fake(1),

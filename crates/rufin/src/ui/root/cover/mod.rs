@@ -8,14 +8,17 @@ mod tiles;
 mod warming;
 
 use size_helpers::*;
-pub(in crate::ui::root) use targets::*;
+use targets::startup_home_cover_prime_targets;
+pub(in crate::ui) use targets::{
+    InitialRouteCoverMetrics, row_layout_uses_cover, sidebar_route_visible,
+};
 pub(in crate::ui) use tiles::{cover_artwork_id_for_key, cover_request_id_for_key};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(in crate::ui::root) struct CoverWarmTarget {
-    pub(in crate::ui::root) image_ref: ImageRef,
-    pub(in crate::ui::root) fetch_size: u32,
-    pub(in crate::ui::root) size: i32,
+pub(in crate::ui::root::cover) struct CoverWarmTarget {
+    pub(in crate::ui::root::cover) image_ref: ImageRef,
+    pub(in crate::ui::root::cover) fetch_size: u32,
+    pub(in crate::ui::root::cover) size: i32,
 }
 
 struct VisibleCoverRef {
@@ -54,7 +57,7 @@ impl Shell {
     }
 }
 
-pub(in crate::ui::root) fn route_visible_cover_targets(
+pub(in crate::ui::root::cover) fn route_visible_cover_targets(
     shell: &Shell,
     route: &Route,
 ) -> Vec<CoverWarmTarget> {
@@ -339,11 +342,11 @@ pub(in crate::ui) struct CoverDecodeJob {
     pub(in crate::ui) requires_live_binding: bool,
 }
 
-pub(in crate::ui) struct CoverWarmJob {
-    pub(in crate::ui) key: String,
-    pub(in crate::ui) image_ref: ImageRef,
-    pub(in crate::ui) fetch_size: u32,
-    pub(in crate::ui) size: i32,
+pub(in crate::ui::root::cover) struct CoverWarmJob {
+    pub(in crate::ui::root::cover) key: String,
+    pub(in crate::ui::root::cover) image_ref: ImageRef,
+    pub(in crate::ui::root::cover) fetch_size: u32,
+    pub(in crate::ui::root::cover) size: i32,
 }
 
 pub(in crate::ui::root) struct CoverWorkStats {
@@ -368,13 +371,6 @@ pub(in crate::ui::root::cover) struct CoverPathLookupRequest {
     pub(in crate::ui::root::cover) intent: CoverPathLookupIntent,
 }
 
-#[derive(Clone)]
-pub(in crate::ui::root) struct CoverRequestRecord {
-    pub(in crate::ui::root::cover) request: CoverPathLookupRequest,
-    pub(in crate::ui::root::cover) state: CoverRequestState,
-    pub(in crate::ui::root::cover) decode_failures: u8,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::ui::root::cover) enum CoverRequestState {
     PathLookup,
@@ -383,6 +379,74 @@ pub(in crate::ui::root::cover) enum CoverRequestState {
     Deferred,
     Ready,
     FinalMissing,
+}
+
+pub(in crate::ui::root) struct CoverVisibleRequests {
+    entries: RefCell<HashMap<String, CoverRequestRecord>>,
+}
+
+#[derive(Clone)]
+struct CoverRequestRecord {
+    request: CoverPathLookupRequest,
+    state: CoverRequestState,
+    decode_failures: u8,
+}
+
+impl CoverVisibleRequests {
+    pub(in crate::ui::root) fn new() -> Self {
+        Self {
+            entries: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub(in crate::ui::root::cover) fn len(&self) -> usize {
+        self.entries.borrow().len()
+    }
+
+    pub(in crate::ui::root::cover) fn clear(&self) {
+        self.entries.borrow_mut().clear();
+    }
+
+    pub(in crate::ui::root::cover) fn record(&self, request: CoverPathLookupRequest) {
+        let mut entries = self.entries.borrow_mut();
+        if let Some(existing) = entries.get_mut(&request.key) {
+            existing.merge_request(request);
+        } else {
+            entries.insert(request.key.clone(), CoverRequestRecord::new(request));
+        }
+    }
+
+    pub(in crate::ui::root::cover) fn remove(&self, key: &str) {
+        self.entries.borrow_mut().remove(key);
+    }
+
+    pub(in crate::ui::root::cover) fn mark(&self, key: &str, state: CoverRequestState) {
+        if let Some(record) = self.entries.borrow_mut().get_mut(key) {
+            record.state = state;
+        }
+    }
+
+    pub(in crate::ui::root::cover) fn request(&self, key: &str) -> Option<CoverPathLookupRequest> {
+        self.entries
+            .borrow()
+            .get(key)
+            .map(|record| record.request.clone())
+    }
+
+    pub(in crate::ui::root::cover) fn retry_after_decode_failure(
+        &self,
+        key: &str,
+    ) -> Option<CoverPathLookupRequest> {
+        self.entries.borrow_mut().get_mut(key).and_then(|record| {
+            if record.decode_failures > 0 {
+                record.state = CoverRequestState::FinalMissing;
+                return None;
+            }
+            record.decode_failures = record.decode_failures.saturating_add(1);
+            record.state = CoverRequestState::PathLookup;
+            Some(record.request.clone())
+        })
+    }
 }
 
 impl CoverRequestRecord {
@@ -489,17 +553,6 @@ impl CoverPathLookupIntent {
             (Self::StartupPrime, _) | (_, Self::StartupPrime) => Self::StartupPrime,
             _ => Self::Warm,
         }
-    }
-}
-
-pub(in crate::ui::root::cover) fn record_visible_cover_request(
-    requests: &mut HashMap<String, CoverRequestRecord>,
-    request: CoverPathLookupRequest,
-) {
-    if let Some(existing) = requests.get_mut(&request.key) {
-        existing.merge_request(request);
-    } else {
-        requests.insert(request.key.clone(), CoverRequestRecord::new(request));
     }
 }
 

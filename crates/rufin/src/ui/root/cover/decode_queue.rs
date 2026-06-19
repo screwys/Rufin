@@ -6,7 +6,7 @@ impl Shell {
             prime_pending: self.state.startup_cover_prime_pending.borrow().len(),
             path_lookups: self.state.cover_path_lookups.len(),
             fetches: self.state.cover_fetches.borrow().len(),
-            visible_requests: self.state.cover_visible_requests.borrow().len(),
+            visible_requests: self.state.cover_visible_requests.len(),
             bindings: self.state.cover_bindings.borrow().len(),
             decode_queue: self.state.cover_decode_queue.borrow().len(),
             decodes: self.state.cover_decodes.borrow().len(),
@@ -21,7 +21,7 @@ impl Shell {
         self.state.cover_unavailable.borrow_mut().clear();
         self.state.cover_path_lookups.clear();
         self.state.cover_fetches.borrow_mut().clear();
-        self.state.cover_visible_requests.borrow_mut().clear();
+        self.state.cover_visible_requests.clear();
         self.state.cover_decode_queue.borrow_mut().clear();
         self.state.startup_cover_prime_pending.borrow_mut().clear();
         self.state
@@ -35,7 +35,7 @@ impl Shell {
 
     pub(in crate::ui) fn reset_route_covers(&self) {
         self.state.cover_bindings.borrow_mut().clear();
-        self.state.cover_visible_requests.borrow_mut().clear();
+        self.state.cover_visible_requests.clear();
         clear_queued_route_cover_work(
             &self.state.cover_path_lookups,
             &mut self.state.cover_decode_queue.borrow_mut(),
@@ -147,18 +147,10 @@ impl Shell {
         self.state.cover_decodes.borrow_mut().remove(key);
         self.state.cover_path_cache.borrow_mut().remove(key);
         let _ = std::fs::remove_file(path);
-        let request = {
-            let mut requests = self.state.cover_visible_requests.borrow_mut();
-            requests.get_mut(key).and_then(|record| {
-                if record.decode_failures > 0 {
-                    record.state = CoverRequestState::FinalMissing;
-                    return None;
-                }
-                record.decode_failures = record.decode_failures.saturating_add(1);
-                record.state = CoverRequestState::PathLookup;
-                Some(record.request.clone())
-            })
-        };
+        let request = self
+            .state
+            .cover_visible_requests
+            .retry_after_decode_failure(key);
         if let Some(request) = request {
             let shell = Rc::clone(self);
             glib::timeout_add_local_once(Duration::from_millis(250), move || {

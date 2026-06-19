@@ -418,14 +418,12 @@ impl Shell {
                 shell.state.smart_playlists_loaded.set(true);
             }
 
-            let targets = source_warm_targets(
+            let (target_count, queued) = shell.schedule_source_route_cover_warm(
                 &shell.state.library.borrow(),
                 smart_playlists.as_deref().unwrap_or_default(),
                 &shell.state.settings.borrow(),
                 shell.source_route_initial_cover_metrics(),
             );
-            let target_count = targets.len();
-            let queued = shell.schedule_warm_targets(targets);
             *shell.state.cover_warm_started.borrow_mut() = Some(server_id.clone());
             if target_count > 0 {
                 debug!(
