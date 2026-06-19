@@ -4,7 +4,7 @@ impl Shell {
     pub(in crate::ui::root) fn cover_work_stats(&self) -> CoverWorkStats {
         CoverWorkStats {
             prime_pending: self.state.startup_cover_prime_pending.borrow().len(),
-            path_lookups: self.state.cover_path_lookups.borrow().len(),
+            path_lookups: self.state.cover_path_lookups.len(),
             fetches: self.state.cover_fetches.borrow().len(),
             visible_requests: self.state.cover_visible_requests.borrow().len(),
             bindings: self.state.cover_bindings.borrow().len(),
@@ -19,7 +19,7 @@ impl Shell {
     pub(in crate::ui) fn reset_cover_pipeline_state(&self) {
         self.state.cover_bindings.borrow_mut().clear();
         self.state.cover_unavailable.borrow_mut().clear();
-        self.state.cover_path_lookups.borrow_mut().clear();
+        self.state.cover_path_lookups.clear();
         self.state.cover_fetches.borrow_mut().clear();
         self.state.cover_visible_requests.borrow_mut().clear();
         self.state.cover_decode_queue.borrow_mut().clear();
@@ -37,7 +37,7 @@ impl Shell {
         self.state.cover_bindings.borrow_mut().clear();
         self.state.cover_visible_requests.borrow_mut().clear();
         clear_queued_route_cover_work(
-            &mut self.state.cover_path_lookups.borrow_mut(),
+            &self.state.cover_path_lookups,
             &mut self.state.cover_decode_queue.borrow_mut(),
         );
     }

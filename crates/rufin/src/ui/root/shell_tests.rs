@@ -16,8 +16,7 @@ use super::startup_reveal::{
 use super::{
     AutoLyricsRequest, LibrarySyncToastState, LocalSourceCacheGateAction,
     LocalSourceCacheGateInput, PlaylistEntryListState, PlaylistEntrySort, SnapshotRenderDecision,
-    auto_lyrics_request_for_settings, auto_lyrics_skip_action_enabled,
-    cover::record_cover_path_lookup_request, current_playback_track_id,
+    auto_lyrics_request_for_settings, auto_lyrics_skip_action_enabled, current_playback_track_id,
     home_visible_sections::changed_visible_home_section_kinds, library_sync_toast_message,
     library_sync_toast_state, local_source_cache_gate_action, local_source_snapshot_is_syncing,
     lyrics_result_subtitle, lyrics_result_subtitle_markup, lyrics_result_title_markup,
@@ -152,40 +151,6 @@ pub(in crate::ui) fn shell_playback_portals() {
     assert_eq!(icon.height(), super::THUMB_COVER_SIZE as i32);
 }
 
-#[test]
-pub(in crate::ui) fn shell_warm_lookup() {
-    let mut lookups = HashMap::new();
-
-    assert!(record_cover_path_lookup_request(
-        &mut lookups,
-        "album-art".to_string(),
-        super::cover::CoverPathLookupIntent::Warm,
-    ));
-    assert!(!record_cover_path_lookup_request(
-        &mut lookups,
-        "album-art".to_string(),
-        super::cover::CoverPathLookupIntent::Visible,
-    ));
-    assert_eq!(
-        lookups.get("album-art"),
-        Some(&super::cover::CoverPathLookupIntent::Visible)
-    );
-
-    assert!(record_cover_path_lookup_request(
-        &mut lookups,
-        "now-playing".to_string(),
-        super::cover::CoverPathLookupIntent::Visible,
-    ));
-    assert!(!record_cover_path_lookup_request(
-        &mut lookups,
-        "now-playing".to_string(),
-        super::cover::CoverPathLookupIntent::Warm,
-    ));
-    assert_eq!(
-        lookups.get("now-playing"),
-        Some(&super::cover::CoverPathLookupIntent::Visible)
-    );
-}
 #[test]
 pub(in crate::ui) fn shell_home_sections() {
     let explore = test_home_album_section(HomeSectionKind::Explore, 1);

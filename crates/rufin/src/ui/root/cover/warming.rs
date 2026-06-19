@@ -61,7 +61,7 @@ impl Shell {
             .map(|(key, _)| key.clone())
             .collect::<HashSet<_>>();
         retain_current_priority_cover_work(
-            &mut self.state.cover_path_lookups.borrow_mut(),
+            &self.state.cover_path_lookups,
             &mut self.state.cover_decode_queue.borrow_mut(),
             &keep,
         );
@@ -345,17 +345,13 @@ impl Shell {
             .cover_decodes
             .borrow()
             .len()
-            .saturating_add(self.state.cover_path_lookups.borrow().len())
+            .saturating_add(self.state.cover_path_lookups.len())
     }
 
     fn cover_job_active(&self, job: &CoverWarmJob) -> bool {
         self.decoded_cover_has_min_size(&job.key, job.size)
             || self.state.cover_decodes.borrow().contains_key(&job.key)
-            || self
-                .state
-                .cover_path_lookups
-                .borrow()
-                .contains_key(&job.key)
+            || self.state.cover_path_lookups.contains_key(&job.key)
     }
 
     fn start_warm_cover_path_lookup(self: &Rc<Self>, job: CoverWarmJob) {

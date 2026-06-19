@@ -405,8 +405,76 @@ impl CoverRequestRecord {
     }
 }
 
+pub(in crate::ui::root) struct CoverPathLookups {
+    entries: RefCell<HashMap<String, CoverPathLookupIntent>>,
+}
+
+impl CoverPathLookups {
+    pub(in crate::ui::root) fn new() -> Self {
+        Self {
+            entries: RefCell::new(HashMap::new()),
+        }
+    }
+
+    pub(in crate::ui::root) fn len(&self) -> usize {
+        self.entries.borrow().len()
+    }
+
+    pub(in crate::ui::root::cover) fn clear(&self) {
+        self.entries.borrow_mut().clear();
+    }
+
+    pub(in crate::ui::root::cover) fn record(
+        &self,
+        key: String,
+        intent: CoverPathLookupIntent,
+    ) -> bool {
+        let mut entries = self.entries.borrow_mut();
+        if let Some(existing) = entries.get_mut(&key) {
+            *existing = existing.coalesce(intent);
+            false
+        } else {
+            entries.insert(key, intent);
+            true
+        }
+    }
+
+    pub(in crate::ui::root::cover) fn remove(&self, key: &str) -> Option<CoverPathLookupIntent> {
+        self.entries.borrow_mut().remove(key)
+    }
+
+    pub(in crate::ui::root::cover) fn contains_key(&self, key: &str) -> bool {
+        self.entries.borrow().contains_key(key)
+    }
+
+    fn retain_current_priority(&self, keep: &HashSet<String>) {
+        self.entries.borrow_mut().retain(|key, intent| {
+            !matches!(
+                intent,
+                CoverPathLookupIntent::Priority | CoverPathLookupIntent::StartupPrime
+            ) || keep.contains(key)
+        });
+    }
+
+    fn retain_warm(&self) {
+        self.entries
+            .borrow_mut()
+            .retain(|_, intent| *intent == CoverPathLookupIntent::Warm);
+    }
+
+    #[cfg(test)]
+    fn contains_intent(&self, key: &str, intent: CoverPathLookupIntent) -> bool {
+        self.entries.borrow().get(key) == Some(&intent)
+    }
+
+    #[cfg(test)]
+    fn snapshot(&self) -> HashMap<String, CoverPathLookupIntent> {
+        self.entries.borrow().clone()
+    }
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::ui::root) enum CoverPathLookupIntent {
+pub(in crate::ui::root::cover) enum CoverPathLookupIntent {
     Visible,
     Priority,
     StartupPrime,
@@ -421,20 +489,6 @@ impl CoverPathLookupIntent {
             (Self::StartupPrime, _) | (_, Self::StartupPrime) => Self::StartupPrime,
             _ => Self::Warm,
         }
-    }
-}
-
-pub(in crate::ui) fn record_cover_path_lookup_request(
-    lookups: &mut HashMap<String, CoverPathLookupIntent>,
-    key: String,
-    intent: CoverPathLookupIntent,
-) -> bool {
-    if let Some(existing) = lookups.get_mut(&key) {
-        *existing = existing.coalesce(intent);
-        false
-    } else {
-        lookups.insert(key, intent);
-        true
     }
 }
 
@@ -471,17 +525,12 @@ impl CoverDecodePriority {
     }
 }
 
-pub(in crate::ui) fn retain_current_priority_cover_work(
-    lookups: &mut HashMap<String, CoverPathLookupIntent>,
+pub(in crate::ui::root::cover) fn retain_current_priority_cover_work(
+    lookups: &CoverPathLookups,
     queue: &mut VecDeque<CoverDecodeJob>,
     keep: &HashSet<String>,
 ) {
-    lookups.retain(|key, intent| {
-        !matches!(
-            intent,
-            CoverPathLookupIntent::Priority | CoverPathLookupIntent::StartupPrime
-        ) || keep.contains(key)
-    });
+    lookups.retain_current_priority(keep);
     queue.retain(|job| {
         job.priority != CoverDecodePriority::Visible
             || job.requires_live_binding
@@ -489,11 +538,11 @@ pub(in crate::ui) fn retain_current_priority_cover_work(
     });
 }
 
-pub(in crate::ui) fn clear_queued_route_cover_work(
-    lookups: &mut HashMap<String, CoverPathLookupIntent>,
+pub(in crate::ui::root::cover) fn clear_queued_route_cover_work(
+    lookups: &CoverPathLookups,
     queue: &mut VecDeque<CoverDecodeJob>,
 ) {
-    lookups.retain(|_, intent| *intent == CoverPathLookupIntent::Warm);
+    lookups.retain_warm();
     queue.retain(|job| job.priority == CoverDecodePriority::Warm);
 }
 
@@ -553,16 +602,28 @@ mod priority_work_tests {
     use std::collections::{HashMap, HashSet};
 
     #[test]
+    fn path_lookup_intent_coalesces() {
+        let lookups = CoverPathLookups::new();
+
+        assert!(lookups.record("album-art".to_string(), CoverPathLookupIntent::Warm));
+        assert!(!lookups.record("album-art".to_string(), CoverPathLookupIntent::Visible));
+        assert!(lookups.contains_intent("album-art", CoverPathLookupIntent::Visible));
+
+        assert!(lookups.record("now-playing".to_string(), CoverPathLookupIntent::Visible));
+        assert!(!lookups.record("now-playing".to_string(), CoverPathLookupIntent::Warm));
+        assert!(lookups.contains_intent("now-playing", CoverPathLookupIntent::Visible));
+    }
+
+    #[test]
     fn visible_drop_backlog() {
-        let mut lookups = HashMap::from([
-            ("old-priority".to_string(), CoverPathLookupIntent::Priority),
-            (
-                "current-priority".to_string(),
-                CoverPathLookupIntent::Priority,
-            ),
-            ("live-visible".to_string(), CoverPathLookupIntent::Visible),
-            ("background-warm".to_string(), CoverPathLookupIntent::Warm),
-        ]);
+        let lookups = CoverPathLookups::new();
+        lookups.record("old-priority".to_string(), CoverPathLookupIntent::Priority);
+        lookups.record(
+            "current-priority".to_string(),
+            CoverPathLookupIntent::Priority,
+        );
+        lookups.record("live-visible".to_string(), CoverPathLookupIntent::Visible);
+        lookups.record("background-warm".to_string(), CoverPathLookupIntent::Warm);
         let mut queue = VecDeque::from([
             CoverDecodeJob {
                 key: "old-priority".to_string(),
@@ -595,7 +656,7 @@ mod priority_work_tests {
         ]);
         let keep = HashSet::from(["current-priority".to_string()]);
 
-        retain_current_priority_cover_work(&mut lookups, &mut queue, &keep);
+        retain_current_priority_cover_work(&lookups, &mut queue, &keep);
 
         assert!(!lookups.contains_key("old-priority"));
         assert!(lookups.contains_key("current-priority"));
@@ -679,20 +740,19 @@ mod priority_work_tests {
 
     #[test]
     fn route_warm_work() {
-        let mut lookups = HashMap::from([
-            ("old-visible".to_string(), CoverPathLookupIntent::Visible),
-            ("old-priority".to_string(), CoverPathLookupIntent::Priority),
-            ("background-warm".to_string(), CoverPathLookupIntent::Warm),
-        ]);
+        let lookups = CoverPathLookups::new();
+        lookups.record("old-visible".to_string(), CoverPathLookupIntent::Visible);
+        lookups.record("old-priority".to_string(), CoverPathLookupIntent::Priority);
+        lookups.record("background-warm".to_string(), CoverPathLookupIntent::Warm);
         let mut queue = VecDeque::from([
             decode_job("old-visible", CoverDecodePriority::Visible),
             decode_job("background-warm", CoverDecodePriority::Warm),
         ]);
 
-        clear_queued_route_cover_work(&mut lookups, &mut queue);
+        clear_queued_route_cover_work(&lookups, &mut queue);
 
         assert_eq!(
-            lookups,
+            lookups.snapshot(),
             HashMap::from([("background-warm".to_string(), CoverPathLookupIntent::Warm)])
         );
         let queued_keys = queue.iter().map(|job| job.key.as_str()).collect::<Vec<_>>();

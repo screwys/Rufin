@@ -331,11 +331,7 @@ impl Shell {
             );
             return;
         }
-        let should_start = record_cover_path_lookup_request(
-            &mut self.state.cover_path_lookups.borrow_mut(),
-            key.clone(),
-            intent,
-        );
+        let should_start = self.state.cover_path_lookups.record(key.clone(), intent);
         if !should_start {
             return;
         }
@@ -354,7 +350,7 @@ impl Shell {
             .await
             .ok()
             .flatten();
-            let Some(intent) = shell.state.cover_path_lookups.borrow_mut().remove(&key) else {
+            let Some(intent) = shell.state.cover_path_lookups.remove(&key) else {
                 return;
             };
             let finish_started = Instant::now();
@@ -650,7 +646,7 @@ impl Shell {
         startup_prime_wait(
             self.decoded_cover_has_min_size(key, cover_size_from_cache_key(key).unwrap_or(1)),
             self.state.cover_unavailable.borrow().contains(key),
-            self.state.cover_path_lookups.borrow().contains_key(key),
+            self.state.cover_path_lookups.contains_key(key),
             self.state.cover_fetches.borrow().contains(key),
             self.state.cover_decodes.borrow().contains_key(key),
             self.state
