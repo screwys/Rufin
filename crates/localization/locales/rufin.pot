@@ -391,6 +391,9 @@ msgstr ""
 msgid "Control notifications"
 msgstr ""
 
+msgid "Controls"
+msgstr ""
+
 msgid "Copy"
 msgstr ""
 
@@ -966,6 +969,9 @@ msgid "Navidrome"
 msgstr ""
 
 msgid "Navigate page items"
+msgstr ""
+
+msgid "Navigation"
 msgstr ""
 
 msgid "Needs attention"

@@ -542,6 +542,60 @@ fn show_shortcuts_dialog(shell: &Shell) {
         .title(tr("Keyboard Shortcuts"))
         .build();
     let section = adw::ShortcutsSection::new(Some(&tr("General")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Menu"),
+        "win.show-primary-menu",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Search"),
+        "win.focus-search",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Preferences"),
+        "app.preferences",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Keyboard Shortcuts"),
+        "app.show-shortcuts",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Toggle Fullscreen"),
+        "win.toggle-fullscreen",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Close app window"),
+        "window.close",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Quit Rufin"),
+        "app.quit",
+    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Playback")));
+    section.add(adw::ShortcutsItem::new(
+        &tr("Play/Pause"),
+        "space <Control>space",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Previous"),
+        "win.previous-track",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Next"),
+        "win.next-track",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Seek Backward"),
+        "win.seek-backward",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Seek Forward"),
+        "win.seek-forward",
+    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Navigation")));
     #[cfg(target_os = "macos")]
     {
         section.add(adw::ShortcutsItem::new(
@@ -569,38 +623,13 @@ fn show_shortcuts_dialog(shell: &Shell) {
             "<Control>1...9",
         ));
     }
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Menu"),
-        "win.show-primary-menu",
-    ));
     section.add(adw::ShortcutsItem::new(
         &tr("Navigate page items"),
         "Up Down Left Right",
     ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Search"),
-        "win.focus-search",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Preferences"),
-        "app.preferences",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Keyboard Shortcuts"),
-        "app.show-shortcuts",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Toggle Fullscreen"),
-        "win.toggle-fullscreen",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Close app window"),
-        "window.close",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Quit Rufin"),
-        "app.quit",
-    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Controls")));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Show/hide right sidebar"),
         "win.toggle-queue",
@@ -608,29 +637,6 @@ fn show_shortcuts_dialog(shell: &Shell) {
     section.add(adw::ShortcutsItem::from_action(
         &tr("Show/hide lyrics"),
         "win.toggle-lyrics",
-    ));
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Playback")));
-    section.add(adw::ShortcutsItem::new(
-        &tr("Play/Pause"),
-        "space <Control>space",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Previous"),
-        "win.previous-track",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Next"),
-        "win.next-track",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Seek Backward"),
-        "win.seek-backward",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Seek Forward"),
-        "win.seek-forward",
     ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Shuffle"),
