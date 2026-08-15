@@ -61,6 +61,8 @@
                 glib
                 gtk4
                 libadwaita
+                glib-networking
+                libsoup_3
               ]
               ++ (with gst_all_1; [
                 gstreamer
