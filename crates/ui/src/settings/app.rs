@@ -3,7 +3,7 @@ use std::rc::Rc;
 
 use desktop_integration::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
-use library::{HomeBlockKind, SourceId, StreamQuality};
+use library::{GenreId, HomeBlockKind, MusicFolderId, PlayedFilter, SourceId, StreamQuality};
 use localization::{default_language_preference, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 use playback::{
@@ -18,6 +18,71 @@ use super::{
     LayoutSettings, LibraryListKey, LibraryListSettings, LibraryListSettingsEntry, SidebarSettings,
     ThemePreference, default_library_list_settings, sanitized_window_size,
 };
+
+const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
+const MIN_RANDOM_PLAY_LIMIT: usize = 1;
+const MAX_RANDOM_PLAY_LIMIT: usize = 500;
+const MIN_RANDOM_PLAY_YEAR: u16 = 1850;
+const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct RandomPlayGenreSelection {
+    pub source_id: SourceId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub music_folder_id: Option<MusicFolderId>,
+    pub genre_id: GenreId,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(default)]
+pub struct RandomPlaySettings {
+    pub limit: usize,
+    pub min_year: Option<u16>,
+    pub max_year: Option<u16>,
+    pub genre: Option<RandomPlayGenreSelection>,
+    pub played_filter: PlayedFilter,
+}
+
+impl Default for RandomPlaySettings {
+    fn default() -> Self {
+        Self {
+            limit: DEFAULT_RANDOM_PLAY_LIMIT,
+            min_year: None,
+            max_year: None,
+            genre: None,
+            played_filter: PlayedFilter::All,
+        }
+    }
+}
+
+impl RandomPlaySettings {
+    pub fn selected_genre_id(
+        &self,
+        source_id: &SourceId,
+        music_folder_id: Option<&MusicFolderId>,
+    ) -> Option<&GenreId> {
+        self.genre.as_ref().and_then(|genre| {
+            (&genre.source_id == source_id && genre.music_folder_id.as_ref() == music_folder_id)
+                .then_some(&genre.genre_id)
+        })
+    }
+
+    fn sanitize(&mut self) {
+        self.limit = self
+            .limit
+            .clamp(MIN_RANDOM_PLAY_LIMIT, MAX_RANDOM_PLAY_LIMIT);
+        self.min_year = self
+            .min_year
+            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+        self.max_year = self
+            .max_year
+            .map(|year| year.clamp(MIN_RANDOM_PLAY_YEAR, MAX_RANDOM_PLAY_YEAR));
+    }
+
+    fn is_default(&self) -> bool {
+        self == &Self::default()
+    }
+}
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
@@ -82,6 +147,8 @@ pub struct Settings {
     pub auto_dj_refill_threshold: u8,
     #[serde(default)]
     pub playback: PlaybackSettings,
+    #[serde(default, skip_serializing_if = "RandomPlaySettings::is_default")]
+    pub random_play: RandomPlaySettings,
     #[serde(default)]
     pub home_blocks: Vec<HomeBlockKind>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -135,6 +202,7 @@ impl Default for Settings {
             repeat_mode: RepeatMode::Off,
             auto_dj_refill_threshold: DEFAULT_AUTO_DJ_REFILL_THRESHOLD,
             playback: PlaybackSettings::default(),
+            random_play: RandomPlaySettings::default(),
             home_blocks: default_home_blocks(),
             window_width: None,
             window_height: None,
@@ -163,6 +231,7 @@ impl Settings {
     pub fn sanitize(&mut self) {
         self.rich_presence.sanitize();
         self.playback.sanitize();
+        self.random_play.sanitize();
         self.lyrics.sanitize();
         self.auto_dj_refill_threshold = self
             .auto_dj_refill_threshold

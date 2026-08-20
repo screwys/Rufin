@@ -29,10 +29,12 @@ pub(crate) use fullscreen::{
     FullscreenPlayerParts, build_fullscreen_player, connect_fullscreen_player_controls,
 };
 pub(crate) use outputs::{
-    audio_output_dropdown, default_audio_output_options, warm_audio_output_cache,
+    audio_output_dropdown, default_audio_output_options, select_next_audio_output,
+    select_previous_audio_output, warm_audio_output_cache,
 };
 pub(crate) use playback_settings::{crossfade_duration_row, playback_rate_row, preserve_pitch_row};
 pub(crate) use queue::connect_queue_panel_controls;
+pub(crate) use random_play::play_saved_random;
 pub(crate) use right_panel::{
     apply_sidebar_media_visibility, build_right_panel, connect_queue_lyrics_overlay,
 };

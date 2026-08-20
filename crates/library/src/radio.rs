@@ -27,7 +27,7 @@ pub enum RadioSeed {
     Playlist(PlaylistId),
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PlayedFilter {
     #[default]
     All,

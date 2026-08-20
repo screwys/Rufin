@@ -2,8 +2,10 @@ use std::{cell::Cell, rc::Rc, time::Duration};
 
 use adw::prelude::*;
 use gtk::{gio, glib};
+use playback::{PlaybackTransitionMode, QueuePlacement};
 
 use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
+use crate::player::{play_saved_random, select_next_audio_output, select_previous_audio_output};
 use crate::preferences::source::selector::install_source_menu_actions;
 use crate::preferences::{
     dialogs::popup::present_light_dismiss_dialog, present_preferences_dialog,
@@ -221,6 +223,46 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         let shell = Rc::clone(shell);
         move || toggle_auto_dj_shortcut(&shell)
     });
+    #[cfg(target_os = "macos")]
+    let random_accels = &["<Alt><Meta>r"][..];
+    #[cfg(not(target_os = "macos"))]
+    let random_accels = &["<Control><Shift>r"][..];
+    add_window_action(shell, "play-random", random_accels, {
+        let shell = Rc::clone(shell);
+        move || play_saved_random(&shell, QueuePlacement::Now)
+    });
+    #[cfg(target_os = "macos")]
+    let random_next_accels = &["<Alt><Meta>n"][..];
+    #[cfg(not(target_os = "macos"))]
+    let random_next_accels = &["<Control><Shift>n"][..];
+    add_window_action(shell, "play-random-next", random_next_accels, {
+        let shell = Rc::clone(shell);
+        move || play_saved_random(&shell, QueuePlacement::Next)
+    });
+    #[cfg(target_os = "macos")]
+    let random_later_accels = &["<Alt><Meta>t"][..];
+    #[cfg(not(target_os = "macos"))]
+    let random_later_accels = &["<Control><Shift>t"][..];
+    add_window_action(shell, "play-random-later", random_later_accels, {
+        let shell = Rc::clone(shell);
+        move || play_saved_random(&shell, QueuePlacement::Last)
+    });
+    #[cfg(target_os = "macos")]
+    let gapless_accels = &["<Alt><Meta>g"][..];
+    #[cfg(not(target_os = "macos"))]
+    let gapless_accels = &["<Control><Shift>g"][..];
+    add_window_action(shell, "use-gapless", gapless_accels, {
+        let shell = Rc::clone(shell);
+        move || set_transition_mode_shortcut(&shell, PlaybackTransitionMode::Gapless)
+    });
+    #[cfg(target_os = "macos")]
+    let crossfade_accels = &["<Alt><Meta>c"][..];
+    #[cfg(not(target_os = "macos"))]
+    let crossfade_accels = &["<Control><Shift>c"][..];
+    add_window_action(shell, "use-crossfade", crossfade_accels, {
+        let shell = Rc::clone(shell);
+        move || set_transition_mode_shortcut(&shell, PlaybackTransitionMode::Crossfade)
+    });
     add_window_action(shell, "mute", &[], {
         let shell = Rc::clone(shell);
         move || toggle_mute_shortcut(&shell)
@@ -242,6 +284,22 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || adjust_volume(&shell, -KEY_VOLUME_STEP)
     });
     #[cfg(target_os = "macos")]
+    let previous_output_accels = &["<Alt><Meta>bracketleft"][..];
+    #[cfg(not(target_os = "macos"))]
+    let previous_output_accels = &["<Control><Shift>bracketleft"][..];
+    add_window_action(shell, "previous-audio-output", previous_output_accels, {
+        let shell = Rc::clone(shell);
+        move || select_previous_audio_output(&shell)
+    });
+    #[cfg(target_os = "macos")]
+    let next_output_accels = &["<Alt><Meta>bracketright"][..];
+    #[cfg(not(target_os = "macos"))]
+    let next_output_accels = &["<Control><Shift>bracketright"][..];
+    add_window_action(shell, "next-audio-output", next_output_accels, {
+        let shell = Rc::clone(shell);
+        move || select_next_audio_output(&shell)
+    });
+    #[cfg(target_os = "macos")]
     let queue_accels = &["<Alt><Meta>u"][..];
     #[cfg(not(target_os = "macos"))]
     let queue_accels = &["F9"][..];
@@ -250,13 +308,59 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || shell.toggle_right_panel()
     });
     #[cfg(target_os = "macos")]
-    let lyrics_accels = &["<Alt><Meta>l"][..];
+    let visualizer_panel_accels = &["<Alt><Meta>v"][..];
     #[cfg(not(target_os = "macos"))]
-    let lyrics_accels = &["F8"][..];
-    add_window_action(shell, "toggle-lyrics", lyrics_accels, {
+    let visualizer_panel_accels = &["<Control><Shift>v"][..];
+    add_window_action(shell, "show-visualizer-panel", visualizer_panel_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.set_right_panel_media_visibility(false, true)
+    });
+    #[cfg(target_os = "macos")]
+    let lyrics_panel_accels = &["<Alt><Meta>l"][..];
+    #[cfg(not(target_os = "macos"))]
+    let lyrics_panel_accels = &["<Control><Shift>l"][..];
+    add_window_action(shell, "show-lyrics-panel", lyrics_panel_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.set_right_panel_media_visibility(true, false)
+    });
+    #[cfg(target_os = "macos")]
+    let visualizer_lyrics_panel_accels = &["<Alt><Meta>b"][..];
+    #[cfg(not(target_os = "macos"))]
+    let visualizer_lyrics_panel_accels = &["<Control><Shift>b"][..];
+    add_window_action(
+        shell,
+        "show-visualizer-lyrics-panel",
+        visualizer_lyrics_panel_accels,
+        {
+            let shell = Rc::clone(shell);
+            move || shell.set_right_panel_media_visibility(true, true)
+        },
+    );
+    add_window_action(shell, "toggle-lyrics", &[], {
         let shell = Rc::clone(shell);
         move || shell.toggle_lyrics_panel()
     });
+    #[cfg(target_os = "macos")]
+    let refresh_library_accels = &["<Control><Meta>r"][..];
+    #[cfg(not(target_os = "macos"))]
+    let refresh_library_accels = &["F5"][..];
+    add_window_action(shell, "refresh-library", refresh_library_accels, {
+        let shell = Rc::clone(shell);
+        move || refresh_selected_library(&shell)
+    });
+    #[cfg(target_os = "macos")]
+    let fullscreen_player_accels = &["<Shift><Meta>f"][..];
+    #[cfg(not(target_os = "macos"))]
+    let fullscreen_player_accels = &["<Shift>F11"][..];
+    add_window_action(
+        shell,
+        "toggle-fullscreen-player",
+        fullscreen_player_accels,
+        {
+            let shell = Rc::clone(shell);
+            move || shell.toggle_fullscreen_player()
+        },
+    );
     #[cfg(target_os = "macos")]
     let primary_menu_accels = &["<Control><Meta>m"][..];
     #[cfg(not(target_os = "macos"))]
@@ -530,6 +634,33 @@ fn adjust_volume(shell: &Rc<Shell>, delta: f64) {
     shell.apply_user_volume(volume);
 }
 
+fn set_transition_mode_shortcut(shell: &Rc<Shell>, mode: PlaybackTransitionMode) {
+    if !shell
+        .products
+        .playback
+        .transport
+        .playback_output()
+        .is_local()
+    {
+        return;
+    }
+    shell.update_playback_settings(|settings| settings.transition_mode = mode);
+    shell.show_control_feedback_toast(match mode {
+        PlaybackTransitionMode::Gapless => tr("Gapless"),
+        PlaybackTransitionMode::Crossfade => tr("Crossfade"),
+    });
+}
+
+fn refresh_selected_library(shell: &Shell) {
+    let source_id = shell
+        .selected_library()
+        .as_deref()
+        .map(|selected| selected.source_id.clone());
+    if let Some(source_id) = source_id {
+        shell.products.source.refresh_source(source_id);
+    }
+}
+
 fn toggle_shuffle_shortcut(shell: &Shell) {
     let Some(enabled) = shell
         .selected_playback()
@@ -598,41 +729,11 @@ fn show_shortcuts_dialog(shell: &Shell) {
     let dialog = adw::ShortcutsDialog::builder()
         .title(tr("Keyboard Shortcuts"))
         .build();
+
     let section = adw::ShortcutsSection::new(Some(&tr("General")));
-    #[cfg(target_os = "macos")]
-    {
-        section.add(adw::ShortcutsItem::new(
-            &tr("Back"),
-            "Back <Meta>bracketleft",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Forward"),
-            "Forward <Meta>bracketright",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Sidebar route by position"),
-            "<Meta>1...9 <Meta>0",
-        ));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        section.add(adw::ShortcutsItem::new(&tr("Back"), "Back <Alt>Left"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Forward"),
-            "Forward <Alt>Right",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Sidebar route by position"),
-            "<Control>1...9 <Control>0",
-        ));
-    }
     section.add(adw::ShortcutsItem::from_action(
         &tr("Menu"),
         "win.show-primary-menu",
-    ));
-    section.add(adw::ShortcutsItem::new(
-        &tr("Navigate page items"),
-        "Up Down Left Right",
     ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Search"),
@@ -647,8 +748,8 @@ fn show_shortcuts_dialog(shell: &Shell) {
         "app.show-shortcuts",
     ));
     section.add(adw::ShortcutsItem::from_action(
-        &tr("Toggle Fullscreen"),
-        "win.toggle-fullscreen",
+        &tr("Resync Library"),
+        "win.refresh-library",
     ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Close app window"),
@@ -657,14 +758,6 @@ fn show_shortcuts_dialog(shell: &Shell) {
     section.add(adw::ShortcutsItem::from_action(
         &tr("Quit Rufin"),
         "app.quit",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show/hide right sidebar"),
-        "win.toggle-queue",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show/hide lyrics"),
-        "win.toggle-lyrics",
     ));
     dialog.add(section);
 
@@ -693,6 +786,25 @@ fn show_shortcuts_dialog(shell: &Shell) {
         "win.seek-forward",
     ));
     section.add(adw::ShortcutsItem::from_action(
+        &tr("Favorite"),
+        "win.toggle-favorite",
+    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Queue")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Play random"),
+        "win.play-random",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Play random (play next)"),
+        "win.play-random-next",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Play random (play later)"),
+        "win.play-random-later",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
         &tr("Shuffle"),
         "win.toggle-shuffle",
     ));
@@ -701,12 +813,19 @@ fn show_shortcuts_dialog(shell: &Shell) {
         "win.cycle-repeat",
     ));
     section.add(adw::ShortcutsItem::from_action(
-        &tr("Favorite"),
-        "win.toggle-favorite",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
         &tr("Auto DJ"),
         "win.toggle-auto-dj",
+    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Audio")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Gapless mode"),
+        "win.use-gapless",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Crossfade mode"),
+        "win.use-crossfade",
     ));
     section.add(adw::ShortcutsItem::new(&tr("Mute"), "m"));
     section.add(adw::ShortcutsItem::from_action(
@@ -717,7 +836,77 @@ fn show_shortcuts_dialog(shell: &Shell) {
         &tr("Volume Down"),
         "win.volume-down",
     ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Previous audio device"),
+        "win.previous-audio-output",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Next audio device"),
+        "win.next-audio-output",
+    ));
     dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("View")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Show/hide right sidebar"),
+        "win.toggle-queue",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Show visualizer in the right panel"),
+        "win.show-visualizer-panel",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Show lyrics in the right panel"),
+        "win.show-lyrics-panel",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Show visualizer and lyrics in the right panel"),
+        "win.show-visualizer-lyrics-panel",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Toggle Fullscreen"),
+        "win.toggle-fullscreen",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Open fullscreen player"),
+        "win.toggle-fullscreen-player",
+    ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Navigation")));
+    #[cfg(target_os = "macos")]
+    {
+        section.add(adw::ShortcutsItem::new(
+            &tr("Back"),
+            "Back <Meta>bracketleft",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Forward"),
+            "Forward <Meta>bracketright",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Sidebar route by position"),
+            "<Meta>1...9 <Meta>0",
+        ));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        section.add(adw::ShortcutsItem::new(&tr("Back"), "Back <Alt>Left"));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Forward"),
+            "Forward <Alt>Right",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Sidebar route by position"),
+            "<Control>1...9 <Control>0",
+        ));
+    }
+    section.add(adw::ShortcutsItem::new(
+        &tr("Navigate page items"),
+        "Up Down Left Right",
+    ));
+    dialog.add(section);
+
     present_light_dismiss_dialog(&dialog, &shell.chrome.window);
 }
 

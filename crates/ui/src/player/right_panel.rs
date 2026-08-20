@@ -177,16 +177,6 @@ impl Shell {
         self.save_queue_lyrics_height(self.right_panel.lyrics_surface.height());
     }
 
-    fn save_lyrics_panel_visibility(&self, visible: bool) {
-        self.update_app_settings("lyrics panel visibility", |settings| {
-            if settings.lyrics_panel_visible == visible {
-                return false;
-            }
-            settings.lyrics_panel_visible = visible;
-            true
-        });
-    }
-
     pub(crate) fn toggle_right_panel(self: &Rc<Self>) {
         let visible = self.right_sidebar_visible();
         self.set_right_sidebar_visible(!visible);
@@ -245,32 +235,42 @@ impl Shell {
     }
 
     pub(crate) fn set_lyrics_panel_visible(self: &Rc<Self>, visible: bool) {
-        if visible && !self.right_sidebar_visible() {
-            self.set_right_sidebar_visible(true);
-        }
-        if !visible {
-            self.remember_queue_lyrics_open_position();
-        }
-
-        if self.lyrics.panel_visible.replace(visible) != visible {
-            self.save_lyrics_panel_visibility(visible);
-        }
-        apply_sidebar_media_visibility(Rc::clone(self));
+        self.set_right_panel_media_visibility(visible, self.right_panel.visualizer_visible.get());
     }
 
     pub(crate) fn set_visualizer_panel_visible(self: &Rc<Self>, visible: bool) {
-        if visible && !self.right_sidebar_visible() {
+        self.set_right_panel_media_visibility(self.lyrics.panel_visible.get(), visible);
+    }
+
+    pub(crate) fn set_right_panel_media_visibility(
+        self: &Rc<Self>,
+        lyrics_visible: bool,
+        visualizer_visible: bool,
+    ) {
+        if (lyrics_visible || visualizer_visible) && !self.right_sidebar_visible() {
             self.set_right_sidebar_visible(true);
         }
-        if !visible {
+        if (!lyrics_visible && self.lyrics.panel_visible.get())
+            || (!visualizer_visible && self.right_panel.visualizer_visible.get())
+        {
             self.remember_queue_lyrics_open_position();
         }
-        if self.right_panel.visualizer_visible.replace(visible) != visible {
-            self.update_app_settings("visualizer panel visibility", |settings| {
-                if settings.visualizer_panel_visible == visible {
+
+        let lyrics_changed = self.lyrics.panel_visible.replace(lyrics_visible) != lyrics_visible;
+        let visualizer_changed = self
+            .right_panel
+            .visualizer_visible
+            .replace(visualizer_visible)
+            != visualizer_visible;
+        if lyrics_changed || visualizer_changed {
+            self.update_app_settings("right panel media visibility", |settings| {
+                if settings.lyrics_panel_visible == lyrics_visible
+                    && settings.visualizer_panel_visible == visualizer_visible
+                {
                     return false;
                 }
-                settings.visualizer_panel_visible = visible;
+                settings.lyrics_panel_visible = lyrics_visible;
+                settings.visualizer_panel_visible = visualizer_visible;
                 true
             });
         }

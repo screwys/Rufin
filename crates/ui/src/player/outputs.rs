@@ -20,6 +20,45 @@ pub(crate) fn warm_audio_output_cache(shell: &Rc<Shell>) {
     request_audio_output_refresh(shell);
 }
 
+pub(crate) fn select_previous_audio_output(shell: &Rc<Shell>) {
+    cycle_audio_output(shell, -1);
+}
+
+pub(crate) fn select_next_audio_output(shell: &Rc<Shell>) {
+    cycle_audio_output(shell, 1);
+}
+
+fn cycle_audio_output(shell: &Rc<Shell>, direction: isize) {
+    if !shell
+        .products
+        .playback
+        .transport
+        .playback_output()
+        .is_local()
+    {
+        return;
+    }
+    let selected = shell
+        .settings
+        .current
+        .borrow()
+        .playback
+        .audio_output
+        .clone();
+    let (next_id, next_title) = {
+        let outputs = shell.playback.audio_output_options.borrow();
+        let current = audio_output_index(&outputs, selected.as_deref()).unwrap_or_default();
+        let Some(next) = adjacent_audio_output_index(outputs.len(), current, direction) else {
+            return;
+        };
+        outputs[next].clone()
+    };
+    shell.update_playback_settings(|settings| settings.audio_output = next_id.clone());
+    if shell.settings.current.borrow().playback.audio_output == next_id {
+        shell.show_control_feedback_toast(next_title);
+    }
+}
+
 pub(crate) fn audio_output_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropDown {
     let selected = shell
         .settings
@@ -228,9 +267,18 @@ fn audio_output_index(
     outputs.iter().position(|(id, _)| id.as_deref() == selected)
 }
 
+fn adjacent_audio_output_index(
+    output_count: usize,
+    current: usize,
+    direction: isize,
+) -> Option<usize> {
+    (output_count >= 2)
+        .then(|| (current as isize + direction).rem_euclid(output_count as isize) as usize)
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{audio_output_index, default_audio_output_options};
+    use super::{adjacent_audio_output_index, audio_output_index, default_audio_output_options};
 
     #[test]
     fn unavailable_selected_output_does_not_mark_system_default_active() {
@@ -238,5 +286,12 @@ mod tests {
 
         assert_eq!(audio_output_index(&outputs, None), Some(0));
         assert_eq!(audio_output_index(&outputs, Some("gst-device:gone")), None);
+    }
+
+    #[test]
+    fn audio_output_cycle_wraps_in_both_directions() {
+        assert_eq!(adjacent_audio_output_index(3, 0, -1), Some(2));
+        assert_eq!(adjacent_audio_output_index(3, 2, 1), Some(0));
+        assert_eq!(adjacent_audio_output_index(1, 0, 1), None);
     }
 }

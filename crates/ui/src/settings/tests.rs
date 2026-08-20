@@ -1,10 +1,10 @@
 use super::{
     AccentPreference, ContextMenuItem, ContextMenuItemSettings, DownloadRule, DownloadRules,
     LibraryField, LibraryLayout, LibraryListKey, MAX_RESTORED_WINDOW_HEIGHT,
-    MAX_RESTORED_WINDOW_WIDTH, Settings, SidebarPin, SidebarRouteItem,
-    available_detail_track_fields, available_sort_fields, sanitized_window_size,
+    MAX_RESTORED_WINDOW_WIDTH, RandomPlayGenreSelection, RandomPlaySettings, Settings, SidebarPin,
+    SidebarRouteItem, available_detail_track_fields, available_sort_fields, sanitized_window_size,
 };
-use library::{AlbumId, GenreId, PlaylistId, SourceId};
+use library::{AlbumId, GenreId, MusicFolderId, PlayedFilter, PlaylistId, SourceId};
 
 #[test]
 fn private_mode_blocks_automatic_external_activity_but_keeps_passive_links() {
@@ -136,6 +136,49 @@ fn playback_modes_are_one_app_wide_settings_value() {
     assert!(restored.auto_dj_enabled);
     assert!(restored.shuffle_enabled);
     assert_eq!(restored.repeat_mode, playback::RepeatMode::All);
+}
+
+#[test]
+fn random_play_settings_round_trip_and_scope_the_genre() {
+    let source_id = SourceId::new("source");
+    let folder_id = MusicFolderId::new("folder");
+    let genre_id = GenreId::new("genre");
+    let settings = Settings {
+        random_play: RandomPlaySettings {
+            limit: 42,
+            min_year: Some(1990),
+            max_year: Some(2020),
+            genre: Some(RandomPlayGenreSelection {
+                source_id: source_id.clone(),
+                music_folder_id: Some(folder_id.clone()),
+                genre_id: genre_id.clone(),
+            }),
+            played_filter: PlayedFilter::Unplayed,
+        },
+        ..Settings::default()
+    };
+
+    let restored = serde_json::from_value::<Settings>(
+        serde_json::to_value(settings).expect("serialize random play settings"),
+    )
+    .expect("restore random play settings");
+
+    assert_eq!(restored.random_play.limit, 42);
+    assert_eq!(restored.random_play.min_year, Some(1990));
+    assert_eq!(restored.random_play.max_year, Some(2020));
+    assert_eq!(restored.random_play.played_filter, PlayedFilter::Unplayed);
+    assert_eq!(
+        restored
+            .random_play
+            .selected_genre_id(&source_id, Some(&folder_id)),
+        Some(&genre_id)
+    );
+    assert_eq!(
+        restored
+            .random_play
+            .selected_genre_id(&SourceId::new("other"), Some(&folder_id)),
+        None
+    );
 }
 
 #[test]

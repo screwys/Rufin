@@ -4,7 +4,10 @@ mod layout;
 mod persistence;
 mod sidebar;
 
-pub use app::{Settings, SettingsHandle, SettingsPort, default_home_blocks};
+pub use app::{
+    RandomPlayGenreSelection, RandomPlaySettings, Settings, SettingsHandle, SettingsPort,
+    default_home_blocks,
+};
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
 pub use downloads::DownloadRule;
 pub use downloads::{DownloadRules, SourceDownloadSettings};
