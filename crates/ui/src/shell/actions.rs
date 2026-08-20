@@ -286,7 +286,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     #[cfg(target_os = "macos")]
     let previous_output_accels = &["<Alt><Meta>bracketleft"][..];
     #[cfg(not(target_os = "macos"))]
-    let previous_output_accels = &["<Control><Shift>bracketleft"][..];
+    let previous_output_accels = &["F6"][..];
     add_window_action(shell, "previous-audio-output", previous_output_accels, {
         let shell = Rc::clone(shell);
         move || select_previous_audio_output(&shell)
@@ -294,7 +294,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     #[cfg(target_os = "macos")]
     let next_output_accels = &["<Alt><Meta>bracketright"][..];
     #[cfg(not(target_os = "macos"))]
-    let next_output_accels = &["<Control><Shift>bracketright"][..];
+    let next_output_accels = &["F7"][..];
     add_window_action(shell, "next-audio-output", next_output_accels, {
         let shell = Rc::clone(shell);
         move || select_next_audio_output(&shell)
