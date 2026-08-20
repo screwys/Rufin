@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::net::{IpAddr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -11,6 +11,8 @@ use std::time::Duration;
 use playback::PreparedStream;
 use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 use url::Url;
+
+const PREFERRED_RELAY_PORT: u16 = 9_876;
 
 #[derive(Clone)]
 struct RelayResource {
@@ -44,8 +46,14 @@ pub(crate) struct RelayServer {
 impl RelayServer {
     pub(crate) fn start(target: SocketAddr, proxy_media: Arc<AtomicBool>) -> Result<Self, String> {
         let local_ip = local_address_for(target)?;
-        let server =
-            Server::http(SocketAddr::new(local_ip, 0)).map_err(|error| error.to_string())?;
+        let bind_ip = if target.is_ipv4() {
+            IpAddr::V4(Ipv4Addr::UNSPECIFIED)
+        } else {
+            IpAddr::V6(Ipv6Addr::UNSPECIFIED)
+        };
+        let server = Server::http(SocketAddr::new(bind_ip, PREFERRED_RELAY_PORT))
+            .or_else(|_| Server::http(SocketAddr::new(bind_ip, 0)))
+            .map_err(|error| error.to_string())?;
         let address = server
             .server_addr()
             .to_ip()
@@ -58,7 +66,7 @@ impl RelayServer {
             .name("rufin-cast-relay".to_string())
             .spawn(move || serve(server, thread_resources, thread_running))
             .map_err(|error| error.to_string())?;
-        let host = match address.ip() {
+        let host = match local_ip {
             IpAddr::V4(ip) => ip.to_string(),
             IpAddr::V6(ip) => format!("[{ip}]"),
         };
