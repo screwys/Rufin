@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-19 19:55+0000\n"
+"PO-Revision-Date: 2026-08-20 22:21+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -430,15 +430,11 @@ msgstr "Подключено"
 msgid "Connecting to music server..."
 msgstr "Подключение к музыкальному серверу…"
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connecting to {device}..."
-msgstr "Подключение к музыкальному серверу…"
+msgstr "Подключение к {device}..."
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connection failed"
-msgstr "Соединение"
+msgstr "Соединение не удалось"
 
 msgid "Connection"
 msgstr "Соединение"
@@ -602,10 +598,8 @@ msgstr "Включить приватный режим"
 msgid "Enter API credentials first"
 msgstr "Сначала введите данные для доступа к API"
 
-#, fuzzy
-#| msgid "Enter a server address, username, and password"
 msgid "Enter a server address and API key"
-msgstr "Введите адрес сервера, имя пользователя и пароль"
+msgstr "Введите адрес сервера и API ключ"
 
 msgid "Enter a server address, username, and password"
 msgstr "Введите адрес сервера, имя пользователя и пароль"
@@ -818,7 +812,7 @@ msgid "Karaoke mode"
 msgstr "Режим караоке"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Не останавливать работу Rufin после закрытия окна"
 
 msgid "Keep album transitions gapless when possible"
 msgstr "По возможности обеспечивать плавный переход между треками альбома"
@@ -1349,10 +1343,8 @@ msgstr "Настройки"
 msgid "Preparing library..."
 msgstr "Подготовка библиотеки…"
 
-#, fuzzy
-#| msgid "Prefer server lyrics"
 msgid "Preserve pitch"
-msgstr "Предпочитать тексты песен с сервера"
+msgstr "Сохранить высоту звука"
 
 msgid "Preset"
 msgstr "Предустановка"
@@ -1423,7 +1415,7 @@ msgid "Recently released"
 msgstr "Недавно выпущенные"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Рекомендуется, если ваш сервер предоставляет такую возможность"
 
 msgid "Reconnect"
 msgstr "Повторное подключение"
@@ -1921,10 +1913,8 @@ msgstr "Звук включен"
 msgid "Update"
 msgstr "Обновить"
 
-#, fuzzy
-#| msgid "API key"
 msgid "Use API key"
-msgstr "Ключ API"
+msgstr "Использовать ключ API"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr "Использовать Мгновенный Микс Jellyfin для рекомендаций"
