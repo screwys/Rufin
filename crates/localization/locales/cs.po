@@ -472,6 +472,11 @@ msgstr "Vytvořit"
 msgid "Crossfade duration"
 msgstr "Doba trvání přechodu"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfade mode"
+msgstr "Přechod"
+
 msgid "Crossfade"
 msgstr "Přechod"
 
@@ -694,6 +699,11 @@ msgstr "Úplné zobrazení"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+#, fuzzy
+#| msgid "Gapless"
+msgid "Gapless mode"
+msgstr "Přehrávání bez mezer"
 
 msgid "Gapless"
 msgstr "Přehrávání bez mezer"
@@ -1049,6 +1059,11 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Procházení položek stránky"
 
+#, fuzzy
+#| msgid "Notifications"
+msgid "Navigation"
+msgstr "Notifikace"
+
 msgid "Needs attention"
 msgstr "Vyžaduje pozornost"
 
@@ -1072,6 +1087,11 @@ msgstr "Nově přidané"
 
 msgid "Next Track"
 msgstr "Další skladba"
+
+#, fuzzy
+#| msgid "Selected device"
+msgid "Next audio device"
+msgstr "Vybrané zařízení"
 
 msgid "Next page"
 msgstr "Další strana"
@@ -1282,6 +1302,16 @@ msgstr "Přehrát playlist"
 msgid "Play radio"
 msgstr "Pustit Rádio"
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play later)"
+msgstr "Přehrát náhodně"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play next)"
+msgstr "Přehrát náhodně"
+
 msgid "Play random"
 msgstr "Přehrát náhodně"
 
@@ -1371,6 +1401,11 @@ msgstr ""
 
 msgid "Previous Track"
 msgstr "Předchozí skladba"
+
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous audio device"
+msgstr "Předchozí stránka"
 
 msgid "Previous page"
 msgstr "Předchozí stránka"
@@ -1552,6 +1587,11 @@ msgstr "Obnovit"
 msgid "Resume"
 msgstr "Pokračovat"
 
+#, fuzzy
+#| msgid "Library"
+msgid "Resync Library"
+msgstr "Knihovna"
+
 msgid "Rich presence"
 msgstr "Rozšířené informace o přehrávání"
 
@@ -1728,6 +1768,11 @@ msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
 msgid "Show external site links"
 msgstr "Zobrazit odkazy na externí stránky"
 
+#, fuzzy
+#| msgid "Show Lyrics Panel"
+msgid "Show lyrics in the right panel"
+msgstr "Zobrazit panel s texty skladeb"
+
 msgid "Show lyrics"
 msgstr "Zobrazit texty skladeb"
 
@@ -1739,6 +1784,14 @@ msgstr "Zobrazit postranní panel"
 
 msgid "Show tray icon"
 msgstr "Zobrazit ikonu v systémové liště"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+#, fuzzy
+#| msgid "Visualizer"
+msgid "Show visualizer in the right panel"
+msgstr "Vizualizace"
 
 #, fuzzy
 #| msgid "Visualizer"
@@ -2140,9 +2193,6 @@ msgstr[2] "Před {count} roky"
 #~ msgid "Rufin is running in the tray"
 #~ msgstr "Rufin běží v systémové liště"
 
-#~ msgid "Selected device"
-#~ msgstr "Vybrané zařízení"
-
 #~ msgid "WASAPI"
 #~ msgstr "WASAPI"
 
@@ -2157,6 +2207,3 @@ msgstr[2] "Před {count} roky"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekundy"
-
-#~ msgid "Show Lyrics Panel"
-#~ msgstr "Zobrazit panel s texty skladeb"

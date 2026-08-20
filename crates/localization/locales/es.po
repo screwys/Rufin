@@ -458,6 +458,9 @@ msgstr ""
 msgid "Crossfade duration"
 msgstr ""
 
+msgid "Crossfade mode"
+msgstr ""
+
 msgid "Crossfade"
 msgstr ""
 
@@ -675,6 +678,9 @@ msgid "Full"
 msgstr ""
 
 msgid "Furigana"
+msgstr ""
+
+msgid "Gapless mode"
 msgstr ""
 
 msgid "Gapless"
@@ -1021,6 +1027,9 @@ msgstr ""
 msgid "Navigate page items"
 msgstr ""
 
+msgid "Navigation"
+msgstr ""
+
 msgid "Needs attention"
 msgstr ""
 
@@ -1043,6 +1052,9 @@ msgid "Newly added"
 msgstr ""
 
 msgid "Next Track"
+msgstr ""
+
+msgid "Next audio device"
 msgstr ""
 
 msgid "Next page"
@@ -1249,6 +1261,12 @@ msgstr ""
 msgid "Play radio"
 msgstr ""
 
+msgid "Play random (play later)"
+msgstr ""
+
+msgid "Play random (play next)"
+msgstr ""
+
 msgid "Play random"
 msgstr ""
 
@@ -1331,6 +1349,9 @@ msgid "Prevent automatic metadata refreshes from replacing these values"
 msgstr ""
 
 msgid "Previous Track"
+msgstr ""
+
+msgid "Previous audio device"
 msgstr ""
 
 msgid "Previous page"
@@ -1513,6 +1534,9 @@ msgstr ""
 msgid "Resume"
 msgstr ""
 
+msgid "Resync Library"
+msgstr ""
+
 msgid "Rich presence"
 msgstr ""
 
@@ -1687,6 +1711,9 @@ msgstr ""
 msgid "Show external site links"
 msgstr ""
 
+msgid "Show lyrics in the right panel"
+msgstr ""
+
 msgid "Show lyrics"
 msgstr ""
 
@@ -1697,6 +1724,12 @@ msgid "Show sidebar"
 msgstr ""
 
 msgid "Show tray icon"
+msgstr ""
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+msgid "Show visualizer in the right panel"
 msgstr ""
 
 msgid "Show visualizer"

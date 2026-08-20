@@ -467,6 +467,11 @@ msgstr "Loo"
 msgid "Crossfade duration"
 msgstr "Risthajumise kestus"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfade mode"
+msgstr "Ristsulatatud"
+
 msgid "Crossfade"
 msgstr "Ristsulatatud"
 
@@ -689,6 +694,11 @@ msgstr "Täisvaates"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+#, fuzzy
+#| msgid "Gapless"
+msgid "Gapless mode"
+msgstr "Vahepausideta"
 
 msgid "Gapless"
 msgstr "Vahepausideta"
@@ -1036,6 +1046,11 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Lehe elementide vahel liikumine"
 
+#, fuzzy
+#| msgid "Notifications"
+msgid "Navigation"
+msgstr "Teavitused"
+
 msgid "Needs attention"
 msgstr "Vajab tähelepanu"
 
@@ -1059,6 +1074,11 @@ msgstr "Äsjalisatud"
 
 msgid "Next Track"
 msgstr "Järgmine lugu"
+
+#, fuzzy
+#| msgid "Selected device"
+msgid "Next audio device"
+msgstr "Valitud seade"
 
 msgid "Next page"
 msgstr "Järgmine leht"
@@ -1268,6 +1288,16 @@ msgstr "Kuula esitusloendit"
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play later)"
+msgstr "Esita juhuslikult"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play next)"
+msgstr "Esita juhuslikult"
+
 msgid "Play random"
 msgstr "Esita juhuslikult"
 
@@ -1353,6 +1383,11 @@ msgstr "Takista, et automaatne metaandmete uuendamine neid väärtusi asendaks"
 
 msgid "Previous Track"
 msgstr "Eelmine lugu"
+
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous audio device"
+msgstr "Eelmine leht"
 
 msgid "Previous page"
 msgstr "Eelmine leht"
@@ -1534,6 +1569,9 @@ msgstr "Taasta"
 msgid "Resume"
 msgstr "Jätka"
 
+msgid "Resync Library"
+msgstr "Sünkrooni muusikakogu uuesti"
+
 msgid "Rich presence"
 msgstr "Andmerikas olekuteave"
 
@@ -1708,6 +1746,11 @@ msgstr "Kuva väliste teenuste ikoonid albumi ja esitaja lehtedel"
 msgid "Show external site links"
 msgstr "Kuva välised veebisaidilingid"
 
+#, fuzzy
+#| msgid "Show Lyrics Panel"
+msgid "Show lyrics in the right panel"
+msgstr "Näita laulusõnade riba"
+
 msgid "Show lyrics"
 msgstr "Vaata laulusõnu"
 
@@ -1719,6 +1762,14 @@ msgstr "Näita külgriba"
 
 msgid "Show tray icon"
 msgstr "Näita süsteemisalve ikooni"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+#, fuzzy
+#| msgid "Show visualizer"
+msgid "Show visualizer in the right panel"
+msgstr "Näita visualiseerijat"
 
 msgid "Show visualizer"
 msgstr "Näita visualiseerijat"
@@ -2107,9 +2158,6 @@ msgstr[1] "{count} aastat tagasi"
 #~ msgid "Rufin is running in the tray"
 #~ msgstr "Rufin on töös süsteemisalves"
 
-#~ msgid "Selected device"
-#~ msgstr "Valitud seade"
-
 #~ msgid "Uses the macOS system output"
 #~ msgstr "Kasutab MacOS-i süsteemset väljundit"
 
@@ -2127,9 +2175,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekundites"
-
-#~ msgid "Show Lyrics Panel"
-#~ msgstr "Näita laulusõnade riba"
 
 #~ msgid "ReplayGain"
 #~ msgstr "Esitusvaljuse tundlikkus"
@@ -2529,9 +2574,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Restore neutral bands and disable equalizer."
 #~ msgstr "Taasta sagedusvahemike olek keskmisena ja lülita ekvalaiser välja."
-
-#~ msgid "Resync Library"
-#~ msgstr "Sünkrooni muusikakogu uuesti"
 
 #~ msgid "Saved mapping."
 #~ msgstr "Vastendus on salvestatud."

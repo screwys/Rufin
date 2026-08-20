@@ -472,6 +472,11 @@ msgstr "Создать"
 msgid "Crossfade duration"
 msgstr "Длительность кроссфейда"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfade mode"
+msgstr "Кроссфейд"
+
 msgid "Crossfade"
 msgstr "Кроссфейд"
 
@@ -694,6 +699,11 @@ msgstr "Полный"
 
 msgid "Furigana"
 msgstr "Фуригана"
+
+#, fuzzy
+#| msgid "Gapless"
+msgid "Gapless mode"
+msgstr "Бесшовный"
 
 msgid "Gapless"
 msgstr "Бесшовный"
@@ -1041,6 +1051,11 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Перемещаться по элементам страницы"
 
+#, fuzzy
+#| msgid "Notifications"
+msgid "Navigation"
+msgstr "Уведомления"
+
 msgid "Needs attention"
 msgstr "Требуется внимание"
 
@@ -1064,6 +1079,11 @@ msgstr "Недавно добавленные"
 
 msgid "Next Track"
 msgstr "Следующий трек"
+
+#, fuzzy
+#| msgid "Selected device"
+msgid "Next audio device"
+msgstr "Выбранное устройство"
 
 msgid "Next page"
 msgstr "Следующая страница"
@@ -1271,6 +1291,16 @@ msgstr "Воспроизвести плейлист"
 msgid "Play radio"
 msgstr "Воспроизвести радио"
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play later)"
+msgstr "Воспроизвести в случайном порядке"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play next)"
+msgstr "Воспроизвести в случайном порядке"
+
 msgid "Play random"
 msgstr "Воспроизвести в случайном порядке"
 
@@ -1356,6 +1386,11 @@ msgstr ""
 
 msgid "Previous Track"
 msgstr "Предыдущий трек"
+
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous audio device"
+msgstr "Предыдущая страница"
 
 msgid "Previous page"
 msgstr "Предыдущая страница"
@@ -1537,6 +1572,9 @@ msgstr "Восстановить"
 msgid "Resume"
 msgstr "Возобновить"
 
+msgid "Resync Library"
+msgstr "Синхронизировать библиотеку"
+
 msgid "Rich presence"
 msgstr "Расширенная информация о текущем воспроизведении"
 
@@ -1712,6 +1750,11 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Показывать ссылки на внешние сайты"
 
+#, fuzzy
+#| msgid "Show Lyrics Panel"
+msgid "Show lyrics in the right panel"
+msgstr "Показать панель с текстом песни"
+
 msgid "Show lyrics"
 msgstr "Показать текст песни"
 
@@ -1723,6 +1766,14 @@ msgstr "Показать боковую панель"
 
 msgid "Show tray icon"
 msgstr "Показывать значок в системном трее"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+#, fuzzy
+#| msgid "Show visualizer"
+msgid "Show visualizer in the right panel"
+msgstr "Показать визуализатор"
 
 msgid "Show visualizer"
 msgstr "Показать визуализатор"
@@ -2121,9 +2172,6 @@ msgstr[2] "{count} лет назад"
 #~ msgid "Rufin is running in the tray"
 #~ msgstr "Rufin работает в системном трее"
 
-#~ msgid "Selected device"
-#~ msgstr "Выбранное устройство"
-
 #~ msgid "Uses the macOS system output"
 #~ msgstr "Использует системный вывод macOS"
 
@@ -2141,9 +2189,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Seconds"
 #~ msgstr "Секунды"
-
-#~ msgid "Show Lyrics Panel"
-#~ msgstr "Показать панель с текстом песни"
 
 #~ msgid "ReplayGain"
 #~ msgstr "Нормализация громкости"
@@ -2479,9 +2524,6 @@ msgstr[2] "{count} лет назад"
 #~ msgstr ""
 #~ "Восстановить выбранный пресет до значений по умолчанию для каждой полосы "
 #~ "частот."
-
-#~ msgid "Resync Library"
-#~ msgstr "Синхронизировать библиотеку"
 
 #~ msgid "Save to apply this mapping after the next sync."
 #~ msgstr ""

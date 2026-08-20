@@ -470,6 +470,11 @@ msgstr "Erstellen"
 msgid "Crossfade duration"
 msgstr "Überblendungsdauer"
 
+#, fuzzy
+#| msgid "Crossfade"
+msgid "Crossfade mode"
+msgstr "Überblendung"
+
 msgid "Crossfade"
 msgstr "Überblendung"
 
@@ -695,6 +700,11 @@ msgstr "Vollständig"
 
 msgid "Furigana"
 msgstr "Furigana"
+
+#, fuzzy
+#| msgid "Gapless"
+msgid "Gapless mode"
+msgstr "Lückenlose Wiedergabe"
 
 msgid "Gapless"
 msgstr "Lückenlose Wiedergabe"
@@ -1041,6 +1051,11 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Seitenelemente navigieren"
 
+#, fuzzy
+#| msgid "Notifications"
+msgid "Navigation"
+msgstr "Benachrichtigungen"
+
 msgid "Needs attention"
 msgstr "Erfordert Aufmerksamkeit"
 
@@ -1064,6 +1079,11 @@ msgstr "Zuletzt hinzugefügt"
 
 msgid "Next Track"
 msgstr "Nächster Titel"
+
+#, fuzzy
+#| msgid "Selected device"
+msgid "Next audio device"
+msgstr "Ausgewähltes Gerät"
 
 msgid "Next page"
 msgstr "Nächste Seite"
@@ -1275,6 +1295,16 @@ msgstr "Playlist abspielen"
 msgid "Play radio"
 msgstr "Radio abspielen"
 
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play later)"
+msgstr "Zufällig abspielen"
+
+#, fuzzy
+#| msgid "Play random"
+msgid "Play random (play next)"
+msgstr "Zufällig abspielen"
+
 msgid "Play random"
 msgstr "Zufällig abspielen"
 
@@ -1361,6 +1391,11 @@ msgstr ""
 
 msgid "Previous Track"
 msgstr "Vorheriger Titel"
+
+#, fuzzy
+#| msgid "Previous page"
+msgid "Previous audio device"
+msgstr "Vorherige Seite"
 
 msgid "Previous page"
 msgstr "Vorherige Seite"
@@ -1542,6 +1577,11 @@ msgstr "Wiederherstellen"
 msgid "Resume"
 msgstr "Fortsetzen"
 
+#, fuzzy
+#| msgid "Library"
+msgid "Resync Library"
+msgstr "Bibliothek"
+
 msgid "Rich presence"
 msgstr "Rich Presence"
 
@@ -1718,6 +1758,11 @@ msgstr "Symbole externer Dienste auf Album- und Künstlerseiten anzeigen"
 msgid "Show external site links"
 msgstr "Externe Website-Links anzeigen"
 
+#, fuzzy
+#| msgid "Show Lyrics Panel"
+msgid "Show lyrics in the right panel"
+msgstr "Songtext-Bereich anzeigen"
+
 msgid "Show lyrics"
 msgstr "Songtexte einblenden"
 
@@ -1729,6 +1774,14 @@ msgstr "Seitenleiste einblenden"
 
 msgid "Show tray icon"
 msgstr "Symbol im Infobereich anzeigen"
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+#, fuzzy
+#| msgid "Show visualizer"
+msgid "Show visualizer in the right panel"
+msgstr "Visualizer anzeigen"
 
 msgid "Show visualizer"
 msgstr "Visualizer anzeigen"
@@ -2116,9 +2169,6 @@ msgstr[1] "vor {count} Jahren"
 #~ msgid "Rufin is running in the tray"
 #~ msgstr "Rufin läuft im Infobereich/Systemtray"
 
-#~ msgid "Selected device"
-#~ msgstr "Ausgewähltes Gerät"
-
 #~ msgid "WASAPI"
 #~ msgstr "WASAPI"
 
@@ -2133,9 +2183,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekunden"
-
-#~ msgid "Show Lyrics Panel"
-#~ msgstr "Songtext-Bereich anzeigen"
 
 #~ msgid "ReplayGain"
 #~ msgstr "ReplayGain"
