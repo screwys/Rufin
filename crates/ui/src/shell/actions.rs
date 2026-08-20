@@ -341,7 +341,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || refresh_selected_library(&shell)
     });
     #[cfg(target_os = "macos")]
-    let fullscreen_player_accels = &["<Shift><Meta>f"][..];
+    let fullscreen_player_accels = &["<Shift><Control>f"][..];
     #[cfg(not(target_os = "macos"))]
     let fullscreen_player_accels = &["<Shift>F11"][..];
     add_window_action(
