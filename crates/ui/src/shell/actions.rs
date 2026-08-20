@@ -283,19 +283,11 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         let shell = Rc::clone(shell);
         move || adjust_volume(&shell, -KEY_VOLUME_STEP)
     });
-    #[cfg(target_os = "macos")]
-    let previous_output_accels = &["<Alt><Meta>bracketleft"][..];
-    #[cfg(not(target_os = "macos"))]
-    let previous_output_accels = &["F6"][..];
-    add_window_action(shell, "previous-audio-output", previous_output_accels, {
+    add_window_action(shell, "previous-audio-output", &[], {
         let shell = Rc::clone(shell);
         move || select_previous_audio_output(&shell)
     });
-    #[cfg(target_os = "macos")]
-    let next_output_accels = &["<Alt><Meta>bracketright"][..];
-    #[cfg(not(target_os = "macos"))]
-    let next_output_accels = &["F7"][..];
-    add_window_action(shell, "next-audio-output", next_output_accels, {
+    add_window_action(shell, "next-audio-output", &[], {
         let shell = Rc::clone(shell);
         move || select_next_audio_output(&shell)
     });
@@ -836,14 +828,28 @@ fn show_shortcuts_dialog(shell: &Shell) {
         &tr("Volume Down"),
         "win.volume-down",
     ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Previous audio device"),
-        "win.previous-audio-output",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Next audio device"),
-        "win.next-audio-output",
-    ));
+    #[cfg(target_os = "macos")]
+    {
+        section.add(adw::ShortcutsItem::new(
+            &tr("Previous audio device"),
+            "<Alt><Meta>Up",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Next audio device"),
+            "<Alt><Meta>Down",
+        ));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        section.add(adw::ShortcutsItem::new(
+            &tr("Previous audio device"),
+            "<Control><Shift>Up",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Next audio device"),
+            "<Control><Shift>Down",
+        ));
+    }
     dialog.add(section);
 
     let section = adw::ShortcutsSection::new(Some(&tr("View")));

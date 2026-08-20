@@ -13,6 +13,7 @@ use crate::layout::{
 use crate::localization::{
     bind_drop_down_options, bind_widget_tooltip, bind_widget_tooltip_with, localized_label,
 };
+use crate::player::{select_next_audio_output, select_previous_audio_output};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::shell::Shell;
 use crate::shell::actions::{ADD_ICON, MORE_ICON, sort_order_icon, toggle_mute_shortcut};
@@ -290,6 +291,22 @@ impl Shell {
                     && let Some(direction) = page_navigation_direction(key)
                 {
                     return shell.navigate_current_route_items(direction);
+                }
+            }
+            if key_has_audio_output_modifiers(state)
+                && shell.playback_keyboard_available()
+                && !focus_blocks_playback_shortcut(current_focus.as_ref())
+            {
+                match key {
+                    gtk::gdk::Key::Up => {
+                        select_previous_audio_output(&shell);
+                        return glib::Propagation::Stop;
+                    }
+                    gtk::gdk::Key::Down => {
+                        select_next_audio_output(&shell);
+                        return glib::Propagation::Stop;
+                    }
+                    _ => {}
                 }
             }
             let Some(search) = shell.route_viewport.route_search.borrow().as_ref().cloned() else {
@@ -783,6 +800,20 @@ fn key_has_no_shortcut_modifiers(state: gtk::gdk::ModifierType) -> bool {
             | gtk::gdk::ModifierType::HYPER_MASK
             | gtk::gdk::ModifierType::META_MASK,
     )
+}
+
+fn key_has_audio_output_modifiers(state: gtk::gdk::ModifierType) -> bool {
+    #[cfg(target_os = "macos")]
+    let expected = gtk::gdk::ModifierType::ALT_MASK | gtk::gdk::ModifierType::META_MASK;
+    #[cfg(not(target_os = "macos"))]
+    let expected = gtk::gdk::ModifierType::CONTROL_MASK | gtk::gdk::ModifierType::SHIFT_MASK;
+    let shortcut_modifiers = gtk::gdk::ModifierType::SHIFT_MASK
+        | gtk::gdk::ModifierType::ALT_MASK
+        | gtk::gdk::ModifierType::CONTROL_MASK
+        | gtk::gdk::ModifierType::SUPER_MASK
+        | gtk::gdk::ModifierType::HYPER_MASK
+        | gtk::gdk::ModifierType::META_MASK;
+    state & shortcut_modifiers == expected
 }
 
 fn page_navigation_direction(key: gtk::gdk::Key) -> Option<gtk::DirectionType> {
