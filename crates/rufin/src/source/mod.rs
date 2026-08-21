@@ -893,15 +893,6 @@ impl SourceOwner {
                 {
                     return Ok(());
                 }
-                let _ = events.try_send(SourceEvent::ArtworkPreparation {
-                    source_id: source_id.clone(),
-                    revision,
-                    progress: Some(SourceProgress {
-                        stage: SourceProgressStage::Artwork,
-                        completed: 0,
-                        total: None,
-                    }),
-                });
                 let cancelled = || active.cancelled.load(Ordering::Acquire);
                 if let Some(replacement) = source
                     .inspect_accepted_artwork(&library, &cancelled)

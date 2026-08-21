@@ -1488,78 +1488,87 @@ pub(super) fn inspect_accepted_artwork(
         .iter()
         .map(|file| (file.path.as_str(), file))
         .collect::<HashMap<_, _>>();
-    let jobs = baseline
-        .tracks
+    let albums_by_id = baseline
+        .albums
         .iter()
-        .filter(|track| track.local_artwork.is_none())
-        .filter_map(|track| track.source_path.as_deref())
-        .filter_map(|path| {
-            files
-                .get(path)
-                .map(|file| (PathBuf::from(path), file_revision(file)))
-        })
-        .collect::<BTreeMap<_, _>>();
-    if jobs.is_empty() {
+        .map(|album| (album.id.clone(), album))
+        .collect::<HashMap<_, _>>();
+    let mut album_jobs = BTreeMap::<AlbumId, BTreeMap<PathBuf, String>>::new();
+    let mut direct_track_jobs = BTreeMap::<PathBuf, (String, Vec<Track>)>::new();
+    for track in &baseline.tracks {
+        let Some(path) = track.source_path.as_deref() else {
+            continue;
+        };
+        let Some(file) = files.get(path) else {
+            continue;
+        };
+        if let Some(album_id) = &track.album_id
+            && let Some(album) = albums_by_id.get(album_id)
+        {
+            if album.local_artwork.is_none() && album.image_ref.is_none() {
+                album_jobs
+                    .entry(album_id.clone())
+                    .or_default()
+                    .entry(PathBuf::from(path))
+                    .or_insert_with(|| file_revision(file));
+            }
+            continue;
+        }
+        let has_album_artwork = track
+            .album_artwork_facts()
+            .is_some_and(|album| album.local_artwork.is_some() || album.image_ref.is_some());
+        if has_album_artwork || track.local_artwork.is_some() || track.image_ref.is_some() {
+            continue;
+        }
+        direct_track_jobs
+            .entry(PathBuf::from(path))
+            .or_insert_with(|| (file_revision(file), Vec::new()))
+            .1
+            .push(track.clone());
+    }
+    if album_jobs.is_empty() && direct_track_jobs.is_empty() {
         return Ok(None);
     }
 
-    let mut embedded = BTreeMap::new();
+    let mut albums = Vec::new();
     run_jobs(
-        jobs,
+        album_jobs,
         discovery::Reader::default,
-        |discoverer, (path, revision)| {
-            let reference = artwork::inspect_embedded(discoverer, &path, revision);
-            Ok((path, reference))
+        |discoverer, (album_id, paths)| {
+            for (path, revision) in paths {
+                check_cancelled(cancelled)?;
+                if let Some(reference) = artwork::inspect_embedded(discoverer, &path, revision) {
+                    return Ok((album_id, Some(reference)));
+                }
+            }
+            Ok((album_id, None))
         },
-        |(path, reference)| {
-            if let Some(reference) = reference {
-                embedded.insert(path, reference);
+        |(album_id, reference)| {
+            if let Some(reference) = reference
+                && let Some(album) = albums_by_id.get(&album_id)
+            {
+                let mut replacement = (*album).clone();
+                replacement.local_artwork = Some(reference);
+                albums.push(replacement);
             }
             Ok(())
         },
         cancelled,
     )?;
 
-    let tracks = baseline
-        .tracks
-        .iter()
-        .filter(|track| track.local_artwork.is_none())
-        .filter_map(|track| {
-            let reference = track
-                .source_path
-                .as_deref()
-                .and_then(|path| embedded.get(Path::new(path)))?;
-            let mut replacement = track.clone();
-            replacement.local_artwork = Some(reference.clone());
-            Some(replacement)
-        })
-        .collect::<Vec<_>>();
-    let mut album_artwork = HashMap::new();
-    for track in &baseline.tracks {
-        let (Some(album_id), Some(path)) = (&track.album_id, track.source_path.as_deref()) else {
-            continue;
-        };
-        let Some(reference) = embedded.get(Path::new(path)) else {
-            continue;
-        };
-        if album_artwork
-            .get(album_id)
-            .is_none_or(|(accepted_path, _)| path < *accepted_path)
-        {
-            album_artwork.insert(album_id.clone(), (path, reference));
+    let mut tracks = Vec::new();
+    let mut discoverer = discovery::Reader::default();
+    for (path, (revision, mut path_tracks)) in direct_track_jobs {
+        check_cancelled(cancelled)?;
+        if let Some(reference) = artwork::inspect_embedded(&mut discoverer, &path, revision) {
+            for track in &mut path_tracks {
+                track.local_artwork = Some(reference.clone());
+            }
+            tracks.extend(path_tracks);
         }
     }
-    let albums = baseline
-        .albums
-        .iter()
-        .filter(|album| album.local_artwork.is_none())
-        .filter_map(|album| {
-            let (_, reference) = album_artwork.get(&album.id)?;
-            let mut replacement = album.clone();
-            replacement.local_artwork = Some((*reference).clone());
-            Some(replacement)
-        })
-        .collect::<Vec<_>>();
+    albums.sort_by(|left, right| left.id.cmp(&right.id));
+    tracks.sort_by(|left, right| left.id.cmp(&right.id));
     if tracks.is_empty() && albums.is_empty() {
         return Ok(None);
     }
@@ -1599,6 +1608,7 @@ fn stream_media(
         })
     });
     let jobs = cue_jobs.into_iter().chain(ordinary_jobs);
+    let mut file_batch = Vec::with_capacity(LOCAL_BATCH_SIZE);
     run_jobs(
         jobs,
         media::Worker::default,
@@ -1620,6 +1630,7 @@ fn stream_media(
                 result,
                 aggregates,
                 track_batch,
+                &mut file_batch,
                 output,
                 &mut successful_cues,
             )?;
@@ -1632,6 +1643,9 @@ fn stream_media(
         },
         cancelled,
     )?;
+    if !file_batch.is_empty() {
+        output.emit(CandidateBatch::LocalFiles(file_batch))?;
+    }
     if completed != media_total {
         return Err(SourceError::Other(
             "Local media readers did not finish the selected files.".to_string(),
@@ -1726,6 +1740,7 @@ fn accept_media_result(
     result: MediaJobResult,
     aggregates: &mut Aggregates,
     track_batch: &mut Vec<Track>,
+    file_batch: &mut Vec<LocalFile>,
     output: &mut dyn FactOutput,
     successful_cues: &mut HashSet<String>,
 ) -> SourceResult<()> {
@@ -1757,7 +1772,6 @@ fn accept_media_result(
         }
     }
 
-    let mut file_batch = Vec::with_capacity(result.reads.len().min(LOCAL_BATCH_SIZE));
     for (path, read) in result.reads {
         let path_text = path.to_string_lossy();
         let mut file = inventory
@@ -1778,11 +1792,8 @@ fn accept_media_result(
         };
         file_batch.push(file);
         if file_batch.len() == LOCAL_BATCH_SIZE {
-            output.emit(CandidateBatch::LocalFiles(std::mem::take(&mut file_batch)))?;
+            output.emit(CandidateBatch::LocalFiles(std::mem::take(file_batch)))?;
         }
-    }
-    if !file_batch.is_empty() {
-        output.emit(CandidateBatch::LocalFiles(file_batch))?;
     }
     Ok(())
 }
