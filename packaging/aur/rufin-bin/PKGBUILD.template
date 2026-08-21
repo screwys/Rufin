@@ -4,7 +4,7 @@
 pkgname=rufin-bin
 pkgver=@PKGVER@
 pkgrel=1
-pkgdesc='Native GTK4/libadwaita music client for Jellyfin, Subsonic, Navidrome and local libraries written in Rust'
+pkgdesc='Native GTK4/libadwaita music player for Jellyfin, Subsonic, Navidrome and local libraries written in Rust'
 arch=('x86_64')
 url='https://github.com/screwys/Rufin'
 license=('GPL-3.0-or-later')

@@ -14,6 +14,7 @@ fn main() -> BuildResult<()> {
 
     println!("cargo:rerun-if-changed={}", icon_path.display());
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-env-changed=CARGO_FEATURE_DEVELOPMENT");
 
     if env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("windows") {
         return Ok(());
@@ -56,6 +57,11 @@ fn compile_windows_resource(icon_path: &Path) -> BuildResult<()> {
 
 fn windows_resource_script() -> BuildResult<String> {
     let package_version = env::var("CARGO_PKG_VERSION")?;
+    let display_name = if env::var_os("CARGO_FEATURE_DEVELOPMENT").is_some() {
+        "Rufin (Development)"
+    } else {
+        "Rufin"
+    };
     let [major, minor, patch, build] = windows_version_numbers(&package_version);
 
     Ok(format!(
@@ -78,11 +84,11 @@ BEGIN
     BEGIN
         BLOCK "040904B0"
         BEGIN
-            VALUE "FileDescription", "Rufin\0"
+            VALUE "FileDescription", "{display_name}\0"
             VALUE "FileVersion", VER_FILEVERSION_STR
             VALUE "InternalName", "rufin\0"
             VALUE "OriginalFilename", "rufin.exe\0"
-            VALUE "ProductName", "Rufin\0"
+            VALUE "ProductName", "{display_name}\0"
             VALUE "ProductVersion", VER_FILEVERSION_STR
         END
     END

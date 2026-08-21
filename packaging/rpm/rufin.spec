@@ -1,7 +1,7 @@
 Name:           rufin
 Version:        0.13.1
 Release:        1%{?dist}
-Summary:        Native GTK4/libadwaita music client written in Rust
+Summary:        Native GTK4/libadwaita music player written in Rust
 
 License:        GPL-3.0-or-later AND Apache-2.0 AND BSD-3-Clause AND CC0-1.0 AND CDLA-Permissive-2.0 AND ISC AND MIT AND MPL-2.0 AND NAIST-2003 AND Unicode-3.0 AND Unlicense AND Zlib
 URL:            https://github.com/screwys/Rufin
@@ -37,7 +37,7 @@ Recommends:     gstreamer1-plugins-ugly-free
 Recommends:     gstreamer1-plugin-libav
 
 %description
-Rufin is a native GTK4/libadwaita music client for Jellyfin, Subsonic,
+Rufin is a native GTK4/libadwaita music player for Jellyfin, Subsonic,
 Navidrome, and local music libraries.
 
 %prep

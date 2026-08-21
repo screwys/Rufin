@@ -1,8 +1,8 @@
 [Desktop Entry]
-Name=Rufin
-Comment=Native music player
-Exec=rufin
-Icon=io.github.screwys.Rufin
+Name=Rufin (Development)
+Comment=Native music player development build
+Exec=false
+Icon=io.github.screwys.Rufin.Devel
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Music;Player;

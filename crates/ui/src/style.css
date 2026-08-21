@@ -45,6 +45,33 @@ toastoverlay toast {
     inset 0 1px color-mix(in srgb, white 14%, transparent);
 }
 
+.source-refresh-feedback {
+  min-width: 0;
+  padding: 8px 12px;
+  background: color-mix(in srgb, var(--window-bg-color) 90%, var(--card-bg-color) 10%);
+  color: var(--window-fg-color);
+  border: 1px solid color-mix(in srgb, var(--window-fg-color) 16%, transparent);
+  border-radius: 999px;
+  box-shadow:
+    0 10px 28px rgba(0, 0, 0, 0.3),
+    inset 0 1px color-mix(in srgb, white 14%, transparent);
+}
+
+.source-refresh-feedback.error {
+  color: var(--error-color);
+  border-color: color-mix(in srgb, var(--error-color) 40%, transparent);
+}
+
+.source-refresh-progress {
+  min-height: 3px;
+}
+
+.source-refresh-progress trough,
+.source-refresh-progress progress {
+  min-height: 3px;
+  border-radius: 999px;
+}
+
 .operation-feedback {
   min-width: 270px;
   padding: 8px;

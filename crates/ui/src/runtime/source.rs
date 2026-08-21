@@ -225,6 +225,7 @@ pub trait SourcePort: Send + Sync {
 /// callers cannot pair an operation with a different source ID or session.
 pub trait SelectedSourcePort: Send + Sync {
     fn selected_library_revealed(&self);
+    fn refresh_library(&self);
     fn refresh_home(&self, kind: HomeSectionKind);
     fn set_music_folder(&self, folder_id: Option<MusicFolderId>);
     fn set_favorite(&self, item: FavoriteItemId, favorite: bool);

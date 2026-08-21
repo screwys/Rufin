@@ -5,7 +5,7 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>@BUNDLE_NAME@</string>
+  <string>@DISPLAY_NAME@</string>
   <key>CFBundleExecutable</key>
   <string>rufin</string>
   <key>CFBundleIconFile</key>

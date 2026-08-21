@@ -1094,6 +1094,35 @@ pub(super) async fn prepare_refresh_candidate(
     )
     .await
 }
+
+pub(super) async fn prepare_configured_refresh_candidate(
+    shared: &Arc<Shared>,
+    source_id: &SourceId,
+    progress: Arc<dyn Fn(SourceReadProgress) + Send + Sync>,
+    cancelled: Arc<AtomicBool>,
+) -> Result<PreparedSourceCandidate, String> {
+    let configured = configured_source(&shared.settings.load().sources, source_id)?;
+    let configuration = configured.configuration.clone();
+    let credential = load_credential(shared, &configured).await?;
+    let source = if let Some(source) = shared.configured_feed_source(source_id) {
+        source
+    } else {
+        Arc::new(
+            Source::open(
+                configuration.clone(),
+                credential,
+                Some(shared.settings.load().jellyfin_device_id),
+            )
+            .map_err(string_error)?,
+        )
+    };
+    let library = shared.library.clone();
+    let source_for_store = source_id.clone();
+    let base =
+        blocking(move || library.load_source(&source_for_store).map_err(string_error)).await?;
+    let identity = configuration.input_identity().map_err(string_error)?;
+    prepare_source_candidate(shared, source, identity, base, progress, cancelled).await
+}
 pub(super) async fn prepare_source_candidate(
     shared: &Shared,
     source: Arc<Source>,

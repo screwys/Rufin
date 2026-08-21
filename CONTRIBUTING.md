@@ -84,7 +84,7 @@ just build dmg # builds the isolated macOS development disk image on macOS
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64
 just build rpm arm # builds Fedora RPMs for AArch64
-just build windows # builds the Windows installer
+just build windows # builds the isolated Windows development installer
 just clean # clears Rufin build state while keeping finished artifacts
 just debug # runs the development app on the host
 just fmt # formats Rust code

@@ -1,6 +1,7 @@
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use adw::prelude::*;
+use app_identity::{APP_ID, DISPLAY_NAME};
 use gtk::{gio, glib};
 use playback::{PlaybackTransitionMode, QueuePlacement};
 
@@ -644,12 +645,8 @@ fn set_transition_mode_shortcut(shell: &Rc<Shell>, mode: PlaybackTransitionMode)
 }
 
 fn refresh_selected_library(shell: &Shell) {
-    let source_id = shell
-        .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_id.clone());
-    if let Some(source_id) = source_id {
-        shell.products.source.refresh_source(source_id);
+    if let Some(source) = shell.selected_source_operations() {
+        source.refresh_library();
     }
 }
 
@@ -918,8 +915,8 @@ fn show_shortcuts_dialog(shell: &Shell) {
 
 fn show_about_dialog(shell: &Shell) {
     let dialog = adw::AboutDialog::builder()
-        .application_name("Rufin")
-        .application_icon("io.github.screwys.Rufin")
+        .application_name(DISPLAY_NAME)
+        .application_icon(APP_ID)
         .developer_name("screwy")
         .developers(["screwy <screwygit@proton.me>"])
         .translator_credits(TRANSLATOR_CREDITS)

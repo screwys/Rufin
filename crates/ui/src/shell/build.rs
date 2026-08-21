@@ -4,6 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use adw::prelude::*;
+use app_identity::DISPLAY_NAME;
 use tracing::info;
 
 use crate::interactions::connect_transient_entry_focus_dismissal;
@@ -130,6 +131,7 @@ pub fn build(
         discovery_running: Cell::new(false),
         discovery_started: Cell::new(false),
         add_server: RefCell::new(None),
+        refresh_feedback_generation: Rc::new(Cell::new(0)),
     };
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
@@ -352,6 +354,31 @@ pub fn build(
     control_feedback_label.set_visible(false);
     app_root_overlay.add_overlay(&control_feedback_label);
     app_root_overlay.set_measure_overlay(&control_feedback_label, false);
+    let source_refresh_feedback = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    source_refresh_feedback.add_css_class("source-refresh-feedback");
+    source_refresh_feedback.set_halign(gtk::Align::Center);
+    source_refresh_feedback.set_valign(gtk::Align::End);
+    source_refresh_feedback.set_margin_bottom(BOTTOM_PLAYER_HEIGHT + 2);
+    source_refresh_feedback.set_visible(false);
+    source_refresh_feedback.set_can_target(false);
+    let source_refresh_icon = gtk::Image::from_icon_name("view-refresh-bundled-symbolic");
+    source_refresh_icon.set_pixel_size(16);
+    source_refresh_feedback.append(&source_refresh_icon);
+    let source_refresh_content = gtk::Box::new(gtk::Orientation::Vertical, 4);
+    let source_refresh_feedback_label = gtk::Label::new(None);
+    source_refresh_feedback_label.add_css_class("caption-heading");
+    source_refresh_feedback_label.set_xalign(0.0);
+    source_refresh_feedback_label.set_max_width_chars(36);
+    source_refresh_feedback_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    source_refresh_feedback_label.set_single_line_mode(true);
+    source_refresh_content.append(&source_refresh_feedback_label);
+    let source_refresh_feedback_progress = gtk::ProgressBar::new();
+    source_refresh_feedback_progress.add_css_class("source-refresh-progress");
+    source_refresh_feedback_progress.set_size_request(250, -1);
+    source_refresh_content.append(&source_refresh_feedback_progress);
+    source_refresh_feedback.append(&source_refresh_content);
+    app_root_overlay.add_overlay(&source_refresh_feedback);
+    app_root_overlay.set_measure_overlay(&source_refresh_feedback, false);
     let operation_feedback = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     operation_feedback.add_css_class("operation-feedback");
     operation_feedback.set_halign(gtk::Align::Center);
@@ -399,7 +426,7 @@ pub fn build(
     toast_overlay.set_child(Some(&window_content));
     let window = crate::application::application_window(
         app,
-        "Rufin",
+        DISPLAY_NAME,
         window_width,
         window_height,
         &toast_overlay,
@@ -413,6 +440,9 @@ pub fn build(
         window_controls,
         toast_overlay,
         control_feedback_label,
+        source_refresh_feedback,
+        source_refresh_feedback_label,
+        source_refresh_feedback_progress,
         operation_feedback,
         operation_feedback_artwork,
         operation_feedback_title,

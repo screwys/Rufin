@@ -389,6 +389,23 @@ debug *args:
                 --identifier io.github.screwys.Rufin.Devel \
                 "$target_dir/debug/rufin"; \
             RUST_LOG="${RUST_LOG:-debug}" "$target_dir/debug/rufin" "$@"; \
+        elif [[ "$(uname -s)" == Linux ]]; then \
+            data_home="${XDG_DATA_HOME:-${HOME:?}/.local/share}"; \
+            target_dir="${CARGO_TARGET_DIR:-$PWD/target}"; \
+            cargo build --locked -p rufin --features development; \
+            mkdir -p "$data_home/applications"; \
+            desktop-file-install \
+                --dir="$data_home/applications" \
+                --set-key=Exec \
+                --set-value="$target_dir/debug/rufin" \
+                data/io.github.screwys.Rufin.Devel.desktop; \
+            install -Dm0644 \
+                data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg \
+                "$data_home/icons/hicolor/scalable/apps/io.github.screwys.Rufin.Devel.svg"; \
+            if command -v update-desktop-database >/dev/null 2>&1; then \
+                update-desktop-database "$data_home/applications"; \
+            fi; \
+            RUST_LOG="${RUST_LOG:-debug}" "$target_dir/debug/rufin" "$@"; \
         else \
             RUST_LOG="${RUST_LOG:-debug}" \
                 cargo run --locked -p rufin --features development -- "$@"; \
@@ -445,11 +462,13 @@ _build-dmg identity="development":
         development)
             app_id="io.github.screwys.Rufin.Devel"
             bundle_name="Rufin.Devel"
+            display_name="Rufin (Development)"
             cargo_features=(--features development)
             ;;
         stable)
             app_id="io.github.screwys.Rufin"
             bundle_name="Rufin"
+            display_name="Rufin"
             cargo_features=()
             ;;
         *)
@@ -629,6 +648,7 @@ _build-dmg identity="development":
         -e "s/@MINIMUM_SYSTEM_VERSION@/${deployment_target}/g" \
         -e "s/@BUNDLE_IDENTIFIER@/${app_id}/g" \
         -e "s/@BUNDLE_NAME@/${bundle_name}/g" \
+        -e "s/@DISPLAY_NAME@/${display_name}/g" \
         "${repo_root}/packaging/macos/Info.plist.in" \
         >"$app_path/Contents/Info.plist"
 
@@ -861,15 +881,36 @@ _build-flatpak:
     mv -f "$temporary_bundle_path" "$bundle_path"
     echo "Built ${bundle_path}"
 
-_build-windows:
+_build-windows identity="development":
     #!/usr/bin/env bash
     set -euo pipefail
 
     repo_root="$PWD"
+    build_identity="{{ identity }}"
+    case "$build_identity" in
+        development)
+            app_id="io.github.screwys.Rufin.Devel"
+            desktop_file="data/io.github.screwys.Rufin.Devel.desktop"
+            display_name="Rufin (Development)"
+            project_name="Rufin.Devel"
+            cargo_features=(--features development)
+            ;;
+        stable)
+            app_id="io.github.screwys.Rufin"
+            desktop_file="data/io.github.screwys.Rufin.desktop"
+            display_name="Rufin"
+            project_name="Rufin"
+            cargo_features=()
+            ;;
+        *)
+            echo "Windows build identity must be 'development' or 'stable'." >&2
+            exit 2
+            ;;
+    esac
     artifact_root="${RUFIN_ARTIFACT_ROOT:-${repo_root}/.local/artifacts}"
     work_root="${repo_root}/.local/build/windows"
     target_dir="${CARGO_TARGET_DIR:-${work_root}/target}"
-    stage_dir="${work_root}/Rufin"
+    stage_dir="${work_root}/${project_name}"
     output_dir="${work_root}/output"
 
     version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$repo_root/Cargo.toml" | head -n 1)"
@@ -878,16 +919,18 @@ _build-windows:
     version_quad="${version_major:-0}.${version_minor:-0}.${version_patch:-0}.0"
 
     mkdir -p "$artifact_root" "$output_dir"
-    installer="$artifact_root/Rufin-${version}-setup.exe"
-    work_installer="$output_dir/Rufin-${version}-setup.exe"
+    installer="$artifact_root/${project_name}-${version}-setup.exe"
+    work_installer="$output_dir/${project_name}-${version}-setup.exe"
     rm -f "$work_installer"
-    CARGO_TARGET_DIR="$target_dir" cargo build --locked --release -p rufin --bin rufin
     CARGO_TARGET_DIR="$target_dir" \
-        cargo build --locked --release -p windows-updater --bin rufin-update-helper
+        cargo build --locked --release -p rufin --bin rufin "${cargo_features[@]}"
+    if [[ "$build_identity" == stable ]]; then
+        CARGO_TARGET_DIR="$target_dir" \
+            cargo build --locked --release -p windows-updater --bin rufin-update-helper
+    fi
 
     runtime_prefix="$MINGW_PREFIX"
     binary="$target_dir/release/rufin.exe"
-    update_helper="$target_dir/release/rufin-update-helper.exe"
 
     copy_file() {
         local source_path="$1"
@@ -967,8 +1010,8 @@ _build-windows:
         "$repo_root/data/japanese-readings.LICENSE" \
         "$app_share/licenses/rufin/japanese-readings.LICENSE"
     copy_file \
-        "$repo_root/data/io.github.screwys.Rufin.desktop" \
-        "$app_share/applications/io.github.screwys.Rufin.desktop"
+        "$repo_root/$desktop_file" \
+        "$app_share/applications/${app_id}.desktop"
     copy_file \
         "$repo_root/data/io.github.screwys.Rufin.metainfo.xml" \
         "$app_share/metainfo/io.github.screwys.Rufin.metainfo.xml"
@@ -1033,12 +1076,15 @@ _build-windows:
     find "$stage_dir/lib" -type f -name '*.dll.a' -delete
     copy_dependency_closure "$stage_dir" "$app_bin"
 
-    updater_dir="$stage_dir/updater/$version"
-    mkdir -p "$updater_dir"
-    cp "$update_helper" "$updater_dir/rufin-update-helper.exe"
-    printf 'rufin-update-helper:%s\n' "$version" \
-        >"$updater_dir/rufin-update-helper.complete"
-    copy_dependency_closure "$updater_dir" "$updater_dir"
+    if [[ "$build_identity" == stable ]]; then
+        update_helper="$target_dir/release/rufin-update-helper.exe"
+        updater_dir="$stage_dir/updater/$version"
+        mkdir -p "$updater_dir"
+        cp "$update_helper" "$updater_dir/rufin-update-helper.exe"
+        printf 'rufin-update-helper:%s\n' "$version" \
+            >"$updater_dir/rufin-update-helper.complete"
+        copy_dependency_closure "$updater_dir" "$updater_dir"
+    fi
 
     copy_directory "$runtime_prefix/share/glib-2.0/schemas" "$app_share/glib-2.0/schemas"
     copy_directory "$runtime_prefix/share/gstreamer-1.0" "$app_share/gstreamer-1.0"
@@ -1080,6 +1126,9 @@ _build-windows:
         "/DRUFIN_STAGE_FILES=${stage_files_argument}" \
         "/DRUFIN_OUTPUT_DIR=${output_argument}" \
         "/DRUFIN_ASSET_DIR=${asset_argument}" \
+        "/DRUFIN_APP_ID=${app_id}" \
+        "/DRUFIN_DISPLAY_NAME=${display_name}" \
+        "/DRUFIN_PROJECT_NAME=${project_name}" \
         "/DRUFIN_VERSION=${version}" \
         "/DRUFIN_VERSION_QUAD=${version_quad}" \
         "$repo_root/packaging/windows/rufin.nsi"

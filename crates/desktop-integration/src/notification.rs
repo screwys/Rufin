@@ -33,7 +33,9 @@ use windows::core::{HSTRING, IInspectable};
 ))]
 use crate::APP_ID;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-const APP_NAME: &str = "Rufin";
+use app_identity::DISPLAY_NAME;
+#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+const APP_NAME: &str = DISPLAY_NAME;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 const DBUS_TIMEOUT_MSEC: i32 = 1_000;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]

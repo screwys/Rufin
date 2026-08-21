@@ -108,14 +108,20 @@ jobs:
 
       - name: Build Windows installer
         shell: msys2 {0}
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-windows
+          build_identity=development
+          if [[ -n "$RELEASE_TAG" ]]; then
+            build_identity=stable
+          fi
+          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-windows "$build_identity"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: Rufin-setup.exe
-          path: dist/Rufin-*-setup.exe
+          path: dist/Rufin*-setup.exe
           if-no-files-found: error
           retention-days: 7

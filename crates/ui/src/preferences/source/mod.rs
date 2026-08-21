@@ -1,4 +1,5 @@
 use std::cell::{Cell, RefCell};
+use std::rc::Rc;
 
 use localization::{tr, trn_with};
 
@@ -20,6 +21,7 @@ pub(crate) struct SourceState {
     pub(crate) discovery_running: Cell<bool>,
     pub(crate) discovery_started: Cell<bool>,
     pub(crate) add_server: RefCell<Option<login::SourceSetupViewHandle>>,
+    pub(crate) refresh_feedback_generation: Rc<Cell<u64>>,
 }
 
 impl SourceState {

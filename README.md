@@ -8,7 +8,7 @@
   <a href="https://search.nixos.org/packages?channel=unstable&query=rufin"><img alt="Nixpkgs version" src="https://repology.org/badge/version-for-repo/nix_unstable/rufin.svg?header=Nixpkgs"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music client written in Rust, available on [multiple platforms](#installation). It can play music from your Jellyfin, Navidrome/OpenSubsonic flavor servers and local folders; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player written in Rust, available on [multiple platforms](#installation). It can play music from your Jellyfin, Navidrome/OpenSubsonic flavor servers and local folders; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
@@ -236,14 +236,15 @@ just build
 just debug
 ```
 
-Local macOS builds use the isolated `Rufin.Devel` application identity. The first `just debug` or
+Local builds are shown as `Rufin (Development)` and use the isolated `Rufin.Devel` application
+identity. The first macOS `just debug` or
 `just build dmg` automatically creates the persistent local `Rufin Development` signing identity. The first signing operation may ask for access to the certificate's private
 key; **Always Allow** should keep this one-time.
 
 On macOS, `just build dmg` creates `.local/artifacts/Rufin.Devel.dmg` for installation and
 platform behavior testing.
-On Windows, `just build windows` creates the versioned setup executable in the
-same artifact directory.
+On Windows, `just build windows` creates the isolated versioned
+`.local/artifacts/Rufin.Devel-*-setup.exe` installer.
 
 Testing, Nix, and container controls are documented in
 [CONTRIBUTING.md](CONTRIBUTING.md#development-environment).

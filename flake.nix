@@ -2,7 +2,7 @@
 # To change Linux package dependencies, edit `NIX_PACKAGES` in
 # `crates/xtask/src/linux_packaging.rs`, then run `just deps`.
 {
-  description = "Native GTK4/libadwaita music client for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
+  description = "Native GTK4/libadwaita music player for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -114,7 +114,7 @@
             '';
 
             meta = {
-              description = "Native GTK4/libadwaita music client for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
+              description = "Native GTK4/libadwaita music player for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
               homepage = "https://github.com/screwys/Rufin";
               license = lib.licenses.gpl3Plus;
               mainProgram = "rufin";

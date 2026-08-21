@@ -1,4 +1,7 @@
 use super::*;
+use std::time::Instant;
+
+use tracing::info;
 
 pub(super) struct ConfiguredJellyfinFeed {
     pub(super) source: Arc<Source>,
@@ -222,6 +225,103 @@ impl Drop for PendingFreshnessCheck {
 }
 
 impl SourceOwner {
+    pub(super) fn request_manual_refresh(&self, source_id: SourceId) {
+        if self
+            .shared
+            .selected()
+            .is_some_and(|selected| selected.source_id() == &source_id)
+        {
+            self.request_refresh(source_id, true);
+            return;
+        }
+        self.spawn_serialized(true, move |operations, cancelled| async move {
+            if operations
+                .shared
+                .selected()
+                .is_some_and(|selected| selected.source_id() == &source_id)
+            {
+                SourceOwner {
+                    shared: Arc::clone(&operations.shared),
+                }
+                .request_refresh(source_id, true);
+                return;
+            }
+            operations
+                .shared
+                .send_event(SourceEvent::Operation(SourceOperation::Refreshing {
+                    source_id: source_id.clone(),
+                    progress: initial_progress(),
+                }))
+                .await;
+            let started = Instant::now();
+            info!(%source_id, "manual source refresh started");
+            let progress_id = source_id.clone();
+            let progress = operations.progress(Arc::clone(&cancelled), move |progress| {
+                Some(SourceOperation::Refreshing {
+                    source_id: progress_id.clone(),
+                    progress,
+                })
+            });
+            let result = prepare_configured_refresh_candidate(
+                &operations.shared,
+                &source_id,
+                progress,
+                Arc::clone(&cancelled),
+            )
+            .await;
+            if cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            let result = match result {
+                Ok(prepared) => {
+                    let change = prepared.change();
+                    let acceptance_owner = Arc::clone(&operations.shared);
+                    let _acceptance = acceptance_owner.acceptance_lane.lock().await;
+                    if !operations.shared.protect_interruptible_commit(&cancelled) {
+                        return;
+                    }
+                    blocking(move || prepared.accept().map_err(string_error))
+                        .await
+                        .map(|_| change)
+                }
+                Err(error) => Err(error),
+            };
+            if cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            match result {
+                Ok(change) => {
+                    info!(
+                        %source_id,
+                        ?change,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "manual source refresh finished"
+                    );
+                    operations
+                        .shared
+                        .send_event(SourceEvent::Operation(SourceOperation::Idle))
+                        .await;
+                }
+                Err(error) => {
+                    warn!(
+                        %error,
+                        %source_id,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "manual source refresh failed"
+                    );
+                    operations
+                        .shared
+                        .send_event(SourceEvent::Operation(SourceOperation::Failed {
+                            source_id: Some(source_id),
+                            message: error,
+                            add_form: false,
+                        }))
+                        .await;
+                }
+            }
+        });
+    }
+
     pub(super) fn install_configured_jellyfin_feed(&self, source: Arc<Source>, cold: bool) {
         let source_id = source.source_id().clone();
         if self
@@ -615,10 +715,12 @@ impl SourceOwner {
             return;
         };
         let source_id = selected.source_id().clone();
+        let started = Instant::now();
         request.started.store(true, Ordering::Release);
         if request.visible.load(Ordering::Acquire)
             && !request.announced.swap(true, Ordering::AcqRel)
         {
+            info!(%source_id, "manual source refresh started");
             self.shared
                 .send_event(SourceEvent::Operation(SourceOperation::Refreshing {
                     source_id: source_id.clone(),
@@ -627,12 +729,13 @@ impl SourceOwner {
                 .await;
         }
         let visible = Arc::clone(&request);
+        let progress_source_id = source_id.clone();
         let progress = self.progress(Arc::clone(&cancelled), move |progress| {
             visible
                 .visible
                 .load(Ordering::Acquire)
                 .then(|| SourceOperation::Refreshing {
-                    source_id: source_id.clone(),
+                    source_id: progress_source_id.clone(),
                     progress,
                 })
         });
@@ -643,6 +746,7 @@ impl SourceOwner {
             Arc::clone(&cancelled),
         )
         .await;
+        let candidate_change = prepared.as_ref().ok().map(PreparedSourceCandidate::change);
         if cancelled.load(Ordering::Acquire) {
             self.shared.finish_refresh(&request);
             return;
@@ -666,12 +770,28 @@ impl SourceOwner {
         let visible = self.shared.finish_refresh(&request).unwrap_or(false);
         match result {
             Ok(()) if visible => {
+                info!(
+                    %source_id,
+                    ?candidate_change,
+                    elapsed_ms = started.elapsed().as_millis(),
+                    "manual source refresh finished"
+                );
                 self.shared
                     .send_event(SourceEvent::Operation(SourceOperation::Idle))
                     .await;
             }
             Ok(()) => {}
-            Err(error) => self.refresh_failed(&selected, visible, error).await,
+            Err(error) => {
+                if visible {
+                    warn!(
+                        %error,
+                        %source_id,
+                        elapsed_ms = started.elapsed().as_millis(),
+                        "manual source refresh failed"
+                    );
+                }
+                self.refresh_failed(&selected, visible, error).await;
+            }
         }
     }
 

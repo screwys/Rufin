@@ -17,6 +17,7 @@ use crate::routes::library_fields::smart_playlist_display_name;
 use crate::routes::route::Route;
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
+use app_identity::DISPLAY_NAME;
 use artwork::ArtworkBinding;
 use gtk::gio;
 use library::{
@@ -406,7 +407,7 @@ pub(super) fn normal_sidebar_header(
     let search_shell = Rc::clone(shell);
     search.connect_clicked(move |_| search_shell.navigate(Route::Search));
 
-    let title = gtk::Label::new(Some("Rufin"));
+    let title = gtk::Label::new(Some(DISPLAY_NAME));
     title.add_css_class("heading");
 
     let menu = normal_primary_menu_button(

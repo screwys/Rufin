@@ -7,7 +7,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
-use app_identity::{APP_ID, STABLE_APP_ID};
+use app_identity::{APP_ID, DISPLAY_NAME, STABLE_APP_ID};
 use gtk::gio;
 use tracing::error;
 
@@ -350,10 +350,10 @@ fn windows_preview_controls() -> gtk::Box {
 fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
     let status = adw::StatusPage::builder()
         .icon_name(STABLE_APP_ID)
-        .title("Rufin")
+        .title(DISPLAY_NAME)
         .description(error)
         .build();
-    let window = application_window(app, "Rufin", 480, 320, &status, preview);
+    let window = application_window(app, DISPLAY_NAME, 480, 320, &status, preview);
     present_window(&window);
 }
 

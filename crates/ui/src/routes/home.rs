@@ -602,21 +602,44 @@ impl Shell {
         refresh.connect_clicked(move |_| {
             refresh_view.reset_page();
             if let Some(source) = source.as_ref() {
-                source.refresh_home(section_kind);
+                if home_section_refreshes_library(section_kind) {
+                    source.refresh_library();
+                } else {
+                    source.refresh_home(section_kind);
+                }
             }
         });
         view
     }
 }
 
+fn home_section_refreshes_library(kind: HomeSectionKind) -> bool {
+    kind == HomeSectionKind::NewlyAdded
+}
+
 #[cfg(test)]
 mod tests {
-    use super::clamped_home_section_page_start;
+    use library::HomeSectionKind;
+
+    use super::{clamped_home_section_page_start, home_section_refreshes_library};
 
     #[test]
     fn home_page_start_stays_on_a_complete_available_page() {
         assert_eq!(clamped_home_section_page_start(12, 6, 14), 12);
         assert_eq!(clamped_home_section_page_start(18, 6, 14), 12);
         assert_eq!(clamped_home_section_page_start(10, 6, 0), 0);
+    }
+
+    #[test]
+    fn newly_added_refreshes_authoritative_library_facts() {
+        assert!(home_section_refreshes_library(HomeSectionKind::NewlyAdded));
+        for kind in [
+            HomeSectionKind::Explore,
+            HomeSectionKind::MostPlayed,
+            HomeSectionKind::RecentlyPlayed,
+            HomeSectionKind::RecentlyReleased,
+        ] {
+            assert!(!home_section_refreshes_library(kind));
+        }
     }
 }

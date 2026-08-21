@@ -200,7 +200,7 @@ impl InstalledUpdater {
         {
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
             let support = directories::BaseDirs::new()
-                .map(|dirs| dirs.data_local_dir().join("Programs").join("Rufin"))
+                .map(|dirs| dirs.data_local_dir().join("Programs").join(PROJECT_NAME))
                 .and_then(|install_root| {
                     detect_support_at(&executable, env!("CARGO_PKG_VERSION"), &install_root).ok()
                 });

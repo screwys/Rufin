@@ -1410,6 +1410,67 @@ fn cached_local_library_is_published_before_an_unavailable_root_is_scanned() {
 }
 
 #[test]
+fn manual_refresh_accepts_a_nonselected_configured_local_source() {
+    let directory = tempfile::tempdir().expect("temporary Rufin data directory");
+    let music_root = directory.path().join("music");
+    std::fs::create_dir(&music_root).expect("create Local music folder");
+    write_silent_wav(&music_root.join("Background.wav")).expect("write Local Track");
+    let source_id = SourceId::new("local:server:background-refresh");
+    let configuration = SourceConfiguration::local(source_id.clone(), "Local", vec![music_root])
+        .expect("Local configuration");
+    let settings = SettingsFile::memory();
+    settings
+        .update(|stored| {
+            stored.sources.configured = vec![ConfiguredSource {
+                configuration,
+                credential_ref: None,
+                music_folder_id: None,
+                local_access: None,
+            }];
+            Ok(())
+        })
+        .expect("save Local source");
+    let runtime = test_runtime();
+    let libraries = Libraries::open(directory.path().join("library.db")).expect("open Library");
+    let (bootstrap, events) = test_owner(directory.path(), &runtime, libraries.clone(), settings);
+
+    runtime.block_on(async {
+        bootstrap.owner.refresh_source(source_id.clone());
+        let mut announced = false;
+        loop {
+            match events.recv().await.expect("manual refresh event") {
+                SourceEvent::Operation(SourceOperation::Refreshing {
+                    source_id: refreshing,
+                    ..
+                }) => {
+                    assert_eq!(refreshing, source_id);
+                    announced = true;
+                }
+                SourceEvent::Operation(SourceOperation::Idle) => break,
+                SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
+                    panic!("nonselected Local refresh failed: {message}");
+                }
+                _ => {}
+            }
+        }
+        assert!(announced, "manual refresh must publish visible progress");
+    });
+
+    assert!(bootstrap.owner.shared.selected().is_none());
+    let loaded = libraries
+        .load_source(&source_id)
+        .expect("load refreshed Local source")
+        .expect("refreshed Local source");
+    assert_eq!(
+        loaded
+            .track_list(None, TrackSort::Title, false)
+            .expect("read refreshed Tracks")
+            .len(),
+        1
+    );
+}
+
+#[test]
 fn completed_source_switch_releases_the_previous_state_and_library() {
     let directory = tempfile::tempdir().expect("temporary Rufin data directory");
     let previous_root = directory.path().join("previous");

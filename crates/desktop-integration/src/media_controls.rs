@@ -4,7 +4,7 @@ mod freedesktop {
     use std::fmt::Write as _;
     use std::rc::Rc;
 
-    use app_identity::APP_ID;
+    use app_identity::{APP_ID, DISPLAY_NAME};
     use glib;
     use mpris_server::{
         LoopStatus, Metadata, PlaybackStatus, Player as MprisPlayer, Time, TrackId as MprisTrackId,
@@ -250,7 +250,7 @@ mod freedesktop {
 
         async fn install(self: Rc<Self>) {
             let player = match MprisPlayer::builder(APP_ID)
-                .identity("Rufin")
+                .identity(DISPLAY_NAME)
                 .desktop_entry(APP_ID)
                 .supported_uri_schemes(["http", "https", "file"])
                 .supported_mime_types(["audio/mpeg", "audio/flac", "audio/ogg", "audio/x-wav"])

@@ -59,7 +59,10 @@ mod connection;
 mod local_access;
 mod observer;
 
-use connection::{add_source, configured_source, prepare_refresh_candidate, select_source};
+use connection::{
+    add_source, configured_source, prepare_configured_refresh_candidate, prepare_refresh_candidate,
+    select_source,
+};
 use local_access::ActiveLocalAccess;
 #[cfg(test)]
 use local_access::accept_metadata_local_access_mapping;
@@ -2054,7 +2057,7 @@ impl SourcePort for SourceOwner {
     }
 
     fn refresh_source(&self, source_id: SourceId) {
-        self.request_refresh(source_id, true);
+        self.request_manual_refresh(source_id);
     }
 
     fn check_for_source_changes(&self) {
@@ -2159,6 +2162,15 @@ impl SelectedSourcePort for ActiveSource {
                 .selected_revealed = true;
             operations.resume_configured_feed(selected.source_id());
             operations.start_album_release_lookup();
+        });
+    }
+
+    fn refresh_library(&self) {
+        self.spawn_selected(false, |operations, selected, _| async move {
+            SourceOwner {
+                shared: Arc::clone(&operations.shared),
+            }
+            .request_refresh(selected.source_id().clone(), true);
         });
     }
 

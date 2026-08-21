@@ -1,4 +1,5 @@
 use adw::prelude::*;
+use app_identity::DISPLAY_NAME;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use std::{cell::Cell, rc::Rc};
@@ -26,6 +27,9 @@ pub(crate) struct WindowChrome {
     pub(crate) window_controls: WindowControlLayout,
     pub(crate) toast_overlay: adw::ToastOverlay,
     pub(super) control_feedback_label: gtk::Label,
+    pub(crate) source_refresh_feedback: gtk::Box,
+    pub(crate) source_refresh_feedback_label: gtk::Label,
+    pub(crate) source_refresh_feedback_progress: gtk::ProgressBar,
     pub(crate) operation_feedback: gtk::Box,
     pub(crate) operation_feedback_artwork: gtk::Box,
     pub(crate) operation_feedback_title: gtk::Label,
@@ -438,7 +442,7 @@ pub(crate) fn playback_window_title(title: Option<&str>, artist: Option<&str>) -
         .into_iter()
         .chain(artist)
         .filter(|part| !part.trim().is_empty())
-        .chain(std::iter::once("Rufin"))
+        .chain(std::iter::once(DISPLAY_NAME))
         .collect::<Vec<_>>()
         .join(" · ")
 }
@@ -447,7 +451,7 @@ pub(crate) fn playback_window_title(title: Option<&str>, artist: Option<&str>) -
 mod tests {
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     use super::filtered_decoration_layout;
-    use super::playback_window_title;
+    use super::{DISPLAY_NAME, playback_window_title};
 
     #[cfg(not(any(target_os = "windows", target_os = "macos")))]
     #[test]
@@ -495,7 +499,7 @@ mod tests {
     fn playback_title_contains_track_artist_and_app() {
         assert_eq!(
             playback_window_title(Some("North Star"), Some("The Satellites")),
-            "North Star · The Satellites · Rufin"
+            format!("North Star · The Satellites · {DISPLAY_NAME}")
         );
     }
 
@@ -503,17 +507,17 @@ mod tests {
     fn playback_title_omits_blank_metadata() {
         assert_eq!(
             playback_window_title(Some("North Star"), Some("  ")),
-            "North Star · Rufin"
+            format!("North Star · {DISPLAY_NAME}")
         );
         assert_eq!(
             playback_window_title(Some(""), Some("The Satellites")),
-            "The Satellites · Rufin"
+            format!("The Satellites · {DISPLAY_NAME}")
         );
     }
 
     #[test]
     fn playback_title_falls_back_to_app_name() {
-        assert_eq!(playback_window_title(None, None), "Rufin");
+        assert_eq!(playback_window_title(None, None), DISPLAY_NAME);
     }
 }
 

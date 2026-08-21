@@ -1,9 +1,10 @@
 use std::path::Path;
 use std::rc::Rc;
 use std::sync::Arc;
+use std::time::Duration;
 
 use gtk::glib;
-use gtk::prelude::EditableExt;
+use gtk::prelude::{EditableExt, WidgetExt};
 use localization::tr;
 use playback::QueuePageQuery;
 use tracing::warn;
@@ -12,10 +13,12 @@ use crate::player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_r
 use crate::player::state::current_playback_media_id;
 use crate::player::{now_playing_notification_can_send, now_playing_notification_should_withdraw};
 use crate::preferences::dialogs::release_notes::apply_release_update;
+use crate::preferences::source::source_progress_text;
 use crate::routes::playlist_picker::refresh_context_playlist_picker;
 use crate::routes::route::Route;
 use crate::runtime::source::{
     ConfiguredSources, DiscoveryStatus, DiscoveryUpdate, LocalFolder, SourceOperation,
+    SourceProgress,
 };
 use crate::runtime::{
     HomePublication, ProductReceivers, SelectedLibraryUpdate, SourceEvent, SourceNotice,
@@ -426,6 +429,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     let completed_add = source_add_completed(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
+    apply_source_refresh_feedback(shell, &previous_operation, &operation);
 
     match &operation {
         SourceOperation::Adding { .. } => {
@@ -498,6 +502,113 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
                 shell.schedule_startup_route_reveal();
             }
         }
+    }
+}
+
+fn apply_source_refresh_feedback(
+    shell: &Shell,
+    previous: &SourceOperation,
+    operation: &SourceOperation,
+) {
+    match operation {
+        SourceOperation::Refreshing {
+            source_id,
+            progress,
+        } => {
+            let continues = matches!(
+                previous,
+                SourceOperation::Refreshing {
+                    source_id: previous_source_id,
+                    progress: previous_progress,
+                } if previous_source_id == source_id && previous_progress.stage == progress.stage
+            );
+            let generation = shell
+                .source
+                .refresh_feedback_generation
+                .get()
+                .wrapping_add(1);
+            shell.source.refresh_feedback_generation.set(generation);
+            shell
+                .chrome
+                .source_refresh_feedback
+                .remove_css_class("error");
+            shell
+                .chrome
+                .source_refresh_feedback_label
+                .set_text(&source_progress_text(progress));
+            let next_fraction = source_progress_fraction(progress);
+            let fraction = if continues {
+                shell
+                    .chrome
+                    .source_refresh_feedback_progress
+                    .fraction()
+                    .max(next_fraction)
+            } else {
+                next_fraction
+            };
+            shell
+                .chrome
+                .source_refresh_feedback_progress
+                .set_fraction(fraction);
+            shell.chrome.source_refresh_feedback.set_visible(true);
+        }
+        SourceOperation::Idle if matches!(previous, SourceOperation::Refreshing { .. }) => {
+            finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
+        }
+        SourceOperation::Failed {
+            message,
+            add_form: false,
+            ..
+        } if matches!(previous, SourceOperation::Refreshing { .. }) => {
+            finish_source_refresh_feedback(shell, Some(message), Duration::from_secs(5));
+        }
+        SourceOperation::Adding { .. } | SourceOperation::Switching { .. }
+            if matches!(previous, SourceOperation::Refreshing { .. }) =>
+        {
+            shell.source.refresh_feedback_generation.set(
+                shell
+                    .source
+                    .refresh_feedback_generation
+                    .get()
+                    .wrapping_add(1),
+            );
+            shell.chrome.source_refresh_feedback.set_visible(false);
+        }
+        _ => {}
+    }
+}
+
+fn finish_source_refresh_feedback(shell: &Shell, error: Option<&str>, delay: Duration) {
+    let generation = shell
+        .source
+        .refresh_feedback_generation
+        .get()
+        .wrapping_add(1);
+    shell.source.refresh_feedback_generation.set(generation);
+    if let Some(error) = error {
+        shell.chrome.source_refresh_feedback.add_css_class("error");
+        shell.chrome.source_refresh_feedback_label.set_text(error);
+    }
+    shell
+        .chrome
+        .source_refresh_feedback_progress
+        .set_fraction(1.0);
+    shell.chrome.source_refresh_feedback.set_visible(true);
+    let feedback = shell.chrome.source_refresh_feedback.clone();
+    let active_generation = Rc::clone(&shell.source.refresh_feedback_generation);
+    glib::timeout_add_local_once(delay, move || {
+        if active_generation.get() == generation {
+            feedback.set_visible(false);
+        }
+    });
+}
+
+fn source_progress_fraction(progress: &SourceProgress) -> f64 {
+    match progress.total {
+        Some(0) => 1.0,
+        Some(total) => progress.completed.min(total) as f64 / total as f64,
+        None if progress.completed == 0 => 0.0,
+        None => (progress.completed as f64 / (progress.completed as f64 + 128.0)).min(0.9),
     }
 }
 
@@ -827,7 +938,7 @@ mod tests {
     use super::{
         bottom_player_can_update_position_only, media_controls_static_state_changed,
         queue_panel_refresh_needed, source_add_completed, source_operation_started_blocking,
-        unavailable_local_folder_for_path,
+        source_progress_fraction, unavailable_local_folder_for_path,
     };
     use crate::runtime::source::{
         LocalFolder, SourceOperation, SourceProgress, SourceProgressStage,
@@ -874,6 +985,26 @@ mod tests {
                 },
             }
         ));
+    }
+
+    #[test]
+    fn source_progress_follows_the_visible_stage_ratio() {
+        let fraction = |stage, completed, total| {
+            source_progress_fraction(&SourceProgress {
+                stage,
+                completed,
+                total,
+            })
+        };
+        assert_eq!(fraction(SourceProgressStage::Connecting, 0, None), 0.0);
+        assert_eq!(fraction(SourceProgressStage::Files, 10, Some(10)), 1.0);
+        assert_eq!(fraction(SourceProgressStage::Tracks, 0, Some(10)), 0.0);
+        assert_eq!(fraction(SourceProgressStage::Tracks, 5, Some(10)), 0.5);
+        assert_eq!(
+            fraction(SourceProgressStage::Tracks, 52, Some(2_584)),
+            52.0 / 2_584.0
+        );
+        assert_eq!(fraction(SourceProgressStage::Finalizing, 1, Some(1)), 1.0);
     }
 
     #[test]
