@@ -100,6 +100,8 @@ pub struct Settings {
     pub private_mode: bool,
     #[serde(default)]
     pub cast_proxy_enabled: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cast_network_interface: Option<String>,
     pub notifications_enabled: bool,
     #[serde(default = "default_true")]
     pub control_notifications_enabled: bool,
@@ -178,6 +180,7 @@ impl Default for Settings {
             language: default_language_preference(),
             private_mode: false,
             cast_proxy_enabled: false,
+            cast_network_interface: None,
             notifications_enabled: false,
             control_notifications_enabled: true,
             release_notifications_enabled: true,
@@ -237,6 +240,12 @@ impl Settings {
             .auto_dj_refill_threshold
             .clamp(MIN_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD);
         self.lastfm_api_key = self.lastfm_api_key.trim().to_string();
+        self.cast_network_interface = self
+            .cast_network_interface
+            .as_deref()
+            .map(str::trim)
+            .filter(|name| !name.is_empty())
+            .map(str::to_string);
         self.language = sanitize_language_preference(&self.language);
         self.release_notification_seen_version = self
             .release_notification_seen_version

@@ -74,7 +74,7 @@ pub(crate) fn audio_output_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropD
     dropdown.add_css_class("audio-output-dropdown");
     dropdown.set_valign(gtk::Align::Center);
     dropdown.set_width_request(width);
-    configure_audio_output_dropdown_factory(&dropdown);
+    configure_output_dropdown_factory(&dropdown);
     keep_parent_grab_for_dropdown(&dropdown);
     refresh_audio_output_dropdown(&dropdown, shell, &options, &selected, &syncing);
 
@@ -111,7 +111,53 @@ pub(crate) fn audio_output_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropD
     dropdown
 }
 
-fn configure_audio_output_dropdown_factory(dropdown: &gtk::DropDown) {
+pub(crate) fn casting_network_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::DropDown {
+    let selected = shell
+        .settings
+        .current
+        .borrow()
+        .cast_network_interface
+        .clone();
+    let mut options = vec![(None, tr("Automatic"))];
+    options.extend(
+        shell
+            .products
+            .playback
+            .transport
+            .available_cast_networks()
+            .into_iter()
+            .map(|network| {
+                (
+                    Some(network.id),
+                    format!("{} ({})", network.name, network.address),
+                )
+            }),
+    );
+    let selected_index = audio_output_index(&options, selected.as_deref()).unwrap_or_default();
+    let titles = options
+        .iter()
+        .map(|(_, title)| title.as_str())
+        .collect::<Vec<_>>();
+    let dropdown = gtk::DropDown::from_strings(&titles);
+    dropdown.set_selected(selected_index as u32);
+    dropdown.set_tooltip_text(options.get(selected_index).map(|(_, title)| title.as_str()));
+    dropdown.set_valign(gtk::Align::Center);
+    dropdown.set_width_request(width);
+    configure_output_dropdown_factory(&dropdown);
+    keep_parent_grab_for_dropdown(&dropdown);
+
+    let network_shell = Rc::clone(shell);
+    dropdown.connect_selected_notify(move |dropdown| {
+        let Some((id, title)) = options.get(dropdown.selected() as usize) else {
+            return;
+        };
+        dropdown.set_tooltip_text(Some(title));
+        network_shell.set_cast_network_interface(id.clone());
+    });
+    dropdown
+}
+
+fn configure_output_dropdown_factory(dropdown: &gtk::DropDown) {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {

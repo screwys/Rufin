@@ -166,6 +166,16 @@ impl Shell {
         });
     }
 
+    pub(crate) fn set_cast_network_interface(self: &Rc<Self>, network_interface: Option<String>) {
+        self.update_app_settings("casting network setting", |settings| {
+            if settings.cast_network_interface == network_interface {
+                return false;
+            }
+            settings.cast_network_interface = network_interface;
+            true
+        });
+    }
+
     pub(super) fn set_notifications_enabled(self: &Rc<Self>, enabled: bool) {
         if self
             .update_app_settings("notification setting", |settings| {

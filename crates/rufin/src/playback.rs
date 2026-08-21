@@ -814,7 +814,7 @@ impl PlaybackOwner {
         });
         let queue_intents = QueueIntentWorker::new(runtime.clone());
         let loudness = LoudnessAnalysisOwner::new(runtime.clone());
-        let cast_proxy_enabled = settings.load().ui.cast_proxy_enabled;
+        let cast_settings = settings.load().ui;
         let owner = Arc::new(Self {
             scrobbler,
             library,
@@ -834,7 +834,10 @@ impl PlaybackOwner {
             play_id_prefix: random_identity(),
             next_instance: AtomicU64::new(1),
             start_backend: Box::new(start_backend),
-            cast: playback_cast::CastManager::new(cast_proxy_enabled),
+            cast: playback_cast::CastManager::new(
+                cast_settings.cast_proxy_enabled,
+                cast_settings.cast_network_interface,
+            ),
             output: Mutex::new(OutputSelection {
                 selected: playback::PlaybackOutput::Local,
                 prepared: None,
@@ -1136,6 +1139,10 @@ impl PlaybackOwner {
 
     pub(crate) fn cast_proxy_setting_changed(&self, enabled: bool) {
         self.cast.set_proxy_media(enabled);
+    }
+
+    pub(crate) fn cast_network_setting_changed(&self, network_interface: Option<String>) {
+        self.cast.set_network_interface(network_interface);
     }
 
     pub(crate) fn auto_dj_threshold_changed(&self, enabled: bool, refill_threshold: u8) {
@@ -1869,6 +1876,16 @@ impl TransportCommandPort for PlaybackOwner {
 
     fn available_audio_outputs(&self) -> Vec<playback::AudioOutput> {
         playback_gstreamer::available_audio_outputs()
+    }
+
+    fn available_cast_networks(&self) -> Vec<playback::CastNetwork> {
+        match self.cast.available_networks() {
+            Ok(networks) => networks,
+            Err(error) => {
+                warn!(%error, "could not list casting networks");
+                Vec::new()
+            }
+        }
     }
 
     fn playback_output(&self) -> playback::PlaybackOutput {

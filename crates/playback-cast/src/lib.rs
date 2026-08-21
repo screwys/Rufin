@@ -16,7 +16,7 @@ use playback::{
     BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, RemoteOutput,
     RemoteOutputProtocol,
 };
-use relay::RelayServer;
+use relay::{RelayServer, available_networks};
 use upnp::UpnpController;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -26,24 +26,37 @@ const UPNP_STATUS_INTERVAL: Duration = Duration::from_secs(1);
 pub struct CastManager {
     targets: Mutex<HashMap<String, DiscoveredTarget>>,
     proxy_media: Arc<AtomicBool>,
+    network_interface: Mutex<Option<String>>,
 }
 
 impl Default for CastManager {
     fn default() -> Self {
-        Self::new(false)
+        Self::new(false, None)
     }
 }
 
 impl CastManager {
-    pub fn new(proxy_media: bool) -> Self {
+    pub fn new(proxy_media: bool, network_interface: Option<String>) -> Self {
         Self {
             targets: Mutex::new(HashMap::new()),
             proxy_media: Arc::new(AtomicBool::new(proxy_media)),
+            network_interface: Mutex::new(network_interface),
         }
     }
 
     pub fn set_proxy_media(&self, enabled: bool) {
         self.proxy_media.store(enabled, Ordering::Release);
+    }
+
+    pub fn available_networks(&self) -> Result<Vec<playback::CastNetwork>, String> {
+        available_networks()
+    }
+
+    pub fn set_network_interface(&self, network_interface: Option<String>) {
+        *self
+            .network_interface
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = network_interface;
     }
 
     pub fn discover(&self) -> Result<Vec<RemoteOutput>, String> {
@@ -112,7 +125,12 @@ impl CastManager {
             .get(&output.id)
             .cloned()
             .ok_or_else(|| format!("{} is no longer available", output.name))?;
-        CastPlaybackBackend::new(target, Arc::clone(&self.proxy_media))
+        let network_interface = self
+            .network_interface
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        CastPlaybackBackend::new(target, Arc::clone(&self.proxy_media), network_interface)
     }
 }
 
@@ -123,8 +141,13 @@ pub struct CastPlaybackBackend {
 }
 
 impl CastPlaybackBackend {
-    fn new(target: DiscoveredTarget, proxy_media: Arc<AtomicBool>) -> Result<Self, String> {
-        let relay = RelayServer::start(target.address(), proxy_media)?;
+    fn new(
+        target: DiscoveredTarget,
+        proxy_media: Arc<AtomicBool>,
+        network_interface: Option<String>,
+    ) -> Result<Self, String> {
+        let relay =
+            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?;
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
                 let controller = UpnpController::new(*device)?;

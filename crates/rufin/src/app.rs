@@ -164,6 +164,10 @@ pub(crate) fn runtime_inputs(
         if previous.ui.cast_proxy_enabled != current.ui.cast_proxy_enabled {
             settings_playback.cast_proxy_setting_changed(current.ui.cast_proxy_enabled);
         }
+        if previous.ui.cast_network_interface != current.ui.cast_network_interface {
+            settings_playback
+                .cast_network_setting_changed(current.ui.cast_network_interface.clone());
+        }
         if previous.ui.auto_dj_refill_threshold != current.ui.auto_dj_refill_threshold {
             settings_playback.auto_dj_threshold_changed(
                 current.ui.auto_dj_enabled,

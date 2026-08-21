@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
 use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
@@ -8,7 +8,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use playback::PreparedStream;
+use playback::{CastNetwork, PreparedStream};
 use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 use url::Url;
 
@@ -44,9 +44,13 @@ pub(crate) struct RelayServer {
 }
 
 impl RelayServer {
-    pub(crate) fn start(target: SocketAddr, proxy_media: Arc<AtomicBool>) -> Result<Self, String> {
-        let local_ip = local_address_for(target)?;
-        let bind_ip = if target.is_ipv4() {
+    pub(crate) fn start(
+        target: SocketAddr,
+        proxy_media: Arc<AtomicBool>,
+        network_interface: Option<&str>,
+    ) -> Result<Self, String> {
+        let local_ip = local_address_for(target, network_interface)?;
+        let bind_ip = if local_ip.is_ipv4() {
             IpAddr::V4(Ipv4Addr::UNSPECIFIED)
         } else {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED)
@@ -223,7 +227,53 @@ impl Drop for RelayServer {
     }
 }
 
-fn local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
+pub(crate) fn available_networks() -> Result<Vec<CastNetwork>, String> {
+    let mut interfaces = BTreeMap::<String, Vec<IpAddr>>::new();
+    for (name, address) in local_interface_addresses()? {
+        interfaces.entry(name).or_default().push(address);
+    }
+    Ok(interfaces
+        .into_iter()
+        .filter_map(|(name, mut addresses)| {
+            addresses.sort_unstable();
+            let address = addresses
+                .iter()
+                .copied()
+                .find(IpAddr::is_ipv4)
+                .or_else(|| addresses.first().copied())?;
+            Some(CastNetwork {
+                id: name.clone(),
+                name,
+                address,
+            })
+        })
+        .collect())
+}
+
+fn local_address_for(
+    target: SocketAddr,
+    network_interface: Option<&str>,
+) -> Result<IpAddr, String> {
+    if let Some(network_interface) = network_interface {
+        let interfaces = local_interface_addresses()?;
+        if let Some(address) = selected_interface_address(
+            interfaces
+                .iter()
+                .map(|(name, address)| (name.as_str(), *address)),
+            network_interface,
+            target.ip(),
+        ) {
+            return Ok(address);
+        }
+        tracing::warn!(
+            network_interface,
+            "selected casting network is unavailable; using automatic routing"
+        );
+    }
+    automatic_local_address_for(target)
+}
+
+fn automatic_local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
     let bind = if target.is_ipv4() {
         "0.0.0.0:0"
     } else {
@@ -235,6 +285,40 @@ fn local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
         .local_addr()
         .map(|address| address.ip())
         .map_err(|error| error.to_string())
+}
+
+fn local_interface_addresses() -> Result<Vec<(String, IpAddr)>, String> {
+    let mut interfaces = if_addrs::get_if_addrs()
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .filter_map(|interface| {
+            let address = interface.ip();
+            (!address.is_loopback()
+                && !address.is_unspecified()
+                && !matches!(address, IpAddr::V6(address) if address.is_unicast_link_local()))
+            .then_some((interface.name, address))
+        })
+        .collect::<Vec<_>>();
+    interfaces.sort_unstable();
+    interfaces.dedup();
+    Ok(interfaces)
+}
+
+fn selected_interface_address<'a>(
+    interfaces: impl IntoIterator<Item = (&'a str, IpAddr)>,
+    selected: &str,
+    target: IpAddr,
+) -> Option<IpAddr> {
+    let mut addresses = interfaces
+        .into_iter()
+        .filter_map(|(name, address)| (name == selected).then_some(address))
+        .collect::<Vec<_>>();
+    addresses.sort_unstable();
+    addresses
+        .iter()
+        .copied()
+        .find(|address| address.is_ipv4() == target.is_ipv4())
+        .or_else(|| addresses.first().copied())
 }
 
 fn serve(
@@ -740,6 +824,32 @@ mod tests {
     }
 
     #[test]
+    fn selected_casting_network_owns_the_advertised_address() {
+        let interfaces = [
+            ("docker0", "172.17.0.1".parse().expect("Docker address")),
+            ("wlan0", "192.168.1.103".parse().expect("Wi-Fi address")),
+            ("wlan0", "fd00::103".parse().expect("Wi-Fi IPv6 address")),
+        ];
+
+        assert_eq!(
+            selected_interface_address(
+                interfaces.iter().copied(),
+                "wlan0",
+                "192.168.1.50".parse().expect("renderer address"),
+            ),
+            Some("192.168.1.103".parse().expect("selected address"))
+        );
+        assert_eq!(
+            selected_interface_address(
+                interfaces.iter().copied(),
+                "wlan0",
+                "fd00::50".parse().expect("renderer IPv6 address"),
+            ),
+            Some("fd00::103".parse().expect("selected IPv6 address"))
+        );
+    }
+
+    #[test]
     fn cue_windows_are_published_as_bounded_nonseekable_media() {
         let stream = PreparedStream::from(
             library::ResolvedStream::new("file:///music/album.flac").with_window(523_613, 612_345),
@@ -747,6 +857,7 @@ mod tests {
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .expect("relay");
 
@@ -779,6 +890,7 @@ mod tests {
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::new(AtomicBool::new(false)),
+            None,
         )
         .expect("start relay");
         let published = relay.publish(&stream).expect("publish stream");
@@ -876,7 +988,8 @@ mod tests {
             "http://{upstream_address}/audio.mp3?api_key=secret"
         )));
         let mut relay =
-            RelayServer::start(upstream_address, Arc::new(AtomicBool::new(false))).expect("relay");
+            RelayServer::start(upstream_address, Arc::new(AtomicBool::new(false)), None)
+                .expect("relay");
 
         let published = relay.publish(&stream).expect("publish remote stream");
 
@@ -914,6 +1027,7 @@ mod tests {
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::clone(&proxy_media),
+            None,
         )
         .expect("relay");
         let stream = PreparedStream::from(library::ResolvedStream::new(

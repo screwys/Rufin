@@ -22,6 +22,7 @@ mod library;
 pub(crate) mod persistence;
 pub(crate) mod source;
 
+use crate::player::casting_network_dropdown;
 use general::{appearance_page, playback_page, scrobbling_page};
 pub(crate) use general::{
     loudness_normalization_from_index, loudness_normalization_index, transition_from_index,
@@ -1098,6 +1099,17 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
         cast_proxy_shell.set_cast_proxy_enabled(row.is_active());
     });
     privacy_group.add(&cast_proxy_row);
+
+    let cast_network_row = adw::ActionRow::builder()
+        .title(tr("Casting network"))
+        .subtitle(tr(
+            "Network used to send local and proxied media to casting devices",
+        ))
+        .build();
+    let cast_network_dropdown = casting_network_dropdown(shell, 220);
+    cast_network_row.add_suffix(&cast_network_dropdown);
+    cast_network_row.set_activatable_widget(Some(&cast_network_dropdown));
+    privacy_group.add(&cast_network_row);
 
     let secret_storage_titles = [tr("Legacy"), tr("Secure storage")];
     let secret_storage_refs = secret_storage_titles

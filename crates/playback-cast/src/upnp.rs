@@ -1208,7 +1208,8 @@ mod tests {
             )),
             playback::NextTransition::Gapless,
         );
-        let relay = RelayServer::start(address, Arc::new(AtomicBool::new(false))).expect("relay");
+        let relay =
+            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
 
         controller
@@ -1322,7 +1323,7 @@ mod tests {
             Url::from_file_path(path).expect("track URL").to_string(),
         ));
         let mut relay =
-            RelayServer::start(address, Arc::new(AtomicBool::new(false))).expect("relay");
+            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
 
         let started = controller
@@ -1460,7 +1461,8 @@ mod tests {
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
         .with_media(test_track(), Some("audio/mpeg".to_string()));
-        let relay = RelayServer::start(address, Arc::new(AtomicBool::new(false))).expect("relay");
+        let relay =
+            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
         controller
             .start(RunId::new(1), stream, None, 0, &relay)

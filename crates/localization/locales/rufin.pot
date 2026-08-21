@@ -263,6 +263,9 @@ msgstr ""
 msgid "Automatic updates"
 msgstr ""
 
+msgid "Automatic"
+msgstr ""
+
 msgid "BPM"
 msgstr ""
 
@@ -288,6 +291,9 @@ msgid "Cancel download"
 msgstr ""
 
 msgid "Cancel"
+msgstr ""
+
+msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
@@ -1008,6 +1014,9 @@ msgid "Needs attention"
 msgstr ""
 
 msgid "NetEase"
+msgstr ""
+
+msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"

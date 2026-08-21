@@ -1,5 +1,6 @@
 use crate::{EqualizerSettings, LoudnessNormalizationMode, PlaybackSettings, VolumeScale};
 use library::{ResolvedStream, Track, TrackLoudness};
+use std::net::IpAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -268,6 +269,13 @@ pub enum BackendEvent {
 pub struct AudioOutput {
     pub id: String,
     pub name: String,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct CastNetwork {
+    pub id: String,
+    pub name: String,
+    pub address: IpAddr,
 }
 #[derive(Debug, Error)]
 pub enum BackendError {
