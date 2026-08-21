@@ -32,7 +32,7 @@ pub(super) fn home_section_header(title: &str) -> HomeSectionHeader {
     heading.set_ellipsize(gtk::pango::EllipsizeMode::End);
     header.append(&heading);
 
-    let refresh = icon_button("view-refresh-bundled-symbolic", "Refresh section");
+    let refresh = icon_button("rufin-view-refresh-symbolic", "Refresh section");
     refresh.add_css_class("home-section-control-button");
     header.append(&refresh);
 
@@ -44,8 +44,8 @@ pub(super) fn home_section_header(title: &str) -> HomeSectionHeader {
     controls.set_halign(gtk::Align::End);
     controls.set_hexpand(false);
 
-    let previous = icon_button("go-previous-bundled-symbolic", "Previous page");
-    let next = icon_button("go-next-bundled-symbolic", "Next page");
+    let previous = icon_button("rufin-go-previous-symbolic", "Previous page");
+    let next = icon_button("rufin-go-next-symbolic", "Next page");
     next.add_css_class("home-section-control-button");
     controls.append(&previous);
     controls.append(&next);

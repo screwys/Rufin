@@ -386,9 +386,9 @@ fn manage_server_content(
 
     let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     actions.set_halign(gtk::Align::End);
-    let remove = text_button("edit-clear-bundled-symbolic", "Clear Mapping");
+    let remove = text_button("rufin-edit-clear-symbolic", "Clear Mapping");
     remove.set_visible(access.is_some());
-    let save = text_button("document-save-bundled-symbolic", "Save Mapping");
+    let save = text_button("rufin-document-save-symbolic", "Save Mapping");
     save.add_css_class("suggested-action");
     actions.append(&remove);
     actions.append(&save);
@@ -743,7 +743,7 @@ pub(crate) fn credential_source_settings_group(
         rows_group.add(extra);
     }
 
-    let save = button_row("Save Server Settings", "document-save-bundled-symbolic");
+    let save = button_row("Save Server Settings", "rufin-document-save-symbolic");
     save.add_css_class("suggested-action");
     rows_group.add(&save);
     section.append(&rows_group);
@@ -817,7 +817,7 @@ fn server_actions_group(
     let actions = action_button_box();
 
     if !selected {
-        let select = row_action_button("Use This Source", "object-select-bundled-symbolic");
+        let select = row_action_button("Use This Source", "rufin-object-select-symbolic");
         let source = shell.products.source.clone();
         let source_id = server.id.clone();
         let exit = exit.clone();
@@ -832,7 +832,7 @@ fn server_actions_group(
         actions.append(&select);
     }
 
-    let resync = row_action_button("Resync Library", "view-refresh-bundled-symbolic");
+    let resync = row_action_button("Resync Library", "rufin-view-refresh-symbolic");
     let source = shell.products.source.clone();
     let source_id = server.id.clone();
     let preferences_dialog_for_resync = preferences_dialog.downgrade();
@@ -844,7 +844,7 @@ fn server_actions_group(
     });
     actions.append(&resync);
 
-    let forget = row_action_button("Forget Server", "window-close-bundled-symbolic");
+    let forget = row_action_button("Forget Server", "rufin-window-close-symbolic");
     forget.add_css_class("destructive-action");
     let forget_shell = Rc::clone(shell);
     let source_id = server.id.clone();
@@ -915,7 +915,7 @@ fn button_row(title: &str, icon_name: &str) -> adw::ButtonRow {
     let row = adw::ButtonRow::builder()
         .title(tr(title))
         .start_icon_name(icon_name)
-        .end_icon_name("go-next-bundled-symbolic")
+        .end_icon_name("rufin-go-next-symbolic")
         .build();
     row.add_css_class("manage-server-action-row");
     row

@@ -571,7 +571,7 @@ fn tree_row(
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     content.set_hexpand(true);
     content.set_margin_start((depth as i32) * 12);
-    content.append(&gtk::Image::from_icon_name("rufin-route-folders-symbolic"));
+    content.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
     let text = gtk::Label::new(Some(&display_label(label, translate)));
     text.set_xalign(0.0);
     text.set_hexpand(true);
@@ -759,7 +759,7 @@ fn folder_name_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
 
         match &row {
             FolderTableRow::Folder { name, .. } => {
-                content.append(&gtk::Image::from_icon_name("rufin-route-folders-symbolic"));
+                content.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
                 content.append(&folder_table_label(name, 20));
             }
             FolderTableRow::Track { track, .. } => {

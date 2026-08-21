@@ -137,9 +137,9 @@ fn set_rating_icons(stars: &[gtk::Image; 5], rating: u8) {
             star.add_css_class("rated");
         }
         star.set_icon_name(Some(match value {
-            0 => "non-starred-bundled-symbolic",
-            1 => "semi-starred-bundled-symbolic",
-            _ => "starred-bundled-symbolic",
+            0 => "rufin-non-starred-symbolic",
+            1 => "rufin-semi-starred-symbolic",
+            _ => "rufin-starred-symbolic",
         }));
     }
 }

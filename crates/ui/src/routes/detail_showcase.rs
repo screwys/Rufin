@@ -673,7 +673,7 @@ pub(crate) fn detail_showcase_frame_with_back(
     overlay.set_width_request(1);
     overlay.set_child(Some(&frame));
 
-    let back = icon_button("go-previous-bundled-symbolic", "Back");
+    let back = icon_button("rufin-go-previous-symbolic", "Back");
     back.add_css_class("detail-back-button");
     back.set_halign(gtk::Align::Start);
     back.set_valign(gtk::Align::Start);

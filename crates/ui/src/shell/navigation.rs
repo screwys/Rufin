@@ -62,71 +62,39 @@ const SIDEBAR_PIN_PLAYING_CLASS: &str = "playing";
 const SIDEBAR_PIN_COVER_SIZE: i32 = 40;
 const COMPACT_SIDEBAR_PIN_COVER_SIZE: i32 = 56;
 const PRIMARY_MENU_CLASS: &str = "rufin-primary-menu";
-const NAV_ROUTE_ICONS: [(&str, &str, &str); 13] = [
-    (
-        NAV_ROUTE_HOME_CLASS,
-        "rufin-route-home-symbolic",
-        "rufin-route-home-selected-symbolic",
-    ),
-    (
-        NAV_ROUTE_SEARCH_CLASS,
-        "rufin-route-search-symbolic",
-        "rufin-route-search-selected-symbolic",
-    ),
+const NAV_ROUTE_ICONS: [(&str, &str, Option<&str>); 13] = [
+    (NAV_ROUTE_HOME_CLASS, "rufin-home-symbolic", None),
+    (NAV_ROUTE_SEARCH_CLASS, "rufin-search-symbolic", None),
     (
         NAV_ROUTE_FAVORITES_CLASS,
-        "heart-outline-bundled-symbolic",
-        "heart-filled-bundled-symbolic",
+        "rufin-heart-outline-symbolic",
+        Some("rufin-heart-filled-symbolic"),
     ),
-    (
-        NAV_ROUTE_HISTORY_CLASS,
-        "rufin-route-history-symbolic",
-        "rufin-route-history-selected-symbolic",
-    ),
-    (
-        NAV_ROUTE_ALBUMS_CLASS,
-        "rufin-route-albums-symbolic",
-        "rufin-route-albums-selected-symbolic",
-    ),
+    (NAV_ROUTE_HISTORY_CLASS, "rufin-history-symbolic", None),
+    (NAV_ROUTE_ALBUMS_CLASS, "rufin-albums-symbolic", None),
     (
         NAV_ROUTE_TRACKS_CLASS,
-        "rufin-route-tracks-symbolic",
-        "rufin-route-tracks-selected-symbolic",
+        "rufin-tracks-symbolic",
+        Some("rufin-tracks-selected-symbolic"),
     ),
-    (
-        NAV_ROUTE_ARTISTS_CLASS,
-        "rufin-route-artists-symbolic",
-        "rufin-route-artists-selected-symbolic",
-    ),
+    (NAV_ROUTE_ARTISTS_CLASS, "rufin-artists-symbolic", None),
     (
         NAV_ROUTE_ALBUM_ARTISTS_CLASS,
-        "rufin-route-album-artists-symbolic",
-        "rufin-route-album-artists-selected-symbolic",
+        "rufin-album-artists-symbolic",
+        None,
     ),
-    (
-        NAV_ROUTE_GENRES_CLASS,
-        "rufin-route-genres-symbolic",
-        "rufin-route-genres-selected-symbolic",
-    ),
-    (
-        NAV_ROUTE_MOODS_CLASS,
-        "rufin-route-moods-symbolic",
-        "rufin-route-moods-selected-symbolic",
-    ),
+    (NAV_ROUTE_GENRES_CLASS, "rufin-genres-symbolic", None),
+    (NAV_ROUTE_MOODS_CLASS, "rufin-moods-symbolic", None),
     (
         NAV_ROUTE_FOLDERS_CLASS,
-        "rufin-route-folders-symbolic",
-        "rufin-route-folders-selected-symbolic",
+        "rufin-folders-symbolic",
+        Some("rufin-folders-selected-symbolic"),
     ),
-    (
-        NAV_ROUTE_PLAYLISTS_CLASS,
-        "rufin-route-playlists-symbolic",
-        "rufin-route-playlists-selected-symbolic",
-    ),
+    (NAV_ROUTE_PLAYLISTS_CLASS, "rufin-playlists-symbolic", None),
     (
         NAV_ROUTE_SMART_PLAYLISTS_CLASS,
-        "rufin-route-smart-playlists-symbolic",
-        "rufin-route-smart-playlists-selected-symbolic",
+        "rufin-smart-playlists-symbolic",
+        None,
     ),
 ];
 
@@ -402,7 +370,7 @@ pub(super) fn normal_sidebar_header(
     shell: &Rc<Shell>,
     start_window_controls: &impl IsA<gtk::Widget>,
 ) -> adw::HeaderBar {
-    let search = gtk::Button::from_icon_name("system-search-bundled-symbolic");
+    let search = gtk::Button::from_icon_name("rufin-system-search-symbolic");
     bind_widget_tooltip(&search, msgid("Search"));
     let search_shell = Rc::clone(shell);
     search.connect_clicked(move |_| search_shell.navigate(Route::Search));
@@ -471,7 +439,7 @@ fn update_native_route_selection(shell: &Shell, active_route: &Route, pin_is_sel
                         |(class, normal_icon_name, selected_icon_name)| {
                             (*class == route_class).then_some(
                                 if selected_index == Some(index as u32) {
-                                    *selected_icon_name
+                                    selected_icon_name.unwrap_or(normal_icon_name)
                                 } else {
                                     *normal_icon_name
                                 },
@@ -547,9 +515,10 @@ fn nav_route_icon_names(widget: &gtk::Widget) -> Option<(&'static str, &'static 
     NAV_ROUTE_ICONS
         .into_iter()
         .find_map(|(route_class, normal_icon_name, selected_icon_name)| {
-            widget
-                .has_css_class(route_class)
-                .then_some((normal_icon_name, selected_icon_name))
+            widget.has_css_class(route_class).then_some((
+                normal_icon_name,
+                selected_icon_name.unwrap_or(normal_icon_name),
+            ))
         })
 }
 
@@ -593,7 +562,7 @@ fn normal_primary_menu_button(
     popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
     shell: &Rc<Shell>,
 ) -> gtk::MenuButton {
-    button.set_icon_name("open-menu-bundled-symbolic");
+    button.set_icon_name("rufin-open-menu-symbolic");
     bind_widget_tooltip(button, msgid("Menu"));
     bind_widget_accessible_label(button, msgid("Menu"));
     if popover_slot.borrow().is_none() {
@@ -728,13 +697,13 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         &preferences,
         &tr("Preferences"),
         "app.preferences",
-        "preferences-system-bundled-symbolic",
+        "rufin-preferences-system-symbolic",
     );
     append_menu_action(
         &preferences,
         &primary_menu_private_mode_label(shell.as_ref()),
         "win.toggle-private-mode",
-        "system-lock-screen-bundled-symbolic",
+        "rufin-system-lock-screen-symbolic",
     );
     menu.append_section(None, &preferences);
 
@@ -743,13 +712,13 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         &window,
         &tr("Keyboard Shortcuts"),
         "app.show-shortcuts",
-        "preferences-desktop-keyboard-shortcuts-bundled-symbolic",
+        "rufin-preferences-desktop-keyboard-shortcuts-symbolic",
     );
     append_menu_action(
         &window,
         &tr("Toggle Fullscreen"),
         "win.toggle-fullscreen",
-        "view-fullscreen-bundled-symbolic",
+        "rufin-view-fullscreen-symbolic",
     );
     append_menu_action(
         &window,
@@ -764,19 +733,19 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
         &information,
         &tr("Version History"),
         "win.show-release-notes",
-        "appointment-new-bundled-symbolic",
+        "rufin-appointment-new-symbolic",
     );
     append_menu_action(
         &information,
         &tr("Troubleshooting"),
         "win.troubleshooting",
-        "utilities-terminal-bundled-symbolic",
+        "rufin-utilities-terminal-symbolic",
     );
     append_menu_action(
         &information,
         &tr("About Rufin"),
         "app.about",
-        "help-about-bundled-symbolic",
+        "rufin-help-about-symbolic",
     );
     menu.append_section(None, &information);
 }
@@ -799,7 +768,7 @@ fn primary_menu_sidebar_toggle_icon(shell: &Shell) -> &'static str {
     if shell.left_sidebar_mode() == ResolvedLeftSidebarMode::Full {
         "rufin-sidebar-hide-symbolic"
     } else {
-        "sidebar-show-bundled-symbolic"
+        "rufin-sidebar-show-symbolic"
     }
 }
 
@@ -831,7 +800,7 @@ fn sidebar_menu_content(compact: bool) -> gtk::Box {
     } else {
         NORMAL_NAV_ICON_SIZE
     };
-    let icon = gtk::Image::from_icon_name("open-menu-bundled-symbolic");
+    let icon = gtk::Image::from_icon_name("rufin-open-menu-symbolic");
     icon.add_css_class("nav-icon");
     icon.set_pixel_size(icon_size);
     icon.set_size_request(icon_size, icon_size);
@@ -1253,7 +1222,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     track_metadata.add_css_class("sidebar-pin-metadata-item");
     track_metadata.set_valign(gtk::Align::Center);
 
-    let tracks_icon = gtk::Image::from_icon_name("rufin-route-tracks-symbolic");
+    let tracks_icon = gtk::Image::from_icon_name("rufin-tracks-symbolic");
     tracks_icon.add_css_class("sidebar-pin-metadata-icon");
     tracks_icon.set_pixel_size(12);
     tracks_icon.set_size_request(12, 12);
@@ -1273,7 +1242,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     duration_metadata.set_valign(gtk::Align::Center);
     duration_metadata.set_overflow(gtk::Overflow::Hidden);
 
-    let duration_icon = gtk::Image::from_icon_name("preferences-system-time-bundled-symbolic");
+    let duration_icon = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
     duration_icon.add_css_class("sidebar-pin-metadata-icon");
     duration_icon.set_pixel_size(12);
     duration_icon.set_size_request(12, 12);
@@ -1359,67 +1328,67 @@ fn sidebar_route_at_position_in(
 fn nav_item(item: SidebarRouteItem) -> NavItem {
     match item {
         SidebarRouteItem::Home => NavItem {
-            icon_name: "rufin-route-home-symbolic",
+            icon_name: "rufin-home-symbolic",
             label: msgid("Home"),
             route: Route::Home,
         },
         SidebarRouteItem::Search => NavItem {
-            icon_name: "rufin-route-search-symbolic",
+            icon_name: "rufin-search-symbolic",
             label: msgid("Search"),
             route: Route::Search,
         },
         SidebarRouteItem::Favorites => NavItem {
-            icon_name: "heart-outline-bundled-symbolic",
+            icon_name: "rufin-heart-outline-symbolic",
             label: msgid("Favorites"),
             route: Route::Favorites,
         },
         SidebarRouteItem::History => NavItem {
-            icon_name: "rufin-route-history-symbolic",
+            icon_name: "rufin-history-symbolic",
             label: msgid("History"),
             route: Route::History,
         },
         SidebarRouteItem::Albums => NavItem {
-            icon_name: "rufin-route-albums-symbolic",
+            icon_name: "rufin-albums-symbolic",
             label: msgid("Albums"),
             route: Route::Albums,
         },
         SidebarRouteItem::Tracks => NavItem {
-            icon_name: "rufin-route-tracks-symbolic",
+            icon_name: "rufin-tracks-symbolic",
             label: msgid("Tracks"),
             route: Route::Tracks,
         },
         SidebarRouteItem::Artists => NavItem {
-            icon_name: "rufin-route-artists-symbolic",
+            icon_name: "rufin-artists-symbolic",
             label: msgid("Artists"),
             route: Route::Artists,
         },
         SidebarRouteItem::AlbumArtists => NavItem {
-            icon_name: "rufin-route-album-artists-symbolic",
+            icon_name: "rufin-album-artists-symbolic",
             label: msgid("Album Artists"),
             route: Route::AlbumArtists,
         },
         SidebarRouteItem::Genres => NavItem {
-            icon_name: "rufin-route-genres-symbolic",
+            icon_name: "rufin-genres-symbolic",
             label: msgid("Genres"),
             route: Route::Genres,
         },
         SidebarRouteItem::Moods => NavItem {
-            icon_name: "rufin-route-moods-symbolic",
+            icon_name: "rufin-moods-symbolic",
             label: msgid("Moods"),
             route: Route::Moods,
         },
         SidebarRouteItem::Folders => NavItem {
-            icon_name: "rufin-route-folders-symbolic",
+            icon_name: "rufin-folders-symbolic",
             label: msgid("Folders"),
             route: Route::Folders { path: Vec::new() },
         },
         SidebarRouteItem::Playlists => NavItem {
-            icon_name: "rufin-route-playlists-symbolic",
+            icon_name: "rufin-playlists-symbolic",
             label: msgid("Playlists"),
             route: Route::Playlists,
         },
         SidebarRouteItem::SmartPlaylists => NavItem {
-            icon_name: "rufin-route-smart-playlists-symbolic",
+            icon_name: "rufin-smart-playlists-symbolic",
             label: msgid("Smart Playlists"),
             route: Route::SmartPlaylists,
         },
@@ -1714,29 +1683,32 @@ mod tests {
     }
 
     #[test]
-    fn navigation_uses_bundled_assets() {
+    fn navigation_uses_app_icons() {
         for item in SidebarRouteItem::all() {
             let nav = nav_item(item);
-            let path = bundled_sidebar_icon_path(nav.icon_name);
+            let path = sidebar_icon_path(nav.icon_name);
             assert!(
                 path.is_file(),
-                "{} should be bundled at {}",
+                "{} should exist at {}",
                 nav.icon_name,
                 path.display()
             );
         }
         for (_, _, selected_icon_name) in NAV_ROUTE_ICONS {
-            let selected_path = bundled_sidebar_icon_path(selected_icon_name);
+            let Some(selected_icon_name) = selected_icon_name else {
+                continue;
+            };
+            let selected_path = sidebar_icon_path(selected_icon_name);
             assert!(
                 selected_path.is_file(),
-                "{} should be bundled at {}",
+                "{} should exist at {}",
                 selected_icon_name,
                 selected_path.display()
             );
         }
     }
 
-    fn bundled_sidebar_icon_path(icon_name: &str) -> PathBuf {
+    fn sidebar_icon_path(icon_name: &str) -> PathBuf {
         PathBuf::from(env!("CARGO_MANIFEST_DIR"))
             .join("../../data/icons/hicolor/scalable/actions")
             .join(format!("{icon_name}.svg"))

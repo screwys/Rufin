@@ -417,7 +417,7 @@ async fn connect_scrobbling(
 pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(tr("Playback"))
-        .icon_name("rufin-route-tracks-symbolic")
+        .icon_name("rufin-tracks-symbolic")
         .build();
 
     let app_settings = shell.settings.current.borrow().clone();
@@ -710,7 +710,7 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
 pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(tr("Appearance"))
-        .icon_name("preferences-desktop-appearance-bundled-symbolic")
+        .icon_name("rufin-preferences-desktop-appearance-symbolic")
         .build();
 
     page.add(&theme_group(shell));

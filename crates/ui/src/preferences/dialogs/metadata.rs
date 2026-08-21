@@ -454,7 +454,7 @@ fn metadata_field(
     style_compact_field_row(&row);
     set_editable(&row, draft, field);
 
-    let undo = gtk::Button::from_icon_name("edit-undo-bundled-symbolic");
+    let undo = gtk::Button::from_icon_name("rufin-edit-undo-symbolic");
     undo.add_css_class("flat");
     undo.set_tooltip_text(Some(&tr("Undo identified value")));
     undo.update_property(&[gtk::accessible::Property::Label(&tr(

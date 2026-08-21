@@ -30,10 +30,10 @@ pub(super) fn volume_icon_state(muted: bool, volume: f64) -> VolumeIcon {
 
 pub(super) fn set_volume_icon(icon: &gtk::Image, state: VolumeIcon) {
     let name = match state {
-        VolumeIcon::Low => "audio-volume-low-bundled-symbolic",
-        VolumeIcon::Medium => "audio-volume-medium-bundled-symbolic",
-        VolumeIcon::High => "audio-volume-high-bundled-symbolic",
-        VolumeIcon::Muted => "audio-volume-muted-bundled-symbolic",
+        VolumeIcon::Low => "rufin-audio-volume-low-symbolic",
+        VolumeIcon::Medium => "rufin-audio-volume-medium-symbolic",
+        VolumeIcon::High => "rufin-audio-volume-high-symbolic",
+        VolumeIcon::Muted => "rufin-audio-volume-muted-symbolic",
     };
     icon.set_icon_name(Some(name));
 }
@@ -218,7 +218,7 @@ fn repeat_icon_area(repeat_mode: RepeatMode) -> gtk::DrawingArea {
 
 pub(super) fn volume_icon_button(label: &str) -> (gtk::Button, gtk::Image, Rc<Cell<VolumeIcon>>) {
     let state = Rc::new(Cell::new(VolumeIcon::High));
-    let icon = gtk::Image::from_icon_name("audio-volume-high-bundled-symbolic");
+    let icon = gtk::Image::from_icon_name("rufin-audio-volume-high-symbolic");
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
     let button = gtk::Button::new();
@@ -357,7 +357,7 @@ pub(super) fn random_clover_icon_button(label: &str) -> gtk::Button {
 }
 
 pub(super) fn queue_sidebar_button(label: &str) -> (gtk::Button, gtk::Image) {
-    let icon = gtk::Image::from_icon_name("sidebar-collapse-right-bundled-symbolic");
+    let icon = gtk::Image::from_icon_name("rufin-sidebar-collapse-right-symbolic");
     let button = gtk::Button::new();
     button.add_css_class("icon-button");
     button.add_css_class("flat");
@@ -371,8 +371,8 @@ pub(super) fn queue_sidebar_button(label: &str) -> (gtk::Button, gtk::Image) {
 
 pub(super) fn set_queue_sidebar_icon(icon: &gtk::Image, visible: bool) {
     icon.set_icon_name(Some(if visible {
-        "sidebar-collapse-right-bundled-symbolic"
+        "rufin-sidebar-collapse-right-symbolic"
     } else {
-        "sidebar-expand-right-bundled-symbolic"
+        "rufin-sidebar-expand-right-symbolic"
     }));
 }

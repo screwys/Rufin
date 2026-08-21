@@ -767,7 +767,7 @@ impl PlaylistDetailSummary {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
         row.set_halign(gtk::Align::Start);
         let (track_count_item, track_count_label) = playlist_detail_summary_item(
-            "rufin-route-tracks-symbolic",
+            "rufin-tracks-symbolic",
             &track_count_text(track_count.into()),
         );
         let track_count_value = Rc::new(Cell::new(track_count));
@@ -776,7 +776,7 @@ impl PlaylistDetailSummary {
             track_count_text(u64::from(track_count_for_locale.get()))
         });
         let (duration_item, duration_label) = playlist_detail_summary_item(
-            "preferences-system-time-bundled-symbolic",
+            "rufin-preferences-system-time-symbolic",
             &format_duration_units(duration_seconds),
         );
         row.append(&track_count_item);

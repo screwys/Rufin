@@ -1175,7 +1175,7 @@ fn build_player_action_controls() -> PlayerActionControls {
     buttons.set_valign(gtk::Align::Center);
     buttons.set_margin_top(BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2);
     let output_button = icon_button_without_tooltip(
-        "video-display-bundled-symbolic",
+        "rufin-video-display-symbolic",
         msgid("Choose playback output"),
     );
     output_button.add_css_class("player-output-button");
@@ -1187,7 +1187,7 @@ fn build_player_action_controls() -> PlayerActionControls {
     output_icon.add_css_class("player-output-icon");
     buttons.append(&output_button);
     let settings_button = gtk::MenuButton::new();
-    settings_button.set_icon_name("preferences-system-bundled-symbolic");
+    settings_button.set_icon_name("rufin-preferences-system-symbolic");
     settings_button.set_direction(gtk::ArrowType::Up);
     settings_button.set_has_frame(false);
     settings_button.add_css_class("icon-button");
@@ -1652,9 +1652,7 @@ fn add_output_row(
     row.add_css_class("playback-output-row");
     if &output == selected {
         row.add_css_class("selected-output");
-        row.add_suffix(&gtk::Image::from_icon_name(
-            "object-select-bundled-symbolic",
-        ));
+        row.add_suffix(&gtk::Image::from_icon_name("rufin-object-select-symbolic"));
     }
     let row_output = output.clone();
     let row_group = group.clone();

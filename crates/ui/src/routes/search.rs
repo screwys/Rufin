@@ -85,9 +85,9 @@ impl SearchCategory {
 
     const fn icon_name(self) -> &'static str {
         match self {
-            Self::Tracks => "rufin-route-tracks-symbolic",
-            Self::Albums => "rufin-route-albums-symbolic",
-            Self::Artists => "rufin-route-artists-symbolic",
+            Self::Tracks => "rufin-tracks-symbolic",
+            Self::Albums => "rufin-albums-symbolic",
+            Self::Artists => "rufin-artists-symbolic",
         }
     }
 
@@ -1399,9 +1399,9 @@ mod tests {
         assert_eq!(
             SearchCategory::ALL.map(SearchCategory::icon_name),
             [
-                "rufin-route-tracks-symbolic",
-                "rufin-route-albums-symbolic",
-                "rufin-route-artists-symbolic"
+                "rufin-tracks-symbolic",
+                "rufin-albums-symbolic",
+                "rufin-artists-symbolic"
             ]
         );
         let results = SearchResults {

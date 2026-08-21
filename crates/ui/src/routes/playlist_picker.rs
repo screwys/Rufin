@@ -424,11 +424,11 @@ fn playlist_picker_row(
     let meta = gtk::Box::new(gtk::Orientation::Horizontal, 10);
     meta.add_css_class("context-playlist-meta");
     meta.append(&playlist_picker_meta(
-        "rufin-route-tracks-symbolic",
+        "rufin-tracks-symbolic",
         &track_count_text(playlist.track_count.into()),
     ));
     meta.append(&playlist_picker_meta(
-        "preferences-system-time-bundled-symbolic",
+        "rufin-preferences-system-time-symbolic",
         &format_duration_units(playlist.duration_seconds),
     ));
     let genres = gtk::Box::new(gtk::Orientation::Horizontal, 6);

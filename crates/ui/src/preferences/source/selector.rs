@@ -73,12 +73,12 @@ pub(crate) fn source_submenu(shell: &Rc<Shell>) -> (String, &'static str, gio::M
     sources.append_item(&source_menu_item(
         &tr("Manage"),
         MANAGE_LIBRARIES_DETAILED_ACTION,
-        "document-edit-bundled-symbolic",
+        "rufin-document-edit-symbolic",
     ));
     sources.append_item(&source_menu_item(
         &tr("Add a new source"),
         ADD_LIBRARY_DETAILED_ACTION,
-        "list-add-bundled-symbolic",
+        "rufin-list-add-symbolic",
     ));
     menu.append_section(Some(&tr("Select Source")), &sources);
 
@@ -124,7 +124,7 @@ fn source_menu_content(
     let Some(source) = active_source else {
         return SourceMenuContent {
             name: tr("No source"),
-            icon_name: "network-server-bundled-symbolic",
+            icon_name: "rufin-network-server-symbolic",
             selected_source_id,
             sources: Arc::clone(&configured.sources),
             local_folders: Arc::clone(&configured.local_folders),
@@ -302,16 +302,14 @@ mod tests {
         let item = source_menu_item(
             "Server",
             "win.source-choice-0",
-            "network-server-bundled-symbolic",
+            "rufin-network-server-symbolic",
         );
         let serialized = item
             .attribute_value("icon", None)
             .expect("source choice should have an icon");
         let icon = gio::Icon::deserialize(&serialized).expect("source icon should deserialize");
 
-        assert!(icon.equal(Some(&gio::ThemedIcon::new(
-            "network-server-bundled-symbolic"
-        ))));
+        assert!(icon.equal(Some(&gio::ThemedIcon::new("rufin-network-server-symbolic"))));
     }
 
     #[test]

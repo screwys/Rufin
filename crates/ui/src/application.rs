@@ -382,9 +382,8 @@ pub(crate) fn verify_interface_resources() -> Result<(), String> {
     for relative_path in [
         "scalable/apps/io.github.screwys.Rufin.svg",
         "scalable/actions/rufin-play-symbolic.svg",
-        "scalable/actions/open-menu-bundled-symbolic.svg",
-        "scalable/actions/x-office-calendar-bundled-symbolic.svg",
-        "scalable/status/io.github.screwys.Rufin.scrobbling-symbolic.svg",
+        "scalable/actions/rufin-open-menu-symbolic.svg",
+        "scalable/actions/rufin-x-office-calendar-symbolic.svg",
         "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
     ] {
         let path = format!("{ICON_RESOURCE_ROOT}/{relative_path}");

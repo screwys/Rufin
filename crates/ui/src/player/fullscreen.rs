@@ -144,7 +144,7 @@ pub(crate) fn build_fullscreen_player(
     root.set_sensitive(false);
     root.set_opacity(0.0);
 
-    let close_button = icon_button("go-down-bundled-symbolic", "Close fullscreen player");
+    let close_button = icon_button("rufin-go-down-symbolic", "Close fullscreen player");
     close_button.add_css_class("fullscreen-player-close-button");
     close_button.set_valign(gtk::Align::Start);
 
@@ -229,7 +229,7 @@ pub(crate) fn build_fullscreen_player(
     switcher_bar.add_css_class("fullscreen-player-tab-bar");
     switcher_bar.set_margin_start(14);
     switcher_bar.set_hexpand(true);
-    let inline_close_button = icon_button("go-down-bundled-symbolic", "Close fullscreen player");
+    let inline_close_button = icon_button("rufin-go-down-symbolic", "Close fullscreen player");
     inline_close_button.add_css_class("fullscreen-player-close-button");
     inline_close_button.set_visible(false);
     let inline_start = gtk::Box::new(gtk::Orientation::Horizontal, 0);

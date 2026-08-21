@@ -334,7 +334,7 @@ impl Shell {
             if let Some(texture) = self.texture_for_decoded(&texture_source_id, Arc::clone(image)) {
                 tile.set_texture_if_current(outcome.generation, texture);
             } else {
-                tile.set_blank_if_current(outcome.generation);
+                tile.set_fallback_if_current(outcome.generation);
             }
             return;
         }
@@ -363,7 +363,7 @@ impl Shell {
                     if let Some(texture) = self.texture_for_decoded(&texture_source_id, image) {
                         tile.set_texture_if_current(outcome.generation, texture);
                     } else {
-                        tile.set_blank_if_current(outcome.generation);
+                        tile.set_fallback_if_current(outcome.generation);
                     }
                 }
                 artwork::ArtworkLoad::Missing => {
@@ -372,7 +372,7 @@ impl Shell {
             },
             Err(error) => {
                 warn!(%error, "failed to start artwork request");
-                tile.set_blank_if_current(outcome.generation);
+                tile.set_fallback_if_current(outcome.generation);
             }
         }
     }
@@ -401,7 +401,7 @@ impl Shell {
                     if let Some(texture) = shell.texture_for_decoded(&source_id, image) {
                         tile.set_texture_if_current(generation, texture)
                     } else {
-                        tile.set_blank_if_current(generation);
+                        tile.set_fallback_if_current(generation);
                         false
                     }
                 }
@@ -411,11 +411,11 @@ impl Shell {
                 }
                 artwork::ArtworkOutcome::Failed(error) => {
                     warn!(%error, "artwork request failed");
-                    tile.set_blank_if_current(generation);
+                    tile.set_fallback_if_current(generation);
                     false
                 }
                 artwork::ArtworkOutcome::Invalidated => {
-                    tile.set_blank_if_current(generation);
+                    tile.set_fallback_if_current(generation);
                     false
                 }
             };

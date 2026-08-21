@@ -70,7 +70,7 @@ pub(crate) fn build_right_panel(end_window_controls: &impl IsA<gtk::Widget>) -> 
     queue_search.set_height_request(30);
     queue_header.append(&queue_search);
 
-    let queue_clear_button = icon_button("edit-clear-bundled-symbolic", "Clear queue");
+    let queue_clear_button = icon_button("rufin-edit-clear-symbolic", "Clear queue");
     queue_header.append(&queue_clear_button);
     queue_header.append(end_window_controls);
     let queue_panel = gtk::Box::new(gtk::Orientation::Vertical, 6);

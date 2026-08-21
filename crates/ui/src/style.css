@@ -433,7 +433,7 @@ row:focus {
 }
 
 .left-opening-primary-menu arrow.right {
-  -gtk-icon-source: -gtk-icontheme("go-previous-bundled-symbolic");
+  -gtk-icon-source: -gtk-icontheme("rufin-go-previous-symbolic");
 }
 
 .album-detail-track-cells {
@@ -1062,7 +1062,7 @@ row.entry.password:focus-within {
   box-shadow: inset 0 0 0 1px color-mix(in srgb, currentColor 8%, transparent);
 }
 
-.cover-fallback {
+.cover-tile.cover-fallback {
   color: #deddda;
   background-color: #77767b;
   background-image: -gtk-icontheme("io.github.screwys.Rufin-symbolic");

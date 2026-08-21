@@ -423,7 +423,7 @@ impl Shell {
         collection: bool,
         downloaded: impl Fn(&SelectedLibrary) -> bool + 'static,
     ) -> gtk::Image {
-        let image = gtk::Image::from_icon_name("folder-download-bundled-symbolic");
+        let image = gtk::Image::from_icon_name("rufin-folder-download-symbolic");
         image.add_css_class("downloaded-badge");
         image.set_pixel_size(14);
         image.set_tooltip_text(Some(&tr("Downloaded")));

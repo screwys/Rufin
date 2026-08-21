@@ -18,11 +18,11 @@ const NATIVE_MENU_PARENT_GRAB_CLASS: &str = "rufin-menu-parent-grab";
 pub(crate) const CONTEXT_MENU_HOVER_OWNER_CLASS: &str = "context-menu-hover-owner";
 pub(crate) const CONTEXT_MENU_HOVER_HELD_CLASS: &str = "context-menu-hover-held";
 
-pub(crate) const ADD_TO_PLAYLIST_ICON: &str = "route-playlists-compact-bundled-symbolic";
-pub(crate) const ALBUM_ICON: &str = "rufin-route-albums-symbolic";
-pub(crate) const ARTIST_ICON: &str = "rufin-route-artists-symbolic";
-pub(crate) const DOWNLOAD_ICON: &str = "folder-download-bundled-symbolic";
-pub(crate) const GO_TO_ICON: &str = "adw-external-link-compact-bundled-symbolic";
+pub(crate) const ADD_TO_PLAYLIST_ICON: &str = "rufin-playlists-compact-symbolic";
+pub(crate) const ALBUM_ICON: &str = "rufin-albums-symbolic";
+pub(crate) const ARTIST_ICON: &str = "rufin-artists-symbolic";
+pub(crate) const DOWNLOAD_ICON: &str = "rufin-folder-download-symbolic";
+pub(crate) const GO_TO_ICON: &str = "rufin-external-link-compact-symbolic";
 pub(crate) const RADIO_ICON: &str = "rufin-audio-radio-symbolic";
 
 pub(crate) type ContextMenuOpen = Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>)>;

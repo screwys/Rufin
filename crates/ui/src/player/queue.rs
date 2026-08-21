@@ -1374,7 +1374,7 @@ fn queue_header_fixed_label(text: &str, width: i32) -> gtk::Label {
 }
 
 fn queue_duration_header_icon() -> gtk::Image {
-    let image = gtk::Image::from_icon_name("preferences-system-time-bundled-symbolic");
+    let image = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
     let label = tr("Duration");
     image.add_css_class("muted");
     image.set_width_request(QUEUE_DURATION_COLUMN_WIDTH);

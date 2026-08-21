@@ -82,13 +82,13 @@ fn context_menu_item_row(
     drag.set_tooltip_text(Some(&tr("Drag to reorder")));
     row.add_prefix(&drag);
 
-    let up = gtk::Button::from_icon_name("go-up-bundled-symbolic");
+    let up = gtk::Button::from_icon_name("rufin-go-up-symbolic");
     up.add_css_class("flat");
     up.set_tooltip_text(Some(&tr("Move up")));
     up.set_valign(gtk::Align::Center);
     row.add_suffix(&up);
 
-    let down = gtk::Button::from_icon_name("go-down-bundled-symbolic");
+    let down = gtk::Button::from_icon_name("rufin-go-down-symbolic");
     down.add_css_class("flat");
     down.set_tooltip_text(Some(&tr("Move down")));
     down.set_valign(gtk::Align::Center);

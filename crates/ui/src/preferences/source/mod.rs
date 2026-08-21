@@ -44,7 +44,7 @@ pub(crate) fn configured_source_kind_display_name(kind: &str) -> String {
 }
 
 pub(crate) fn configured_source_icon_name(source: &SourceSummary) -> &'static str {
-    login::source_kind_icon_name(&source.kind).unwrap_or("network-server-bundled-symbolic")
+    login::source_kind_icon_name(&source.kind).unwrap_or("rufin-network-server-symbolic")
 }
 
 pub(crate) fn folder_selected_text(count: u64) -> String {

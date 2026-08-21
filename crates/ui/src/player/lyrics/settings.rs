@@ -79,7 +79,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
     let settings = shell.settings.current.borrow().lyrics.clone();
     let page = adw::PreferencesPage::builder()
         .title(tr("Lyrics settings"))
-        .icon_name("applications-system-bundled-symbolic")
+        .icon_name("rufin-applications-system-symbolic")
         .build();
 
     let sources = adw::PreferencesGroup::builder()
@@ -264,7 +264,7 @@ fn populate_provider_rows(
             });
             row.add_controller(drop_target);
 
-            let up = small_icon_button("go-up-bundled-symbolic", msgid("Move provider up"));
+            let up = small_icon_button("rufin-go-up-symbolic", msgid("Move provider up"));
             up.set_sensitive(index > 0);
             let up_shell = Rc::clone(shell);
             let up_group = group.downgrade();
@@ -279,7 +279,7 @@ fn populate_provider_rows(
                 populate_provider_rows(&up_shell, &group, &up_rows);
             });
             row.add_suffix(&up);
-            let down = small_icon_button("go-down-bundled-symbolic", msgid("Move provider down"));
+            let down = small_icon_button("rufin-go-down-symbolic", msgid("Move provider down"));
             down.set_sensitive(index + 1 < enabled.len());
             let down_shell = Rc::clone(shell);
             let down_group = group.downgrade();

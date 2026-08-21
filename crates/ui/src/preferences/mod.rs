@@ -42,7 +42,7 @@ const PREFERENCES_DIALOG_WIDTH: i32 = 700;
 const PREFERENCES_DIALOG_HEIGHT: i32 = 640;
 const LASTFM_API_CREATE_URL: &str = "https://www.last.fm/api/account/create";
 const LISTENBRAINZ_TOKEN_URL: &str = "https://listenbrainz.org/settings/";
-const INTEGRATIONS_ICON_NAME: &str = "network-workgroup-bundled-symbolic";
+const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 
 pub(crate) struct PreferencesState {
     pub(crate) dialog: RefCell<Option<gtk::glib::WeakRef<adw::Dialog>>>,
@@ -255,11 +255,11 @@ impl PreferencesPageKind {
 
     fn icon_name(self) -> &'static str {
         match self {
-            Self::General => "preferences-system-bundled-symbolic",
-            Self::Appearance => "preferences-desktop-appearance-bundled-symbolic",
+            Self::General => "rufin-preferences-system-symbolic",
+            Self::Appearance => "rufin-preferences-desktop-appearance-symbolic",
             Self::Integrations => INTEGRATIONS_ICON_NAME,
-            Self::Playback => "media-playback-start-bundled-symbolic",
-            Self::Library => "drive-multidisk-bundled-symbolic",
+            Self::Playback => "rufin-media-playback-start-symbolic",
+            Self::Library => "rufin-drive-multidisk-symbolic",
         }
     }
 
@@ -287,7 +287,7 @@ pub(crate) struct PreferencesNavigationControls {
 
 impl PreferencesNavigationControls {
     fn new() -> Self {
-        let back = gtk::Button::from_icon_name("go-previous-bundled-symbolic");
+        let back = gtk::Button::from_icon_name("rufin-go-previous-symbolic");
         back.add_css_class("flat");
         back.add_css_class("preferences-nested-back");
         back.update_property(&[gtk::accessible::Property::Label(&tr("Back"))]);
@@ -403,7 +403,7 @@ fn rebuild_preferences_dialog(
         .build();
     let navigation_controls = PreferencesNavigationControls::new();
     let search_button = gtk::ToggleButton::builder()
-        .icon_name("system-search-bundled-symbolic")
+        .icon_name("rufin-system-search-symbolic")
         .tooltip_text(tr("Search"))
         .build();
     search_button.add_css_class("flat");
@@ -412,7 +412,7 @@ fn rebuild_preferences_dialog(
     let start_controls = gtk::Box::new(gtk::Orientation::Horizontal, 4);
     start_controls.append(&search_button);
     start_controls.append(&navigation_controls.back);
-    let close_button = gtk::Button::from_icon_name("window-close-bundled-symbolic");
+    let close_button = gtk::Button::from_icon_name("rufin-window-close-symbolic");
     close_button.add_css_class("flat");
     close_button.add_css_class("preferences-dialog-close");
     close_button.set_tooltip_text(Some(&tr("Close")));
@@ -580,7 +580,7 @@ fn rebuild_preferences_dialog(
                 .activatable(true)
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(item.page.icon_name()));
-            row.add_suffix(&gtk::Image::from_icon_name("go-next-bundled-symbolic"));
+            row.add_suffix(&gtk::Image::from_icon_name("rufin-go-next-symbolic"));
             let page = item.page;
             let target = item.target.clone();
             let expander = item.expander.clone();
@@ -754,7 +754,7 @@ fn build_preferences_page(
 fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage {
     let page = adw::PreferencesPage::builder()
         .title(tr("General"))
-        .icon_name("preferences-system-bundled-symbolic")
+        .icon_name("rufin-preferences-system-symbolic")
         .build();
 
     let settings = shell.settings.current.borrow().clone();
@@ -1435,13 +1435,13 @@ fn sidebar_item_row(
     visible.set_active(entry.visible);
     visible.set_valign(gtk::Align::Center);
 
-    let up = gtk::Button::from_icon_name("go-up-bundled-symbolic");
+    let up = gtk::Button::from_icon_name("rufin-go-up-symbolic");
     up.add_css_class("flat");
     up.set_tooltip_text(Some(&tr("Move up")));
     up.set_valign(gtk::Align::Center);
     row.add_suffix(&up);
 
-    let down = gtk::Button::from_icon_name("go-down-bundled-symbolic");
+    let down = gtk::Button::from_icon_name("rufin-go-down-symbolic");
     down.add_css_class("flat");
     down.set_tooltip_text(Some(&tr("Move down")));
     down.set_valign(gtk::Align::Center);

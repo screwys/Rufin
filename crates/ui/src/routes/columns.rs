@@ -659,7 +659,7 @@ pub(crate) fn track_row_index_cell(text: &str) -> gtk::Overlay {
     label.set_single_line_mode(true);
     cell.set_child(Some(&label));
 
-    let playing = gtk::Image::from_icon_name("media-playback-start-bundled-symbolic");
+    let playing = gtk::Image::from_icon_name("rufin-media-playback-start-symbolic");
     playing.add_css_class("track-row-index-playing");
     playing.set_pixel_size(14);
     playing.set_halign(gtk::Align::Center);
@@ -667,7 +667,7 @@ pub(crate) fn track_row_index_cell(text: &str) -> gtk::Overlay {
     playing.set_margin_start(2);
     cell.add_overlay(&playing);
 
-    let paused = gtk::Image::from_icon_name("media-playback-pause-bundled-symbolic");
+    let paused = gtk::Image::from_icon_name("rufin-media-playback-pause-symbolic");
     paused.add_css_class("track-row-index-paused");
     paused.set_pixel_size(14);
     paused.set_halign(gtk::Align::Center);

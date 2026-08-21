@@ -493,15 +493,15 @@ pub(crate) fn load_album_detail(
 fn album_summary_items(summary: &AlbumSummary) -> Vec<(&'static str, String)> {
     vec![
         (
-            "x-office-calendar-bundled-symbolic",
+            "rufin-x-office-calendar-symbolic",
             nonzero_year(summary.album.year),
         ),
         (
-            "rufin-route-tracks-symbolic",
+            "rufin-tracks-symbolic",
             track_count_text(summary.track_count.into()),
         ),
         (
-            "preferences-system-time-bundled-symbolic",
+            "rufin-preferences-system-time-symbolic",
             format_duration_units(summary.duration_seconds),
         ),
     ]

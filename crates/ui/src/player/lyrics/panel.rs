@@ -224,7 +224,7 @@ impl Shell {
         title.set_xalign(0.0);
         title.set_hexpand(true);
         header.append(&title);
-        let close_button = icon_button("window-close-bundled-symbolic", "Close");
+        let close_button = icon_button("rufin-window-close-symbolic", "Close");
         header.append(&close_button);
         content.append(&header);
 

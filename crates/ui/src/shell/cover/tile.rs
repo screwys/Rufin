@@ -7,7 +7,6 @@ use gtk::glib;
 #[derive(Clone)]
 pub(crate) struct ArtworkTile {
     pub(crate) area: gtk::Overlay,
-    fallback: gtk::Box,
     image: gtk::Picture,
     size: Rc<Cell<i32>>,
     known_missing: Rc<Cell<bool>>,
@@ -22,7 +21,6 @@ pub(crate) struct ArtworkTile {
 #[derive(Clone)]
 pub(crate) struct ArtworkTileWeak {
     area: glib::WeakRef<gtk::Overlay>,
-    fallback: glib::WeakRef<gtk::Box>,
     image: glib::WeakRef<gtk::Picture>,
     size: Rc<Cell<i32>>,
     known_missing: Rc<Cell<bool>>,
@@ -74,12 +72,6 @@ impl ArtworkTile {
         sizing.set_accessible_role(gtk::AccessibleRole::Presentation);
         area.set_child(Some(&sizing));
 
-        let fallback = cover_fallback();
-        fallback.set_visible(false);
-        area.add_overlay(&fallback);
-        area.set_measure_overlay(&fallback, false);
-        area.set_clip_overlay(&fallback, true);
-
         let image = cover_picture(gtk::ContentFit::Cover);
         image.set_visible(false);
         area.add_overlay(&image);
@@ -98,7 +90,6 @@ impl ArtworkTile {
 
         Self {
             area,
-            fallback,
             image,
             size,
             known_missing,
@@ -122,7 +113,6 @@ impl ArtworkTile {
     pub(crate) fn downgrade(&self) -> ArtworkTileWeak {
         ArtworkTileWeak {
             area: self.area.downgrade(),
-            fallback: self.fallback.downgrade(),
             image: self.image.downgrade(),
             size: Rc::clone(&self.size),
             known_missing: Rc::clone(&self.known_missing),
@@ -188,7 +178,7 @@ impl ArtworkTile {
         self.known_missing.set(terminal_missing);
 
         let has_texture = self.image.paintable().is_some();
-        self.sync_presentation(has_texture, terminal_missing);
+        self.sync_presentation(has_texture, true);
         self.area.queue_draw();
 
         ArtworkBindOutcome {
@@ -247,7 +237,7 @@ impl ArtworkTile {
         self.known_missing.set(known_missing);
         *self.artwork_id.borrow_mut() = None;
         *self.request_key.borrow_mut() = None;
-        self.sync_presentation(has_texture, known_missing);
+        self.sync_presentation(has_texture, true);
         generation
     }
 
@@ -261,7 +251,7 @@ impl ArtworkTile {
         }
         self.image.set_paintable(Some(&texture));
         self.known_missing.set(false);
-        self.sync_presentation(true, false);
+        self.sync_presentation(true, true);
         true
     }
 
@@ -275,7 +265,7 @@ impl ArtworkTile {
         self.sync_presentation(false, false);
     }
 
-    pub(super) fn set_blank_if_current(&self, generation: u64) -> bool {
+    pub(super) fn set_fallback_if_current(&self, generation: u64) -> bool {
         if self.generation.get() != generation {
             return false;
         }
@@ -284,7 +274,7 @@ impl ArtworkTile {
         self.known_missing.set(false);
         *self.artwork_id.borrow_mut() = None;
         *self.request_key.borrow_mut() = None;
-        self.sync_presentation(false, false);
+        self.sync_presentation(false, true);
         true
     }
 
@@ -299,18 +289,14 @@ impl ArtworkTile {
         true
     }
 
-    fn sync_presentation(&self, has_texture: bool, known_missing: bool) {
+    fn sync_presentation(&self, has_texture: bool, bound: bool) {
         self.image.set_visible(has_texture);
-        if has_texture {
-            self.fallback.set_visible(false);
-            self.area.set_opacity(1.0);
-        } else if known_missing {
-            self.fallback.set_visible(true);
-            self.area.set_opacity(1.0);
+        if bound && !has_texture {
+            self.area.add_css_class("cover-fallback");
         } else {
-            self.fallback.set_visible(false);
-            self.area.set_opacity(0.0);
+            self.area.remove_css_class("cover-fallback");
         }
+        self.area.set_opacity(if bound { 1.0 } else { 0.0 });
     }
 }
 
@@ -318,7 +304,6 @@ impl ArtworkTileWeak {
     pub(crate) fn upgrade(&self) -> Option<ArtworkTile> {
         Some(ArtworkTile {
             area: self.area.upgrade()?,
-            fallback: self.fallback.upgrade()?,
             image: self.image.upgrade()?,
             size: Rc::clone(&self.size),
             known_missing: Rc::clone(&self.known_missing),
@@ -347,16 +332,4 @@ fn cover_picture(content_fit: gtk::ContentFit) -> gtk::Picture {
     picture.set_valign(gtk::Align::Fill);
     picture.set_can_target(false);
     picture
-}
-
-fn cover_fallback() -> gtk::Box {
-    let fallback = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    fallback.add_css_class("cover-fallback");
-    fallback.set_accessible_role(gtk::AccessibleRole::Presentation);
-    fallback.set_can_target(false);
-    fallback.set_hexpand(true);
-    fallback.set_vexpand(true);
-    fallback.set_halign(gtk::Align::Fill);
-    fallback.set_valign(gtk::Align::Fill);
-    fallback
 }

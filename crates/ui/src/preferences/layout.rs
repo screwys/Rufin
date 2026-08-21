@@ -26,7 +26,7 @@ pub(crate) fn populate_home_block_rows(
         drag.set_tooltip_text(Some(&tr("Drag to reorder")));
         row.add_prefix(&drag);
 
-        let up = gtk::Button::from_icon_name("go-up-bundled-symbolic");
+        let up = gtk::Button::from_icon_name("rufin-go-up-symbolic");
         up.add_css_class("flat");
         up.set_tooltip_text(Some(&tr("Move up")));
         up.set_valign(gtk::Align::Center);
@@ -49,7 +49,7 @@ pub(crate) fn populate_home_block_rows(
         });
         row.add_suffix(&up);
 
-        let down = gtk::Button::from_icon_name("go-down-bundled-symbolic");
+        let down = gtk::Button::from_icon_name("rufin-go-down-symbolic");
         down.add_css_class("flat");
         down.set_tooltip_text(Some(&tr("Move down")));
         down.set_valign(gtk::Align::Center);
@@ -234,7 +234,7 @@ pub(crate) fn button_row(title: &str, icon_name: &str) -> adw::ButtonRow {
     adw::ButtonRow::builder()
         .title(tr(title))
         .start_icon_name(icon_name)
-        .end_icon_name("go-next-bundled-symbolic")
+        .end_icon_name("rufin-go-next-symbolic")
         .build()
 }
 pub(crate) fn left_sidebar_row<F>(

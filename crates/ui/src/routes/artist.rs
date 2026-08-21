@@ -817,7 +817,7 @@ impl Shell {
         counts.add_css_class("artist-count-row");
         counts.set_halign(gtk::Align::Start);
         let (albums, album_count) =
-            artist_count_button_with_label("rufin-route-albums-symbolic", &facts.album_text());
+            artist_count_button_with_label("rufin-albums-symbolic", &facts.album_text());
         let localized_album_count = facts.clone();
         bind_label_text_with(&album_count, move || localized_album_count.album_text());
         let shell = Rc::clone(self);
@@ -827,7 +827,7 @@ impl Shell {
         });
         counts.append(&albums);
         let (tracks_button, track_count) =
-            artist_count_button_with_label("rufin-route-tracks-symbolic", &facts.track_text());
+            artist_count_button_with_label("rufin-tracks-symbolic", &facts.track_text());
         let localized_track_count = facts.clone();
         bind_label_text_with(&track_count, move || localized_track_count.track_text());
         let shell = Rc::clone(self);

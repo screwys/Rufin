@@ -282,7 +282,7 @@ pub fn build(
     let right_split = content_chrome.right_split;
     let right_panel_slot = content_chrome.right_panel_slot;
     let right_resize_handle = content_chrome.right_resize_handle;
-    let tiny_nav_button = gtk::Button::from_icon_name("sidebar-show-bundled-symbolic");
+    let tiny_nav_button = gtk::Button::from_icon_name("rufin-sidebar-show-symbolic");
     tiny_nav_button.add_css_class("icon-button");
     tiny_nav_button.add_css_class("flat");
     tiny_nav_button.add_css_class("circular");
@@ -361,7 +361,7 @@ pub fn build(
     source_refresh_feedback.set_margin_bottom(BOTTOM_PLAYER_HEIGHT + 2);
     source_refresh_feedback.set_visible(false);
     source_refresh_feedback.set_can_target(false);
-    let source_refresh_icon = gtk::Image::from_icon_name("view-refresh-bundled-symbolic");
+    let source_refresh_icon = gtk::Image::from_icon_name("rufin-view-refresh-symbolic");
     source_refresh_icon.set_pixel_size(16);
     source_refresh_feedback.append(&source_refresh_icon);
     let source_refresh_content = gtk::Box::new(gtk::Orientation::Vertical, 4);
@@ -407,7 +407,7 @@ pub fn build(
     operation_feedback_text.append(&operation_feedback_title);
     operation_feedback_text.append(&operation_feedback_subtitle);
     operation_feedback.append(&operation_feedback_text);
-    let operation_feedback_close = gtk::Button::from_icon_name("window-close-bundled-symbolic");
+    let operation_feedback_close = gtk::Button::from_icon_name("rufin-window-close-symbolic");
     operation_feedback_close.add_css_class("flat");
     operation_feedback_close.set_valign(gtk::Align::Center);
     operation_feedback_close.set_tooltip_text(Some(&tr("Close")));

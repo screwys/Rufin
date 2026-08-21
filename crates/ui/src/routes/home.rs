@@ -397,13 +397,13 @@ impl Shell {
         body.append(&cover_column);
 
         let facts = DetailSummaryProjection::new(&[
-            ("x-office-calendar-bundled-symbolic", nonzero_year(year)),
+            ("rufin-x-office-calendar-symbolic", nonzero_year(year)),
             (
-                "rufin-route-tracks-symbolic",
+                "rufin-tracks-symbolic",
                 track_count_text(track_count.into()),
             ),
             (
-                "preferences-system-time-bundled-symbolic",
+                "rufin-preferences-system-time-symbolic",
                 format_duration_units(duration),
             ),
         ]);

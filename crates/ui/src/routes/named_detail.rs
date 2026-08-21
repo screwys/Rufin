@@ -383,12 +383,12 @@ fn named_id(summary: &NamedCollectionItem) -> &str {
 
 fn named_summary_items(summary: &NamedCollectionItem) -> Vec<(&'static str, String)> {
     let mut items = vec![(
-        "rufin-route-tracks-symbolic",
+        "rufin-tracks-symbolic",
         track_count_text(summary.track_count().into()),
     )];
     if summary.duration_seconds() > 0 {
         items.push((
-            "preferences-system-time-bundled-symbolic",
+            "rufin-preferences-system-time-symbolic",
             format_duration_units(summary.duration_seconds()),
         ));
     }

@@ -66,7 +66,7 @@ static SUBSONIC: SourcePresentation = SourcePresentation {
 static LOCAL: SourcePresentation = SourcePresentation {
     kind: LOCAL_SOURCE_KIND,
     title: msgid("Local"),
-    icon_name: "rufin-route-folders-symbolic",
+    icon_name: "rufin-folders-symbolic",
     setup_flow: local_setup_flow,
     settings_group: None,
 };
@@ -739,7 +739,7 @@ impl SourceSetupFlow for LocalSetupFlow {
         content.append(&group);
 
         let status = setup_status_label(shell);
-        let login = text_button("folder-music-bundled-symbolic", "Connect");
+        let login = text_button("rufin-folder-music-symbolic", "Connect");
         login.add_css_class("suggested-action");
         let actions = setup_actions(&login);
         content.append(&actions);
@@ -876,12 +876,12 @@ fn saved_source_recovery_group(shell: &Rc<Shell>, compact: bool) -> Option<adw::
             .activatable(registration.is_some())
             .build();
         let icon = gtk::Image::from_icon_name(
-            registration.map_or("network-server-bundled-symbolic", |registration| {
+            registration.map_or("rufin-network-server-symbolic", |registration| {
                 registration.icon_name
             }),
         );
         row.add_prefix(&icon);
-        let forget = gtk::Button::from_icon_name("window-close-bundled-symbolic");
+        let forget = gtk::Button::from_icon_name("rufin-window-close-symbolic");
         forget.set_tooltip_text(Some(&tr("Forget Server")));
         forget.set_valign(gtk::Align::Center);
         forget.add_css_class("flat");
@@ -1259,7 +1259,7 @@ fn append_credential_connect(
     submit: impl Fn(&SourceHandle, CredentialInput) + 'static,
 ) {
     let status = setup_status_label(shell);
-    let login = text_button("network-server-bundled-symbolic", "Connect");
+    let login = text_button("rufin-network-server-symbolic", "Connect");
     login.add_css_class("suggested-action");
     login.set_sensitive(host.ready());
     connect_entry_row_activation(&host.name, &login);
@@ -1403,9 +1403,7 @@ fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersVi
                 tr("No Servers Found")
             })
             .build();
-        row.add_prefix(&gtk::Image::from_icon_name(
-            "network-server-bundled-symbolic",
-        ));
+        row.add_prefix(&gtk::Image::from_icon_name("rufin-network-server-symbolic"));
         if running {
             let spinner = gtk::Spinner::new();
             spinner.start();
@@ -1439,7 +1437,7 @@ fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersVi
         } else {
             tr("Search Again")
         })
-        .start_icon_name("view-refresh-bundled-symbolic")
+        .start_icon_name("rufin-view-refresh-symbolic")
         .build();
     search.set_sensitive(!running);
     let shell = Rc::downgrade(shell);
@@ -1488,8 +1486,8 @@ fn refresh_local_folder_selection_rows(selection: &LocalFolderSelectionRows) {
             .subtitle(path_subtitle(&folder))
             .subtitle_lines(2)
             .build();
-        row.add_prefix(&gtk::Image::from_icon_name("rufin-route-folders-symbolic"));
-        let remove = gtk::Button::from_icon_name("window-close-bundled-symbolic");
+        row.add_prefix(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
+        let remove = gtk::Button::from_icon_name("rufin-window-close-symbolic");
         remove.set_tooltip_text(Some(&tr("Remove folder")));
         remove.add_css_class("flat");
         remove.add_css_class("destructive-action");
