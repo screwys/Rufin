@@ -56,6 +56,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 
 | Crate | What it is for |
 | :--- | :--- |
+| `app-identity` | single-file crate to separate development builds |
 | `artwork` | artwork selection, loading, and caching |
 | `desktop-integration` | MPRIS, notifications, the tray, and Discord RPC |
 | `downloads` | server track downloads and download management |
@@ -79,7 +80,7 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 ```bash
 just build # builds the app
 just build arch # builds the Arch package
-just build dmg # builds the macOS disk image on macOS
+just build dmg # builds the isolated macOS development disk image on macOS
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64
 just build rpm arm # builds Fedora RPMs for AArch64
@@ -115,5 +116,3 @@ is kept under `.local/build`, container state under `.local/container`, and fini
 `.local/artifacts`. Use `just container shell` for an interactive shell, `just container disable` to
 return commands to the host, or `just container reset` to clear the container state. `just debug`
 always runs on the host and is unavailable inside the container shell.
-
-

@@ -17,6 +17,7 @@ use std::process::{Command, Stdio};
 #[cfg(target_os = "windows")]
 use std::sync::mpsc;
 
+use app_identity::PROJECT_NAME;
 #[cfg(target_os = "windows")]
 use reqwest::blocking::Client;
 use serde::{Deserialize, Serialize};
@@ -417,7 +418,7 @@ fn take_previous_result(cache_dir: &Path) -> Result<Option<PreviousUpdateResult>
 /// Convenience entry point used during application startup, before a channel
 /// handle has necessarily been detected.
 pub fn take_previous_update_result() -> Result<Option<PreviousUpdateResult>, String> {
-    let cache_dir = directories::ProjectDirs::from("io.github", "screwys", "Rufin")
+    let cache_dir = directories::ProjectDirs::from("io.github", "screwys", PROJECT_NAME)
         .map(|dirs| dirs.cache_dir().to_path_buf())
         .ok_or_else(|| {
             UpdateError::Io(io::Error::new(

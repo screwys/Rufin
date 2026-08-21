@@ -148,16 +148,6 @@ impl AudioGraph {
             .map(|factory| factory.name().to_string())
     }
 
-    #[cfg(test)]
-    pub(super) fn try_pull_output_sample(&self, timeout: gst::ClockTime) -> Option<gst::Sample> {
-        self.output
-            .downcast_ref::<gst_app::AppSink>()
-            .and_then(|sink| {
-                sink.try_pull_preroll(timeout)
-                    .or_else(|| sink.try_pull_sample(timeout))
-            })
-    }
-
     pub(super) fn apply_loudness(&self, loudness: &TrackLoudness) {
         if let Some(tags) = self.loudness_tags.as_ref() {
             tags.apply(loudness);

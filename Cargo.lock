@@ -42,6 +42,10 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "330a5ed07fa54e4702c9d6c4174f74427fc0ef6e214bbd677ae50a5099946470"
 
 [[package]]
+name = "app-identity"
+version = "0.13.1"
+
+[[package]]
 name = "apple-cf"
 version = "0.6.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -767,6 +771,7 @@ checksum = "092966b41edc516079bdf31ec78a2e0588d1d0c08f78b91d8307215928642b2b"
 name = "desktop-integration"
 version = "0.13.1"
 dependencies = [
+ "app-identity",
  "apple-cf",
  "artwork",
  "async-channel",
@@ -3712,6 +3717,7 @@ checksum = "6c20b6793b5c2fa6553b250154b78d6d0db37e72700ae35fad9387a46f487c97"
 name = "rufin"
 version = "0.13.1"
 dependencies = [
+ "app-identity",
  "artwork",
  "async-channel",
  "desktop-integration",
@@ -3961,6 +3967,7 @@ dependencies = [
 name = "secrets"
 version = "0.13.1"
 dependencies = [
+ "app-identity",
  "apple-native-keyring-store",
  "base64 0.23.0",
  "keyring-core",
@@ -4755,6 +4762,7 @@ dependencies = [
 name = "ui"
 version = "0.13.1"
 dependencies = [
+ "app-identity",
  "artwork",
  "ashpd",
  "async-channel",
@@ -5242,6 +5250,7 @@ dependencies = [
 name = "windows-updater"
 version = "0.13.1"
 dependencies = [
+ "app-identity",
  "directories",
  "reqwest",
  "serde",

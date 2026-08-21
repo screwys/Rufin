@@ -13,11 +13,15 @@ keywords = ["music", "audio", "gtk4", "jellyfin", "subsonic"]
 categories = ["multimedia::audio", "gui"]
 build = "build.rs"
 
+[features]
+development = ["app-identity/development"]
+
 [[bin]]
 name = "rufin"
 path = "src/main.rs"
 
 [dependencies]
+app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
 artwork.workspace = true

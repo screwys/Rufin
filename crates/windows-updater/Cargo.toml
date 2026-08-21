@@ -19,6 +19,7 @@ name = "rufin-update-helper"
 path = "src/bin/rufin-update-helper.rs"
 
 [dependencies]
+app-identity.workspace = true
 directories.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -131,7 +131,13 @@ fn macos_bundle_command(
     frameworks_dir: &Path,
 ) -> Result<Command, String> {
     let loader_dir = resources_dir.join("lib/gdk-pixbuf-2.0/loaders");
-    let loader_cache = env::temp_dir().join("rufin-gdk-pixbuf-loaders.cache");
+    let loader_cache = paths::project_cache_dir()
+        .unwrap_or_else(|| env::temp_dir().join(app_identity::APP_ID))
+        .join("gdk-pixbuf-loaders.cache");
+    if let Some(parent) = loader_cache.parent() {
+        fs::create_dir_all(parent)
+            .map_err(|error| format!("could not prepare the image loader cache: {error}"))?;
+    }
     let mut loader_modules = fs::read_dir(&loader_dir)
         .map_err(|error| format!("could not read image loaders: {error}"))?
         .filter_map(|entry| entry.ok().map(|entry| entry.path()))
@@ -156,21 +162,14 @@ fn macos_bundle_command(
 
     let registry_path = env::var_os("RUFIN_GST_REGISTRY_1_0")
         .map(PathBuf::from)
-        .or_else(|| {
-            env::var_os("HOME").map(|home| {
-                PathBuf::from(home)
-                    .join("Library/Caches/io.github.screwys.Rufin")
-                    .join(format!(
-                        "gstreamer-registry-{}.bin",
-                        env::consts::ARCH.replace("aarch64", "arm64")
-                    ))
-            })
-        })
         .unwrap_or_else(|| {
-            env::temp_dir().join(format!(
-                "rufin-gstreamer-registry-{}.bin",
+            let registry_file = format!(
+                "gstreamer-registry-{}.bin",
                 env::consts::ARCH.replace("aarch64", "arm64")
-            ))
+            );
+            paths::project_cache_dir()
+                .map(|cache_dir| cache_dir.join(&registry_file))
+                .unwrap_or_else(|| env::temp_dir().join(registry_file))
         });
     let mut command = Command::new(executable);
     command

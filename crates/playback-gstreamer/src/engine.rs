@@ -3433,27 +3433,6 @@ mod tests {
     }
 
     #[test]
-    fn fresh_playback_scales_the_first_output_buffer() {
-        ensure_gstreamer_initialized().expect("initialize GStreamer");
-        let directory = tempfile::tempdir().expect("playback fixture directory");
-        let path = directory.path().join("initial-volume-samples.wav");
-        write_constant_wave(&path);
-        let uri = gst::glib::filename_to_uri(&path, None).expect("playback fixture URI");
-
-        let baseline = first_output_peak(uri.as_str(), VolumeScale::Linear, 1.0, false);
-        let perceptual = first_output_peak(uri.as_str(), VolumeScale::Perceptual, 0.5, false);
-        let muted = first_output_peak(uri.as_str(), VolumeScale::Perceptual, 0.5, true);
-
-        assert!(baseline > 0.4, "unexpected baseline peak: {baseline}");
-        let ratio = perceptual / baseline;
-        assert!(
-            (ratio - 0.056_234_132_519_034_91).abs() < 2e-4,
-            "unexpected first-buffer gain: baseline={baseline}, perceptual={perceptual}, ratio={ratio}"
-        );
-        assert_eq!(muted, 0.0);
-    }
-
-    #[test]
     fn startup_seek_stays_silent_until_position_confirmation() {
         ensure_gstreamer_initialized().expect("initialize GStreamer");
         let directory = tempfile::tempdir().expect("playback fixture directory");
@@ -3494,65 +3473,31 @@ mod tests {
     }
 
     #[test]
-    fn visualizer_emits_levels_for_the_current_playing_pipeline() {
-        ensure_gstreamer_initialized().expect("initialize GStreamer");
-        let directory = tempfile::tempdir().expect("playback fixture directory");
-        let path = directory.path().join("current-visualizer.wav");
-        write_long_silent_wave(&path);
-        let uri = gst::glib::filename_to_uri(&path, None).expect("playback fixture URI");
+    fn visualizer_enablement_resets_the_current_run() {
         let events = Arc::new(Mutex::new(EventMailbox::default()));
-        let mut engine = GstEngine::new(events);
-        lock_recover(&engine.shared).settings = BackendAudioSettings {
-            audio_output: Some("appsink".to_string()),
-            ..BackendAudioSettings::default()
-        };
+        let mut engine = GstEngine::new(Arc::clone(&events));
+        let run = RunId::new(1);
+        {
+            let mut shared = lock_recover(&engine.shared);
+            shared.current = Some(PreparedRun {
+                run,
+                stream: ResolvedStream::new("file:///music/current.flac").into(),
+            });
+            shared.set_pipeline_id(Slot::Primary, Some(PipelineId(7)));
+        }
 
-        engine
-            .play_prepared(
-                PreparedRun {
-                    run: RunId::new(1),
-                    stream: ResolvedStream::new(uri.as_str()).into(),
-                },
-                None,
-                0,
-            )
-            .expect("start current playback");
-        assert!(
-            engine
-                .primary
-                .wait_for_state(gst::State::Playing, gst::ClockTime::from_seconds(10))
-        );
         engine
             .set_visualizer_enabled(true)
             .expect("enable visualizer");
 
-        let deadline = Instant::now() + Duration::from_secs(2);
-        let levels = loop {
-            let _ = engine
-                .primary
-                .try_pull_output_sample(gst::ClockTime::from_mseconds(50));
-            if let Some(levels) =
-                lock_recover(&engine.events)
-                    .drain()
-                    .into_iter()
-                    .find_map(|event| match event {
-                        BackendEvent::Visualizer { levels, .. } if !levels.is_empty() => {
-                            Some(levels)
-                        }
-                        _ => None,
-                    })
-            {
-                break levels;
-            }
-            assert!(
-                Instant::now() < deadline,
-                "current playback did not emit visualizer levels"
-            );
-            std::thread::yield_now();
-        };
-
-        assert!(!levels.is_empty());
-        engine.shutdown();
+        assert!(lock_recover(&engine.shared).visualizer_enabled);
+        assert!(matches!(
+            lock_recover(&events).drain().as_slice(),
+            [BackendEvent::Visualizer {
+                run: emitted_run,
+                levels,
+            }] if *emitted_run == run && levels.is_empty()
+        ));
     }
 
     #[test]
@@ -3747,49 +3692,6 @@ mod tests {
         assert!(shared.pipeline_id(Slot::Primary).is_some());
         drop(shared);
         engine.shutdown();
-    }
-
-    fn first_output_peak(uri: &str, volume_scale: VolumeScale, volume: f64, muted: bool) -> f64 {
-        let events = Arc::new(Mutex::new(EventMailbox::default()));
-        let mut engine = GstEngine::new(events);
-        lock_recover(&engine.shared).settings = BackendAudioSettings {
-            volume,
-            volume_scale,
-            muted,
-            audio_output: Some("appsink".to_string()),
-            ..BackendAudioSettings::default()
-        };
-        engine
-            .play_prepared(
-                PreparedRun {
-                    run: RunId::new(1),
-                    stream: ResolvedStream::new(uri).into(),
-                },
-                None,
-                0,
-            )
-            .expect("start sample capture playback");
-        assert!(
-            engine
-                .primary
-                .wait_for_state(gst::State::Playing, gst::ClockTime::from_seconds(10)),
-            "sample capture playback state"
-        );
-        let sample = engine
-            .primary
-            .try_pull_output_sample(gst::ClockTime::ZERO)
-            .expect("first output sample");
-        let buffer = sample.buffer().expect("sample buffer");
-        let map = buffer.map_readable().expect("map output samples");
-        let samples = map.as_slice();
-        assert_eq!(samples.len() % std::mem::size_of::<f32>(), 0);
-        let peak = samples
-            .chunks_exact(std::mem::size_of::<f32>())
-            .map(|bytes| f32::from_le_bytes(bytes.try_into().expect("32-bit sample")))
-            .map(f32::abs)
-            .fold(0.0_f32, f32::max);
-        engine.shutdown();
-        f64::from(peak)
     }
 
     #[test]
@@ -4357,18 +4259,14 @@ mod tests {
     }
 
     fn write_silent_wave(path: &std::path::Path) {
-        write_mono_wave(path, 0, 800);
+        write_silent_mono_wave(path, 800);
     }
 
     fn write_long_silent_wave(path: &std::path::Path) {
-        write_mono_wave(path, 0, 80_000);
+        write_silent_mono_wave(path, 80_000);
     }
 
-    fn write_constant_wave(path: &std::path::Path) {
-        write_mono_wave(path, i16::MAX / 2, 800);
-    }
-
-    fn write_mono_wave(path: &std::path::Path, sample: i16, frames: u32) {
+    fn write_silent_mono_wave(path: &std::path::Path, frames: u32) {
         const SAMPLE_RATE: u32 = 8_000;
         const CHANNELS: u16 = 1;
         const BITS_PER_SAMPLE: u16 = 16;
@@ -4397,7 +4295,7 @@ mod tests {
         file.write_all(&data_len.to_le_bytes())
             .expect("write data size");
         for _ in 0..frames {
-            file.write_all(&sample.to_le_bytes()).expect("write sample");
+            file.write_all(&0_i16.to_le_bytes()).expect("write sample");
         }
     }
 

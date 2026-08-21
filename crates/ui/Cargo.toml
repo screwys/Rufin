@@ -12,6 +12,7 @@ publish.workspace = true
 
 [dependencies]
 adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
+app-identity.workspace = true
 async-channel.workspace = true
 artwork.workspace = true
 directories.workspace = true

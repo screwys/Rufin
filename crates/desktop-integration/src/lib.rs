@@ -16,7 +16,7 @@ use tracing::warn;
     target_os = "windows",
     all(unix, not(any(target_os = "android", target_vendor = "apple")))
 ))]
-pub(crate) const APP_ID: &str = "io.github.screwys.Rufin";
+pub(crate) use app_identity::APP_ID;
 
 pub use discord::{DEFAULT_CLIENT_ID, Discord, DisplayType, LinkType, Settings};
 pub use media_controls::MediaControls;

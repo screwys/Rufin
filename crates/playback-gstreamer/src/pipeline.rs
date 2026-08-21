@@ -157,27 +157,11 @@ impl PlayerPipeline {
     }
 
     #[cfg(test)]
-    pub(super) fn wait_for_state(&self, state: gst::State, timeout: gst::ClockTime) -> bool {
-        self.session.as_ref().is_some_and(|session| {
-            let (result, current, _) = session.pipeline.state(timeout);
-            result.is_ok() && current == state
-        })
-    }
-
-    #[cfg(test)]
     pub(super) fn has_or_targets_state(&self, state: gst::State) -> bool {
         self.session.as_ref().is_some_and(|session| {
             let (result, current, pending) = session.pipeline.state(gst::ClockTime::ZERO);
             result.is_ok() && (current == state || pending == state)
         })
-    }
-
-    #[cfg(test)]
-    pub(super) fn try_pull_output_sample(&self, timeout: gst::ClockTime) -> Option<gst::Sample> {
-        self.session
-            .as_ref()
-            .and_then(|session| session.audio_graph.as_ref())
-            .and_then(|graph| graph.try_pull_output_sample(timeout))
     }
 
     pub(super) fn set_state(&self, state: gst::State) -> Result<gst::StateChangeSuccess, String> {

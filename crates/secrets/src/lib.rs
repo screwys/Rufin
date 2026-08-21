@@ -8,6 +8,10 @@ use std::sync::{Arc, Mutex};
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 use std::time::Duration;
 
+#[cfg(any(target_os = "macos", target_os = "windows"))]
+use app_identity::APP_ID;
+#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+use app_identity::PROJECT_NAME;
 use base64::{Engine as _, engine::general_purpose::STANDARD as BASE64};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -439,7 +443,7 @@ struct SystemKeyringBackend {
 impl SystemKeyringBackend {
     fn new(scope_id: String) -> SecretResult<Self> {
         Ok(Self {
-            application: "Rufin".to_string(),
+            application: PROJECT_NAME.to_string(),
             scope_id,
         })
     }
@@ -618,7 +622,7 @@ impl SystemKeyringBackend {
     fn entry(&self, key: &SecretKey) -> SecretResult<keyring_core::Entry> {
         let user = key.scoped_config_key(&self.scope_id);
         self.store
-            .build("io.github.screwys.Rufin", &user, None)
+            .build(APP_ID, &user, None)
             .map_err(native_credential_error)
     }
 }
@@ -722,12 +726,12 @@ impl SecretStore for SystemKeyringBackend {
 
 #[cfg(test)]
 mod tests {
-    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-    use super::SystemKeyringStore;
     use super::{
         CachedSecretStore, ConfigSecretStore, MemorySecretStore, SecretError, SecretKey,
         SecretResult, SecretStorageMode, SecretStore, SwitchableSecretStore,
     };
+    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+    use super::{PROJECT_NAME, SystemKeyringStore};
     use std::fs;
     use std::sync::{Arc, Mutex};
 
@@ -924,7 +928,7 @@ mod tests {
         assert_eq!(
             store.backend.secret_attributes(&key),
             vec![
-                ("application".to_string(), "Rufin".to_string()),
+                ("application".to_string(), PROJECT_NAME.to_string()),
                 ("scope".to_string(), "scope-1".to_string()),
                 ("namespace".to_string(), "example".to_string()),
                 ("kind".to_string(), "session".to_string()),
@@ -943,7 +947,7 @@ mod tests {
         assert_eq!(
             store.backend.secret_attributes(&key),
             vec![
-                ("application".to_string(), "Rufin".to_string()),
+                ("application".to_string(), PROJECT_NAME.to_string()),
                 ("scope".to_string(), "scope-1".to_string()),
                 ("namespace".to_string(), "provider".to_string()),
                 ("kind".to_string(), "provider-token".to_string()),
@@ -953,7 +957,7 @@ mod tests {
         assert_eq!(
             store.backend.legacy_secret_attributes(&key),
             Some(vec![
-                ("application".to_string(), "Rufin".to_string()),
+                ("application".to_string(), PROJECT_NAME.to_string()),
                 ("scope".to_string(), "scope-1".to_string()),
                 ("namespace".to_string(), "provider".to_string()),
                 ("kind".to_string(), "provider-token".to_string()),

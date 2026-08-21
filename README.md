@@ -226,7 +226,7 @@ pacman -S --needed base-devel git \
 ```bash
 brew install \
   rust just pkgconf gettext gtk4 libadwaita gstreamer \
-  dylibbundler librsvg game-music-emu libopenmpt libsoup meson ninja wavpack
+  dylibbundler librsvg game-music-emu libopenmpt libsoup meson ninja openssl@3 wavpack
 ```
 
 **Building:** After you installed dependencies for your operating system, you can build and run:
@@ -236,8 +236,12 @@ just build
 just debug
 ```
 
-On macOS, `just build dmg` creates
-`.local/artifacts/Rufin.dmg` for installation and platform behavior testing.
+Local macOS builds use the isolated `Rufin.Devel` application identity. The first `just debug` or
+`just build dmg` automatically creates the persistent local `Rufin Development` signing identity. The first signing operation may ask for access to the certificate's private
+key; **Always Allow** should keep this one-time.
+
+On macOS, `just build dmg` creates `.local/artifacts/Rufin.Devel.dmg` for installation and
+platform behavior testing.
 On Windows, `just build windows` creates the versioned setup executable in the
 same artifact directory.
 

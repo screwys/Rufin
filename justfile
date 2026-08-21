@@ -61,7 +61,7 @@ _build:
     fi; \
     artifact="$artifact_root/$executable"; \
     mkdir -p "$artifact_root"; \
-    CARGO_TARGET_DIR="$target_dir" cargo build --locked; \
+    CARGO_TARGET_DIR="$target_dir" cargo build --locked -p rufin --features development; \
     cp "$target_dir/debug/$executable" "$artifact"
 
 _build-arch:
@@ -309,6 +309,55 @@ _check-all:
     @just _test
     @cargo deny --locked check -D unmatched-skip
 
+setup-macos-signing:
+    #!/usr/bin/env bash
+    set -euo pipefail
+
+    if [[ "$(uname -s)" != Darwin ]]; then
+        echo "macOS signing setup must run on macOS." >&2
+        exit 1
+    fi
+    signing_identity="Rufin Development"
+    if security find-identity -v -p codesigning \
+        | grep -F "$signing_identity" >/dev/null; then
+        echo "$signing_identity is already available."
+        exit 0
+    fi
+
+    openssl_command="$(brew --prefix openssl@3)/bin/openssl"
+    keychain_path="$(security default-keychain -d user | tr -d '"')"
+    work_dir="$(mktemp -d)"
+    trap 'rm -rf "$work_dir"' EXIT
+    private_key_path="$work_dir/rufin-development.key.pem"
+    certificate_path="$work_dir/rufin-development.cert.pem"
+
+    "$openssl_command" req \
+        -newkey rsa:3072 \
+        -nodes \
+        -x509 \
+        -sha256 \
+        -days 3650 \
+        -subj '/CN=Rufin Development/O=Rufin' \
+        -addext 'basicConstraints=critical,CA:TRUE' \
+        -addext 'keyUsage=critical,digitalSignature' \
+        -addext 'extendedKeyUsage=critical,codeSigning' \
+        -keyout "$private_key_path" \
+        -out "$certificate_path"
+    security import "$private_key_path" \
+        -k "$keychain_path" \
+        -T /usr/bin/codesign
+    security import "$certificate_path" \
+        -k "$keychain_path" \
+        -T /usr/bin/codesign
+    security add-trusted-cert \
+        -r trustRoot \
+        -p codeSign \
+        -k "$keychain_path" \
+        "$certificate_path"
+    security find-identity -v -p codesigning "$keychain_path" \
+        | grep -F "$signing_identity" >/dev/null
+    echo "Created $signing_identity."
+
 debug *args:
     @if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then \
         echo "Run 'just debug' on the host." >&2; \
@@ -319,7 +368,31 @@ debug *args:
         shift; \
         flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \
     else \
-        RUST_LOG="${RUST_LOG:-debug}" cargo run --locked -p rufin -- "$@"; \
+        if [[ "$(uname -s)" == Darwin ]]; then \
+            brew_prefix="$(brew --prefix)"; \
+            export GIO_MODULE_DIR="${brew_prefix}/lib/gio/modules"; \
+            export GSETTINGS_SCHEMA_DIR="${brew_prefix}/share/glib-2.0/schemas"; \
+            export XDG_DATA_DIRS="${brew_prefix}/share${XDG_DATA_DIRS:+:${XDG_DATA_DIRS}}"; \
+            if [[ -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
+                just setup-macos-signing; \
+            fi; \
+            target_dir="${CARGO_TARGET_DIR:-$PWD/target}"; \
+            cargo build --locked -p rufin --features development; \
+            signing_args=( \
+                --force \
+                --sign "${RUFIN_MACOS_SIGN_IDENTITY:-Rufin Development}" \
+            ); \
+            if [[ -n "${RUFIN_MACOS_SIGN_KEYCHAIN:-}" ]]; then \
+                signing_args+=(--keychain "$RUFIN_MACOS_SIGN_KEYCHAIN"); \
+            fi; \
+            codesign "${signing_args[@]}" \
+                --identifier io.github.screwys.Rufin.Devel \
+                "$target_dir/debug/rufin"; \
+            RUST_LOG="${RUST_LOG:-debug}" "$target_dir/debug/rufin" "$@"; \
+        else \
+            RUST_LOG="${RUST_LOG:-debug}" \
+                cargo run --locked -p rufin --features development -- "$@"; \
+        fi; \
     fi
 
 fmt:
@@ -362,17 +435,51 @@ deps:
 _deps:
     @cargo run --locked -p xtask -- generate linux-packaging
 
-_build-dmg:
+_build-dmg identity="development":
     #!/usr/bin/env bash
     set -euo pipefail
 
     repo_root="$PWD"
+    build_identity="{{ identity }}"
+    case "$build_identity" in
+        development)
+            app_id="io.github.screwys.Rufin.Devel"
+            bundle_name="Rufin.Devel"
+            cargo_features=(--features development)
+            ;;
+        stable)
+            app_id="io.github.screwys.Rufin"
+            bundle_name="Rufin"
+            cargo_features=()
+            ;;
+        *)
+            echo "macOS build identity must be 'development' or 'stable'." >&2
+            exit 2
+            ;;
+    esac
+    if [[ "$build_identity" == stable \
+        && ( -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" \
+            || "${RUFIN_MACOS_SIGN_IDENTITY}" == "-" ) ]]; then
+        echo "Stable macOS builds require RUFIN_MACOS_SIGN_IDENTITY." >&2
+        exit 1
+    fi
+    if [[ "$build_identity" == development \
+        && -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then
+        just setup-macos-signing
+    fi
+    signing_args=(
+        --force
+        --sign "${RUFIN_MACOS_SIGN_IDENTITY:-Rufin Development}"
+    )
+    if [[ -n "${RUFIN_MACOS_SIGN_KEYCHAIN:-}" ]]; then
+        signing_args+=(--keychain "$RUFIN_MACOS_SIGN_KEYCHAIN")
+    fi
     artifact_root="${RUFIN_ARTIFACT_ROOT:-${repo_root}/.local/artifacts}"
     work_root="${repo_root}/.local/build/macos"
     target_dir="${CARGO_TARGET_DIR:-${work_root}/target}"
-    app_path="${work_root}/Rufin.app"
+    app_path="${work_root}/${bundle_name}.app"
     dmg_root="${work_root}/dmg"
-    dmg_path="${RUFIN_DMG_ARTIFACT:-${artifact_root}/Rufin.dmg}"
+    dmg_path="${RUFIN_DMG_ARTIFACT:-${artifact_root}/${bundle_name}.dmg}"
 
     mkdir -p "$work_root"
     mkdir -p "$(dirname "$dmg_path")"
@@ -510,7 +617,8 @@ _build-dmg:
         "$app_path/Contents/Resources/share"
 
     MACOSX_DEPLOYMENT_TARGET="$deployment_target" \
-        CARGO_TARGET_DIR="$target_dir" cargo build --locked --release -p rufin
+        CARGO_TARGET_DIR="$target_dir" \
+        cargo build --locked --release -p rufin "${cargo_features[@]}"
     cp "$target_dir/release/rufin" "$app_path/Contents/MacOS/rufin"
     cp "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
     cp "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" \
@@ -519,6 +627,8 @@ _build-dmg:
     sed \
         -e "s/@VERSION@/${version}/g" \
         -e "s/@MINIMUM_SYSTEM_VERSION@/${deployment_target}/g" \
+        -e "s/@BUNDLE_IDENTIFIER@/${app_id}/g" \
+        -e "s/@BUNDLE_NAME@/${bundle_name}/g" \
         "${repo_root}/packaging/macos/Info.plist.in" \
         >"$app_path/Contents/Info.plist"
 
@@ -672,7 +782,7 @@ _build-dmg:
     while IFS= read -r -d '' bundled_file; do
         if file "$bundled_file" | grep -q 'Mach-O'; then
             prepare_mach_o_for_bundle "$bundled_file"
-            codesign --force --sign - "$bundled_file"
+            codesign "${signing_args[@]}" "$bundled_file"
             install_name="$(mach_o_install_name "$bundled_file" || true)"
             external_dependencies="$(mach_o_dependencies "$bundled_file" \
                 | grep -vFx "$install_name" \
@@ -685,13 +795,13 @@ _build-dmg:
             fi
         fi
     done < <(find "$app_path/Contents" -type f -print0)
-    codesign --force --sign - --identifier io.github.screwys.Rufin "$app_path"
+    codesign "${signing_args[@]}" --identifier "$app_id" "$app_path"
     codesign --verify --deep --strict "$app_path"
 
     mkdir -p "$dmg_root"
-    ditto "$app_path" "$dmg_root/Rufin.app"
+    ditto "$app_path" "$dmg_root/${bundle_name}.app"
     ln -s /Applications "$dmg_root/Applications"
-    hdiutil create -volname Rufin -srcfolder "$dmg_root" -ov -format UDZO "$dmg_path"
+    hdiutil create -volname "$bundle_name" -srcfolder "$dmg_root" -ov -format UDZO "$dmg_path"
 
     echo "Built ${dmg_path}"
 

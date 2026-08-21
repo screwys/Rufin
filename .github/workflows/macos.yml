@@ -46,6 +46,9 @@ jobs:
       ref: ${{ inputs.ref }}
       release_tag: ${{ inputs.upload_release_tag }}
       verify_signed_tag: ${{ inputs.upload_release_tag != '' }}
+    secrets:
+      MACOS_SIGNING_CERTIFICATE_PEM_BASE64: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PEM_BASE64 }}
+      MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64: ${{ secrets.MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64 }}
 
   upload:
     name: Upload macOS release assets

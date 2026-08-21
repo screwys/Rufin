@@ -11,6 +11,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+app-identity.workspace = true
 metadata-lookup.workspace = true
 artwork.workspace = true
 gio.workspace = true

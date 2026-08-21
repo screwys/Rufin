@@ -7,6 +7,7 @@ use std::sync::OnceLock;
 use std::time::Duration;
 
 use adw::prelude::*;
+use app_identity::{APP_ID, STABLE_APP_ID};
 use gtk::gio;
 use tracing::error;
 
@@ -14,7 +15,6 @@ use crate::runtime::RuntimeInputs;
 
 pub(crate) mod style;
 
-const APP_ID: &str = "io.github.screwys.Rufin";
 const ICON_RESOURCE_ROOT: &str = "/io/github/screwys/Rufin/icons/hicolor";
 const GTK_DECORATION_LAYOUT_OPTION: &str = "gtk-decoration-layout";
 const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
@@ -349,7 +349,7 @@ fn windows_preview_controls() -> gtk::Box {
 
 fn present_startup_error(app: &adw::Application, error: &str, preview: Option<WindowBarPreview>) {
     let status = adw::StatusPage::builder()
-        .icon_name(APP_ID)
+        .icon_name(STABLE_APP_ID)
         .title("Rufin")
         .description(error)
         .build();
@@ -361,7 +361,7 @@ fn configure_app_icon() {
     if let Err(error) = register_resources() {
         error!(%error, "failed to register Rufin's interface resources");
     }
-    gtk::Window::set_default_icon_name(APP_ID);
+    gtk::Window::set_default_icon_name(STABLE_APP_ID);
     let Some(display) = gtk::gdk::Display::default() else {
         return;
     };

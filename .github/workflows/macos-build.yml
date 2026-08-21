@@ -17,6 +17,11 @@ on:
         default: false
         required: false
         type: boolean
+    secrets:
+      MACOS_SIGNING_CERTIFICATE_PEM_BASE64:
+        required: false
+      MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64:
+        required: false
 
 permissions:
   contents: read
@@ -112,14 +117,86 @@ jobs:
           [[ "$sdk_version" == 26.* ]]
           echo "Using $xcode_app with macOS SDK $sdk_version."
 
+      - name: Install release code-signing identity
+        if: inputs.release_tag != ''
+        env:
+          SIGNING_CERTIFICATE_PEM_BASE64: ${{ secrets.MACOS_SIGNING_CERTIFICATE_PEM_BASE64 }}
+          SIGNING_PRIVATE_KEY_PEM_BASE64: ${{ secrets.MACOS_SIGNING_PRIVATE_KEY_PEM_BASE64 }}
+        run: |
+          set -euo pipefail
+          test -n "$SIGNING_CERTIFICATE_PEM_BASE64"
+          test -n "$SIGNING_PRIVATE_KEY_PEM_BASE64"
+          certificate_path="$RUNNER_TEMP/rufin-signing.cert.pem"
+          private_key_path="$RUNNER_TEMP/rufin-signing.key.pem"
+          keychain_path="$RUNNER_TEMP/rufin-signing.keychain-db"
+          keychain_password="$(uuidgen)$(uuidgen)"
+          printf '%s' "$SIGNING_CERTIFICATE_PEM_BASE64" \
+            | base64 --decode -o "$certificate_path"
+          printf '%s' "$SIGNING_PRIVATE_KEY_PEM_BASE64" \
+            | base64 --decode -o "$private_key_path"
+          chmod 0600 "$private_key_path"
+          certificate_fingerprint="$(
+            openssl x509 \
+              -in "$certificate_path" \
+              -noout \
+              -fingerprint \
+              -sha256 \
+              | sed 's/.*=//; s/://g'
+          )"
+          test "$certificate_fingerprint" = \
+            "1A78A878B19C4C1FC6578386153D900755A4E967D50107233838B34561908368"
+          sudo security add-trusted-cert \
+            -d \
+            -r trustRoot \
+            -p codeSign \
+            -k /Library/Keychains/System.keychain \
+            "$certificate_path"
+          security create-keychain -p "$keychain_password" "$keychain_path"
+          security set-keychain-settings -lut 21600 "$keychain_path"
+          security unlock-keychain -p "$keychain_password" "$keychain_path"
+          security import "$private_key_path" \
+            -k "$keychain_path" \
+            -T /usr/bin/codesign
+          security import "$certificate_path" \
+            -k "$keychain_path" \
+            -T /usr/bin/codesign
+          security set-key-partition-list \
+            -S apple-tool:,apple: \
+            -s \
+            -k "$keychain_password" \
+            "$keychain_path"
+          signing_identity="$(
+            security find-identity -v -p codesigning "$keychain_path" \
+              | awk '/Rufin GitHub Signing/ { print $2; exit }'
+          )"
+          test -n "$signing_identity"
+          echo "RUFIN_MACOS_SIGN_IDENTITY=$signing_identity" >> "$GITHUB_ENV"
+          echo "RUFIN_MACOS_SIGN_KEYCHAIN=$keychain_path" >> "$GITHUB_ENV"
+
       - name: Build macOS disk image
+        env:
+          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
           gettext_prefix="$(brew --prefix gettext)"
           export PATH="${gettext_prefix}/bin:$PATH"
+          build_identity=development
+          if [[ -n "$RELEASE_TAG" ]]; then
+            build_identity=stable
+          else
+            export RUFIN_MACOS_SIGN_IDENTITY=-
+          fi
           RUFIN_ARTIFACT_ROOT="$PWD/dist" \
             RUFIN_DMG_ARTIFACT="$PWD/dist/Rufin-macos-${{ matrix.architecture }}.dmg" \
-            just _build-dmg
+            just _build-dmg "$build_identity"
+
+      - name: Remove release code-signing keychain
+        if: always() && inputs.release_tag != ''
+        run: |
+          keychain_path="$RUNNER_TEMP/rufin-signing.keychain-db"
+          if [[ -e "$keychain_path" ]]; then
+            security delete-keychain "$keychain_path"
+          fi
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

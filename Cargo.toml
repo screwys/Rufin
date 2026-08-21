@@ -17,6 +17,7 @@ publish = false
 adw = { package = "libadwaita", version = "0.9.1" }
 apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
 apple-cf = "=0.6.0"
+app-identity = { path = "crates/app-identity" }
 async-channel = "2.5.0"
 async-trait = "0.1.89"
 ashpd = { version = "0.13.13", default-features = false, features = [

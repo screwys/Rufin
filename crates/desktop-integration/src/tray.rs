@@ -16,6 +16,8 @@ mod freedesktop {
     use std::sync::mpsc::{Receiver, Sender, channel};
     use tracing::warn;
 
+    use app_identity::{APP_ID, STABLE_APP_ID};
+
     use super::TrayIntent;
 
     const TRAY_ICON_SIZES: [i32; 5] = [16, 22, 24, 32, 48];
@@ -71,7 +73,7 @@ mod freedesktop {
 
     impl ksni::Tray for RufinTray {
         fn id(&self) -> String {
-            "io.github.screwys.Rufin".to_string()
+            APP_ID.to_string()
         }
 
         fn title(&self) -> String {
@@ -80,7 +82,7 @@ mod freedesktop {
 
         fn icon_name(&self) -> String {
             if tray_icon_pixmaps().is_empty() {
-                "io.github.screwys.Rufin".to_string()
+                STABLE_APP_ID.to_string()
             } else {
                 String::new()
             }

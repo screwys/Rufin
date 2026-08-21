@@ -5,17 +5,17 @@
   <key>CFBundleDevelopmentRegion</key>
   <string>en</string>
   <key>CFBundleDisplayName</key>
-  <string>Rufin</string>
+  <string>@BUNDLE_NAME@</string>
   <key>CFBundleExecutable</key>
   <string>rufin</string>
   <key>CFBundleIconFile</key>
   <string>Rufin.icns</string>
   <key>CFBundleIdentifier</key>
-  <string>io.github.screwys.Rufin</string>
+  <string>@BUNDLE_IDENTIFIER@</string>
   <key>CFBundleInfoDictionaryVersion</key>
   <string>6.0</string>
   <key>CFBundleName</key>
-  <string>Rufin</string>
+  <string>@BUNDLE_NAME@</string>
   <key>CFBundlePackageType</key>
   <string>APPL</string>
   <key>CFBundleShortVersionString</key>
