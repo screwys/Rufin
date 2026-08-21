@@ -798,7 +798,7 @@ fn aggregate_commit_failure_restores_every_original_file() {
 }
 
 #[test]
-fn complete_scan_maps_lofty_metadata_and_embedded_artwork() {
+fn complete_scan_maps_lofty_metadata_before_background_embedded_artwork() {
     let root = tempfile::tempdir().expect("Local root");
     let path = root.path().join("Tagged.wav");
     write_complete_tagged_wav(&path).expect("write complete tagged WAV");
@@ -857,13 +857,7 @@ fn complete_scan_maps_lofty_metadata_and_embedded_artwork() {
     );
     assert_eq!(track.mood_names().collect::<Vec<_>>(), ["Focused", "Calm"]);
 
-    let artwork = track
-        .local_artwork
-        .as_ref()
-        .expect("embedded artwork reference");
-    let image = source.image_bytes(artwork).expect("read embedded artwork");
-    assert_eq!(image.bytes, TEST_PNG);
-    assert_eq!(image.content_type.as_deref(), Some("image/png"));
+    assert_eq!(track.local_artwork, None);
 
     let albums = facts.albums();
     let [album] = albums.as_slice() else {

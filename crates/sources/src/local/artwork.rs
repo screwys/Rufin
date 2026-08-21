@@ -85,6 +85,22 @@ pub(super) fn embedded_reference(
     }
 }
 
+pub(super) fn inspect_embedded(
+    discoverer: &mut discovery::Reader,
+    path: &Path,
+    revision: String,
+) -> Option<LocalArtworkRef> {
+    if let Ok(Some(file)) = read_lofty(path, true) {
+        let picture_index =
+            best_picture_index(&file, file.primary_tag().or_else(|| file.first_tag()))?;
+        return Some(embedded_reference(path, picture_index, revision));
+    }
+    discoverer
+        .read(path)
+        .and_then(|metadata| metadata.artwork_index)
+        .map(|picture_index| embedded_reference(path, picture_index, revision))
+}
+
 pub(super) fn best_picture_index(
     file: &TaggedFile,
     preferred: Option<&lofty::tag::Tag>,

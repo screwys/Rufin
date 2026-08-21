@@ -205,6 +205,23 @@ impl LocalSource {
         artwork::read_image(&reference)
     }
 
+    pub(crate) fn inspect_accepted_artwork(
+        &self,
+        library: &library::Library,
+        observed_at: i64,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Option<LocalComponentReplacement>, crate::SourceChangePreparationError> {
+        let seeds = self
+            .roots
+            .iter()
+            .map(|root| {
+                library::LocalComponentSeed::DirectoryTree(root.to_string_lossy().into_owned())
+            })
+            .collect::<Vec<_>>();
+        let baseline = library.local_component_baseline(&seeds)?;
+        scan::inspect_accepted_artwork(baseline, observed_at, cancelled).map_err(Into::into)
+    }
+
     pub(crate) fn watch(
         &self,
         on_ready: &mut dyn FnMut(bool) -> bool,
@@ -289,7 +306,7 @@ pub fn verify_local_media_file(path: &Path) -> SourceResult<()> {
         SourceError::Other(format!("Could not read {}: {error}", path.display()))
     })?;
     let mut worker = media::Worker::default();
-    let read = media::read_media(&mut worker, path.clone(), None, "verification".to_string());
+    let read = media::read_media(&mut worker, path.clone(), None);
     let media::MediaRead::Accepted(scanned) = read else {
         return Err(SourceError::Other(format!(
             "Could not read {}",

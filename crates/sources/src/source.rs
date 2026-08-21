@@ -624,6 +624,17 @@ impl Source {
         }
     }
 
+    pub fn inspect_accepted_artwork(
+        &self,
+        library: &Library,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<Option<LocalComponentReplacement>, SourceChangePreparationError> {
+        let Implementation::Local(local) = &self.implementation else {
+            return Ok(None);
+        };
+        local.inspect_accepted_artwork(library, unix_seconds(), cancelled)
+    }
+
     pub async fn check_freshness(
         &self,
         accepted: Option<&ProviderFreshness>,

@@ -14,6 +14,7 @@ use walkdir::WalkDir;
 
 use super::artwork;
 use super::cue::{CueFile, CueSheet, CueTrack, parse_cue_sheet};
+use super::discovery;
 use super::media::{self, MediaRead, ScannedTrack};
 use crate::source::{BatchEmitter, SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
@@ -180,7 +181,7 @@ pub(super) fn acquire_local_access(
         total: Some(total),
     });
     let mut completed = 0;
-    run_ordered_jobs(
+    run_jobs(
         changed,
         media::Worker::default,
         |worker, path| {
@@ -1400,7 +1401,7 @@ fn read_cue(path: &Path) -> Option<CueSheet> {
     parse_cue_sheet(path, &String::from_utf8_lossy(&bytes))
 }
 
-fn run_ordered_jobs<J, R, W>(
+fn run_jobs<J, R, W>(
     jobs: impl IntoIterator<Item = J>,
     create_worker: impl Fn() -> W + Sync,
     read: impl Fn(&mut W, J) -> SourceResult<R> + Sync,
@@ -1417,9 +1418,8 @@ where
             .unwrap_or(1),
     );
     std::thread::scope(|scope| {
-        let (job_send, job_receive) = mpsc::sync_channel::<(usize, J)>(worker_count * 2);
-        let (result_send, result_receive) =
-            mpsc::sync_channel::<(usize, SourceResult<R>)>(worker_count * 2);
+        let (job_send, job_receive) = mpsc::sync_channel::<J>(worker_count * 2);
+        let (result_send, result_receive) = mpsc::sync_channel::<SourceResult<R>>(worker_count * 2);
         let job_receive = Arc::new(Mutex::new(job_receive));
 
         for _ in 0..worker_count {
@@ -1436,11 +1436,11 @@ where
                             .expect("Local media job receiver is not poisoned");
                         receive.recv()
                     };
-                    let Ok((order, job)) = job else {
+                    let Ok(job) = job else {
                         break;
                     };
                     let result = check_cancelled(cancelled).and_then(|()| read(&mut worker, job));
-                    if result_send.send((order, result)).is_err() {
+                    if result_send.send(result).is_err() {
                         break;
                     }
                 }
@@ -1448,39 +1448,127 @@ where
         }
         drop(result_send);
 
-        let mut jobs = jobs.into_iter().enumerate();
-        loop {
+        let mut jobs = jobs.into_iter();
+        let mut in_flight = 0;
+        for _ in 0..worker_count {
+            let Some(job) = jobs.next() else {
+                break;
+            };
+            job_send
+                .send(job)
+                .map_err(|_| SourceError::Other("Local media readers stopped.".to_string()))?;
+            in_flight += 1;
+        }
+        while in_flight > 0 {
+            let result = result_receive
+                .recv()
+                .map_err(|_| SourceError::Other("Local media readers stopped.".to_string()))?;
+            in_flight -= 1;
             check_cancelled(cancelled)?;
-            let mut sent = 0;
-            for _ in 0..worker_count {
-                let Some(job) = jobs.next() else {
-                    break;
-                };
+            accept(result?)?;
+            if let Some(job) = jobs.next() {
                 job_send
                     .send(job)
                     .map_err(|_| SourceError::Other("Local media readers stopped.".to_string()))?;
-                sent += 1;
-            }
-            if sent == 0 {
-                break;
-            }
-            let mut wave = Vec::with_capacity(sent);
-            for _ in 0..sent {
-                wave.push(
-                    result_receive.recv().map_err(|_| {
-                        SourceError::Other("Local media readers stopped.".to_string())
-                    })?,
-                );
-            }
-            check_cancelled(cancelled)?;
-            wave.sort_by_key(|(order, _)| *order);
-            for (_, result) in wave {
-                accept(result?)?;
+                in_flight += 1;
             }
         }
         drop(job_send);
         Ok(())
     })
+}
+
+pub(super) fn inspect_accepted_artwork(
+    baseline: LocalComponentBaseline,
+    observed_at: i64,
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> SourceResult<Option<LocalComponentReplacement>> {
+    let files = baseline
+        .files
+        .iter()
+        .map(|file| (file.path.as_str(), file))
+        .collect::<HashMap<_, _>>();
+    let jobs = baseline
+        .tracks
+        .iter()
+        .filter(|track| track.local_artwork.is_none())
+        .filter_map(|track| track.source_path.as_deref())
+        .filter_map(|path| {
+            files
+                .get(path)
+                .map(|file| (PathBuf::from(path), file_revision(file)))
+        })
+        .collect::<BTreeMap<_, _>>();
+    if jobs.is_empty() {
+        return Ok(None);
+    }
+
+    let mut embedded = BTreeMap::new();
+    run_jobs(
+        jobs,
+        discovery::Reader::default,
+        |discoverer, (path, revision)| {
+            let reference = artwork::inspect_embedded(discoverer, &path, revision);
+            Ok((path, reference))
+        },
+        |(path, reference)| {
+            if let Some(reference) = reference {
+                embedded.insert(path, reference);
+            }
+            Ok(())
+        },
+        cancelled,
+    )?;
+
+    let tracks = baseline
+        .tracks
+        .iter()
+        .filter(|track| track.local_artwork.is_none())
+        .filter_map(|track| {
+            let reference = track
+                .source_path
+                .as_deref()
+                .and_then(|path| embedded.get(Path::new(path)))?;
+            let mut replacement = track.clone();
+            replacement.local_artwork = Some(reference.clone());
+            Some(replacement)
+        })
+        .collect::<Vec<_>>();
+    let mut album_artwork = HashMap::new();
+    for track in &baseline.tracks {
+        let (Some(album_id), Some(path)) = (&track.album_id, track.source_path.as_deref()) else {
+            continue;
+        };
+        let Some(reference) = embedded.get(Path::new(path)) else {
+            continue;
+        };
+        if album_artwork
+            .get(album_id)
+            .is_none_or(|(accepted_path, _)| path < *accepted_path)
+        {
+            album_artwork.insert(album_id.clone(), (path, reference));
+        }
+    }
+    let albums = baseline
+        .albums
+        .iter()
+        .filter(|album| album.local_artwork.is_none())
+        .filter_map(|album| {
+            let (_, reference) = album_artwork.get(&album.id)?;
+            let mut replacement = album.clone();
+            replacement.local_artwork = Some((*reference).clone());
+            Some(replacement)
+        })
+        .collect::<Vec<_>>();
+    if tracks.is_empty() && albums.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(LocalComponentReplacement {
+        observed_at,
+        albums,
+        tracks,
+        ..LocalComponentReplacement::default()
+    }))
 }
 
 fn local_worker_count(available_parallelism: usize) -> usize {
@@ -1511,7 +1599,7 @@ fn stream_media(
         })
     });
     let jobs = cue_jobs.into_iter().chain(ordinary_jobs);
-    run_ordered_jobs(
+    run_jobs(
         jobs,
         media::Worker::default,
         |worker, job| {
@@ -1612,21 +1700,11 @@ fn cue_jobs(plans: Vec<CuePlan>) -> (Vec<MediaJob>, HashSet<String>) {
 }
 
 fn read_media(worker: &mut media::Worker, inventory: &Inventory, path: &Path) -> MediaRead {
-    let path_text = path.to_string_lossy();
-    let entry = inventory
-        .entries
-        .get(path_text.as_ref())
-        .expect("a queued Local media path comes from the inventory");
     let sidecar = path
         .parent()
         .and_then(|directory| inventory.artwork_by_directory.get(directory))
         .cloned();
-    media::read_media(
-        worker,
-        path.to_path_buf(),
-        sidecar,
-        file_revision(&entry.file),
-    )
+    media::read_media(worker, path.to_path_buf(), sidecar)
 }
 
 fn file_revision(file: &LocalFile) -> String {
@@ -2195,7 +2273,7 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
 }
 
 #[cfg(test)]
-mod ordered_job_tests {
+mod worker_job_tests {
     use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
     use super::*;
@@ -2212,7 +2290,7 @@ mod ordered_job_tests {
         let worker_count = AtomicUsize::new(0);
         let read_count = AtomicUsize::new(0);
         let cancelled = AtomicBool::new(false);
-        let result = run_ordered_jobs(
+        let result = run_jobs(
             0..32,
             || {
                 worker_count.fetch_add(1, Ordering::SeqCst);
@@ -2237,7 +2315,7 @@ mod ordered_job_tests {
     fn cancellation_is_checked_inside_a_connected_cue_job() {
         let read_count = AtomicUsize::new(0);
         let cancelled = AtomicBool::new(false);
-        let result = run_ordered_jobs(
+        let result = run_jobs(
             [vec![0, 1, 2]],
             || (),
             |(), paths| {

@@ -893,6 +893,28 @@ impl SourceOwner {
                 {
                     return Ok(());
                 }
+                let _ = events.try_send(SourceEvent::ArtworkPreparation {
+                    source_id: source_id.clone(),
+                    revision,
+                    progress: Some(SourceProgress {
+                        stage: SourceProgressStage::Artwork,
+                        completed: 0,
+                        total: None,
+                    }),
+                });
+                let cancelled = || active.cancelled.load(Ordering::Acquire);
+                if let Some(replacement) = source
+                    .inspect_accepted_artwork(&library, &cancelled)
+                    .map_err(string_error)?
+                {
+                    let _acceptance = shared.acceptance_lane.blocking_lock();
+                    library
+                        .accept_local_component(replacement)
+                        .map_err(string_error)?;
+                }
+                if cancelled() {
+                    return Err("source artwork preparation was cancelled".to_string());
+                }
                 let source_artwork = library.source_artwork().map_err(string_error)?;
                 let total = source_artwork.len();
                 let send_progress = |completed| {
@@ -908,7 +930,6 @@ impl SourceOwner {
                 };
                 send_progress(0);
                 let progress = |completed, _| send_progress(completed);
-                let cancelled = || active.cancelled.load(Ordering::Acquire);
                 let summary = artwork
                     .prepare_source_artwork(
                         SourceImages::new(source),

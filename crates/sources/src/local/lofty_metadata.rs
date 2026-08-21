@@ -151,13 +151,20 @@ pub(super) fn read_lofty(
     path: &Path,
     read_cover_art: bool,
 ) -> lofty::error::Result<Option<TaggedFile>> {
+    read_lofty_file(fs::File::open(path)?, read_cover_art)
+}
+
+pub(super) fn read_lofty_file(
+    file: fs::File,
+    read_cover_art: bool,
+) -> lofty::error::Result<Option<TaggedFile>> {
     apply_global_options(
         GlobalOptions::new()
             .allocation_limit(LOFTY_ALLOCATION_MAX_BYTES)
             .preserve_format_specific_items(false),
     );
     let options = ParseOptions::new().read_cover_art(read_cover_art);
-    let probe = Probe::new(BufReader::new(fs::File::open(path)?))
+    let probe = Probe::new(BufReader::new(file))
         .options(options)
         .guess_file_type()?;
     let Some(_) = probe.file_type() else {
