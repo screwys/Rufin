@@ -77,11 +77,9 @@ impl Library {
         let AlbumReleaseResult::Found { release_types } = result else {
             return Ok(None);
         };
-        let is_compilation = Some(release_types.iter().any(|kind| kind == "compilation"));
         Ok(Some(self.replace_album_release(
             &candidate.album_id,
             release_types,
-            is_compilation,
         )?))
     }
 }

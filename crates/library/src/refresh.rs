@@ -134,6 +134,7 @@ pub enum AcceptedHomeChange {
 pub struct AcceptedLibraryChange {
     pub tracks: Vec<AcceptedTrackReplacement>,
     pub albums: Vec<AlbumId>,
+    pub album_releases: Vec<AlbumId>,
     pub artists: Vec<ArtistId>,
     pub artist_releases: Vec<ArtistId>,
     pub genres: Vec<GenreId>,
@@ -145,7 +146,6 @@ pub struct AcceptedLibraryChange {
     pub favorite: Option<FavoriteAcknowledgement>,
     pub home: AcceptedHomeChange,
     pub download_coverage_changed: bool,
-    pub album_release_candidates_changed: bool,
 }
 
 pub struct SourceCandidate {
@@ -210,7 +210,6 @@ impl Library {
             AcceptedHomeChange::Keep
         };
         accepted.download_coverage_changed = true;
-        accepted.album_release_candidates_changed = source_items_changed;
         Ok(Some(accepted))
     }
 }

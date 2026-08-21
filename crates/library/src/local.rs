@@ -206,7 +206,6 @@ impl Library {
         )?;
         accepted.home = AcceptedHomeChange::Rebuild;
         accepted.download_coverage_changed = true;
-        accepted.album_release_candidates_changed = true;
         Ok(Some(accepted))
     }
 }

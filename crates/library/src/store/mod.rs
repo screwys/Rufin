@@ -2404,34 +2404,29 @@ impl Worker {
         if current_key.as_deref() != Some(expected_key.as_str()) {
             return Ok(false);
         }
-        let (lookup_state, release_types, is_compilation) = match result {
-            AlbumReleaseResult::Found { release_types } => (
-                "found",
-                Some(serde_json::to_string(release_types)?),
-                Some(i64::from(
-                    release_types.iter().any(|kind| kind == "compilation"),
-                )),
-            ),
-            AlbumReleaseResult::Missing => ("missing", None, None),
+        let (lookup_state, release_types) = match result {
+            AlbumReleaseResult::Found { release_types } => {
+                ("found", Some(serde_json::to_string(release_types)?))
+            }
+            AlbumReleaseResult::Missing => ("missing", None),
         };
         self.connection.execute(
             "INSERT INTO album_release_info(
                 source_id, album_id, exact_identity_key, lookup_state,
-                release_types_json, is_compilation
-             ) VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                release_types_json
+             ) VALUES (?1, ?2, ?3, ?4, ?5)
              ON CONFLICT(source_id, album_id)
              DO UPDATE SET
                 exact_identity_key = excluded.exact_identity_key,
                 lookup_state = excluded.lookup_state,
                 release_types_json = excluded.release_types_json,
-                is_compilation = excluded.is_compilation",
+                is_compilation = NULL",
             params![
                 candidate.source_id.as_str(),
                 candidate.album_id.as_str(),
                 expected_key,
                 lookup_state,
                 release_types,
-                is_compilation,
             ],
         )?;
         Ok(true)
@@ -4729,7 +4724,7 @@ fn apply_album_release_info(
     let mut statement = connection.prepare(
         "SELECT
             album_id, exact_identity_key, lookup_state,
-            release_types_json, is_compilation
+            release_types_json
          FROM album_release_info WHERE source_id = ?1",
     )?;
     let rows = statement
@@ -4740,7 +4735,6 @@ fn apply_album_release_info(
                     row.get::<_, String>(1)?,
                     row.get::<_, String>(2)?,
                     row.get::<_, Option<String>>(3)?,
-                    row.get::<_, Option<i64>>(4)?,
                 ),
             ))
         })?
@@ -4753,9 +4747,7 @@ fn apply_album_release_info(
             continue;
         };
         let identity_key = identity.stored_key();
-        let Some((stored_identity, state, release_types, is_compilation)) =
-            rows.get(album.id.as_str())
-        else {
+        let Some((stored_identity, state, release_types)) = rows.get(album.id.as_str()) else {
             continue;
         };
         if stored_identity != &identity_key {
@@ -4768,7 +4760,6 @@ fn apply_album_release_info(
             && let Some(release_types) = release_types
         {
             album.release_types = serde_json::from_str(release_types)?;
-            album.is_compilation = is_compilation.map(|value| value != 0);
             continue;
         }
     }
@@ -4786,7 +4777,7 @@ fn apply_exact_album_release_info(
         .query_row(
             "SELECT
                 exact_identity_key, lookup_state,
-                release_types_json, is_compilation
+                release_types_json
              FROM album_release_info
              WHERE source_id = ?1 AND album_id = ?2",
             params![source_id.as_str(), album.id.as_str()],
@@ -4795,12 +4786,11 @@ fn apply_exact_album_release_info(
                     row.get::<_, String>(0)?,
                     row.get::<_, String>(1)?,
                     row.get::<_, Option<String>>(2)?,
-                    row.get::<_, Option<i64>>(3)?,
                 ))
             },
         )
         .optional()?;
-    let Some((stored_identity, state, release_types, is_compilation)) = stored else {
+    let Some((stored_identity, state, release_types)) = stored else {
         return Ok(());
     };
     if current_identity.as_deref() != Some(stored_identity.as_str()) {
@@ -4818,7 +4808,6 @@ fn apply_exact_album_release_info(
         ("missing", None) => Ok(()),
         ("found", Some(release_types)) => {
             album.release_types = serde_json::from_str(&release_types)?;
-            album.is_compilation = is_compilation.map(|value| value != 0);
             Ok(())
         }
         _ => Err(StoreError::InvalidValue {

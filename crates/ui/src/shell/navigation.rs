@@ -252,9 +252,7 @@ impl Shell {
 fn sidebar_pin_changed(pin: &SidebarPin, change: &AcceptedLibraryChange) -> bool {
     match pin {
         SidebarPin::Album { album_id, .. } => change.albums.contains(album_id),
-        SidebarPin::Artist { artist_id, .. } => {
-            change.artists.contains(artist_id) || change.artist_releases.contains(artist_id)
-        }
+        SidebarPin::Artist { artist_id, .. } => change.artists.contains(artist_id),
         SidebarPin::Genre { genre_id, .. } => change.genres.contains(genre_id),
         SidebarPin::Playlist { playlist_id, .. } => change.playlists.contains(playlist_id),
         SidebarPin::SmartPlaylist { playlist_id, .. } => {
@@ -1679,7 +1677,7 @@ mod tests {
             artist_releases: vec![artist_id],
             ..AcceptedLibraryChange::default()
         };
-        assert!(sidebar_pin_changed(&artist, &change));
+        assert!(!sidebar_pin_changed(&artist, &change));
     }
 
     #[test]

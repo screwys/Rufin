@@ -1326,10 +1326,7 @@ impl SourceOwner {
             return;
         }
         let downloads_changed = change.download_coverage_changed;
-        let album_release_candidates_changed = change.album_release_candidates_changed;
-        if album_release_candidates_changed {
-            self.cancel_album_release_lookup(false);
-        }
+        let albums_changed = !change.albums.is_empty();
         let tracks = change
             .tracks
             .iter()
@@ -1398,7 +1395,7 @@ impl SourceOwner {
                 home,
             }))
             .await;
-        if album_release_candidates_changed {
+        if albums_changed {
             self.start_album_release_lookup();
         }
     }

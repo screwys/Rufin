@@ -425,7 +425,9 @@ impl Shell {
             let music_folder_id = music_folder_id.clone();
             Rc::new(move |update: &crate::runtime::SelectedLibraryUpdate| {
                 let replacements = update.change.tracks.as_slice();
-                if !update.change.albums.contains(&album_id) {
+                if !update.change.albums.contains(&album_id)
+                    && !update.change.album_releases.contains(&album_id)
+                {
                     let exact_membership = matches!(
                         replacements,
                         [replacement]

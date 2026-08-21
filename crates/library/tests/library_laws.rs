@@ -336,7 +336,6 @@ fn remote_exact_patch(harness: &mut Harness, model: &mut Model, slot: Slot, time
         .expect("changed remote source facts");
     assert_eq!(accepted.home, AcceptedHomeChange::Rebuild);
     assert!(accepted.download_coverage_changed);
-    assert!(accepted.album_release_candidates_changed);
 }
 
 fn local_exact_patch(
@@ -391,7 +390,6 @@ fn local_exact_patch(
         .expect("changed Local component");
     assert_eq!(accepted.home, AcceptedHomeChange::Rebuild);
     assert!(accepted.download_coverage_changed);
-    assert!(accepted.album_release_candidates_changed);
 }
 
 fn candidate_drop(harness: &Harness, model: &Model, slot: Slot, finished: bool, accepted_at: i64) {
@@ -469,7 +467,6 @@ fn favorite(
         .expect("accept favorite");
     assert_eq!(accepted.home, AcceptedHomeChange::Favorite(item));
     assert!(accepted.download_coverage_changed);
-    assert!(!accepted.album_release_candidates_changed);
     model.source_mut(slot).favorites[kind][index] = favorite;
 }
 
@@ -490,7 +487,6 @@ fn playlist(harness: &mut Harness, model: &mut Model, slot: Slot) {
             .expect("changed remote playlist");
         assert_eq!(accepted.home, AcceptedHomeChange::Keep);
         assert!(accepted.download_coverage_changed);
-        assert!(!accepted.album_release_candidates_changed);
         return;
     }
 
@@ -511,7 +507,6 @@ fn playlist(harness: &mut Harness, model: &mut Model, slot: Slot) {
             .expect("local playlist creation changes the Library");
         assert_eq!(change.home, AcceptedHomeChange::Keep);
         assert!(change.download_coverage_changed);
-        assert!(!change.album_release_candidates_changed);
         let id = created_playlist_id(change);
         model.source_mut(Slot::Local).local_playlist = Some(LocalPlaylist {
             id,
@@ -553,7 +548,6 @@ fn playlist(harness: &mut Harness, model: &mut Model, slot: Slot) {
         .expect("added local playlist occurrence");
     assert_eq!(accepted.home, AcceptedHomeChange::Keep);
     assert!(accepted.download_coverage_changed);
-    assert!(!accepted.album_release_candidates_changed);
     model
         .source_mut(Slot::Local)
         .local_playlist

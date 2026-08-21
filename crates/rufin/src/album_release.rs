@@ -1,4 +1,4 @@
-//! Bounded release-type lookup for one selected-library snapshot.
+//! Bounded release-type lookup for the selected source.
 //!
 //! Source owns when this work starts and whether it is still current. Library
 //! owns candidates and exact acceptance, while Album Lookup performs the
@@ -100,9 +100,9 @@ pub(crate) fn run_selected_album_release_lookup(
                 .accept_album_release_result(candidate, result)
             {
                 Ok(Some(change)) => {
-                    pending.albums.extend(change.albums);
+                    pending.album_releases.extend(change.album_releases);
                     pending.artist_releases.extend(change.artist_releases);
-                    if pending.albums.len() >= PUBLICATION_BATCH_SIZE {
+                    if pending.album_releases.len() >= PUBLICATION_BATCH_SIZE {
                         publish_change(&events, &source_id, source_session_epoch, &mut pending);
                     }
                 }
@@ -138,11 +138,11 @@ fn publish_change(
     source_session_epoch: SourceSessionEpoch,
     pending: &mut AcceptedLibraryChange,
 ) {
-    if pending.albums.is_empty() {
+    if pending.album_releases.is_empty() {
         return;
     }
-    pending.albums.sort();
-    pending.albums.dedup();
+    pending.album_releases.sort();
+    pending.album_releases.dedup();
     pending.artist_releases.sort();
     pending.artist_releases.dedup();
     let change = std::mem::take(pending);

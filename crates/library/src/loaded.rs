@@ -1327,7 +1327,6 @@ impl Library {
         &self,
         id: &AlbumId,
         release_types: Vec<String>,
-        is_compilation: Option<bool>,
     ) -> LibraryQueryResult<AcceptedLibraryChange> {
         let mut state = self.write()?;
         let current = state
@@ -1340,7 +1339,6 @@ impl Library {
             .clone();
         let mut replacement = current.album.as_ref().clone();
         replacement.release_types = release_types;
-        replacement.is_compilation = is_compilation;
         let replacement = Arc::new(replacement);
         state
             .albums
@@ -1349,7 +1347,7 @@ impl Library {
             .album = replacement;
         let artist_releases = sorted_set(album_artist_ids(&state, id));
         Ok(AcceptedLibraryChange {
-            albums: vec![id.clone()],
+            album_releases: vec![id.clone()],
             artist_releases,
             ..AcceptedLibraryChange::default()
         })

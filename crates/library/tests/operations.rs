@@ -2038,7 +2038,6 @@ fn local_favorite_and_playlist_transactions_reopen_without_parallel_truth() {
         AcceptedHomeChange::Favorite(FavoriteItemId::Album(album_id.clone()))
     );
     assert!(favorite.download_coverage_changed);
-    assert!(!favorite.album_release_candidates_changed);
     let next_home = accepted
         .library
         .home_after_accepted_change(None, &mounted_home, &favorite.home)
@@ -2426,7 +2425,6 @@ fn local_component_replaces_files_relations_and_dormant_user_data_atomically() {
         .expect("changed Local component must report a change");
     assert_eq!(result.home, AcceptedHomeChange::Rebuild);
     assert!(result.download_coverage_changed);
-    assert!(result.album_release_candidates_changed);
     assert_eq!(result.tracks.len(), 1);
     assert_eq!(result.tracks[0].id, changed.id);
     assert_eq!(
@@ -2884,7 +2882,6 @@ fn local_retag_preserves_activity_and_smart_playlist_membership() {
         .expect("accepted skip changes activity");
     assert_eq!(skip_change.home, AcceptedHomeChange::Keep);
     assert!(!skip_change.download_coverage_changed);
-    assert!(!skip_change.album_release_candidates_changed);
     let smart_id = created_smart_playlist_id(
         accepted
             .library
@@ -4392,7 +4389,6 @@ fn accepted_activity_replaces_only_the_next_local_home_and_reopens() {
         AcceptedHomeChange::Played(play.track_id.clone())
     );
     assert!(!accepted_play.download_coverage_changed);
-    assert!(!accepted_play.album_release_candidates_changed);
     assert_eq!(accepted_play.tracks.len(), 1);
     assert_eq!(
         accepted_play.tracks[0]
@@ -4634,7 +4630,6 @@ fn source_item_replacement_survives_removal_and_reattaches_dormant_consumers() {
         .expect("replacement Track must change the library");
     assert_eq!(replacement.home, AcceptedHomeChange::Rebuild);
     assert!(replacement.download_coverage_changed);
-    assert!(replacement.album_release_candidates_changed);
     assert_eq!(replacement.tracks.len(), 1);
     assert_eq!(
         replacement.tracks[0]
@@ -5156,7 +5151,6 @@ fn source_update_commits_tracks_and_playlist_readback_as_one_reopenable_value() 
         .expect("Track and Playlist update must change the library");
     assert_eq!(update.home, AcceptedHomeChange::Rebuild);
     assert!(update.download_coverage_changed);
-    assert!(update.album_release_candidates_changed);
     assert!(update.playlists.contains(&playlist_id));
     let playlist = accepted
         .library
@@ -5307,7 +5301,7 @@ fn album_release_results_follow_exact_identity_across_replacement_and_reopen() {
     );
     let mut expected_artist_releases = vec![primary_artist_id, appearing_artist_id];
     expected_artist_releases.sort();
-    assert_eq!(release.albums, [album.id.clone()]);
+    assert_eq!(release.album_releases, [album.id.clone()]);
     assert_eq!(release.artist_releases, expected_artist_releases);
     assert!(release.artists.is_empty());
     assert!(release.tracks.is_empty());
