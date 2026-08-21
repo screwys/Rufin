@@ -286,13 +286,8 @@ impl Artwork {
         self.pipeline.request(prepared.source, prepared.request)
     }
 
-    pub fn warm_prepared(&self, prepared: PreparedArtwork) -> Result<ArtworkLoad, ArtworkError> {
-        self.pipeline.warm(prepared.source, prepared.request)
-    }
-
-    /// Caches the canonical source-owned images before publishing a new
-    /// cacheless library.
-    pub fn prepare_source_artwork(
+    /// Caches candidate source-owned images without publishing a manifest.
+    pub fn prefetch_source_artwork(
         &self,
         source: SourceImages,
         artwork: Arc<[SourceArtwork]>,
@@ -300,7 +295,29 @@ impl Artwork {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
         self.pipeline
-            .prepare_source_artwork(source, artwork, progress, cancelled)
+            .prefetch_source_artwork(source, artwork, progress, cancelled)
+    }
+
+    pub fn source_preparation_complete(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+    ) -> Result<bool, ArtworkError> {
+        self.pipeline
+            .source_preparation_complete(source_id, revision)
+    }
+
+    /// Caches and reconciles the accepted source-owned artwork manifest.
+    pub fn prepare_source_artwork(
+        &self,
+        source: SourceImages,
+        revision: u64,
+        artwork: Arc<[SourceArtwork]>,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<ArtworkPreparation, ArtworkError> {
+        self.pipeline
+            .prepare_source_artwork(source, revision, artwork, progress, cancelled)
     }
 
     pub fn cache_only_file(

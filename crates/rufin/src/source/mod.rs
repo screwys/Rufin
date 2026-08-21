@@ -284,6 +284,7 @@ struct Shared {
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
     state: Mutex<OwnerState>,
+    artwork_preparations: Mutex<BTreeMap<SourceId, Arc<ActiveSourceArtworkPreparation>>>,
     lane: tokio::sync::Mutex<()>,
     acceptance_lane: tokio::sync::Mutex<()>,
     interruptible: Mutex<Vec<InterruptibleTask>>,
@@ -380,6 +381,11 @@ struct ActiveInterruptible {
     registration: InterruptibleRegistration,
 }
 
+struct ActiveSourceArtworkPreparation {
+    revision: u64,
+    cancelled: Arc<AtomicBool>,
+}
+
 impl Drop for ActiveInterruptible {
     fn drop(&mut self) {
         self.shared
@@ -436,6 +442,7 @@ impl SourceOwner {
                 refresh: None,
                 freshness: FreshnessAdmission::new(tokio::time::Instant::now()),
             }),
+            artwork_preparations: Mutex::new(BTreeMap::new()),
             lane: tokio::sync::Mutex::new(()),
             acceptance_lane: tokio::sync::Mutex::new(()),
             interruptible: Mutex::new(Vec::new()),
@@ -842,6 +849,121 @@ impl SourceOwner {
         }
         if reset_reveal {
             state.selected_revealed = false;
+        }
+    }
+
+    fn start_source_artwork_preparation(&self, selected: &SelectedSourceState) {
+        let Ok(revision) = u64::try_from(selected.library.library_id()) else {
+            warn!(source_id = %selected.source_id(), "accepted Library has an invalid artwork revision");
+            return;
+        };
+        let Some(source) = selected.source.as_ref().cloned() else {
+            return;
+        };
+        let source_id = selected.source_id().clone();
+        let active = Arc::new(ActiveSourceArtworkPreparation {
+            revision,
+            cancelled: Arc::new(AtomicBool::new(false)),
+        });
+        {
+            let mut preparations = self
+                .shared
+                .artwork_preparations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if preparations
+                .get(&source_id)
+                .is_some_and(|current| current.revision == revision)
+            {
+                return;
+            }
+            if let Some(previous) = preparations.insert(source_id.clone(), Arc::clone(&active)) {
+                previous.cancelled.store(true, Ordering::Release);
+            }
+        }
+        let artwork = self.shared.artwork.clone();
+        let library = Arc::clone(&selected.library);
+        let events = self.shared.outputs.events.clone();
+        let shared = Arc::clone(&self.shared);
+        drop(self.shared.runtime.spawn_blocking(move || {
+            let result = (|| -> Result<(), String> {
+                if artwork
+                    .source_preparation_complete(&source_id, revision)
+                    .map_err(string_error)?
+                {
+                    return Ok(());
+                }
+                let source_artwork = library.source_artwork().map_err(string_error)?;
+                let total = source_artwork.len();
+                let send_progress = |completed| {
+                    let _ = events.try_send(SourceEvent::ArtworkPreparation {
+                        source_id: source_id.clone(),
+                        revision,
+                        progress: Some(SourceProgress {
+                            stage: SourceProgressStage::Artwork,
+                            completed,
+                            total: Some(total),
+                        }),
+                    });
+                };
+                send_progress(0);
+                let progress = |completed, _| send_progress(completed);
+                let cancelled = || active.cancelled.load(Ordering::Acquire);
+                let summary = artwork
+                    .prepare_source_artwork(
+                        SourceImages::new(source),
+                        revision,
+                        source_artwork,
+                        &progress,
+                        &cancelled,
+                    )
+                    .map_err(string_error)?;
+                if summary.failed > 0 {
+                    warn!(
+                        %source_id,
+                        failed = summary.failed,
+                        total = summary.total,
+                        "some accepted source artwork remains available for retry"
+                    );
+                }
+                Ok(())
+            })();
+            if let Err(error) = result
+                && !active.cancelled.load(Ordering::Acquire)
+            {
+                warn!(%error, %source_id, "could not prepare accepted source artwork");
+            }
+            let completion = SourceEvent::ArtworkPreparation {
+                source_id: source_id.clone(),
+                revision,
+                progress: None,
+            };
+            let completion_owner = Arc::clone(&shared);
+            drop(shared.runtime.spawn(async move {
+                completion_owner.send_event(completion).await;
+            }));
+            let mut preparations = shared
+                .artwork_preparations
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if preparations
+                .get(&source_id)
+                .is_some_and(|current| Arc::ptr_eq(current, &active))
+            {
+                preparations.remove(&source_id);
+            }
+        }));
+    }
+
+    fn cancel_source_artwork_preparation(&self, source_id: &SourceId) {
+        let active = self
+            .shared
+            .artwork_preparations
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(source_id);
+        if let Some(active) = active {
+            active.cancelled.store(true, Ordering::Release);
         }
     }
 
@@ -2159,6 +2281,7 @@ impl SelectedSourcePort for ActiveSource {
                 .selected_revealed = true;
             operations.resume_configured_feed(selected.source_id());
             operations.start_album_release_lookup();
+            operations.start_source_artwork_preparation(&selected);
         });
     }
 

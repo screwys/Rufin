@@ -154,7 +154,7 @@ fn source_preparation_populates_disk_without_decoded_residency() {
     )]);
 
     let preparation = artwork
-        .prepare_source_artwork(source.clone(), source_artwork, &|_, _| {}, &|| false)
+        .prefetch_source_artwork(source.clone(), source_artwork, &|_, _| {}, &|| false)
         .expect("prepare source artwork");
     assert_eq!(preparation.ready, 1);
     assert_eq!(images.calls.load(Ordering::Relaxed), 1);
@@ -212,7 +212,7 @@ fn cached_fallback_does_not_bypass_an_available_album_primary() {
     let fallback_artwork: Arc<[SourceArtwork]> = Arc::new([fallback]);
 
     artwork
-        .prepare_source_artwork(source.clone(), fallback_artwork, &|_, _| {}, &|| false)
+        .prefetch_source_artwork(source.clone(), fallback_artwork, &|_, _| {}, &|| false)
         .expect("prepare fallback artwork");
 
     let track_request = ArtworkRequest::new(ArtworkBinding::track(&track), 256, 256);
@@ -244,10 +244,10 @@ fn source_preparation_caches_ready_and_missing_images_without_a_second_fetch() {
     ]);
 
     let first = artwork
-        .prepare_source_artwork(source.clone(), Arc::clone(&facts), &|_, _| {}, &|| false)
+        .prefetch_source_artwork(source.clone(), Arc::clone(&facts), &|_, _| {}, &|| false)
         .expect("prepare source artwork");
     let second = artwork
-        .prepare_source_artwork(source, facts, &|_, _| {}, &|| false)
+        .prefetch_source_artwork(source, facts, &|_, _| {}, &|| false)
         .expect("reuse prepared source artwork");
 
     assert_eq!(first.total, 2);
@@ -269,7 +269,7 @@ fn cancelled_source_preparation_starts_no_image_work() {
     let artwork = Artwork::new(temporary.path(), runtime()).expect("artwork service starts");
     let cancelled = AtomicBool::new(true);
 
-    let result = artwork.prepare_source_artwork(
+    let result = artwork.prefetch_source_artwork(
         source,
         Arc::new([SourceArtwork::Native(ImageRef::new(
             "cancelled-image",
@@ -390,7 +390,7 @@ fn source_preparation_streams_every_image_through_a_bounded_window() {
     let worker_artwork = artwork.clone();
     let worker_progress = Arc::clone(&progress);
     let preparation = thread::spawn(move || {
-        worker_artwork.prepare_source_artwork(
+        worker_artwork.prefetch_source_artwork(
             source,
             facts,
             &|completed, total| {
@@ -403,7 +403,7 @@ fn source_preparation_streams_every_image_through_a_bounded_window() {
         )
     });
 
-    images.wait_started_count(super::pipeline::WORKERS);
+    images.wait_started_count(super::pipeline::PREPARATION_WORKERS);
     let (preparation_interests, jobs) = artwork.pipeline.preparation_work();
     assert_eq!(preparation_interests, super::pipeline::PREPARATION_WINDOW);
     assert!(jobs <= super::pipeline::PREPARATION_WINDOW);
@@ -441,19 +441,19 @@ fn cancelling_source_preparation_discards_the_unstarted_window() {
     let worker_artwork = artwork.clone();
     let worker_cancelled = Arc::clone(&cancelled);
     let preparation = thread::spawn(move || {
-        worker_artwork.prepare_source_artwork(source, facts, &|_, _| {}, &|| {
+        worker_artwork.prefetch_source_artwork(source, facts, &|_, _| {}, &|| {
             worker_cancelled.load(Ordering::Acquire)
         })
     });
 
-    images.wait_started_count(super::pipeline::WORKERS);
+    images.wait_started_count(super::pipeline::PREPARATION_WORKERS);
     cancelled.store(true, Ordering::Release);
     let result = preparation.join().expect("preparation thread");
     assert!(matches!(result, Err(crate::ArtworkError::Cancelled)));
     let (preparation_interests, jobs) = artwork.pipeline.preparation_work();
     assert_eq!(preparation_interests, 0);
-    assert!(jobs <= super::pipeline::WORKERS);
-    assert_eq!(images.started_count(), super::pipeline::WORKERS);
+    assert!(jobs <= super::pipeline::PREPARATION_WORKERS);
+    assert_eq!(images.started_count(), super::pipeline::PREPARATION_WORKERS);
     images.release();
 
     let deadline = Instant::now() + Duration::from_secs(3);

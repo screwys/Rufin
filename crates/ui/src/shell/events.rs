@@ -107,6 +107,11 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
             apply_selected_library_replacement(shell, configured, selected);
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
+        SourceEvent::ArtworkPreparation {
+            source_id,
+            revision,
+            progress,
+        } => apply_source_artwork_preparation(shell, source_id, revision, progress),
         SourceEvent::Home(publication) => apply_home_publication(shell, publication),
         SourceEvent::HomeReplaced {
             source_id,
@@ -429,6 +434,10 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     let started_blocking = source_operation_started_blocking(&previous_operation, &operation);
     let completed_add = source_add_completed(&previous_operation, &operation);
     *shell.source.operation.borrow_mut() = operation.clone();
+    if operation.blocks_library() {
+        shell.source.artwork_preparation_revision.set(None);
+        shell.chrome.source_refresh_feedback.set_visible(false);
+    }
     apply_source_refresh_feedback(shell, &previous_operation, &operation);
 
     match &operation {
@@ -515,6 +524,7 @@ fn apply_source_refresh_feedback(
             source_id,
             progress,
         } => {
+            shell.source.artwork_preparation_revision.set(None);
             let continues = matches!(
                 previous,
                 SourceOperation::Refreshing {
@@ -575,6 +585,52 @@ fn apply_source_refresh_feedback(
             shell.chrome.source_refresh_feedback.set_visible(false);
         }
         _ => {}
+    }
+}
+
+fn apply_source_artwork_preparation(
+    shell: &Shell,
+    source_id: library::SourceId,
+    revision: u64,
+    progress: Option<SourceProgress>,
+) {
+    let matches_selected = shell
+        .selected_library()
+        .as_deref()
+        .is_some_and(|selected| selected.source_id == source_id);
+    if !matches_selected
+        || matches!(
+            *shell.source.operation.borrow(),
+            SourceOperation::Refreshing { .. }
+        )
+    {
+        return;
+    }
+    match progress {
+        Some(progress) => {
+            shell
+                .source
+                .artwork_preparation_revision
+                .set(Some(revision));
+            shell
+                .chrome
+                .source_refresh_feedback
+                .remove_css_class("error");
+            shell
+                .chrome
+                .source_refresh_feedback_label
+                .set_text(&source_progress_text(&progress));
+            shell
+                .chrome
+                .source_refresh_feedback_progress
+                .set_fraction(source_progress_fraction(&progress));
+            shell.chrome.source_refresh_feedback.set_visible(true);
+        }
+        None if shell.source.artwork_preparation_revision.get() == Some(revision) => {
+            shell.source.artwork_preparation_revision.set(None);
+            finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
+        }
+        None => {}
     }
 }
 

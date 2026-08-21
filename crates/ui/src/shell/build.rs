@@ -132,6 +132,7 @@ pub fn build(
         discovery_started: Cell::new(false),
         add_server: RefCell::new(None),
         refresh_feedback_generation: Rc::new(Cell::new(0)),
+        artwork_preparation_revision: Cell::new(None),
     };
     let startup = StartupState {
         route_revealed: Cell::new(!defer_initial_route),
@@ -169,7 +170,6 @@ pub fn build(
     let desktop = DesktopState::new(app, products.playback.transport.clone());
     let artwork = ArtworkState {
         startup_prime: Default::default(),
-        thumbnail_warm: Default::default(),
         live_bindings: RefCell::new(HashMap::new()),
         route_interaction: Rc::new(Default::default()),
         textures: RefCell::new(Default::default()),

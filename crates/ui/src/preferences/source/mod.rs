@@ -22,6 +22,7 @@ pub(crate) struct SourceState {
     pub(crate) discovery_started: Cell<bool>,
     pub(crate) add_server: RefCell<Option<login::SourceSetupViewHandle>>,
     pub(crate) refresh_feedback_generation: Rc<Cell<u64>>,
+    pub(crate) artwork_preparation_revision: Cell<Option<u64>>,
 }
 
 impl SourceState {

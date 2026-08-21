@@ -21,8 +21,9 @@ use crate::{
 };
 
 pub(crate) const WORKERS: usize = 4;
+pub(crate) const PREPARATION_WORKERS: usize = WORKERS - 1;
 // Keep every worker fed without mirroring the selected source in the job table.
-pub(crate) const PREPARATION_WINDOW: usize = WORKERS * 4;
+pub(crate) const PREPARATION_WINDOW: usize = PREPARATION_WORKERS * 4;
 const MAX_DECODED_INDEX_ENTRIES: usize = 4_096;
 const SOURCE_ARTWORK_SIZE: u32 = 256;
 
@@ -169,7 +170,7 @@ impl Pipeline {
             let worker = Arc::clone(&shared);
             thread::Builder::new()
                 .name(format!("artwork-{index}"))
-                .spawn(move || run_worker(worker))
+                .spawn(move || run_worker(worker, index == 0))
                 .map_err(ArtworkError::Cache)?;
         }
         Ok(Self { shared })
@@ -181,14 +182,6 @@ impl Pipeline {
         request: ArtworkRequest,
     ) -> Result<ArtworkLoad, ArtworkError> {
         self.request_with_priority(source, request, JobPriority::Foreground)
-    }
-
-    pub(crate) fn warm(
-        self: &Arc<Self>,
-        source: SourceImages,
-        request: ArtworkRequest,
-    ) -> Result<ArtworkLoad, ArtworkError> {
-        self.request_with_priority(source, request, JobPriority::Preparation)
     }
 
     fn request_with_priority(
@@ -236,7 +229,60 @@ impl Pipeline {
         }))
     }
 
+    pub(crate) fn source_preparation_complete(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+    ) -> Result<bool, ArtworkError> {
+        self.shared
+            .cache
+            .source_manifest_complete(source_id, revision)
+            .map_err(ArtworkError::Cache)
+    }
+
+    pub(crate) fn prefetch_source_artwork(
+        &self,
+        source: SourceImages,
+        artwork: Arc<[SourceArtwork]>,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<ArtworkPreparation, ArtworkError> {
+        self.prepare_source_artwork_jobs(source, artwork, progress, cancelled)
+    }
+
     pub(crate) fn prepare_source_artwork(
+        &self,
+        source: SourceImages,
+        revision: u64,
+        artwork: Arc<[SourceArtwork]>,
+        progress: &(dyn Fn(usize, usize) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> Result<ArtworkPreparation, ArtworkError> {
+        if self.source_preparation_complete(&source.source_id, revision)? {
+            return Ok(ArtworkPreparation::default());
+        }
+        let summary = self.prepare_source_artwork_jobs(
+            source.clone(),
+            Arc::clone(&artwork),
+            progress,
+            cancelled,
+        )?;
+        if summary.failed == 0 && !cancelled() {
+            let identities = artwork.iter().filter_map(|source_artwork| {
+                ArtworkBinding::source_artwork(source_artwork)
+                    .candidates()
+                    .first()
+                    .map(Candidate::stable_identity)
+            });
+            let _commit = lock_cache_commit(&self.shared);
+            self.shared
+                .cache
+                .complete_source_manifest(&source.source_id, revision, identities)?;
+        }
+        Ok(summary)
+    }
+
+    fn prepare_source_artwork_jobs(
         &self,
         source: SourceImages,
         artwork: Arc<[SourceArtwork]>,
@@ -986,21 +1032,22 @@ fn source_epoch(state: &State, source_id: &SourceId) -> u64 {
         .unwrap_or_default()
 }
 
-fn run_worker(shared: Arc<Shared>) {
+fn run_worker(shared: Arc<Shared>, foreground_reserved: bool) {
     loop {
-        let work = next_work(&shared);
+        let work = next_work(&shared, foreground_reserved);
         let resolution = resolve(&shared, &work);
         finish(&shared, work, resolution);
     }
 }
 
-fn next_work(shared: &Shared) -> Work {
+fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
     let mut state = lock_state(shared);
     loop {
-        let key = state
-            .foreground
-            .pop_front()
-            .or_else(|| state.preparations.pop_front());
+        let key = state.foreground.pop_front().or_else(|| {
+            (!foreground_reserved)
+                .then(|| state.preparations.pop_front())
+                .flatten()
+        });
         if let Some(key) = key {
             let eligible = state
                 .jobs
@@ -1424,7 +1471,7 @@ mod tests {
     }
 
     #[test]
-    fn visible_request_promotes_matching_thumbnail_warm() {
+    fn visible_request_promotes_matching_bulk_preparation() {
         let source = SourceImages::cache_only(SourceId::new("source"));
         let binding = ArtworkBinding::source_artwork(&SourceArtwork::Native(
             library::ImageRef::new("image", None),

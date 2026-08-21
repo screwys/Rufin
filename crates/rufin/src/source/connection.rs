@@ -235,6 +235,7 @@ impl SourceOwner {
                                     Arc::clone(&source),
                                     identity,
                                     same_account.then(|| Arc::clone(&current.library)),
+                                    true,
                                     progress,
                                     Arc::clone(&cancelled),
                                 )
@@ -475,6 +476,7 @@ impl SourceOwner {
         self.shared
             .publish_selected(session, Arc::clone(&selected), playback)
             .await;
+        self.start_source_artwork_preparation(&selected);
         if !cancelled.load(Ordering::Acquire) {
             self.start_selected_access(cache_match == Some(SourceCacheMatch::Exact))
                 .await;
@@ -610,6 +612,7 @@ impl SourceOwner {
             self.shared
                 .publish_library_replacement(selected.clone())
                 .await;
+            self.start_source_artwork_preparation(&selected);
             let library = Arc::clone(&selected.library);
             if let Err(error) =
                 blocking(move || playback.apply_track_refresh(refresh, &library)).await
@@ -891,6 +894,7 @@ impl SourceOwner {
     }
 
     pub(super) async fn remove_replaced_source_data(&self, source_id: SourceId) {
+        self.cancel_source_artwork_preparation(&source_id);
         self.remove_configured_feed(&source_id);
         self.shared
             .downloads
@@ -940,6 +944,7 @@ pub(super) async fn add_source(
         Arc::clone(&source),
         identity,
         None,
+        false,
         progress,
         Arc::clone(&cancelled),
     )
@@ -1045,6 +1050,7 @@ pub(super) async fn select_source(
             Arc::clone(source),
             identity,
             None,
+            true,
             progress,
             Arc::clone(&cancelled),
         )
@@ -1089,6 +1095,7 @@ pub(super) async fn prepare_refresh_candidate(
         source,
         identity,
         Some(Arc::clone(&selected.library)),
+        true,
         progress,
         cancelled,
     )
@@ -1121,13 +1128,14 @@ pub(super) async fn prepare_configured_refresh_candidate(
     let base =
         blocking(move || library.load_source(&source_for_store).map_err(string_error)).await?;
     let identity = configuration.input_identity().map_err(string_error)?;
-    prepare_source_candidate(shared, source, identity, base, progress, cancelled).await
+    prepare_source_candidate(shared, source, identity, base, true, progress, cancelled).await
 }
 pub(super) async fn prepare_source_candidate(
     shared: &Shared,
     source: Arc<Source>,
     identity: SourceInputIdentity,
     base: Option<Arc<Library>>,
+    prefetch_artwork: bool,
     progress: Arc<dyn Fn(SourceReadProgress) + Send + Sync>,
     cancelled: Arc<AtomicBool>,
 ) -> Result<PreparedSourceCandidate, String> {
@@ -1141,7 +1149,11 @@ pub(super) async fn prepare_source_candidate(
         )
         .await
         .map_err(string_error)?;
-    prepare_candidate_artwork(shared, source, prepared, progress, cancelled).await
+    if prefetch_artwork {
+        prepare_candidate_artwork(shared, source, prepared, progress, cancelled).await
+    } else {
+        Ok(prepared)
+    }
 }
 pub(super) async fn prepare_candidate_artwork(
     shared: &Shared,
@@ -1168,7 +1180,7 @@ pub(super) async fn prepare_candidate_artwork(
         let progress_update = Arc::clone(&progress);
         let cancellation = Arc::clone(&cancelled);
         let summary = artwork
-            .prepare_source_artwork(
+            .prefetch_source_artwork(
                 SourceImages::new(Arc::clone(&source)),
                 Arc::clone(&source_artwork),
                 &move |completed, total| {

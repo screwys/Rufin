@@ -6,7 +6,7 @@ use library::{
 use playback::{LoadedPlayRequest, PlaybackProjection, QueuePlacement, SourceSessionEpoch};
 use std::sync::Arc;
 
-use super::source::{ConfiguredSources, SelectedSourceHandle, SourceOperation};
+use super::source::{ConfiguredSources, SelectedSourceHandle, SourceOperation, SourceProgress};
 use super::{DiagnosticsHandle, ProductHandles, ProductReceivers};
 
 #[derive(Clone)]
@@ -69,6 +69,11 @@ pub enum SourceEvent {
         selected: SelectedLibrary,
     },
     Operation(SourceOperation),
+    ArtworkPreparation {
+        source_id: SourceId,
+        revision: u64,
+        progress: Option<SourceProgress>,
+    },
     Home(HomePublication),
     HomeReplaced {
         source_id: SourceId,
