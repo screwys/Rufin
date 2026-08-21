@@ -351,6 +351,7 @@ mod windows {
     use std::sync::mpsc::{Receiver, Sender, channel};
     use std::sync::{Mutex, Once, OnceLock};
 
+    use app_identity::DISPLAY_NAME;
     use localization::tr;
     use tray_icon::TrayIconEvent;
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
