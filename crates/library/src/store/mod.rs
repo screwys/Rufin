@@ -2030,30 +2030,6 @@ impl Worker {
             i64::try_from(update.state.progress_millis).map_err(|_| StoreError::IntegerRange)?;
         let traversal_json = serde_json::to_string(&update.traversal)?;
         let transaction = self.connection.transaction()?;
-        let rows_json = transaction
-            .query_row(
-                "SELECT rows_json
-                 FROM playback_queues
-                 WHERE source_id = ?1 AND revision = ?2",
-                params![update.source_id.as_str(), expected_revision],
-                |row| row.get::<_, String>(0),
-            )
-            .optional()?;
-        let Some(rows_json) = rows_json else {
-            transaction.rollback()?;
-            return Ok(PlaybackWriteOutcome::Stale);
-        };
-        let rows = serde_json::from_str::<PlaybackQueueRowsSnapshot>(&rows_json)?;
-        crate::playback_state::validate_queue_parts(
-            &rows.occurrences,
-            &rows.fallback_tracks,
-            &update.traversal,
-            update.state.selected.as_ref(),
-        )
-        .map_err(|value| StoreError::InvalidValue {
-            kind: "Playback traversal",
-            value,
-        })?;
         let queue_changed = transaction.execute(
             "UPDATE playback_queues
              SET revision = ?3, traversal_json = ?4

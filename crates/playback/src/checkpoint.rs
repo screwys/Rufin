@@ -179,12 +179,13 @@ pub fn restore_checkpoint(
     shuffle_enabled: bool,
     shuffle_seed: u64,
 ) -> Result<Sequence, CheckpointError> {
-    let mut fallbacks = checkpoint
+    let fallbacks = checkpoint
         .queue
         .fallback_tracks
         .iter()
-        .map(|fallback| (fallback.id.clone(), track_from_fallback(fallback)))
+        .map(|fallback| (&fallback.id, fallback))
         .collect::<HashMap<_, _>>();
+    let mut tracks = HashMap::new();
     if let Some(loaded) = loaded.filter(|loaded| loaded.source_id() == &checkpoint.source_id) {
         for track_id in checkpoint
             .queue
@@ -197,7 +198,7 @@ pub fn restore_checkpoint(
                 .track(track_id)
                 .map_err(|error| CheckpointError::Loaded(error.to_string()))?
             {
-                fallbacks.insert(track_id.clone(), track);
+                tracks.insert(track_id.clone(), track);
             }
         }
     }
@@ -206,10 +207,16 @@ pub fn restore_checkpoint(
         .occurrences
         .iter()
         .map(|occurrence| {
-            let track = fallbacks
+            if !tracks.contains_key(&occurrence.track_id) {
+                let fallback = fallbacks
+                    .get(&occurrence.track_id)
+                    .ok_or_else(|| CheckpointError::MissingFallback(occurrence.track_id.clone()))?;
+                tracks.insert(occurrence.track_id.clone(), track_from_fallback(fallback));
+            }
+            let track = tracks
                 .get(&occurrence.track_id)
-                .cloned()
-                .ok_or_else(|| CheckpointError::MissingFallback(occurrence.track_id.clone()))?;
+                .expect("resolved current or fallback Track")
+                .clone();
             Ok(SequenceEntry {
                 occurrence: OccurrenceId::new(occurrence.id.as_str()),
                 track,
