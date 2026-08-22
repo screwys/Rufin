@@ -18,8 +18,8 @@ use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::lyrics::{
-    LyricsPlan, cached_lyrics_allowed, external_best_lyrics, local_sidecar_lyrics,
-    lyrics_from_native, lyrics_with_displayable_content,
+    LyricsPlan, cached_lyrics_allowed, embedded_lyrics_from_audio, external_best_lyrics,
+    local_sidecar_lyrics, lyrics_from_native, lyrics_with_displayable_content,
 };
 use crate::{
     CurrentLyrics, CurrentLyricsContent, LocalLyricsInput, LyricsBundle, LyricsDocument,
@@ -436,11 +436,55 @@ impl LyricsService {
             ..Settings::default()
         };
         let mut fallback = None;
+
+        // 1. Check embedded lyrics from audio file tags (highest priority)
+        if let Some(ref local) = resolution.local {
+            let audio_path = local.audio_path.clone();
+            let document =
+                match tokio::task::spawn_blocking(move || embedded_lyrics_from_audio(&audio_path))
+                    .await
+                {
+                    Ok(doc) => doc,
+                    Err(e) => {
+                        warn!(%e, "embedded lyrics task panicked");
+                        None
+                    }
+                };
+            if let Some(document) = document {
+                if document.is_instrumental()
+                    || (!resolution.plan.prefers_translations() && document.has_original())
+                    || document.has_preferred_translation(&settings)
+                {
+                    if self.current_request_active(request, &key, &cancelled) {
+                        self.cache_and_accept(
+                            request,
+                            &key,
+                            &resolution.input,
+                            &resolution.plan,
+                            document,
+                        )
+                        .await;
+                    }
+                    return;
+                } else {
+                    fallback = Some(document);
+                }
+            }
+        }
+        if !self.current_request_active(request, &key, &cancelled) {
+            return;
+        }
+
+        // 2. Check sidecar .lrc file
         if let Some(input) = resolution.local.take() {
-            let document = tokio::task::spawn_blocking(move || local_sidecar_lyrics(&input))
-                .await
-                .ok()
-                .flatten();
+            let document =
+                match tokio::task::spawn_blocking(move || local_sidecar_lyrics(&input)).await {
+                    Ok(doc) => doc,
+                    Err(e) => {
+                        warn!(%e, "sidecar lyrics task panicked");
+                        None
+                    }
+                };
             if let Some(document) = document {
                 if document.is_instrumental()
                     || (!resolution.plan.prefers_translations() && document.has_original())

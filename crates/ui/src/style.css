@@ -1486,6 +1486,7 @@ popover.slider-value-popover label {
 
 .lyrics-line {
   color: var(--window-fg-color);
+  /* font-size may be overridden by lyrics typography settings via CssProvider */
   font-size: 19px;
   font-weight: 650;
   opacity: 0.34;
@@ -2042,10 +2043,11 @@ listview.queue-list row {
 }
 
 .lyrics-cue-sung {
-  color: var(--accent-color);
+  color: var(--lyrics-highlight-color, #e8962c);
 }
 
 .lyrics-cue-active {
+  color: var(--lyrics-highlight-color, #e8962c);
   font-weight: 700;
 }
 

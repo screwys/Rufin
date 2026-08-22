@@ -92,6 +92,12 @@ pub struct Settings {
     pub show_romanization: bool,
     #[serde(default = "default_true")]
     pub word_by_word_highlighting: bool,
+    #[serde(default)]
+    pub lyrics_font_family: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub lyrics_font_size: Option<u16>,
+    #[serde(default = "default_lyrics_highlight_color")]
+    pub lyrics_highlight_color: String,
 }
 
 impl Default for Settings {
@@ -107,6 +113,9 @@ impl Default for Settings {
             show_furigana: false,
             show_romanization: false,
             word_by_word_highlighting: true,
+            lyrics_font_family: String::new(),
+            lyrics_font_size: None,
+            lyrics_highlight_color: default_lyrics_highlight_color(),
         }
     }
 }
@@ -129,10 +138,43 @@ impl Settings {
         self.preferred_translation_language =
             normalize_language_tag(&self.preferred_translation_language)
                 .unwrap_or_else(default_translation_language);
+        self.lyrics_font_family = self.lyrics_font_family.trim().to_string();
+        if self.lyrics_font_family.len() > 128 {
+            self.lyrics_font_family.truncate(128);
+        }
+        self.lyrics_font_size = self.lyrics_font_size.map(|size| size.clamp(12, 28));
+        self.lyrics_highlight_color = self.lyrics_highlight_color.trim().to_string();
+        if !self.lyrics_highlight_color.is_empty()
+            && !self.lyrics_highlight_color.starts_with('#')
+            && self.lyrics_highlight_color.len() > 16
+        {
+            self.lyrics_highlight_color = default_lyrics_highlight_color();
+        }
     }
 
     pub(crate) const fn external_lyrics_network_allowed(&self, private_mode: bool) -> bool {
         self.external_lyrics_enabled && !private_mode
+    }
+
+    pub fn lyrics_font_css(&self) -> String {
+        let selectors = ".lyrics-line, .lyrics-furigana, .lyrics-romanization, .lyrics-reading-surface, .lyrics-cue";
+        let mut css = String::new();
+        let has_color = !self.lyrics_highlight_color.is_empty();
+        if has_color {
+            let color = &self.lyrics_highlight_color;
+            css.push_str(&format!(":root {{ --lyrics-highlight-color: {color}; }}\n"));
+        }
+        if self.lyrics_font_family.is_empty() {
+            return css;
+        }
+        let family = css_escape_family(&self.lyrics_font_family);
+        css.push_str(&format!(
+            "{selectors} {{ font-family: '{family}', sans-serif; }}\n"
+        ));
+        if let Some(size) = self.lyrics_font_size {
+            css.push_str(&format!(".lyrics-line {{ font-size: {size}px; }}\n"));
+        }
+        css
     }
 
     pub fn move_external_lyrics_provider(
@@ -783,6 +825,10 @@ fn default_translation_language() -> String {
     "en".to_string()
 }
 
+fn default_lyrics_highlight_color() -> String {
+    "#e8962c".to_string()
+}
+
 pub fn normalize_language_tag(value: &str) -> Option<String> {
     let value = value.trim().replace('_', "-").to_ascii_lowercase();
     if value.is_empty() || matches!(value.as_str(), "und" | "xxx") {
@@ -813,6 +859,10 @@ fn language_matches(candidate: Option<&str>, target: Option<&str>) -> bool {
         (Some(candidate), Some(target)) => candidate == target,
         _ => false,
     }
+}
+
+fn css_escape_family(family: &str) -> String {
+    family.replace('\\', "\\\\").replace('\'', "\\'")
 }
 
 #[cfg(test)]

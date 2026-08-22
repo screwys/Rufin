@@ -80,7 +80,7 @@ mod metadata;
 mod playback_state;
 mod playlists;
 mod radio;
-mod refresh;
+pub(crate) mod refresh;
 mod scrobbles;
 mod search;
 pub mod smart_playlists;

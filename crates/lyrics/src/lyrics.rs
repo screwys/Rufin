@@ -1,14 +1,19 @@
 use std::collections::HashSet;
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, BufReader, Read};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
+use lofty::config::{GlobalOptions, ParseOptions, apply_global_options};
+use lofty::file::TaggedFileExt;
+use lofty::probe::Probe;
+use lofty::tag::ItemKey;
+
 use library::{Track, TrackId};
 use serde::Deserialize;
-use tracing::debug;
+use tracing::{debug, warn};
 
 use crate::{
     ExternalLyricsProvider, LyricsAgent, LyricsAgentRole, LyricsBundle as Lyrics, LyricsCue,
@@ -19,6 +24,7 @@ use crate::{
 const EXTERNAL_LYRICS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
 const LRCLIB_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const LOCAL_LYRICS_MAX_BYTES: usize = 2 * 1024 * 1024;
+const LOCAL_LYRICS_ALLOCATION_LIMIT: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct LyricsPlan {
@@ -324,12 +330,16 @@ fn lyric_line_from_text(line: &str) -> Option<LyricLine> {
         return None;
     }
     if let Some((start_millis, text)) = parse_lrc_timestamp(trimmed) {
+        let (display, cue_lines) = parse_inline_cues(text, start_millis);
         return Some(LyricLine {
-            text: text.to_string(),
+            text: display,
             start_millis: Some(start_millis),
             end_millis: None,
-            cue_lines: Vec::new(),
+            cue_lines,
         });
+    }
+    if let Some(cue_line) = parse_angle_bracket_line(trimmed) {
+        return Some(cue_line);
     }
     if trimmed.starts_with('[') && trimmed.contains(']') {
         return None;
@@ -374,6 +384,187 @@ fn fraction_to_millis(fraction: &str) -> Option<u64> {
             };
     }
     Some(millis)
+}
+
+#[allow(clippy::string_slice)]
+fn parse_inline_cues(text: &str, line_start_millis: u64) -> (String, Vec<LyricsCueLine>) {
+    #[derive(Clone, Copy)]
+    struct Stamp {
+        tag_start: usize,
+        content_start: usize,
+        millis: u64,
+    }
+    let mut timestamps: Vec<Stamp> = Vec::new();
+    let text_bytes = text.as_bytes();
+    let len = text.len();
+    let mut i = 0;
+    while i < len {
+        if text_bytes[i] == b'<' {
+            if let Some(close) = text[i + 1..].find('>') {
+                let stamp_str = &text[i + 1..i + 1 + close];
+                if let Some((millis, _)) = parse_lrc_inline_timestamp(stamp_str) {
+                    timestamps.push(Stamp {
+                        tag_start: i,
+                        content_start: i + 1 + close + 1,
+                        millis,
+                    });
+                }
+                i += 1 + close + 1;
+            } else {
+                break;
+            }
+        } else {
+            i += 1;
+        }
+    }
+
+    if timestamps.is_empty() {
+        return (text.to_string(), Vec::new());
+    }
+
+    let mut display = String::new();
+    let mut cues = Vec::new();
+
+    let prefix = &text[..timestamps[0].tag_start];
+    if !prefix.is_empty() {
+        let prefix_start = display.len();
+        display.push_str(prefix);
+        cues.push(LyricsCue {
+            text: prefix.to_string(),
+            start_millis: line_start_millis,
+            end_millis: Some(timestamps[0].millis),
+            byte_start: prefix_start,
+            byte_end_exclusive: display.len(),
+        });
+    }
+
+    for (idx, stamp) in timestamps.iter().enumerate() {
+        let word_end = timestamps
+            .get(idx + 1)
+            .map_or(text.len(), |next| next.tag_start);
+        if stamp.content_start >= word_end {
+            continue;
+        }
+        let word = &text[stamp.content_start..word_end];
+        if word.is_empty() {
+            continue;
+        }
+        let display_start = display.len();
+        display.push_str(word);
+        let start_millis = stamp.millis;
+        let end_millis = timestamps.get(idx + 1).map(|s| s.millis);
+        cues.push(LyricsCue {
+            text: word.to_string(),
+            start_millis,
+            end_millis,
+            byte_start: display_start,
+            byte_end_exclusive: display.len(),
+        });
+    }
+
+    if cues.is_empty() {
+        return (text.to_string(), Vec::new());
+    }
+
+    let cue_line = LyricsCueLine {
+        text: display.clone(),
+        start_millis: Some(line_start_millis),
+        end_millis: None,
+        agent_id: None,
+        cues,
+    };
+    (display, vec![cue_line])
+}
+
+fn parse_lrc_inline_timestamp(stamp: &str) -> Option<(u64, &str)> {
+    let (minutes, rest) = stamp.split_once(':')?;
+    let minutes = minutes.parse::<u64>().ok()?;
+    let (seconds, fraction) = rest
+        .split_once('.')
+        .map(|(s, f)| (s, Some(f)))
+        .unwrap_or((rest, None));
+    let seconds = seconds.parse::<u64>().ok()?;
+    let fraction_millis = match fraction {
+        Some(f) => fraction_to_millis(f)?,
+        None => 0,
+    };
+    Some(((minutes * 60 + seconds) * 1_000 + fraction_millis, stamp))
+}
+
+fn parse_angle_bracket_line(line: &str) -> Option<LyricLine> {
+    let (first_stamp, rest) = line.split_once('<')?;
+    let (stamp, after_close) = rest.split_once('>')?;
+    let line_millis = parse_lrc_inline_timestamp(stamp)?.0;
+    if !first_stamp.trim().is_empty() {
+        return None;
+    }
+    let mut display = String::new();
+    let mut cues = Vec::new();
+    let mut remaining = after_close;
+    let mut prev_millis = line_millis;
+
+    while !remaining.is_empty() {
+        let (text_part, after_tag) = match remaining.split_once('<') {
+            Some((t, a)) => (t, a),
+            None => {
+                let text_start = display.len();
+                display.push_str(remaining);
+                if !remaining.is_empty() && !cues.is_empty() {
+                    cues.push(LyricsCue {
+                        text: remaining.to_string(),
+                        start_millis: prev_millis,
+                        end_millis: None,
+                        byte_start: text_start,
+                        byte_end_exclusive: display.len(),
+                    });
+                }
+                break;
+            }
+        };
+        let text_start = display.len();
+        display.push_str(text_part);
+        if let Some((tag_stamp, tag_rest)) = after_tag.split_once('>') {
+            if let Some((millis, _)) = parse_lrc_inline_timestamp(tag_stamp) {
+                cues.push(LyricsCue {
+                    text: text_part.to_string(),
+                    start_millis: prev_millis,
+                    end_millis: Some(millis),
+                    byte_start: text_start,
+                    byte_end_exclusive: display.len(),
+                });
+                prev_millis = millis;
+                remaining = tag_rest;
+            } else {
+                display.push('<');
+                display.push_str(tag_stamp);
+                display.push('>');
+                remaining = tag_rest;
+            }
+        } else {
+            display.push('<');
+            display.push_str(after_tag);
+            break;
+        }
+    }
+
+    if cues.is_empty() {
+        return None;
+    }
+
+    let cue_line = LyricsCueLine {
+        text: display.clone(),
+        start_millis: Some(line_millis),
+        end_millis: None,
+        agent_id: None,
+        cues,
+    };
+
+    Some(LyricLine {
+        text: display,
+        start_millis: Some(line_millis),
+        end_millis: None,
+        cue_lines: vec![cue_line],
+    })
 }
 
 fn inline_search_content(
@@ -1751,6 +1942,102 @@ pub(crate) fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
     for path in local_sidecar_candidates(&input.audio_path, Some(&input.title), input.cue_track) {
         if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
             return Some(lyrics);
+        }
+    }
+    None
+}
+
+pub(crate) fn embedded_lyrics_from_audio(path: &Path) -> Option<Lyrics> {
+    apply_global_options(
+        GlobalOptions::new()
+            .allocation_limit(LOCAL_LYRICS_ALLOCATION_LIMIT)
+            .preserve_format_specific_items(false),
+    );
+    let options = ParseOptions::new().read_cover_art(false);
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embedded lyrics: cannot open file");
+            return None;
+        }
+    };
+    let probe = match Probe::new(BufReader::new(file))
+        .options(options)
+        .guess_file_type()
+    {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embedded lyrics: cannot guess file type");
+            return None;
+        }
+    };
+    let Some(_file_type) = probe.file_type() else {
+        warn!(path = %path.display(), "embedded lyrics: no file type detected");
+        return None;
+    };
+    let tagged_file = match probe.read() {
+        Ok(t) => t,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embedded lyrics: failed to read tags");
+            return None;
+        }
+    };
+    let tag = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag());
+    let Some(tag) = tag else {
+        warn!(path = %path.display(), "embedded lyrics: no tag found");
+        return None;
+    };
+    let raw = match extract_lyrics_from_tag(tag) {
+        Some(r) => r,
+        None => {
+            debug!(path = %path.display(), "embedded lyrics: no lyrics tag found");
+            return None;
+        }
+    };
+    let trimmed = raw.trim();
+    if trimmed.is_empty() || trimmed.len() > LOCAL_LYRICS_MAX_BYTES {
+        debug!(path = %path.display(), len = trimmed.len(), "embedded lyrics: lyrics empty or too large");
+        return None;
+    }
+    if content_marks_instrumental(trimmed, None) {
+        return Some(Lyrics::instrumental(LyricsOrigin::Local));
+    }
+    let lines = trimmed
+        .lines()
+        .filter_map(lyric_line_from_text)
+        .collect::<Vec<_>>();
+    (!lines.is_empty()).then(|| {
+        Lyrics::from_documents(
+            LyricsOrigin::Local,
+            vec![LyricsDocument {
+                role: LyricsRole::Original,
+                language: None,
+                offset_millis: 0,
+                lines,
+                agents: Vec::new(),
+            }],
+        )
+    })
+}
+
+fn extract_lyrics_from_tag(tag: &lofty::tag::Tag) -> Option<String> {
+    for key in [ItemKey::UnsyncLyrics, ItemKey::Lyrics] {
+        if let Some(value) = tag.get_string(key) {
+            return Some(value.to_string());
+        }
+    }
+    for item in tag.items() {
+        let key_str = item
+            .key()
+            .map_key(tag.tag_type())
+            .unwrap_or_default()
+            .to_ascii_lowercase();
+        if key_str == "lyrics" {
+            if let Some(value) = item.value().text() {
+                return Some(value.to_string());
+            }
         }
     }
     None

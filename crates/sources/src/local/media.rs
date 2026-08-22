@@ -129,12 +129,13 @@ pub(super) fn read_media(
                 .map(|picture_index| artwork::embedded_reference(&path, picture_index, revision))
         });
     let metadata = if tagged_file.is_some() {
-        audio_metadata_from_lofty(
+        let meta = audio_metadata_from_lofty(
             &path,
             tagged_file.as_ref(),
             discovered.duration_seconds,
             local_artwork,
-        )
+        );
+        meta
     } else {
         audio_metadata_from_discoverer(&path, Some(&discovered), local_artwork)
     };

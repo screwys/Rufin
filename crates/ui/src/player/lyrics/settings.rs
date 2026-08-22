@@ -190,6 +190,113 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
     });
     playback.add(&karaoke);
     page.add(&playback);
+
+    let typography = adw::PreferencesGroup::builder()
+        .title(tr("Typography"))
+        .build();
+
+    let font_names = collect_font_names();
+    let font_titles: Vec<&str> = font_names.iter().map(|s| s.as_str()).collect();
+    let font_model = gtk::StringList::new(&font_titles);
+    let current_font_index = if settings.lyrics_font_family.is_empty() {
+        0
+    } else {
+        font_names
+            .iter()
+            .position(|n| n == &settings.lyrics_font_family)
+            .unwrap_or(0) as u32
+    };
+    let font_row = adw::ComboRow::builder()
+        .title(tr("Font family"))
+        .model(&font_model)
+        .selected(current_font_index)
+        .build();
+    let font_shell = Rc::clone(shell);
+    let font_names_for_row = font_names.clone();
+    font_row.connect_selected_notify(move |row| {
+        let family = font_names_for_row
+            .get(row.selected() as usize)
+            .cloned()
+            .unwrap_or_default();
+        font_shell.set_lyrics_font_family(family);
+    });
+    typography.add(&font_row);
+
+    let size_adjustment = gtk::Adjustment::builder()
+        .lower(12.0)
+        .upper(28.0)
+        .step_increment(1.0)
+        .page_increment(1.0)
+        .value(settings.lyrics_font_size.unwrap_or(19) as f64)
+        .build();
+    let size_row = adw::SpinRow::builder()
+        .title(tr("Font size (px)"))
+        .adjustment(&size_adjustment)
+        .digits(0)
+        .build();
+    let has_custom_size = settings.lyrics_font_size.is_some();
+    let default_label = tr("Default");
+    let size_suffix_label = gtk::Label::builder()
+        .label(if has_custom_size { "" } else { &default_label })
+        .css_classes(vec!["dim-label".to_string()])
+        .build();
+    size_row.add_suffix(&size_suffix_label);
+    let size_shell = Rc::clone(shell);
+    size_row.connect_value_notify(move |row| {
+        let raw = row.value() as u16;
+        let size = if raw == 19 { None } else { Some(raw) };
+        size_shell.set_lyrics_font_size(size);
+        let label = if size.is_some() {
+            String::new()
+        } else {
+            tr("Default")
+        };
+        size_suffix_label.set_label(&label);
+    });
+    typography.add(&size_row);
+
+    let highlight_color_row = adw::ActionRow::builder()
+        .title(tr("Highlight color"))
+        .build();
+    let initial_rgba = gtk::gdk::RGBA::parse(settings.lyrics_highlight_color.as_str())
+        .unwrap_or(gtk::gdk::RGBA::new(0.91, 0.59, 0.17, 1.0));
+    let color_button = gtk::ColorDialogButton::builder()
+        .rgba(&initial_rgba)
+        .build();
+    let color_dialog = gtk::ColorDialog::builder()
+        .title(tr("Highlight color"))
+        .modal(true)
+        .build();
+    color_button.set_dialog(&color_dialog);
+    let color_shell = Rc::clone(shell);
+    color_button.connect_rgba_notify(move |btn| {
+        let rgba = btn.rgba();
+        let r = (rgba.red() * 255.0) as u8;
+        let g = (rgba.green() * 255.0) as u8;
+        let b = (rgba.blue() * 255.0) as u8;
+        let hex = format!("#{r:02x}{g:02x}{b:02x}");
+        color_shell.set_lyrics_highlight_color(hex);
+    });
+    highlight_color_row.add_suffix(&color_button);
+    highlight_color_row.set_activatable_widget(Some(&color_button));
+    typography.add(&highlight_color_row);
+
+    page.add(&typography);
+
+    let maintenance = adw::PreferencesGroup::builder()
+        .title(tr("Maintenance"))
+        .build();
+    let scan_button = gtk::Button::builder()
+        .label(tr("Scan embedded lyrics"))
+        .css_classes(["suggested-action"])
+        .build();
+    let scan_shell = Rc::clone(shell);
+    scan_button.connect_clicked(move |_| {
+        scan_shell.rescan_for_embedded_lyrics();
+    });
+    maintenance.add(&scan_button);
+    page.add(&maintenance);
+
     (page, karaoke)
 }
 
@@ -340,6 +447,30 @@ fn small_icon_button(icon: &str, label: &str) -> gtk::Button {
     button
 }
 
+fn collect_font_names() -> Vec<String> {
+    vec![
+        "Sans".into(),
+        "Sans Serif".into(),
+        "Serif".into(),
+        "Mono".into(),
+        "Noto Sans".into(),
+        "Noto Serif".into(),
+        "Noto Sans Mono".into(),
+        "Noto Sans Sinhala".into(),
+        "Noto Sans Tamil".into(),
+        "Noto Sans Devanagari".into(),
+        "Noto Sans Bengali".into(),
+        "Noto Sans Thai".into(),
+        "Noto Sans Arabic".into(),
+        "Noto Sans CJK".into(),
+        "Noto Sans JP".into(),
+        "Noto Sans KR".into(),
+        "Noto Sans SC".into(),
+        "Noto Sans TC".into(),
+        "Noto Sans HK".into(),
+    ]
+}
+
 impl Shell {
     pub(crate) fn set_external_lyrics_enabled(self: &Rc<Self>, enabled: bool) -> bool {
         self.update_lyrics_settings("lyrics setting", false, |settings| {
@@ -452,6 +583,42 @@ impl Shell {
             settings.word_by_word_highlighting = enabled;
             true
         });
+    }
+
+    pub(crate) fn set_lyrics_font_family(self: &Rc<Self>, family: String) {
+        self.update_lyrics_settings("lyrics font family", true, |settings| {
+            if settings.lyrics_font_family == family {
+                return false;
+            }
+            settings.lyrics_font_family = family;
+            true
+        });
+    }
+
+    pub(crate) fn set_lyrics_font_size(self: &Rc<Self>, size: Option<u16>) {
+        self.update_lyrics_settings("lyrics font size", true, |settings| {
+            if settings.lyrics_font_size == size {
+                return false;
+            }
+            settings.lyrics_font_size = size;
+            true
+        });
+    }
+
+    pub(crate) fn set_lyrics_highlight_color(self: &Rc<Self>, color: String) {
+        self.update_lyrics_settings("lyrics highlight color", true, |settings| {
+            if settings.lyrics_highlight_color == color {
+                return false;
+            }
+            settings.lyrics_highlight_color = color;
+            true
+        });
+    }
+
+    pub(crate) fn rescan_for_embedded_lyrics(self: &Rc<Self>) {
+        if let Some(source) = self.selected_source_operations() {
+            source.refresh_library();
+        }
     }
 
     fn update_lyrics_settings(

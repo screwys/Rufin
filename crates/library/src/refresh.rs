@@ -12,7 +12,6 @@ use crate::{
     LibraryResult, LocalFile, MoodId, MusicFolder, PlaylistId, PlaylistSnapshot, SmartPlaylistId,
     SourceId, Track, TrackId,
 };
-
 pub const STORE_ROW_BATCH_LIMIT: usize = 500;
 pub const STORE_BYTE_BATCH_LIMIT: usize = 8 * 1024 * 1024;
 

@@ -80,13 +80,18 @@ const DARK_SURFACE_TOKENS: &str = r#"  --window-bg-color: #222226;
 
 pub(crate) struct ApplicationAppearance {
     override_provider: gtk::CssProvider,
+    lyrics_font_provider: gtk::CssProvider,
 }
 
 impl ApplicationAppearance {
     pub(crate) fn install() -> Self {
         let override_provider = gtk::CssProvider::new();
+        let lyrics_font_provider = gtk::CssProvider::new();
         let Some(display) = gtk::gdk::Display::default() else {
-            return Self { override_provider };
+            return Self {
+                override_provider,
+                lyrics_font_provider,
+            };
         };
 
         let base_provider = gtk::CssProvider::new();
@@ -101,8 +106,16 @@ impl ApplicationAppearance {
             &override_provider,
             gtk::STYLE_PROVIDER_PRIORITY_USER + 1,
         );
+        gtk::style_context_add_provider_for_display(
+            &display,
+            &lyrics_font_provider,
+            gtk::STYLE_PROVIDER_PRIORITY_USER + 2,
+        );
 
-        Self { override_provider }
+        Self {
+            override_provider,
+            lyrics_font_provider,
+        }
     }
 
     pub(crate) fn apply(&self, settings: &Settings) {
@@ -112,6 +125,8 @@ impl ApplicationAppearance {
                 settings.theme_preference,
                 settings.accent_preference,
             ));
+        self.lyrics_font_provider
+            .load_from_string(&settings.lyrics.lyrics_font_css());
     }
 }
 

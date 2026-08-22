@@ -13,6 +13,7 @@ publish.workspace = true
 [dependencies]
 async-channel.workspace = true
 library.workspace = true
+lofty.workspace = true
 playback.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 serde.workspace = true
