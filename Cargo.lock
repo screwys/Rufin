@@ -2537,6 +2537,7 @@ version = "0.13.1"
 dependencies = [
  "async-channel",
  "library",
+ "lofty",
  "playback",
  "reqwest",
  "serde",

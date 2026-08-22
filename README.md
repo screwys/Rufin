@@ -1,12 +1,5 @@
 # Rufin
 
-This is a fork of **[Rufin](https://github.com/screwys/Rufin)** with additional features:
-
-- **Embedded lyrics**: reads lyrics from audio file tags **(ID3, Vorbis, MP4)** at resolve time, prioritized over sidecar `.lrc` and external providers
-- **Word-by-word (karaoke) highlighting**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
-- **Typography customization**: custom font family **(from system-installed fonts)** and font size for the lyrics panel
-- **Highlight color**: user-selectable color for the karaoke highlight sweep
-
 <p>
   <a href="Cargo.toml"><img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-f74c00?logo=rust"></a>
   <a href="LICENSE"><img alt="License: GPL-3.0" src="https://img.shields.io/badge/License-GPL--3.0-blue.svg"></a>
@@ -15,6 +8,15 @@ This is a fork of **[Rufin](https://github.com/screwys/Rufin)** with additional 
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
   <a href="https://search.nixos.org/packages?channel=unstable&query=rufin"><img alt="Nixpkgs version" src="https://repology.org/badge/version-for-repo/nix_unstable/rufin.svg?header=Nixpkgs"></a>
 </p>
+
+This is a fork of **[Rufin](https://github.com/screwys/Rufin)** with additional features:
+
+- **Embedded lyrics**: reads lyrics from audio file tags **(ID3, Vorbis, MP4)** at resolve time, prioritized over sidecar `.lrc` and external providers
+- **Word-by-word (karaoke) highlighting**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
+- **Typography customization**: custom font family **(from system-installed fonts)** and font size for the lyrics panel
+- **Highlight color**: user-selectable color for the karaoke highlight sweep
+
+ ---
 
 <img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player written in Rust, available on [multiple platforms](#installation). It can play music from your Jellyfin, Navidrome/OpenSubsonic flavor servers and local folders; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
 
