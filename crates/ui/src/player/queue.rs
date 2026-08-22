@@ -6,6 +6,7 @@ use std::time::Duration;
 use crate::format_duration;
 use crate::routes::detail_links::{DetailLinkBinding, track_artist_links};
 use crate::routes::route::Route;
+use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 use ::library::{AcceptedTrackReplacement, MetadataItemId, RadioSeed, Track, TrackId};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -192,6 +193,7 @@ impl QueueSidebarRowSlot {
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
         stack.set_halign(gtk::Align::Fill);
+        stack.set_margin_end(WINDOW_CHROME_MARGIN_END);
 
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.add_css_class("queue-row");
