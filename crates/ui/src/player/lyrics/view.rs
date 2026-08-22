@@ -10,6 +10,8 @@ use lyrics::{
     japanese_reading_for_language_options,
 };
 
+use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
+
 use super::wrapping_line::WrappingLine;
 
 const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
@@ -140,7 +142,7 @@ impl LyricsPane {
 
         let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
         body.set_vexpand(true);
-        body.set_margin_end(8);
+        body.set_margin_end(WINDOW_CHROME_MARGIN_END);
         body.add_css_class("lyrics-lines");
         scroller.set_child(Some(&body));
         root.set_child(Some(&scroller));
