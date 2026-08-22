@@ -382,7 +382,7 @@ struct ActiveInterruptible {
 }
 
 struct ActiveSourceArtworkPreparation {
-    revision: u64,
+    key: AtomicU64,
     cancelled: Arc<AtomicBool>,
 }
 
@@ -853,16 +853,17 @@ impl SourceOwner {
     }
 
     fn start_source_artwork_preparation(&self, selected: &SelectedSourceState) {
-        let Ok(revision) = u64::try_from(selected.library.library_id()) else {
-            warn!(source_id = %selected.source_id(), "accepted Library has an invalid artwork revision");
-            return;
-        };
         let Some(source) = selected.source.as_ref().cloned() else {
             return;
         };
         let source_id = selected.source_id().clone();
+        let Ok(source_artwork) = selected.library.source_artwork() else {
+            warn!(%source_id, "could not read accepted source artwork");
+            return;
+        };
+        let key = self.shared.artwork.source_preparation_key(&source_artwork);
         let active = Arc::new(ActiveSourceArtworkPreparation {
-            revision,
+            key: AtomicU64::new(key),
             cancelled: Arc::new(AtomicBool::new(false)),
         });
         {
@@ -873,7 +874,7 @@ impl SourceOwner {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if preparations
                 .get(&source_id)
-                .is_some_and(|current| current.revision == revision)
+                .is_some_and(|current| current.key.load(Ordering::Acquire) == key)
             {
                 return;
             }
@@ -888,12 +889,14 @@ impl SourceOwner {
         drop(self.shared.runtime.spawn_blocking(move || {
             let result = (|| -> Result<(), String> {
                 if artwork
-                    .source_preparation_complete(&source_id, revision)
+                    .source_preparation_complete(&source_id, key)
                     .map_err(string_error)?
                 {
                     return Ok(());
                 }
                 let cancelled = || active.cancelled.load(Ordering::Acquire);
+                let mut source_artwork = source_artwork;
+                let mut key = key;
                 if let Some(replacement) = source
                     .inspect_accepted_artwork(&library, &cancelled)
                     .map_err(string_error)?
@@ -902,16 +905,18 @@ impl SourceOwner {
                     library
                         .accept_local_component(replacement)
                         .map_err(string_error)?;
+                    source_artwork = library.source_artwork().map_err(string_error)?;
+                    key = artwork.source_preparation_key(&source_artwork);
+                    active.key.store(key, Ordering::Release);
                 }
                 if cancelled() {
                     return Err("source artwork preparation was cancelled".to_string());
                 }
-                let source_artwork = library.source_artwork().map_err(string_error)?;
                 let total = source_artwork.len();
                 let send_progress = |completed| {
                     let _ = events.try_send(SourceEvent::ArtworkPreparation {
                         source_id: source_id.clone(),
-                        revision,
+                        revision: key,
                         progress: Some(SourceProgress {
                             stage: SourceProgressStage::Artwork,
                             completed,
@@ -924,7 +929,7 @@ impl SourceOwner {
                 let summary = artwork
                     .prepare_source_artwork(
                         SourceImages::new(source),
-                        revision,
+                        key,
                         source_artwork,
                         &progress,
                         &cancelled,
@@ -947,7 +952,7 @@ impl SourceOwner {
             }
             let completion = SourceEvent::ArtworkPreparation {
                 source_id: source_id.clone(),
-                revision,
+                revision: active.key.load(Ordering::Acquire),
                 progress: None,
             };
             let completion_owner = Arc::clone(&shared);

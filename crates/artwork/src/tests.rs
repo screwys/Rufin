@@ -25,6 +25,69 @@ struct StaticImages {
     bytes: Vec<u8>,
 }
 
+#[test]
+fn source_preparation_key_depends_only_on_accepted_artwork_bindings() {
+    let temporary = TempDir::new().expect("temporary artwork cache");
+    let images = Arc::new(StaticImages {
+        calls: AtomicUsize::new(0),
+        bytes: png_bytes(),
+    });
+    let source_id = SourceId::new("binding-key-source");
+    let source = SourceImages::testing(source_id.clone(), images.clone());
+    let artwork = Artwork::new(temporary.path(), runtime()).expect("artwork");
+    let first = SourceArtwork::Native(ImageRef::new("cover:first", Some("v1".to_string())));
+    let second = SourceArtwork::Native(ImageRef::new("cover:second", None));
+
+    let accepted = artwork.source_preparation_key(&[first.clone(), second.clone()]);
+    let reordered = artwork.source_preparation_key(&[second.clone(), first.clone()]);
+    let changed = artwork.source_preparation_key(&[
+        SourceArtwork::Native(ImageRef::new("cover:first", Some("v2".to_string()))),
+        second.clone(),
+    ]);
+
+    artwork
+        .prepare_source_artwork(
+            source.clone(),
+            accepted,
+            Arc::new([first, second]),
+            &|_, _| {},
+            &|| false,
+        )
+        .expect("prepare accepted artwork bindings");
+
+    assert_eq!(accepted, reordered);
+    assert_ne!(accepted, changed);
+    assert!(
+        artwork
+            .source_preparation_complete(&source_id, reordered)
+            .expect("reuse reordered accepted bindings")
+    );
+    assert!(
+        !artwork
+            .source_preparation_complete(&source_id, changed)
+            .expect("changed binding invalidates preparation")
+    );
+    let changed_facts: Arc<[SourceArtwork]> = Arc::new([
+        SourceArtwork::Native(ImageRef::new("cover:first", Some("v2".to_string()))),
+        SourceArtwork::Native(ImageRef::new("cover:second", None)),
+    ]);
+    artwork
+        .prepare_source_artwork(
+            source.clone(),
+            changed,
+            Arc::clone(&changed_facts),
+            &|_, _| {},
+            &|| false,
+        )
+        .expect("prepare changed artwork bindings");
+    let repeated = artwork
+        .prepare_source_artwork(source, changed, changed_facts, &|_, _| {}, &|| false)
+        .expect("reuse changed artwork bindings");
+
+    assert_eq!(repeated, Default::default());
+    assert_eq!(images.calls.load(Ordering::Relaxed), 3);
+}
+
 #[async_trait(?Send)]
 impl TestImageSource for StaticImages {
     async fn image(&self, _request: SourceImageRequest) -> SourceResult<ImageBytes> {

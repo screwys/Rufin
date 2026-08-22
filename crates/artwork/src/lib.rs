@@ -307,6 +307,24 @@ impl Artwork {
             .source_preparation_complete(source_id, revision)
     }
 
+    pub fn source_preparation_key(&self, artwork: &[SourceArtwork]) -> u64 {
+        let mut identities = artwork
+            .iter()
+            .map(|artwork| {
+                ArtworkBinding::source_artwork(artwork)
+                    .stable_identity()
+                    .to_string()
+            })
+            .collect::<Vec<_>>();
+        identities.sort_unstable();
+        let mut digest = md5::Context::new();
+        for identity in identities {
+            digest.consume(identity.len().to_le_bytes());
+            digest.consume(identity.as_bytes());
+        }
+        u64::from_le_bytes(digest.finalize().0[..8].try_into().expect("MD5 prefix"))
+    }
+
     /// Caches and reconciles the accepted source-owned artwork manifest.
     pub fn prepare_source_artwork(
         &self,
