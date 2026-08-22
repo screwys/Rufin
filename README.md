@@ -9,12 +9,11 @@
   <a href="https://search.nixos.org/packages?channel=unstable&query=rufin"><img alt="Nixpkgs version" src="https://repology.org/badge/version-for-repo/nix_unstable/rufin.svg?header=Nixpkgs"></a>
 </p>
 
-This is a fork of **[Rufin](https://github.com/screwys/Rufin)** with additional features:
+This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with additional features:
 
 - **Embedded lyrics**: reads lyrics from audio file tags **(ID3, Vorbis, MP4)** at resolve time, prioritized over sidecar `.lrc` and external providers
-- **Word-by-word (karaoke) highlighting**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
+- **Word-by-word (karaoke) support**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
 - **Typography customization**: custom font family **(from system-installed fonts)** and font size for the lyrics panel
-- **Highlight color**: user-selectable color for the karaoke highlight sweep
 
  ---
 
