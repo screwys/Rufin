@@ -195,7 +195,13 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         .title(tr("Typography"))
         .build();
 
-    let font_names = collect_font_names();
+    let use_custom_font = adw::SwitchRow::builder()
+        .title(tr("Use custom font"))
+        .active(settings.lyrics_use_custom_font)
+        .build();
+    typography.add(&use_custom_font);
+
+    let font_names = collect_system_font_names(&shell.chrome.window);
     let font_titles: Vec<&str> = font_names.iter().map(|s| s.as_str()).collect();
     let font_model = gtk::StringList::new(&font_titles);
     let current_font_index = if settings.lyrics_font_family.is_empty() {
@@ -210,9 +216,10 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         .title(tr("Font family"))
         .model(&font_model)
         .selected(current_font_index)
+        .visible(settings.lyrics_use_custom_font)
         .build();
     let font_shell = Rc::clone(shell);
-    let font_names_for_row = font_names.clone();
+    let font_names_for_row = font_names;
     font_row.connect_selected_notify(move |row| {
         let family = font_names_for_row
             .get(row.selected() as usize)
@@ -233,6 +240,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         .title(tr("Font size (px)"))
         .adjustment(&size_adjustment)
         .digits(0)
+        .visible(settings.lyrics_use_custom_font)
         .build();
     let has_custom_size = settings.lyrics_font_size.is_some();
     let default_label = tr("Default");
@@ -254,6 +262,21 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         size_suffix_label.set_label(&label);
     });
     typography.add(&size_row);
+    page.add(&typography);
+
+    let toggle_font_row = font_row.clone();
+    let toggle_size_row = size_row.clone();
+    let use_custom_shell = Rc::clone(shell);
+    use_custom_font.connect_active_notify(move |row| {
+        let active = row.is_active();
+        use_custom_shell.set_lyrics_use_custom_font(active);
+        toggle_font_row.set_visible(active);
+        toggle_size_row.set_visible(active);
+    });
+
+    let wbw_group = adw::PreferencesGroup::builder()
+        .title(tr("Word-by-word"))
+        .build();
 
     let highlight_color_row = adw::ActionRow::builder()
         .title(tr("Highlight color"))
@@ -279,9 +302,8 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
     });
     highlight_color_row.add_suffix(&color_button);
     highlight_color_row.set_activatable_widget(Some(&color_button));
-    typography.add(&highlight_color_row);
-
-    page.add(&typography);
+    wbw_group.add(&highlight_color_row);
+    page.add(&wbw_group);
 
     let maintenance = adw::PreferencesGroup::builder()
         .title(tr("Maintenance"))
@@ -447,28 +469,19 @@ fn small_icon_button(icon: &str, label: &str) -> gtk::Button {
     button
 }
 
-fn collect_font_names() -> Vec<String> {
-    vec![
-        "Sans".into(),
-        "Sans Serif".into(),
-        "Serif".into(),
-        "Mono".into(),
-        "Noto Sans".into(),
-        "Noto Serif".into(),
-        "Noto Sans Mono".into(),
-        "Noto Sans Sinhala".into(),
-        "Noto Sans Tamil".into(),
-        "Noto Sans Devanagari".into(),
-        "Noto Sans Bengali".into(),
-        "Noto Sans Thai".into(),
-        "Noto Sans Arabic".into(),
-        "Noto Sans CJK".into(),
-        "Noto Sans JP".into(),
-        "Noto Sans KR".into(),
-        "Noto Sans SC".into(),
-        "Noto Sans TC".into(),
-        "Noto Sans HK".into(),
-    ]
+fn collect_system_font_names(window: &impl IsA<gtk::Widget>) -> Vec<String> {
+    let font_map = match window.pango_context().font_map() {
+        Some(map) => map,
+        None => return vec![],
+    };
+    let mut families: Vec<String> = font_map
+        .list_families()
+        .into_iter()
+        .map(|f| f.name().to_string())
+        .collect();
+    families.sort();
+    families.dedup();
+    families
 }
 
 impl Shell {
@@ -585,6 +598,16 @@ impl Shell {
         });
     }
 
+    pub(crate) fn set_lyrics_use_custom_font(self: &Rc<Self>, enabled: bool) {
+        self.update_lyrics_settings("lyrics custom font", true, |settings| {
+            if settings.lyrics_use_custom_font == enabled {
+                return false;
+            }
+            settings.lyrics_use_custom_font = enabled;
+            true
+        });
+    }
+
     pub(crate) fn set_lyrics_font_family(self: &Rc<Self>, family: String) {
         self.update_lyrics_settings("lyrics font family", true, |settings| {
             if settings.lyrics_font_family == family {
@@ -633,6 +656,7 @@ impl Shell {
         if !updated {
             return false;
         }
+        self.appearance.apply(&self.settings.current.borrow());
         if rerender_lyrics {
             self.render_lyrics_presentation();
         }

@@ -93,6 +93,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub word_by_word_highlighting: bool,
     #[serde(default)]
+    pub lyrics_use_custom_font: bool,
+    #[serde(default)]
     pub lyrics_font_family: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub lyrics_font_size: Option<u16>,
@@ -113,6 +115,7 @@ impl Default for Settings {
             show_furigana: false,
             show_romanization: false,
             word_by_word_highlighting: true,
+            lyrics_use_custom_font: false,
             lyrics_font_family: String::new(),
             lyrics_font_size: None,
             lyrics_highlight_color: default_lyrics_highlight_color(),
@@ -164,15 +167,14 @@ impl Settings {
             let color = &self.lyrics_highlight_color;
             css.push_str(&format!(":root {{ --lyrics-highlight-color: {color}; }}\n"));
         }
-        if self.lyrics_font_family.is_empty() {
-            return css;
-        }
-        let family = css_escape_family(&self.lyrics_font_family);
-        css.push_str(&format!(
-            "{selectors} {{ font-family: '{family}', sans-serif; }}\n"
-        ));
-        if let Some(size) = self.lyrics_font_size {
-            css.push_str(&format!(".lyrics-line {{ font-size: {size}px; }}\n"));
+        if self.lyrics_use_custom_font && !self.lyrics_font_family.is_empty() {
+            let family = css_escape_family(&self.lyrics_font_family);
+            css.push_str(&format!(
+                "{selectors} {{ font-family: '{family}', sans-serif; }}\n"
+            ));
+            if let Some(size) = self.lyrics_font_size {
+                css.push_str(&format!(".lyrics-line {{ font-size: {size}px; }}\n"));
+            }
         }
         css
     }
