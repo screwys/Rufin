@@ -492,6 +492,7 @@ fn field_title(item_id: &MetadataItemId, field: MetadataField) -> &'static str {
         MetadataField::MusicBrainzReleaseGroupId => msgid("MusicBrainz release group ID"),
         MetadataField::MusicBrainzArtistId => msgid("MusicBrainz artist ID"),
         MetadataField::LockData => unreachable!("lock metadata uses a SwitchRow"),
+        MetadataField::Lyrics => unreachable!("lyrics edited separately"),
     }
 }
 
@@ -524,6 +525,7 @@ fn field_value(values: &MetadataValues, field: MetadataField) -> Option<String> 
         MetadataField::MusicBrainzReleaseGroupId => values.musicbrainz_release_group_id.clone(),
         MetadataField::MusicBrainzArtistId => values.musicbrainz_artist_id.clone(),
         MetadataField::LockData => None,
+        MetadataField::Lyrics => None,
     }
 }
 
@@ -897,6 +899,7 @@ fn apply_identification_input(values: &mut MetadataValues, field: MetadataField,
         MetadataField::MusicBrainzReleaseGroupId => values.musicbrainz_release_group_id = text(),
         MetadataField::MusicBrainzArtistId => values.musicbrainz_artist_id = text(),
         MetadataField::LockData => {}
+        MetadataField::Lyrics => {}
     }
 }
 
@@ -1056,7 +1059,8 @@ fn metadata_change(
         | MetadataField::DiscNumber
         | MetadataField::Year
         | MetadataField::Bpm
-        | MetadataField::LockData => unreachable!("metadata field handled separately"),
+        | MetadataField::LockData
+        | MetadataField::Lyrics => unreachable!("metadata field handled separately"),
     };
     Ok(Some(change))
 }

@@ -18,8 +18,9 @@ use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::lyrics::{
-    LyricsPlan, cached_lyrics_allowed, embedded_lyrics_from_audio, external_best_lyrics,
-    local_sidecar_lyrics, lyrics_from_native, lyrics_with_displayable_content,
+    LyricsPlan, cached_lyrics_allowed, embed_lyrics_in_audio, embedded_lyrics_from_audio,
+    external_best_lyrics, local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_native,
+    lyrics_to_lrc_text, lyrics_with_displayable_content,
 };
 use crate::{
     CurrentLyrics, CurrentLyricsContent, LocalLyricsInput, LyricsBundle, LyricsDocument,
@@ -529,7 +530,12 @@ impl LyricsService {
                             && bundle_satisfies_plan(document, &resolution.plan)
                     })
                 {
-                    self.accept_bundle(request, &key, Arc::new(document));
+                    let is_external = matches!(authority, LyricsCacheAuthority::External);
+                    let arc = Arc::new(document);
+                    if is_external {
+                        self.try_embed_lyrics(&key, &arc).await;
+                    }
+                    self.accept_bundle(request, &key, arc);
                     return;
                 }
                 if !self.current_request_active(request, &key, &cancelled) {
@@ -652,6 +658,7 @@ impl LyricsService {
         if !self.matches_current(request, key) {
             return;
         }
+        let is_external = matches!(document.origin, LyricsOrigin::External(_));
         let library = self.library.clone();
         match cache_write(key, input, plan, &document) {
             Ok(write) => {
@@ -663,7 +670,40 @@ impl LyricsService {
             }
             Err(error) => warn!(%error, "could not encode lyrics cache"),
         }
+        if is_external {
+            self.try_embed_lyrics(key, &document).await;
+        }
         self.accept_bundle(request, key, Arc::new(document));
+    }
+
+    async fn try_embed_lyrics(&self, key: &DocumentKey, document: &LyricsBundle) {
+        let Some(first_doc) = document.documents().first() else {
+            return;
+        };
+        let lrc_text = lyrics_to_lrc_text(first_doc, 0);
+        if lrc_text.trim().is_empty() {
+            return;
+        }
+        let library = self.library.clone();
+        let source_id = key.source_id.clone();
+        let track_id = key.track_id.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            let loaded = library.load_source(&source_id).ok().flatten()?;
+            let track = loaded.track(&track_id).ok().flatten()?;
+            track.source_path.clone()
+        })
+        .await;
+        match result {
+            Ok(Some(path)) => {
+                let path = std::path::PathBuf::from(path);
+                tokio::task::spawn_blocking(move || {
+                    embed_lyrics_in_audio(&path, &lrc_text);
+                })
+                .await
+                .ok();
+            }
+            _ => {}
+        }
     }
 
     fn accept_bundle(&self, request: u64, key: &DocumentKey, bundle: Arc<LyricsBundle>) {
@@ -887,6 +927,7 @@ impl LyricsService {
                         let _ =
                             tokio::task::spawn_blocking(move || library.store_lyrics(write)).await;
                     }
+                    service.try_embed_lyrics(&key, &document).await;
                     let accepted = service.matches_current(request, &key);
                     if accepted {
                         service.accept_bundle(request, &key, Arc::clone(&document));
@@ -979,6 +1020,25 @@ impl LyricsService {
         });
     }
 
+    fn update_lyrics_text(self: &Arc<Self>, text: &str) {
+        let Some(new_document) = lyrics_from_edited_text(text) else {
+            return;
+        };
+        let event = {
+            let mut state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(current) = state.current.as_mut() else {
+                return;
+            };
+            current.document = Some(Arc::new(new_document));
+            current.request = self.next_request.fetch_add(1, Ordering::AcqRel);
+            current_event(current)
+        };
+        self.publish(event);
+    }
+
     fn clear_fetched(self: &Arc<Self>, media_id: CurrentMediaId) {
         let key = {
             let state = self
@@ -1034,6 +1094,10 @@ impl LyricsHandle {
 
     pub fn save_current(&self, media_id: CurrentMediaId, offset_millis: i64, path: PathBuf) {
         self.service.save_current(media_id, offset_millis, path);
+    }
+
+    pub fn update_lyrics_text(&self, text: &str) {
+        self.service.update_lyrics_text(text);
     }
 
     pub fn clear_fetched(&self, media_id: CurrentMediaId) {

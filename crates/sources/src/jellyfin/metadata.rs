@@ -617,6 +617,7 @@ fn apply_change(item: &mut Map<String, Value>, change: &MetadataChange) {
             set_provider_id(item, "MusicBrainzArtist", value.as_deref())
         }
         MetadataChange::Bpm(_) => {}
+        MetadataChange::Lyrics(_) => {}
     }
 }
 

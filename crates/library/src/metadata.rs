@@ -108,6 +108,7 @@ pub enum MetadataField {
     MusicBrainzAlbumId,
     MusicBrainzReleaseGroupId,
     MusicBrainzArtistId,
+    Lyrics,
 }
 
 /// Metadata fields an opened source can write for one exact library item.
@@ -183,6 +184,7 @@ fn identification_changes_field(
             &candidate.musicbrainz_artist_id,
         ),
         MetadataField::LockData => false,
+        MetadataField::Lyrics => false,
     }
 }
 
@@ -289,6 +291,7 @@ pub enum MetadataChange {
     MusicBrainzAlbumId(Option<String>),
     MusicBrainzReleaseGroupId(Option<String>),
     MusicBrainzArtistId(Option<String>),
+    Lyrics(Option<String>),
 }
 
 impl MetadataChange {
@@ -311,6 +314,7 @@ impl MetadataChange {
             Self::MusicBrainzAlbumId(_) => MetadataField::MusicBrainzAlbumId,
             Self::MusicBrainzReleaseGroupId(_) => MetadataField::MusicBrainzReleaseGroupId,
             Self::MusicBrainzArtistId(_) => MetadataField::MusicBrainzArtistId,
+            Self::Lyrics(_) => MetadataField::Lyrics,
         }
     }
 
@@ -346,6 +350,7 @@ impl MetadataChange {
                 values.musicbrainz_release_group_id == normalized(value)
             }
             Self::MusicBrainzArtistId(value) => values.musicbrainz_artist_id == normalized(value),
+            Self::Lyrics(_) => true,
         }
     }
 }

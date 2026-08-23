@@ -1505,6 +1505,10 @@ fn apply_change(tag: &mut Tag, change: &MetadataChange, changed: &mut HashSet<It
             set_text(tag, ItemKey::MusicBrainzReleaseGroupId, value.as_deref())
         }
         MetadataChange::LockData(_) | MetadataChange::MusicBrainzArtistId(_) => {}
+        MetadataChange::Lyrics(value) => {
+            changed.insert(ItemKey::UnsyncLyrics);
+            set_text(tag, ItemKey::UnsyncLyrics, value.as_deref())
+        }
     }
 }
 
@@ -1543,6 +1547,7 @@ fn field_name(field: library::MetadataField) -> &'static str {
         library::MetadataField::MusicBrainzReleaseGroupId => "MusicBrainz release group ID",
         library::MetadataField::MusicBrainzArtistId => "MusicBrainz artist ID",
         library::MetadataField::LockData => "metadata field",
+        library::MetadataField::Lyrics => "lyrics",
     }
 }
 

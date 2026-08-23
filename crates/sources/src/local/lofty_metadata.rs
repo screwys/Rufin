@@ -68,6 +68,7 @@ impl MetadataWriter {
                 MetadataField::MusicBrainzReleaseGroupId,
                 ItemKey::MusicBrainzReleaseGroupId,
             ),
+            (MetadataField::Lyrics, ItemKey::UnsyncLyrics),
         ]
         .into_iter()
         .filter_map(|(field, key)| {

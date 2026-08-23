@@ -6,10 +6,10 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use lofty::config::{GlobalOptions, ParseOptions, apply_global_options};
+use lofty::config::{GlobalOptions, ParseOptions, WriteOptions, apply_global_options};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
-use lofty::tag::ItemKey;
+use lofty::tag::{ItemKey, TagExt};
 
 use library::{Track, TrackId};
 use serde::Deserialize;
@@ -2041,6 +2041,95 @@ fn extract_lyrics_from_tag(tag: &lofty::tag::Tag) -> Option<String> {
         }
     }
     None
+}
+
+pub fn lyrics_to_lrc_text(document: &LyricsDocument, offset_millis: i64) -> String {
+    document
+        .lines
+        .iter()
+        .map(|line| match line.start_millis {
+            Some(start_millis) => {
+                let start_millis = if offset_millis >= 0 {
+                    start_millis.saturating_sub(offset_millis.unsigned_abs())
+                } else {
+                    start_millis.saturating_add(offset_millis.unsigned_abs())
+                };
+                let minutes = start_millis / 60_000;
+                let seconds = start_millis % 60_000 / 1_000;
+                let millis = start_millis % 1_000;
+                format!("[{minutes:02}:{seconds:02}.{millis:03}]{}", line.text)
+            }
+            None => line.text.clone(),
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+pub fn lyrics_from_edited_text(text: &str) -> Option<LyricsDocument> {
+    let lines: Vec<LyricLine> = text.lines().filter_map(lyric_line_from_text).collect();
+    if lines.is_empty() {
+        return None;
+    }
+    Some(LyricsDocument {
+        role: LyricsRole::Original,
+        language: None,
+        offset_millis: 0,
+        lines,
+        agents: Vec::new(),
+    })
+}
+
+pub(crate) fn embed_lyrics_in_audio(path: &Path, lrc_text: &str) -> bool {
+    apply_global_options(
+        GlobalOptions::new()
+            .allocation_limit(LOCAL_LYRICS_ALLOCATION_LIMIT),
+    );
+    let options = ParseOptions::new().read_cover_art(true);
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embed lyrics: cannot open file");
+            return false;
+        }
+    };
+    let probe = match Probe::new(BufReader::new(file))
+        .options(options)
+        .guess_file_type()
+    {
+        Ok(p) => p,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embed lyrics: cannot guess file type");
+            return false;
+        }
+    };
+    let tagged_file = match probe.read() {
+        Ok(t) => t,
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embed lyrics: failed to read tags");
+            return false;
+        }
+    };
+    let mut tagged_file = tagged_file;
+    let tag = match tagged_file.primary_tag_mut() {
+        Some(tag) => Some(tag),
+        None => tagged_file.first_tag_mut(),
+    };
+    let Some(tag) = tag else {
+        warn!(path = %path.display(), "embed lyrics: no writable tag found");
+        return false;
+    };
+    tag.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
+    let write_options = WriteOptions::new().remove_others(false);
+    match tag.save_to_path(path, write_options) {
+        Ok(()) => {
+            debug!(path = %path.display(), "embed lyrics: saved to audio file");
+            true
+        }
+        Err(e) => {
+            warn!(path = %path.display(), %e, "embed lyrics: failed to save");
+            false
+        }
+    }
 }
 fn lyrics_from_sidecar_file(path: &Path) -> Option<Lyrics> {
     let content = read_text_file_bounded(path, LOCAL_LYRICS_MAX_BYTES).ok()?;

@@ -27,6 +27,7 @@ pub(crate) struct LyricsPane {
     save_button: gtk::Button,
     clear_auto_search_button: gtk::Button,
     search_button: gtk::Button,
+    edit_button: gtk::Button,
     settings_button: gtk::Button,
     offset_decrease_button: gtk::Button,
     offset_entry: gtk::Entry,
@@ -92,6 +93,14 @@ impl LyricsPane {
         search_button.add_css_class("icon-button");
         search_button.add_css_class("flat");
         search_button.add_css_class("circular");
+        let edit_button = gtk::Button::from_icon_name("document-edit-symbolic");
+        edit_button.add_css_class("icon-button");
+        edit_button.add_css_class("flat");
+        edit_button.add_css_class("circular");
+        edit_button.set_focus_on_click(false);
+        let edit_label = tr("Edit lyrics");
+        edit_button.set_tooltip_text(Some(&edit_label));
+        edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
         let settings_button = gtk::Button::from_icon_name("rufin-applications-system-symbolic");
         settings_button.add_css_class("icon-button");
         settings_button.add_css_class("flat");
@@ -106,6 +115,7 @@ impl LyricsPane {
         top_controls.set_halign(gtk::Align::Start);
         top_controls.set_valign(gtk::Align::Start);
         top_controls.append(&search_button);
+        top_controls.append(&edit_button);
         top_controls.append(&settings_button);
 
         let offset_decrease_button = lyrics_control_button("rufin-value-decrease-symbolic");
@@ -154,6 +164,7 @@ impl LyricsPane {
             save_button,
             clear_auto_search_button,
             search_button,
+            edit_button,
             settings_button,
             offset_decrease_button,
             offset_entry,
@@ -181,6 +192,15 @@ impl LyricsPane {
 
     pub fn connect_save_clicked(&self, save: impl Fn() + 'static) {
         self.save_button.connect_clicked(move |_| save());
+    }
+
+    pub fn connect_edit_clicked(&self, edit: impl Fn() + 'static) {
+        self.edit_button.connect_clicked(move |_| edit());
+    }
+
+    pub fn set_edit_action(&self, enabled: bool) {
+        self.edit_button.set_visible(enabled);
+        self.edit_button.set_sensitive(enabled);
     }
 
     pub fn connect_clear_auto_search_clicked(&self, clear: impl Fn() + 'static) {

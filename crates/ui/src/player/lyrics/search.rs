@@ -35,6 +35,12 @@ pub(crate) fn connect_lyrics_search_controls(shell: &Rc<Shell>) {
             }
         });
         let weak = Rc::downgrade(shell);
+        pane.connect_edit_clicked(move || {
+            if let Some(shell) = weak.upgrade() {
+                shell.present_lyrics_edit_dialog();
+            }
+        });
+        let weak = Rc::downgrade(shell);
         pane.connect_search_clicked(move || {
             let Some(shell) = weak.upgrade() else {
                 return;

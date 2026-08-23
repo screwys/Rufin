@@ -12,7 +12,7 @@ use adw::prelude::*;
 use gtk::glib;
 use localization::result_count_text;
 use localization::tr;
-use lyrics::{LyricsSearchResult, release_japanese_reader};
+use lyrics::{CurrentLyrics, CurrentLyricsContent, LyricsSearchResult, release_japanese_reader};
 use std::cell::RefCell;
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -105,6 +105,7 @@ impl Shell {
         let word_by_word_highlighting = settings.lyrics.word_by_word_highlighting;
         drop(settings);
         pane.set_save_action(&tr("Save Lyrics"), lyrics_available);
+        pane.set_edit_action(lyrics_available);
         pane.set_search_action(&search_label, search_enabled);
         pane.set_clear_auto_search_action(
             &tr("Clear fetched lyrics for this track"),
@@ -184,6 +185,99 @@ impl Shell {
                 .save_current(media_id, offset_millis, path);
         });
     }
+
+    pub(crate) fn present_lyrics_edit_dialog(self: &Rc<Self>) {
+        let Some(lyrics) = self.selected_lyrics() else {
+            return;
+        };
+        let visible = self.visible_lyrics();
+        drop(lyrics);
+        if visible.is_none() {
+            return;
+        }
+        let Some(lyrics) = self.selected_lyrics() else {
+            return;
+        };
+        let projection = lyrics.projection.borrow();
+        let (document, offset_millis) = match &*projection {
+            CurrentLyrics::Ready {
+                content: Some(CurrentLyricsContent::Document { document, .. }),
+                ..
+            } => (document.clone(), lyrics.offset_millis.get()),
+            _ => return,
+        };
+        let lrc_text = lyrics::lyrics_to_lrc_text(&document, offset_millis);
+        drop(projection);
+        drop(lyrics);
+
+        let shell = Rc::clone(self);
+        let dialog = adw::Dialog::builder()
+            .title(tr("Edit Lyrics"))
+            .content_width(520)
+            .content_height(560)
+            .build();
+
+        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
+        content.set_margin_top(16);
+        content.set_margin_bottom(16);
+        content.set_margin_start(16);
+        content.set_margin_end(16);
+
+        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        let title_label = gtk::Label::new(Some(&tr("Edit Lyrics")));
+        title_label.add_css_class("title");
+        title_label.set_halign(gtk::Align::Start);
+        title_label.set_hexpand(true);
+        header.append(&title_label);
+        let close_button = gtk::Button::from_icon_name("window-close-symbolic");
+        close_button.add_css_class("flat");
+        close_button.add_css_class("circular");
+        let dialog_ref = dialog.clone();
+        close_button.connect_clicked(move |_| {
+            dialog_ref.close();
+        });
+        header.append(&close_button);
+        content.append(&header);
+
+        let helper = gtk::Label::new(Some(&tr(
+            "Edit the lyrics text below. Synced lyrics use LRC format: [MM:SS.mmm]text",
+        )));
+        helper.set_wrap(true);
+        helper.set_xalign(0.0);
+        helper.add_css_class("dim-label");
+        content.append(&helper);
+
+        let text_view = gtk::TextView::new();
+        text_view.set_wrap_mode(gtk::WrapMode::WordChar);
+        text_view.set_vexpand(true);
+        text_view.set_monospace(true);
+        let buffer = text_view.buffer();
+        buffer.set_text(&lrc_text);
+        let scroller = gtk::ScrolledWindow::new();
+        scroller.set_child(Some(&text_view));
+        scroller.set_vexpand(true);
+        content.append(&scroller);
+
+        let save_button = gtk::Button::with_label(&tr("Save"));
+        save_button.add_css_class("suggested-action");
+        let dialog_close = dialog.clone();
+        let buffer = text_view.buffer();
+        save_button.connect_clicked(move |_| {
+            let start = buffer.start_iter();
+            let end = buffer.end_iter();
+            let text = buffer.text(&start, &end, false).to_string();
+            shell.products.lyrics.update_lyrics_text(&text);
+            dialog_close.close();
+        });
+        content.append(&save_button);
+
+        dialog.set_child(Some(&content));
+        crate::preferences::dialogs::popup::present_light_dismiss_dialog(
+            &dialog,
+            &self.chrome.window,
+        );
+    }
+
     pub(crate) fn present_lyrics_search_dialog(self: &Rc<Self>) {
         let Some(lyrics) = self.selected_lyrics() else {
             return;

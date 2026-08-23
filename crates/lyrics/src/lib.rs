@@ -12,8 +12,8 @@ mod lyrics;
 pub use current::{LyricsContext, LyricsHandle, LyricsService};
 pub use events::{CurrentLyrics, CurrentLyricsContent, LyricsEvent};
 pub use lyrics::{
-    LocalLyricsInput, lyrics_from_search_result, save_current_lyrics, save_lyrics_search_result,
-    search_lyrics,
+    LocalLyricsInput, lyrics_from_search_result, lyrics_to_lrc_text, save_current_lyrics,
+    save_lyrics_search_result, search_lyrics,
 };
 
 pub const LYRICS_PROVIDER_SETTINGS_VERSION: u8 = 1;
