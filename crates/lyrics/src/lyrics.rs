@@ -2080,10 +2080,7 @@ pub fn lyrics_from_edited_text(text: &str) -> Option<LyricsDocument> {
 }
 
 pub(crate) fn embed_lyrics_in_audio(path: &Path, lrc_text: &str) -> bool {
-    apply_global_options(
-        GlobalOptions::new()
-            .allocation_limit(LOCAL_LYRICS_ALLOCATION_LIMIT),
-    );
+    apply_global_options(GlobalOptions::new().allocation_limit(LOCAL_LYRICS_ALLOCATION_LIMIT));
     let options = ParseOptions::new().read_cover_art(true);
     let file = match fs::File::open(path) {
         Ok(f) => f,
