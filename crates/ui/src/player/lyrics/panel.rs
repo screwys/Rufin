@@ -302,17 +302,17 @@ fn apply_lrc_syntax_highlighting(buffer: &gtk::TextBuffer) {
     buffer.remove_tag(&tag_cu, &start, &end);
 
     let mut iter = buffer.start_iter();
-    while !iter.is_end() && !iter.ends_line() {
+    while !iter.is_end() {
         let ch = iter.char();
         if ch == '[' || ch == '<' {
             let tag = if ch == '[' { &tag_ts } else { &tag_cu };
             let closing = if ch == '[' { ']' } else { '>' };
             let tag_start = iter.clone();
             iter.forward_char();
-            while !iter.is_end() && !iter.ends_line() {
+            while !iter.is_end() {
                 let c = iter.char();
                 iter.forward_char();
-                if c == closing {
+                if c == closing || c == '\n' {
                     break;
                 }
             }

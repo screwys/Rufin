@@ -2150,11 +2150,16 @@ pub(crate) fn embed_lyrics_in_audio(path: &Path, lrc_text: &str) -> bool {
         Some(tag) => Some(tag),
         None => tagged_file.first_tag_mut(),
     };
-    let Some(tag) = tag else {
-        warn!(path = %path.display(), "embed lyrics: no writable tag found");
-        return false;
-    };
     let write_options = WriteOptions::new().remove_others(false);
+    let Some(tag) = tag else {
+        debug!(
+            path = %path.display(),
+            "embed lyrics: no writable tag found, creating ID3v2 tag"
+        );
+        let mut id3v2 = Tag::new(TagType::Id3v2);
+        id3v2.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
+        return id3v2.save_to_path(path, write_options).is_ok();
+    };
     let inserted = tag.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
     if !inserted {
         debug!(
