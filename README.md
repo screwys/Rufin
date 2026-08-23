@@ -14,6 +14,8 @@ This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with add
 - **Embedded lyrics**: reads lyrics from audio file tags **(ID3, Vorbis, MP4)** at resolve time, prioritized over sidecar `.lrc` and external providers
 - **Word-by-word (karaoke) support**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
 - **Typography customization**: custom font family **(from system-installed fonts)** and font size for the lyrics panel
+- **Smart artist splitting**: automatically splits `feat.`, `ft.`, `vs.`, and comma-separated artist names into individually clickable credits
+- **Optimized release builds**: stripped symbols, LTO and size-optimized binary (~ nearly 66% smaller)
 
  ---
 
@@ -47,6 +49,7 @@ This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with add
 - Download tracks manually or through automatic rules, then keep using the same remote library while offline
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
 - Metadata editing for supported servers and local formats, with bulk editing and `Identify` available with auto-fill
+- Smart artist name splitting: `feat.`, `ft.`, `vs.`, commas and other separators create individual artist credits
 - Automatic metadata, artwork and lyrics caching
 - Easy rating support, with an option to enable visual-only partial stars for OpenSubsonic
 - Browsing large libraries feels normal, routes are not paginated 

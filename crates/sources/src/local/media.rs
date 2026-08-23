@@ -177,7 +177,7 @@ fn audio_metadata_from_lofty(
             musicbrainz_id,
         })
         .collect();
-    let album_artist_names = split_names(&album_artist);
+    let album_artist_names = split_artists(&album_artist);
     let album_artist_mbids = aligned_mbids(
         &album_artist_names,
         tag_mbids(tag, ItemKey::MusicBrainzReleaseArtistId),
@@ -253,7 +253,7 @@ fn audio_metadata_from_discoverer(
     let album_artist = metadata
         .and_then(|metadata| metadata.album_artist.clone())
         .unwrap_or_else(|| artist.clone());
-    let artist_names = split_names(artist);
+    let artist_names = split_artists(artist);
     let artist_mbids = aligned_mbids(
         &artist_names,
         metadata
@@ -271,7 +271,7 @@ fn audio_metadata_from_discoverer(
             musicbrainz_id,
         })
         .collect();
-    let album_artist_names = split_names(&album_artist);
+    let album_artist_names = split_artists(&album_artist);
     let album_artist_mbids = aligned_mbids(
         &album_artist_names,
         metadata
@@ -571,13 +571,29 @@ pub(super) fn artist_credit(name: &str, musicbrainz_artist_id: Option<&str>) -> 
 pub(super) fn split_names(value: &str) -> Vec<String> {
     let mut values = Vec::new();
     for value in value
-        .split([';', '/'])
+        .split([';', '/', ','])
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
         values.push(value.to_string());
     }
     values
+}
+
+pub(super) fn split_artists(value: &str) -> Vec<String> {
+    let mut result = value.to_string();
+    for pattern in &[
+        " feat. ",
+        " ft. ",
+        " feat ",
+        " ft ",
+        " featuring ",
+        " vs. ",
+        " vs ",
+    ] {
+        result = result.replace(pattern, ";");
+    }
+    split_names(&result)
 }
 
 pub(super) fn local_id<T>(kind: &str, value: &str) -> T
@@ -591,11 +607,11 @@ fn artist_names(tag: Option<&Tag>, fallback: &str) -> Vec<String> {
     let tagged = tag
         .map(|tag| {
             tag.get_strings(ItemKey::TrackArtists)
-                .flat_map(split_names)
+                .flat_map(split_artists)
                 .collect::<Vec<_>>()
         })
         .unwrap_or_default();
-    let fallback = split_names(fallback);
+    let fallback = split_artists(fallback);
     if tagged.is_empty()
         || (tagged.len() == 1
             && fallback.len() == 1

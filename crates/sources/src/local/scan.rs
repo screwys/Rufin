@@ -1774,11 +1774,11 @@ fn cue_track_from(
         .performer
         .clone()
         .unwrap_or_else(|| album_artist.clone());
-    let artists = media::split_names(&artist)
+    let artists = media::split_artists(&artist)
         .iter()
         .map(|name| media::artist_credit(name, None))
         .collect::<Vec<_>>();
-    let album_artists = media::split_names(&album_artist)
+    let album_artists = media::split_artists(&album_artist)
         .iter()
         .map(|name| media::artist_credit(name, None))
         .collect::<Vec<_>>();
