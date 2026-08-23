@@ -563,7 +563,7 @@ impl Shell {
                     &controls.cover,
                     source_id,
                     ArtworkBinding::track(&entry.track),
-                    BOTTOM_PLAYER_COVER_SIZE,
+                    MEDIUM_COVER_SIZE as i32,
                     MEDIUM_COVER_SIZE,
                 );
             } else {
