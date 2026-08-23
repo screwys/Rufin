@@ -302,46 +302,23 @@ fn apply_lrc_syntax_highlighting(buffer: &gtk::TextBuffer) {
     buffer.remove_tag(&tag_cu, &start, &end);
 
     let mut iter = buffer.start_iter();
-    while !iter.is_end() {
-        let line_start_offset = iter.offset();
-        let mut byte_offset = 0i32;
-        while !iter.is_end() && !iter.ends_line() {
-            let ch = iter.char();
+    while !iter.is_end() && !iter.ends_line() {
+        let ch = iter.char();
+        if ch == '[' || ch == '<' {
+            let tag = if ch == '[' { &tag_ts } else { &tag_cu };
+            let closing = if ch == '[' { ']' } else { '>' };
+            let tag_start = iter.clone();
             iter.forward_char();
-            if ch == '[' {
-                let tag_start = buffer.iter_at_offset(line_start_offset + byte_offset);
-                let mut i = byte_offset;
-                while !iter.is_end() && !iter.ends_line() {
-                    let c = iter.char();
-                    iter.forward_char();
-                    i += c.len_utf8() as i32;
-                    if c == ']' {
-                        break;
-                    }
+            while !iter.is_end() && !iter.ends_line() {
+                let c = iter.char();
+                iter.forward_char();
+                if c == closing {
+                    break;
                 }
-                let tag_end = buffer.iter_at_offset(line_start_offset + i);
-                buffer.apply_tag(&tag_ts, &tag_start, &tag_end);
-                byte_offset = i;
-            } else if ch == '<' {
-                let tag_start = buffer.iter_at_offset(line_start_offset + byte_offset);
-                let mut i = byte_offset;
-                while !iter.is_end() && !iter.ends_line() {
-                    let c = iter.char();
-                    iter.forward_char();
-                    i += c.len_utf8() as i32;
-                    if c == '>' {
-                        break;
-                    }
-                }
-                let tag_end = buffer.iter_at_offset(line_start_offset + i);
-                buffer.apply_tag(&tag_cu, &tag_start, &tag_end);
-                byte_offset = i;
-            } else {
-                byte_offset += ch.len_utf8() as i32;
             }
-        }
-        if !iter.is_end() {
-            iter.forward_line();
+            buffer.apply_tag(tag, &tag_start, &iter);
+        } else {
+            iter.forward_char();
         }
     }
 }

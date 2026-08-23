@@ -88,28 +88,18 @@ This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with add
 
 ## Screenshots
 
-<details>
-<summary><strong>View Screenshots</strong></summary>
-
 | | |
 |:---:|:---:|
 | **Tracks Page** | **Albums Page** |
-| *Browse your library with album artwork and metadata* | *Grid view with cover art* |
 | [![Tracks page](data/screenshots/tracks_page.png)](data/screenshots/tracks_page.png) | [![Albums page](data/screenshots/albums_page.png)](data/screenshots/albums_page.png) |
 | **Artist Details** | **Album Details** |
-| *Artist biography, discography and related artists* | *Track listing, credits and album metadata* |
 | [![Artist details](data/screenshots/artist_detail.png)](data/screenshots/artist_detail.png) | [![Album details](data/screenshots/album_detail.png)](data/screenshots/album_detail.png) |
 | **Fullscreen Player** | **Customize Display** |
-| *Visualizer and Now Playing view* | *Layout and appearance preferences* |
 | [![Fullscreen player](data/screenshots/visualizer.png)](data/screenshots/visualizer.png) | [![Customize display](data/screenshots/customize_display.png)](data/screenshots/customize_display.png) |
 | **Download Settings** | **Playback Settings** |
-| *Configure offline downloads and sync rules* | *Crossfade, equalizer and audio output options* |
 | [![Download settings](data/screenshots/download_settings.png)](data/screenshots/download_settings.png) | [![Playback settings](data/screenshots/playback_settings.png)](data/screenshots/playback_settings.png) |
-| **Layout Settings** | |
-| *Sidebar and window layout presets* | |
-| [![Layout settings](data/screenshots/layout_settings.png)](data/screenshots/layout_settings.png) | |
-
-</details>
+| **Layout Settings** | **Lyrics Settings** |
+| [![Layout settings](data/screenshots/layout_settings.png)](data/screenshots/layout_settings.png) | [![Lyrics settings](data/screenshots/lyrics_settings.png)](data/screenshots/lyrics_settings.png) |
 
 ## Installation
 
