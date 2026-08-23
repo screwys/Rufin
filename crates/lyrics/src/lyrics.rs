@@ -9,7 +9,7 @@ use std::time::{Duration, Instant};
 use lofty::config::{GlobalOptions, ParseOptions, WriteOptions, apply_global_options};
 use lofty::file::TaggedFileExt;
 use lofty::probe::Probe;
-use lofty::tag::{ItemKey, TagExt};
+use lofty::tag::{ItemKey, Tag, TagExt, TagType};
 
 use library::{Track, TrackId};
 use serde::Deserialize;
@@ -2043,23 +2043,58 @@ fn extract_lyrics_from_tag(tag: &lofty::tag::Tag) -> Option<String> {
     None
 }
 
+fn format_cue_timestamp(millis: u64, offset_millis: i64) -> String {
+    let millis = if offset_millis >= 0 {
+        millis.saturating_sub(offset_millis.unsigned_abs())
+    } else {
+        millis.saturating_add(offset_millis.unsigned_abs())
+    };
+    let minutes = millis / 60_000;
+    let seconds = millis % 60_000 / 1_000;
+    let fraction = millis % 1_000;
+    format!("[{minutes:02}:{seconds:02}.{fraction:03}]")
+}
+
+fn format_inline_cues(line: &LyricLine, offset_millis: i64) -> Option<String> {
+    let cue_line = line.cue_lines.first()?;
+    if cue_line.cues.is_empty() {
+        return None;
+    }
+    let mut result = String::new();
+    for cue in &cue_line.cues {
+        let millis = if offset_millis >= 0 {
+            cue.start_millis
+                .saturating_sub(offset_millis.unsigned_abs())
+        } else {
+            cue.start_millis
+                .saturating_add(offset_millis.unsigned_abs())
+        };
+        let minutes = millis / 60_000;
+        let seconds = millis % 60_000 / 1_000;
+        let fraction = millis % 1_000;
+        result.push_str(&format!(
+            "<{minutes:02}:{seconds:02}.{fraction:03}>{}",
+            cue.text
+        ));
+    }
+    Some(result)
+}
+
 pub fn lyrics_to_lrc_text(document: &LyricsDocument, offset_millis: i64) -> String {
     document
         .lines
         .iter()
-        .map(|line| match line.start_millis {
-            Some(start_millis) => {
-                let start_millis = if offset_millis >= 0 {
-                    start_millis.saturating_sub(offset_millis.unsigned_abs())
-                } else {
-                    start_millis.saturating_add(offset_millis.unsigned_abs())
-                };
-                let minutes = start_millis / 60_000;
-                let seconds = start_millis % 60_000 / 1_000;
-                let millis = start_millis % 1_000;
-                format!("[{minutes:02}:{seconds:02}.{millis:03}]{}", line.text)
+        .map(|line| {
+            let line_ts = line
+                .start_millis
+                .map(|m| format_cue_timestamp(m, offset_millis));
+            let inline = format_inline_cues(line, offset_millis);
+            match (line_ts, inline) {
+                (Some(ts), Some(cues)) => format!("{ts}{cues}"),
+                (Some(ts), None) => format!("{ts}{}", line.text),
+                (None, Some(cues)) => cues,
+                (None, None) => line.text.clone(),
             }
-            None => line.text.clone(),
         })
         .collect::<Vec<_>>()
         .join("\n")
@@ -2107,6 +2142,10 @@ pub(crate) fn embed_lyrics_in_audio(path: &Path, lrc_text: &str) -> bool {
         }
     };
     let mut tagged_file = tagged_file;
+    let tag_type = tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+        .map(|t| t.tag_type());
     let tag = match tagged_file.primary_tag_mut() {
         Some(tag) => Some(tag),
         None => tagged_file.first_tag_mut(),
@@ -2115,8 +2154,27 @@ pub(crate) fn embed_lyrics_in_audio(path: &Path, lrc_text: &str) -> bool {
         warn!(path = %path.display(), "embed lyrics: no writable tag found");
         return false;
     };
-    tag.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
     let write_options = WriteOptions::new().remove_others(false);
+    let inserted = tag.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
+    if !inserted {
+        debug!(
+            path = %path.display(),
+            tag_type = ?tag_type,
+            "embed lyrics: primary tag does not support UnsyncLyrics, trying ID3v2 fallback"
+        );
+        let mut id3v2 = Tag::new(TagType::Id3v2);
+        id3v2.insert_text(ItemKey::UnsyncLyrics, lrc_text.to_string());
+        match id3v2.save_to_path(path, write_options) {
+            Ok(()) => {
+                debug!(path = %path.display(), "embed lyrics: saved via ID3v2 fallback");
+                return true;
+            }
+            Err(e) => {
+                warn!(path = %path.display(), %e, "embed lyrics: ID3v2 fallback also failed");
+                return false;
+            }
+        }
+    }
     match tag.save_to_path(path, write_options) {
         Ok(()) => {
             debug!(path = %path.display(), "embed lyrics: saved to audio file");

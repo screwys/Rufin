@@ -225,7 +225,7 @@ impl Shell {
 
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         let title_label = gtk::Label::new(Some(&tr("Edit Lyrics")));
-        title_label.add_css_class("title");
+        title_label.add_css_class("heading");
         title_label.set_halign(gtk::Align::Start);
         title_label.set_hexpand(true);
         header.append(&title_label);
@@ -239,9 +239,7 @@ impl Shell {
         header.append(&close_button);
         content.append(&header);
 
-        let helper = gtk::Label::new(Some(&tr(
-            "Edit the lyrics text below. Synced lyrics use LRC format: [MM:SS.mmm]text",
-        )));
+        let helper = gtk::Label::new(Some(&tr("Edit the lyrics text manually.")));
         helper.set_wrap(true);
         helper.set_xalign(0.0);
         helper.add_css_class("dim-label");
@@ -252,7 +250,17 @@ impl Shell {
         text_view.set_vexpand(true);
         text_view.set_monospace(true);
         let buffer = text_view.buffer();
+
+        buffer.create_tag(Some("lrc-timestamp"), &[("foreground", &"#e8962c")]);
+        buffer.create_tag(Some("lrc-cue-timestamp"), &[("foreground", &"#8ab4f8")]);
+
         buffer.set_text(&lrc_text);
+        apply_lrc_syntax_highlighting(&buffer);
+
+        buffer.connect_changed(move |buf| {
+            apply_lrc_syntax_highlighting(buf);
+        });
+
         let scroller = gtk::ScrolledWindow::new();
         scroller.set_child(Some(&text_view));
         scroller.set_vexpand(true);
@@ -277,7 +285,68 @@ impl Shell {
             &self.chrome.window,
         );
     }
+}
 
+fn apply_lrc_syntax_highlighting(buffer: &gtk::TextBuffer) {
+    let tag_ts = match buffer.tag_table().lookup("lrc-timestamp") {
+        Some(t) => t,
+        None => return,
+    };
+    let tag_cu = match buffer.tag_table().lookup("lrc-cue-timestamp") {
+        Some(t) => t,
+        None => return,
+    };
+
+    let (start, end) = buffer.bounds();
+    buffer.remove_tag(&tag_ts, &start, &end);
+    buffer.remove_tag(&tag_cu, &start, &end);
+
+    let mut iter = buffer.start_iter();
+    while !iter.is_end() {
+        let line_start_offset = iter.offset();
+        let mut byte_offset = 0i32;
+        while !iter.is_end() && !iter.ends_line() {
+            let ch = iter.char();
+            iter.forward_char();
+            if ch == '[' {
+                let tag_start = buffer.iter_at_offset(line_start_offset + byte_offset);
+                let mut i = byte_offset;
+                while !iter.is_end() && !iter.ends_line() {
+                    let c = iter.char();
+                    iter.forward_char();
+                    i += c.len_utf8() as i32;
+                    if c == ']' {
+                        break;
+                    }
+                }
+                let tag_end = buffer.iter_at_offset(line_start_offset + i);
+                buffer.apply_tag(&tag_ts, &tag_start, &tag_end);
+                byte_offset = i;
+            } else if ch == '<' {
+                let tag_start = buffer.iter_at_offset(line_start_offset + byte_offset);
+                let mut i = byte_offset;
+                while !iter.is_end() && !iter.ends_line() {
+                    let c = iter.char();
+                    iter.forward_char();
+                    i += c.len_utf8() as i32;
+                    if c == '>' {
+                        break;
+                    }
+                }
+                let tag_end = buffer.iter_at_offset(line_start_offset + i);
+                buffer.apply_tag(&tag_cu, &tag_start, &tag_end);
+                byte_offset = i;
+            } else {
+                byte_offset += ch.len_utf8() as i32;
+            }
+        }
+        if !iter.is_end() {
+            iter.forward_line();
+        }
+    }
+}
+
+impl Shell {
     pub(crate) fn present_lyrics_search_dialog(self: &Rc<Self>) {
         let Some(lyrics) = self.selected_lyrics() else {
             return;
