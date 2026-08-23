@@ -15,7 +15,7 @@ This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with add
 - **Word-by-word (karaoke) support**: parses inline cue timestamps (`<mm:ss.xx>`) from synced lyrics sources and embedded tags, with real-time per-word highlight during playback
 - **Typography customization**: custom font family **(from system-installed fonts)** and font size for the lyrics panel
 - **Smart artist splitting**: automatically splits `feat.`, `ft.`, `vs.`, and comma-separated artist names into individually clickable credits
-- **Optimized release builds**: stripped symbols, LTO and size-optimized binary (~ nearly 66% smaller)
+- **Optimized release builds**: stripped symbols, LTO and size-optimized binary (~ nearly 60% or more smaller binary size)
 
  ---
 
