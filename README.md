@@ -88,41 +88,28 @@ This is a fork of **[screwys/Rufin](https://github.com/screwys/Rufin)** with add
 
 ## Screenshots
 
-**Tracks Page**  
-*Browse your library with album artwork and metadata*  
-[![Tracks page](data/screenshots/tracks_page.png)](data/screenshots/tracks_page.png)
+<details>
+<summary><strong>View Screenshots</strong></summary>
 
-**Albums Page**  
-*Grid view with cover art*  
-[![Albums page](data/screenshots/albums_page.png)](data/screenshots/albums_page.png)
+| | |
+|:---:|:---:|
+| **Tracks Page** | **Albums Page** |
+| *Browse your library with album artwork and metadata* | *Grid view with cover art* |
+| [![Tracks page](data/screenshots/tracks_page.png)](data/screenshots/tracks_page.png) | [![Albums page](data/screenshots/albums_page.png)](data/screenshots/albums_page.png) |
+| **Artist Details** | **Album Details** |
+| *Artist biography, discography and related artists* | *Track listing, credits and album metadata* |
+| [![Artist details](data/screenshots/artist_detail.png)](data/screenshots/artist_detail.png) | [![Album details](data/screenshots/album_detail.png)](data/screenshots/album_detail.png) |
+| **Fullscreen Player** | **Customize Display** |
+| *Visualizer and Now Playing view* | *Layout and appearance preferences* |
+| [![Fullscreen player](data/screenshots/visualizer.png)](data/screenshots/visualizer.png) | [![Customize display](data/screenshots/customize_display.png)](data/screenshots/customize_display.png) |
+| **Download Settings** | **Playback Settings** |
+| *Configure offline downloads and sync rules* | *Crossfade, equalizer and audio output options* |
+| [![Download settings](data/screenshots/download_settings.png)](data/screenshots/download_settings.png) | [![Playback settings](data/screenshots/playback_settings.png)](data/screenshots/playback_settings.png) |
+| **Layout Settings** | |
+| *Sidebar and window layout presets* | |
+| [![Layout settings](data/screenshots/layout_settings.png)](data/screenshots/layout_settings.png) | |
 
-**Artist Details**  
-*Artist biography, discography and related artists*  
-[![Artist details](data/screenshots/artist_detail.png)](data/screenshots/artist_detail.png)
-
-**Album Details**  
-*Track listing, credits and album metadata*  
-[![Album details](data/screenshots/album_detail.png)](data/screenshots/album_detail.png)
-
-**Fullscreen Player**  
-*Visualizer and Now Playing view*  
-[![Fullscreen player](data/screenshots/visualizer.png)](data/screenshots/visualizer.png)
-
-**Customize Display**  
-*Layout and appearance preferences*  
-[![Customize display](data/screenshots/customize_display.png)](data/screenshots/customize_display.png)
-
-**Download Settings**  
-*Configure offline downloads and sync rules*  
-[![Download settings](data/screenshots/download_settings.png)](data/screenshots/download_settings.png)
-
-**Playback Settings**  
-*Crossfade, equalizer and audio output options*  
-[![Playback settings](data/screenshots/playback_settings.png)](data/screenshots/playback_settings.png)
-
-**Layout Settings**  
-*Sidebar and window layout presets*  
-[![Layout settings](data/screenshots/layout_settings.png)](data/screenshots/layout_settings.png)
+</details>
 
 ## Installation
 
