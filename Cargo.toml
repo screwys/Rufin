@@ -116,6 +116,13 @@ fallible_impl_from = "deny"
 panic_in_result_fn = "deny"
 string_slice = "deny"
 
+[profile.release]
+opt-level = "s"
+lto = "fat"
+codegen-units = 1
+strip = "symbols"
+panic = "abort"
+
 [profile.dev]
 debug = "line-tables-only"
 
