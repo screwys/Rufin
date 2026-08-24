@@ -176,7 +176,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
     page.add(&language_and_readings);
 
     let playback = adw::PreferencesGroup::builder()
-        .title(tr("Playback"))
+        .title(tr("Karaoke Playback"))
         .build();
     let karaoke = adw::SwitchRow::builder()
         .title(tr(msgid("Karaoke mode")))
@@ -189,6 +189,34 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         karaoke_shell.set_lyrics_word_highlighting(row.is_active());
     });
     playback.add(&karaoke);
+
+    let highlight_color_row = adw::ActionRow::builder()
+        .title(tr("Karaoke highlight color"))
+        .subtitle(tr("Color for the active word during playback"))
+        .build();
+    let initial_rgba = gtk::gdk::RGBA::parse(settings.lyrics_highlight_color.as_str())
+        .unwrap_or(gtk::gdk::RGBA::new(0.91, 0.59, 0.17, 1.0));
+    let color_button = gtk::ColorDialogButton::builder()
+        .rgba(&initial_rgba)
+        .css_classes(["lyrics-color-button"])
+        .build();
+    let color_dialog = gtk::ColorDialog::builder()
+        .title(tr("Karaoke highlight color"))
+        .modal(true)
+        .build();
+    color_button.set_dialog(&color_dialog);
+    let color_shell = Rc::clone(shell);
+    color_button.connect_rgba_notify(move |btn| {
+        let rgba = btn.rgba();
+        let r = (rgba.red() * 255.0) as u8;
+        let g = (rgba.green() * 255.0) as u8;
+        let b = (rgba.blue() * 255.0) as u8;
+        let hex = format!("#{r:02x}{g:02x}{b:02x}");
+        color_shell.set_lyrics_highlight_color(hex);
+    });
+    highlight_color_row.add_suffix(&color_button);
+    highlight_color_row.set_activatable_widget(Some(&color_button));
+    playback.add(&highlight_color_row);
     page.add(&playback);
 
     let typography = adw::PreferencesGroup::builder()
@@ -273,51 +301,6 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
         toggle_font_row.set_visible(active);
         toggle_size_row.set_visible(active);
     });
-
-    let wbw_group = adw::PreferencesGroup::builder()
-        .title(tr("Word-by-word"))
-        .build();
-
-    let highlight_color_row = adw::ActionRow::builder()
-        .title(tr("Highlight color"))
-        .build();
-    let initial_rgba = gtk::gdk::RGBA::parse(settings.lyrics_highlight_color.as_str())
-        .unwrap_or(gtk::gdk::RGBA::new(0.91, 0.59, 0.17, 1.0));
-    let color_button = gtk::ColorDialogButton::builder()
-        .rgba(&initial_rgba)
-        .build();
-    let color_dialog = gtk::ColorDialog::builder()
-        .title(tr("Highlight color"))
-        .modal(true)
-        .build();
-    color_button.set_dialog(&color_dialog);
-    let color_shell = Rc::clone(shell);
-    color_button.connect_rgba_notify(move |btn| {
-        let rgba = btn.rgba();
-        let r = (rgba.red() * 255.0) as u8;
-        let g = (rgba.green() * 255.0) as u8;
-        let b = (rgba.blue() * 255.0) as u8;
-        let hex = format!("#{r:02x}{g:02x}{b:02x}");
-        color_shell.set_lyrics_highlight_color(hex);
-    });
-    highlight_color_row.add_suffix(&color_button);
-    highlight_color_row.set_activatable_widget(Some(&color_button));
-    wbw_group.add(&highlight_color_row);
-    page.add(&wbw_group);
-
-    let maintenance = adw::PreferencesGroup::builder()
-        .title(tr("Maintenance"))
-        .build();
-    let scan_button = gtk::Button::builder()
-        .label(tr("Scan embedded lyrics"))
-        .css_classes(["suggested-action"])
-        .build();
-    let scan_shell = Rc::clone(shell);
-    scan_button.connect_clicked(move |_| {
-        scan_shell.rescan_for_embedded_lyrics();
-    });
-    maintenance.add(&scan_button);
-    page.add(&maintenance);
 
     (page, karaoke)
 }
@@ -636,12 +619,6 @@ impl Shell {
             settings.lyrics_highlight_color = color;
             true
         });
-    }
-
-    pub(crate) fn rescan_for_embedded_lyrics(self: &Rc<Self>) {
-        if let Some(source) = self.selected_source_operations() {
-            source.refresh_library();
-        }
     }
 
     fn update_lyrics_settings(

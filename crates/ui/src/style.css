@@ -2042,6 +2042,12 @@ listview.queue-list row {
   transition: color 80ms linear, opacity 80ms linear;
 }
 
+.lyrics-color-button {
+  min-width: 32px;
+  min-height: 32px;
+  padding: 4px;
+}
+
 .lyrics-cue-sung {
   color: var(--lyrics-highlight-color, #e8962c);
 }
