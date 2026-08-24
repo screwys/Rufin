@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-23 20:51+0000\n"
+"PO-Revision-Date: 2026-08-25 03:51+0000\n"
 "Last-Translator: Tsung-Ying Yu <an920107@gmail.com>\n"
 "Language-Team: Chinese (Traditional Han script) <https://hosted.weblate.org/"
 "projects/rufin/app/zh_Hant/>\n"
@@ -382,7 +382,7 @@ msgid "Comment"
 msgstr ""
 
 msgid "Compact"
-msgstr ""
+msgstr "緊湊"
 
 msgid "Connect"
 msgstr "連接"
@@ -658,7 +658,7 @@ msgid "Full Treble"
 msgstr ""
 
 msgid "Full"
-msgstr ""
+msgstr "完整"
 
 msgid "Furigana"
 msgstr "注音假名"
@@ -718,7 +718,7 @@ msgid "Help"
 msgstr "幫助"
 
 msgid "Hidden"
-msgstr "已隱藏"
+msgstr "隱藏"
 
 msgid "Hide sidebar"
 msgstr "隱藏側邊欄"
@@ -1768,16 +1768,16 @@ msgid "Slate"
 msgstr ""
 
 msgid "Smart Playlist"
-msgstr ""
+msgstr "智慧播放清單"
 
 msgid "Smart Playlists"
-msgstr ""
+msgstr "智慧播放清單"
 
 msgid "Smart playlist tracks"
-msgstr ""
+msgstr "智慧播放清單曲目"
 
 msgid "Smart playlists"
-msgstr ""
+msgstr "智慧播放清單"
 
 msgid "Song title"
 msgstr ""
@@ -1867,7 +1867,7 @@ msgid "Tracks from your five latest albums"
 msgstr ""
 
 msgid "Tracks"
-msgstr ""
+msgstr "曲目"
 
 msgid "Transition mode"
 msgstr ""
@@ -2070,8 +2070,7 @@ msgstr[1] ""
 #, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 首曲目"
 
 #, rust-format
 msgid "{count} week ago"
