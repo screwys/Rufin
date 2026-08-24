@@ -79,6 +79,8 @@ pub struct Settings {
     #[serde(default = "default_true")]
     pub prefer_server_lyrics: bool,
     #[serde(default)]
+    pub auto_embed_lyrics: bool,
+    #[serde(default)]
     pub lyrics_provider_settings_version: u8,
     #[serde(default)]
     pub suppressed_auto_lyrics_track_ids: Vec<String>,
@@ -108,6 +110,7 @@ impl Default for Settings {
             external_lyrics_enabled: true,
             external_lyrics_providers: default_external_lyrics_providers(),
             prefer_server_lyrics: true,
+            auto_embed_lyrics: false,
             lyrics_provider_settings_version: LYRICS_PROVIDER_SETTINGS_VERSION,
             suppressed_auto_lyrics_track_ids: Vec::new(),
             prefer_translations: false,

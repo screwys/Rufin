@@ -99,17 +99,33 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesPage, adw::Switc
     });
     sources.add(&prefer_server);
 
+    let auto_embed = adw::SwitchRow::builder()
+        .title(tr("Auto-embed lyrics"))
+        .subtitle(tr(
+            "Write fetched lyrics into the audio file tags for offline playback",
+        ))
+        .active(settings.auto_embed_lyrics)
+        .build();
+    auto_embed.set_sensitive(settings.external_lyrics_enabled);
+    let auto_embed_shell = Rc::clone(shell);
+    auto_embed.connect_active_notify(move |row| {
+        auto_embed_shell.set_auto_embed_lyrics(row.is_active());
+    });
+    sources.add(&auto_embed);
+
     let provider_rows = Rc::new(RefCell::new(Vec::new()));
     populate_provider_rows(shell, &sources, &provider_rows);
     let external_shell = Rc::clone(shell);
     let external_sources = sources.downgrade();
     let external_provider_rows = Rc::clone(&provider_rows);
     let external_prefer_server = prefer_server.clone();
+    let external_auto_embed = auto_embed.clone();
     external.connect_active_notify(move |row| {
         if !external_shell.set_external_lyrics_enabled(row.is_active()) {
             return;
         }
         external_prefer_server.set_sensitive(row.is_active());
+        external_auto_embed.set_sensitive(row.is_active());
         let Some(sources) = external_sources.upgrade() else {
             return;
         };
@@ -484,6 +500,16 @@ impl Shell {
                 return false;
             }
             settings.prefer_server_lyrics = enabled;
+            true
+        });
+    }
+
+    pub(crate) fn set_auto_embed_lyrics(self: &Rc<Self>, enabled: bool) {
+        self.update_lyrics_settings("lyrics auto embed setting", false, |settings| {
+            if settings.auto_embed_lyrics == enabled {
+                return false;
+            }
+            settings.auto_embed_lyrics = enabled;
             true
         });
     }

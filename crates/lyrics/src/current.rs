@@ -452,10 +452,7 @@ impl LyricsService {
                     }
                 };
             if let Some(document) = document {
-                if document.is_instrumental()
-                    || (!resolution.plan.prefers_translations() && document.has_original())
-                    || document.has_preferred_translation(&settings)
-                {
+                if document.is_instrumental() || document.has_original() {
                     if self.current_request_active(request, &key, &cancelled) {
                         self.cache_and_accept(
                             request,
@@ -527,7 +524,7 @@ impl LyricsService {
                     .and_then(lyrics_with_displayable_content)
                     .filter(|document| {
                         cached_lyrics_allowed(document, &resolution.plan, resolution.cue_track)
-                            && bundle_satisfies_plan(document, &resolution.plan)
+                            && bundle_satisfies_plan(document)
                     })
                 {
                     let is_external = matches!(authority, LyricsCacheAuthority::External);
@@ -560,10 +557,7 @@ impl LyricsService {
             {
                 Ok(NativeSourceResult::Available(Some(native))) => {
                     let document = lyrics_from_native(native);
-                    if document.is_instrumental()
-                        || (!resolution.plan.prefers_translations() && document.has_original())
-                        || document.has_preferred_translation(&settings)
-                    {
+                    if document.is_instrumental() || document.has_original() {
                         if self.current_request_active(request, &key, &cancelled) {
                             self.cache_and_accept(
                                 request,
@@ -615,9 +609,7 @@ impl LyricsService {
                 }
             });
             if let Some(document) = document {
-                let selected = document.is_instrumental()
-                    || (!resolution.plan.prefers_translations() && document.has_original())
-                    || document.has_preferred_translation(&settings);
+                let selected = document.is_instrumental() || document.has_original();
                 if selected {
                     if self.current_request_active(request, &key, &cancelled) {
                         self.cache_and_accept(
@@ -677,6 +669,15 @@ impl LyricsService {
     }
 
     async fn try_embed_lyrics(&self, key: &DocumentKey, document: &LyricsBundle) {
+        {
+            let state = self
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            if !state.settings.auto_embed_lyrics {
+                return;
+            }
+        }
         let Some(first_doc) = document.documents().first() else {
             return;
         };
@@ -1131,34 +1132,8 @@ fn current_event(current: &CurrentDocument) -> LyricsEvent {
     }
 }
 
-fn selection_settings(plan: &LyricsPlan) -> Settings {
-    Settings {
-        prefer_translations: plan.prefers_translations(),
-        preferred_translation_language: plan.preferred_translation_language().to_string(),
-        ..Settings::default()
-    }
-}
-
-fn bundle_satisfies_plan(bundle: &LyricsBundle, plan: &LyricsPlan) -> bool {
-    if bundle.is_instrumental() {
-        true
-    } else if plan.prefers_translations() {
-        bundle.has_preferred_translation(&selection_settings(plan))
-    } else {
-        bundle.has_original()
-    }
-}
-
-fn cache_key_for_bundle(
-    key: &DocumentKey,
-    plan: &LyricsPlan,
-    bundle: &LyricsBundle,
-) -> LyricsCacheKey {
-    if plan.prefers_translations() && bundle.has_preferred_translation(&selection_settings(plan)) {
-        key.cache_key(plan)
-    } else {
-        key.cache_key_for(LyricsRole::Original, "")
-    }
+fn bundle_satisfies_plan(bundle: &LyricsBundle) -> bool {
+    bundle.is_instrumental() || bundle.has_original()
 }
 
 fn lyrics_selection_changed(previous: &Settings, current: &Settings) -> bool {
@@ -1242,7 +1217,7 @@ fn cache_write(
         LyricsOrigin::External(_) => LyricsCacheAuthority::External,
     };
     Ok(LyricsCacheWrite {
-        key: cache_key_for_bundle(key, plan, document),
+        key: key.cache_key(plan),
         authority,
         input: cache_input(input),
         payload: serde_json::to_string(&CachedBundle {
@@ -1367,7 +1342,7 @@ mod tests {
     }
 
     #[test]
-    fn original_fallback_is_not_cached_as_a_translation() {
+    fn original_fallback_is_cached_with_plan_key() {
         let fixture = fixture(Settings::default(), false);
         let key = DocumentKey::for_context(&fixture.context);
         let mut settings = Settings::default();
@@ -1378,8 +1353,8 @@ mod tests {
         let write = cache_write(&key, &fixture.context.input, &plan, &external_document())
             .expect("encode original fallback");
 
-        assert_eq!(write.key.role, LyricsRole::Original.key());
-        assert!(write.key.language.is_empty());
+        assert_eq!(write.key.role, LyricsRole::Translation.key());
+        assert_eq!(write.key.language, "en");
     }
 
     #[test]
