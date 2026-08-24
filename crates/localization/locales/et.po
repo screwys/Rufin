@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-19 19:55+0000\n"
+"PO-Revision-Date: 2026-08-25 03:51+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -45,6 +45,8 @@ msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
+"Teenusepakkuja võrguaadressi töötlejaga jagamise asemel suuna serverist "
+"pärit meedium läbi selle seadme"
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -270,7 +272,7 @@ msgid "Audio output"
 msgstr "Heliväljund"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Heli töötlemine pole meediumilevi kasutamisel saadaval"
 
 msgid "Audio"
 msgstr "Heli"
@@ -317,10 +319,8 @@ msgstr "Katkesta allalaadimine"
 msgid "Cancel"
 msgstr "Katkesta"
 
-#, fuzzy
-#| msgid "Rating"
 msgid "Casting"
-msgstr "Hinnang"
+msgstr "Meediumilevi"
 
 msgid "Change Secret Storage"
 msgstr "Muuda turvalist andmeruumi"
@@ -350,10 +350,8 @@ msgstr ""
 "Vali üks või enam, kasuta, mille sisu sellest arvutist tahad skaneerida ja "
 "kuulata"
 
-#, fuzzy
-#| msgid "Show playback icon"
 msgid "Choose playback output"
-msgstr "Näita taasesituse ikooni"
+msgstr "Vali taasesituse väljund"
 
 msgid "Choose"
 msgstr "Vali"
@@ -421,15 +419,11 @@ msgstr "Ühendatud"
 msgid "Connecting to music server..."
 msgstr "Ühendan muusikaserveriga…"
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connecting to {device}..."
-msgstr "Ühendan muusikaserveriga…"
+msgstr "Ühendan seadmega {device}..."
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connection failed"
-msgstr "Ühendus"
+msgstr "Ühendamine ei õnnestunud"
 
 msgid "Connection"
 msgstr "Ühendus"
@@ -467,13 +461,11 @@ msgstr "Loo"
 msgid "Crossfade duration"
 msgstr "Risthajumise kestus"
 
-#, fuzzy
-#| msgid "Crossfade"
 msgid "Crossfade mode"
-msgstr "Ristsulatatud"
+msgstr "Risthajumise viis"
 
 msgid "Crossfade"
-msgstr "Ristsulatatud"
+msgstr "Risthajutamine"
 
 msgid "Custom"
 msgstr "Kohandatud"
@@ -598,10 +590,8 @@ msgstr "Lülita privaatne režiim sisse"
 msgid "Enter API credentials first"
 msgstr "Esmalt sisesta API tuvastusandmed"
 
-#, fuzzy
-#| msgid "Enter a server address, username, and password"
 msgid "Enter a server address and API key"
-msgstr "Sisesta serveri aadress, kasutajanimi ja salasõna"
+msgstr "Sisesta serveri aadress ja API-võti"
 
 msgid "Enter a server address, username, and password"
 msgstr "Sisesta serveri aadress, kasutajanimi ja salasõna"
@@ -695,10 +685,8 @@ msgstr "Täisvaates"
 msgid "Furigana"
 msgstr "Furigana"
 
-#, fuzzy
-#| msgid "Gapless"
 msgid "Gapless mode"
-msgstr "Vahepausideta"
+msgstr "Vahepausideta režiim"
 
 msgid "Gapless"
 msgstr "Vahepausideta"
@@ -737,7 +725,7 @@ msgid "Go to"
 msgstr "Mine asukohta"
 
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Green"
 msgstr "Roheline"
@@ -817,7 +805,7 @@ msgid "Karaoke mode"
 msgstr "Karaoke-režiim"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Jäta Rufin peale akna sulgemist tööle"
 
 msgid "Keep album transitions gapless when possible"
 msgstr "Kui võimalik, siis hoia albumi lugude üleminekud pausideta"
@@ -1046,10 +1034,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Lehe elementide vahel liikumine"
 
-#, fuzzy
-#| msgid "Notifications"
 msgid "Navigation"
-msgstr "Teavitused"
+msgstr "Rakenduses liikumine"
 
 msgid "Needs attention"
 msgstr "Vajab tähelepanu"
@@ -1075,10 +1061,8 @@ msgstr "Äsjalisatud"
 msgid "Next Track"
 msgstr "Järgmine lugu"
 
-#, fuzzy
-#| msgid "Selected device"
 msgid "Next audio device"
-msgstr "Valitud seade"
+msgstr "Järgmine heliseade"
 
 msgid "Next page"
 msgstr "Järgmine leht"
@@ -1122,10 +1106,8 @@ msgstr "Sobivaid lugusid pole"
 msgid "No music from this artist yet"
 msgstr "Sellelt esitajalt pole veel muusikat"
 
-#, fuzzy
-#| msgid "No lyrics found."
 msgid "No network devices found"
-msgstr "Laulusõnu ei leidu."
+msgstr "Ühtegi võrguseadet ei leidu"
 
 msgid "No remote sources configured"
 msgstr "Ühtegi kaugallikat pole seadistatud"
@@ -1288,15 +1270,11 @@ msgstr "Kuula esitusloendit"
 msgid "Play radio"
 msgstr "Esita raadiorežiimis"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play later)"
-msgstr "Esita juhuslikult"
+msgstr "Esita (hiljem) juhuslikult"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play next)"
-msgstr "Esita juhuslikult"
+msgstr "Esita (kohe) juhuslikult"
 
 msgid "Play random"
 msgstr "Esita juhuslikult"
@@ -1370,10 +1348,8 @@ msgstr "Eelistused"
 msgid "Preparing library..."
 msgstr "Valmistan muusikakogu ette…"
 
-#, fuzzy
-#| msgid "Prefer server lyrics"
 msgid "Preserve pitch"
-msgstr "Eelista laulusõnu serverist"
+msgstr "Säilita helikõrgus"
 
 msgid "Preset"
 msgstr "Eelseadistus"
@@ -1384,10 +1360,8 @@ msgstr "Takista, et automaatne metaandmete uuendamine neid väärtusi asendaks"
 msgid "Previous Track"
 msgstr "Eelmine lugu"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous audio device"
-msgstr "Eelmine leht"
+msgstr "Eelmine heliseade"
 
 msgid "Previous page"
 msgstr "Eelmine leht"
@@ -1411,7 +1385,7 @@ msgid "Pronunciation"
 msgstr "Hääldus"
 
 msgid "Proxy casting through Rufin"
-msgstr ""
+msgstr "Puhverad meediumilevi läbi Rufini"
 
 msgid "Purple"
 msgstr "Purpurpunane"
@@ -1447,7 +1421,7 @@ msgid "Recently released"
 msgstr "Hiljuti avaldatud"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Kui su server seda tagab, siis soovitame kasutada"
 
 msgid "Reconnect"
 msgstr "Ühenda uuesti"
@@ -1746,10 +1720,8 @@ msgstr "Kuva väliste teenuste ikoonid albumi ja esitaja lehtedel"
 msgid "Show external site links"
 msgstr "Kuva välised veebisaidilingid"
 
-#, fuzzy
-#| msgid "Show Lyrics Panel"
 msgid "Show lyrics in the right panel"
-msgstr "Näita laulusõnade riba"
+msgstr "Näita laulusõnu paremal külgribal"
 
 msgid "Show lyrics"
 msgstr "Vaata laulusõnu"
@@ -1764,12 +1736,10 @@ msgid "Show tray icon"
 msgstr "Näita süsteemisalve ikooni"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Näita visualiseerijat ja laulusõnu paremal külgribal"
 
-#, fuzzy
-#| msgid "Show visualizer"
 msgid "Show visualizer in the right panel"
-msgstr "Näita visualiseerijat"
+msgstr "Näita visualiseerijat paremal külgribal"
 
 msgid "Show visualizer"
 msgstr "Näita visualiseerijat"
@@ -1814,7 +1784,7 @@ msgid "Skip count"
 msgstr "Vahelejätmiste arv"
 
 msgid "Skip same-album crossfade"
-msgstr "Jäta vahele ristsulatus sama albumi lugude vahel"
+msgstr "Ära kasuta risthajutamist sama albumi lugude vahel"
 
 msgid "Slate"
 msgstr "Paekarva"
@@ -1960,10 +1930,8 @@ msgstr "Summutamine on lõpetatud"
 msgid "Update"
 msgstr "Uuenda"
 
-#, fuzzy
-#| msgid "API key"
 msgid "Use API key"
-msgstr "API võti"
+msgstr "Kasuta API-võtit"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
