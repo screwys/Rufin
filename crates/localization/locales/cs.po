@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-15 18:23+0000\n"
+"PO-Revision-Date: 2026-08-25 03:51+0000\n"
 "Last-Translator: Jakub Cabal <info@jakubcabal.cz>\n"
 "Language-Team: Czech <https://hosted.weblate.org/projects/rufin/app/cs/>\n"
 "Language: cs\n"
@@ -32,7 +32,7 @@ msgstr ""
 "možná budete chtít protokoly před jejich sdílením přesto zkontrolovat"
 
 msgid "No results ¯\\_(°╭╮°)_/¯"
-msgstr ""
+msgstr "Žádné výsledky ¯\\_(°╭╮°)_/¯"
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -45,6 +45,8 @@ msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
+"Směřujte mediální obsah přes tento server namísto sdílení URL poskytovatelů "
+"s rendererem"
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -276,7 +278,7 @@ msgid "Audio output"
 msgstr "Zvukový výstup"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Zpracování zvuku není během odesílání k dispozici"
 
 msgid "Audio"
 msgstr "Zvuk"
@@ -323,10 +325,8 @@ msgstr "Zrušit stahování"
 msgid "Cancel"
 msgstr "Zrušit"
 
-#, fuzzy
-#| msgid "Rating"
 msgid "Casting"
-msgstr "Hodnocení"
+msgstr "Přenos"
 
 msgid "Change Secret Storage"
 msgstr "Změnit tajné úložiště"
@@ -358,7 +358,7 @@ msgstr ""
 "počítače"
 
 msgid "Choose playback output"
-msgstr ""
+msgstr "Vyberte výstup přehrávání"
 
 msgid "Choose"
 msgstr "Vyberte"
@@ -426,15 +426,11 @@ msgstr "Připojeno"
 msgid "Connecting to music server..."
 msgstr "Připojování k hudebnímu serveru..."
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connecting to {device}..."
-msgstr "Připojování k hudebnímu serveru..."
+msgstr "Připojování k {device}..."
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connection failed"
-msgstr "Spojení"
+msgstr "Spojení selhalo"
 
 msgid "Connection"
 msgstr "Spojení"
@@ -472,10 +468,8 @@ msgstr "Vytvořit"
 msgid "Crossfade duration"
 msgstr "Doba trvání přechodu"
 
-#, fuzzy
-#| msgid "Crossfade"
 msgid "Crossfade mode"
-msgstr "Přechod"
+msgstr "Režim prolínání"
 
 msgid "Crossfade"
 msgstr "Přechod"
@@ -603,10 +597,8 @@ msgstr "Zapnout soukromý režim"
 msgid "Enter API credentials first"
 msgstr "Nejprve zadejte přihlašovací údaje k API"
 
-#, fuzzy
-#| msgid "Enter a server address, username, and password"
 msgid "Enter a server address and API key"
-msgstr "Zadejte adresu serveru, uživatelské jméno a heslo"
+msgstr "Zadejte adresu serveru a API klíč"
 
 msgid "Enter a server address, username, and password"
 msgstr "Zadejte adresu serveru, uživatelské jméno a heslo"
@@ -700,10 +692,8 @@ msgstr "Úplné zobrazení"
 msgid "Furigana"
 msgstr "Furigana"
 
-#, fuzzy
-#| msgid "Gapless"
 msgid "Gapless mode"
-msgstr "Přehrávání bez mezer"
+msgstr "Režim přehrávání bez mezer"
 
 msgid "Gapless"
 msgstr "Přehrávání bez mezer"
@@ -738,13 +728,11 @@ msgstr "Přejít do alba"
 msgid "Go to Artist"
 msgstr "Přejít na interpreta"
 
-#, fuzzy
-#| msgid "Go to Album"
 msgid "Go to"
-msgstr "Přejít do alba"
+msgstr "Přejít do"
 
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Green"
 msgstr "Zelená"
@@ -811,10 +799,8 @@ msgstr "Nainstalováno"
 msgid "Instrumental"
 msgstr "Instrumentální"
 
-#, fuzzy
-#| msgid "Duration"
 msgid "Integrations"
-msgstr "Délka"
+msgstr "Integrace"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
@@ -826,7 +812,7 @@ msgid "Karaoke mode"
 msgstr "Režim Karaoke"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Po zavření okna ponechat Rufin spuštěný"
 
 msgid "Keep album transitions gapless when possible"
 msgstr "Pokud je to možné, zachovejte plynulé přechody mezi skladbami v albu"
@@ -917,10 +903,8 @@ msgstr "Mapování lokálních souborů"
 msgid "Local library"
 msgstr "Místní knihovna"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Local music folder is unavailable"
-msgstr "Místní hudební složka"
+msgstr "Místní hudební složka je nedostupná"
 
 msgid "Local music folder"
 msgstr "Místní hudební složka"
@@ -928,10 +912,8 @@ msgstr "Místní hudební složka"
 msgid "Local"
 msgstr "Místní"
 
-#, fuzzy
-#| msgid "Local Folders"
 msgid "Locate Folder"
-msgstr "Místní složky"
+msgstr "Vyhledat složku"
 
 msgid "Lock metadata"
 msgstr "Uzamknout metadata"
@@ -1059,10 +1041,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Procházení položek stránky"
 
-#, fuzzy
-#| msgid "Notifications"
 msgid "Navigation"
-msgstr "Notifikace"
+msgstr "Navigace"
 
 msgid "Needs attention"
 msgstr "Vyžaduje pozornost"
@@ -1088,10 +1068,8 @@ msgstr "Nově přidané"
 msgid "Next Track"
 msgstr "Další skladba"
 
-#, fuzzy
-#| msgid "Selected device"
 msgid "Next audio device"
-msgstr "Vybrané zařízení"
+msgstr "Další zvukové zařízení"
 
 msgid "Next page"
 msgstr "Další strana"
@@ -1135,10 +1113,8 @@ msgstr "Žádné odpovídající skladby"
 msgid "No music from this artist yet"
 msgstr "Tento interpret zatím nemá žádnou hudbu"
 
-#, fuzzy
-#| msgid "No Servers Found"
 msgid "No network devices found"
-msgstr "Nebyly nalezeny žádné servery"
+msgstr "Nebyly nalezeny žádné sítové zařízení"
 
 msgid "No remote sources configured"
 msgstr "Nebyly nakonfigurovány žádné vzdálené zdroje"
@@ -1302,15 +1278,11 @@ msgstr "Přehrát playlist"
 msgid "Play radio"
 msgstr "Pustit Rádio"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play later)"
-msgstr "Přehrát náhodně"
+msgstr "Přehrát náhodně (později)"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play next)"
-msgstr "Přehrát náhodně"
+msgstr "Přehrát náhodně (příště)"
 
 msgid "Play random"
 msgstr "Přehrát náhodně"
@@ -1327,10 +1299,8 @@ msgstr "Přehrát"
 msgid "Play/Pause"
 msgstr "Přehrát/Pozastavit"
 
-#, fuzzy
-#| msgid "Playback"
 msgid "Playback speed"
-msgstr "Přehrávání"
+msgstr "Rychlost přehrávání"
 
 msgid "Playback"
 msgstr "Přehrávání"
@@ -1339,10 +1309,10 @@ msgid "Played"
 msgstr "Přehráno"
 
 msgid "Playing on this device"
-msgstr ""
+msgstr "Přehrává se na tomto zařízení"
 
 msgid "Playing on {device}"
-msgstr ""
+msgstr "Přehrává se na {device}"
 
 msgid "Playlist name"
 msgstr "Název playlistu"
@@ -1386,10 +1356,8 @@ msgstr "Nastavení"
 msgid "Preparing library..."
 msgstr "Příprava knihovny..."
 
-#, fuzzy
-#| msgid "Prefer server lyrics"
 msgid "Preserve pitch"
-msgstr "Upřednostnit texty skladeb ze serveru"
+msgstr "Zachovat výšku tónu"
 
 msgid "Preset"
 msgstr "Předvolba"
@@ -1402,10 +1370,8 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Předchozí skladba"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous audio device"
-msgstr "Předchozí stránka"
+msgstr "Předchozí zvukové zařízení"
 
 msgid "Previous page"
 msgstr "Předchozí stránka"
@@ -1429,7 +1395,7 @@ msgid "Pronunciation"
 msgstr "Výslovnost"
 
 msgid "Proxy casting through Rufin"
-msgstr ""
+msgstr "Proxy casting přes Rufin"
 
 msgid "Purple"
 msgstr "Fialová"
@@ -1465,7 +1431,7 @@ msgid "Recently released"
 msgstr "Nedávno vydané"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Doporučeno, pokud to váš server poskytuje"
 
 msgid "Reconnect"
 msgstr "Znovu se připojit"
@@ -1587,10 +1553,8 @@ msgstr "Obnovit"
 msgid "Resume"
 msgstr "Pokračovat"
 
-#, fuzzy
-#| msgid "Library"
 msgid "Resync Library"
-msgstr "Knihovna"
+msgstr "Znovu synchronizovat knihovnu"
 
 msgid "Rich presence"
 msgstr "Rozšířené informace o přehrávání"
@@ -1667,10 +1631,8 @@ msgstr "Prohledávání místní sítě"
 msgid "Searching for Jellyfin servers on the local network..."
 msgstr "Vyhledávání serverů Jellyfin v místní síti..."
 
-#, fuzzy
-#| msgid "Searching..."
 msgid "Searching for devices..."
-msgstr "Hledání..."
+msgstr "Hledání zařízení..."
 
 msgid "Searching will start automatically"
 msgstr "Vyhledávání se spustí automaticky"
@@ -1768,10 +1730,8 @@ msgstr "Zobrazit ikony externích služeb na stránkách alb a interpretů"
 msgid "Show external site links"
 msgstr "Zobrazit odkazy na externí stránky"
 
-#, fuzzy
-#| msgid "Show Lyrics Panel"
 msgid "Show lyrics in the right panel"
-msgstr "Zobrazit panel s texty skladeb"
+msgstr "Zobrazit text skladby v pravém panelu"
 
 msgid "Show lyrics"
 msgstr "Zobrazit texty skladeb"
@@ -1786,17 +1746,13 @@ msgid "Show tray icon"
 msgstr "Zobrazit ikonu v systémové liště"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Zobrazit vizualizér a texty písní v pravém panelu"
 
-#, fuzzy
-#| msgid "Visualizer"
 msgid "Show visualizer in the right panel"
-msgstr "Vizualizace"
+msgstr "Zobrazit vizualizátor v pravém panelu"
 
-#, fuzzy
-#| msgid "Visualizer"
 msgid "Show visualizer"
-msgstr "Vizualizace"
+msgstr "Zobrazit vizualizátor"
 
 msgid "Show/hide lyrics"
 msgstr "Zobrazit/skrýt texty skladeb"
@@ -1910,7 +1866,7 @@ msgid "Theme"
 msgstr "Téma"
 
 msgid "This device"
-msgstr ""
+msgstr "Toto zařízení"
 
 msgid "This isn't available"
 msgstr "Toto není dostupné"
@@ -1970,7 +1926,7 @@ msgid "Type to search"
 msgstr "Zadejte text pro vyhledání"
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Undo identified value"
 msgstr "Vrátit zpět určenou hodnotu"
@@ -1984,10 +1940,8 @@ msgstr "Zrušeno ztlumení"
 msgid "Update"
 msgstr "Aktualizovat"
 
-#, fuzzy
-#| msgid "API key"
 msgid "Use API key"
-msgstr "API klíč"
+msgstr "Použít API klíč"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr "Pro doporučení použijte Jellyfin Instant Mix"
@@ -2102,10 +2056,8 @@ msgstr "není"
 msgid "is"
 msgstr "je"
 
-#, fuzzy
-#| msgid "128 kbps"
 msgid "kbps"
-msgstr "128 kbps"
+msgstr "kbps"
 
 msgid "range"
 msgstr "rozsah"
