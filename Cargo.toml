@@ -16,7 +16,7 @@ publish = false
 [workspace.dependencies]
 adw = { package = "libadwaita", version = "0.9.1" }
 apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
-apple-cf = "=0.6.0"
+apple-cf = "=0.9.3"
 app-identity = { path = "crates/app-identity" }
 async-channel = "2.5.0"
 async-trait = "0.1.89"
@@ -53,7 +53,7 @@ keyring-core = "1.0.0"
 library = { path = "crates/library" }
 localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
-lofty = "0.24.0"
+lofty = "0.25.0"
 md5 = "0.8.0"
 mediaplayer = "0.4.3"
 mpris-server = "0.10.0"
