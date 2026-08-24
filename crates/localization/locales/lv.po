@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-12 10:51+0000\n"
+"PO-Revision-Date: 2026-08-22 11:51+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Latvian <https://hosted.weblate.org/projects/rufin/app/lv/>\n"
 "Language: lv\n"
@@ -46,6 +46,8 @@ msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
+"Novirzēt servera multivides datus caur šo ierīci, nevis daliīties ar "
+"atskaņotāja URL adresēm"
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -276,7 +278,7 @@ msgid "Audio output"
 msgstr "Skaņas izvade"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Skaņas apstrāde nav pieejama straumējot"
 
 msgid "Audio"
 msgstr "Skaņa"
@@ -323,10 +325,8 @@ msgstr "Atcelt lejupielādi"
 msgid "Cancel"
 msgstr "Atcelt"
 
-#, fuzzy
-#| msgid "Rating"
 msgid "Casting"
-msgstr "Vērtējums"
+msgstr "Pārraide"
 
 msgid "Change Secret Storage"
 msgstr "Mainīt slepeno krātuvi"
@@ -357,10 +357,8 @@ msgstr ""
 "Izvēlieties vienu vai vairākas mapes, ko skenēt un atskaņot tieši no šī "
 "datora"
 
-#, fuzzy
-#| msgid "Show playback icon"
 msgid "Choose playback output"
-msgstr "Rādīt atskaņošanas ikonu"
+msgstr "Izvēlēties atskaņošanas izvadi"
 
 msgid "Choose"
 msgstr "Izvēlēties"
@@ -428,15 +426,11 @@ msgstr "Savienots"
 msgid "Connecting to music server..."
 msgstr "Savienojas ar mūzikas serveri…"
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connecting to {device}..."
-msgstr "Savienojas ar mūzikas serveri…"
+msgstr "Izveido savienojumu ar {device}..."
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connection failed"
-msgstr "Savienojums"
+msgstr "Savienojums neizdevās"
 
 msgid "Connection"
 msgstr "Savienojums"
@@ -474,10 +468,8 @@ msgstr "Izveidot"
 msgid "Crossfade duration"
 msgstr "Sajaukšanas ilgums"
 
-#, fuzzy
-#| msgid "Crossfade"
 msgid "Crossfade mode"
-msgstr "Sajaukšana"
+msgstr "Sajaukšanas režīms"
 
 msgid "Crossfade"
 msgstr "Sajaukšana"
@@ -605,10 +597,8 @@ msgstr "Ieslēgt privāto režīmu"
 msgid "Enter API credentials first"
 msgstr "Vispirms ievadiet API autentifikācijas datus"
 
-#, fuzzy
-#| msgid "Enter a server address, username, and password"
 msgid "Enter a server address and API key"
-msgstr "Ievadiet servera adresi, lietotājvārdu un paroli"
+msgstr "Ievadiet servera adresi un API atslēgu"
 
 msgid "Enter a server address, username, and password"
 msgstr "Ievadiet servera adresi, lietotājvārdu un paroli"
@@ -704,10 +694,8 @@ msgstr "Pilns"
 msgid "Furigana"
 msgstr "Furigana"
 
-#, fuzzy
-#| msgid "Gapless"
 msgid "Gapless mode"
-msgstr "Bez pauzēm"
+msgstr "Režīms bez pauzēm"
 
 msgid "Gapless"
 msgstr "Bez pauzēm"
@@ -742,13 +730,11 @@ msgstr "Pāriet uz albumu"
 msgid "Go to Artist"
 msgstr "Pāriet uz Izpildītāju"
 
-#, fuzzy
-#| msgid "Go to Album"
 msgid "Go to"
-msgstr "Pāriet uz albumu"
+msgstr "Pāriet uz"
 
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Green"
 msgstr "Zaļš"
@@ -813,10 +799,8 @@ msgstr "Uzstādīts"
 msgid "Instrumental"
 msgstr "Instrumentāls"
 
-#, fuzzy
-#| msgid "Duration"
 msgid "Integrations"
-msgstr "Ilgums"
+msgstr "Integrācijas"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
@@ -828,7 +812,7 @@ msgid "Karaoke mode"
 msgstr "Karaoke režīms"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Turpināt Rufin darbību pēc loga aizvēršanas"
 
 msgid "Keep album transitions gapless when possible"
 msgstr "Turēt albumu pārejas bez pauzēm, ja iespējams"
@@ -919,10 +903,8 @@ msgstr "Lokālo failu sasaiste"
 msgid "Local library"
 msgstr "Lokālā mūzikas bibliotēka"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Local music folder is unavailable"
-msgstr "Lokālā mūzikas mape"
+msgstr "Lokālā mūzikas mape nav pieejama"
 
 msgid "Local music folder"
 msgstr "Lokālā mūzikas mape"
@@ -930,10 +912,8 @@ msgstr "Lokālā mūzikas mape"
 msgid "Local"
 msgstr "Lokāls"
 
-#, fuzzy
-#| msgid "Local Folders"
 msgid "Locate Folder"
-msgstr "Lokālās mapes"
+msgstr "Atrast mapi"
 
 msgid "Lock metadata"
 msgstr "Bloķēt metadatus"
@@ -1061,10 +1041,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Pārvietoties pa lapas elementiem"
 
-#, fuzzy
-#| msgid "Notifications"
 msgid "Navigation"
-msgstr "Paziņojumi"
+msgstr "Navigācija"
 
 msgid "Needs attention"
 msgstr "Prasās uzmanība"
@@ -1090,10 +1068,8 @@ msgstr "Nesen pievienotie"
 msgid "Next Track"
 msgstr "Nākamā dziesma"
 
-#, fuzzy
-#| msgid "Selected device"
 msgid "Next audio device"
-msgstr "Izvēlētā ierīce"
+msgstr "Nākamā skaņas ierīce"
 
 msgid "Next page"
 msgstr "Nākamā lapa"
@@ -1137,10 +1113,8 @@ msgstr "Nav atrasts neviens atbilstošs celiņš"
 msgid "No music from this artist yet"
 msgstr "Šim izpildītājam vēl nav pieejama neviena mūzika"
 
-#, fuzzy
-#| msgid "No lyrics found."
 msgid "No network devices found"
-msgstr "Teksti nav atrasti."
+msgstr "Tīkla ierīces nav atrastas"
 
 msgid "No remote sources configured"
 msgstr "Nav konfigurētu attālu avotu"
@@ -1303,15 +1277,11 @@ msgstr "Atskaņot atskaņošanas sarakstu"
 msgid "Play radio"
 msgstr "Atskaņot radio"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play later)"
-msgstr "Atskaņot nejaušā secībā"
+msgstr "Atskaņot nejaušā secībā (atskaņot vēlāk)"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play next)"
-msgstr "Atskaņot nejaušā secībā"
+msgstr "Atskaņot nejaušā secībā (atskaņot nākamo)"
 
 msgid "Play random"
 msgstr "Atskaņot nejaušā secībā"
@@ -1328,10 +1298,8 @@ msgstr "Atskaņot"
 msgid "Play/Pause"
 msgstr "Atskaņot/Pauzēt"
 
-#, fuzzy
-#| msgid "Playback"
 msgid "Playback speed"
-msgstr "Atskaņošana"
+msgstr "Atskaņošanas ātrums"
 
 msgid "Playback"
 msgstr "Atskaņošana"
@@ -1340,10 +1308,10 @@ msgid "Played"
 msgstr "Atskaņots"
 
 msgid "Playing on this device"
-msgstr ""
+msgstr "Atskaņo šajā ierīcē"
 
 msgid "Playing on {device}"
-msgstr ""
+msgstr "Atskaņo ierīcē {device}"
 
 msgid "Playlist name"
 msgstr "Atskaņošanas saraksta nosaukums"
@@ -1387,10 +1355,8 @@ msgstr "Iestatījumi"
 msgid "Preparing library..."
 msgstr "Sagatavo bibliotēku…"
 
-#, fuzzy
-#| msgid "Prefer server lyrics"
 msgid "Preserve pitch"
-msgstr "Dot priekšroku servera tekstiem"
+msgstr "Saglabāt toni"
 
 msgid "Preset"
 msgstr "Iepriekš iestatīts"
@@ -1401,10 +1367,8 @@ msgstr "Neļaut automātiskajai metadatu atjaunināšanai aizstāt šīs vērtī
 msgid "Previous Track"
 msgstr "Iepriekšēja dziesma"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous audio device"
-msgstr "Iepriekšējā lapa"
+msgstr "Iepriekšējā skaņas ierīce"
 
 msgid "Previous page"
 msgstr "Iepriekšējā lapa"
@@ -1428,7 +1392,7 @@ msgid "Pronunciation"
 msgstr "Izruna"
 
 msgid "Proxy casting through Rufin"
-msgstr ""
+msgstr "Pārsūtīšana caur Rufin izmantojot starpniekserveri"
 
 msgid "Purple"
 msgstr "Violets"
@@ -1464,7 +1428,7 @@ msgid "Recently released"
 msgstr "Nesen izdotie"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Ieteicams, ja jūsu serveris to nodrošina"
 
 msgid "Reconnect"
 msgstr "Atjaunot savienojumu"
@@ -1664,10 +1628,8 @@ msgstr "Meklē lokālajā tīklā"
 msgid "Searching for Jellyfin servers on the local network..."
 msgstr "Tiek meklēti Jellyfin serveri lokālajā tīklā…"
 
-#, fuzzy
-#| msgid "Searching..."
 msgid "Searching for devices..."
-msgstr "Tiek veikta meklēšana..."
+msgstr "Tiek meklētas ierīces..."
 
 msgid "Searching will start automatically"
 msgstr "Meklēšana tiks automātiski uzsākta"
@@ -1765,10 +1727,8 @@ msgstr "Rādīt ārējo pakalpojumu ikonas albumu un izpildītāju lapās"
 msgid "Show external site links"
 msgstr "Rādīt ārējās saites"
 
-#, fuzzy
-#| msgid "Show Lyrics Panel"
 msgid "Show lyrics in the right panel"
-msgstr "Rādīt tekstu paneli"
+msgstr "Rādīt tekstus labajā panelī"
 
 msgid "Show lyrics"
 msgstr "Rādīt tekstus"
@@ -1783,17 +1743,13 @@ msgid "Show tray icon"
 msgstr "Rādīt sistēmas joslas ikonu"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Rādīt vizualizāciju un tekstus labajā panelī"
 
-#, fuzzy
-#| msgid "Visualizer"
 msgid "Show visualizer in the right panel"
-msgstr "Vizualizācija"
+msgstr "Rādīt vizualizāciju labajā panelī"
 
-#, fuzzy
-#| msgid "Visualizer"
 msgid "Show visualizer"
-msgstr "Vizualizācija"
+msgstr "Rādīt vizualizāciju"
 
 msgid "Show/hide lyrics"
 msgstr "Rādīt/paslēpt tekstus"
@@ -1907,7 +1863,7 @@ msgid "Theme"
 msgstr "Tēma"
 
 msgid "This device"
-msgstr ""
+msgstr "Šī ierīce"
 
 msgid "This isn't available"
 msgstr "Šis nav pieejams"
@@ -1967,7 +1923,7 @@ msgid "Type to search"
 msgstr "Ierakstiet, lai meklētu"
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Undo identified value"
 msgstr "Atcelt atzīmēto vērtību"
@@ -1981,10 +1937,8 @@ msgstr "Skaņa atjaunota"
 msgid "Update"
 msgstr "Atjaunināt"
 
-#, fuzzy
-#| msgid "API key"
 msgid "Use API key"
-msgstr "API atslēga"
+msgstr "Izmantot API atslēgu"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
@@ -2099,10 +2053,8 @@ msgstr "nav"
 msgid "is"
 msgstr "ir"
 
-#, fuzzy
-#| msgid "128 kbps"
 msgid "kbps"
-msgstr "128 kbps"
+msgstr "kbit/s"
 
 msgid "range"
 msgstr "diapazons"

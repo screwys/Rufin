@@ -1,0 +1,2086 @@
+# Rufin translation template.
+# Copyright (C) 2026 Rufin contributors
+# This file is distributed under the same license as the Rufin package.
+#
+msgid ""
+msgstr ""
+"Project-Id-Version: Rufin\n"
+"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
+"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
+"PO-Revision-Date: 2026-08-23 20:51+0000\n"
+"Last-Translator: Tsung-Ying Yu <an920107@gmail.com>\n"
+"Language-Team: Chinese (Traditional Han script) <https://hosted.weblate.org/"
+"projects/rufin/app/zh_Hant/>\n"
+"Language: zh_Hant\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+"Plural-Forms: nplurals=1; plural=0;\n"
+"X-Generator: Weblate 2026.9.dev0\n"
+
+msgid ""
+"Downloads from this server will be removed, and automatic rules will be "
+"turned off"
+msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會被關閉"
+
+msgid ""
+"Logs have secrets and absolute folder paths redacted, but you may still want "
+"to review the logs before sharing them"
+msgstr "記錄中的敏感資訊與絕對路徑名稱都會被去除，但仍然建議您再分享記錄前查看確認"
+
+msgid ""
+"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgstr "沒有結果 302257\\_(302260342225255342225256302260)_/302257"
+
+msgid ""
+"Only downloads from this rule will be deleted. Shared and manual downloads "
+"stay"
+msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
+
+msgid ""
+"Route server media through this device instead of sharing provider URLs with "
+"the renderer"
+msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
+
+#, rust-format
+msgid ""
+"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
+"{unmatched} unmatched of {total} track"
+msgid_plural ""
+"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
+"{unmatched} unmatched of {total} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid ""
+"Tap to the entry to load the lyrics and save in the app cache, click save "
+"only if you also want to save it in your music folder"
+msgstr ""
+
+msgid ""
+"Thank you for trying out Rufin! If you have problems or suggestions, please "
+"open an issue in Github."
+msgstr "感謝您使用 Rufin！如果遇到問題或有任何建議，請在 GitHub 上建立 issue。"
+
+msgid ""
+"These folders are combined into the Local source and shown through folder "
+"browsing"
+msgstr ""
+
+msgid ""
+"This removes the server, cached library metadata, queue snapshot, and saved "
+"token for"
+msgstr "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
+
+msgid ""
+"This uses Jellyfin API for play radio, necessary if you want recommendation "
+"plugins to work"
+msgstr ""
+
+msgid ""
+"This will log you out and clear your secrets including API ones. Your app "
+"cache is not touched."
+msgstr "這會將您登出並清除所有機密資訊包含 API 金鑰。應用程式快取則不受影響。"
+
+msgid ""
+"Track evens out every song, while Album preserves the intended differences "
+"within each album"
+msgstr ""
+
+#, rust-format
+msgid ""
+"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
+"{unmatched} unmatched of {total} track"
+msgid_plural ""
+"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
+"{unmatched} unmatched of {total} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+msgid ". You only need to fill email and an application name parts"
+msgstr ""
+
+msgid "128 kbps"
+msgstr "128 kbps"
+
+msgid "192 kbps"
+msgstr "192 kbps"
+
+msgid "256 kbps"
+msgstr "256 kbps"
+
+msgid "320 kbps"
+msgstr "320 kbps"
+
+msgid "5 Latest Albums"
+msgstr "最新的 5 張專輯"
+
+msgid "API key"
+msgstr "API 金鑰"
+
+msgid "API keys"
+msgstr "API 金鑰"
+
+msgid "About Rufin"
+msgstr "關於 Rufin"
+
+msgid "Accent color"
+msgstr "強調色"
+
+msgid "Add Rule"
+msgstr "新增規則"
+
+msgid "Add a matching server prefix"
+msgstr "新增匹配的伺服器前綴"
+
+msgid "Add a new source"
+msgstr "新增來源"
+
+msgid "Add a title"
+msgstr "新增標題"
+
+msgid "Add current"
+msgstr ""
+
+msgid "Add folder"
+msgstr "新增資料夾"
+
+msgid "Add server"
+msgstr "新增伺服器"
+
+msgid "Add to Favorites"
+msgstr "加入最愛"
+
+msgid "Add to Pins"
+msgstr "加入釘選"
+
+msgid "Add to Playlist"
+msgstr "加入播放清單"
+
+msgid "Add tracks when fewer than this many remain"
+msgstr "當剩餘的曲目數量少於此時新增曲目"
+
+msgid "Add"
+msgstr "新增"
+
+msgid "Added to favorites"
+msgstr "已加入最愛"
+
+msgid "Added to"
+msgstr "已加入"
+
+msgid "Album Artists"
+msgstr "專輯藝人"
+
+msgid "Album artist"
+msgstr "專輯藝人"
+
+msgid "Album artists"
+msgstr "專輯藝人"
+
+msgid "Album radio"
+msgstr "專輯電台"
+
+msgid "Album title"
+msgstr "專輯標題"
+
+msgid "Album tracks"
+msgstr "專輯曲目"
+
+msgid "Album"
+msgstr "專輯"
+
+msgid "Albums"
+msgstr "專輯"
+
+msgid "All Music"
+msgstr "所有音樂"
+
+msgid "All Playlists"
+msgstr "所有播放清單"
+
+msgid "All tracks"
+msgstr "所有曲目"
+
+msgid "Any genre"
+msgstr "任何曲風"
+
+msgid "App settings"
+msgstr "應用程式設定"
+
+msgid "Appearance"
+msgstr "外觀"
+
+msgid "Appears On"
+msgstr ""
+
+msgid "Application name"
+msgstr "應用程式名稱"
+
+msgid "Artist / Album"
+msgstr "藝人 / 專輯"
+
+msgid "Artist albums"
+msgstr "藝人專輯"
+
+msgid "Artist name"
+msgstr "藝人名稱"
+
+msgid "Artist radio"
+msgstr "藝人電台"
+
+msgid "Artist tracks"
+msgstr "藝人曲目"
+
+msgid "Artist"
+msgstr "藝人"
+
+msgid "Artists"
+msgstr "藝人"
+
+msgid "Audio fade on play/pause"
+msgstr "播放/暫停時淡入淡出"
+
+msgid "Audio output"
+msgstr "音訊輸出"
+
+msgid "Audio processing is unavailable while casting"
+msgstr "投放時無法進行音訊處理"
+
+msgid "Audio"
+msgstr "音訊"
+
+msgid "Auto DJ off"
+msgstr "自動 DJ 關閉"
+
+msgid "Auto DJ on"
+msgstr "自動 DJ 開啟"
+
+msgid "Auto DJ refill threshold"
+msgstr "自動 DJ 補歌閾值"
+
+msgid "Auto DJ"
+msgstr "自動 DJ"
+
+msgid "Automatic updates"
+msgstr "自動更新"
+
+msgid "Automatic"
+msgstr "自動"
+
+msgid "BPM"
+msgstr "BPM"
+
+msgid "Back"
+msgstr "返回"
+
+msgid "Blue"
+msgstr "藍色"
+
+msgid "Cached"
+msgstr "已快取"
+
+msgid "Caching Library"
+msgstr "快取庫"
+
+msgid "Caching local library..."
+msgstr "正在快取本地媒體庫..."
+
+msgid "Cancel download and clear downloaded items"
+msgstr "取消下載並清除已下載的項目"
+
+msgid "Cancel download"
+msgstr "取消下載"
+
+msgid "Cancel"
+msgstr "取消"
+
+msgid "Casting network"
+msgstr ""
+
+msgid "Casting"
+msgstr ""
+
+msgid "Change Secret Storage"
+msgstr "變更敏感存儲空間"
+
+msgid "Change"
+msgstr "變更"
+
+#, rust-format
+msgid "Changes apply to {count} track"
+msgid_plural "Changes apply to {count} tracks"
+msgstr[0] "套用變更到 {count} 個曲目"
+
+msgid "Checking..."
+msgstr "檢查中..."
+
+msgid "Choose a local music folder"
+msgstr "選擇本地音樂資料夾"
+
+msgid "Choose an existing local folder"
+msgstr "選擇已存在的本地資料夾"
+
+msgid "Choose at least one local music folder"
+msgstr "選擇至少一個本地音樂資料夾"
+
+msgid "Choose one or more folders to scan and play directly from this computer"
+msgstr "選擇一個或多個資料夾掃描，並直接由此電腦播放"
+
+msgid "Choose playback output"
+msgstr "選擇播放裝置"
+
+msgid "Choose"
+msgstr "選擇"
+
+msgid "Classical"
+msgstr "古典"
+
+msgid "Clear Mapping"
+msgstr ""
+
+msgid "Clear fetched lyrics for this track"
+msgstr "清除此曲目已抓取的歌詞"
+
+msgid "Clear queue"
+msgstr "清除播放佇列"
+
+msgid "Close Window"
+msgstr "關閉視窗"
+
+msgid "Close app window"
+msgstr "關閉應用程式視窗"
+
+msgid "Close fullscreen player"
+msgstr "關閉全螢幕播放器"
+
+msgid "Close"
+msgstr "關閉"
+
+msgid "Club"
+msgstr ""
+
+msgid "Collapse sidebar"
+msgstr "折疊側邊欄"
+
+msgid "Collection"
+msgstr "收藏"
+
+msgid "Collections"
+msgstr "收藏"
+
+msgid "Color scheme"
+msgstr "色彩配置"
+
+msgid "Columns"
+msgstr ""
+
+msgid "Comment text"
+msgstr ""
+
+msgid "Comment"
+msgstr ""
+
+msgid "Compact"
+msgstr ""
+
+msgid "Connect"
+msgstr "連接"
+
+#, rust-format
+msgid "Connected as {username}"
+msgstr "已以 {username} 的身份連接"
+
+msgid "Connected"
+msgstr "已連接"
+
+msgid "Connecting to music server..."
+msgstr "正在連接到音樂伺服器..."
+
+#, rust-format
+msgid "Connecting to {device}..."
+msgstr "正在連接到 {device}..."
+
+msgid "Connection failed"
+msgstr "連接失敗"
+
+msgid "Connection"
+msgstr "連接"
+
+msgid "Context Menus"
+msgstr ""
+
+msgid "Continue"
+msgstr "繼續"
+
+msgid "Control notifications"
+msgstr ""
+
+msgid "Copy"
+msgstr "複製"
+
+msgid "Could not save diagnostic log"
+msgstr "無法儲存診斷記錄"
+
+msgid "Could not update favorites"
+msgstr "無法更新最愛"
+
+#, rust-format
+msgid "Couldn't connect to {service}"
+msgstr "無法連接到 {service}"
+
+msgid "Couldn't load this folder"
+msgstr "無法載入此資料夾"
+
+msgid "Couldn't search for lyrics"
+msgstr "無法搜尋到歌詞"
+
+msgid "Create"
+msgstr "建立"
+
+msgid "Crossfade duration"
+msgstr "交叉淡入淡出時間"
+
+msgid "Crossfade mode"
+msgstr "交叉淡入淡出模式"
+
+msgid "Crossfade"
+msgstr "交叉淡入淡出"
+
+msgid "Custom"
+msgstr ""
+
+msgid "Customize display"
+msgstr ""
+
+msgid "Cut"
+msgstr "剪下"
+
+msgid "Dance"
+msgstr ""
+
+msgid "Dark"
+msgstr ""
+
+msgid "Date added"
+msgstr "新增日期"
+
+msgid "Debug logging"
+msgstr "除錯記錄"
+
+msgid "Decrease"
+msgstr "減少"
+
+msgid "Default left sidebar"
+msgstr "預設左側邊欄"
+
+msgid "Default right sidebar"
+msgstr "預設右側邊欄"
+
+msgid "Delete Playlist"
+msgstr "刪除播放清單"
+
+msgid "Delete"
+msgstr "刪除"
+
+msgid "Descending"
+msgstr "遞減"
+
+msgid "Detail track columns"
+msgstr ""
+
+msgid "Detail"
+msgstr ""
+
+msgid "Diagnostic log saved"
+msgstr "已儲存診斷記錄"
+
+msgid "Diagnostic log"
+msgstr "診斷記錄"
+
+msgid "Disable private mode"
+msgstr "禁用無痕模式"
+
+msgid "Disc number"
+msgstr "光碟編號"
+
+msgid "Disc"
+msgstr "光碟"
+
+msgid "Discography"
+msgstr ""
+
+msgid "Discord"
+msgstr "Discord"
+
+msgid "Don't duplicate"
+msgstr ""
+
+msgid "Download Folder"
+msgstr "下載資料夾"
+
+msgid "Download Queue"
+msgstr "下載佇列"
+
+msgid "Download quality"
+msgstr "下載品質"
+
+msgid "Download queued"
+msgstr "已加入下載佇列"
+
+msgid "Download started"
+msgstr "已開始下載"
+
+msgid "Download"
+msgstr "下載"
+
+msgid "Downloaded"
+msgstr "已下載"
+
+msgid "Downloading"
+msgstr "正在下載"
+
+msgid "Downloads"
+msgstr "下載"
+
+msgid "Drag to reorder"
+msgstr "拖曳以重新排序"
+
+msgid "Duration"
+msgstr "時長"
+
+msgid "EP"
+msgstr ""
+
+msgid "EPs"
+msgstr ""
+
+msgid "Edit metadata"
+msgstr "編輯元資料"
+
+msgid "Edit"
+msgstr "編輯"
+
+msgid "Enable equalizer"
+msgstr "啟用等化器"
+
+msgid "Enable private mode"
+msgstr "啟用無痕模式"
+
+msgid "Enter API credentials first"
+msgstr "先輸入 API 憑證"
+
+msgid "Enter a server address and API key"
+msgstr "輸入伺服器位置與 API 金鑰"
+
+msgid "Enter a server address, username, and password"
+msgstr "輸入伺服器位置、使用者名稱與密碼"
+
+msgid "Entire Library"
+msgstr ""
+
+msgid "Equalizer"
+msgstr "等化器"
+
+msgid "Everything, including new tracks"
+msgstr "所有內容，包含新曲目"
+
+msgid "Expand sidebar"
+msgstr "展開側邊欄"
+
+msgid "Explore"
+msgstr "探索"
+
+msgid "External lyric lookup is off"
+msgstr "外部歌詞查找已關閉"
+
+msgid "External lyric lookup"
+msgstr "外部歌詞查找"
+
+msgid "External metadata lookup"
+msgstr "外部元資料查找"
+
+msgid "External site links"
+msgstr "外部網站連結"
+
+msgid "Fade audio when playback is paused or resumed"
+msgstr "當播放暫停或繼續時淡出或淡入"
+
+msgid "Favorite tracks"
+msgstr "最愛的曲目"
+
+msgid "Favorite tracks, plus tracks from favorite albums and artists"
+msgstr "最愛的曲目，包含最愛專輯與藝人的曲目"
+
+msgid "Favorite"
+msgstr "最愛"
+
+msgid "Favorites"
+msgstr "最愛"
+
+msgid "Featured genres"
+msgstr ""
+
+msgid "File path replacement"
+msgstr ""
+
+msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
+msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
+
+msgid "Find your ListenBrainz user token"
+msgstr "尋找您的 ListenBrainz 使用者憑證"
+
+msgid "Fixed position"
+msgstr "固定位置"
+
+msgid "Flat"
+msgstr ""
+
+msgid "Folder"
+msgstr "資料夾"
+
+msgid "Folders"
+msgstr "資料夾"
+
+msgid "Forget Server"
+msgstr "遺忘伺服器"
+
+msgid "Forward"
+msgstr "前進"
+
+msgid "Found Servers"
+msgstr ""
+
+msgid "Full Bass"
+msgstr ""
+
+msgid "Full Treble"
+msgstr ""
+
+msgid "Full"
+msgstr ""
+
+msgid "Furigana"
+msgstr "注音假名"
+
+msgid "Gapless mode"
+msgstr "無縫銜接模式"
+
+msgid "Gapless"
+msgstr "無縫銜接"
+
+msgid "General"
+msgstr ""
+
+msgid "Generate and cache waveforms for the current track"
+msgstr "生成並快取目前曲目的波形圖"
+
+msgid "Genius"
+msgstr ""
+
+msgid "Genre radio"
+msgstr "曲風電台"
+
+msgid "Genre tracks"
+msgstr "曲風曲目"
+
+msgid "Genre"
+msgstr "曲風"
+
+msgid "Genres"
+msgstr "曲風"
+
+msgid "Get token"
+msgstr "取得登入授權"
+
+msgid "Go to Album"
+msgstr "前往專輯"
+
+msgid "Go to Artist"
+msgstr "前往藝人"
+
+msgid "Go to"
+msgstr "前往"
+
+msgid "Google Cast"
+msgstr ""
+
+msgid "Green"
+msgstr "綠色"
+
+msgid "Grid labels"
+msgstr ""
+
+msgid "Grid"
+msgstr ""
+
+msgid "Help"
+msgstr "幫助"
+
+msgid "Hidden"
+msgstr "已隱藏"
+
+msgid "Hide sidebar"
+msgstr "隱藏側邊欄"
+
+msgid "History"
+msgstr "歷史"
+
+msgid "Hold and drag to resize"
+msgstr "按住並拖曳以縮放"
+
+msgid "Home Blocks"
+msgstr ""
+
+msgid "Home"
+msgstr "首頁"
+
+msgid "Identify"
+msgstr "認證"
+
+msgid "Identifying..."
+msgstr "認證中..."
+
+msgid "If the page doesn't load, then Libre.fm blocks your IP range/VPN"
+msgstr "如果頁面沒有載入，表示 Libre.fm 阻擋了您的 IP 區段或 VPN"
+
+msgid "If you do not have API keys, create them"
+msgstr "如果你尚未擁有 API 金鑰，請建立它"
+
+msgid "Image"
+msgstr "圖像"
+
+msgid "Include detailed Rufin diagnostics in this session"
+msgstr ""
+
+msgid "Increase"
+msgstr "增加"
+
+msgid "Increases memory usage"
+msgstr "增加記憶體使用量"
+
+msgid "Install available updates when Rufin starts"
+msgstr "在 Rufin 啟動時安裝可用的更新"
+
+msgid "Installed"
+msgstr "已安裝"
+
+msgid "Instrumental"
+msgstr "樂器"
+
+msgid "Integrations"
+msgstr ""
+
+msgid "Jellyfin"
+msgstr "Jellyfin"
+
+msgid "Jellyfin, Navidrome, or OpenSubsonic"
+msgstr "Jellyfin、Navidrome 或 OpenSubsonic"
+
+msgid "Karaoke mode"
+msgstr ""
+
+msgid "Keep Rufin running after closing the window"
+msgstr ""
+
+msgid "Keep album transitions gapless when possible"
+msgstr ""
+
+msgid "Keep music available offline. Folder changes only affect new downloads"
+msgstr "使音樂在離線時仍然可用。資料夾的變更只會影響新的下載"
+
+msgid "Keyboard Shortcuts"
+msgstr "快捷鍵"
+
+msgid "LRCLIB"
+msgstr "LRCLIB"
+
+msgid "Language and readings"
+msgstr ""
+
+msgid "Language"
+msgstr "語言"
+
+msgid "Laptop/Headphones"
+msgstr ""
+
+msgid "Last played"
+msgstr "最後播放"
+
+msgid "Last.fm scrobbling"
+msgstr ""
+
+msgid "Last.fm"
+msgstr "Last.fm"
+
+msgid "Layout"
+msgstr "佈局"
+
+msgid "Legacy"
+msgstr ""
+
+msgid "Library"
+msgstr "媒體庫"
+
+msgid "Libre.fm scrobbling"
+msgstr ""
+
+msgid "Libre.fm"
+msgstr "Libre.fm"
+
+msgid "Light"
+msgstr "淺色"
+
+msgid "Limit"
+msgstr "限制"
+
+msgid "Linear"
+msgstr "線性"
+
+msgid "ListenBrainz scrobbling"
+msgstr ""
+
+msgid "ListenBrainz"
+msgstr "ListenBrainz"
+
+msgid "Loading folders..."
+msgstr "資料夾載入中..."
+
+msgid "Local File Access"
+msgstr ""
+
+msgid "Local File Mapping"
+msgstr ""
+
+msgid "Local Folders"
+msgstr ""
+
+msgid "Local Prefix"
+msgstr ""
+
+msgid "Local file access configured"
+msgstr ""
+
+msgid "Local file mapping is no longer available"
+msgstr ""
+
+msgid "Local file mapping"
+msgstr ""
+
+msgid "Local library"
+msgstr "本地媒體庫"
+
+msgid "Local music folder is unavailable"
+msgstr ""
+
+msgid "Local music folder"
+msgstr ""
+
+msgid "Local"
+msgstr "本地"
+
+msgid "Locate Folder"
+msgstr "定位資料夾"
+
+msgid "Lock metadata"
+msgstr "鎖定元資料"
+
+msgid "Loudness normalization"
+msgstr "響度正規化"
+
+msgid "Lyrics loaded"
+msgstr "歌詞已載入"
+
+msgid "Lyrics offset (ms)"
+msgstr "歌詞延遲 (ms)"
+
+msgid "Lyrics settings"
+msgstr "歌詞設定"
+
+msgid "Lyrics"
+msgstr "歌詞"
+
+msgid "Manage"
+msgstr "管理"
+
+msgid "Mapped Local Path"
+msgstr ""
+
+msgid "Maximum year"
+msgstr "最大年份"
+
+msgid "Menu"
+msgstr "選單"
+
+msgid "Metadata editing is no longer available"
+msgstr "元資料已經不再能編輯"
+
+msgid "Metadata source"
+msgstr "元資料來源"
+
+msgid "Metadata"
+msgstr "元資料"
+
+msgid "Minimum year"
+msgstr "最小年份"
+
+msgid "Mood tracks"
+msgstr "氛圍曲目"
+
+msgid "Mood"
+msgstr "氛圍"
+
+msgid "Moods"
+msgstr "氛圍"
+
+msgid "More actions"
+msgstr "更多操作"
+
+msgid "Most Played"
+msgstr "最常播放"
+
+msgid "Most Skipped"
+msgstr "最常跳過"
+
+msgid "Most played"
+msgstr "最常播放"
+
+msgid "Move down"
+msgstr "下移"
+
+msgid "Move provider down"
+msgstr ""
+
+msgid "Move provider up"
+msgstr ""
+
+msgid "Move up"
+msgstr "上移"
+
+msgid "Multiple values"
+msgstr ""
+
+msgid "Music Folder"
+msgstr "音樂資料夾"
+
+msgid "MusicBrainz + Last.fm"
+msgstr ""
+
+msgid "MusicBrainz artist ID"
+msgstr "MusicBrainz 藝人 ID"
+
+msgid "MusicBrainz recording ID"
+msgstr ""
+
+msgid "MusicBrainz release ID"
+msgstr ""
+
+msgid "MusicBrainz release group ID"
+msgstr ""
+
+msgid "MusicBrainz release track ID"
+msgstr ""
+
+msgid "MusicBrainz"
+msgstr "MusicBrainz"
+
+msgid "Mute"
+msgstr "靜音"
+
+msgid "Muted"
+msgstr "已靜音"
+
+msgid "Name"
+msgstr "名稱"
+
+msgid "Narrow layout threshold"
+msgstr "窄佈局閾值"
+
+msgid "Narrow left sidebar"
+msgstr "窄左側邊欄"
+
+msgid "Narrow right sidebar"
+msgstr "窄右側邊欄"
+
+msgid "Navidrome"
+msgstr "Navidrome"
+
+msgid "Navigate page items"
+msgstr ""
+
+msgid "Navigation"
+msgstr "導覽"
+
+msgid "Needs attention"
+msgstr ""
+
+msgid "NetEase"
+msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
+
+msgid "Never Played"
+msgstr "從未播放"
+
+msgid "New Playlist"
+msgstr "新增播放清單"
+
+msgid "New Smart Playlist"
+msgstr "新增智慧播放清單"
+
+msgid "New download rule"
+msgstr "新增下載規則"
+
+msgid "Newly added"
+msgstr "最新加入"
+
+msgid "Next Track"
+msgstr "下一首"
+
+msgid "Next audio device"
+msgstr "下一個音訊裝置"
+
+msgid "Next page"
+msgstr "下一頁"
+
+msgid "Next"
+msgstr ""
+
+msgid "No Servers Found"
+msgstr "未找到伺服器"
+
+msgid "No albums from this artist yet"
+msgstr "暫無此藝人的專輯"
+
+msgid "No cached server path yet"
+msgstr "暫無快取伺服器路徑"
+
+msgid "No favorites yet"
+msgstr "暫無最愛"
+
+msgid "No folder selected"
+msgstr "無資料夾被選擇"
+
+msgid "No folders selected"
+msgstr "無資料夾被選擇"
+
+msgid "No limit"
+msgstr "無上限"
+
+msgid "No local file mapping"
+msgstr ""
+
+msgid "No local folders configured"
+msgstr ""
+
+msgid "No lyrics"
+msgstr "無歌詞"
+
+msgid "No matching tracks"
+msgstr "無匹配的曲目"
+
+msgid "No music from this artist yet"
+msgstr "暫無此藝人的音樂"
+
+msgid "No network devices found"
+msgstr "找不到網路裝置"
+
+msgid "No remote sources configured"
+msgstr "未設置遠端來源"
+
+msgid "No servers found, add one manually or try again"
+msgstr ""
+
+msgid "No smart playlists yet"
+msgstr "暫無智慧播放清單"
+
+msgid "No source"
+msgstr "無來源"
+
+msgid "No sources configured"
+msgstr "未設置來源"
+
+msgid "No tracks here yet"
+msgstr "暫無曲目"
+
+msgid "No"
+msgstr "不"
+
+msgid "None"
+msgstr "無"
+
+msgid "Not connected"
+msgstr "未連接"
+
+msgid "Nothing here yet"
+msgstr "這裡目前還沒有任何東西"
+
+msgid "Nothing in this folder"
+msgstr "此資料夾沒有任何東西"
+
+msgid "Nothing played yet"
+msgstr "尚未播放任何內容"
+
+msgid "Nothing playing"
+msgstr "未播放任何內容"
+
+msgid "Nothing queued"
+msgstr "未佇列任何內容"
+
+msgid "Notifications"
+msgstr "通知"
+
+msgid "Now playing notifications"
+msgstr "正在播放通知"
+
+msgid "Now playing updates"
+msgstr "正在播放更新"
+
+msgid "Number of songs"
+msgstr "歌曲數量"
+
+msgid "Off only for a server you control"
+msgstr ""
+
+msgid "Off"
+msgstr "關閉"
+
+msgid "Only played tracks"
+msgstr "僅播放過的曲目"
+
+msgid "Only unplayed tracks"
+msgstr "僅未播放過的曲目"
+
+msgid "Open fullscreen player"
+msgstr "開啟全螢幕播放器"
+
+msgid "Open on Jellyfin"
+msgstr "在 Jellyfin 上打開"
+
+msgid "Open on Last.fm"
+msgstr "在 Last.fm 上打開"
+
+msgid "Open on MusicBrainz"
+msgstr "在 MusicBrainz 上打開"
+
+msgid "Open on Navidrome"
+msgstr "在 Navidrome 上打開"
+
+msgid "Open release notes"
+msgstr "開啟更新記錄"
+
+msgid "OpenSubsonic"
+msgstr "OpenSubsonic"
+
+msgid "Opening Last.fm authorization..."
+msgstr ""
+
+msgid "Opening Libre.fm authorization..."
+msgstr ""
+
+msgid "Orange"
+msgstr "橘色"
+
+msgid "Original"
+msgstr ""
+
+msgid "Other"
+msgstr "其他"
+
+msgid "Overview"
+msgstr "總覽"
+
+msgid "Password"
+msgstr "密碼"
+
+msgid "Paste"
+msgstr "貼上"
+
+msgid "Pause"
+msgstr "暫停"
+
+msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
+msgstr ""
+
+msgid "Perceptual"
+msgstr ""
+
+msgid "Pink"
+msgstr "粉紅色"
+
+msgid "Pins"
+msgstr "釘選"
+
+msgid "Plain lyrics"
+msgstr "原始歌詞"
+
+msgid "Play Later"
+msgstr "稍候播放"
+
+msgid "Play Next"
+msgstr "接續播放"
+
+msgid "Play album"
+msgstr "播放專輯"
+
+msgid "Play artist"
+msgstr "播放藝人"
+
+msgid "Play count"
+msgstr "播放次數"
+
+msgid "Play filter"
+msgstr "播放篩選內容"
+
+msgid "Play genre"
+msgstr "播放曲風"
+
+msgid "Play mood"
+msgstr "播放氛圍"
+
+msgid "Play playlist"
+msgstr "播放播放清單"
+
+msgid "Play radio"
+msgstr "播放電台"
+
+msgid "Play random (play later)"
+msgstr "隨機播放（稍候播放）"
+
+msgid "Play random (play next)"
+msgstr "隨機播放（接續播放）"
+
+msgid "Play random"
+msgstr "隨機播放"
+
+msgid "Play smart playlist"
+msgstr "播放智慧播放清單"
+
+msgid "Play track"
+msgstr "播放曲目"
+
+msgid "Play"
+msgstr "播放"
+
+msgid "Play/Pause"
+msgstr "播放/暫停"
+
+msgid "Playback speed"
+msgstr "播放速度"
+
+msgid "Playback"
+msgstr "播放"
+
+msgid "Played"
+msgstr "已播放"
+
+msgid "Playing on this device"
+msgstr "在此裝置上播放"
+
+#, rust-format
+msgid "Playing on {device}"
+msgstr "在 {device} 上播放"
+
+msgid "Playlist name"
+msgstr "播放清單名稱"
+
+msgid "Playlist order"
+msgstr "播放清單順序"
+
+msgid "Playlist radio"
+msgstr "播放清單電台"
+
+msgid "Playlist tracks"
+msgstr "播放清單曲目"
+
+msgid "Playlist"
+msgstr "播放清單"
+
+msgid "Playlists"
+msgstr "播放清單"
+
+msgid "Plays"
+msgstr ""
+
+msgid "Pop"
+msgstr "流行"
+
+msgid "Position"
+msgstr "位置"
+
+msgid "Prefer server lyrics"
+msgstr "偏好伺服器歌詞"
+
+msgid "Prefer server playlist covers"
+msgstr "偏好伺服器的播放清單封面"
+
+msgid "Prefer translations"
+msgstr "偏好翻譯"
+
+msgid "Preferences"
+msgstr "偏好設定"
+
+msgid "Preparing library..."
+msgstr "媒體庫準備中..."
+
+msgid "Preserve pitch"
+msgstr ""
+
+msgid "Preset"
+msgstr "預設集"
+
+msgid "Prevent automatic metadata refreshes from replacing these values"
+msgstr ""
+
+msgid "Previous Track"
+msgstr "上一首"
+
+msgid "Previous audio device"
+msgstr "上一個音訊裝置"
+
+msgid "Previous page"
+msgstr "上一頁"
+
+msgid "Previous"
+msgstr "前一個"
+
+msgid "Privacy and Security"
+msgstr "隱私與安全"
+
+msgid "Private mode is off"
+msgstr "無痕模式已關閉"
+
+msgid "Private mode is on"
+msgstr "無痕模式已開啟"
+
+msgid "Private mode"
+msgstr "無痕模式"
+
+msgid "Pronunciation"
+msgstr ""
+
+msgid "Proxy casting through Rufin"
+msgstr ""
+
+msgid "Purple"
+msgstr ""
+
+msgid "Queue a track to begin"
+msgstr ""
+
+msgid "Queue and transitions"
+msgstr ""
+
+msgid "Queue"
+msgstr ""
+
+msgid "Queued"
+msgstr ""
+
+msgid "Quit Rufin"
+msgstr ""
+
+msgid "Quit"
+msgstr ""
+
+msgid "Rating"
+msgstr ""
+
+msgid "Ready"
+msgstr ""
+
+msgid "Recently played"
+msgstr "最近播放"
+
+msgid "Recently released"
+msgstr "最近發行"
+
+msgid "Recommended when your server provides one"
+msgstr ""
+
+msgid "Reconnect"
+msgstr "重新連接"
+
+msgid "Red"
+msgstr "紅色"
+
+msgid "Redo"
+msgstr "重做"
+
+msgid "Refresh section"
+msgstr "重新整理區塊"
+
+msgid "Refresh"
+msgstr "重新整理"
+
+msgid "Release date"
+msgstr "發行日期"
+
+msgid "Release notifications"
+msgstr ""
+
+msgid "Release"
+msgstr ""
+
+msgid "Remote lyrics"
+msgstr "遠端歌詞"
+
+msgid "Remove All Downloads"
+msgstr "移除所有下載內容"
+
+msgid "Remove Download"
+msgstr "移除下載內容"
+
+msgid "Remove Downloads"
+msgstr "移除下載內容"
+
+msgid "Remove Local Folder"
+msgstr "移除本地資料夾"
+
+msgid "Remove Rule and Delete Downloads"
+msgstr "移除規則並刪除下載內容"
+
+msgid "Remove Rule and Downloads"
+msgstr "移除規則與下載內容"
+
+msgid "Remove Rule, Keep Downloads"
+msgstr "移除規則，保留下載內容"
+
+msgid "Remove and Delete"
+msgstr "移除並刪除"
+
+msgid "Remove folder"
+msgstr "移除資料夾"
+
+msgid "Remove from Favorites"
+msgstr "從最愛中移除"
+
+msgid "Remove from Pins"
+msgstr "從釘選中移除"
+
+msgid "Remove from Playlist"
+msgstr "從播放清單中移除"
+
+msgid "Remove from Queue"
+msgstr "從佇列中移除"
+
+msgid "Remove from playlist"
+msgstr "從播放清單中移除"
+
+msgid "Remove prefix"
+msgstr "移除前綴"
+
+msgid "Remove rule"
+msgstr "移除規則"
+
+msgid "Remove"
+msgstr "移除"
+
+msgid "Removed from favorites"
+msgstr "從最愛中移除"
+
+msgid "Rename Playlist"
+msgstr "重新命名播放清單"
+
+msgid "Rename"
+msgstr "重新命名"
+
+msgid "Repeat all"
+msgstr "重複播放全部"
+
+msgid "Repeat off"
+msgstr "重複播放關閉"
+
+msgid "Repeat one"
+msgstr "重複播放單曲"
+
+msgid "Repeat"
+msgstr "重複播放"
+
+msgid "Requires OpenSubsonic songLyrics v2"
+msgstr ""
+
+msgid "Reset equalizer"
+msgstr "重置等化器"
+
+msgid "Reset to defaults"
+msgstr "重置回預設值"
+
+msgid "Reset"
+msgstr "重置"
+
+msgid "Restore Default"
+msgstr "回復預設值"
+
+msgid "Restore"
+msgstr "復原"
+
+msgid "Resume"
+msgstr "繼續"
+
+msgid "Resync Library"
+msgstr ""
+
+msgid "Rich presence"
+msgstr ""
+
+msgid "Rock"
+msgstr "搖滾"
+
+msgid "Romaji"
+msgstr "羅馬拼音"
+
+msgid "Rows"
+msgstr ""
+
+msgid "Rufin data folder"
+msgstr ""
+
+msgid "Rule actions"
+msgstr ""
+
+msgid "Save Diagnostic Log"
+msgstr ""
+
+msgid "Save Lyrics"
+msgstr ""
+
+msgid "Save Mapping"
+msgstr ""
+
+msgid "Save Server Settings"
+msgstr ""
+
+msgid "Save to rescan"
+msgstr ""
+
+msgid "Save"
+msgstr ""
+
+msgid "Saved Sources"
+msgstr ""
+
+msgid "Saved to"
+msgstr ""
+
+msgid "Saved"
+msgstr ""
+
+msgid "Saved, sync to preview matches"
+msgstr ""
+
+msgid "Saving..."
+msgstr ""
+
+msgid "Search Again"
+msgstr ""
+
+msgid "Search Lyrics"
+msgstr ""
+
+msgid "Search lyrics"
+msgstr ""
+
+msgid "Search preferences"
+msgstr ""
+
+msgid "Search queue"
+msgstr ""
+
+msgid "Search"
+msgstr ""
+
+msgid "Searching Local Network"
+msgstr ""
+
+msgid "Searching for Jellyfin servers on the local network..."
+msgstr ""
+
+msgid "Searching for devices..."
+msgstr ""
+
+msgid "Searching will start automatically"
+msgstr ""
+
+msgid "Searching..."
+msgstr ""
+
+msgid "Secret storage"
+msgstr ""
+
+msgid "Secure storage"
+msgstr ""
+
+msgid "Seek Backward"
+msgstr ""
+
+msgid "Seek Forward"
+msgstr ""
+
+msgid "Seek playback"
+msgstr ""
+
+msgid "Seekbar"
+msgstr ""
+
+msgid "Select All"
+msgstr ""
+
+msgid "Select Download Folder"
+msgstr ""
+
+msgid "Select Music Folder"
+msgstr ""
+
+msgid "Select Source"
+msgstr ""
+
+msgid "Selection"
+msgstr ""
+
+msgid "Server Actions"
+msgstr ""
+
+msgid "Server Address"
+msgstr ""
+
+msgid "Server Library"
+msgstr ""
+
+msgid "Server Prefix"
+msgstr ""
+
+msgid "Server Sample"
+msgstr ""
+
+msgid "Server Settings"
+msgstr ""
+
+#, rust-format
+msgid "Server discovery failed: {error}"
+msgstr ""
+
+msgid "Server is unreachable"
+msgstr ""
+
+msgid "Server lyrics are off in private mode"
+msgstr "在無痕模式中伺服器歌詞會被關閉"
+
+msgid "Server path"
+msgstr ""
+
+msgid "Server prefix doesn't match"
+msgstr ""
+
+msgid "Server"
+msgstr ""
+
+msgid "Servers"
+msgstr ""
+
+msgid "Set the Discord activity type to Listening"
+msgstr ""
+
+msgid "Shared secret"
+msgstr ""
+
+msgid "Show Rufin"
+msgstr ""
+
+msgid "Show downloaded badge"
+msgstr ""
+
+msgid "Show external service icons on album and artist pages"
+msgstr ""
+
+msgid "Show external site links"
+msgstr ""
+
+msgid "Show lyrics in the right panel"
+msgstr ""
+
+msgid "Show lyrics"
+msgstr ""
+
+msgid "Show paused status"
+msgstr ""
+
+msgid "Show sidebar"
+msgstr "顯示側邊欄"
+
+msgid "Show tray icon"
+msgstr ""
+
+msgid "Show visualizer and lyrics in the right panel"
+msgstr ""
+
+msgid "Show visualizer in the right panel"
+msgstr ""
+
+msgid "Show visualizer"
+msgstr ""
+
+msgid "Show/hide lyrics"
+msgstr ""
+
+msgid "Show/hide right sidebar"
+msgstr "顯示/隱藏右側邊欄"
+
+msgid "Showcase"
+msgstr ""
+
+msgid "Shuffle off"
+msgstr ""
+
+msgid "Shuffle on"
+msgstr ""
+
+msgid "Shuffle"
+msgstr ""
+
+msgid "Sidebar Items"
+msgstr "側邊欄項目"
+
+#, rust-format
+msgid "Sidebar item {position}"
+msgstr "側邊欄項目 {position}"
+
+msgid "Sidebar route by position"
+msgstr "按位置瀏覽側邊欄"
+
+msgid "SimpMusic"
+msgstr ""
+
+msgid "Single"
+msgstr ""
+
+msgid "Singles"
+msgstr ""
+
+msgid "Skip count"
+msgstr ""
+
+msgid "Skip same-album crossfade"
+msgstr ""
+
+msgid "Slate"
+msgstr ""
+
+msgid "Smart Playlist"
+msgstr ""
+
+msgid "Smart Playlists"
+msgstr ""
+
+msgid "Smart playlist tracks"
+msgstr ""
+
+msgid "Smart playlists"
+msgstr ""
+
+msgid "Song title"
+msgstr ""
+
+msgid "Song"
+msgstr ""
+
+msgid "Sort title"
+msgstr ""
+
+msgid "Sort"
+msgstr ""
+
+msgid "Source to use for cover images and song/artist links"
+msgstr ""
+
+msgid "Sources"
+msgstr ""
+
+msgid "Start minimized"
+msgstr ""
+
+msgid "Status display"
+msgstr ""
+
+msgid "Stream quality"
+msgstr ""
+
+msgid "Support"
+msgstr ""
+
+msgid "Switching library..."
+msgstr ""
+
+msgid "Synced lyrics"
+msgstr ""
+
+msgid "System default"
+msgstr ""
+
+msgid "System"
+msgstr ""
+
+msgid "Teal"
+msgstr ""
+
+msgid "Techno"
+msgstr ""
+
+msgid "Text"
+msgstr ""
+
+msgid "Theme"
+msgstr ""
+
+msgid "This device"
+msgstr ""
+
+msgid "This isn't available"
+msgstr ""
+
+msgid "This source cannot edit this field"
+msgstr ""
+
+msgid "Title (merged)"
+msgstr ""
+
+msgid "Title"
+msgstr ""
+
+msgid "Toggle Fullscreen"
+msgstr ""
+
+msgid "Track number"
+msgstr ""
+
+msgid "Track radio"
+msgstr ""
+
+msgid "Track"
+msgstr ""
+
+msgid "Tracks from every playlist"
+msgstr ""
+
+msgid "Tracks from your five latest albums"
+msgstr ""
+
+msgid "Tracks"
+msgstr ""
+
+msgid "Transition mode"
+msgstr ""
+
+msgid "Translation language"
+msgstr ""
+
+msgid "Troubleshooting"
+msgstr ""
+
+msgid "Turn off only for a server you control"
+msgstr ""
+
+msgid "Turn off private mode"
+msgstr "關閉無痕模式"
+
+msgid "Turn on private mode"
+msgstr "開啟無痕模式"
+
+msgid "Type to search or create a new playlist"
+msgstr ""
+
+msgid "Type to search"
+msgstr ""
+
+msgid "UPnP"
+msgstr ""
+
+msgid "Undo identified value"
+msgstr ""
+
+msgid "Undo"
+msgstr ""
+
+msgid "Unmuted"
+msgstr ""
+
+msgid "Update"
+msgstr ""
+
+msgid "Use API key"
+msgstr ""
+
+msgid "Use Jellyfin Instant Mix for recommendations"
+msgstr ""
+
+msgid "Use Rufin data folder"
+msgstr ""
+
+msgid "Use a number above zero"
+msgstr ""
+
+msgid "Use different layout below a threshold width"
+msgstr ""
+
+msgid "Use listening activity"
+msgstr ""
+
+msgid "Use local files for playback, lyrics, and supported metadata editing"
+msgstr ""
+
+msgid "User token"
+msgstr ""
+
+msgid "User"
+msgstr ""
+
+msgid "Username"
+msgstr ""
+
+msgid "Verify server certificate"
+msgstr ""
+
+msgid "Version History"
+msgstr ""
+
+msgid "View"
+msgstr ""
+
+msgid "Visible"
+msgstr ""
+
+msgid "Visualizer"
+msgstr ""
+
+msgid "Volume Down"
+msgstr ""
+
+msgid "Volume Up"
+msgstr ""
+
+msgid "Volume scale"
+msgstr ""
+
+msgid "Waiting for connection"
+msgstr ""
+
+msgid "Waveform seekbar"
+msgstr ""
+
+msgid "Window"
+msgstr ""
+
+msgid "Year"
+msgstr ""
+
+msgid "Yellow"
+msgstr ""
+
+msgid "Yes"
+msgstr ""
+
+msgid "above"
+msgstr ""
+
+msgid "after"
+msgstr ""
+
+msgid "before"
+msgstr ""
+
+msgid "below"
+msgstr ""
+
+msgid "contains"
+msgstr ""
+
+msgid "does not contain"
+msgstr ""
+
+msgid "does not equal"
+msgstr ""
+
+msgid "equals"
+msgstr ""
+
+msgid "excludes"
+msgstr ""
+
+msgid "here"
+msgstr ""
+
+msgid "is empty"
+msgstr ""
+
+msgid "is not empty"
+msgstr ""
+
+msgid "is not"
+msgstr ""
+
+msgid "is"
+msgstr ""
+
+msgid "kbps"
+msgstr ""
+
+msgid "range"
+msgstr ""
+
+msgid "to"
+msgstr ""
+
+msgid "today"
+msgstr ""
+
+msgid "yesterday"
+msgstr ""
+
+#, rust-format
+msgid "{count} album"
+msgid_plural "{count} albums"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} day ago"
+msgid_plural "{count} days ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} folder selected"
+msgid_plural "{count} folders selected"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} month ago"
+msgid_plural "{count} months ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} result"
+msgid_plural "{count} results"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} track"
+msgid_plural "{count} tracks"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} week ago"
+msgid_plural "{count} weeks ago"
+msgstr[0] ""
+msgstr[1] ""
+
+#, rust-format
+msgid "{count} year ago"
+msgid_plural "{count} years ago"
+msgstr[0] ""
+msgstr[1] ""

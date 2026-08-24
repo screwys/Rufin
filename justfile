@@ -325,7 +325,6 @@ setup-macos-signing:
     fi
 
     openssl_command="$(brew --prefix openssl@3)/bin/openssl"
-    keychain_path="$(security default-keychain -d user | tr -d '"')"
     work_dir="$(mktemp -d)"
     trap 'rm -rf "$work_dir"' EXIT
     private_key_path="$work_dir/rufin-development.key.pem"
@@ -344,17 +343,14 @@ setup-macos-signing:
         -keyout "$private_key_path" \
         -out "$certificate_path"
     security import "$private_key_path" \
-        -k "$keychain_path" \
         -T /usr/bin/codesign
     security import "$certificate_path" \
-        -k "$keychain_path" \
         -T /usr/bin/codesign
     security add-trusted-cert \
         -r trustRoot \
         -p codeSign \
-        -k "$keychain_path" \
         "$certificate_path"
-    security find-identity -v -p codesigning "$keychain_path" \
+    security find-identity -v -p codesigning \
         | grep -F "$signing_identity" >/dev/null
     echo "Created $signing_identity."
 

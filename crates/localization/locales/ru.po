@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-20 22:21+0000\n"
+"PO-Revision-Date: 2026-08-22 11:51+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -472,10 +472,8 @@ msgstr "Создать"
 msgid "Crossfade duration"
 msgstr "Длительность кроссфейда"
 
-#, fuzzy
-#| msgid "Crossfade"
 msgid "Crossfade mode"
-msgstr "Кроссфейд"
+msgstr "Режим кроссфейда"
 
 msgid "Crossfade"
 msgstr "Кроссфейд"
@@ -700,10 +698,8 @@ msgstr "Полный"
 msgid "Furigana"
 msgstr "Фуригана"
 
-#, fuzzy
-#| msgid "Gapless"
 msgid "Gapless mode"
-msgstr "Бесшовный"
+msgstr "Бесшовный режим"
 
 msgid "Gapless"
 msgstr "Бесшовный"
@@ -1051,10 +1047,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Перемещаться по элементам страницы"
 
-#, fuzzy
-#| msgid "Notifications"
 msgid "Navigation"
-msgstr "Уведомления"
+msgstr "Навигация"
 
 msgid "Needs attention"
 msgstr "Требуется внимание"
@@ -1080,10 +1074,8 @@ msgstr "Недавно добавленные"
 msgid "Next Track"
 msgstr "Следующий трек"
 
-#, fuzzy
-#| msgid "Selected device"
 msgid "Next audio device"
-msgstr "Выбранное устройство"
+msgstr "Следующее аудиоустройство"
 
 msgid "Next page"
 msgstr "Следующая страница"
@@ -1291,15 +1283,11 @@ msgstr "Воспроизвести плейлист"
 msgid "Play radio"
 msgstr "Воспроизвести радио"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play later)"
-msgstr "Воспроизвести в случайном порядке"
+msgstr "Воспроизвести в случайном порядке (позже)"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play next)"
-msgstr "Воспроизвести в случайном порядке"
+msgstr "Воспроизвести в случайном порядке (следующим)"
 
 msgid "Play random"
 msgstr "Воспроизвести в случайном порядке"
@@ -1387,10 +1375,8 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Предыдущий трек"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous audio device"
-msgstr "Предыдущая страница"
+msgstr "Предыдущее аудиоустройство"
 
 msgid "Previous page"
 msgstr "Предыдущая страница"
@@ -1750,10 +1736,8 @@ msgstr ""
 msgid "Show external site links"
 msgstr "Показывать ссылки на внешние сайты"
 
-#, fuzzy
-#| msgid "Show Lyrics Panel"
 msgid "Show lyrics in the right panel"
-msgstr "Показать панель с текстом песни"
+msgstr "Показать текст песни в правой панели"
 
 msgid "Show lyrics"
 msgstr "Показать текст песни"
@@ -1768,12 +1752,10 @@ msgid "Show tray icon"
 msgstr "Показывать значок в системном трее"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Показать визуализатор и текст песни в правой панели"
 
-#, fuzzy
-#| msgid "Show visualizer"
 msgid "Show visualizer in the right panel"
-msgstr "Показать визуализатор"
+msgstr "Показать визуализатор в правой панели"
 
 msgid "Show visualizer"
 msgstr "Показать визуализатор"
