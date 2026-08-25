@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-17 17:59+0000\n"
+"PO-Revision-Date: 2026-08-26 05:51+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -45,6 +45,8 @@ msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
+"Servermedien über dieses Gerät leiten, anstatt Anbieter-URLs an den Renderer "
+"weiterzugeben"
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -273,7 +275,7 @@ msgid "Audio output"
 msgstr "Audioausgabe"
 
 msgid "Audio processing is unavailable while casting"
-msgstr ""
+msgstr "Audioverarbeitung ist beim Übertragen nicht verfügbar"
 
 msgid "Audio"
 msgstr "Audio"
@@ -320,10 +322,8 @@ msgstr "Download abbrechen"
 msgid "Cancel"
 msgstr "Abbrechen"
 
-#, fuzzy
-#| msgid "Rating"
 msgid "Casting"
-msgstr "Bewertung"
+msgstr "Übertragen"
 
 msgid "Change Secret Storage"
 msgstr "Anmeldedaten-Speicher ändern"
@@ -353,10 +353,8 @@ msgstr ""
 "Einen oder mehrere Ordner auswählen, um Musik direkt von diesem Computer "
 "einzulesen und abzuspielen"
 
-#, fuzzy
-#| msgid "Show playback icon"
 msgid "Choose playback output"
-msgstr "Wiedergabesymbol anzeigen"
+msgstr "Wiedergabeausgabe auswählen"
 
 msgid "Choose"
 msgstr "Wähle"
@@ -424,15 +422,11 @@ msgstr "Verbunden"
 msgid "Connecting to music server..."
 msgstr "Mit Musikserver verbinden..."
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connecting to {device}..."
-msgstr "Mit Musikserver verbinden..."
+msgstr "Verbindung mit {device} wird hergestellt …"
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connection failed"
-msgstr "Verbindung"
+msgstr "Verbindung fehlgeschlagen"
 
 msgid "Connection"
 msgstr "Verbindung"
@@ -470,10 +464,8 @@ msgstr "Erstellen"
 msgid "Crossfade duration"
 msgstr "Überblendungsdauer"
 
-#, fuzzy
-#| msgid "Crossfade"
 msgid "Crossfade mode"
-msgstr "Überblendung"
+msgstr "Überblendmodus"
 
 msgid "Crossfade"
 msgstr "Überblendung"
@@ -601,10 +593,8 @@ msgstr "Privaten Modus aktivieren"
 msgid "Enter API credentials first"
 msgstr "Geben Sie zuerst die API-Zugangsdaten ein"
 
-#, fuzzy
-#| msgid "Enter a server address, username, and password"
 msgid "Enter a server address and API key"
-msgstr "Serveradresse, Benutzername und Passwort eingeben"
+msgstr "Serveradresse und API-Schlüssel eingeben"
 
 msgid "Enter a server address, username, and password"
 msgstr "Serveradresse, Benutzername und Passwort eingeben"
@@ -701,10 +691,8 @@ msgstr "Vollständig"
 msgid "Furigana"
 msgstr "Furigana"
 
-#, fuzzy
-#| msgid "Gapless"
 msgid "Gapless mode"
-msgstr "Lückenlose Wiedergabe"
+msgstr "Lückenloser Wiedergabemodus"
 
 msgid "Gapless"
 msgstr "Lückenlose Wiedergabe"
@@ -743,7 +731,7 @@ msgid "Go to"
 msgstr "Gehe zu"
 
 msgid "Google Cast"
-msgstr ""
+msgstr "Google Cast"
 
 msgid "Green"
 msgstr "Grün"
@@ -822,7 +810,7 @@ msgid "Karaoke mode"
 msgstr "Karaoke-Modus"
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "Rufin nach dem Schließen des Fensters weiter ausführen"
 
 msgid "Keep album transitions gapless when possible"
 msgstr "Album-Übergänge nach Möglichkeit lückenlos halten"
@@ -1051,10 +1039,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Seitenelemente navigieren"
 
-#, fuzzy
-#| msgid "Notifications"
 msgid "Navigation"
-msgstr "Benachrichtigungen"
+msgstr "Navigation"
 
 msgid "Needs attention"
 msgstr "Erfordert Aufmerksamkeit"
@@ -1080,10 +1066,8 @@ msgstr "Zuletzt hinzugefügt"
 msgid "Next Track"
 msgstr "Nächster Titel"
 
-#, fuzzy
-#| msgid "Selected device"
 msgid "Next audio device"
-msgstr "Ausgewähltes Gerät"
+msgstr "Nächstes Audiogerät"
 
 msgid "Next page"
 msgstr "Nächste Seite"
@@ -1127,10 +1111,8 @@ msgstr "Keine passenden Titel"
 msgid "No music from this artist yet"
 msgstr "Noch keine Musik von diesem Künstler"
 
-#, fuzzy
-#| msgid "No lyrics found."
 msgid "No network devices found"
-msgstr "Keine Songtexte gefunden."
+msgstr "Keine Netzwerkgeräte gefunden"
 
 msgid "No remote sources configured"
 msgstr "Keine externen Quellen konfiguriert"
@@ -1295,15 +1277,11 @@ msgstr "Playlist abspielen"
 msgid "Play radio"
 msgstr "Radio abspielen"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play later)"
-msgstr "Zufällig abspielen"
+msgstr "Zufällig abspielen (später abspielen)"
 
-#, fuzzy
-#| msgid "Play random"
 msgid "Play random (play next)"
-msgstr "Zufällig abspielen"
+msgstr "Zufällig abspielen (als Nächstes abspielen)"
 
 msgid "Play random"
 msgstr "Zufällig abspielen"
@@ -1330,10 +1308,10 @@ msgid "Played"
 msgstr "Abgespielt"
 
 msgid "Playing on this device"
-msgstr ""
+msgstr "Wiedergabe auf diesem Gerät"
 
 msgid "Playing on {device}"
-msgstr ""
+msgstr "Wiedergabe auf {device}"
 
 msgid "Playlist name"
 msgstr "Playlist-Name"
@@ -1377,10 +1355,8 @@ msgstr "Einstellungen"
 msgid "Preparing library..."
 msgstr "Bibliothek wird vorbereitet..."
 
-#, fuzzy
-#| msgid "Prefer server lyrics"
 msgid "Preserve pitch"
-msgstr "Server-Songtexte bevorzugen"
+msgstr "Tonhöhe beibehalten"
 
 msgid "Preset"
 msgstr "Voreinstellung"
@@ -1392,10 +1368,8 @@ msgstr ""
 msgid "Previous Track"
 msgstr "Vorheriger Titel"
 
-#, fuzzy
-#| msgid "Previous page"
 msgid "Previous audio device"
-msgstr "Vorherige Seite"
+msgstr "Vorheriges Audiogerät"
 
 msgid "Previous page"
 msgstr "Vorherige Seite"
@@ -1419,7 +1393,7 @@ msgid "Pronunciation"
 msgstr "Aussprache"
 
 msgid "Proxy casting through Rufin"
-msgstr ""
+msgstr "Übertragung über Rufin-Proxy"
 
 msgid "Purple"
 msgstr "Lila"
@@ -1455,7 +1429,7 @@ msgid "Recently released"
 msgstr "Zuletzt veröffentlicht"
 
 msgid "Recommended when your server provides one"
-msgstr ""
+msgstr "Empfohlen, wenn dein Server dies bereitstellt"
 
 msgid "Reconnect"
 msgstr "Erneut verbinden"
@@ -1577,10 +1551,8 @@ msgstr "Wiederherstellen"
 msgid "Resume"
 msgstr "Fortsetzen"
 
-#, fuzzy
-#| msgid "Library"
 msgid "Resync Library"
-msgstr "Bibliothek"
+msgstr "Bibliothek neu synchronisieren"
 
 msgid "Rich presence"
 msgstr "Rich Presence"
@@ -1657,10 +1629,8 @@ msgstr "Lokales Netzwerk durchsuchen"
 msgid "Searching for Jellyfin servers on the local network..."
 msgstr "Im lokalen Netzwerk wird nach Jellyfin-Servern gesucht..."
 
-#, fuzzy
-#| msgid "Searching..."
 msgid "Searching for devices..."
-msgstr "Suche..."
+msgstr "Nach Geräten wird gesucht …"
 
 msgid "Searching will start automatically"
 msgstr "Die Suche startet automatisch"
@@ -1758,10 +1728,8 @@ msgstr "Symbole externer Dienste auf Album- und Künstlerseiten anzeigen"
 msgid "Show external site links"
 msgstr "Externe Website-Links anzeigen"
 
-#, fuzzy
-#| msgid "Show Lyrics Panel"
 msgid "Show lyrics in the right panel"
-msgstr "Songtext-Bereich anzeigen"
+msgstr "Liedtexte im rechten Bereich anzeigen"
 
 msgid "Show lyrics"
 msgstr "Songtexte einblenden"
@@ -1776,12 +1744,10 @@ msgid "Show tray icon"
 msgstr "Symbol im Infobereich anzeigen"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Visualizer und Liedtexte im rechten Bereich anzeigen"
 
-#, fuzzy
-#| msgid "Show visualizer"
 msgid "Show visualizer in the right panel"
-msgstr "Visualizer anzeigen"
+msgstr "Visualizer im rechten Bereich anzeigen"
 
 msgid "Show visualizer"
 msgstr "Visualizer anzeigen"
@@ -1898,7 +1864,7 @@ msgid "Theme"
 msgstr "Darstellung"
 
 msgid "This device"
-msgstr ""
+msgstr "Dieses Gerät"
 
 msgid "This isn't available"
 msgstr "Dies ist nicht verfügbar"
@@ -1958,7 +1924,7 @@ msgid "Type to search"
 msgstr "Tippen zum Suchen"
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Undo identified value"
 msgstr "Erkannten Wert rückgängig machen"
@@ -1972,10 +1938,8 @@ msgstr "Stummschaltung aufgehoben"
 msgid "Update"
 msgstr "Update"
 
-#, fuzzy
-#| msgid "API key"
 msgid "Use API key"
-msgstr "API Schlüssel"
+msgstr "API-Schlüssel verwenden"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
