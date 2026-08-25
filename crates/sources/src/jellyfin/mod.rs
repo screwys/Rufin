@@ -3,41 +3,35 @@ use crate::policy::{raw_item_id, stable_hash};
 use crate::{
     ConnectedSource, CredentialHostInput, ImageBytes, JellyfinSettingsInput, JellyfinSetupInput,
     LyricsSearch, NativeLyricLine, NativeLyrics, NativeLyricsDocument, NativeLyricsRole,
-    SourceConfiguration, SourceEditResult, SourceError, SourceResult,
+    SourceConfiguration, SourceEditResult, SourceError, SourceId, SourceResult,
 };
 pub use discovery::{DiscoveredJellyfinServer, discover_jellyfin_servers};
-#[cfg(test)]
-use item::artist_from_item;
 use item::{
-    ALBUM_FIELDS, ItemQueryResult, JellyfinItem, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS,
-    album_from_item, folder_from_item, genre_from_item, is_audio_item, normalize_artist_items,
-    playlist_from_item, primary_image_ref, track_from_item,
+    ALBUM_FIELDS, ImageRef, ItemQueryResult, JellyfinItem, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS,
+    TRACK_FIELDS, album_from_item, artist_from_item, genre_from_item, is_audio_item,
+    playlist_from_item, primary_image_ref, stage_album, stage_artist, stage_genre, stage_track,
+    track_from_item,
 };
-use library::{
-    AlbumId, FavoriteItemId, Folder, FolderId, HomeItemId, ImageRef, MusicFolder, MusicFolderId,
-    PlayedFilter, Playlist, PlaylistEntry, PlaylistId, PlaylistSnapshot, RadioSeed, RandomCriteria,
-    ResolvedStream, SourceHomeSection, SourceHomeSectionKind, SourceId, StreamQuality,
-    StreamRequest, Track, TrackId,
+use playback::{
+    RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality, StreamRequest,
 };
-use playback::{RepeatMode, SourceReportFact, SourceReportPhase};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use std::sync::Arc;
-use std::sync::atomic::AtomicBool;
+use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::instrument;
 
 mod client;
 mod discovery;
 mod events;
 mod item;
-mod metadata;
+pub(crate) mod metadata;
 mod refresh;
+
+type PlaylistId = String;
 
 use client::*;
 pub(crate) use client::{jellyfin_id, normalize_base_url};
-
-#[cfg(test)]
-mod tests;
 
 const CLIENT_NAME: &str = "Rufin";
 const DEVICE_NAME: &str = "Rufin";
@@ -274,6 +268,10 @@ pub struct JellyfinSource {
     metadata_editing: AtomicBool,
 }
 impl JellyfinSource {
+    pub(super) fn metadata_editing_available(&self) -> bool {
+        self.metadata_editing.load(Ordering::Acquire)
+    }
+
     fn open(
         config: JellyfinSourceConfig,
         access_token: String,

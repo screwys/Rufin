@@ -21,11 +21,11 @@ use crate::{
     HomeFacts, ImageRef, LibraryInput, LocalAccessFile, LocalArtworkRef, LocalFile, LocalFileKind,
     LocalFileState, LocalImport, LoudnessItemId, LoudnessMeasurement, LoudnessMeasurementWrite,
     LyricsCacheAuthority, LyricsCacheInput, LyricsCacheKey, LyricsCacheTrim, LyricsCacheWrite,
-    MusicFolder, MusicFolderId, NewScrobble, PendingFavorite, PendingScrobble, PendingScrobbleId,
+    MusicFolder, MusicFolderId, PendingFavorite,
     PlaybackCheckpoint, PlaybackLoad, PlaybackOccurrenceId, PlaybackProgressUpdate,
     PlaybackQueueRowsSnapshot, PlaybackState, PlaybackStateUpdate, PlaybackTraversalUpdate,
     PlaybackWriteOutcome, Playlist, PlaylistEntry, PlaylistId, PlaylistSnapshot, ProviderFreshness,
-    RecentPlay, ScrobbleService, SmartPlaylistBuiltin, SmartPlaylistId, SmartPlaylistRecord,
+    RecentPlay, SmartPlaylistBuiltin, SmartPlaylistId, SmartPlaylistRecord,
     SourceId, Track, TrackActivity, TrackData, TrackId, TrackRelations,
     favorites::FavoriteValue,
     items::color_seed,
@@ -555,58 +555,6 @@ impl StoreLane {
         limit: usize,
     ) -> StoreResult<Vec<AlbumReleaseCandidate>> {
         self.execute(move |worker| worker.album_release_candidates(&source_id, library_id, limit))
-    }
-
-    pub(crate) fn queue_scrobbles(&self, scrobbles: Vec<NewScrobble>) -> StoreResult<usize> {
-        self.execute(move |worker| worker.queue_scrobbles(&scrobbles))
-    }
-
-    pub(crate) fn due_scrobbles(
-        &self,
-        service: ScrobbleService,
-        account_id: String,
-        now: i64,
-        limit: usize,
-    ) -> StoreResult<Vec<PendingScrobble>> {
-        self.execute(move |worker| worker.due_scrobbles(service, &account_id, now, limit))
-    }
-
-    pub(crate) fn complete_scrobble(&self, id: PendingScrobbleId) -> StoreResult<()> {
-        self.execute(move |worker| worker.complete_scrobble(&id))
-    }
-
-    pub(crate) fn discard_scrobbles(
-        &self,
-        service: ScrobbleService,
-        account_id: String,
-    ) -> StoreResult<usize> {
-        self.execute(move |worker| worker.discard_scrobbles(service, &account_id))
-    }
-
-    pub(crate) fn defer_scrobble(
-        &self,
-        id: PendingScrobbleId,
-        next_attempt_at: i64,
-    ) -> StoreResult<()> {
-        self.execute(move |worker| worker.defer_scrobble(&id, next_attempt_at))
-    }
-
-    pub(crate) fn block_scrobbles(
-        &self,
-        service: ScrobbleService,
-        account_id: String,
-        error: String,
-    ) -> StoreResult<usize> {
-        self.execute(move |worker| worker.block_scrobbles(service, &account_id, &error))
-    }
-
-    pub(crate) fn wake_scrobbles(
-        &self,
-        service: ScrobbleService,
-        account_id: String,
-        now: i64,
-    ) -> StoreResult<usize> {
-        self.execute(move |worker| worker.wake_scrobbles(service, &account_id, now))
     }
 
     fn execute<T: Send + 'static>(
@@ -2430,183 +2378,6 @@ impl Worker {
             ],
         )?;
         Ok(true)
-    }
-
-    fn queue_scrobbles(&mut self, scrobbles: &[NewScrobble]) -> StoreResult<usize> {
-        let transaction = self.connection.transaction()?;
-        let mut inserted = 0;
-        {
-            let mut statement = transaction.prepare(
-                "INSERT OR IGNORE INTO pending_scrobbles(
-                    service, account_id, play_id, track_title, artist_name,
-                    album_title, duration_millis, started_at, attempts,
-                    next_attempt_at
-                 ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, 0, ?8)",
-            )?;
-            for scrobble in scrobbles {
-                inserted += statement.execute(params![
-                    scrobble.id.service.as_str(),
-                    scrobble.id.account_id,
-                    scrobble.id.play_id,
-                    scrobble.track_title,
-                    scrobble.artist_name,
-                    scrobble.album_title,
-                    i64::try_from(scrobble.duration_millis)
-                        .map_err(|_| StoreError::IntegerRange)?,
-                    scrobble.started_at,
-                ])?;
-            }
-        }
-        transaction.commit()?;
-        Ok(inserted)
-    }
-
-    fn due_scrobbles(
-        &mut self,
-        service: ScrobbleService,
-        account_id: &str,
-        now: i64,
-        limit: usize,
-    ) -> StoreResult<Vec<PendingScrobble>> {
-        let mut statement = self.connection.prepare(
-            "SELECT
-                service, account_id, play_id, track_title, artist_name,
-                album_title, duration_millis, started_at, attempts,
-                next_attempt_at
-             FROM pending_scrobbles
-             WHERE service = ?1
-               AND account_id = ?2
-               AND next_attempt_at IS NOT NULL
-               AND next_attempt_at <= ?3
-             ORDER BY next_attempt_at, started_at, play_id
-             LIMIT ?4",
-        )?;
-        let rows = statement.query_map(
-            params![
-                service.as_str(),
-                account_id,
-                now,
-                i64::try_from(limit).map_err(|_| StoreError::IntegerRange)?
-            ],
-            |row| {
-                Ok((
-                    row.get::<_, String>(0)?,
-                    row.get::<_, String>(1)?,
-                    row.get::<_, String>(2)?,
-                    row.get::<_, String>(3)?,
-                    row.get::<_, String>(4)?,
-                    row.get::<_, Option<String>>(5)?,
-                    row.get::<_, i64>(6)?,
-                    row.get::<_, i64>(7)?,
-                    row.get::<_, i64>(8)?,
-                    row.get::<_, i64>(9)?,
-                ))
-            },
-        )?;
-        rows.map(|row| {
-            let (
-                service,
-                account_id,
-                play_id,
-                track_title,
-                artist_name,
-                album_title,
-                duration_millis,
-                started_at,
-                attempts,
-                next_attempt_at,
-            ) = row?;
-            Ok(PendingScrobble {
-                id: PendingScrobbleId {
-                    service: ScrobbleService::from_stored(&service).ok_or_else(|| {
-                        StoreError::InvalidValue {
-                            kind: "scrobble service",
-                            value: service,
-                        }
-                    })?,
-                    account_id,
-                    play_id,
-                },
-                track_title,
-                artist_name,
-                album_title,
-                duration_millis: checked_u64(duration_millis)?,
-                started_at,
-                attempts: checked_u32(attempts)?,
-                next_attempt_at,
-            })
-        })
-        .collect()
-    }
-
-    fn complete_scrobble(&mut self, id: &PendingScrobbleId) -> StoreResult<()> {
-        self.connection.execute(
-            "DELETE FROM pending_scrobbles
-             WHERE service = ?1 AND account_id = ?2 AND play_id = ?3",
-            params![id.service.as_str(), id.account_id, id.play_id],
-        )?;
-        Ok(())
-    }
-
-    fn discard_scrobbles(
-        &mut self,
-        service: ScrobbleService,
-        account_id: &str,
-    ) -> StoreResult<usize> {
-        Ok(self.connection.execute(
-            "DELETE FROM pending_scrobbles
-             WHERE service = ?1 AND account_id = ?2",
-            params![service.as_str(), account_id],
-        )?)
-    }
-
-    fn defer_scrobble(&mut self, id: &PendingScrobbleId, next_attempt_at: i64) -> StoreResult<()> {
-        self.connection.execute(
-            "UPDATE pending_scrobbles
-             SET attempts = attempts + 1,
-                 next_attempt_at = ?4,
-                 last_error = NULL
-             WHERE service = ?1 AND account_id = ?2 AND play_id = ?3",
-            params![
-                id.service.as_str(),
-                id.account_id,
-                id.play_id,
-                next_attempt_at,
-            ],
-        )?;
-        Ok(())
-    }
-
-    fn block_scrobbles(
-        &mut self,
-        service: ScrobbleService,
-        account_id: &str,
-        error: &str,
-    ) -> StoreResult<usize> {
-        Ok(self.connection.execute(
-            "UPDATE pending_scrobbles
-             SET next_attempt_at = NULL,
-                 last_error = ?3
-             WHERE service = ?1 AND account_id = ?2",
-            params![service.as_str(), account_id, error],
-        )?)
-    }
-
-    fn wake_scrobbles(
-        &mut self,
-        service: ScrobbleService,
-        account_id: &str,
-        now: i64,
-    ) -> StoreResult<usize> {
-        Ok(self.connection.execute(
-            "UPDATE pending_scrobbles
-             SET next_attempt_at = ?3,
-                 last_error = NULL
-             WHERE service = ?1
-               AND account_id = ?2
-               AND next_attempt_at IS NULL",
-            params![service.as_str(), account_id, now],
-        )?)
     }
 
     fn queue_cleanup(&mut self, library_id: i64) {

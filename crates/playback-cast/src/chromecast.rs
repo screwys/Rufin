@@ -446,10 +446,11 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .end_millis()
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
-            stream
-                .track
-                .as_ref()
-                .map(|track| u64::from(track.duration_seconds) * 1_000)
+            stream.track.as_ref().and_then(|track| {
+                track
+                    .duration_millis
+                    .and_then(|value| u64::try_from(value).ok())
+            })
         })
 }
 

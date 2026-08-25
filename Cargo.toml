@@ -53,7 +53,7 @@ keyring-core = "1.0.0"
 library = { path = "crates/library" }
 localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
-lofty = "0.24.0"
+lofty = "0.25.1"
 md5 = "0.8.0"
 mediaplayer = "0.4.3"
 mpris-server = "0.10.0"
@@ -67,7 +67,7 @@ scrobbling = { path = "crates/scrobbling" }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
 rupnp = "3.0.0"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
-rusqlite = { version = "0.40.1", default-features = false }
+rusqlite = { version = "0.39.0", default-features = false }
 rustix = { version = "1.1.4", features = ["fs"] }
 rustfft = "6.2.0"
 secrets = { path = "crates/secrets" }
@@ -76,6 +76,7 @@ serde_json = "1.0.150"
 serde_path_to_error = "0.1.20"
 sha2 = "0.11.0"
 socket2 = "0.6.5"
+sqlx = { version = "0.9.0", default-features = false, features = ["derive", "runtime-tokio", "sqlite"] }
 sources = { path = "crates/sources" }
 tempfile = "3.23.0"
 thiserror = "2.0.18"

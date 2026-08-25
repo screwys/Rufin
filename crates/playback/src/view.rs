@@ -1,52 +1,101 @@
 use std::sync::Arc;
 
-use library::{SourceId, Track};
+use library::{AlbumKey, QueueMedia, SourceKey, TrackKey, TrackRow};
 
-use crate::sequence::{OccurrenceId, RepeatMode, Sequence, SequenceEntry};
+use crate::sequence::{OccurrenceId, RepeatMode, Sequence};
 use crate::{PlaybackSession, Provenance, RunId, SourceSessionEpoch, TransportStatus};
 
-pub const MAX_QUEUE_PAGE_SIZE: usize = 100;
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuePageQuery {
-    kind: QueuePageQueryKind,
+/// The bounded current or prepared-next media facts Playback consumes.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaybackMedia {
+    pub track_key: Option<TrackKey>,
+    pub track_object_id: String,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_display_artist: Option<String>,
+    pub album_key: Option<AlbumKey>,
+    pub media_uri: Option<String>,
+    pub artwork_binding: Option<Vec<u8>>,
+    pub duration_millis: i64,
+    pub disc_number: Option<i64>,
+    pub track_number: Option<i64>,
+    pub year: Option<i64>,
+    pub release_date: Option<String>,
+    pub favorite: Option<bool>,
+    pub source_format: Option<String>,
+    pub musicbrainz_recording_id: Option<String>,
+    pub musicbrainz_release_track_id: Option<String>,
+    pub musicbrainz_album_id: Option<String>,
+    pub musicbrainz_release_group_id: Option<String>,
+    pub primary_artist_musicbrainz_id: Option<String>,
+    pub cue_path: Option<String>,
+    pub cue_start_millis: Option<i64>,
+    pub cue_end_millis: Option<i64>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum QueuePageQueryKind {
-    Current,
-    Search { text: String },
+impl From<QueueMedia> for PlaybackMedia {
+    fn from(media: QueueMedia) -> Self {
+        Self {
+            track_key: media.track_key,
+            track_object_id: media.track_object_id,
+            title: media.title,
+            artist: media.artist,
+            album: media.album,
+            album_display_artist: media.album_display_artist,
+            album_key: media.album_key,
+            media_uri: media.media_uri,
+            artwork_binding: media.artwork_binding,
+            duration_millis: media.duration_millis.unwrap_or_default(),
+            disc_number: media.disc_number,
+            track_number: media.track_number,
+            year: media.year,
+            release_date: media.release_date,
+            favorite: media.favorite,
+            source_format: media.source_format,
+            musicbrainz_recording_id: media.musicbrainz_recording_id,
+            musicbrainz_release_track_id: media.musicbrainz_release_track_id,
+            musicbrainz_album_id: media.musicbrainz_album_id,
+            musicbrainz_release_group_id: media.musicbrainz_release_group_id,
+            primary_artist_musicbrainz_id: media.primary_artist_musicbrainz_id,
+            cue_path: media.cue_path,
+            cue_start_millis: media.cue_start_millis,
+            cue_end_millis: media.cue_end_millis,
+        }
+    }
 }
 
-impl QueuePageQuery {
-    pub fn current() -> Self {
+impl From<TrackRow> for PlaybackMedia {
+    fn from(track: TrackRow) -> Self {
+        let album_display_artist = track
+            .album_artists
+            .first()
+            .map(|artist| artist.name.clone());
         Self {
-            kind: QueuePageQueryKind::Current,
-        }
-    }
-
-    pub fn search(text: &str) -> Self {
-        let text = text.trim().to_lowercase();
-        if text.is_empty() {
-            return Self::current();
-        }
-        Self {
-            kind: QueuePageQueryKind::Search { text },
-        }
-    }
-
-    pub fn follows_current(&self) -> bool {
-        matches!(self.kind, QueuePageQueryKind::Current)
-    }
-
-    pub fn is_filtered(&self) -> bool {
-        matches!(self.kind, QueuePageQueryKind::Search { .. })
-    }
-
-    pub fn search_text(&self) -> Option<&str> {
-        match &self.kind {
-            QueuePageQueryKind::Search { text } => Some(text),
-            QueuePageQueryKind::Current => None,
+            track_key: Some(track.track_key),
+            track_object_id: track.object_id,
+            title: track.title,
+            artist: track.display_artist,
+            album: track.display_album,
+            album_display_artist,
+            album_key: track.album_key,
+            media_uri: track.media_uri,
+            artwork_binding: track.artwork_binding,
+            duration_millis: track.duration_millis,
+            disc_number: Some(track.disc_number),
+            track_number: Some(track.track_number),
+            year: track.year,
+            release_date: track.release_date,
+            favorite: Some(track.favorite),
+            source_format: track.source_format,
+            musicbrainz_recording_id: track.musicbrainz_recording_id,
+            musicbrainz_release_track_id: track.musicbrainz_release_track_id,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            primary_artist_musicbrainz_id: None,
+            cue_path: track.cue_path,
+            cue_start_millis: track.cue_start_millis,
+            cue_end_millis: track.cue_end_millis,
         }
     }
 }
@@ -60,31 +109,16 @@ pub struct QueueSummaryView {
     pub next_occurrence: Option<OccurrenceId>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuePageRow {
-    pub absolute_index: usize,
-    pub entry: SequenceEntry,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct QueuePage {
-    pub revision: u64,
-    pub query: QueuePageQuery,
-    pub total: usize,
-    pub current_absolute_index: Option<usize>,
-    pub rows: Vec<QueuePageRow>,
-}
-
 #[derive(Clone, Debug, PartialEq)]
 pub struct CurrentMedia {
     pub id: CurrentMediaId,
-    pub track: Track,
+    pub track: PlaybackMedia,
     pub provenance: Provenance,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct CurrentMediaId {
-    pub source_id: SourceId,
+    pub source_key: SourceKey,
     pub source_session_epoch: SourceSessionEpoch,
     pub run: Option<RunId>,
     pub occurrence: OccurrenceId,
@@ -92,7 +126,7 @@ pub struct CurrentMediaId {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct TransportView {
-    pub source_id: SourceId,
+    pub source_id: SourceKey,
     pub current: Option<Arc<CurrentMedia>>,
     pub state: TransportStatus,
     pub desired_playing: bool,
@@ -172,7 +206,6 @@ pub enum PlaybackNotice {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackProjection {
     pub view: PlaybackView,
-    pub queue_page: Option<QueuePage>,
     pub notices: Vec<PlaybackNotice>,
 }
 
@@ -189,58 +222,6 @@ impl Sequence {
                 .map(|entry| entry.occurrence.clone()),
         }
     }
-
-    pub fn page(&self, query: QueuePageQuery) -> QueuePage {
-        let total = self.entries().len();
-        let start = match query.kind {
-            QueuePageQueryKind::Current => self
-                .selected_index()
-                .map(|index| index.saturating_sub(20))
-                .unwrap_or_default(),
-            QueuePageQueryKind::Search { .. } => 0,
-        }
-        .min(total);
-        let rows = match &query.kind {
-            QueuePageQueryKind::Current => self.entries()[start..]
-                .iter()
-                .take(MAX_QUEUE_PAGE_SIZE)
-                .enumerate()
-                .map(|(offset, entry)| QueuePageRow {
-                    absolute_index: start + offset,
-                    entry: entry.clone(),
-                })
-                .collect(),
-            QueuePageQueryKind::Search { text } => self
-                .entries()
-                .iter()
-                .enumerate()
-                .filter(|(_, entry)| queue_entry_matches_search(entry, text))
-                .take(MAX_QUEUE_PAGE_SIZE)
-                .map(|(absolute_index, entry)| QueuePageRow {
-                    absolute_index,
-                    entry: entry.clone(),
-                })
-                .collect(),
-        };
-        QueuePage {
-            revision: self.revision(),
-            query,
-            total,
-            current_absolute_index: self.selected_index(),
-            rows,
-        }
-    }
-
-    pub fn current_page(&self) -> QueuePage {
-        self.page(QueuePageQuery::current())
-    }
-}
-
-fn queue_entry_matches_search(entry: &SequenceEntry, text: &str) -> bool {
-    entry.track.title.to_lowercase().contains(text)
-        || entry.track.artist.to_lowercase().contains(text)
-        || entry.track.album.to_lowercase().contains(text)
-        || (entry.track.year != 0 && entry.track.year.to_string().contains(text))
 }
 
 impl PlaybackSession {
@@ -250,18 +231,23 @@ impl PlaybackSession {
         PlaybackView {
             queue: sequence.summary(),
             transport: TransportView {
-                source_id: sequence.source_id().clone(),
-                current: sequence.selected().map(|entry| {
+                source_id: sequence.source_key(),
+                current: sequence.selected().and_then(|entry| {
+                    let (occurrence, media) = self.current_media_fact()?;
+                    if occurrence != &entry.occurrence {
+                        return None;
+                    }
                     Arc::new(CurrentMedia {
                         id: CurrentMediaId {
-                            source_id: sequence.source_id().clone(),
+                            source_key: sequence.source_key(),
                             source_session_epoch: self.source_session_epoch(),
                             run: self.current_run(),
                             occurrence: entry.occurrence.clone(),
                         },
-                        track: entry.track.clone(),
+                        track: media.clone(),
                         provenance: entry.provenance.clone(),
                     })
+                    .into()
                 }),
                 state: self.status(),
                 desired_playing: self.desired_playing(),
@@ -285,120 +271,5 @@ impl PlaybackSession {
                 playback_output: self.playback_output().clone(),
             },
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use library::{AlbumId, SourceId, Track, TrackId};
-
-    use super::*;
-    use crate::sequence::{Batch, BatchItem, Placement, Provenance};
-
-    #[test]
-    fn effective_transport_state_follows_play_pause_intent_before_backend_confirmation() {
-        assert_eq!(
-            effective_transport_state(TransportStatus::Playing, false),
-            TransportStatus::Paused
-        );
-        assert_eq!(
-            effective_transport_state(TransportStatus::Paused, true),
-            TransportStatus::Buffering
-        );
-        assert_eq!(
-            effective_transport_state(TransportStatus::Stopped, true),
-            TransportStatus::Stopped
-        );
-        assert_eq!(
-            effective_transport_state(TransportStatus::Failed, true),
-            TransportStatus::Failed
-        );
-    }
-
-    #[test]
-    fn queue_pages_bound_projection_work_without_truncating_the_sequence() {
-        let mut sequence = Sequence::new(SourceId::fake(1));
-        sequence
-            .apply_batch(
-                Batch::new(
-                    (0..219)
-                        .map(|number| BatchItem::new(track(number), Provenance::Manual))
-                        .collect(),
-                ),
-                Placement::Replace { anchor_index: 150 },
-            )
-            .expect("replace sequence");
-
-        let page = sequence.current_page();
-        assert_eq!(sequence.entries().len(), 219);
-        assert_eq!(page.rows.len(), 89);
-        assert_eq!(page.current_absolute_index, Some(150));
-        assert_eq!(page.rows.first().map(|row| row.absolute_index), Some(130));
-        assert_eq!(page.rows.last().map(|row| row.absolute_index), Some(218));
-
-        let summary = sequence.summary();
-        assert_eq!(summary.total, 219);
-        assert_eq!(summary.current_index, Some(150));
-        assert!(summary.next_occurrence.is_some());
-    }
-
-    #[test]
-    fn queue_search_scans_the_full_sequence_but_bounds_its_projection() {
-        let mut sequence = Sequence::new(SourceId::fake(1));
-        sequence
-            .apply_batch(
-                Batch::new(
-                    (0..300)
-                        .map(|number| {
-                            let mut track = track(number);
-                            if number >= 150 {
-                                track.title = format!("Needle {number}");
-                            }
-                            BatchItem::new(track, Provenance::Manual)
-                        })
-                        .collect(),
-                ),
-                Placement::Replace { anchor_index: 0 },
-            )
-            .expect("replace sequence");
-
-        let page = sequence.page(QueuePageQuery::search("  nEeDlE "));
-
-        assert_eq!(page.total, 300);
-        assert_eq!(page.rows.len(), MAX_QUEUE_PAGE_SIZE);
-        assert_eq!(page.rows.first().map(|row| row.absolute_index), Some(150));
-        assert_eq!(page.rows.last().map(|row| row.absolute_index), Some(249));
-    }
-
-    fn track(number: u32) -> Track {
-        Track::new(library::TrackData {
-            id: TrackId::fake(number),
-            album_id: Some(AlbumId::fake(1)),
-            title: format!("Track {number}"),
-            artist: "Artist".to_string(),
-            album: "Album".to_string(),
-            album_artwork: None,
-            year: 2026,
-            release_date: None,
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: None,
-            duration_seconds: 180,
-            favorite: false,
-            disc_number: 1,
-            track_number: number as u16,
-            image_ref: None,
-            local_artwork: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            source_path: None,
-            cue: None,
-            source_format: None,
-            comment: None,
-            skip_count: None,
-            bpm: None,
-            relations: library::TrackRelations::default(),
-        })
     }
 }

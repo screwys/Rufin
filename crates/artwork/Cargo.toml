@@ -15,6 +15,7 @@ metadata-lookup.workspace = true
 image.workspace = true
 library.workspace = true
 md5.workspace = true
+serde_json.workspace = true
 sources.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }

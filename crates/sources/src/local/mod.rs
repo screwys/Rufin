@@ -7,10 +7,11 @@
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use library::{HomeFacts, LocalComponentReplacement};
+use lofty::prelude::{Accessor, TaggedFileExt};
+use lofty::tag::ItemKey;
 use serde::Deserialize;
 
-use crate::source::{BatchEmitter, SourceReadProgress};
+use crate::source::SourceReadProgress;
 use crate::{
     ConnectedSource, ImageBytes, LocalFolderHostInput, SourceConfiguration, SourceEditResult,
     SourceError, SourceResult,
@@ -24,9 +25,6 @@ mod media;
 pub(crate) mod metadata;
 mod scan;
 mod watch;
-
-#[cfg(test)]
-mod tests;
 
 pub const LOCAL_SOURCE_ID: &str = "local";
 pub const LOCAL_LIBRARY_SOURCE_ID: &str = "local:server:library";
@@ -109,84 +107,70 @@ impl LocalSource {
         &self.roots
     }
 
-    pub(crate) fn metadata_entry_available(&self, item: &library::MetadataItem) -> bool {
-        metadata::entry_editing_available(&self.roots, item)
-    }
-
-    pub(crate) fn read_metadata(
+    pub(super) async fn stage_catalog(
         &self,
-        subject: &library::MetadataSubject,
-    ) -> Result<library::MetadataDraft, library::MetadataError> {
-        metadata::read_subject(&self.roots, subject)
-    }
-
-    pub(crate) fn write_metadata(
-        &self,
-        subject: &library::MetadataSubject,
-        edit: &library::MetadataEdit,
-    ) -> Result<std::collections::BTreeSet<PathBuf>, library::MetadataError> {
-        metadata::write_subject(&self.roots, subject, edit)
-    }
-
-    pub(crate) fn write_rating(
-        &self,
-        track: &library::Track,
-        rating: Option<u8>,
-    ) -> Result<bool, library::MetadataError> {
-        metadata::write_rating(&self.roots, track, rating)
-    }
-
-    pub(super) fn read_facts(
-        &self,
-        emitter: &BatchEmitter,
+        database: &library::Database,
+        scan: &mut library::Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<(Option<library::ProviderFreshness>, HomeFacts)> {
-        scan::acquire_complete(&self.roots, emitter, progress, cancelled)?;
-        Ok((None, HomeFacts::RufinDefined))
+    ) -> SourceResult<()> {
+        scan::stage_catalog(database, &self.roots, scan, progress, cancelled).await
     }
 
-    pub(crate) fn prepare_change(
+    pub(super) async fn publish_metadata_paths(
         &self,
-        library: &library::Library,
-        change: crate::ObservedSourceChange,
-        observed_at: i64,
-        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        database: &library::Database,
+        source_id: &str,
+        paths: &[PathBuf],
+        removed_album: Option<&str>,
+        removed_artist: Option<&str>,
+    ) -> SourceResult<library::ScanOutcome> {
+        scan::publish_metadata_paths(database, source_id, paths, removed_album, removed_artist)
+            .await
+    }
+
+    pub(super) async fn persist_initial_observations(
+        &self,
+        database: &library::Database,
+        source: library::SourceKey,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<Option<LocalComponentReplacement>, crate::SourceChangePreparationError> {
-        let check = match change {
-            crate::ObservedSourceChange::LocalPaths(paths) => {
-                scan::check_exact(&self.roots, paths, cancelled)
-            }
-            crate::ObservedSourceChange::LocalRescan => {
-                scan::check_automatic(&self.roots, cancelled)
-            }
-            crate::ObservedSourceChange::Full | crate::ObservedSourceChange::Jellyfin { .. } => {
-                return Err(crate::SourceError::InvalidRequest(
-                    "filesystem change preparation requires a Local change",
-                )
-                .into());
-            }
-        }?;
-        let file_baseline = library.local_file_baseline(check.file_seeds())?;
-        let Some(change) = scan::confirm_change(check, file_baseline, progress, cancelled)? else {
-            return Ok(None);
-        };
-        let component_baseline = library.local_component_baseline(change.component_seeds())?;
-        scan::complete_change(change, component_baseline, observed_at, cancelled)
-            .map(Some)
-            .map_err(Into::into)
+    ) -> SourceResult<()> {
+        scan::persist_initial_observations(database, source, &self.roots, cancelled).await
     }
 
-    pub(crate) fn image_bytes(
+    pub(super) async fn reconcile_observations(
         &self,
-        artwork: &library::LocalArtworkRef,
-    ) -> SourceResult<ImageBytes> {
+        database: &library::Database,
+        source: library::SourceKey,
+    ) -> SourceResult<()> {
+        let cancellation = library::ReadCancellation::new();
+        let mut after = None;
+        loop {
+            let page = database
+                .local_file_page(source, after, 128, &cancellation)
+                .await?;
+            if page.is_empty() {
+                return Ok(());
+            }
+            for file in &page {
+                if fs::symlink_metadata(&file.path)
+                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
+                {
+                    database
+                        .remove_local_file(source, file.local_file_key)
+                        .await?;
+                }
+            }
+            after = page.last().map(|file| file.local_file_key);
+        }
+    }
+
+    pub(crate) fn image_bytes(&self, artwork: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
         let reference = match artwork {
-            library::LocalArtworkRef::File { path, .. } => {
+            crate::LocalImageRef::File { path, .. } => {
                 self::artwork::ArtworkReference::File(PathBuf::from(path))
             }
-            library::LocalArtworkRef::Embedded {
+            crate::LocalImageRef::Embedded {
                 path,
                 picture_index,
                 ..
@@ -205,27 +189,84 @@ impl LocalSource {
         artwork::read_image(&reference)
     }
 
-    pub(crate) fn inspect_accepted_artwork(
+    pub(crate) fn image(&self, request: crate::SourceImageRequest) -> SourceResult<ImageBytes> {
+        match request {
+            crate::SourceImageRequest::Local(reference) => self.image_bytes(&reference),
+            crate::SourceImageRequest::Native { .. } => Err(SourceError::NotFound),
+        }
+    }
+
+    pub(crate) async fn prepare_artwork_page(
         &self,
-        library: &library::Library,
-        observed_at: i64,
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<Option<LocalComponentReplacement>, crate::SourceChangePreparationError> {
-        let seeds = self
-            .roots
-            .iter()
-            .map(|root| {
-                library::LocalComponentSeed::DirectoryTree(root.to_string_lossy().into_owned())
-            })
-            .collect::<Vec<_>>();
-        let baseline = library.local_component_baseline(&seeds)?;
-        scan::inspect_accepted_artwork(baseline, observed_at, cancelled).map_err(Into::into)
+        database: &library::Database,
+        source: library::SourceKey,
+        after: Option<library::AlbumKey>,
+    ) -> SourceResult<crate::ArtworkPreparationProgress> {
+        let cancellation = library::ReadCancellation::new();
+        let candidates = database
+            .local_album_artwork_candidates(source, after, 128, &cancellation)
+            .await?;
+        let mut discoverer = discovery::Reader::default();
+        let mut completed = 0;
+        let mut next_album = None;
+        for candidate in candidates {
+            next_album = Some(candidate.album_key);
+            let path = PathBuf::from(
+                candidate
+                    .media_uri
+                    .strip_prefix("file://")
+                    .unwrap_or(&candidate.media_uri),
+            );
+            let revision = fs::metadata(&path)
+                .ok()
+                .and_then(|metadata| metadata.modified().ok())
+                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
+                .map(|duration| {
+                    format!(
+                        "{}-{}",
+                        fs::metadata(&path)
+                            .map(|metadata| metadata.len())
+                            .unwrap_or_default(),
+                        duration.as_nanos()
+                    )
+                })
+                .unwrap_or_default();
+            let images = path
+                .parent()
+                .and_then(|parent| fs::read_dir(parent).ok())
+                .into_iter()
+                .flatten()
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .filter(|path| artwork::supported_image(path))
+                .collect::<Vec<_>>();
+            let binding = artwork::sidecar(&images)
+                .map(|image| artwork::file_reference(&image, revision.clone()))
+                .or_else(|| artwork::inspect_embedded(&mut discoverer, &path, revision));
+            if let Some(binding) = binding {
+                let binding = serde_json::to_vec(&binding)?;
+                let digest = *blake3::hash(&binding).as_bytes();
+                database
+                    .write_album_artwork_binding(
+                        source,
+                        candidate.album_key,
+                        Some(&binding),
+                        digest,
+                    )
+                    .await?;
+            }
+            completed += 1;
+        }
+        Ok(crate::ArtworkPreparationProgress {
+            completed,
+            next_album,
+        })
     }
 
     pub(crate) fn watch(
         &self,
         on_ready: &mut dyn FnMut(bool) -> bool,
-        on_change: &mut dyn FnMut(crate::ObservedSourceChange) -> bool,
+        on_change: &mut dyn FnMut(crate::LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
         watch::LocalChangeFeed::new(self.roots.clone()).listen_forever(
@@ -236,29 +277,10 @@ impl LocalSource {
     }
 }
 
-pub(crate) fn mapped_metadata_editing_available(item: &library::MetadataItem) -> bool {
-    metadata::mapped_editing_available(item)
-}
-
-pub(crate) fn read_mapped_metadata(
-    subject: &library::MetadataSubject,
-    targets: &[library::LocalAccessTarget],
-) -> Result<library::MetadataDraft, library::MetadataError> {
-    metadata::read_mapped_subject(subject, targets)
-}
-
-pub(crate) fn write_mapped_metadata(
-    subject: &library::MetadataSubject,
-    targets: &[library::LocalAccessTarget],
-    edit: &library::MetadataEdit,
-) -> Result<std::collections::BTreeSet<PathBuf>, library::MetadataError> {
-    metadata::write_mapped_subject(subject, targets, edit)
-}
-
 pub(crate) fn connect(input: LocalFolderHostInput) -> SourceResult<ConnectedSource> {
     let source = LocalSource::from_roots(input.roots)?;
     let configuration = crate::config::encode_provider_payload(
-        library::SourceId::new(LOCAL_LIBRARY_SOURCE_ID),
+        crate::SourceId::new(LOCAL_LIBRARY_SOURCE_ID),
         LOCAL_SOURCE_ID,
         "Local",
         LocalSourceConfig {
@@ -292,15 +314,6 @@ pub(crate) fn edit(
     )))
 }
 
-pub fn read_local_access(
-    root: &Path,
-    baseline: &[library::LocalAccessFile],
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<Vec<library::LocalAccessFile>> {
-    scan::acquire_local_access(root, baseline, progress, cancelled)
-}
-
 pub fn verify_local_media_file(path: &Path) -> SourceResult<()> {
     let path = fs::canonicalize(path).map_err(|error| {
         SourceError::Other(format!("Could not read {}: {error}", path.display()))
@@ -313,7 +326,7 @@ pub fn verify_local_media_file(path: &Path) -> SourceResult<()> {
             path.display()
         )));
     };
-    if let Some(reference) = &scanned.track.local_artwork {
+    if let Some(reference) = &scanned.local_artwork {
         let root = path.parent().ok_or(SourceError::NotFound)?.to_path_buf();
         LocalSource { roots: vec![root] }.image_bytes(reference)?;
     }
@@ -368,6 +381,170 @@ fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
     Ok(normalized)
 }
 
-pub(super) fn path_is_in_roots(path: &Path, roots: &[PathBuf]) -> bool {
-    roots.iter().any(|root| path.starts_with(root))
+pub(super) fn metadata_file_available(path: &Path, source_format: Option<&str>) -> bool {
+    source_format
+        .and_then(lofty_metadata::MetadataWriter::for_source_format)
+        .or_else(|| lofty_metadata::MetadataWriter::for_path(path))
+        .is_some()
+}
+
+pub(super) fn read_track_metadata(
+    track_key: library::TrackKey,
+    path: &Path,
+    source_format: Option<&str>,
+) -> Result<crate::TrackMetadata, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(lofty_metadata::MetadataWriter::for_source_format)
+        .or_else(|| lofty_metadata::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = lofty_metadata::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    let number = |key| text(key).and_then(|value| value.parse::<u16>().ok());
+    let values = crate::TrackMetadataValues {
+        title: tag
+            .and_then(|tag| tag.title())
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default(),
+        sort_title: text(ItemKey::TrackTitleSortOrder),
+        artist: tag
+            .and_then(|tag| tag.artist())
+            .map(|value| value.trim().to_string()),
+        album: tag
+            .and_then(|tag| tag.album())
+            .map(|value| value.trim().to_string()),
+        album_artist: text(ItemKey::AlbumArtist),
+        track_number: tag.and_then(|tag| tag.track()).map(|value| value as u16),
+        disc_number: tag.and_then(|tag| tag.disk()).map(|value| value as u16),
+        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        bpm: number(ItemKey::IntegerBpm).or_else(|| number(ItemKey::Bpm)),
+        locked: None,
+        musicbrainz_recording_id: text(ItemKey::MusicBrainzRecordingId),
+        musicbrainz_release_track_id: text(ItemKey::MusicBrainzTrackId),
+        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
+        musicbrainz_artist_id: text(ItemKey::MusicBrainzArtistId),
+    };
+    let can = |key| writer.metadata_key_is_writable(key);
+    let writable = crate::TrackMetadataWritable {
+        title: can(ItemKey::TrackTitle),
+        sort_title: can(ItemKey::TrackTitleSortOrder),
+        artist: can(ItemKey::TrackArtist),
+        album: can(ItemKey::AlbumTitle),
+        album_artist: can(ItemKey::AlbumArtist),
+        track_number: can(ItemKey::TrackNumber),
+        disc_number: can(ItemKey::DiscNumber),
+        year: can(ItemKey::RecordingDate),
+        genre: can(ItemKey::Genre),
+        comment: can(ItemKey::Comment),
+        bpm: lofty_metadata::bpm_key(writer.file_type().primary_tag_type()).is_some(),
+        locked: false,
+        musicbrainz_recording_id: can(ItemKey::MusicBrainzRecordingId),
+        musicbrainz_release_track_id: can(ItemKey::MusicBrainzTrackId),
+        musicbrainz_album_id: can(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: can(ItemKey::MusicBrainzReleaseGroupId),
+        musicbrainz_artist_id: can(ItemKey::MusicBrainzArtistId),
+    };
+    let metadata =
+        fs::metadata(path).map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |value| value.as_nanos());
+    Ok(crate::TrackMetadata {
+        track_key,
+        writable,
+        source_search: false,
+        revision: Some(format!("{}:{modified}", metadata.len())),
+        values,
+    })
+}
+
+pub(super) fn read_album_metadata_values(
+    path: &Path,
+    source_format: Option<&str>,
+) -> Result<crate::AlbumMetadataValues, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(lofty_metadata::MetadataWriter::for_source_format)
+        .or_else(|| lofty_metadata::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = lofty_metadata::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    Ok(crate::AlbumMetadataValues {
+        title: tag
+            .and_then(|tag| tag.album())
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default(),
+        sort_title: text(ItemKey::AlbumTitleSortOrder),
+        album_artist: text(ItemKey::AlbumArtist),
+        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        locked: None,
+        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
+    })
+}
+
+pub(super) fn read_artist_metadata_values(
+    path: &Path,
+    source_format: Option<&str>,
+    fallback_name: &str,
+) -> Result<crate::ArtistMetadataValues, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(lofty_metadata::MetadataWriter::for_source_format)
+        .or_else(|| lofty_metadata::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = lofty_metadata::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    Ok(crate::ArtistMetadataValues {
+        name: fallback_name.to_string(),
+        sort_name: text(ItemKey::TrackArtistSortOrder),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        locked: None,
+        musicbrainz_artist_id: text(ItemKey::MusicBrainzArtistId),
+    })
+}
+
+pub(super) fn basic_metadata_readable(path: PathBuf) -> bool {
+    media::read_basic_audio(&mut media::Worker::default(), path).is_some()
 }

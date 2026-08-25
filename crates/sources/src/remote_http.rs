@@ -69,31 +69,6 @@ pub async fn json<T: DeserializeOwned>(
     deserialize_json(&bytes, &checked.request)
 }
 
-pub async fn json_with_header<T: DeserializeOwned>(
-    request: reqwest::RequestBuilder,
-    policy: RemoteHttpPolicy,
-    limit: BodyLimit,
-    header_name: &header::HeaderName,
-) -> SourceResult<(T, Option<String>)> {
-    let checked = checked_response(request, policy).await?;
-    let header = checked
-        .response
-        .headers()
-        .get(header_name)
-        .map(|value| {
-            value.to_str().map(str::to_string).map_err(|error| {
-                SourceError::Other(format!(
-                    "{} returned an invalid {} header: {error}",
-                    checked.request.service, header_name
-                ))
-            })
-        })
-        .transpose()?;
-    let bytes =
-        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
-    deserialize_json(&bytes, &checked.request).map(|body| (body, header))
-}
-
 fn deserialize_json<T: DeserializeOwned>(
     bytes: &[u8],
     request: &RequestMetadata,

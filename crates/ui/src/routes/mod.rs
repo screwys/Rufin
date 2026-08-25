@@ -28,6 +28,7 @@ pub(crate) mod route_layout;
 mod route_shell;
 mod routes;
 mod search;
+mod sparse_model;
 mod table_links;
 mod table_sizing;
 mod track_model;

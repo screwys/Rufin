@@ -1,67 +1,188 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
-use std::future::Future;
+//! Streams Jellyfin catalog pages directly into Library Scan staging.
 
-use library::{ArtistId, CandidateBatch, GenreId, HomeFacts, Library, SourceHomeSectionKind};
+use library::Scan;
 
 use super::*;
-use crate::source::{BatchEmitter, PreparedSourceChange, SourceReadProgress, SourceReadStage};
-
-const CHANGED_ITEM_BATCH_SIZE: usize = 100;
+use crate::source::{SourceReadProgress, SourceReadStage};
 
 impl JellyfinSource {
-    pub(crate) async fn read_facts(
+    pub(crate) async fn apply_live_items(
         &self,
-        emitter: &BatchEmitter,
+        database: &library::Database,
+        source_id: &str,
+        upserts: Vec<String>,
+        removals: Vec<String>,
+    ) -> SourceResult<library::ScanOutcome> {
+        let mut scan = Scan::begin_items(database, source_id).await?;
+        for raw_id in upserts {
+            let mut url = endpoint(&self.base_url, &format!("Items/{raw_id}"))?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Fields", MIXED_ITEM_FIELDS);
+            let item = self.get_json::<JellyfinItem>(url).await?;
+            let item_type = item.item_type.clone().unwrap_or_default();
+            if item_type.eq_ignore_ascii_case("Audio") {
+                if let Some(album_id) = item.album_id.clone() {
+                    let mut album_url = endpoint(&self.base_url, &format!("Items/{album_id}"))?;
+                    album_url
+                        .query_pairs_mut()
+                        .append_pair("UserId", &self.user_id)
+                        .append_pair("Fields", ALBUM_FIELDS);
+                    let album = self.get_json::<JellyfinItem>(album_url).await?;
+                    scan.begin_batch().await?;
+                    stage_album(&mut scan, album_from_item(album)).await?;
+                    scan.finish_batch().await?;
+                }
+                scan.begin_batch().await?;
+                stage_track(&mut scan, track_from_item(item)).await?;
+                scan.finish_batch().await?;
+                self.stage_live_track_folders(&mut scan, &raw_id).await?;
+            } else if item_type.eq_ignore_ascii_case("MusicAlbum") {
+                scan.begin_batch().await?;
+                stage_album(&mut scan, album_from_item(item)).await?;
+                scan.finish_batch().await?;
+            } else if item_type.eq_ignore_ascii_case("MusicArtist") {
+                scan.begin_batch().await?;
+                stage_artist(&mut scan, artist_from_item(item)).await?;
+                scan.finish_batch().await?;
+            } else if item_type.eq_ignore_ascii_case("MusicGenre") {
+                scan.begin_batch().await?;
+                stage_genre(&mut scan, genre_from_item(item)).await?;
+                scan.finish_batch().await?;
+            } else if item_type.eq_ignore_ascii_case("Playlist") {
+                let playlist = playlist_from_item(item);
+                let artwork = playlist
+                    .image_ref
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()?;
+                scan.begin_batch().await?;
+                scan.write_playlist(
+                    &playlist.id,
+                    &playlist.name,
+                    &playlist.name.to_lowercase(),
+                    &playlist.name.to_lowercase(),
+                    artwork.as_deref(),
+                )
+                .await?;
+                scan.finish_batch().await?;
+                self.stage_playlist_entries(&mut scan, &playlist.id).await?;
+            }
+        }
+        scan.begin_batch().await?;
+        for raw_id in removals {
+            scan.remove_track(&jellyfin_id("track", &raw_id)).await?;
+            scan.remove_album(&jellyfin_id("album", &raw_id)).await?;
+            scan.remove_artist(&jellyfin_id("artist", &raw_id)).await?;
+            scan.remove_genre(&jellyfin_id("genre", &raw_id)).await?;
+            scan.remove_playlist(&jellyfin_id("playlist", &raw_id))
+                .await?;
+        }
+        scan.finish_batch().await?;
+        Ok(scan.finish().await?)
+    }
+
+    async fn stage_live_track_folders(
+        &self,
+        scan: &mut Scan,
+        raw_track_id: &str,
+    ) -> SourceResult<()> {
+        let mut url = endpoint(&self.base_url, &format!("Items/{raw_track_id}/Ancestors"))?;
+        url.query_pairs_mut().append_pair("UserId", &self.user_id);
+        let ancestors = self.get_json::<Vec<JellyfinItem>>(url).await?;
+        scan.begin_batch().await?;
+        for (position, folder) in ancestors
+            .into_iter()
+            .filter(|item| {
+                item.collection_type
+                    .as_deref()
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
+            })
+            .enumerate()
+        {
+            let Some(name) = folder.name else { continue };
+            let folder_id = jellyfin_id("music-folder", &folder.id);
+            let artwork = primary_image_ref("music-folder", &folder.id, &folder.image_tags)
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()?;
+            scan.write_folder(
+                &folder_id,
+                &name,
+                &name.to_lowercase(),
+                &name.to_lowercase(),
+                artwork.as_deref(),
+            )
+            .await?;
+            scan.write_track_folder(
+                &jellyfin_id("track", raw_track_id),
+                &folder_id,
+                position as i64,
+            )
+            .await?;
+        }
+        scan.finish_batch().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn stage_catalog(
+        &self,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<(Option<library::ProviderFreshness>, HomeFacts)> {
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Albums, 0, None));
-        emit_pages(
-            emitter,
-            |offset, limit| self.item_page("MusicAlbum", offset, limit),
-            |items| CandidateBatch::Albums(items.into_iter().map(album_from_item).collect()),
-            progress,
-            SourceReadStage::Albums,
-            cancelled,
-        )
-        .await?;
+    ) -> SourceResult<()> {
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let page = self
+                .item_page("MusicAlbum", pages.offset(), COLLECTION_PAGE_SIZE)
+                .await?;
+            let count = page.items.len();
+            let finished = pages.advance(count, page.total_record_count)?;
+            scan.begin_batch().await?;
+            for item in page.items {
+                stage_album(scan, album_from_item(item)).await?;
+            }
+            scan.finish_batch().await?;
+            progress(stage(
+                SourceReadStage::Albums,
+                pages.offset(),
+                pages.total(),
+            ));
+            if finished {
+                break;
+            }
+        }
 
-        let music_folders = self.read_music_folders().await?;
-        emitter
-            .emit_async(CandidateBatch::MusicFolders(music_folders.clone()))
-            .await?;
-        let mut memberships = self
-            .read_music_folder_memberships(&music_folders, cancelled)
-            .await?;
+        let folders = self.stage_music_folders(scan, cancelled).await?;
+        for (folder_position, folder_id) in folders.iter().enumerate() {
+            self.stage_music_folder_memberships(scan, folder_id, folder_position as i64, cancelled)
+                .await?;
+        }
 
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Tracks, 0, None));
-        emit_pages(
-            emitter,
-            |offset, limit| self.item_page("Audio", offset, limit),
-            |items| {
-                let tracks = items
-                    .into_iter()
-                    .map(track_from_item)
-                    .map(|mut track| {
-                        if let Some(folders) = memberships.remove(&track.id) {
-                            track.relations.music_folders = folders;
-                        }
-                        track
-                    })
-                    .collect();
-                CandidateBatch::Tracks(tracks)
-            },
-            progress,
-            SourceReadStage::Tracks,
-            cancelled,
-        )
-        .await?;
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let page = self
+                .item_page("Audio", pages.offset(), COLLECTION_PAGE_SIZE)
+                .await?;
+            let count = page.items.len();
+            let finished = pages.advance(count, page.total_record_count)?;
+            scan.begin_batch().await?;
+            for item in page.items {
+                stage_track(scan, track_from_item(item)).await?;
+            }
+            scan.finish_batch().await?;
+            progress(stage(
+                SourceReadStage::Tracks,
+                pages.offset(),
+                pages.total(),
+            ));
+            if finished {
+                break;
+            }
+        }
 
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Artists, 0, None));
-        let mut artist_items = Vec::new();
         for path in ["Artists", "Artists/AlbumArtists"] {
             let mut pages = PageState::default();
             loop {
@@ -71,7 +192,11 @@ impl JellyfinSource {
                     .await?;
                 let count = page.items.len();
                 let finished = pages.advance(count, page.total_record_count)?;
-                artist_items.extend(page.items);
+                scan.begin_batch().await?;
+                for item in page.items {
+                    stage_artist(scan, artist_from_item(item)).await?;
+                }
+                scan.finish_batch().await?;
                 progress(stage(
                     SourceReadStage::Artists,
                     pages.offset(),
@@ -82,140 +207,116 @@ impl JellyfinSource {
                 }
             }
         }
-        emitter
-            .emit_async(CandidateBatch::Artists(normalize_artist_items(
-                artist_items,
-            )))
-            .await?;
 
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Genres, 0, None));
-        emit_pages(
-            emitter,
-            |offset, limit| self.music_genre_page(offset, limit),
-            |items| CandidateBatch::Genres(items.into_iter().map(genre_from_item).collect()),
-            progress,
-            SourceReadStage::Genres,
-            cancelled,
-        )
-        .await?;
-
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Playlists, 0, None));
-        self.emit_playlists(emitter, progress, cancelled).await?;
-
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Home, 0, Some(4)));
-        let mut sections = Vec::new();
-        for kind in [
-            SourceHomeSectionKind::MostPlayed,
-            SourceHomeSectionKind::NewlyAdded,
-            SourceHomeSectionKind::RecentlyPlayed,
-            SourceHomeSectionKind::RecentlyReleased,
-        ] {
-            let section = self.read_home_section(kind).await?;
-            if !section.items.is_empty() {
-                sections.push(section);
+        let mut pages = PageState::default();
+        loop {
+            check_cancelled(cancelled)?;
+            let page = self
+                .music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
+                .await?;
+            let count = page.items.len();
+            let finished = pages.advance(count, page.total_record_count)?;
+            scan.begin_batch().await?;
+            for item in page.items {
+                stage_genre(scan, genre_from_item(item)).await?;
+            }
+            scan.finish_batch().await?;
+            progress(stage(
+                SourceReadStage::Genres,
+                pages.offset(),
+                pages.total(),
+            ));
+            if finished {
+                break;
             }
         }
 
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Finalizing, 0, None));
-        Ok((None, HomeFacts::Source { sections }))
+        self.stage_playlists(scan, progress, cancelled).await?;
+        self.stage_home(scan).await?;
+        progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
+        Ok(())
     }
 
-    pub(crate) async fn read_home_section(
+    async fn stage_music_folders(
         &self,
-        kind: SourceHomeSectionKind,
-    ) -> SourceResult<library::SourceHomeSection> {
-        match kind {
-            SourceHomeSectionKind::MostPlayed => {
-                self.home_track_section(kind, "PlayCount,SortName", "Descending")
-                    .await
-            }
-            SourceHomeSectionKind::NewlyAdded => {
-                self.home_album_section(kind, "DateCreated,SortName", "Descending")
-                    .await
-            }
-            SourceHomeSectionKind::RecentlyPlayed => {
-                self.home_track_section(kind, "DatePlayed,SortName", "Descending")
-                    .await
-            }
-            SourceHomeSectionKind::RecentlyReleased => {
-                self.home_album_section(kind, "ProductionYear,PremiereDate,SortName", "Descending")
-                    .await
-            }
-        }
-    }
-
-    pub(super) async fn read_music_folders(&self) -> SourceResult<Vec<MusicFolder>> {
+        scan: &mut Scan,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<Vec<String>> {
+        check_cancelled(cancelled)?;
         let mut url = endpoint(&self.base_url, &format!("Users/{}/Views", self.user_id))?;
         url.query_pairs_mut()
             .append_pair("IncludeExternalContent", "false");
         let response = self.get_json::<ItemQueryResult>(url).await?;
-        Ok(response
-            .items
-            .into_iter()
-            .filter(|item| {
-                item.collection_type
-                    .as_deref()
-                    .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
-            })
-            .filter_map(|item| {
-                let image_ref = primary_image_ref("music-folder", &item.id, &item.image_tags);
-                item.name.map(|name| MusicFolder {
-                    id: MusicFolderId::new(jellyfin_id("music-folder", &item.id)),
-                    name,
-                    image_ref,
-                })
-            })
-            .collect())
+        let mut folders = Vec::new();
+        scan.begin_batch().await?;
+        for item in response.items.into_iter().filter(|item| {
+            item.collection_type
+                .as_deref()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
+        }) {
+            let Some(name) = item.name else { continue };
+            let id = jellyfin_id("music-folder", &item.id);
+            let artwork = primary_image_ref("music-folder", &item.id, &item.image_tags)
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()?;
+            scan.write_folder(
+                &id,
+                &name,
+                &name.to_lowercase(),
+                &name.to_lowercase(),
+                artwork.as_deref(),
+            )
+            .await?;
+            folders.push(id);
+        }
+        scan.finish_batch().await?;
+        Ok(folders)
     }
 
-    async fn read_music_folder_memberships(
+    async fn stage_music_folder_memberships(
         &self,
-        folders: &[MusicFolder],
+        scan: &mut Scan,
+        folder_id: &str,
+        folder_position: i64,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<HashMap<TrackId, Vec<MusicFolderId>>> {
-        let mut memberships = HashMap::<TrackId, Vec<MusicFolderId>>::new();
-        for folder in folders {
+    ) -> SourceResult<()> {
+        let raw_folder_id = raw_item_id(folder_id).to_string();
+        let mut pages = PageState::default();
+        loop {
             check_cancelled(cancelled)?;
-            let raw_folder_id = raw_item_id(folder.id.as_str()).to_string();
-            let mut pages = PageState::default();
-            loop {
-                check_cancelled(cancelled)?;
-                let mut url = endpoint(&self.base_url, "Items")?;
-                url.query_pairs_mut()
-                    .append_pair("UserId", &self.user_id)
-                    .append_pair("ParentId", &raw_folder_id)
-                    .append_pair("Recursive", "true")
-                    .append_pair("IncludeItemTypes", "Audio")
-                    .append_pair("StartIndex", &pages.offset().to_string())
-                    .append_pair("Limit", &COLLECTION_PAGE_SIZE.to_string())
-                    .append_pair("SortBy", "SortName")
-                    .append_pair("SortOrder", "Ascending");
-                let page = self.get_json::<ItemQueryResult>(url).await?;
-                let count = page.items.len();
-                let finished = pages.advance(count, page.total_record_count)?;
-                for item in page.items {
-                    let values = memberships
-                        .entry(TrackId::new(jellyfin_id("track", &item.id)))
-                        .or_default();
-                    if !values.contains(&folder.id) {
-                        values.push(folder.id.clone());
-                    }
-                }
-                if finished {
-                    break;
-                }
+            let mut url = endpoint(&self.base_url, "Items")?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("ParentId", &raw_folder_id)
+                .append_pair("Recursive", "true")
+                .append_pair("IncludeItemTypes", "Audio")
+                .append_pair("StartIndex", &pages.offset().to_string())
+                .append_pair("Limit", &COLLECTION_PAGE_SIZE.to_string())
+                .append_pair("SortBy", "SortName")
+                .append_pair("SortOrder", "Ascending");
+            let page = self.get_json::<ItemQueryResult>(url).await?;
+            let count = page.items.len();
+            let finished = pages.advance(count, page.total_record_count)?;
+            scan.begin_batch().await?;
+            for item in page.items {
+                scan.write_track_folder(
+                    &jellyfin_id("track", &item.id),
+                    folder_id,
+                    folder_position,
+                )
+                .await?;
+            }
+            scan.finish_batch().await?;
+            if finished {
+                return Ok(());
             }
         }
-        Ok(memberships)
     }
 
-    async fn emit_playlists(
+    async fn stage_playlists(
         &self,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
@@ -227,12 +328,24 @@ impl JellyfinSource {
                 .await?;
             let count = page.items.len();
             let finished = pages.advance(count, page.total_record_count)?;
-            for playlist in page.items.into_iter().map(playlist_from_item) {
-                check_cancelled(cancelled)?;
-                let snapshot = self.read_playlist_snapshot(playlist).await?;
-                emitter
-                    .emit_async(CandidateBatch::Playlists(vec![snapshot]))
-                    .await?;
+            for item in page.items {
+                let playlist = playlist_from_item(item);
+                let artwork = playlist
+                    .image_ref
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()?;
+                scan.begin_batch().await?;
+                scan.write_playlist(
+                    &playlist.id,
+                    &playlist.name,
+                    &playlist.name.to_lowercase(),
+                    &playlist.name.to_lowercase(),
+                    artwork.as_deref(),
+                )
+                .await?;
+                scan.finish_batch().await?;
+                self.stage_playlist_entries(scan, &playlist.id).await?;
             }
             progress(stage(
                 SourceReadStage::Playlists,
@@ -244,311 +357,115 @@ impl JellyfinSource {
             }
         }
     }
-}
 
-impl JellyfinSource {
-    pub(crate) async fn prepare_change(
-        &self,
-        library: &Library,
-        upserts: BTreeSet<String>,
-        removals: BTreeSet<String>,
-    ) -> SourceResult<PreparedSourceChange> {
-        if upserts.is_empty() && removals.is_empty() {
-            return Ok(PreparedSourceChange::Ignored);
-        }
-        if !upserts.is_disjoint(&removals) {
-            return Ok(PreparedSourceChange::Full);
-        }
-        let available = self.items_by_ids(&upserts).await?;
-        let mut albums = BTreeMap::new();
-        let mut tracks = BTreeMap::new();
-        let mut playlists = BTreeMap::new();
-        let mut removed_tracks = BTreeSet::new();
-        let mut removed_playlists = BTreeSet::new();
-        let mut referenced_albums = BTreeSet::new();
-
-        for raw_id in removals {
-            match accepted_kinds(library, &raw_id).as_slice() {
-                [] => {}
-                [AcceptedKind::Track] => {
-                    removed_tracks.insert(TrackId::new(jellyfin_id("track", &raw_id)));
-                }
-                [AcceptedKind::Playlist] => {
-                    removed_playlists.insert(PlaylistId::new(jellyfin_id("playlist", &raw_id)));
-                }
-                _ => return Ok(PreparedSourceChange::Full),
-            }
-        }
-
-        for raw_id in upserts {
-            let known = accepted_kinds(library, &raw_id);
-            let Some(item) = available.get(&raw_id) else {
-                return Ok(PreparedSourceChange::Full);
-            };
-            match current_item_kind(item) {
-                CurrentItemKind::Track if new_or_only(&known, AcceptedKind::Track) => {
-                    let track = track_from_item(item.clone());
-                    if let Some(album_id) = track.album_id.as_ref()
-                        && let Some(raw_album_id) = raw_entity_id(album_id.as_str(), "album")
-                    {
-                        referenced_albums.insert(raw_album_id.to_string());
+    async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
+        for (section_id, item_type, sort_by, kind) in [
+            (
+                "most-played",
+                "Audio",
+                "PlayCount,SortName",
+                library::HomeEntryKind::Track,
+            ),
+            (
+                "newly-added",
+                "MusicAlbum",
+                "DateCreated,SortName",
+                library::HomeEntryKind::Album,
+            ),
+            (
+                "recently-played",
+                "Audio",
+                "DatePlayed,SortName",
+                library::HomeEntryKind::Track,
+            ),
+            (
+                "recently-released",
+                "MusicAlbum",
+                "ProductionYear,PremiereDate,SortName",
+                library::HomeEntryKind::Album,
+            ),
+        ] {
+            let page = self
+                .item_page_sorted(item_type, 0, 24, sort_by, "Descending")
+                .await?;
+            scan.begin_batch().await?;
+            for (position, item) in page.items.into_iter().enumerate() {
+                let (entity_object_id, title, subtitle, artwork_binding) = match kind {
+                    library::HomeEntryKind::Track => {
+                        let track = track_from_item(item);
+                        (
+                            track.id,
+                            track.title,
+                            track.artist,
+                            track
+                                .image_ref
+                                .as_ref()
+                                .map(serde_json::to_vec)
+                                .transpose()?,
+                        )
                     }
-                    tracks.insert(track.id.clone(), track);
-                }
-                CurrentItemKind::Album if new_or_only(&known, AcceptedKind::Album) => {
-                    let album = album_from_item(item.clone());
-                    albums.insert(album.id.clone(), album);
-                }
-                CurrentItemKind::Playlist if new_or_only(&known, AcceptedKind::Playlist) => {
-                    let playlist = playlist_from_item(item.clone());
-                    let snapshot = self.read_playlist_snapshot(playlist).await?;
-                    playlists.insert(snapshot.playlist.id.clone(), snapshot);
-                }
-                CurrentItemKind::Other if known.is_empty() => {}
-                CurrentItemKind::Track
-                | CurrentItemKind::Album
-                | CurrentItemKind::Artist
-                | CurrentItemKind::Playlist
-                | CurrentItemKind::Genre
-                | CurrentItemKind::Folder
-                | CurrentItemKind::Other => return Ok(PreparedSourceChange::Full),
+                    library::HomeEntryKind::Album => {
+                        let album = album_from_item(item);
+                        (
+                            album.id,
+                            album.title,
+                            album.artist,
+                            album
+                                .image_ref
+                                .as_ref()
+                                .map(serde_json::to_vec)
+                                .transpose()?,
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+                scan.write_home_entry(&library::HomeEntryInput {
+                    section_id: section_id.to_string(),
+                    position: position as i64,
+                    kind,
+                    entity_object_id,
+                    title,
+                    subtitle,
+                    artwork_binding,
+                })
+                .await?;
             }
+            scan.finish_batch().await?;
         }
-
-        let missing_albums = referenced_albums
-            .into_iter()
-            .filter(|raw_id| !albums.contains_key(&AlbumId::new(jellyfin_id("album", raw_id))))
-            .collect::<BTreeSet<_>>();
-        let referenced = self.items_by_ids(&missing_albums).await?;
-        for raw_id in missing_albums {
-            let known = accepted_kinds(library, &raw_id);
-            let Some(item) = referenced.get(&raw_id) else {
-                return Ok(PreparedSourceChange::Full);
-            };
-            if current_item_kind(item) != CurrentItemKind::Album
-                || !new_or_only(&known, AcceptedKind::Album)
-            {
-                return Ok(PreparedSourceChange::Full);
-            }
-            let album = album_from_item(item.clone());
-            albums.insert(album.id.clone(), album);
-        }
-
-        if albums.is_empty()
-            && tracks.is_empty()
-            && playlists.is_empty()
-            && removed_tracks.is_empty()
-            && removed_playlists.is_empty()
-        {
-            return Ok(PreparedSourceChange::Ignored);
-        }
-        Ok(PreparedSourceChange::SourceUpdate(
-            library::SourceLibraryUpdate {
-                albums: albums.into_values().collect(),
-                tracks: tracks.into_values().collect(),
-                artists: Vec::new(),
-                removed_tracks: removed_tracks.into_iter().collect(),
-                playlists: playlists.into_values().collect(),
-                removed_playlists: removed_playlists.into_iter().collect(),
-            },
-        ))
-    }
-
-    async fn items_by_ids(
-        &self,
-        ids: &BTreeSet<String>,
-    ) -> SourceResult<BTreeMap<String, JellyfinItem>> {
-        let ids = ids.iter().cloned().collect::<Vec<_>>();
-        let mut items = BTreeMap::new();
-        for chunk in ids.chunks(CHANGED_ITEM_BATCH_SIZE) {
-            let mut url = endpoint(&self.base_url, "Items")?;
-            url.query_pairs_mut()
-                .append_pair("UserId", &self.user_id)
-                .append_pair("Recursive", "true")
-                .append_pair("Ids", &chunk.join(","))
-                .append_pair("Limit", &chunk.len().to_string())
-                .append_pair("Fields", MIXED_ITEM_FIELDS);
-            let response = self.get_json::<ItemQueryResult>(url).await?;
-            for item in response.items {
-                items.insert(item.id.clone(), item);
-            }
-        }
-        Ok(items)
+        Ok(())
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-enum AcceptedKind {
-    Album,
-    Track,
-    Artist,
-    Genre,
-    Playlist,
-    MusicFolder,
-}
-
-impl AcceptedKind {
-    const ALL: [Self; 6] = [
-        Self::Album,
-        Self::Track,
-        Self::Artist,
-        Self::Genre,
-        Self::Playlist,
-        Self::MusicFolder,
-    ];
-
-    fn present(self, library: &Library, raw_id: &str) -> bool {
-        match self {
-            Self::Album => library
-                .album(&AlbumId::new(jellyfin_id("album", raw_id)))
-                .ok()
-                .flatten()
-                .is_some(),
-            Self::Track => library
-                .track(&TrackId::new(jellyfin_id("track", raw_id)))
-                .ok()
-                .flatten()
-                .is_some(),
-            Self::Artist => library
-                .artist(&ArtistId::new(jellyfin_id("artist", raw_id)))
-                .ok()
-                .flatten()
-                .is_some(),
-            Self::Genre => library
-                .genre(&GenreId::new(jellyfin_id("genre", raw_id)))
-                .ok()
-                .flatten()
-                .is_some(),
-            Self::Playlist => library
-                .contains_playlist(&PlaylistId::new(jellyfin_id("playlist", raw_id)))
-                .unwrap_or(false),
-            Self::MusicFolder => library
-                .contains_music_folder(&MusicFolderId::new(jellyfin_id("music-folder", raw_id)))
-                .unwrap_or(false),
-        }
-    }
-}
-
-fn accepted_kinds(library: &Library, raw_id: &str) -> Vec<AcceptedKind> {
-    AcceptedKind::ALL
-        .into_iter()
-        .filter(|kind| kind.present(library, raw_id))
-        .collect()
-}
-
-fn new_or_only(known: &[AcceptedKind], kind: AcceptedKind) -> bool {
-    known.is_empty() || known == [kind]
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum CurrentItemKind {
-    Track,
-    Album,
-    Artist,
-    Genre,
-    Playlist,
-    Folder,
-    Other,
-}
-
-fn current_item_kind(item: &JellyfinItem) -> CurrentItemKind {
-    match item.item_type.as_deref() {
-        Some(kind) if kind.eq_ignore_ascii_case("Audio") => CurrentItemKind::Track,
-        Some(kind) if kind.eq_ignore_ascii_case("MusicAlbum") => CurrentItemKind::Album,
-        Some(kind)
-            if kind.eq_ignore_ascii_case("MusicArtist") || kind.eq_ignore_ascii_case("Artist") =>
-        {
-            CurrentItemKind::Artist
-        }
-        Some(kind)
-            if kind.eq_ignore_ascii_case("MusicGenre") || kind.eq_ignore_ascii_case("Genre") =>
-        {
-            CurrentItemKind::Genre
-        }
-        Some(kind) if kind.eq_ignore_ascii_case("Playlist") => CurrentItemKind::Playlist,
-        Some(kind)
-            if matches!(
-                kind.to_ascii_lowercase().as_str(),
-                "collectionfolder" | "folder" | "userview"
-            ) =>
-        {
-            CurrentItemKind::Folder
-        }
-        _ => CurrentItemKind::Other,
-    }
-}
-
-fn raw_entity_id<'a>(item_id: &'a str, kind: &str) -> Option<&'a str> {
-    item_id
-        .strip_prefix(&format!("jellyfin:{kind}:"))
-        .filter(|raw_id| !raw_id.is_empty())
-}
-
-async fn emit_pages<F, Fut, C>(
-    emitter: &BatchEmitter,
-    mut fetch: F,
-    mut transform: C,
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-    source_read_stage: SourceReadStage,
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<()>
-where
-    F: FnMut(usize, usize) -> Fut + Send,
-    Fut: Future<Output = SourceResult<ItemQueryResult>> + Send,
-    C: FnMut(Vec<JellyfinItem>) -> CandidateBatch + Send,
-{
-    let mut pages = PageState::default();
-    loop {
-        check_cancelled(cancelled)?;
-        let page = fetch(pages.offset(), COLLECTION_PAGE_SIZE).await?;
-        let count = page.items.len();
-        let finished = pages.advance(count, page.total_record_count)?;
-        emitter.emit_async(transform(page.items)).await?;
-        progress(stage(source_read_stage, pages.offset(), pages.total()));
-        if finished {
-            return Ok(());
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Default)]
 pub(super) struct PageState {
     offset: usize,
     total: Option<usize>,
 }
 
 impl PageState {
-    pub(super) fn offset(self) -> usize {
+    pub(super) fn offset(&self) -> usize {
         self.offset
     }
 
-    pub(super) fn total(self) -> Option<usize> {
+    pub(super) fn total(&self) -> Option<usize> {
         self.total
     }
 
-    pub(super) fn advance(
-        &mut self,
-        count: usize,
-        reported_total: Option<usize>,
-    ) -> SourceResult<bool> {
-        if let Some(reported_total) = reported_total {
-            self.total = Some(reported_total);
-        }
-
+    pub(super) fn advance(&mut self, count: usize, total: Option<usize>) -> SourceResult<bool> {
         if count == 0 {
-            return match self.total {
-                Some(total) if self.offset < total => Err(incomplete_page()),
-                _ => Ok(true),
-            };
+            return Ok(true);
         }
-
-        self.offset = self.offset.checked_add(count).ok_or_else(incomplete_page)?;
-        Ok(self.total.is_some_and(|total| self.offset >= total))
+        self.offset = self
+            .offset
+            .checked_add(count)
+            .ok_or_else(|| SourceError::Other("Jellyfin page offset overflowed".to_string()))?;
+        if let Some(total) = total {
+            self.total = Some(total);
+            Ok(self.offset >= total)
+        } else {
+            Ok(count < COLLECTION_PAGE_SIZE)
+        }
     }
-}
-
-fn incomplete_page() -> SourceError {
-    SourceError::Other("Jellyfin returned an incomplete page".to_string())
 }
 
 fn stage(stage: SourceReadStage, completed: usize, total: Option<usize>) -> SourceReadProgress {
@@ -564,72 +481,5 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
         Err(SourceError::Cancelled)
     } else {
         Ok(())
-    }
-}
-
-#[cfg(test)]
-mod paging_tests {
-    use super::PageState;
-
-    #[test]
-    fn short_pages_continue_until_the_declared_total() {
-        let mut pages = PageState::default();
-
-        assert!(!pages.advance(1, Some(2)).expect("first page"));
-        assert!(pages.advance(1, Some(2)).expect("second page"));
-        assert_eq!(pages.offset(), 2);
-    }
-
-    #[test]
-    fn the_first_declared_total_is_retained() {
-        let mut pages = PageState::default();
-
-        assert!(!pages.advance(1, None).expect("page without a total"));
-        assert!(pages.advance(1, Some(2)).expect("page declaring the total"));
-        assert_eq!(pages.total(), Some(2));
-    }
-
-    #[test]
-    fn the_latest_declared_total_controls_completion() {
-        let mut pages = PageState::default();
-
-        assert!(!pages.advance(1, Some(2)).expect("first page"));
-        assert!(!pages.advance(1, Some(3)).expect("larger total"));
-        assert!(pages.advance(1, Some(3)).expect("last page"));
-        assert_eq!(pages.total(), Some(3));
-    }
-
-    #[test]
-    fn a_page_offset_overflow_is_rejected() {
-        let mut pages = PageState {
-            offset: usize::MAX,
-            total: None,
-        };
-
-        assert!(pages.advance(1, None).is_err());
-    }
-
-    #[test]
-    fn a_stale_smaller_total_does_not_discard_returned_items() {
-        let mut pages = PageState::default();
-
-        assert!(pages.advance(2, Some(1)).expect("returned items"));
-        assert_eq!(pages.offset(), 2);
-    }
-
-    #[test]
-    fn an_empty_page_before_the_declared_total_is_rejected() {
-        let mut pages = PageState::default();
-
-        assert!(!pages.advance(1, Some(2)).expect("first page"));
-        assert!(pages.advance(0, Some(2)).is_err());
-    }
-
-    #[test]
-    fn pages_without_a_total_finish_only_when_empty() {
-        let mut pages = PageState::default();
-
-        assert!(!pages.advance(1, None).expect("non-empty page"));
-        assert!(pages.advance(0, None).expect("empty page"));
     }
 }

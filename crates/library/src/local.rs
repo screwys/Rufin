@@ -1,21 +1,18 @@
-//! Durable observations used by Local's exact no-op and dependency decisions.
-//!
-//! Sources owns filesystem walking and parsing. Library persists only the
-//! accepted observation and applies canonical item changes; one unreadable
-//! file or invalid CUE is not a source-level failure.
+//! Persists bounded Local observations, dependency paths, and point playback access.
+//! Walking, parsing, retries, and filesystem policy remain owned by Sources.
 
-use std::collections::{BTreeMap, BTreeSet, HashSet, VecDeque};
-use std::path::Path;
+use std::collections::BTreeMap;
 
-use serde::{Deserialize, Serialize};
+use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 
 use crate::{
-    AcceptedHomeChange, AcceptedLibraryChange, Album, AlbumId, Artist, ArtistId, Genre, GenreId,
-    Library, LibraryResult, Track, TrackId,
-    loaded::{ItemReplacement, LocalArtworkItemId},
+    Database, LibraryError, LibraryResult, LocalAccessFileKey, LocalFileKey, ReadCancellation,
+    SourceKey, loudness::recompute_album_loudness_key,
 };
 
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+const LOCAL_FILE_PAGE_LIMIT: usize = 128;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalFileKind {
     Media,
     Cue,
@@ -23,28 +20,7 @@ pub enum LocalFileKind {
     Directory,
 }
 
-impl LocalFileKind {
-    pub(crate) const fn as_str(self) -> &'static str {
-        match self {
-            Self::Media => "media",
-            Self::Cue => "cue",
-            Self::Image => "image",
-            Self::Directory => "directory",
-        }
-    }
-
-    pub(crate) fn from_stored(value: &str) -> Option<Self> {
-        match value {
-            "media" => Some(Self::Media),
-            "cue" => Some(Self::Cue),
-            "image" => Some(Self::Image),
-            "directory" => Some(Self::Directory),
-            _ => None,
-        }
-    }
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum LocalFileState {
     Accepted,
     Rejected,
@@ -52,8 +28,117 @@ pub enum LocalFileState {
     Observed,
 }
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalFileWrite {
+    pub path: String,
+    pub root: String,
+    pub relative_path: String,
+    pub kind: LocalFileKind,
+    pub size_bytes: Option<i64>,
+    pub mtime_ns: i64,
+    pub device_id: Option<i64>,
+    pub inode: Option<i64>,
+    pub parse_version: Option<i64>,
+    pub state: LocalFileState,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalFileRow {
+    pub local_file_key: LocalFileKey,
+    pub path: String,
+    pub root: String,
+    pub relative_path: String,
+    pub kind: LocalFileKind,
+    pub size_bytes: Option<i64>,
+    pub mtime_ns: i64,
+    pub device_id: Option<i64>,
+    pub inode: Option<i64>,
+    pub parse_version: Option<i64>,
+    pub state: LocalFileState,
+    pub dependencies: Vec<String>,
+}
+
+#[derive(Clone, Debug, FromRow)]
+struct LocalFileScalar {
+    local_file_key: LocalFileKey,
+    path: String,
+    root: String,
+    relative_path: String,
+    kind: String,
+    size_bytes: Option<i64>,
+    mtime_ns: i64,
+    device_id: Option<i64>,
+    inode: Option<i64>,
+    parse_version: Option<i64>,
+    state: String,
+}
+
+#[derive(FromRow)]
+struct LocalDependency {
+    local_file_key: LocalFileKey,
+    dependency_path: String,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct LocalAccessWrite {
+    pub track_object_id: Option<String>,
+    pub path: String,
+    pub root: String,
+    pub relative_path: String,
+    pub size_bytes: i64,
+    pub mtime_ns: i64,
+    pub device_id: Option<i64>,
+    pub inode: Option<i64>,
+    pub parser_version: i64,
+    pub title: String,
+    pub album: String,
+    pub artist: String,
+    pub disc_number: i64,
+    pub track_number: i64,
+    pub duration_millis: i64,
+    pub media_uri: String,
+    pub loudness_analysis_key: [u8; 32],
+}
+
+#[derive(Clone, Debug, FromRow, PartialEq)]
+pub struct LocalAccessRow {
+    pub local_access_file_key: LocalAccessFileKey,
+    pub track_object_id: Option<String>,
+    pub path: String,
+    pub root: String,
+    pub relative_path: String,
+    pub size_bytes: i64,
+    pub mtime_ns: i64,
+    pub device_id: Option<i64>,
+    pub inode: Option<i64>,
+    pub parser_version: i64,
+    pub media_uri: String,
+}
+
+impl LocalFileKind {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Media => "media",
+            Self::Cue => "cue",
+            Self::Image => "image",
+            Self::Directory => "directory",
+        }
+    }
+    fn parse(value: &str) -> LibraryResult<Self> {
+        match value {
+            "media" => Ok(Self::Media),
+            "cue" => Ok(Self::Cue),
+            "image" => Ok(Self::Image),
+            "directory" => Ok(Self::Directory),
+            _ => Err(LibraryError::InvalidStore(
+                "invalid Local file kind".to_string(),
+            )),
+        }
+    }
+}
+
 impl LocalFileState {
-    pub(crate) const fn as_str(self) -> &'static str {
+    fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
             Self::Rejected => "rejected",
@@ -61,444 +146,430 @@ impl LocalFileState {
             Self::Observed => "observed",
         }
     }
-
-    pub(crate) fn from_stored(value: &str) -> Option<Self> {
+    fn parse(value: &str) -> LibraryResult<Self> {
         match value {
-            "accepted" => Some(Self::Accepted),
-            "rejected" => Some(Self::Rejected),
-            "unreadable" => Some(Self::Unreadable),
-            "observed" => Some(Self::Observed),
-            _ => None,
+            "accepted" => Ok(Self::Accepted),
+            "rejected" => Ok(Self::Rejected),
+            "unreadable" => Ok(Self::Unreadable),
+            "observed" => Ok(Self::Observed),
+            _ => Err(LibraryError::InvalidStore(
+                "invalid Local file state".to_string(),
+            )),
         }
     }
 }
 
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LocalFile {
-    pub path: String,
-    pub root: String,
-    pub relative_path: String,
-    pub kind: LocalFileKind,
-    pub size_bytes: Option<u64>,
-    pub mtime_ns: i64,
-    pub device_id: Option<u64>,
-    pub inode: Option<u64>,
-    pub parse_version: Option<u32>,
-    pub state: LocalFileState,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub dependencies: Vec<String>,
-}
-
-impl LocalFile {
-    /// Directories containing this file, from its parent through its
-    /// configured music root.
-    pub fn directories_to_root(&self) -> impl Iterator<Item = &Path> {
-        let root = Path::new(&self.root);
-        Path::new(&self.path)
-            .parent()
-            .into_iter()
-            .flat_map(move |parent| {
-                parent
-                    .ancestors()
-                    .take_while(move |directory| directory.starts_with(root))
-            })
-    }
-}
-
-/// The complete post-state of one Local filesystem dependency component.
-///
-/// Sources decides the component from old and new file/CUE/art relationships
-/// and parses it. Library accepts the finished canonical values and file
-/// observations atomically; it does not interpret filesystem events.
-#[derive(Clone, Debug, Default)]
-pub struct LocalComponentReplacement {
-    pub observed_at: i64,
-    pub files: Vec<LocalFile>,
-    pub removed_paths: Vec<String>,
-    pub albums: Vec<Album>,
-    pub tracks: Vec<Track>,
-    pub artists: Vec<Artist>,
-    pub genres: Vec<Genre>,
-    pub removed_album_ids: Vec<AlbumId>,
-    pub removed_track_ids: Vec<TrackId>,
-    pub removed_artist_ids: Vec<ArtistId>,
-    pub removed_genre_ids: Vec<GenreId>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum LocalFileSeed {
-    Path(String),
-    DirectoryTree(String),
-    ArtworkDirectory(String),
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct LocalFileBaseline {
-    pub files: Vec<LocalFile>,
-    pub tracked_media_paths: BTreeSet<String>,
-    /// Accepted media counts beneath each requested artwork directory.
-    pub accepted_media_counts_by_directory: BTreeMap<String, usize>,
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub enum LocalComponentSeed {
-    Path(String),
-    DirectoryTree(String),
-    ArtworkDirectory(String),
-    Album(AlbumId),
-}
-
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub struct LocalComponentBaseline {
-    pub files: Vec<LocalFile>,
-    pub albums: Vec<Album>,
-    pub tracks: Vec<Track>,
-}
-
-impl Library {
-    pub fn accept_local_component(
+impl Database {
+    pub async fn local_accepted_paths(
         &self,
-        replacement: LocalComponentReplacement,
-    ) -> LibraryResult<Option<AcceptedLibraryChange>> {
-        let LocalComponentReplacement {
-            observed_at,
-            files,
-            removed_paths,
-            albums,
-            tracks,
-            artists,
-            genres,
-            removed_album_ids,
-            removed_track_ids,
-            removed_artist_ids,
-            removed_genre_ids,
-        } = replacement;
-        let replacement = ItemReplacement {
-            albums,
-            tracks,
-            artists,
-            genres,
-            removed_albums: removed_album_ids,
-            removed_tracks: removed_track_ids,
-            removed_artists: removed_artist_ids,
-            removed_genres: removed_genre_ids,
+        source: SourceKey,
+        paths: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local accepted-path batch exceeds 128 files".to_string(),
+            ));
+        }
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
+        query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
+            row.push_bind(path).push_bind(position as i64);
+        });
+        query.push(") SELECT requested.path FROM requested WHERE EXISTS (SELECT 1 FROM tracks track WHERE track.source_key=")
+            .push_bind(source)
+            .push(" AND (track.media_uri=('file://'||requested.path) OR track.cue_path=requested.path)) ORDER BY requested.position");
+        let result = query
+            .build_query_scalar()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
+    pub async fn upsert_local_file(
+        &self,
+        source: SourceKey,
+        file: &LocalFileWrite,
+        dependencies: &[String],
+    ) -> LibraryResult<LocalFileKey> {
+        let mut keys = self
+            .upsert_local_files(source, &[(file.clone(), dependencies.to_vec())])
+            .await?;
+        Ok(keys.remove(0))
+    }
+
+    pub async fn upsert_local_files(
+        &self,
+        source: SourceKey,
+        files: &[(LocalFileWrite, Vec<String>)],
+    ) -> LibraryResult<Vec<LocalFileKey>> {
+        if files.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local observation batch exceeds 128 files".to_string(),
+            ));
+        }
+        for (file, dependencies) in files {
+            validate_local_file(file, dependencies)?;
+        }
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let mut keys = Vec::with_capacity(files.len());
+        for (file, dependencies) in files {
+            let key = sqlx::query_scalar::<_, LocalFileKey>("INSERT INTO local_files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parse_version=excluded.parse_version,state=excluded.state RETURNING local_file_key")
+                .bind(source).bind(&file.path).bind(&file.root).bind(&file.relative_path)
+                .bind(file.kind.as_str()).bind(file.size_bytes).bind(file.mtime_ns)
+                .bind(file.device_id).bind(file.inode).bind(file.parse_version)
+                .bind(file.state.as_str()).fetch_one(&mut *transaction).await?;
+            sqlx::query("DELETE FROM local_file_dependencies WHERE local_file_key=?1")
+                .bind(key)
+                .execute(&mut *transaction)
+                .await?;
+            for (position, dependency) in dependencies.iter().enumerate() {
+                sqlx::query("INSERT INTO local_file_dependencies(local_file_key,dependency_path,position) VALUES (?1,?2,?3)")
+                    .bind(key).bind(dependency).bind(position as i64).execute(&mut *transaction).await?;
+            }
+            keys.push(key);
+        }
+        transaction.commit().await?;
+        Ok(keys)
+    }
+
+    pub async fn local_file_page(
+        &self,
+        source: SourceKey,
+        after: Option<LocalFileKey>,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<LocalFileRow>> {
+        let limit = limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64;
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
+            .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
+            .fetch_all(&mut *transaction).await?;
+        let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
+        if !scalars.is_empty() {
+            let mut query =
+                QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,position) AS (");
+            query.push_values(scalars.iter().enumerate(), |mut row, (position, file)| {
+                row.push_bind(file.local_file_key)
+                    .push_bind(position as i64);
+            });
+            query.push(") SELECT dependency.local_file_key,dependency.dependency_path FROM requested JOIN local_file_dependencies dependency USING(local_file_key) ORDER BY requested.position,dependency.position");
+            for dependency in query
+                .build_query_as::<LocalDependency>()
+                .persistent(false)
+                .fetch_all(&mut *transaction)
+                .await?
+            {
+                dependencies
+                    .entry(dependency.local_file_key)
+                    .or_default()
+                    .push(dependency.dependency_path);
+            }
+        }
+        let mut rows = Vec::with_capacity(scalars.len());
+        for scalar in scalars {
+            rows.push(LocalFileRow {
+                local_file_key: scalar.local_file_key,
+                path: scalar.path,
+                root: scalar.root,
+                relative_path: scalar.relative_path,
+                kind: LocalFileKind::parse(&scalar.kind)?,
+                size_bytes: scalar.size_bytes,
+                mtime_ns: scalar.mtime_ns,
+                device_id: scalar.device_id,
+                inode: scalar.inode,
+                parse_version: scalar.parse_version,
+                state: LocalFileState::parse(&scalar.state)?,
+                dependencies: dependencies
+                    .remove(&scalar.local_file_key)
+                    .unwrap_or_default(),
+            });
+        }
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    pub async fn local_file_identities(
+        &self,
+        source: SourceKey,
+        identities: &[(i64, i64)],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<LocalFileRow>> {
+        if identities.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local identity batch exceeds 128 files".to_string(),
+            ));
+        }
+        if identities.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let mut query =
+            QueryBuilder::<Sqlite>::new("WITH requested(device_id,inode,position) AS (");
+        query.push_values(
+            identities.iter().enumerate(),
+            |mut row, (position, identity)| {
+                row.push_bind(identity.0)
+                    .push_bind(identity.1)
+                    .push_bind(position as i64);
+            },
+        );
+        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
+            .push_bind(source)
+            .push(" AND file.device_id=requested.device_id AND file.inode=requested.inode ORDER BY requested.position,file.local_file_key");
+        let scalars = query
+            .build_query_as::<LocalFileScalar>()
+            .persistent(false)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = load_local_file_rows(&mut transaction, scalars).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    pub async fn remove_local_file(
+        &self,
+        source: SourceKey,
+        key: LocalFileKey,
+    ) -> LibraryResult<bool> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(
+            sqlx::query("DELETE FROM local_files WHERE source_key=?1 AND local_file_key=?2")
+                .bind(source)
+                .bind(key)
+                .execute(connection)
+                .await?
+                .rows_affected()
+                == 1,
+        )
+    }
+
+    pub async fn local_file_identity(
+        &self,
+        source: SourceKey,
+        device_id: i64,
+        inode: i64,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<LocalFileRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let scalar = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state FROM local_files WHERE source_key=?1 AND device_id=?2 AND inode=?3 ORDER BY local_file_key LIMIT 1")
+            .bind(source).bind(device_id).bind(inode).fetch_optional(&mut *connection).await?;
+        let result = if let Some(scalar) = scalar {
+            let dependencies = sqlx::query_scalar("SELECT dependency_path FROM local_file_dependencies WHERE local_file_key=?1 ORDER BY position")
+                .bind(scalar.local_file_key).fetch_all(&mut *connection).await?;
+            Some(LocalFileRow {
+                local_file_key: scalar.local_file_key,
+                path: scalar.path,
+                root: scalar.root,
+                relative_path: scalar.relative_path,
+                kind: LocalFileKind::parse(&scalar.kind)?,
+                size_bytes: scalar.size_bytes,
+                mtime_ns: scalar.mtime_ns,
+                device_id: scalar.device_id,
+                inode: scalar.inode,
+                parse_version: scalar.parse_version,
+                state: LocalFileState::parse(&scalar.state)?,
+                dependencies,
+            })
+        } else {
+            None
         };
-        if files.is_empty() && removed_paths.is_empty() && replacement.is_empty() {
-            return Ok(None);
-        }
-        let favorite_update = self.local_favorite_update(&replacement)?;
-        let stored = self.store.replace_local_component(
-            self.source_id().clone(),
-            self.library_id(),
-            observed_at,
-            files,
-            removed_paths,
-            replacement,
-            favorite_update,
-        )?;
-        let mut accepted = self.replace_local_component(
-            stored.files,
-            stored.removed_paths,
-            stored.replacement,
-            stored.imports,
-            stored.favorites,
-            stored.activity,
-        )?;
-        accepted.home = AcceptedHomeChange::Rebuild;
-        accepted.download_coverage_changed = true;
-        Ok(Some(accepted))
-    }
-}
-
-impl Library {
-    /// Returns only accepted filesystem observations needed to decide whether a
-    /// Local notification represents a real change.
-    ///
-    /// This deliberately does not clone Tracks, Albums, or relationship facts.
-    /// The logical component is resolved only after Local has compared these
-    /// observations with the filesystem.
-    pub fn local_file_baseline(&self, seeds: &[LocalFileSeed]) -> LibraryResult<LocalFileBaseline> {
-        let state = self.read_state()?;
-        let mut pending = VecDeque::<(String, bool)>::new();
-        let mut artwork_directories = BTreeSet::new();
-        for seed in seeds {
-            match seed {
-                LocalFileSeed::Path(path) => {
-                    let tree = state
-                        .local_files
-                        .get(path)
-                        .is_some_and(|file| file.kind == LocalFileKind::Directory);
-                    pending.push_back((path.clone(), tree));
-                }
-                LocalFileSeed::DirectoryTree(path) => {
-                    if state.local_files.contains_key(path)
-                        || state.directory_children.contains_key(path)
-                    {
-                        pending.push_back((path.clone(), true));
-                    } else {
-                        let root = std::path::Path::new(path);
-                        pending.extend(
-                            state
-                                .local_files
-                                .keys()
-                                .filter(|candidate| {
-                                    std::path::Path::new(candidate).starts_with(root)
-                                })
-                                .cloned()
-                                .map(|path| (path, false)),
-                        );
-                    }
-                }
-                LocalFileSeed::ArtworkDirectory(path) => {
-                    artwork_directories.insert(path.clone());
-                    pending.extend(
-                        state
-                            .directory_images
-                            .get(path)
-                            .into_iter()
-                            .flatten()
-                            .cloned()
-                            .map(|path| (path, false)),
-                    );
-                }
-            }
-        }
-
-        let mut visited = HashSet::new();
-        let mut expanded = HashSet::new();
-        let mut files = Vec::new();
-        while let Some((path, tree)) = pending.pop_front() {
-            if tree && expanded.insert(path.clone()) {
-                pending.extend(
-                    state
-                        .directory_children
-                        .get(&path)
-                        .into_iter()
-                        .flatten()
-                        .cloned()
-                        .map(|path| (path, true)),
-                );
-            }
-            if !visited.insert(path.clone()) {
-                continue;
-            }
-            if let Some(file) = state.local_files.get(&path) {
-                files.push(file.clone());
-                if file.kind == LocalFileKind::Cue {
-                    pending.extend(file.dependencies.iter().cloned().map(|path| (path, false)));
-                }
-            }
-            pending.extend(
-                state
-                    .cue_dependents
-                    .get(&path)
-                    .into_iter()
-                    .flatten()
-                    .cloned()
-                    .map(|path| (path, false)),
-            );
-        }
-        files.sort_by(|left, right| left.path.cmp(&right.path));
-        let tracked_media_paths = files
-            .iter()
-            .filter(|file| {
-                file.kind == LocalFileKind::Media && state.path_tracks.contains_key(&file.path)
-            })
-            .map(|file| file.path.clone())
-            .collect();
-        Ok(LocalFileBaseline {
-            files,
-            tracked_media_paths,
-            accepted_media_counts_by_directory: artwork_directories
-                .into_iter()
-                .map(|directory| {
-                    let count = state
-                        .directory_media_counts
-                        .get(&directory)
-                        .copied()
-                        .unwrap_or_default();
-                    (directory, count)
-                })
-                .collect(),
-        })
+        Database::clear_progress(&mut connection).await?;
+        Ok(result)
     }
 
-    pub fn local_component_baseline(
+    pub async fn upsert_local_access(
         &self,
-        seeds: &[LocalComponentSeed],
-    ) -> LibraryResult<LocalComponentBaseline> {
-        let state = self.read_state()?;
-        let mut pending_paths = VecDeque::<(String, bool)>::new();
-        let mut pending_tracks = VecDeque::<TrackId>::new();
-        let mut pending_albums = VecDeque::<AlbumId>::new();
-        for seed in seeds {
-            match seed {
-                LocalComponentSeed::Path(path) => {
-                    let tree = state
-                        .local_files
-                        .get(path)
-                        .is_some_and(|file| file.kind == LocalFileKind::Directory);
-                    pending_paths.push_back((path.clone(), tree));
-                }
-                LocalComponentSeed::DirectoryTree(path) => {
-                    if state.local_files.contains_key(path)
-                        || state.directory_children.contains_key(path)
-                    {
-                        pending_paths.push_back((path.clone(), true));
-                    } else {
-                        let root = std::path::Path::new(path);
-                        pending_paths.extend(
-                            state
-                                .local_files
-                                .keys()
-                                .filter(|candidate| {
-                                    std::path::Path::new(candidate).starts_with(root)
-                                })
-                                .cloned()
-                                .map(|path| (path, false)),
-                        );
-                    }
-                }
-                LocalComponentSeed::ArtworkDirectory(path) => {
-                    pending_paths.push_back((path.clone(), true));
-                }
-                LocalComponentSeed::Album(id) => {
-                    pending_albums.push_back(id.clone());
-                }
-            }
+        source: SourceKey,
+        access: &LocalAccessWrite,
+    ) -> LibraryResult<LocalAccessFileKey> {
+        validate_local_access(access)?;
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        if let Some(track_object_id) = access.track_object_id.as_deref() {
+            sqlx::query("DELETE FROM local_access_files WHERE source_key=?1 AND track_object_id=?2 AND path<>?3")
+                .bind(source).bind(track_object_id).bind(&access.path).execute(&mut *transaction).await?;
         }
-
-        let mut visited_paths = HashSet::new();
-        let mut expanded_directories = HashSet::new();
-        let mut file_paths = HashSet::new();
-        let mut track_ids = HashSet::new();
-        let mut album_ids = HashSet::new();
-
-        while !(pending_paths.is_empty() && pending_tracks.is_empty() && pending_albums.is_empty())
+        let key=sqlx::query_scalar::<_, LocalAccessFileKey>("INSERT INTO local_access_files(source_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,title,normalized_title,album,normalized_album,artist,normalized_artist,disc_number,track_number,duration_millis,media_uri,loudness_analysis_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,lower(?11),?12,lower(?12),?13,lower(?13),?14,?15,?16,?17,?18) ON CONFLICT(source_key,path) DO UPDATE SET track_object_id=excluded.track_object_id,root=excluded.root,relative_path=excluded.relative_path,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parser_version=excluded.parser_version,title=excluded.title,normalized_title=excluded.normalized_title,album=excluded.album,normalized_album=excluded.normalized_album,artist=excluded.artist,normalized_artist=excluded.normalized_artist,disc_number=excluded.disc_number,track_number=excluded.track_number,duration_millis=excluded.duration_millis,media_uri=excluded.media_uri,loudness_analysis_key=excluded.loudness_analysis_key RETURNING local_access_file_key")
+            .bind(source).bind(access.track_object_id.as_deref()).bind(&access.path).bind(&access.root)
+            .bind(&access.relative_path).bind(access.size_bytes).bind(access.mtime_ns)
+            .bind(access.device_id).bind(access.inode).bind(access.parser_version)
+            .bind(&access.title).bind(&access.album).bind(&access.artist).bind(access.disc_number)
+            .bind(access.track_number).bind(access.duration_millis).bind(&access.media_uri)
+            .bind(access.loudness_analysis_key.as_slice())
+            .fetch_one(&mut *transaction).await?;
+        if let Some(track_object_id) = access.track_object_id.as_deref()
+            && let Some((track, album)) =
+                sqlx::query_as::<_, (crate::TrackKey, Option<crate::AlbumKey>)>(
+                    "SELECT track_key,album_key FROM tracks WHERE source_key=?1 AND object_id=?2",
+                )
+                .bind(source)
+                .bind(track_object_id)
+                .fetch_optional(&mut *transaction)
+                .await?
         {
-            if let Some((path, tree)) = pending_paths.pop_front() {
-                let file = state.local_files.get(&path);
-                if tree && expanded_directories.insert(path.clone()) {
-                    pending_paths.extend(
-                        state
-                            .directory_children
-                            .get(&path)
-                            .into_iter()
-                            .flatten()
-                            .cloned()
-                            .map(|child| (child, true)),
-                    );
-                }
-                if !visited_paths.insert(path.clone()) {
-                    continue;
-                }
-                if let Some(file) = file {
-                    file_paths.insert(path.clone());
-                    if file.kind == LocalFileKind::Cue {
-                        pending_paths.extend(
-                            file.dependencies
-                                .iter()
-                                .cloned()
-                                .map(|dependency| (dependency, false)),
-                        );
-                    }
-                }
-                pending_paths.extend(
-                    state
-                        .cue_dependents
-                        .get(&path)
-                        .into_iter()
-                        .flatten()
-                        .cloned()
-                        .map(|cue| (cue, false)),
-                );
-                pending_tracks.extend(
-                    state
-                        .path_tracks
-                        .get(&path)
-                        .into_iter()
-                        .flatten()
-                        .filter_map(|slot| state.tracks.get_slot(*slot))
-                        .map(|track| track.id.clone()),
-                );
-                for item in state.artwork_items.get(&path).into_iter().flatten() {
-                    match item {
-                        LocalArtworkItemId::Album(slot) => pending_albums
-                            .extend(state.albums.get_slot(*slot).map(|album| album.id.clone())),
-                        LocalArtworkItemId::Track(slot) => pending_tracks
-                            .extend(state.tracks.get_slot(*slot).map(|track| track.id.clone())),
-                        LocalArtworkItemId::Artist(_) => {}
-                    }
-                }
-                continue;
-            }
-
-            if let Some(id) = pending_tracks.pop_front() {
-                if !track_ids.insert(id.clone()) {
-                    continue;
-                }
-                let Some(track) = state.tracks.get(&id) else {
-                    continue;
-                };
-                pending_paths.extend(
-                    [
-                        track.source_path.as_deref(),
-                        track.cue.as_ref().map(|cue| cue.cue_path.as_str()),
-                        track.local_artwork.as_ref().map(|artwork| artwork.path()),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    .map(|path| (path.to_string(), false)),
-                );
-                pending_albums.extend(track.album_id.iter().cloned());
-                continue;
-            }
-
-            if let Some(id) = pending_albums.pop_front() {
-                if !album_ids.insert(id.clone()) {
-                    continue;
-                }
-                let Some(album) = state.albums.get(&id) else {
-                    continue;
-                };
-                if let Some(artwork) = &album.local_artwork {
-                    pending_paths.push_back((artwork.path().to_string(), false));
-                }
-                pending_tracks.extend(
-                    album
-                        .tracks
-                        .iter()
-                        .filter_map(|slot| state.tracks.get_slot(*slot))
-                        .map(|track| track.id.clone()),
-                );
+            sqlx::query("UPDATE tracks SET loudness_analysis_key=?2 WHERE track_key=?1")
+                .bind(track)
+                .bind(access.loudness_analysis_key.as_slice())
+                .execute(&mut *transaction)
+                .await?;
+            if let Some(album) = album {
+                recompute_album_loudness_key(&mut transaction, album).await?;
             }
         }
-
-        let mut baseline = LocalComponentBaseline {
-            files: file_paths
-                .into_iter()
-                .filter_map(|path| state.local_files.get(&path).cloned())
-                .collect(),
-            albums: album_ids
-                .into_iter()
-                .filter_map(|id| state.albums.get(&id))
-                .filter(|album| album.source_provided)
-                .map(|album| album.album.as_ref().clone())
-                .collect(),
-            tracks: track_ids
-                .into_iter()
-                .filter_map(|id| state.tracks.get(&id).cloned())
-                .collect(),
-        };
-        baseline
-            .files
-            .sort_by(|left, right| left.path.cmp(&right.path));
-        baseline
-            .albums
-            .sort_by(|left, right| left.id.cmp(&right.id));
-        baseline
-            .tracks
-            .sort_by(|left, right| left.id.cmp(&right.id));
-        Ok(baseline)
+        transaction.commit().await?;
+        Ok(key)
     }
+
+    pub async fn resolve_local_access(
+        &self,
+        source: SourceKey,
+        track_object_id: Option<&str>,
+        title: &str,
+        album: &str,
+        artist: &str,
+        disc_number: i64,
+        track_number: i64,
+        duration_millis: i64,
+    ) -> LibraryResult<Option<LocalAccessRow>> {
+        let mut connection = self.acquire_playback().await?;
+        if let Some(track_object_id) = track_object_id {
+            if let Some(row) = sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND track_object_id=?2")
+                .bind(source).bind(track_object_id).fetch_optional(&mut *connection).await? {
+                return Ok(Some(row));
+            }
+        }
+        Ok(sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND normalized_title=lower(?2) AND normalized_album=lower(?3) AND normalized_artist=lower(?4) AND disc_number=?5 AND track_number=?6 AND duration_millis=?7 ORDER BY local_access_file_key LIMIT 1")
+            .bind(source).bind(title).bind(album).bind(artist).bind(disc_number)
+            .bind(track_number).bind(duration_millis).fetch_optional(&mut *connection).await?)
+    }
+
+    pub async fn remove_local_access(
+        &self,
+        source: SourceKey,
+        key: LocalAccessFileKey,
+    ) -> LibraryResult<bool> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let track_object_id=sqlx::query_scalar::<_,Option<String>>("SELECT track_object_id FROM local_access_files WHERE source_key=?1 AND local_access_file_key=?2")
+            .bind(source).bind(key).fetch_optional(&mut *transaction).await?.flatten();
+        let removed = sqlx::query(
+            "DELETE FROM local_access_files WHERE source_key=?1 AND local_access_file_key=?2",
+        )
+        .bind(source)
+        .bind(key)
+        .execute(&mut *transaction)
+        .await?
+        .rows_affected()
+            == 1;
+        if let Some(track_object_id) = track_object_id
+            && let Some((track, album)) =
+                sqlx::query_as::<_, (crate::TrackKey, Option<crate::AlbumKey>)>(
+                    "SELECT track_key,album_key FROM tracks WHERE source_key=?1 AND object_id=?2",
+                )
+                .bind(source)
+                .bind(track_object_id)
+                .fetch_optional(&mut *transaction)
+                .await?
+        {
+            sqlx::query("UPDATE tracks SET loudness_analysis_key=source_loudness_analysis_key WHERE track_key=?1")
+                .bind(track).execute(&mut *transaction).await?;
+            if let Some(album) = album {
+                recompute_album_loudness_key(&mut transaction, album).await?;
+            }
+        }
+        transaction.commit().await?;
+        Ok(removed)
+    }
+}
+
+async fn load_local_file_rows(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    scalars: Vec<LocalFileScalar>,
+) -> LibraryResult<Vec<LocalFileRow>> {
+    let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
+    if !scalars.is_empty() {
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,position) AS (");
+        query.push_values(scalars.iter().enumerate(), |mut row, (position, file)| {
+            row.push_bind(file.local_file_key)
+                .push_bind(position as i64);
+        });
+        query.push(") SELECT dependency.local_file_key,dependency.dependency_path FROM requested JOIN local_file_dependencies dependency USING(local_file_key) ORDER BY requested.position,dependency.position");
+        for dependency in query
+            .build_query_as::<LocalDependency>()
+            .persistent(false)
+            .fetch_all(&mut **transaction)
+            .await?
+        {
+            dependencies
+                .entry(dependency.local_file_key)
+                .or_default()
+                .push(dependency.dependency_path);
+        }
+    }
+    scalars
+        .into_iter()
+        .map(|scalar| {
+            Ok(LocalFileRow {
+                local_file_key: scalar.local_file_key,
+                path: scalar.path,
+                root: scalar.root,
+                relative_path: scalar.relative_path,
+                kind: LocalFileKind::parse(&scalar.kind)?,
+                size_bytes: scalar.size_bytes,
+                mtime_ns: scalar.mtime_ns,
+                device_id: scalar.device_id,
+                inode: scalar.inode,
+                parse_version: scalar.parse_version,
+                state: LocalFileState::parse(&scalar.state)?,
+                dependencies: dependencies
+                    .remove(&scalar.local_file_key)
+                    .unwrap_or_default(),
+            })
+        })
+        .collect()
+}
+
+fn validate_local_file(file: &LocalFileWrite, dependencies: &[String]) -> LibraryResult<()> {
+    if file.path.is_empty()
+        || file.root.is_empty()
+        || file.size_bytes.is_some_and(|value| value < 0)
+        || dependencies.iter().any(String::is_empty)
+    {
+        return Err(LibraryError::InvalidRequest(
+            "invalid Local file observation".to_string(),
+        ));
+    }
+    Ok(())
+}
+
+fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {
+    if access.path.is_empty()
+        || access.root.is_empty()
+        || access.media_uri.is_empty()
+        || access.size_bytes < 0
+        || access.parser_version < 1
+        || access.disc_number < 0
+        || access.track_number < 0
+        || access.duration_millis < 0
+    {
+        return Err(LibraryError::InvalidRequest(
+            "invalid Local access file".to_string(),
+        ));
+    }
+    Ok(())
 }

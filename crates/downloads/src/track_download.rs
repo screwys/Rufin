@@ -1,41 +1,54 @@
 use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::time::Duration;
 
-use library::{Library, ResolvedStream, SourceId, StreamRequest, Track, TrackId};
+use library::{Database, SourceKey, TrackKey, TrackRow};
+use playback::{ResolvedStream, StreamRequest};
 use reqwest::header::{
     ACCEPT_ENCODING, CONTENT_ENCODING, CONTENT_LENGTH, CONTENT_RANGE, DATE, ETAG, IF_RANGE,
     LAST_MODIFIED, RANGE,
 };
 use serde::{Deserialize, Serialize};
-#[cfg(test)]
-use sources::{NativeSourceResult, Source};
-use sources::{SourceError, SourceResult};
+use sources::{SourceError, SourceId, SourceResult};
 use tokio::io::AsyncWriteExt;
 use tokio::sync::oneshot;
 use tracing::warn;
 
-use crate::DownloadOwner;
+use crate::{DownloadOwner, ReleasedDownloadOwner, rebind_released_subject};
 
-pub(super) const RECORD_VERSION: u32 = 3;
+pub(super) const RECORD_VERSION: u32 = 4;
 pub(super) const AUDIO_EXTENSION: &str = "audio";
 pub(super) const RECORD_EXTENSION: &str = "json";
 pub(super) const PART_EXTENSION: &str = "part";
 const CHECKPOINT_EXTENSION: &str = "resume";
-const CUSTOM_STAGING_DIRECTORY: &str = ".rufin-partials";
+pub(super) const CUSTOM_STAGING_DIRECTORY: &str = ".rufin-partials";
 
 #[derive(Debug, Deserialize, Serialize)]
 pub(super) struct DownloadRecord {
     pub(super) version: u32,
     pub(super) source_id: SourceId,
-    pub(super) track_id: TrackId,
+    pub(super) track_id: TrackKey,
     #[serde(default)]
     pub(super) owners: HashSet<DownloadOwner>,
+    #[serde(default)]
+    pub(super) custom_storage: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) audio_root: Option<PathBuf>,
+    pub(super) relative_audio_path: Option<PathBuf>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub(super) audio_path: Option<PathBuf>,
+    pub(super) completed_size: Option<u64>,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasedDownloadRecordV3 {
+    version: u32,
+    source_id: SourceId,
+    track_id: String,
+    #[serde(default)]
+    owners: HashSet<ReleasedDownloadOwner>,
+    #[serde(default)]
+    audio_root: Option<PathBuf>,
+    #[serde(default)]
+    audio_path: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -137,23 +150,6 @@ impl TransferClients {
         Err(SourceError::Other(
             "the download server returned an unsupported successful response".to_string(),
         ))
-    }
-
-    #[cfg(test)]
-    async fn download(
-        &self,
-        source: &Source,
-        request: &StreamRequest,
-        paths: &DownloadPaths,
-    ) -> SourceResult<NativeSourceResult<()>> {
-        let (_cancellation, mut receiver) = oneshot::channel();
-        let NativeSourceResult::Available(stream) = source.stream(request).await? else {
-            return Ok(NativeSourceResult::Unavailable);
-        };
-        let representation = representation_key(source.source_id(), request, stream.redacted_uri());
-        self.download_cancellable(&stream, &representation, paths, &mut receiver)
-            .await?;
-        Ok(NativeSourceResult::Available(()))
     }
 }
 
@@ -393,7 +389,7 @@ pub(super) async fn cleanup_staging(
     root: &Path,
     source_id: &SourceId,
     directory: Option<&Path>,
-    track_ids: &HashSet<TrackId>,
+    track_ids: &HashSet<TrackKey>,
 ) -> SourceResult<()> {
     let expected = track_ids
         .iter()
@@ -587,8 +583,9 @@ pub(super) async fn run_transfer(
 pub(super) async fn add_owner_to_existing_download(
     root: &Path,
     source_id: &SourceId,
-    track_id: &TrackId,
+    track_id: &TrackKey,
     owner: &DownloadOwner,
+    custom_directory: Option<&Path>,
 ) -> Result<bool, String> {
     let metadata_paths = download_paths(root, source_id, track_id);
     if !metadata_paths.record.is_file() {
@@ -602,7 +599,14 @@ pub(super) async fn add_owner_to_existing_download(
     if record.source_id != *source_id || record.track_id != *track_id {
         return Ok(false);
     }
-    let paths = record_download_paths(root, source_id, &record);
+    let paths = match record_download_paths(root, source_id, &record, custom_directory) {
+        Ok(paths) => paths,
+        Err(error) => {
+            warn!(%error, path = %metadata_paths.record.display(), "ignored an unsafe download record");
+            quarantine_record(&metadata_paths.record);
+            return Ok(false);
+        }
+    };
     if !paths.audio.is_file() {
         return Ok(false);
     }
@@ -632,21 +636,35 @@ pub(super) async fn write_record(
 pub(super) async fn finalize_download(
     paths: &DownloadPaths,
     source_id: SourceId,
-    track_id: TrackId,
+    track_id: TrackKey,
     owner: DownloadOwner,
 ) -> Result<(), String> {
+    tokio::fs::rename(&paths.audio_part, &paths.audio)
+        .await
+        .map_err(|error| format!("could not save the downloaded track: {error}"))?;
+    let completed_size = tokio::fs::metadata(&paths.audio)
+        .await
+        .map_err(|error| format!("could not inspect the downloaded track: {error}"))?
+        .len();
+    let storage_root = paths.audio_root.as_deref().unwrap_or(&paths.directory);
+    let relative_audio_path = paths
+        .audio
+        .strip_prefix(storage_root)
+        .map_err(|_| "the downloaded track is outside its managed storage".to_string())?
+        .to_path_buf();
+    if !normal_relative_path(&relative_audio_path) {
+        return Err("the downloaded track has an invalid managed path".to_string());
+    }
     let record = DownloadRecord {
         version: RECORD_VERSION,
         source_id,
         track_id,
         owners: HashSet::from([owner]),
-        audio_root: paths.audio_root.clone(),
-        audio_path: Some(paths.audio.clone()),
+        custom_storage: storage_root != paths.directory,
+        relative_audio_path: Some(relative_audio_path),
+        completed_size: Some(completed_size),
     };
     write_record(paths, &record).await?;
-    tokio::fs::rename(&paths.audio_part, &paths.audio)
-        .await
-        .map_err(|error| format!("could not save the downloaded track: {error}"))?;
     let _ = remove_file_if_present(&paths.checkpoint).await;
     Ok(())
 }
@@ -654,14 +672,22 @@ pub(super) async fn finalize_download(
 pub(super) fn load_download_records(
     root: &Path,
     source_id: &SourceId,
-) -> Result<HashMap<TrackId, DownloadRecord>, String> {
-    load_download_state(root, source_id).map(|(_, records)| records)
+    custom_directory: Option<&Path>,
+) -> Result<HashMap<TrackKey, DownloadRecord>, String> {
+    load_download_state(root, source_id, custom_directory).map(|(_, records)| records)
 }
 
 fn load_download_state(
     root: &Path,
     source_id: &SourceId,
-) -> Result<(HashMap<TrackId, PathBuf>, HashMap<TrackId, DownloadRecord>), String> {
+    custom_directory: Option<&Path>,
+) -> Result<
+    (
+        HashMap<TrackKey, DownloadPaths>,
+        HashMap<TrackKey, DownloadRecord>,
+    ),
+    String,
+> {
     match std::fs::metadata(root) {
         Ok(metadata) if !metadata.is_dir() => {
             return Err(format!(
@@ -693,7 +719,6 @@ fn load_download_state(
     };
     let mut files = HashMap::new();
     let mut records = HashMap::new();
-    let mut referenced_audio = HashSet::new();
     for entry in entries {
         let entry = entry.map_err(|error| format!("could not read a download entry: {error}"))?;
         let path = entry.path();
@@ -719,68 +744,280 @@ fn load_download_state(
             }
             Ok(_) | Err(_) => {
                 warn!(path = %path.display(), "ignored an invalid download record");
-                let _ = std::fs::remove_file(path);
+                quarantine_record(&path);
                 continue;
             }
         };
         if record.owners.is_empty() {
             record.owners.insert(DownloadOwner::Retained);
         }
-        let expected = record_download_paths(root, source_id, &record);
+        let expected = match record_download_paths(root, source_id, &record, custom_directory) {
+            Ok(paths) => paths,
+            Err(error) => {
+                warn!(%error, path = %path.display(), "ignored an unsafe download record");
+                quarantine_record(&path);
+                continue;
+            }
+        };
         if path != expected.record {
             warn!(path = %path.display(), "ignored a misplaced download record");
-            let _ = std::fs::remove_file(path);
+            quarantine_record(&path);
             continue;
         }
-        if expected.audio.is_file() {
-            if expected.audio_root.is_none() {
-                referenced_audio.insert(
-                    expected
-                        .audio
-                        .file_name()
-                        .expect("download audio path has a file name")
-                        .to_os_string(),
-                );
-            }
+        if expected.audio.is_file()
+            && record.completed_size.is_none_or(|expected_size| {
+                std::fs::metadata(&expected.audio)
+                    .is_ok_and(|metadata| metadata.len() == expected_size)
+            })
+        {
             let _ = std::fs::remove_file(&expected.audio_part);
             let _ = std::fs::remove_file(&expected.checkpoint);
-            files.insert(record.track_id.clone(), expected.audio);
+            files.insert(record.track_id, expected);
             records.insert(record.track_id.clone(), record);
         } else {
-            let _ = std::fs::remove_file(path);
-        }
-    }
-    if let Ok(entries) = std::fs::read_dir(&directory) {
-        for entry in entries.flatten() {
-            let path = entry.path();
-            if path.extension().and_then(|value| value.to_str()) == Some(AUDIO_EXTENSION)
-                && path
-                    .file_name()
-                    .is_some_and(|name| !referenced_audio.contains(name))
-            {
-                let _ = std::fs::remove_file(path);
-            }
+            warn!(path = %path.display(), "ignored a missing or size-mismatched download");
+            quarantine_record(&path);
         }
     }
     Ok((files, records))
 }
 
-pub(super) fn attach_downloaded_files(
+async fn migrate_released_download_records(
     root: &Path,
-    loaded: &Arc<Library>,
+    database: &Database,
+    source_key: SourceKey,
+    source_id: &SourceId,
+    custom_directory: Option<&Path>,
+) -> Result<(), String> {
+    let directory = source_directory(root, source_id);
+    let entries = match std::fs::read_dir(&directory) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => {
+            return Err(format!(
+                "could not read downloads at {}: {error}",
+                directory.display()
+            ));
+        }
+    };
+    let cancellation = library::ReadCancellation::new();
+    for entry in entries {
+        let entry = entry.map_err(|error| format!("could not read a download entry: {error}"))?;
+        let path = entry.path();
+        if !managed_record_file(&path) {
+            continue;
+        }
+        let bytes = match std::fs::read(&path) {
+            Ok(bytes) => bytes,
+            Err(error) => {
+                warn!(%error, path = %path.display(), "could not read a released download record");
+                continue;
+            }
+        };
+        if serde_json::from_slice::<DownloadRecord>(&bytes).is_ok() {
+            continue;
+        }
+        let released = match serde_json::from_slice::<ReleasedDownloadRecordV3>(&bytes) {
+            Ok(record) if record.version == 3 && record.source_id == *source_id => record,
+            _ => continue,
+        };
+        let Some(track_id) = database
+            .track_key_by_object(source_key, &released.track_id, &cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+        else {
+            continue;
+        };
+        let (custom_storage, relative_audio_path) = match released_audio_location(
+            root,
+            source_id,
+            &released,
+            custom_directory,
+        ) {
+            Ok(location) => location,
+            Err(error) => {
+                warn!(%error, path = %path.display(), "quarantined an unsafe released download record");
+                quarantine_record(&path);
+                continue;
+            }
+        };
+        let storage_root = if custom_storage {
+            custom_directory.expect("custom released storage was authorized")
+        } else {
+            directory.as_path()
+        };
+        let audio = authorize_existing_audio(storage_root, &relative_audio_path)?;
+        let completed_size = std::fs::metadata(&audio)
+            .map_err(|error| format!("could not inspect {}: {error}", audio.display()))?
+            .len();
+        let mut owners = HashSet::new();
+        for owner in released.owners {
+            match owner {
+                ReleasedDownloadOwner::Retained => {
+                    owners.insert(DownloadOwner::Retained);
+                }
+                ReleasedDownloadOwner::Subject(subject) => {
+                    if let Some(subject) =
+                        rebind_released_subject(database, source_key, subject, &cancellation)
+                            .await?
+                    {
+                        owners.insert(DownloadOwner::Subject(subject));
+                    }
+                }
+            }
+        }
+        if owners.is_empty() {
+            owners.insert(DownloadOwner::Retained);
+        }
+        let record = DownloadRecord {
+            version: RECORD_VERSION,
+            source_id: source_id.clone(),
+            track_id,
+            owners,
+            custom_storage,
+            relative_audio_path: Some(relative_audio_path),
+            completed_size: Some(completed_size),
+        };
+        let paths = record_download_paths(root, source_id, &record, custom_directory)?;
+        if let Some(parent) = paths.record.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        write_record(&paths, &record).await?;
+        if path != paths.record {
+            std::fs::remove_file(&path).map_err(|error| {
+                format!("could not finish released download migration: {error}")
+            })?;
+        }
+    }
+    Ok(())
+}
+
+fn released_audio_location(
+    root: &Path,
+    source_id: &SourceId,
+    record: &ReleasedDownloadRecordV3,
+    custom_directory: Option<&Path>,
+) -> Result<(bool, PathBuf), String> {
+    let internal = source_directory(root, source_id);
+    let Some(stored_audio) = record.audio_path.as_deref() else {
+        return Ok((
+            false,
+            PathBuf::from(format!("{}.{}", hash_id(&record.track_id), AUDIO_EXTENSION)),
+        ));
+    };
+    if stored_audio.is_absolute() {
+        for (custom, approved) in [(false, Some(internal.as_path())), (true, custom_directory)] {
+            let Some(approved) = approved else { continue };
+            if let Ok(relative) = stored_audio.strip_prefix(approved)
+                && normal_relative_path(relative)
+                && authorize_existing_audio(approved, relative).is_ok()
+            {
+                return Ok((custom, relative.to_path_buf()));
+            }
+        }
+        return Err("the released download path is outside configured storage".to_string());
+    }
+    if !normal_relative_path(stored_audio) {
+        return Err("the released download path is not a normal relative path".to_string());
+    }
+    let custom = match record.audio_root.as_deref() {
+        None => false,
+        Some(stored_root) if same_approved_root(stored_root, &internal) => false,
+        Some(stored_root)
+            if custom_directory
+                .is_some_and(|approved| same_approved_root(stored_root, approved)) =>
+        {
+            true
+        }
+        Some(_) => return Err("the released download root is not currently configured".to_string()),
+    };
+    let approved = if custom {
+        custom_directory.expect("custom released storage was selected")
+    } else {
+        internal.as_path()
+    };
+    authorize_existing_audio(approved, stored_audio)?;
+    Ok((custom, stored_audio.to_path_buf()))
+}
+
+fn same_approved_root(left: &Path, right: &Path) -> bool {
+    left == right
+        || std::fs::canonicalize(left)
+            .ok()
+            .zip(std::fs::canonicalize(right).ok())
+            .is_some_and(|(left, right)| left == right)
+}
+
+pub(super) async fn attach_downloaded_files(
+    root: &Path,
+    database: &Database,
+    source_key: SourceKey,
+    source_id: &SourceId,
+    custom_directory: Option<&Path>,
 ) -> Result<Vec<DownloadPaths>, String> {
-    let source_id = loaded.source_id();
-    let (files, records) = load_download_state(root, source_id)?;
-    let removed = loaded
-        .replace_downloaded_files(files)
-        .map_err(|error| error.to_string())?;
-    Ok(removed
+    migrate_released_download_records(root, database, source_key, source_id, custom_directory)
+        .await?;
+    let (files, records) = load_download_state(root, source_id, custom_directory)?;
+    let cancellation = library::ReadCancellation::new();
+    let keys = files.keys().copied().collect::<Vec<_>>();
+    let mut current = HashSet::new();
+    for page in keys.chunks(256) {
+        for track in database
+            .track_rows(source_key, page, &cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+        {
+            let Some(paths) = files.get(&track.track_key) else {
+                continue;
+            };
+            let (storage_root, relative_path) = local_access_projection(paths)?;
+            let metadata = std::fs::metadata(&paths.audio).map_err(|error| error.to_string())?;
+            database
+                .upsert_local_access(
+                    source_key,
+                    &library::LocalAccessWrite {
+                        track_object_id: Some(track.object_id.clone()),
+                        path: paths.audio.to_string_lossy().into_owned(),
+                        root: storage_root.to_string_lossy().into_owned(),
+                        relative_path: relative_path.to_string_lossy().into_owned(),
+                        size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+                        mtime_ns: metadata
+                            .modified()
+                            .ok()
+                            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                            .map_or(0, |value| {
+                                i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
+                            }),
+                        device_id: None,
+                        inode: None,
+                        parser_version: RECORD_VERSION as i64,
+                        title: track.title.clone(),
+                        album: track.display_album.clone(),
+                        artist: track.display_artist.clone(),
+                        disc_number: track.disc_number,
+                        track_number: track.track_number,
+                        duration_millis: track.duration_millis,
+                        media_uri: format!("file://{}", paths.audio.to_string_lossy()),
+                        loudness_analysis_key: track.loudness_analysis_key,
+                    },
+                )
+                .await
+                .map_err(|error| error.to_string())?;
+            current.insert(track.track_key);
+        }
+    }
+    Ok(keys
         .into_iter()
-        .map(|track_id| {
+        .filter(|key| !current.contains(key))
+        .map(|key| {
             records
-                .get(&track_id)
-                .map(|record| record_download_paths(root, source_id, record))
-                .unwrap_or_else(|| download_paths(root, source_id, &track_id))
+                .get(&key)
+                .and_then(|record| {
+                    record_download_paths(root, source_id, record, custom_directory).ok()
+                })
+                .unwrap_or_else(|| download_paths(root, source_id, &key))
         })
         .collect())
 }
@@ -839,10 +1076,10 @@ pub(super) fn source_directory(root: &Path, source_id: &SourceId) -> PathBuf {
 pub(super) fn download_paths(
     root: &Path,
     source_id: &SourceId,
-    track_id: &TrackId,
+    track_id: &TrackKey,
 ) -> DownloadPaths {
     let directory = source_directory(root, source_id);
-    let stem = hash_id(track_id.as_str());
+    let stem = hash_id(&track_id.raw().to_string());
     let audio = directory.join(format!("{stem}.{AUDIO_EXTENSION}"));
     let audio_part = part_path(&audio);
     let checkpoint = checkpoint_path(&audio_part);
@@ -860,7 +1097,7 @@ pub(super) fn download_paths(
 pub(super) fn staging_paths(
     root: &Path,
     source_id: &SourceId,
-    track_id: &TrackId,
+    track_id: &TrackKey,
     directory: Option<&Path>,
 ) -> DownloadPaths {
     let mut paths = download_paths(root, source_id, track_id);
@@ -872,7 +1109,7 @@ pub(super) fn staging_paths(
         .join(hash_id(source_id.as_str()));
     paths.audio_part = staging.join(format!(
         "{}.{}.{}",
-        hash_id(track_id.as_str()),
+        hash_id(&track_id.raw().to_string()),
         AUDIO_EXTENSION,
         PART_EXTENSION
     ));
@@ -880,21 +1117,44 @@ pub(super) fn staging_paths(
     paths
 }
 
+pub(super) fn released_staging_paths(
+    root: &Path,
+    source_id: &SourceId,
+    track_object_id: &str,
+    directory: Option<&Path>,
+) -> (PathBuf, PathBuf) {
+    let staging = directory
+        .map(|directory| {
+            directory
+                .join(CUSTOM_STAGING_DIRECTORY)
+                .join(hash_id(source_id.as_str()))
+        })
+        .unwrap_or_else(|| source_directory(root, source_id));
+    let audio_part = staging.join(format!(
+        "{}.{}.{}",
+        hash_id(track_object_id),
+        AUDIO_EXTENSION,
+        PART_EXTENSION
+    ));
+    let checkpoint = checkpoint_path(&audio_part);
+    (audio_part, checkpoint)
+}
+
 pub(super) fn new_download_paths(
     root: &Path,
     source_id: &SourceId,
-    track: &Track,
+    track: &TrackRow,
     directory: Option<&Path>,
     transcoded_extension: Option<&str>,
 ) -> DownloadPaths {
-    let mut paths = staging_paths(root, source_id, &track.id, directory);
+    let mut paths = staging_paths(root, source_id, &track.track_key, directory);
     let audio_root = directory
         .map(Path::to_path_buf)
         .unwrap_or_else(|| source_directory(root, source_id));
-    let artist = safe_path_component(&track.artist, "Unknown Artist");
-    let album = safe_path_component(&track.album, "Unknown Album");
+    let artist = safe_path_component(&track.display_artist, "Unknown Artist");
+    let album = safe_path_component(&track.display_album, "Unknown Album");
     let title = safe_path_component(&track.title, "Untitled");
-    let id = source_track_hash(source_id, &track.id);
+    let id = source_track_hash(source_id, &track.track_key);
     let short_id = id.chars().take(12).collect::<String>();
     let extension = download_extension(track, transcoded_extension);
     let file_name = format!(
@@ -911,26 +1171,43 @@ pub(super) fn record_download_paths(
     root: &Path,
     source_id: &SourceId,
     record: &DownloadRecord,
-) -> DownloadPaths {
+    custom_directory: Option<&Path>,
+) -> Result<DownloadPaths, String> {
     let internal_root = source_directory(root, source_id);
-    let Some(audio_root) = record.audio_root.as_ref() else {
-        return download_paths(root, source_id, &record.track_id);
+    let audio_root = if record.custom_storage {
+        custom_directory.ok_or_else(|| {
+            "the download record requires a custom storage location that is not configured"
+                .to_string()
+        })?
+    } else {
+        internal_root.as_path()
     };
-    let Some(audio) = record.audio_path.as_ref() else {
-        return download_paths(root, source_id, &record.track_id);
-    };
-    if !valid_managed_audio_path(audio_root, audio) {
-        return download_paths(root, source_id, &record.track_id);
-    }
+    let relative = record
+        .relative_audio_path
+        .as_deref()
+        .ok_or_else(|| "the download record has no relative audio path".to_string())?;
+    let audio = authorize_existing_audio(audio_root, relative)?;
     let mut paths = staging_paths(
         root,
         source_id,
         &record.track_id,
-        (audio_root != &internal_root).then_some(audio_root.as_path()),
+        record.custom_storage.then_some(audio_root),
     );
-    paths.audio_root = Some(audio_root.clone());
-    paths.audio = audio.clone();
-    paths
+    paths.audio_root = Some(audio_root.to_path_buf());
+    paths.audio = audio;
+    Ok(paths)
+}
+
+pub(super) fn local_access_projection(paths: &DownloadPaths) -> Result<(&Path, PathBuf), String> {
+    let storage_root = paths.audio_root.as_deref().unwrap_or(&paths.directory);
+    let relative = paths
+        .audio
+        .strip_prefix(storage_root)
+        .map_err(|_| "the downloaded track is outside its authorized storage".to_string())?;
+    if !normal_relative_path(relative) {
+        return Err("the downloaded track has an invalid relative storage path".to_string());
+    }
+    Ok((storage_root, relative.to_path_buf()))
 }
 
 fn part_path(path: &Path) -> PathBuf {
@@ -945,15 +1222,49 @@ fn checkpoint_path(audio_part: &Path) -> PathBuf {
     value.into()
 }
 
-fn valid_managed_audio_path(root: &Path, audio: &Path) -> bool {
-    let Ok(relative) = audio.strip_prefix(root) else {
-        return false;
-    };
-    let components = relative.components().collect::<Vec<_>>();
-    components.len() == 3
-        && components
-            .iter()
+fn normal_relative_path(path: &Path) -> bool {
+    !path.as_os_str().is_empty()
+        && !path.is_absolute()
+        && path
+            .components()
             .all(|component| matches!(component, std::path::Component::Normal(_)))
+}
+
+fn authorize_existing_audio(root: &Path, relative: &Path) -> Result<PathBuf, String> {
+    if !normal_relative_path(relative) {
+        return Err("the download record path is not a normal relative path".to_string());
+    }
+    let audio = root.join(relative);
+    let root = std::fs::canonicalize(root)
+        .map_err(|error| format!("could not authorize the download storage: {error}"))?;
+    let parent = audio
+        .parent()
+        .ok_or_else(|| "the download record path has no parent".to_string())?;
+    let parent = std::fs::canonicalize(parent)
+        .map_err(|error| format!("could not authorize the download parent: {error}"))?;
+    if !parent.starts_with(&root) {
+        return Err("the download record parent escapes its configured storage".to_string());
+    }
+    let metadata = std::fs::symlink_metadata(&audio)
+        .map_err(|error| format!("could not inspect the downloaded track: {error}"))?;
+    if metadata.file_type().is_symlink() || !metadata.is_file() {
+        return Err("the download record does not name a managed regular file".to_string());
+    }
+    let canonical_audio = std::fs::canonicalize(&audio)
+        .map_err(|error| format!("could not authorize the downloaded track: {error}"))?;
+    if !canonical_audio.starts_with(&root) {
+        return Err("the downloaded track escapes its configured storage".to_string());
+    }
+    Ok(audio)
+}
+
+fn quarantine_record(path: &Path) {
+    let quarantine = path.with_extension(format!("{RECORD_EXTENSION}.quarantine"));
+    if !quarantine.exists()
+        && let Err(error) = std::fs::rename(path, &quarantine)
+    {
+        warn!(%error, path = %path.display(), "could not quarantine a download record");
+    }
 }
 
 fn safe_path_component(value: &str, fallback: &str) -> String {
@@ -982,7 +1293,7 @@ fn safe_path_component(value: &str, fallback: &str) -> String {
     }
 }
 
-fn download_extension(track: &Track, transcoded_extension: Option<&str>) -> String {
+fn download_extension(track: &TrackRow, transcoded_extension: Option<&str>) -> String {
     let extension = transcoded_extension
         .or(track.source_format.as_deref())
         .unwrap_or(AUDIO_EXTENSION)
@@ -1002,7 +1313,7 @@ fn hash_id(value: &str) -> String {
     hash_id_bytes(value.as_bytes())
 }
 
-fn source_track_hash(source_id: &SourceId, track_id: &TrackId) -> String {
+fn source_track_hash(source_id: &SourceId, track_id: &TrackKey) -> String {
     let value =
         serde_json::to_vec(&(source_id, track_id)).expect("a download identity can be encoded");
     hash_id_bytes(&value)
@@ -1015,393 +1326,133 @@ pub(super) fn hash_id_bytes(value: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sources::SourceConfiguration;
-    use std::io::{Read, Write};
-    use std::net::TcpListener;
-    use std::sync::mpsc;
 
-    fn scripted_server(
-        responses: Vec<Vec<u8>>,
-    ) -> (String, mpsc::Receiver<String>, std::thread::JoinHandle<()>) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind download server");
-        let address = listener.local_addr().expect("download server address");
-        let (requests, received) = mpsc::channel();
-        let task = std::thread::spawn(move || {
-            for response in responses {
-                let (mut stream, _) = listener.accept().expect("accept download request");
-                let mut request = Vec::new();
-                loop {
-                    let mut buffer = [0; 1024];
-                    let read = stream.read(&mut buffer).expect("read download request");
-                    if read == 0 {
-                        break;
-                    }
-                    request.extend_from_slice(&buffer[..read]);
-                    if request.windows(4).any(|window| window == b"\r\n\r\n") {
-                        break;
-                    }
-                }
-                requests
-                    .send(String::from_utf8_lossy(&request).into_owned())
-                    .expect("record download request");
-                stream
-                    .write_all(&response)
-                    .expect("write download response");
-            }
-        });
-        (format!("http://{address}"), received, task)
-    }
-
-    fn remote_source(base_url: &str) -> Source {
-        Source::open(
-            SourceConfiguration {
-                source_id: SourceId::new("configured:jellyfin"),
-                kind: "jellyfin".to_string(),
-                name: "Server".to_string(),
-                provider_payload: serde_json::json!({
-                    "version": 1,
-                    "base_url": base_url,
-                    "server_id": null,
-                    "user_id": "account",
-                    "username": "listener",
-                    "trust_invalid_cert": false,
-                    "use_jellyfin_instant_mix": false,
-                })
-                .to_string(),
-            },
-            Some("secret-token".to_string()),
-            Some("device-one".to_string()),
-        )
-        .expect("open remote source")
+    fn record(relative_audio_path: PathBuf, custom_storage: bool, size: u64) -> DownloadRecord {
+        DownloadRecord {
+            version: RECORD_VERSION,
+            source_id: SourceId::new("source"),
+            track_id: TrackKey::from_raw(7),
+            owners: HashSet::new(),
+            custom_storage,
+            relative_audio_path: Some(relative_audio_path),
+            completed_size: Some(size),
+        }
     }
 
     #[test]
-    fn last_modified_is_used_only_when_no_entity_tag_exists() {
-        let mut headers = reqwest::header::HeaderMap::new();
-        headers.insert(ETAG, reqwest::header::HeaderValue::from_static("W/\"v1\""));
-        headers.insert(
-            DATE,
-            reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2015 07:27:01 GMT"),
-        );
-        headers.insert(
-            LAST_MODIFIED,
-            reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2015 07:27:00 GMT"),
-        );
+    fn records_never_authorize_absolute_or_parent_paths() {
+        let directory = tempfile::tempdir().expect("temporary download directory");
+        let source = SourceId::new("source");
+        let absolute = record(directory.path().join("outside.audio"), false, 1);
+        assert!(record_download_paths(directory.path(), &source, &absolute, None).is_err());
 
-        assert_eq!(resume_validator(&headers), None);
-        headers.remove(ETAG);
-        assert_eq!(resume_validator(&headers), None);
-        headers.insert(
-            DATE,
-            reqwest::header::HeaderValue::from_static("Wed, 21 Oct 2015 07:28:00 GMT"),
-        );
-        assert_eq!(
-            resume_validator(&headers),
-            Some("Wed, 21 Oct 2015 07:27:00 GMT".to_string())
-        );
+        let traversal = record(PathBuf::from("Artist/../outside.audio"), false, 1);
+        assert!(record_download_paths(directory.path(), &source, &traversal, None).is_err());
     }
 
-    #[tokio::test]
-    async fn a_record_failure_keeps_the_completed_transfer() {
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let source_id = SourceId::new("source");
-        let track_id = TrackId::new("track");
-        let paths = download_paths(directory.path(), &source_id, &track_id);
-        tokio::fs::create_dir_all(&paths.directory)
-            .await
-            .expect("download directory");
-        tokio::fs::write(&paths.audio_part, b"complete audio")
-            .await
-            .expect("completed transfer");
-        tokio::fs::create_dir(&paths.record_part)
-            .await
-            .expect("block record write");
+    #[cfg(unix)]
+    #[test]
+    fn custom_record_rejects_a_symlink_escape() {
+        use std::os::unix::fs::symlink;
 
+        let directory = tempfile::tempdir().expect("temporary download directory");
+        let custom = directory.path().join("custom");
+        let outside = directory.path().join("outside");
+        std::fs::create_dir_all(&custom).expect("create custom root");
+        std::fs::create_dir_all(&outside).expect("create outside directory");
+        std::fs::write(outside.join("track.audio"), b"external").expect("write external audio");
+        symlink(&outside, custom.join("Artist")).expect("create escaping symlink");
+
+        let record = record(PathBuf::from("Artist/track.audio"), true, 8);
         assert!(
-            finalize_download(&paths, source_id, track_id, DownloadOwner::Retained,)
-                .await
-                .is_err()
+            record_download_paths(
+                directory.path(),
+                &SourceId::new("source"),
+                &record,
+                Some(&custom),
+            )
+            .is_err()
         );
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"complete audio");
-        assert!(!paths.audio.exists());
+        assert!(outside.join("track.audio").is_file());
     }
 
-    #[tokio::test]
-    async fn a_checkpoint_cannot_resume_a_different_representation() {
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let paths = download_paths(
+    #[test]
+    fn configured_custom_record_resolves_a_relative_object_path() {
+        let directory = tempfile::tempdir().expect("temporary download directory");
+        let custom = directory.path().join("custom");
+        let relative = PathBuf::from("Artist/Album/track.audio");
+        let audio = custom.join(&relative);
+        std::fs::create_dir_all(audio.parent().expect("audio parent"))
+            .expect("create audio parent");
+        std::fs::write(&audio, b"audio").expect("write audio");
+
+        let paths = record_download_paths(
             directory.path(),
             &SourceId::new("source"),
-            &TrackId::new("track"),
-        );
-        tokio::fs::create_dir_all(&paths.directory)
-            .await
-            .expect("download directory");
-        tokio::fs::write(&paths.audio_part, b"abcd")
-            .await
-            .expect("partial download");
-        write_checkpoint(
-            &paths,
-            &TransferCheckpoint {
-                representation: "old".to_string(),
-                validator: "\"v1\"".to_string(),
-                length: 10,
-            },
+            &record(relative, true, 5),
+            Some(&custom),
         )
-        .await
-        .expect("download checkpoint");
-
-        assert!(
-            read_checkpoint(&paths, Some("new"))
-                .await
-                .unwrap()
-                .is_none()
-        );
-        assert!(!paths.audio_part.exists());
-        assert!(!paths.checkpoint.exists());
+        .expect("authorize configured custom audio");
+        assert_eq!(paths.audio, audio);
+        let (storage_root, projected) =
+            local_access_projection(&paths).expect("project custom Local access");
+        assert_eq!(storage_root, custom);
+        assert_eq!(projected, PathBuf::from("Artist/Album/track.audio"));
+        assert_eq!(storage_root.join(projected), paths.audio);
     }
 
-    #[tokio::test]
-    async fn an_interrupted_body_resumes_from_its_saved_bytes() {
-        let (url, requests, server) = scripted_server(vec![
-            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nDate: Wed, 21 Oct 2015 07:29:00 GMT\r\nLast-Modified: Wed, 21 Oct 2015 07:27:00 GMT\r\nContent-Type: audio/flac\r\nConnection: close\r\n\r\nabcd".to_vec(),
-            b"HTTP/1.1 206 Partial Content\r\nTransfer-Encoding: chunked\r\nContent-Range: bytes 4-9/10\r\nConnection: close\r\n\r\n0\r\n\r\n".to_vec(),
-            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 6\r\nContent-Range: bytes 4-9/10\r\nDate: Wed, 21 Oct 2015 07:30:00 GMT\r\nContent-Type: audio/flac\r\nConnection: close\r\n\r\nefghij".to_vec(),
-        ]);
-        let source = remote_source(&url);
-        let track_id = TrackId::new("jellyfin:track:one");
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let paths = download_paths(directory.path(), source.source_id(), &track_id);
-        tokio::fs::create_dir_all(&paths.directory)
-            .await
-            .expect("download directory");
-        let transfers = TransferClients::default();
-        let request = StreamRequest::original(track_id);
-
-        assert!(matches!(
-            transfers.download(&source, &request, &paths).await,
-            Err(SourceError::Network(_))
-        ));
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"abcd");
-        assert!(paths.checkpoint.is_file());
-        let orphan = download_paths(
+    #[test]
+    fn internal_nested_path_reconstructs_from_local_access_projection() {
+        let directory = tempfile::tempdir().expect("temporary download directory");
+        let source = SourceId::new("source");
+        let source_root = source_directory(directory.path(), &source);
+        let relative = PathBuf::from("Artist/Album/track.audio");
+        let audio = source_root.join(&relative);
+        std::fs::create_dir_all(audio.parent().expect("audio parent"))
+            .expect("create audio parent");
+        std::fs::write(&audio, b"audio").expect("write audio");
+        let paths = record_download_paths(
             directory.path(),
-            source.source_id(),
-            &TrackId::new("jellyfin:track:orphan"),
-        );
-        std::fs::write(&orphan.audio_part, b"orphan").expect("orphan partial");
-        load_download_state(directory.path(), source.source_id()).expect("reload downloads");
-        cleanup_staging(
-            directory.path(),
-            source.source_id(),
+            &source,
+            &record(relative.clone(), false, 5),
             None,
-            &HashSet::from([request.track_id.clone()]),
         )
-        .await
-        .expect("clean staging against the queue");
-        assert!(paths.audio_part.is_file());
-        assert!(!orphan.audio_part.exists());
-        assert!(matches!(
-            transfers.download(&source, &request, &paths).await,
-            Err(SourceError::Network(_))
-        ));
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"abcd");
-        assert!(paths.checkpoint.is_file());
-        assert!(matches!(
-            transfers.download(&source, &request, &paths).await,
-            Ok(NativeSourceResult::Available(()))
-        ));
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"abcdefghij");
+        .expect("authorize internal audio");
 
-        server.join().expect("download server");
-        let requests = requests.into_iter().collect::<Vec<_>>();
-        assert!(!requests[0].to_ascii_lowercase().contains("range:"));
+        let (storage_root, projected) =
+            local_access_projection(&paths).expect("project internal Local access");
+        assert_eq!(storage_root, source_root);
+        assert_eq!(projected, relative);
+        assert_eq!(storage_root.join(projected), paths.audio);
+    }
+
+    #[test]
+    fn size_mismatch_quarantines_only_the_record() {
+        let directory = tempfile::tempdir().expect("temporary download directory");
+        let source = SourceId::new("source");
+        let source_root = source_directory(directory.path(), &source);
+        let relative = PathBuf::from("Artist/Album/track.audio");
+        let audio = source_root.join(&relative);
+        std::fs::create_dir_all(audio.parent().expect("audio parent"))
+            .expect("create audio parent");
+        std::fs::write(&audio, b"audio").expect("write audio");
+        let record = record(relative, false, 99);
+        let record_path = download_paths(directory.path(), &source, &record.track_id).record;
+        std::fs::write(
+            &record_path,
+            serde_json::to_vec(&record).expect("encode record"),
+        )
+        .expect("write record");
+
+        let (files, records) =
+            load_download_state(directory.path(), &source, None).expect("load downloads");
+        assert!(files.is_empty());
+        assert!(records.is_empty());
+        assert!(audio.is_file());
         assert!(
-            requests[1..]
-                .iter()
-                .all(|request| request.to_ascii_lowercase().contains("range: bytes=4-"))
+            record_path
+                .with_extension(format!("{RECORD_EXTENSION}.quarantine"))
+                .is_file()
         );
-        assert!(
-            requests[2]
-                .to_ascii_lowercase()
-                .contains("if-range: wed, 21 oct 2015 07:27:00 gmt")
-        );
-    }
-
-    #[tokio::test]
-    async fn cancellation_settles_before_staging_cleanup() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("bind download server");
-        let address = listener.local_addr().expect("download server address");
-        let (headers_sent, headers_received) = mpsc::channel();
-        let (release_body, body_released) = mpsc::channel();
-        let server = std::thread::spawn(move || {
-            let (mut stream, _) = listener.accept().expect("accept download request");
-            let mut request = [0; 4096];
-            let _ = stream.read(&mut request).expect("read download request");
-            stream
-                .write_all(
-                    b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nETag: \"v1\"\r\nContent-Type: audio/flac\r\nConnection: close\r\n\r\n",
-                )
-                .expect("write download headers");
-            stream.flush().expect("flush download headers");
-            headers_sent.send(()).expect("signal download headers");
-            body_released.recv().expect("release download body");
-            let _ = stream.write_all(b"abcdefghij");
-        });
-        let source = remote_source(&format!("http://{address}"));
-        let track_id = TrackId::new("jellyfin:track:one");
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let paths = download_paths(directory.path(), source.source_id(), &track_id);
-        let request = StreamRequest::original(track_id);
-        let NativeSourceResult::Available(stream) = source
-            .stream(&request)
-            .await
-            .expect("resolve download stream")
-        else {
-            panic!("remote source has no stream");
-        };
-        let source_id = source.source_id().clone();
-        let task_paths = paths.clone();
-        let (cancel, cancelled) = oneshot::channel();
-        let transfer = tokio::spawn(async move {
-            run_transfer(
-                &source_id,
-                &request,
-                &stream,
-                &task_paths,
-                &TransferClients::default(),
-                cancelled,
-            )
-            .await
-        });
-        tokio::task::spawn_blocking(move || headers_received.recv())
-            .await
-            .expect("wait for download headers")
-            .expect("download headers");
-        tokio::time::timeout(Duration::from_secs(5), async {
-            while !paths.checkpoint.is_file() {
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("download staging checkpoint");
-
-        cancel.send(()).expect("cancel transfer");
-        assert!(matches!(
-            transfer.await.expect("join transfer"),
-            Err(SourceError::Cancelled)
-        ));
-        discard_staging(&paths).await.expect("discard staging");
-        release_body.send(()).expect("release server body");
-        tokio::task::spawn_blocking(move || server.join())
-            .await
-            .expect("wait for download server")
-            .expect("download server");
-
-        assert!(!paths.audio_part.exists());
-        assert!(!paths.checkpoint.exists());
-    }
-
-    #[tokio::test]
-    async fn a_stale_range_restarts_once_without_range() {
-        let (url, requests, server) = scripted_server(vec![
-            b"HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */20\r\nConnection: close\r\n\r\n".to_vec(),
-            b"HTTP/1.1 200 OK\r\nContent-Length: 10\r\nETag: \"v2\"\r\nContent-Type: audio/flac\r\nConnection: close\r\n\r\nabcdefghij".to_vec(),
-        ]);
-        let source = remote_source(&url);
-        let track_id = TrackId::new("jellyfin:track:one");
-        let request = StreamRequest::original(track_id.clone());
-        let NativeSourceResult::Available(stream) = source
-            .stream(&request)
-            .await
-            .expect("resolve download stream")
-        else {
-            panic!("remote source has no stream");
-        };
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let paths = download_paths(directory.path(), source.source_id(), &track_id);
-        tokio::fs::create_dir_all(&paths.directory)
-            .await
-            .expect("download directory");
-        tokio::fs::write(&paths.audio_part, b"abcd")
-            .await
-            .expect("partial download");
-        write_checkpoint(
-            &paths,
-            &TransferCheckpoint {
-                representation: representation_key(
-                    source.source_id(),
-                    &request,
-                    stream.redacted_uri(),
-                ),
-                validator: "\"v1\"".to_string(),
-                length: 10,
-            },
-        )
-        .await
-        .expect("download checkpoint");
-
-        assert!(matches!(
-            TransferClients::default()
-                .download(&source, &request, &paths)
-                .await,
-            Ok(NativeSourceResult::Available(()))
-        ));
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"abcdefghij");
-        server.join().expect("download server");
-        let requests = requests.into_iter().collect::<Vec<_>>();
-        assert!(requests[0].to_ascii_lowercase().contains("range: bytes=4-"));
-        assert!(!requests[1].to_ascii_lowercase().contains("range:"));
-    }
-
-    #[tokio::test]
-    async fn an_invalid_partial_response_does_not_change_staging() {
-        let (url, requests, server) = scripted_server(vec![
-            b"HTTP/1.1 206 Partial Content\r\nContent-Length: 6\r\nContent-Range: bytes 0-5/10\r\nETag: \"v1\"\r\nConnection: close\r\n\r\nXXXXXX".to_vec(),
-        ]);
-        let source = remote_source(&url);
-        let track_id = TrackId::new("jellyfin:track:one");
-        let request = StreamRequest::original(track_id.clone());
-        let NativeSourceResult::Available(stream) = source
-            .stream(&request)
-            .await
-            .expect("resolve download stream")
-        else {
-            panic!("remote source has no stream");
-        };
-        let representation =
-            representation_key(source.source_id(), &request, stream.redacted_uri());
-        let directory = tempfile::tempdir().expect("temporary downloads");
-        let paths = download_paths(directory.path(), source.source_id(), &track_id);
-        tokio::fs::create_dir_all(&paths.directory)
-            .await
-            .expect("download directory");
-        tokio::fs::write(&paths.audio_part, b"abcd")
-            .await
-            .expect("partial download");
-        write_checkpoint(
-            &paths,
-            &TransferCheckpoint {
-                representation,
-                validator: "\"v1\"".to_string(),
-                length: 10,
-            },
-        )
-        .await
-        .expect("download checkpoint");
-
-        assert!(matches!(
-            TransferClients::default()
-                .download(&source, &request, &paths,)
-                .await,
-            Err(SourceError::Other(_))
-        ));
-        assert_eq!(std::fs::read(&paths.audio_part).unwrap(), b"abcd");
-        assert!(paths.checkpoint.exists());
-
-        server.join().expect("download server");
-        let requests = requests.into_iter().collect::<Vec<_>>();
-        assert!(requests[0].to_ascii_lowercase().contains("range: bytes=4-"));
-        assert_eq!(requests.len(), 1);
     }
 }

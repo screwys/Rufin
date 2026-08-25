@@ -1,10 +1,160 @@
-use crate::{EqualizerSettings, LoudnessNormalizationMode, PlaybackSettings, VolumeScale};
-use library::{ResolvedStream, Track, TrackLoudness};
+use crate::{
+    EqualizerSettings, LoudnessNormalizationMode, PlaybackSettings, StreamQuality, VolumeScale,
+};
+use library::{LoudnessMeasurement, QueueMedia};
+use serde::{Deserialize, Serialize};
+use std::fmt;
 use std::net::IpAddr;
 use std::ops::Deref;
 use std::path::PathBuf;
 use std::sync::Arc;
 use thiserror::Error;
+
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct StreamRequest {
+    pub track_object_id: String,
+    pub quality: StreamQuality,
+    pub media_uri: Option<String>,
+    pub cue_start_millis: Option<u64>,
+    pub cue_end_millis: Option<u64>,
+}
+
+impl StreamRequest {
+    pub fn original(track_object_id: impl Into<String>) -> Self {
+        Self::new(track_object_id, StreamQuality::Original)
+    }
+
+    pub fn new(track_object_id: impl Into<String>, quality: StreamQuality) -> Self {
+        Self {
+            track_object_id: track_object_id.into(),
+            quality,
+            media_uri: None,
+            cue_start_millis: None,
+            cue_end_millis: None,
+        }
+    }
+
+    pub fn for_media(media: &crate::PlaybackMedia, quality: StreamQuality) -> Self {
+        Self {
+            track_object_id: media.track_object_id.clone(),
+            quality,
+            media_uri: media.media_uri.clone(),
+            cue_start_millis: media
+                .cue_start_millis
+                .and_then(|value| u64::try_from(value).ok()),
+            cue_end_millis: media
+                .cue_end_millis
+                .and_then(|value| u64::try_from(value).ok()),
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct StreamWindow {
+    pub start_millis: u64,
+    pub end_millis: u64,
+}
+
+#[derive(Clone, Eq, PartialEq)]
+pub struct ResolvedStream {
+    uri: String,
+    redacted_uri: String,
+    trust_invalid_certificate: bool,
+    window: Option<StreamWindow>,
+}
+
+impl ResolvedStream {
+    pub fn new(uri: impl Into<String>) -> Self {
+        let uri = uri.into();
+        Self {
+            redacted_uri: redact_sensitive_uri(&uri),
+            uri,
+            trust_invalid_certificate: false,
+            window: None,
+        }
+    }
+
+    pub fn with_redacted(uri: impl Into<String>, redacted_uri: impl Into<String>) -> Self {
+        Self {
+            uri: uri.into(),
+            redacted_uri: redacted_uri.into(),
+            trust_invalid_certificate: false,
+            window: None,
+        }
+    }
+
+    pub fn with_trust_invalid_certificate(mut self, trust: bool) -> Self {
+        self.trust_invalid_certificate = trust;
+        self
+    }
+
+    pub fn with_window(mut self, start_millis: u64, end_millis: u64) -> Self {
+        if end_millis > start_millis {
+            self.window = Some(StreamWindow {
+                start_millis,
+                end_millis,
+            });
+        }
+        self
+    }
+
+    pub fn uri(&self) -> &str {
+        &self.uri
+    }
+    pub fn redacted_uri(&self) -> &str {
+        &self.redacted_uri
+    }
+    pub fn trust_invalid_certificate(&self) -> bool {
+        self.trust_invalid_certificate
+    }
+    pub fn start_millis(&self) -> u64 {
+        self.window.as_ref().map_or(0, |window| window.start_millis)
+    }
+    pub fn end_millis(&self) -> Option<u64> {
+        self.window.as_ref().map(|window| window.end_millis)
+    }
+    pub fn window(&self) -> Option<&StreamWindow> {
+        self.window.as_ref()
+    }
+}
+
+impl fmt::Debug for ResolvedStream {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("ResolvedStream")
+            .field("uri", &self.redacted_uri)
+            .field("window", &self.window)
+            .finish()
+    }
+}
+
+fn redact_sensitive_uri(uri: &str) -> String {
+    let Some((base, query)) = uri.split_once('?') else {
+        return uri.to_string();
+    };
+    let query = query
+        .split('&')
+        .map(|pair| {
+            let Some((key, value)) = pair.split_once('=') else {
+                return pair.to_string();
+            };
+            let lower = key.to_ascii_lowercase();
+            if lower.contains("token") || lower.contains("key") {
+                format!("{key}=<redacted>")
+            } else {
+                format!("{key}={value}")
+            }
+        })
+        .collect::<Vec<_>>()
+        .join("&");
+    format!("{base}?{query}")
+}
+
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TrackLoudness {
+    pub track: Option<LoudnessMeasurement>,
+    pub album: Option<LoudnessMeasurement>,
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub struct RunId(u64);
@@ -36,9 +186,9 @@ pub enum NextTransition {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PreparedStream {
-    pub stream: ResolvedStream,
+    pub stream: Box<ResolvedStream>,
     pub loudness: TrackLoudness,
-    pub track: Option<Track>,
+    pub track: Option<Box<QueueMedia>>,
     pub content_type: Option<String>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
@@ -48,7 +198,7 @@ pub struct PreparedStream {
 impl PreparedStream {
     pub fn new(stream: ResolvedStream, loudness: TrackLoudness) -> Self {
         Self {
-            stream,
+            stream: Box::new(stream),
             loudness,
             track: None,
             content_type: None,
@@ -68,8 +218,8 @@ impl PreparedStream {
         self
     }
 
-    pub fn with_media(mut self, track: Track, content_type: Option<String>) -> Self {
-        self.track = Some(track);
+    pub fn with_media(mut self, track: QueueMedia, content_type: Option<String>) -> Self {
+        self.track = Some(Box::new(track));
         self.content_type = content_type;
         self
     }

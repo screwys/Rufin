@@ -393,7 +393,9 @@ mod freedesktop {
             .title(entry.track.title.clone())
             .artist([entry.track.artist.clone()])
             .album(entry.track.album.clone())
-            .length(Time::from_secs(i64::from(entry.track.duration_seconds)));
+            .length(Time::from_micros(
+                entry.track.duration_millis.saturating_mul(1_000),
+            ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
         }

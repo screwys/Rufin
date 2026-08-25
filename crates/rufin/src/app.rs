@@ -34,24 +34,13 @@ pub(crate) fn runtime_inputs(
     });
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&stored)));
-    let (library, repair) = match library::Libraries::open_with_repair(paths::store_file()) {
-        Ok(opened) => opened,
-        Err(error) => {
-            warn!(%error, "could not use the saved Store; startup will continue in memory");
-            (library::Libraries::memory().map_err(string_error)?, None)
-        }
-    };
-    if let Some(repair) = repair {
-        warn!(
-            preserved_store_path = %repair.preserved_store.display(),
-            recovered_rows = repair.recovered_rows,
-            skipped_rows = repair.skipped_rows,
-            unreadable_families = ?repair.unreadable_families,
-            "repaired the Rufin Store; source facts will be rebuilt"
-        );
-    }
+    let library = tokio::task::block_in_place(|| {
+        runtime.block_on(library::Database::open(paths::store_file()))
+    })
+    .map_err(string_error)?;
     let scrobbler = Arc::new(Scrobbler::new(
         library.clone(),
+        runtime.clone(),
         startup_scrobbling_settings(&settings, &secrets),
         stored.ui.private_mode,
     )?);

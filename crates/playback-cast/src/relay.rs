@@ -810,13 +810,13 @@ mod tests {
 
     #[test]
     fn direct_media_requires_a_receiver_reachable_url() {
-        let loopback = PreparedStream::from(library::ResolvedStream::new(
+        let loopback = PreparedStream::from(playback::ResolvedStream::new(
             "http://127.0.0.1:8096/audio.flac",
         ));
         assert!(!direct_media_uri(&loopback, false, false));
         assert!(direct_media_uri(&loopback, false, true));
 
-        let remote = PreparedStream::from(library::ResolvedStream::new(
+        let remote = PreparedStream::from(playback::ResolvedStream::new(
             "https://music.example/audio.flac",
         ));
         assert!(direct_media_uri(&remote, false, false));
@@ -852,7 +852,7 @@ mod tests {
     #[test]
     fn cue_windows_are_published_as_bounded_nonseekable_media() {
         let stream = PreparedStream::from(
-            library::ResolvedStream::new("file:///music/album.flac").with_window(523_613, 612_345),
+            playback::ResolvedStream::new("file:///music/album.flac").with_window(523_613, 612_345),
         );
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
@@ -885,7 +885,7 @@ mod tests {
             .write_all(b"\x89PNG\r\n\x1a\ncover")
             .expect("write artwork");
         let uri = Url::from_file_path(&path).expect("file URL").to_string();
-        let stream = PreparedStream::from(library::ResolvedStream::new(uri))
+        let stream = PreparedStream::from(playback::ResolvedStream::new(uri))
             .with_artwork_path(Some(artwork_path));
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
@@ -984,7 +984,7 @@ mod tests {
                     .expect("upstream response");
             }
         });
-        let stream = PreparedStream::from(library::ResolvedStream::new(format!(
+        let stream = PreparedStream::from(playback::ResolvedStream::new(format!(
             "http://{upstream_address}/audio.mp3?api_key=secret"
         )));
         let mut relay =
@@ -1030,7 +1030,7 @@ mod tests {
             None,
         )
         .expect("relay");
-        let stream = PreparedStream::from(library::ResolvedStream::new(
+        let stream = PreparedStream::from(playback::ResolvedStream::new(
             "https://music.example/audio.mp3?api_key=secret",
         ));
 

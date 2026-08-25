@@ -1,13 +1,12 @@
-use std::collections::HashSet;
 use std::time::Duration;
 
-use library::{CandidateBatch, HomeFacts, ProviderFreshness};
+use library::{Freshness, Scan};
 
 use super::*;
-use crate::source::{BatchEmitter, SourceReadProgress, SourceReadStage};
+use crate::source::{SourceReadProgress, SourceReadStage};
 
 const ALBUM_REQUEST_SIZE: usize = 500;
-const TRACK_REQUEST_SIZE: usize = 20_000;
+const TRACK_REQUEST_SIZE: usize = 500;
 const FRESHNESS_VERSION: u32 = 2;
 const METADATA_SCAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const METADATA_SCAN_MAX_POLLS: usize = 120;
@@ -19,92 +18,69 @@ struct ScanWait {
 }
 
 impl SubsonicSource {
-    pub(crate) async fn check_freshness(
-        &self,
-        accepted: Option<&ProviderFreshness>,
-    ) -> SourceResult<crate::SourceFreshness> {
-        let capability = self.refresh_metadata_editing();
-        let status = self.get_json("getScanStatus", &[]);
-        let (_, status) = tokio::join!(capability, status);
-        let body: ScanStatusBody = status?;
+    pub(crate) async fn freshness(&self) -> SourceResult<Option<Freshness>> {
+        let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
         if body.scan_status.scanning {
-            return Ok(crate::SourceFreshness::Busy);
+            return Ok(None);
         }
-        let current = freshness(body.scan_status);
-        if accepted == Some(&current) {
-            Ok(crate::SourceFreshness::Unchanged)
-        } else {
-            Ok(crate::SourceFreshness::Changed(current))
-        }
+        Ok(Some(Freshness::new(freshness(body.scan_status))?))
     }
 
-    pub(crate) async fn read_facts(
+    pub(crate) async fn stage_catalog(
         &self,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<(Option<ProviderFreshness>, HomeFacts)> {
-        self.refresh_metadata_editing().await;
-
+    ) -> SourceResult<()> {
         check_cancelled(cancelled)?;
         let music_folders = self.read_music_folders().await?;
-        emitter
-            .emit_async(CandidateBatch::MusicFolders(music_folders.clone()))
+        scan.begin_batch().await?;
+        for folder in &music_folders {
+            scan.write_folder(
+                &folder.id,
+                &folder.name,
+                &folder.name.to_lowercase(),
+                &folder.name.to_lowercase(),
+                None,
+            )
             .await?;
-
-        if self.has_navidrome_library() {
-            self.emit_navidrome_library(emitter, progress, cancelled)
-                .await?;
-        } else {
-            check_cancelled(cancelled)?;
-            progress(stage(SourceReadStage::Albums, 0));
-            self.emit_albums(emitter, progress, cancelled).await?;
-
-            progress(stage(SourceReadStage::Tracks, 0));
-            self.emit_tracks(&music_folders, emitter, progress, cancelled)
-                .await?;
-
-            check_cancelled(cancelled)?;
-            progress(stage(SourceReadStage::Artists, 0));
-            emitter
-                .emit_async(CandidateBatch::Artists(self.get_all_artists().await?))
-                .await?;
         }
+        scan.finish_batch().await?;
+        check_cancelled(cancelled)?;
+        progress(stage(SourceReadStage::Albums, 0));
+        self.emit_albums(scan, progress, cancelled).await?;
+        progress(stage(SourceReadStage::Tracks, 0));
+        self.emit_tracks(&music_folders, scan, progress, cancelled)
+            .await?;
+        check_cancelled(cancelled)?;
+        progress(stage(SourceReadStage::Artists, 0));
+        self.stage_artists(scan, progress, cancelled).await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Genres, 0));
-        emitter
-            .emit_async(CandidateBatch::Genres(self.read_genres().await?))
-            .await?;
+        scan.begin_batch().await?;
+        for genre in self.read_genres().await? {
+            stage_genre(scan, genre).await?;
+        }
+        scan.finish_batch().await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Playlists, 0));
-        self.emit_playlists(emitter, progress, cancelled).await?;
-
-        check_cancelled(cancelled)?;
-        progress(SourceReadProgress {
-            stage: SourceReadStage::Home,
-            completed: 0,
-            total: Some(4),
-        });
-        let home = HomeFacts::Source {
-            sections: self.read_home_sections().await?,
-        };
-        let freshness = Some(self.read_freshness().await?);
+        self.emit_playlists(scan, progress, cancelled).await?;
+        self.stage_home(scan).await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Finalizing, 0));
-        Ok((freshness, home))
+        Ok(())
     }
 
     pub(super) async fn emit_albums(
         &self,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let mut offset = 0_usize;
-        let mut seen = HashSet::new();
         loop {
             check_cancelled(cancelled)?;
             let body: AlbumListBody = self
@@ -125,17 +101,11 @@ impl SubsonicSource {
             offset = offset.checked_add(page.len()).ok_or_else(|| {
                 SourceError::Other("OpenSubsonic album offset overflowed".to_string())
             })?;
-            let mut albums = Vec::with_capacity(page.len());
+            scan.begin_batch().await?;
             for album in page {
-                let raw_id = raw_id_string(&album.id);
-                if !seen.insert(raw_id.clone()) {
-                    return Err(SourceError::Other(
-                        "OpenSubsonic repeated an album page".to_string(),
-                    ));
-                }
-                albums.push(album_from_dto(self, album));
+                stage_album(scan, album_from_dto(self, album)).await?;
             }
-            emitter.emit_async(CandidateBatch::Albums(albums)).await?;
+            scan.finish_batch().await?;
             progress(stage(SourceReadStage::Albums, offset));
             if page_len < ALBUM_REQUEST_SIZE {
                 return Ok(());
@@ -146,7 +116,7 @@ impl SubsonicSource {
     pub(super) async fn emit_tracks(
         &self,
         music_folders: &[MusicFolder],
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
@@ -155,11 +125,9 @@ impl SubsonicSource {
         } else {
             music_folders.iter().map(Some).collect()
         };
-        let mut seen_tracks = HashSet::<TrackId>::new();
         let mut emitted = 0;
         for folder in scopes {
             let mut offset = 0_usize;
-            let mut scope_ids = HashSet::new();
             loop {
                 check_cancelled(cancelled)?;
                 let mut extra = vec![
@@ -185,25 +153,16 @@ impl SubsonicSource {
                 offset = offset.checked_add(page.len()).ok_or_else(|| {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
-                let mut tracks = Vec::with_capacity(page.len());
+                scan.begin_batch().await?;
                 for song in page {
-                    let raw_id = raw_id_string(&song.id);
-                    if !scope_ids.insert(raw_id) {
-                        return Err(SourceError::Other(
-                            "OpenSubsonic repeated a track page".to_string(),
-                        ));
-                    }
-                    let mut track = track_from_dto(self, song);
-                    if !seen_tracks.insert(track.id.clone()) {
-                        continue;
-                    }
+                    let track = track_from_dto(self, song);
                     if let Some(folder) = folder {
-                        track.relations.music_folders.push(folder.id.clone());
+                        scan.write_track_folder(&track.id, &folder.id, 0).await?;
                     }
-                    tracks.push(track);
+                    stage_track(scan, track).await?;
+                    emitted += 1;
                 }
-                emitted += tracks.len();
-                emitter.emit_async(CandidateBatch::Tracks(tracks)).await?;
+                scan.finish_batch().await?;
                 progress(stage(SourceReadStage::Tracks, emitted));
             }
         }
@@ -217,7 +176,7 @@ impl SubsonicSource {
             .music_folder
             .into_iter()
             .map(|folder| MusicFolder {
-                id: MusicFolderId::new(self.id("music-folder", &folder.id.0)),
+                id: String::from(self.id("music-folder", &folder.id.0)),
                 name: folder.name,
                 image_ref: None,
             })
@@ -236,7 +195,7 @@ impl SubsonicSource {
 
     async fn emit_playlists(
         &self,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
@@ -248,12 +207,33 @@ impl SubsonicSource {
         let total = playlists.len();
         for (position, playlist) in playlists.into_iter().enumerate() {
             check_cancelled(cancelled)?;
-            let id = PlaylistId::new(self.id("playlist", &raw_id_string(&playlist.id)));
-            emitter
-                .emit_async(CandidateBatch::Playlists(vec![
-                    self.read_playlist(&id).await?,
-                ]))
+            let id = String::from(self.id("playlist", &raw_id_string(&playlist.id)));
+            let snapshot = self.read_playlist(&id).await?;
+            let artwork = snapshot
+                .playlist
+                .image_ref
+                .as_ref()
+                .map(serde_json::to_vec)
+                .transpose()?;
+            scan.begin_batch().await?;
+            scan.write_playlist(
+                &snapshot.playlist.id,
+                &snapshot.playlist.name,
+                &snapshot.playlist.name.to_lowercase(),
+                &snapshot.playlist.name.to_lowercase(),
+                artwork.as_deref(),
+            )
+            .await?;
+            for (entry_position, entry) in snapshot.entries.iter().enumerate() {
+                scan.write_playlist_entry(
+                    &snapshot.playlist.id,
+                    &entry.occurrence_id,
+                    &entry.track_id,
+                    entry_position as i64,
+                )
                 .await?;
+            }
+            scan.finish_batch().await?;
             progress(SourceReadProgress {
                 stage: SourceReadStage::Playlists,
                 completed: position + 1,
@@ -263,57 +243,89 @@ impl SubsonicSource {
         Ok(())
     }
 
-    async fn read_home_sections(&self) -> SourceResult<Vec<SourceHomeSection>> {
-        let mut sections = Vec::new();
-        for kind in [
-            SourceHomeSectionKind::MostPlayed,
-            SourceHomeSectionKind::NewlyAdded,
-            SourceHomeSectionKind::RecentlyPlayed,
-            SourceHomeSectionKind::RecentlyReleased,
-        ] {
-            let section = self.read_home_section(kind).await?;
-            if !section.items.is_empty() {
-                sections.push(section);
+    async fn stage_artists(
+        &self,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let mut offset = 0_usize;
+        loop {
+            check_cancelled(cancelled)?;
+            let body: SearchBody = self
+                .get_json(
+                    "search3",
+                    &[
+                        ("query", String::new()),
+                        ("artistCount", ALBUM_REQUEST_SIZE.to_string()),
+                        ("artistOffset", offset.to_string()),
+                        ("albumCount", "0".to_string()),
+                        ("albumOffset", "0".to_string()),
+                        ("songCount", "0".to_string()),
+                        ("songOffset", "0".to_string()),
+                    ],
+                )
+                .await?;
+            let page = body
+                .search_result
+                .and_then(|result| result.artist)
+                .unwrap_or_default();
+            if page.is_empty() {
+                return Ok(());
+            }
+            offset += page.len();
+            let finished = page.len() < ALBUM_REQUEST_SIZE;
+            scan.begin_batch().await?;
+            for artist in page {
+                stage_artist(scan, artist_from_dto(self, artist)).await?;
+            }
+            scan.finish_batch().await?;
+            progress(stage(SourceReadStage::Artists, offset));
+            if finished {
+                return Ok(());
             }
         }
-        Ok(sections)
     }
 
-    pub(crate) async fn read_home_section(
-        &self,
-        kind: SourceHomeSectionKind,
-    ) -> SourceResult<SourceHomeSection> {
-        let (list_type, mut extra) = match kind {
-            SourceHomeSectionKind::MostPlayed => ("frequent", Vec::new()),
-            SourceHomeSectionKind::NewlyAdded => ("newest", Vec::new()),
-            SourceHomeSectionKind::RecentlyPlayed => ("recent", Vec::new()),
-            SourceHomeSectionKind::RecentlyReleased => (
+    async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
+        for (section_id, list_type, extra) in [
+            ("most-played", "frequent", Vec::new()),
+            ("newly-added", "newest", Vec::new()),
+            ("recently-played", "recent", Vec::new()),
+            (
+                "recently-released",
                 "byYear",
                 vec![
                     ("fromYear", current_year().to_string()),
                     ("toYear", "0".to_string()),
                 ],
             ),
-        };
-        extra.push(("type", list_type.to_string()));
-        extra.push(("size", library::HOME_SECTION_ITEM_LIMIT.to_string()));
-        let body: AlbumListBody = self.get_json("getAlbumList2", &extra).await?;
-        Ok(SourceHomeSection {
-            kind,
-            items: body
-                .album_list
-                .album
-                .into_iter()
-                .map(|album| {
-                    HomeItemId::Album(AlbumId::new(self.id("album", &raw_id_string(&album.id))))
+        ] {
+            let mut query = vec![("type", list_type.to_string()), ("size", "24".to_string())];
+            query.extend(extra);
+            let body: AlbumListBody = self.get_json("getAlbumList2", &query).await?;
+            scan.begin_batch().await?;
+            for (position, dto) in body.album_list.album.into_iter().enumerate() {
+                let album = album_from_dto(self, dto);
+                let artwork_binding = album
+                    .image_ref
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()?;
+                scan.write_home_entry(&library::HomeEntryInput {
+                    section_id: section_id.to_string(),
+                    position: position as i64,
+                    kind: library::HomeEntryKind::Album,
+                    entity_object_id: album.id,
+                    title: album.title,
+                    subtitle: album.artist,
+                    artwork_binding,
                 })
-                .collect(),
-        })
-    }
-
-    async fn read_freshness(&self) -> SourceResult<ProviderFreshness> {
-        let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
-        Ok(freshness(body.scan_status))
+                .await?;
+            }
+            scan.finish_batch().await?;
+        }
+        Ok(())
     }
 
     pub(crate) async fn require_metadata_scan_idle(&self) -> SourceResult<()> {
@@ -355,15 +367,6 @@ impl SubsonicSource {
             "The server library scan did not finish within two minutes.".to_string(),
         ))
     }
-
-    #[cfg(test)]
-    pub(super) async fn start_metadata_scan_for_test(&self, max_polls: usize) -> SourceResult<()> {
-        self.start_metadata_scan_with_wait(ScanWait {
-            interval: Duration::ZERO,
-            max_polls,
-        })
-        .await
-    }
 }
 
 fn scan_finished(status: ScanStatus) -> SourceResult<()> {
@@ -376,8 +379,8 @@ fn scan_finished(status: ScanStatus) -> SourceResult<()> {
     }
 }
 
-fn freshness(status: ScanStatus) -> ProviderFreshness {
-    let mut marker = Vec::new();
+fn freshness(status: ScanStatus) -> Vec<u8> {
+    let mut marker = FRESHNESS_VERSION.to_le_bytes().to_vec();
     marker.extend_from_slice(&status.count.to_le_bytes());
     marker.extend_from_slice(&status.folder_count.unwrap_or_default().to_le_bytes());
     if let Some(last_scan) = status.last_scan {
@@ -386,10 +389,7 @@ fn freshness(status: ScanStatus) -> ProviderFreshness {
     } else {
         marker.extend_from_slice(&0_u64.to_le_bytes());
     }
-    ProviderFreshness {
-        version: FRESHNESS_VERSION,
-        marker,
-    }
+    marker
 }
 
 fn stage(stage: SourceReadStage, completed: usize) -> SourceReadProgress {

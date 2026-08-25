@@ -476,7 +476,7 @@ fn album_from_navidrome(source: &SubsonicSource, album: NavidromeAlbum) -> Album
         })
         .unwrap_or_default();
     Album {
-        id: AlbumId::new(source.id("album", &raw_id)),
+        id: String::from(source.id("album", &raw_id)),
         title: clean(album.name).unwrap_or_else(|| "Untitled Album".to_string()),
         artist: artist.clone(),
         year,
@@ -548,9 +548,9 @@ fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track
         .into_iter()
         .collect();
     }
-    let album_id = clean(track.album_id).map(|id| AlbumId::new(source.id("album", &id)));
-    Track::new(TrackData {
-        id: TrackId::new(source.id("track", &raw_id)),
+    let album_id = clean(track.album_id).map(|id| String::from(source.id("album", &id)));
+    Track {
+        id: String::from(source.id("track", &raw_id)),
         album_id,
         title: clean(track.title).unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
@@ -583,20 +583,20 @@ fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track
             moods: super::moods_from_item(source, tag_values(&track.tags, "mood")),
             music_folders: (track.library_id > 0)
                 .then(|| {
-                    library::MusicFolderId::new(
+                    String::from(
                         source.id("music-folder", &track.library_id.to_string()),
                     )
                 })
                 .into_iter()
                 .collect(),
         },
-    })
+    }
 }
 
 fn artist_from_navidrome(source: &SubsonicSource, artist: NavidromeArtist) -> Artist {
     let raw_id = artist.id;
     Artist {
-        id: ArtistId::new(source.id("artist", &raw_id)),
+        id: String::from(source.id("artist", &raw_id)),
         name: clean(artist.name).unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: artist.starred,
         last_played: clean_optional(artist.play_date),
@@ -615,7 +615,7 @@ fn artist_credit(
     musicbrainz_artist_id: Option<String>,
 ) -> Option<ArtistCredit> {
     clean(raw_id).map(|raw_id| ArtistCredit {
-        id: ArtistId::new(source.id("artist", &raw_id)),
+        id: String::from(source.id("artist", &raw_id)),
         name,
         musicbrainz_artist_id: clean_optional(musicbrainz_artist_id),
     })
@@ -635,7 +635,7 @@ fn participant_credits(
         .filter_map(|participant| {
             let raw_id = clean(participant.id.clone())?;
             Some(ArtistCredit {
-                id: ArtistId::new(source.id("artist", &raw_id)),
+                id: String::from(source.id("artist", &raw_id)),
                 name: clean(participant.name.clone())
                     .unwrap_or_else(|| "Unknown Artist".to_string()),
                 musicbrainz_artist_id: clean_optional(participant.mbz_artist_id.clone()),
@@ -661,7 +661,7 @@ fn genre_credits(source: &SubsonicSource, genres: Option<Vec<NavidromeGenre>>) -
         .into_iter()
         .filter_map(|genre| clean(genre.name))
         .map(|name| GenreCredit {
-            id: GenreId::new(source.id("genre", &name)),
+            id: String::from(source.id("genre", &name)),
             name,
         })
         .collect()

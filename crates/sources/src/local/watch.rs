@@ -9,7 +9,7 @@ use notify::{
 };
 use tracing::warn;
 
-use crate::{ObservedSourceChange, SourceError, SourceResult};
+use crate::{LocalLiveChange, SourceError, SourceResult};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(500);
 const DEBOUNCE: Duration = Duration::from_secs(2);
@@ -29,7 +29,7 @@ impl LocalChangeFeed {
     pub fn listen_forever(
         &self,
         on_ready: &mut dyn FnMut(bool) -> bool,
-        on_change: &mut dyn FnMut(ObservedSourceChange) -> bool,
+        on_change: &mut dyn FnMut(LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
@@ -59,7 +59,7 @@ impl LocalChangeFeed {
         &self,
         reconnecting: bool,
         on_ready: &mut dyn FnMut(bool) -> bool,
-        on_change: &mut dyn FnMut(ObservedSourceChange) -> bool,
+        on_change: &mut dyn FnMut(LocalLiveChange) -> bool,
         should_stop: &dyn Fn() -> bool,
     ) -> SourceResult<()> {
         let (messages, receiver) = mpsc::channel();
@@ -155,7 +155,7 @@ impl LocalChangeFeed {
                 }
                 failed_roots = still_failed;
                 retry_failed_roots_at = Instant::now() + FAILED_ROOT_RETRY;
-                if recovered && !on_change(ObservedSourceChange::LocalRescan) {
+                if recovered && !on_change(LocalLiveChange::Rescan) {
                     return Ok(());
                 }
             }
@@ -223,7 +223,7 @@ fn feed_error(error: notify::Error) -> SourceError {
     SourceError::Other(error.to_string())
 }
 
-fn event_evidence(event: Event) -> ObservedSourceChange {
+fn event_evidence(event: Event) -> LocalLiveChange {
     let complete_required = event.need_rescan()
         || event.paths.is_empty()
         || matches!(event.kind, EventKind::Other)
@@ -233,15 +233,13 @@ fn event_evidence(event: Event) -> ObservedSourceChange {
                 if mode != RenameMode::Both || event.paths.len() != 2
         );
     if complete_required {
-        return ObservedSourceChange::LocalRescan;
+        return LocalLiveChange::Rescan;
     }
-    ObservedSourceChange::LocalPaths(event.paths.into_iter().collect())
+    LocalLiveChange::Paths(event.paths.into_iter().collect())
 }
 
 #[cfg(test)]
 mod tests {
-    use std::collections::BTreeSet;
-
     use notify::event::{CreateKind, Flag};
 
     use super::*;
@@ -254,7 +252,7 @@ mod tests {
         );
         assert_eq!(
             evidence,
-            ObservedSourceChange::LocalPaths(BTreeSet::from([PathBuf::from("/music/one.flac")]))
+            LocalLiveChange::Paths(vec![PathBuf::from("/music/one.flac")])
         );
     }
 
@@ -265,7 +263,7 @@ mod tests {
                 .add_path(PathBuf::from("/music/old.flac")),
         );
         let rescan = event_evidence(Event::new(EventKind::Any).set_flag(Flag::Rescan));
-        assert_eq!(rename, ObservedSourceChange::LocalRescan);
-        assert_eq!(rescan, ObservedSourceChange::LocalRescan);
+        assert_eq!(rename, LocalLiveChange::Rescan);
+        assert_eq!(rescan, LocalLiveChange::Rescan);
     }
 }

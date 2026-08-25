@@ -3,8 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use library::{Libraries, NewScrobble, PendingScrobble, PendingScrobbleId, ScrobbleService};
-use playback::{CompletedScrobble, ListeningTrack};
+use library::{
+    Database, ListenDeliveryTarget, ListenWrite, PendingListenDelivery, ReadCancellation,
+};
+use playback::{CompletedScrobble, ListeningTrack, external_scrobble_threshold_millis};
 use reqwest::blocking::Client;
 use tracing::warn;
 
@@ -50,12 +52,12 @@ impl SubmissionTrack {
         })
     }
 
-    fn from_pending(pending: &PendingScrobble) -> Self {
+    fn from_pending(pending: &PendingListenDelivery) -> Self {
         Self {
             title: pending.track_title.clone(),
             artist: pending.artist_name.clone(),
-            album: pending.album_title.clone().unwrap_or_default(),
-            duration_millis: pending.duration_millis,
+            album: pending.album_title.clone(),
+            duration_millis: pending.duration_millis.max(0) as u64,
         }
     }
 }
@@ -109,9 +111,35 @@ enum TargetSettings {
     ListenBrainz(ListenBrainzSettings),
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum DeliveryService {
+    LastFm,
+    LibreFm,
+    ListenBrainz,
+}
+
+impl DeliveryService {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::LastFm => "lastfm",
+            Self::LibreFm => "librefm",
+            Self::ListenBrainz => "listenbrainz",
+        }
+    }
+
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "lastfm" => Some(Self::LastFm),
+            "librefm" => Some(Self::LibreFm),
+            "listenbrainz" => Some(Self::ListenBrainz),
+            _ => None,
+        }
+    }
+}
+
 #[derive(Clone)]
 struct DeliveryTarget {
-    service: ScrobbleService,
+    service: DeliveryService,
     account_id: String,
     settings: TargetSettings,
 }
@@ -151,7 +179,11 @@ struct Worker {
 }
 
 impl Worker {
-    fn new(library: Libraries, state: Arc<Mutex<DeliveryState>>) -> Result<Self, String> {
+    fn new(
+        database: Database,
+        runtime: tokio::runtime::Handle,
+        state: Arc<Mutex<DeliveryState>>,
+    ) -> Result<Self, String> {
         let client = Client::builder()
             .timeout(Duration::from_secs(6))
             .user_agent(USER_AGENT)
@@ -162,7 +194,7 @@ impl Worker {
         let worker_pending = Arc::clone(&pending);
         let thread = std::thread::Builder::new()
             .name("rufin-scrobbling".to_string())
-            .spawn(move || run_worker(client, library, state, receiver, worker_pending))
+            .spawn(move || run_worker(client, database, runtime, state, receiver, worker_pending))
             .map_err(|error| error.to_string())?;
         Ok(Self {
             sender,
@@ -189,14 +221,16 @@ impl Worker {
 }
 
 pub struct Scrobbler {
-    library: Libraries,
+    database: Database,
+    runtime: tokio::runtime::Handle,
     state: Arc<Mutex<DeliveryState>>,
     worker: Worker,
 }
 
 impl Scrobbler {
     pub fn new(
-        library: Libraries,
+        database: Database,
+        runtime: tokio::runtime::Handle,
         mut settings: Settings,
         private_mode: bool,
     ) -> Result<Self, String> {
@@ -205,9 +239,10 @@ impl Scrobbler {
             settings,
             private_mode,
         }));
-        let worker = Worker::new(library.clone(), Arc::clone(&state))?;
+        let worker = Worker::new(database.clone(), runtime.clone(), Arc::clone(&state))?;
         Ok(Self {
-            library,
+            database,
+            runtime,
             state,
             worker,
         })
@@ -236,15 +271,21 @@ impl Scrobbler {
                 .iter()
                 .any(|current| current == &(service, account_id.clone()))
             {
-                self.library
-                    .discard_scrobbles(service, &account_id)
+                self.runtime
+                    .block_on(
+                        self.database
+                            .remove_listen_deliveries(service.as_str(), &account_id),
+                    )
                     .map_err(|error| error.to_string())?;
             }
         }
         let now = unix_seconds();
         for (service, account_id) in reauthorized {
-            self.library
-                .wake_scrobbles(service, &account_id, now)
+            self.runtime
+                .block_on(
+                    self.database
+                        .wake_listen_deliveries(service.as_str(), &account_id, now),
+                )
                 .map_err(|error| error.to_string())?;
         }
         if !private_mode {
@@ -264,6 +305,14 @@ impl Scrobbler {
     }
 
     pub fn completed_play(&self, completed: &CompletedScrobble) -> Result<usize, String> {
+        self.accept_completed_play(completed, true)
+    }
+
+    fn accept_completed_play(
+        &self,
+        completed: &CompletedScrobble,
+        wake_worker: bool,
+    ) -> Result<usize, String> {
         let targets = {
             let state = self
                 .state
@@ -272,31 +321,43 @@ impl Scrobbler {
             if state.private_mode {
                 return Ok(0);
             }
-            targets(&state.settings, false)
+            if external_scrobble_threshold_millis(completed.track.duration_millis).is_some() {
+                targets(&state.settings, false)
+            } else {
+                Vec::new()
+            }
         };
         let Some(track) = SubmissionTrack::capture(&completed.track) else {
             return Ok(0);
         };
-        let scrobbles = targets
+        let deliveries = targets
             .into_iter()
-            .map(|target| NewScrobble {
-                id: PendingScrobbleId {
-                    service: target.service,
-                    account_id: target.account_id,
-                    play_id: completed.play_id.clone(),
-                },
-                track_title: track.title.clone(),
-                artist_name: track.artist.clone(),
-                album_title: (!track.album.is_empty()).then(|| track.album.clone()),
-                duration_millis: track.duration_millis,
-                started_at: completed.started_at_unix_seconds,
+            .map(|target| ListenDeliveryTarget {
+                service: target.service.as_str().to_string(),
+                account_id: target.account_id,
+                next_attempt_at: Some(unix_seconds()),
             })
             .collect::<Vec<_>>();
-        let accepted = self
-            .library
-            .queue_scrobbles(scrobbles)
+        let accepted = deliveries.len();
+        self.runtime
+            .block_on(self.database.record_listen(
+                completed.track.source_key,
+                &ListenWrite {
+                    external_id: completed.play_id.clone(),
+                    track_key: completed.track.track_key,
+                    track_object_id: completed.track.track_object_id.clone(),
+                    track_title: track.title,
+                    artist_name: track.artist,
+                    album_title: track.album,
+                    started_at: completed.started_at_unix_seconds,
+                    duration_millis: i64::try_from(track.duration_millis).unwrap_or(i64::MAX),
+                    listened_millis: i64::try_from(completed.listened_millis).unwrap_or(i64::MAX),
+                    skipped: false,
+                },
+                &deliveries,
+            ))
             .map_err(|error| error.to_string())?;
-        if accepted > 0 {
+        if wake_worker && accepted > 0 {
             self.worker.wake();
         }
         Ok(accepted)
@@ -305,7 +366,8 @@ impl Scrobbler {
 
 fn run_worker(
     client: Client,
-    library: Libraries,
+    database: Database,
+    runtime: tokio::runtime::Handle,
     state: Arc<Mutex<DeliveryState>>,
     receiver: Receiver<()>,
     pending: Arc<Mutex<PendingWork>>,
@@ -317,7 +379,7 @@ fn run_worker(
             .lock()
             .is_ok_and(|mut pending| std::mem::take(&mut pending.wake));
         if wake || now >= retry_at {
-            deliver_due(&client, &library, &state);
+            deliver_due(&client, &database, &runtime, &state);
             retry_at = Instant::now() + RETRY_POLL;
             continue;
         }
@@ -359,61 +421,76 @@ fn deliver_now_playing(client: &Client, state: &Arc<Mutex<DeliveryState>>, track
     }
 }
 
-fn deliver_due(client: &Client, library: &Libraries, state: &Arc<Mutex<DeliveryState>>) {
-    let targets = state
-        .lock()
-        .ok()
-        .filter(|state| !state.private_mode)
-        .map(|state| targets(&state.settings, false))
-        .unwrap_or_default();
+fn deliver_due(
+    client: &Client,
+    database: &Database,
+    runtime: &tokio::runtime::Handle,
+    state: &Arc<Mutex<DeliveryState>>,
+) {
+    if state.lock().map_or(true, |state| state.private_mode) {
+        return;
+    }
     let now = unix_seconds();
-    for target in targets {
-        let pending = match library.due_scrobbles(
-            target.service,
-            &target.account_id,
-            now,
-            DELIVERY_BATCH_SIZE,
-        ) {
-            Ok(pending) => pending,
-            Err(error) => {
-                warn!(%error, service = ?target.service, "could not read external scrobbling work");
-                continue;
-            }
-        };
-        for pending in pending {
-            let Some(current) = current_target(state, target.service, &target.account_id) else {
-                break;
-            };
-            let submission = Submission::Scrobble {
-                track: SubmissionTrack::from_pending(&pending),
-                started_at_unix_seconds: pending.started_at,
-            };
-            if finish_delivery(library, pending, now, submit(client, &current, &submission))
-                == DeliveryFlow::StopAccount
-            {
-                break;
-            }
+    let cancellation = ReadCancellation::new();
+    let pending = match runtime.block_on(database.due_listen_deliveries(
+        now,
+        DELIVERY_BATCH_SIZE,
+        &cancellation,
+    )) {
+        Ok(pending) => pending,
+        Err(error) => {
+            warn!(%error, "could not read external scrobbling work");
+            return;
         }
+    };
+    for pending in pending {
+        let Some(service) = DeliveryService::parse(&pending.service) else {
+            let _ = runtime.block_on(database.complete_listen_delivery(pending.outbox_key));
+            continue;
+        };
+        let Some(current) = current_target(state, service, &pending.account_id) else {
+            continue;
+        };
+        let submission = Submission::Scrobble {
+            track: SubmissionTrack::from_pending(&pending),
+            started_at_unix_seconds: pending.started_at,
+        };
+        let _ = finish_delivery(
+            database,
+            runtime,
+            pending,
+            now,
+            submit(client, &current, &submission),
+        );
     }
 }
 
 fn finish_delivery(
-    library: &Libraries,
-    pending: PendingScrobble,
+    database: &Database,
+    runtime: &tokio::runtime::Handle,
+    pending: PendingListenDelivery,
     now: i64,
     result: Result<(), DeliveryError>,
 ) -> DeliveryFlow {
     match result {
         Ok(()) => {
-            if let Err(error) = library.complete_scrobble(pending.id) {
+            if let Err(error) =
+                runtime.block_on(database.complete_listen_delivery(pending.outbox_key))
+            {
                 warn!(%error, "could not complete external scrobbling work");
             }
             DeliveryFlow::Continue
         }
         Err(DeliveryError::Retry(error)) => {
-            let service = pending.id.service;
-            let next_attempt_at = now.saturating_add(retry_delay(pending.attempts));
-            if let Err(store_error) = library.defer_scrobble(pending.id, next_attempt_at) {
+            let service = pending.service.clone();
+            let next_attempt_at = now.saturating_add(retry_delay(
+                u32::try_from(pending.attempts).unwrap_or(u32::MAX),
+            ));
+            if let Err(store_error) = runtime.block_on(database.defer_listen_delivery(
+                pending.outbox_key,
+                next_attempt_at,
+                Some(&error),
+            )) {
                 warn!(%store_error, "could not defer external scrobbling work");
             }
             warn!(
@@ -424,10 +501,12 @@ fn finish_delivery(
             DeliveryFlow::StopAccount
         }
         Err(DeliveryError::CredentialBlocked(error)) => {
-            let service = pending.id.service;
-            if let Err(store_error) =
-                library.block_scrobbles(service, &pending.id.account_id, &error)
-            {
+            let service = pending.service.clone();
+            if let Err(store_error) = runtime.block_on(database.block_listen_deliveries(
+                &pending.service,
+                &pending.account_id,
+                &error,
+            )) {
                 warn!(%store_error, "could not preserve credential-blocked scrobbles");
             }
             warn!(
@@ -438,13 +517,15 @@ fn finish_delivery(
             DeliveryFlow::StopAccount
         }
         Err(DeliveryError::Stop(error)) => {
-            let service = pending.id.service;
+            let service = pending.service.clone();
             warn!(
                 %error,
                 ?service,
                 "external scrobble was rejected"
             );
-            if let Err(store_error) = library.complete_scrobble(pending.id) {
+            if let Err(store_error) =
+                runtime.block_on(database.complete_listen_delivery(pending.outbox_key))
+            {
                 warn!(%store_error, "could not discard rejected external scrobble");
             }
             DeliveryFlow::Continue
@@ -454,7 +535,7 @@ fn finish_delivery(
 
 fn current_target(
     state: &Arc<Mutex<DeliveryState>>,
-    service: ScrobbleService,
+    service: DeliveryService,
     account_id: &str,
 ) -> Option<DeliveryTarget> {
     state
@@ -487,8 +568,8 @@ fn targets(settings: &Settings, now_playing: bool) -> Vec<DeliveryTarget> {
     let mut targets = Vec::with_capacity(3);
     if settings.lastfm.configured(now_playing) {
         targets.push(DeliveryTarget {
-            service: ScrobbleService::LastFm,
-            account_id: audioscrobbler_account_id(ScrobbleService::LastFm, &settings.lastfm),
+            service: DeliveryService::LastFm,
+            account_id: audioscrobbler_account_id(DeliveryService::LastFm, &settings.lastfm),
             settings: TargetSettings::Audioscrobbler {
                 service: audioscrobbler::Service::LastFm,
                 settings: settings.lastfm.clone(),
@@ -497,8 +578,8 @@ fn targets(settings: &Settings, now_playing: bool) -> Vec<DeliveryTarget> {
     }
     if settings.librefm.configured(now_playing) {
         targets.push(DeliveryTarget {
-            service: ScrobbleService::LibreFm,
-            account_id: audioscrobbler_account_id(ScrobbleService::LibreFm, &settings.librefm),
+            service: DeliveryService::LibreFm,
+            account_id: audioscrobbler_account_id(DeliveryService::LibreFm, &settings.librefm),
             settings: TargetSettings::Audioscrobbler {
                 service: audioscrobbler::Service::LibreFm,
                 settings: settings.librefm.clone(),
@@ -507,9 +588,9 @@ fn targets(settings: &Settings, now_playing: bool) -> Vec<DeliveryTarget> {
     }
     if settings.listenbrainz.configured(now_playing) {
         targets.push(DeliveryTarget {
-            service: ScrobbleService::ListenBrainz,
+            service: DeliveryService::ListenBrainz,
             account_id: opaque_account_id(
-                ScrobbleService::ListenBrainz,
+                DeliveryService::ListenBrainz,
                 &settings.listenbrainz.user_token,
             ),
             settings: TargetSettings::ListenBrainz(settings.listenbrainz.clone()),
@@ -518,25 +599,25 @@ fn targets(settings: &Settings, now_playing: bool) -> Vec<DeliveryTarget> {
     targets
 }
 
-fn known_accounts(settings: &Settings) -> Vec<(ScrobbleService, String)> {
+fn known_accounts(settings: &Settings) -> Vec<(DeliveryService, String)> {
     let mut accounts = Vec::with_capacity(3);
     if !settings.lastfm.session_key.is_empty() {
         accounts.push((
-            ScrobbleService::LastFm,
-            audioscrobbler_account_id(ScrobbleService::LastFm, &settings.lastfm),
+            DeliveryService::LastFm,
+            audioscrobbler_account_id(DeliveryService::LastFm, &settings.lastfm),
         ));
     }
     if !settings.librefm.session_key.is_empty() {
         accounts.push((
-            ScrobbleService::LibreFm,
-            audioscrobbler_account_id(ScrobbleService::LibreFm, &settings.librefm),
+            DeliveryService::LibreFm,
+            audioscrobbler_account_id(DeliveryService::LibreFm, &settings.librefm),
         ));
     }
     if !settings.listenbrainz.user_token.is_empty() {
         accounts.push((
-            ScrobbleService::ListenBrainz,
+            DeliveryService::ListenBrainz,
             opaque_account_id(
-                ScrobbleService::ListenBrainz,
+                DeliveryService::ListenBrainz,
                 &settings.listenbrainz.user_token,
             ),
         ));
@@ -547,12 +628,12 @@ fn known_accounts(settings: &Settings) -> Vec<(ScrobbleService, String)> {
 fn reauthorized_accounts(
     previous: &Settings,
     current: &Settings,
-) -> Vec<(ScrobbleService, String)> {
+) -> Vec<(DeliveryService, String)> {
     let mut accounts = Vec::with_capacity(2);
     for (service, previous, current) in [
-        (ScrobbleService::LastFm, &previous.lastfm, &current.lastfm),
+        (DeliveryService::LastFm, &previous.lastfm, &current.lastfm),
         (
-            ScrobbleService::LibreFm,
+            DeliveryService::LibreFm,
             &previous.librefm,
             &current.librefm,
         ),
@@ -573,7 +654,7 @@ fn reauthorized_accounts(
 }
 
 fn audioscrobbler_account_id(
-    service: ScrobbleService,
+    service: DeliveryService,
     settings: &AudioscrobblerSettings,
 ) -> String {
     let identity = if settings.username.trim().is_empty() {
@@ -584,11 +665,11 @@ fn audioscrobbler_account_id(
     opaque_account_id(service, &identity.to_lowercase())
 }
 
-fn opaque_account_id(service: ScrobbleService, identity: &str) -> String {
+fn opaque_account_id(service: DeliveryService, identity: &str) -> String {
     let service = match service {
-        ScrobbleService::LastFm => "lastfm",
-        ScrobbleService::LibreFm => "librefm",
-        ScrobbleService::ListenBrainz => "listenbrainz",
+        DeliveryService::LastFm => "lastfm",
+        DeliveryService::LibreFm => "librefm",
+        DeliveryService::ListenBrainz => "listenbrainz",
     };
     let value = format!("rufin-scrobbling-account\0{service}\0{}", identity.trim());
     format!("{:x}", md5::compute(value))
@@ -608,271 +689,198 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{SourceId, TrackId};
+    use library::{Database, ReadCancellation, Scan, ScanOutcome, TrackSort};
 
     use super::*;
 
     #[test]
     fn now_playing_keeps_only_the_track_stable_for_one_second() {
-        let first_change = Instant::now();
-        let last_change = first_change + Duration::from_millis(500);
-        let mut pending = Some((submission_track("First"), first_change));
+        let first = Instant::now();
+        let mut pending = Some((submission_track("First"), first));
         assert!(
-            take_stable_now_playing(&mut pending, first_change + Duration::from_millis(499))
-                .is_none()
+            take_stable_now_playing(&mut pending, first + Duration::from_millis(999)).is_none()
         );
-        pending = Some((submission_track("Last"), last_change));
-
-        assert!(
-            take_stable_now_playing(&mut pending, first_change + Duration::from_millis(1499))
-                .is_none()
-        );
+        pending = Some((submission_track("Last"), first + Duration::from_millis(500)));
         assert_eq!(
-            take_stable_now_playing(&mut pending, first_change + Duration::from_millis(1500))
+            take_stable_now_playing(&mut pending, first + Duration::from_millis(1500))
                 .map(|track| track.title),
             Some("Last".to_string())
         );
-        assert!(pending.is_none());
     }
 
     #[test]
     fn account_identity_is_service_scoped_and_does_not_store_the_secret() {
-        let lastfm = opaque_account_id(ScrobbleService::LastFm, "secret");
-        let listenbrainz = opaque_account_id(ScrobbleService::ListenBrainz, "secret");
+        let lastfm = opaque_account_id(DeliveryService::LastFm, "secret");
+        let listenbrainz = opaque_account_id(DeliveryService::ListenBrainz, "secret");
         assert_ne!(lastfm, listenbrainz);
         assert!(!lastfm.contains("secret"));
     }
 
-    #[test]
-    fn retry_delay_is_bounded() {
-        assert_eq!(retry_delay(0), 30);
-        assert_eq!(retry_delay(3), 240);
-        assert_eq!(retry_delay(100), 3_600);
-    }
-
-    #[test]
-    fn completed_track_capture_uses_canonical_artist_credit_text() {
-        let track = ListeningTrack {
-            source_id: SourceId::new("source"),
-            track_id: TrackId::new("track"),
-            recording_id: None,
-            title: " Track ".to_string(),
-            artists: vec!["Artist".to_string(), "Guest".to_string()],
-            album: Some(" Album ".to_string()),
-            track_number: None,
-            disc_number: None,
-            duration_millis: 180_000,
+    #[tokio::test(flavor = "multi_thread")]
+    async fn one_completed_play_owns_activity_and_each_delivery_target_once() {
+        let directory = tempfile::tempdir().expect("temporary Store");
+        let database = Database::open(directory.path().join("library.sqlite3"))
+            .await
+            .expect("open Database");
+        let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .expect("begin Scan");
+        scan.write_track(
+            "track",
+            None,
+            "Track",
+            "track artist",
+            "Album",
+            "Artist",
+            "track",
+            180_000,
+            1,
+            1,
+            None,
+            None,
+            None,
+            None,
+            Some("FLAC"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            [1; 32],
+        )
+        .await
+        .expect("stage Track");
+        let ScanOutcome::Changed(publication) = scan.finish().await.expect("publish Scan") else {
+            panic!("initial Scan must publish")
         };
-        assert_eq!(
-            SubmissionTrack::capture(&track),
-            Some(SubmissionTrack {
+        let cancellation = ReadCancellation::new();
+        let track_key = database
+            .track_order(
+                publication.source,
+                None,
+                false,
+                TrackSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("Track order")[0];
+        let settings = Settings {
+            lastfm: AudioscrobblerSettings {
+                enabled: true,
+                username: "listener".to_string(),
+                api_key: "key".to_string(),
+                api_secret: "secret".to_string(),
+                session_key: "session".to_string(),
+                now_playing_enabled: true,
+            },
+            listenbrainz: ListenBrainzSettings {
+                enabled: true,
+                user_token: "token".to_string(),
+                now_playing_enabled: true,
+            },
+            ..Settings::default()
+        };
+        let scrobbler = tokio::task::block_in_place(|| {
+            Scrobbler::new(
+                database.clone(),
+                tokio::runtime::Handle::current(),
+                settings,
+                false,
+            )
+        })
+        .expect("start Scrobbler");
+        let completed = CompletedScrobble {
+            play_id: "play".to_string(),
+            track: ListeningTrack {
+                source_key: publication.source,
+                track_key: Some(track_key),
+                track_object_id: "track".to_string(),
+                recording_id: None,
                 title: "Track".to_string(),
-                artist: "Artist, Guest".to_string(),
-                album: "Album".to_string(),
+                artists: vec!["Artist".to_string()],
+                album: Some("Album".to_string()),
+                track_number: Some(1),
+                disc_number: Some(1),
                 duration_millis: 180_000,
-            })
-        );
-    }
-
-    #[test]
-    fn delivery_results_delete_or_preserve_the_original_completed_play() {
-        let directory = tempfile::tempdir().expect("temporary scrobbling directory");
-        let path = directory.path().join("library.db");
-        let library = Libraries::open(&path).expect("open Libraries");
-        let account_id = "listener";
-
-        let success = queue_one(&library, account_id, "success", 11);
-        assert_eq!(
-            finish_delivery(&library, success, 20, Ok(())),
-            DeliveryFlow::Continue
-        );
-        assert!(
-            library
-                .due_scrobbles(ScrobbleService::LastFm, account_id, i64::MAX, 10)
-                .expect("read after immediate success")
-                .is_empty()
-        );
-
-        let retry = queue_one(&library, account_id, "retry", 12);
-        assert_eq!(
-            finish_delivery(
-                &library,
-                retry,
-                20,
-                Err(DeliveryError::retry("service unavailable")),
-            ),
-            DeliveryFlow::StopAccount
-        );
-        assert!(
-            library
-                .due_scrobbles(ScrobbleService::LastFm, account_id, 49, 10)
-                .expect("read before retry deadline")
-                .is_empty()
-        );
-        let retry = library
-            .due_scrobbles(ScrobbleService::LastFm, account_id, 50, 10)
-            .expect("read retry")
-            .into_iter()
-            .next()
-            .expect("transient failure stays queued");
-        assert_eq!(retry.attempts, 1);
-        library
-            .complete_scrobble(retry.id)
-            .expect("finish retry fixture");
-
-        let rejected = queue_one(&library, account_id, "rejected", 12);
-        assert_eq!(
-            finish_delivery(
-                &library,
-                rejected,
-                20,
-                Err(DeliveryError::stop("invalid track fields")),
-            ),
-            DeliveryFlow::Continue
-        );
-        assert!(
-            library
-                .due_scrobbles(ScrobbleService::LastFm, account_id, i64::MAX, 10)
-                .expect("read after permanent rejection")
-                .is_empty()
-        );
-
-        let blocked = queue_one(&library, account_id, "blocked", 13);
-        library
-            .queue_scrobbles(vec![new_scrobble(account_id, "also-blocked", 14)])
-            .expect("queue second account delivery");
-        assert_eq!(
-            finish_delivery(
-                &library,
-                blocked,
-                20,
-                Err(DeliveryError::credential_blocked("invalid session")),
-            ),
-            DeliveryFlow::StopAccount
-        );
-        drop(library);
-
-        let reopened = Libraries::open(&path).expect("reopen Libraries");
-        assert!(
-            reopened
-                .due_scrobbles(ScrobbleService::LastFm, account_id, i64::MAX, 10)
-                .expect("read credential-blocked work")
-                .is_empty()
-        );
-        assert_eq!(
-            reopened
-                .wake_scrobbles(ScrobbleService::LastFm, "another-listener", 21)
-                .expect("wake other account"),
-            0
-        );
-        assert_eq!(
-            reopened
-                .wake_scrobbles(ScrobbleService::LastFm, account_id, 21)
-                .expect("wake reauthorized account"),
-            2
-        );
-        let due = reopened
-            .due_scrobbles(ScrobbleService::LastFm, account_id, 21, 10)
-            .expect("read reauthorized work");
-        assert_eq!(
-            due.iter()
-                .map(|pending| (pending.id.play_id.as_str(), pending.started_at))
-                .collect::<Vec<_>>(),
-            vec![("blocked", 13), ("also-blocked", 14)]
-        );
-    }
-
-    #[test]
-    fn only_changed_credentials_for_the_same_account_wake_blocked_work() {
-        let previous = audioscrobbler_settings("listener", "session-one");
-        let mut current = previous.clone();
-        current.session_key = "session-two".to_string();
-        let previous = Settings {
-            lastfm: previous,
-            ..Settings::default()
+            },
+            started_at_unix_seconds: 100,
+            listened_millis: 90_000,
         };
-        let current = Settings {
-            lastfm: current,
-            ..Settings::default()
-        };
-        let account_id = audioscrobbler_account_id(ScrobbleService::LastFm, &previous.lastfm);
+        tokio::task::block_in_place(|| {
+            assert_eq!(
+                scrobbler.accept_completed_play(&completed, false).unwrap(),
+                2
+            );
+            assert_eq!(
+                scrobbler.accept_completed_play(&completed, false).unwrap(),
+                2
+            );
+        });
 
-        let directory = tempfile::tempdir().expect("temporary scrobbling directory");
-        let library = Libraries::open(directory.path().join("library.db")).expect("open Libraries");
-        library
-            .queue_scrobbles(vec![new_scrobble(&account_id, "blocked", 10)])
-            .expect("queue completed play");
-        library
-            .block_scrobbles(ScrobbleService::LastFm, &account_id, "invalid session")
-            .expect("block account work");
-        let scrobbler =
-            Scrobbler::new(library.clone(), previous.clone(), true).expect("start Scrobbler");
-        scrobbler
-            .update_settings(current.clone(), true)
-            .expect("replace account credentials");
         assert_eq!(
-            library
-                .due_scrobbles(ScrobbleService::LastFm, &account_id, i64::MAX, 10)
-                .expect("read woken work")
+            database
+                .activity_history(publication.source, &cancellation)
+                .await
+                .expect("Activity")
                 .len(),
             1
         );
-
+        let due = database
+            .due_listen_deliveries(i64::MAX, 10, &cancellation)
+            .await
+            .expect("delivery outbox");
+        assert_eq!(due.len(), 2);
+        let retry_track = SubmissionTrack::from_pending(&due[0]);
+        assert_eq!(retry_track.duration_millis, 180_000);
+        assert_eq!(due[0].listened_millis, 90_000);
+        let lastfm_account = opaque_account_id(DeliveryService::LastFm, "listener");
         assert_eq!(
-            reauthorized_accounts(&previous, &current),
-            vec![(ScrobbleService::LastFm, account_id)]
+            database
+                .block_listen_deliveries("lastfm", &lastfm_account, "invalid session")
+                .await
+                .expect("block account"),
+            1
         );
-
-        let mut other_account = current.clone();
-        other_account.lastfm.username = "another-listener".to_string();
-        assert!(reauthorized_accounts(&previous, &other_account).is_empty());
-
-        let mut presentation_only = previous.clone();
-        presentation_only.lastfm.now_playing_enabled = false;
-        assert!(reauthorized_accounts(&previous, &presentation_only).is_empty());
-    }
-
-    fn queue_one(
-        library: &Libraries,
-        account_id: &str,
-        play_id: &str,
-        started_at: i64,
-    ) -> PendingScrobble {
-        library
-            .queue_scrobbles(vec![new_scrobble(account_id, play_id, started_at)])
-            .expect("queue completed play");
-        library
-            .due_scrobbles(ScrobbleService::LastFm, account_id, started_at, 10)
-            .expect("read completed play")
-            .into_iter()
-            .find(|pending| pending.id.play_id == play_id)
-            .expect("queued play is due immediately")
-    }
-
-    fn new_scrobble(account_id: &str, play_id: &str, started_at: i64) -> NewScrobble {
-        NewScrobble {
-            id: PendingScrobbleId {
-                service: ScrobbleService::LastFm,
-                account_id: account_id.to_string(),
-                play_id: play_id.to_string(),
-            },
-            track_title: "Track".to_string(),
-            artist_name: "Artist".to_string(),
-            album_title: Some("Album".to_string()),
-            duration_millis: 180_000,
-            started_at,
-        }
-    }
-
-    fn audioscrobbler_settings(username: &str, session_key: &str) -> AudioscrobblerSettings {
-        AudioscrobblerSettings {
-            enabled: true,
-            username: username.to_string(),
-            api_key: "api-key".to_string(),
-            api_secret: "api-secret".to_string(),
-            session_key: session_key.to_string(),
-            now_playing_enabled: true,
-        }
+        assert_eq!(
+            database
+                .due_listen_deliveries(i64::MAX, 10, &cancellation)
+                .await
+                .expect("blocked outbox")
+                .len(),
+            1
+        );
+        assert_eq!(
+            database
+                .wake_listen_deliveries("lastfm", &lastfm_account, 101)
+                .await
+                .expect("wake account"),
+            1
+        );
+        assert_eq!(
+            database
+                .remove_listen_deliveries("lastfm", &lastfm_account)
+                .await
+                .expect("remove account"),
+            1
+        );
+        assert_eq!(
+            database
+                .activity_history(publication.source, &cancellation)
+                .await
+                .expect("Activity after account removal")
+                .len(),
+            1
+        );
     }
 
     fn submission_track(title: &str) -> SubmissionTrack {

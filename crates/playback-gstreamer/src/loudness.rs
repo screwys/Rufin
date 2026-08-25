@@ -6,19 +6,25 @@ use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
 use gstreamer_audio as gst_audio;
-use library::{LoudnessMeasurement, ResolvedStream};
+use playback::ResolvedStream;
 use std::time::{Duration, Instant};
 
 const ANALYSIS_STALL_TIMEOUT: Duration = Duration::from_secs(60);
 const SAMPLE_POLL: gst::ClockTime = gst::ClockTime::from_mseconds(100);
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct AnalyzedLoudness {
+    pub integrated_lufs: Option<f64>,
+    pub true_peak: Option<f64>,
+}
+
 pub struct LoudnessAnalysis {
     analyzer: EbuR128,
-    measurement: LoudnessMeasurement,
+    measurement: AnalyzedLoudness,
 }
 
 impl LoudnessAnalysis {
-    pub const fn measurement(&self) -> LoudnessMeasurement {
+    pub const fn measurement(&self) -> AnalyzedLoudness {
         self.measurement
     }
 }
@@ -117,20 +123,20 @@ pub fn analyze_loudness_cancellable(
     result
 }
 
-pub fn album_loudness(analyses: &[LoudnessAnalysis]) -> Result<LoudnessMeasurement, String> {
+pub fn album_loudness(analyses: &[LoudnessAnalysis]) -> Result<AnalyzedLoudness, String> {
     if analyses.is_empty() {
         return Err("an album needs at least one loudness analysis".to_string());
     }
     let integrated_lufs =
         EbuR128::loudness_global_multiple(analyses.iter().map(|analysis| &analysis.analyzer))
             .map_err(|error| error.to_string())?;
-    LoudnessMeasurement::new(
-        integrated_lufs.is_finite().then_some(integrated_lufs),
-        analyses
+    Ok(AnalyzedLoudness {
+        integrated_lufs: integrated_lufs.is_finite().then_some(integrated_lufs),
+        true_peak: analyses
             .iter()
-            .map(|analysis| analysis.measurement.true_peak_ratio)
-            .fold(0.0_f64, f64::max),
-    )
+            .filter_map(|analysis| analysis.measurement.true_peak)
+            .reduce(f64::max),
+    })
 }
 
 fn add_sample(
@@ -225,22 +231,22 @@ fn ebur128_channel(position: gst_audio::AudioChannelPosition) -> Result<Channel,
     })
 }
 
-fn measurement(analyzer: &EbuR128) -> Result<LoudnessMeasurement, String> {
+fn measurement(analyzer: &EbuR128) -> Result<AnalyzedLoudness, String> {
     let integrated_lufs = analyzer
         .loudness_global()
         .map_err(|error| error.to_string())?;
-    let mut true_peak_ratio = 0.0_f64;
+    let mut true_peak = 0.0_f64;
     for channel in 0..analyzer.channels() {
-        true_peak_ratio = true_peak_ratio.max(
+        true_peak = true_peak.max(
             analyzer
                 .true_peak(channel)
                 .map_err(|error| error.to_string())?,
         );
     }
-    LoudnessMeasurement::new(
-        integrated_lufs.is_finite().then_some(integrated_lufs),
-        true_peak_ratio,
-    )
+    Ok(AnalyzedLoudness {
+        integrated_lufs: integrated_lufs.is_finite().then_some(integrated_lufs),
+        true_peak: Some(true_peak),
+    })
 }
 
 fn wait_for_preroll(
@@ -292,7 +298,7 @@ mod tests {
         let result = analyze_loudness_cancellable(&stream, || false)
             .expect("analyze prepared stream window");
 
-        assert!(result.measurement.true_peak_ratio < 0.05);
+        assert!(result.measurement.true_peak.is_some_and(|peak| peak < 0.05));
         assert!(result.measurement.integrated_lufs.is_some());
     }
 
@@ -321,10 +327,7 @@ mod tests {
             "quiet {quiet_lufs}, album {album_lufs}, loud {loud_lufs}"
         );
         assert!((album_lufs - (quiet_lufs + loud_lufs) / 2.0).abs() > 1.0);
-        assert_eq!(
-            album.true_peak_ratio,
-            analyses[1].measurement.true_peak_ratio
-        );
+        assert_eq!(album.true_peak, analyses[1].measurement.true_peak);
     }
 
     #[test]

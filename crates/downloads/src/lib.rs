@@ -10,18 +10,19 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
 use library::{
-    AcceptedLibraryChange, Library, MusicFolderId, SourceId, StreamQuality, StreamRequest, TrackId,
-    TrackSelection, TrackSort,
+    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey,
+    SourceKey, TrackKey, TrackSort,
 };
+use playback::{ResolvedStream, StreamQuality, StreamRequest};
 use serde::{Deserialize, Serialize};
-use sources::{NativeSourceResult, Source, SourceError};
+use sources::{Source, SourceError, SourceId};
 use tracing::warn;
 
 mod track_download;
 
 use track_download::*;
 
-const QUEUE_VERSION: u32 = 1;
+const QUEUE_VERSION: u32 = 2;
 const QUEUE_FILE: &str = "queue.json";
 const QUEUE_PART_FILE: &str = "queue.json.part";
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -31,34 +32,32 @@ const MAX_ACTIVE_DOWNLOADS: usize = 3;
 pub struct Downloads {
     root: Arc<PathBuf>,
     commands: Sender<Command>,
-    runtime: tokio::runtime::Handle,
 }
 
 enum Command {
     Attach {
+        source_id: SourceId,
+        source_key: SourceKey,
         source: Option<Weak<Source>>,
-        loaded: Weak<Library>,
-        music_folder_id: Option<MusicFolderId>,
+        folder: Option<FolderKey>,
         response: Sender<Result<(), String>>,
     },
     Download {
-        loaded: Weak<Library>,
+        source_id: SourceId,
         subject: DownloadSubject,
-        track_ids: Vec<TrackId>,
+        track_keys: Vec<TrackKey>,
     },
     Remove {
-        loaded: Weak<Library>,
-        track_ids: Vec<TrackId>,
+        source_id: SourceId,
+        track_keys: Vec<TrackKey>,
         notify: bool,
     },
     LibraryChanged {
-        loaded: Weak<Library>,
-        change: AcceptedLibraryChange,
+        source_id: SourceId,
     },
     SettingsChanged(Vec<SourceDownloadSettings>),
     RemoveRule {
         source_id: SourceId,
-        loaded: Option<Weak<Library>>,
         rule: DownloadRule,
         delete_downloads: bool,
     },
@@ -79,29 +78,29 @@ enum Command {
     },
     Clear {
         source_id: SourceId,
-        loaded: Option<Weak<Library>>,
         notify: bool,
     },
 }
 
 #[derive(Clone)]
 struct AttachedSource {
+    source_key: SourceKey,
     source: Option<Weak<Source>>,
-    loaded: Weak<Library>,
-    music_folder_id: Option<MusicFolderId>,
+    folder: Option<FolderKey>,
     directory: Option<PathBuf>,
 }
 
 #[derive(Clone)]
 struct RuleIntent {
-    loaded: Arc<Library>,
-    music_folder_id: Option<MusicFolderId>,
+    database: Database,
+    source_key: SourceKey,
+    folder: Option<FolderKey>,
     rules: DownloadRules,
 }
 
 impl RuleIntent {
     fn same_context(&self, other: &Self) -> bool {
-        Arc::ptr_eq(&self.loaded, &other.loaded) && self.music_folder_id == other.music_folder_id
+        self.source_key == other.source_key && self.folder == other.folder
     }
 }
 
@@ -126,8 +125,8 @@ struct DownloadJob {
     quality: StreamQuality,
     total_tracks: usize,
     #[serde(default)]
-    completed: Vec<TrackId>,
-    remaining: Vec<TrackId>,
+    completed: Vec<TrackKey>,
+    remaining: Vec<TrackKey>,
     state: DownloadQueueState,
 }
 
@@ -136,6 +135,48 @@ struct QueueFile {
     version: u32,
     source_id: SourceId,
     jobs: Vec<DownloadJob>,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+enum ReleasedDownloadSubject {
+    Rule(DownloadRule),
+    Track(String),
+    Album(String),
+    Artist(String),
+    Genre(String),
+    Mood(String),
+    Playlist(String),
+    SmartPlaylist(String),
+    Prepared {
+        context_id: String,
+        title: Option<String>,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
+enum ReleasedDownloadOwner {
+    Subject(ReleasedDownloadSubject),
+    Retained,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasedDownloadJob {
+    id: String,
+    subject: ReleasedDownloadSubject,
+    quality: StreamQuality,
+    #[serde(rename = "total_tracks")]
+    _total_tracks: usize,
+    #[serde(default)]
+    completed: Vec<String>,
+    remaining: Vec<String>,
+    state: DownloadQueueState,
+}
+
+#[derive(Debug, Deserialize)]
+struct ReleasedQueueFile {
+    version: u32,
+    source_id: SourceId,
+    jobs: Vec<ReleasedDownloadJob>,
 }
 
 async fn persist_queue(
@@ -168,7 +209,13 @@ async fn persist_queue(
         .map_err(|error| format!("could not finish the download queue: {error}"))
 }
 
-fn load_queue(root: &Path, source_id: &SourceId) -> Result<Vec<DownloadJob>, String> {
+async fn load_queue(
+    root: &Path,
+    source_id: &SourceId,
+    database: &Database,
+    source_key: SourceKey,
+    custom_directory: Option<&Path>,
+) -> Result<Vec<DownloadJob>, String> {
     let directory = source_directory(root, source_id);
     let path = directory.join(QUEUE_FILE);
     let part = directory.join(QUEUE_PART_FILE);
@@ -181,15 +228,144 @@ fn load_queue(root: &Path, source_id: &SourceId) -> Result<Vec<DownloadJob>, Str
         },
         Err(error) => return Err(format!("could not read {}: {error}", path.display())),
     };
-    let queue = serde_json::from_slice::<QueueFile>(&bytes)
-        .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
-    if queue.version != QUEUE_VERSION || queue.source_id != *source_id {
-        return Err("the saved download queue does not match this source".to_string());
-    }
+    let jobs = if let Ok(queue) = serde_json::from_slice::<QueueFile>(&bytes) {
+        if queue.version != QUEUE_VERSION || queue.source_id != *source_id {
+            return Err("the saved download queue does not match this source".to_string());
+        }
+        queue.jobs
+    } else {
+        let released = serde_json::from_slice::<ReleasedQueueFile>(&bytes)
+            .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
+        if released.version != 1 || released.source_id != *source_id {
+            return Err("the saved download queue does not match this source".to_string());
+        }
+        let cancellation = library::ReadCancellation::new();
+        let mut rebound = Vec::new();
+        for job in released.jobs {
+            let Some(subject) =
+                rebind_released_subject(database, source_key, job.subject, &cancellation).await?
+            else {
+                continue;
+            };
+            let mut completed = Vec::new();
+            let mut remaining = Vec::new();
+            for object_id in job.completed {
+                if let Some(key) = database
+                    .track_key_by_object(source_key, &object_id, &cancellation)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    completed.push(key);
+                }
+            }
+            for object_id in job.remaining {
+                if let Some(key) = database
+                    .track_key_by_object(source_key, &object_id, &cancellation)
+                    .await
+                    .map_err(|error| error.to_string())?
+                {
+                    migrate_released_staging(root, source_id, &object_id, key, custom_directory)
+                        .await?;
+                    remaining.push(key);
+                }
+            }
+            if !remaining.is_empty() {
+                rebound.push(DownloadJob {
+                    id: job.id,
+                    subject,
+                    quality: job.quality,
+                    total_tracks: completed.len() + remaining.len(),
+                    completed,
+                    remaining,
+                    state: job.state,
+                });
+            }
+        }
+        persist_queue(root, source_id, &rebound).await?;
+        rebound
+    };
     if recovered && let Err(error) = std::fs::rename(&part, &path) {
         warn!(%error, path = %part.display(), "could not finish recovering the download queue");
     }
-    Ok(queue.jobs)
+    Ok(jobs)
+}
+
+async fn rebind_released_subject(
+    database: &Database,
+    source: SourceKey,
+    subject: ReleasedDownloadSubject,
+    cancellation: &library::ReadCancellation,
+) -> Result<Option<DownloadSubject>, String> {
+    Ok(match subject {
+        ReleasedDownloadSubject::Rule(rule) => Some(DownloadSubject::Rule(rule)),
+        ReleasedDownloadSubject::Track(id) => database
+            .track_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Track),
+        ReleasedDownloadSubject::Album(id) => database
+            .album_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Album),
+        ReleasedDownloadSubject::Artist(id) => database
+            .artist_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Artist),
+        ReleasedDownloadSubject::Genre(id) => database
+            .genre_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Genre),
+        ReleasedDownloadSubject::Mood(id) => database
+            .mood_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Mood),
+        ReleasedDownloadSubject::Playlist(id) => database
+            .playlist_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::Playlist),
+        ReleasedDownloadSubject::SmartPlaylist(id) => database
+            .smart_playlist_key_by_object(source, &id, cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .map(DownloadSubject::SmartPlaylist),
+        ReleasedDownloadSubject::Prepared { context_id, title } => {
+            Some(DownloadSubject::Prepared { context_id, title })
+        }
+    })
+}
+
+async fn migrate_released_staging(
+    root: &Path,
+    source_id: &SourceId,
+    track_object_id: &str,
+    track_key: TrackKey,
+    custom_directory: Option<&Path>,
+) -> Result<(), String> {
+    let (old_part, old_checkpoint) =
+        released_staging_paths(root, source_id, track_object_id, custom_directory);
+    let current = staging_paths(root, source_id, &track_key, custom_directory);
+    for (old, new) in [
+        (old_part, current.audio_part),
+        (old_checkpoint, current.checkpoint),
+    ] {
+        if old == new || !old.exists() || new.exists() {
+            continue;
+        }
+        if let Some(parent) = new.parent() {
+            tokio::fs::create_dir_all(parent)
+                .await
+                .map_err(|error| error.to_string())?;
+        }
+        tokio::fs::rename(&old, &new)
+            .await
+            .map_err(|error| format!("could not preserve {}: {error}", old.display()))?;
+    }
+    Ok(())
 }
 
 enum DownloadFailure {
@@ -201,7 +377,7 @@ enum DownloadFailure {
 struct ActiveDownload {
     source_id: SourceId,
     job_id: String,
-    track_id: TrackId,
+    track_id: TrackKey,
     subject: DownloadSubject,
     paths: DownloadPaths,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
@@ -293,79 +469,78 @@ impl SourceDownloadSettings {
     }
 }
 
-fn affected_rules(rules: DownloadRules, change: &AcceptedLibraryChange) -> DownloadRules {
-    let tracks = !change.tracks.is_empty();
-    DownloadRules {
-        entire_library: rules.entire_library && tracks,
-        favorites: rules.favorites
-            && (tracks
-                || !change.albums.is_empty()
-                || !change.artists.is_empty()
-                || change.favorite.is_some()),
-        all_playlists: rules.all_playlists && (tracks || !change.playlists.is_empty()),
-        latest_five_albums: rules.latest_five_albums && (tracks || !change.albums.is_empty()),
+async fn rule_track_ids(
+    database: &Database,
+    source: SourceKey,
+    folder: Option<FolderKey>,
+    rule: DownloadRule,
+) -> library::LibraryResult<Vec<TrackKey>> {
+    let cancellation = library::ReadCancellation::new();
+    match rule {
+        DownloadRule::EntireLibrary => {
+            database
+                .track_order(
+                    source,
+                    folder,
+                    false,
+                    TrackSort::Title,
+                    false,
+                    &cancellation,
+                )
+                .await
+        }
+        DownloadRule::Favorites => {
+            database
+                .track_order(source, folder, true, TrackSort::Title, false, &cancellation)
+                .await
+        }
+        DownloadRule::AllPlaylists => {
+            database
+                .all_playlist_track_order(source, folder, &cancellation)
+                .await
+        }
+        DownloadRule::LatestFiveAlbums => {
+            database
+                .latest_album_track_order(source, folder, 5, &cancellation)
+                .await
+        }
     }
 }
 
-fn rule_track_ids(
-    loaded: &Arc<Library>,
-    music_folder_id: Option<&MusicFolderId>,
-    rule: DownloadRule,
-) -> library::LibraryQueryResult<Vec<TrackId>> {
-    let tracks = match rule {
-        DownloadRule::EntireLibrary => {
-            loaded.track_list(music_folder_id, TrackSort::Title, false)?
-        }
-        DownloadRule::Favorites => loaded.favorite_download_track_list(music_folder_id)?,
-        DownloadRule::AllPlaylists => loaded.all_playlist_track_list(music_folder_id)?,
-        DownloadRule::LatestFiveAlbums => loaded.latest_album_track_list(music_folder_id, 5)?,
-    };
-    Ok(tracks.track_ids()?.to_vec())
-}
-
-fn prepare_command<T: Send + 'static>(
-    runtime: tokio::runtime::Handle,
-    commands: Sender<Command>,
-    work: impl FnOnce() -> library::LibraryQueryResult<T> + Send + 'static,
-    command: impl FnOnce(T) -> Command + Send + 'static,
-) {
-    runtime.spawn_blocking(move || match work() {
-        Ok(prepared) => drop(commands.try_send(command(prepared))),
-        Err(error) => warn!(%error, "could not prepare selected downloads"),
-    });
-}
-
-type PreparedRules = Result<Vec<(DownloadRule, Vec<TrackId>)>, String>;
+type PreparedRules = Result<Vec<(DownloadRule, Vec<TrackKey>)>, String>;
 
 fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
-    tokio::task::spawn_blocking(move || {
+    tokio::spawn(async move {
         let RuleIntent {
-            loaded,
-            music_folder_id,
+            database,
+            source_key,
+            folder,
             rules,
         } = intent;
-        let result = rules
-            .active()
-            .map(|rule| {
-                rule_track_ids(&loaded, music_folder_id.as_ref(), rule)
-                    .map(|track_ids| (rule, track_ids))
-            })
-            .collect::<library::LibraryQueryResult<_>>()
-            .map_err(|error| error.to_string());
-        drop(prepared.try_send(result));
+        let mut result = Vec::new();
+        for rule in rules.active() {
+            match rule_track_ids(&database, source_key, folder, rule).await {
+                Ok(track_keys) => result.push((rule, track_keys)),
+                Err(error) => {
+                    drop(prepared.try_send(Err(error.to_string())));
+                    return;
+                }
+            }
+        }
+        drop(prepared.try_send(Ok(result)));
     });
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum DownloadSubject {
     Rule(DownloadRule),
-    Track(library::TrackId),
-    Album(library::AlbumId),
-    Artist(library::ArtistId),
-    Genre(library::GenreId),
-    Mood(library::MoodId),
-    Playlist(library::PlaylistId),
-    SmartPlaylist(library::SmartPlaylistId),
+    Track(TrackKey),
+    Album(AlbumKey),
+    Artist(ArtistKey),
+    Genre(GenreKey),
+    Mood(MoodKey),
+    Playlist(PlaylistKey),
+    SmartPlaylist(SmartPlaylistKey),
     Prepared {
         context_id: String,
         title: Option<String>,
@@ -423,11 +598,12 @@ pub enum DownloadEvent {
 
 struct Actor {
     root: Arc<PathBuf>,
+    database: Database,
     events: Sender<DownloadEvent>,
     transfers: Arc<TransferClients>,
     prepared_rules: Sender<PreparedRules>,
     attached: HashMap<SourceId, AttachedSource>,
-    selected: Option<Weak<Library>>,
+    selected: Option<SourceId>,
     settings: HashMap<SourceId, SourceDownloadSettings>,
     running_rules: Option<RuleIntent>,
     pending_rules: Option<RuleIntent>,
@@ -439,6 +615,7 @@ struct Actor {
 impl Downloads {
     pub fn new(
         root: PathBuf,
+        database: Database,
         runtime: tokio::runtime::Handle,
         events: Sender<DownloadEvent>,
         settings: Vec<SourceDownloadSettings>,
@@ -448,11 +625,11 @@ impl Downloads {
         let downloads = Self {
             root: Arc::new(root),
             commands,
-            runtime: runtime.clone(),
         };
         runtime.spawn(run(
             Actor {
                 root: Arc::clone(&downloads.root),
+                database,
                 events,
                 transfers: Arc::new(TransferClients::default()),
                 prepared_rules,
@@ -476,16 +653,18 @@ impl Downloads {
 
     pub async fn attach(
         &self,
+        source_id: SourceId,
+        source_key: SourceKey,
         source: Option<Arc<Source>>,
-        loaded: &Arc<Library>,
-        music_folder_id: Option<MusicFolderId>,
+        folder: Option<FolderKey>,
     ) -> Result<(), String> {
         let (response, result) = async_channel::bounded(1);
         self.commands
             .send(Command::Attach {
+                source_id,
+                source_key,
                 source: source.as_ref().map(Arc::downgrade),
-                loaded: Arc::downgrade(loaded),
-                music_folder_id,
+                folder,
                 response,
             })
             .await
@@ -496,65 +675,38 @@ impl Downloads {
             .map_err(|_| "download attachment did not finish".to_string())?
     }
 
-    pub fn download(&self, loaded: Arc<Library>, subject: DownloadSubject, tracks: TrackSelection) {
-        let loaded = Arc::downgrade(&loaded);
-        prepare_command(
-            self.runtime.clone(),
-            self.commands.clone(),
-            move || {
-                tracks
-                    .prepare()
-                    .and_then(|tracks| tracks.track_ids())
-                    .map(|track_ids| track_ids.to_vec())
-            },
-            move |track_ids| Command::Download {
-                loaded,
-                subject,
-                track_ids,
-            },
-        );
-    }
-
-    pub fn remove(&self, loaded: Arc<Library>, tracks: TrackSelection, notify: bool) {
-        let loaded = Arc::downgrade(&loaded);
-        prepare_command(
-            self.runtime.clone(),
-            self.commands.clone(),
-            move || {
-                tracks
-                    .prepare()
-                    .and_then(|tracks| tracks.track_ids())
-                    .map(|track_ids| track_ids.to_vec())
-            },
-            move |track_ids| Command::Remove {
-                loaded,
-                track_ids,
-                notify,
-            },
-        );
-    }
-
-    pub fn library_changed(&self, loaded: Arc<Library>, change: AcceptedLibraryChange) {
-        self.send(Command::LibraryChanged {
-            loaded: Arc::downgrade(&loaded),
-            change,
+    pub fn download(
+        &self,
+        source_id: SourceId,
+        subject: DownloadSubject,
+        track_keys: Vec<TrackKey>,
+    ) {
+        self.send(Command::Download {
+            source_id,
+            subject,
+            track_keys,
         });
+    }
+
+    pub fn remove(&self, source_id: SourceId, track_keys: Vec<TrackKey>, notify: bool) {
+        self.send(Command::Remove {
+            source_id,
+            track_keys,
+            notify,
+        });
+    }
+
+    pub fn library_changed(&self, source_id: SourceId) {
+        self.send(Command::LibraryChanged { source_id });
     }
 
     pub fn settings_changed(&self, settings: Vec<SourceDownloadSettings>) {
         self.send(Command::SettingsChanged(settings));
     }
 
-    pub fn remove_rule(
-        &self,
-        source_id: SourceId,
-        loaded: Option<Arc<Library>>,
-        rule: DownloadRule,
-        delete_downloads: bool,
-    ) {
+    pub fn remove_rule(&self, source_id: SourceId, rule: DownloadRule, delete_downloads: bool) {
         self.send(Command::RemoveRule {
             source_id,
-            loaded: loaded.as_ref().map(Arc::downgrade),
             rule,
             delete_downloads,
         });
@@ -587,12 +739,8 @@ impl Downloads {
         });
     }
 
-    pub fn clear(&self, source_id: SourceId, loaded: Option<Arc<Library>>, notify: bool) {
-        self.send(Command::Clear {
-            source_id,
-            loaded: loaded.as_ref().map(Arc::downgrade),
-            notify,
-        });
+    pub fn clear(&self, source_id: SourceId, notify: bool) {
+        self.send(Command::Clear { source_id, notify });
     }
 
     fn send(&self, command: Command) {
@@ -674,20 +822,12 @@ impl Actor {
     async fn apply(&mut self, command: Command, active: &mut Vec<ActiveDownload>) {
         match command {
             Command::Attach {
+                source_id,
+                source_key,
                 source,
-                loaded,
-                music_folder_id,
+                folder,
                 response,
             } => {
-                let Some(live) = loaded.upgrade() else {
-                    let _ = response
-                        .send(Err(
-                            "the accepted library is no longer available".to_string()
-                        ))
-                        .await;
-                    return;
-                };
-                let source_id = live.source_id().clone();
                 let directory = self.settings_for(&source_id).directory;
                 let directory_changed = self
                     .attached
@@ -698,17 +838,14 @@ impl Actor {
                     .get(&source_id)
                     .is_some_and(|attached| !same_weak_target(&attached.source, &source));
                 self.discard_matching(active, !directory_changed, |download| {
-                    download.source_id == source_id
-                        && (source_changed
-                            || directory_changed
-                            || matches!(live.track(&download.track_id), Ok(None)))
+                    download.source_id == source_id && (source_changed || directory_changed)
                 })
                 .await;
                 let result = self
-                    .attach(source_id.clone(), source, live, music_folder_id, directory)
+                    .attach(source_id.clone(), source_key, source, folder, directory)
                     .await;
                 let ready = result.is_ok();
-                self.selected = Some(loaded);
+                self.selected = Some(source_id.clone());
                 self.pending_rules = None;
                 let _ = response.send(result).await;
                 if ready {
@@ -716,61 +853,43 @@ impl Actor {
                 }
             }
             Command::Download {
-                loaded,
+                source_id,
                 subject,
-                track_ids,
+                track_keys,
             } => {
-                let Some(source_id) = self.attached_source_id(&loaded) else {
-                    warn!("ignored a download from a retired Library");
+                if self.selected.as_ref() != Some(&source_id)
+                    || !self.attached.contains_key(&source_id)
+                {
+                    warn!("ignored a download from an inactive source");
                     return;
-                };
+                }
                 let quality = self.settings_for(&source_id).quality;
-                self.enqueue(source_id, subject, quality, track_ids).await;
+                self.enqueue(source_id, subject, quality, track_keys).await;
             }
             Command::Remove {
-                loaded,
-                track_ids,
+                source_id,
+                track_keys,
                 notify,
             } => {
-                let Some(source_id) = self.attached_source_id(&loaded) else {
-                    warn!("ignored download removal from a retired Library");
+                if !self.attached.contains_key(&source_id) {
+                    warn!("ignored download removal from an inactive source");
                     return;
-                };
-                let remove = track_ids.iter().collect::<HashSet<_>>();
+                }
+                let remove = track_keys.iter().collect::<HashSet<_>>();
                 self.abort_matching(active, false, |download| {
                     download.source_id == source_id && remove.contains(&download.track_id)
                 })
                 .await;
-                self.force_remove(&source_id, &loaded, track_ids, notify)
-                    .await;
+                self.force_remove(&source_id, track_keys, notify).await;
             }
-            Command::LibraryChanged { loaded, change } => {
-                let Some(source_id) = self.attached_source_id(&loaded) else {
-                    return;
-                };
-                let removed = change
-                    .tracks
-                    .iter()
-                    .filter(|replacement| replacement.track.is_none())
-                    .map(|replacement| replacement.id.clone())
-                    .collect::<Vec<_>>();
-                if !removed.is_empty() {
-                    let remove = removed.iter().collect::<HashSet<_>>();
-                    self.abort_matching(active, false, |download| {
-                        download.source_id == source_id && remove.contains(&download.track_id)
-                    })
-                    .await;
-                    self.force_remove(&source_id, &loaded, removed, false).await;
-                }
-                let rules = affected_rules(self.settings_for(&source_id).rules, &change);
-                self.reconcile_rules(&source_id, rules);
+            Command::LibraryChanged { source_id } => {
+                self.reconcile_all_rules(&source_id);
             }
             Command::SettingsChanged(settings) => {
                 self.apply_settings(settings, active).await;
             }
             Command::RemoveRule {
                 source_id,
-                loaded,
                 rule,
                 delete_downloads,
             } => {
@@ -779,8 +898,7 @@ impl Actor {
                         && download.subject == DownloadSubject::Rule(rule)
                 })
                 .await;
-                self.remove_rule(&source_id, loaded.as_ref(), rule, delete_downloads)
-                    .await;
+                self.remove_rule(&source_id, rule, delete_downloads).await;
             }
             Command::Cancel { source_id, job_id } => {
                 self.cancel(&source_id, &job_id, active).await;
@@ -807,18 +925,14 @@ impl Actor {
                 self.move_job(&source_id, &job_id, &target_job_id, after)
                     .await;
             }
-            Command::Clear {
-                source_id,
-                loaded,
-                notify,
-            } => {
+            Command::Clear { source_id, notify } => {
                 if let Some(settings) = self.settings.get_mut(&source_id) {
                     settings.rules = DownloadRules::default();
                 }
                 self.reconcile_all_rules(&source_id);
                 self.abort_matching(active, false, |download| download.source_id == source_id)
                     .await;
-                self.clear(&source_id, loaded.as_ref(), notify).await;
+                self.clear(&source_id, notify).await;
             }
         }
     }
@@ -828,19 +942,6 @@ impl Actor {
             .get(source_id)
             .cloned()
             .unwrap_or_else(|| SourceDownloadSettings::for_source(source_id.clone()))
-    }
-
-    fn attached_source_id(&self, loaded: &Weak<Library>) -> Option<SourceId> {
-        let selected = self.selected.as_ref()?;
-        if !Weak::ptr_eq(selected, loaded) {
-            return None;
-        }
-        let live = loaded.upgrade()?;
-        let source_id = live.source_id();
-        self.attached
-            .get(source_id)
-            .filter(|attached| Weak::ptr_eq(&attached.loaded, loaded))
-            .map(|_| source_id.clone())
     }
 
     async fn apply_settings(
@@ -881,26 +982,17 @@ impl Actor {
         self.schedule_rules(source_id, rules, true);
     }
 
-    fn reconcile_rules(&mut self, source_id: &SourceId, rules: DownloadRules) {
-        if rules.is_empty() {
-            return;
-        }
-        self.schedule_rules(source_id, rules, false);
-    }
-
     fn schedule_rules(&mut self, source_id: &SourceId, rules: DownloadRules, authoritative: bool) {
         let Some(attached) = self.attached.get(source_id).cloned() else {
             return;
         };
-        if self.attached_source_id(&attached.loaded).is_none() {
+        if self.selected.as_ref() != Some(source_id) {
             return;
         }
-        let Some(loaded) = attached.loaded.upgrade() else {
-            return;
-        };
         let mut intent = RuleIntent {
-            loaded,
-            music_folder_id: attached.music_folder_id,
+            database: self.database.clone(),
+            source_key: attached.source_key,
+            folder: attached.folder,
             rules,
         };
         if let Some(pending) = self.pending_rules.as_mut() {
@@ -914,7 +1006,7 @@ impl Actor {
         } else {
             if !authoritative
                 && let Some(running) = self.running_rules.as_ref()
-                && running.loaded.source_id() == source_id
+                && running.source_key == attached.source_key
                 && running.same_context(&intent)
             {
                 for rule in running.rules.active() {
@@ -949,11 +1041,15 @@ impl Actor {
         let Some(intent) = self.running_rules.take() else {
             return;
         };
-        let source_id = intent.loaded.source_id().clone();
+        let Some(source_id) = self.attached.iter().find_map(|(id, attached)| {
+            (attached.source_key == intent.source_key).then(|| id.clone())
+        }) else {
+            self.start_rule_preparation();
+            return;
+        };
         let superseded = self.pending_rules.is_some();
-        let expected = Arc::downgrade(&intent.loaded);
-        let current = self.attached_source_id(&expected).is_some()
-            && self.attached[&source_id].music_folder_id == intent.music_folder_id;
+        let current = self.selected.as_ref() == Some(&source_id)
+            && self.attached[&source_id].folder == intent.folder;
         if !superseded && current {
             match prepared {
                 Ok(prepared) => {
@@ -974,15 +1070,14 @@ impl Actor {
     async fn attach(
         &mut self,
         source_id: SourceId,
+        source_key: SourceKey,
         source: Option<Weak<Source>>,
-        live: Arc<Library>,
-        music_folder_id: Option<MusicFolderId>,
+        folder: Option<FolderKey>,
         directory: Option<PathBuf>,
     ) -> Result<(), String> {
-        let loaded = Arc::downgrade(&live);
         let unchanged = self.attached.get(&source_id).is_some_and(|attached| {
             attached.directory == directory
-                && Weak::ptr_eq(&attached.loaded, &loaded)
+                && attached.source_key == source_key
                 && same_weak_target(&attached.source, &source)
         });
         self.discard_previous_directory(&source_id, &directory)
@@ -990,9 +1085,9 @@ impl Actor {
         self.attached.insert(
             source_id.clone(),
             AttachedSource {
+                source_key,
                 source: source.clone(),
-                loaded: loaded.clone(),
-                music_folder_id,
+                folder,
                 directory: directory.clone(),
             },
         );
@@ -1002,28 +1097,37 @@ impl Actor {
             return Ok(());
         }
         let mut attachment_error = None;
-        let root = Arc::clone(&self.root);
-        let attached_loaded = Arc::clone(&live);
-        match tokio::task::spawn_blocking(move || attach_downloaded_files(&root, &attached_loaded))
-            .await
+        match attach_downloaded_files(
+            &self.root,
+            &self.database,
+            source_key,
+            &source_id,
+            directory.as_deref(),
+        )
+        .await
         {
-            Ok(Ok(stale)) => {
+            Ok(stale) => {
                 for paths in stale {
                     if let Err(error) = remove_download_files(&paths).await {
                         attachment_error.get_or_insert(error);
                     }
                 }
             }
-            Ok(Err(error)) => attachment_error = Some(error),
-            Err(error) => {
-                attachment_error = Some(format!("download attachment task failed: {error}"));
-            }
+            Err(error) => attachment_error = Some(error),
         }
         let source_available = source.as_ref().and_then(Weak::upgrade).is_some();
         let mut jobs = if let Some(jobs) = self.jobs.get(&source_id) {
             jobs.clone()
         } else {
-            match load_queue(&self.root, &source_id) {
+            match load_queue(
+                &self.root,
+                &source_id,
+                &self.database,
+                source_key,
+                directory.as_deref(),
+            )
+            .await
+            {
                 Ok(jobs) => jobs,
                 Err(error) => {
                     warn!(%error, %source_id, "could not load the download queue");
@@ -1031,9 +1135,24 @@ impl Actor {
                 }
             }
         };
+        let cancellation = library::ReadCancellation::new();
+        let mut current = HashSet::new();
+        let queued = jobs
+            .iter()
+            .flat_map(|job| job.remaining.iter().copied())
+            .collect::<Vec<_>>();
+        for page in queued.chunks(256) {
+            if let Ok(rows) = self
+                .database
+                .track_rows(source_key, page, &cancellation)
+                .await
+            {
+                current.extend(rows.into_iter().map(|track| track.track_key));
+            }
+        }
         jobs.retain_mut(|job| {
             job.remaining
-                .retain(|track_id| live.track(track_id).ok().flatten().is_some());
+                .retain(|track_key| current.contains(track_key));
             job.state = if source_available {
                 DownloadQueueState::Queued
             } else {
@@ -1050,7 +1169,6 @@ impl Actor {
         {
             attachment_error.get_or_insert_with(|| error.to_string());
         }
-        drop(live);
         self.jobs.insert(source_id.clone(), jobs);
         self.persist_and_publish(&source_id).await;
         attachment_error.map_or(Ok(()), Err)
@@ -1061,13 +1179,14 @@ impl Actor {
         source_id: SourceId,
         subject: DownloadSubject,
         quality: StreamQuality,
-        track_ids: Vec<TrackId>,
+        track_ids: Vec<TrackKey>,
     ) {
         let Some(attached) = self.attached.get(&source_id) else {
             warn!(%source_id, "ignored a download for an unattached source");
             return;
         };
         let source_available = attached.source.as_ref().and_then(Weak::upgrade).is_some();
+        let custom_directory = attached.directory.clone();
         let can_start = !self.paused && source_available;
 
         let mut seen = HashSet::new();
@@ -1083,7 +1202,15 @@ impl Actor {
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for track_id in &track_ids {
-            match add_owner_to_existing_download(&self.root, &source_id, track_id, &owner).await {
+            match add_owner_to_existing_download(
+                &self.root,
+                &source_id,
+                track_id,
+                &owner,
+                custom_directory.as_deref(),
+            )
+            .await
+            {
                 Ok(true) => completed.push(track_id.clone()),
                 Ok(false) => remaining.push(track_id.clone()),
                 Err(error) => {
@@ -1174,7 +1301,7 @@ impl Actor {
         source_id: SourceId,
         rule: DownloadRule,
         quality: StreamQuality,
-        track_ids: Vec<TrackId>,
+        track_ids: Vec<TrackKey>,
         active: &mut Vec<ActiveDownload>,
     ) {
         let Some(attached) = self.attached.get(&source_id).cloned() else {
@@ -1207,7 +1334,11 @@ impl Actor {
             .map(|download| download.job_id.clone());
         let owner = DownloadOwner::Subject(subject.clone());
 
-        let records = match load_download_records(&self.root, &source_id) {
+        let custom_directory = self
+            .attached
+            .get(&source_id)
+            .and_then(|attached| attached.directory.as_deref());
+        let records = match load_download_records(&self.root, &source_id, custom_directory) {
             Ok(records) => records,
             Err(error) => {
                 warn!(%error, %source_id, "could not read rule downloads");
@@ -1223,15 +1354,18 @@ impl Actor {
                 &track_id,
                 Some(&subject),
             ));
-            let paths = record_download_paths(&self.root, &source_id, &record);
+            let Ok(paths) =
+                record_download_paths(&self.root, &source_id, &record, custom_directory)
+            else {
+                continue;
+            };
             if record.owners.is_empty() {
                 if let Err(error) = remove_download_files(&paths).await {
                     warn!(%error, %source_id, %track_id, "could not remove stale rule download");
                     continue;
                 }
-                if let Some(loaded) = attached.loaded.upgrade() {
-                    let _ = loaded.remove_downloaded_file(&track_id);
-                }
+                self.remove_download_access(&source_id, track_id, &paths)
+                    .await;
             } else if let Err(error) = write_record(&paths, &record).await {
                 warn!(%error, %source_id, %track_id, "could not update rule ownership");
             }
@@ -1240,7 +1374,15 @@ impl Actor {
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
         for track_id in &track_ids {
-            match add_owner_to_existing_download(&self.root, &source_id, track_id, &owner).await {
+            match add_owner_to_existing_download(
+                &self.root,
+                &source_id,
+                track_id,
+                &owner,
+                custom_directory,
+            )
+            .await
+            {
                 Ok(true) => completed.push(track_id.clone()),
                 Ok(false) => remaining.push(track_id.clone()),
                 Err(error) => {
@@ -1327,13 +1469,6 @@ impl Actor {
                 self.persist_and_publish(&source_id).await;
                 continue;
             };
-            let Some(loaded) = attached.loaded.upgrade() else {
-                if let Some(job) = self.find_job_mut(&source_id, &job_id) {
-                    job.state = DownloadQueueState::WaitingForConnection;
-                }
-                self.persist_and_publish(&source_id).await;
-                continue;
-            };
             let Some(source) = attached.source.as_ref().and_then(Weak::upgrade) else {
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::WaitingForConnection;
@@ -1341,15 +1476,28 @@ impl Actor {
                 self.persist_and_publish(&source_id).await;
                 continue;
             };
-            let track = loaded.track(&track_id).ok().flatten();
-            drop(loaded);
-            let Some(track) = track else {
+            let cancellation = library::ReadCancellation::new();
+            let Some(track) = self
+                .database
+                .track_rows(attached.source_key, &[track_id], &cancellation)
+                .await
+                .ok()
+                .and_then(|mut rows| rows.pop())
+            else {
                 self.remove_job_track(&source_id, &job_id, &track_id, false);
                 self.persist_and_publish(&source_id).await;
                 continue;
             };
             let owner = DownloadOwner::Subject(subject.clone());
-            match add_owner_to_existing_download(&self.root, &source_id, &track_id, &owner).await {
+            match add_owner_to_existing_download(
+                &self.root,
+                &source_id,
+                &track_id,
+                &owner,
+                attached.directory.as_deref(),
+            )
+            .await
+            {
                 Ok(true) => {
                     self.remove_job_track(&source_id, &job_id, &track_id, true);
                     self.persist_and_publish(&source_id).await;
@@ -1365,18 +1513,11 @@ impl Actor {
                     continue;
                 }
             }
-            let request = StreamRequest::new(track_id.clone(), quality);
+            let media = playback::PlaybackMedia::from(track.clone());
+            let request = StreamRequest::for_media(&media, quality);
             let resolved = source.resolve_download(&request);
             let (transcoded_extension, transfer) = match resolved {
-                Ok(NativeSourceResult::Available(download)) => {
-                    (download.transcoded_extension(), Ok(download.into_stream()))
-                }
-                Ok(NativeSourceResult::Unavailable) => (
-                    None,
-                    Err(DownloadFailure::NeedsAttention(
-                        "the selected source does not support downloads".to_string(),
-                    )),
-                ),
+                Ok(download) => (download.transcoded_extension(), Ok(download.into_stream())),
                 Err(error) => (None, Err(download_source_failure(error))),
             };
             let paths = new_download_paths(
@@ -1432,7 +1573,7 @@ impl Actor {
         String,
         DownloadSubject,
         StreamQuality,
-        TrackId,
+        TrackKey,
         DownloadQueueState,
     )> {
         for (source_id, jobs) in &self.jobs {
@@ -1525,7 +1666,7 @@ impl Actor {
     async fn commit_transfer(
         &self,
         source_id: &SourceId,
-        track_id: &TrackId,
+        track_id: &TrackKey,
         subject: &DownloadSubject,
         paths: &DownloadPaths,
     ) -> Result<(), DownloadFailure> {
@@ -1537,14 +1678,51 @@ impl Actor {
         )
         .await
         .map_err(DownloadFailure::NeedsAttention)?;
-        if let Some(loaded) = self
-            .attached
-            .get(source_id)
-            .and_then(|attached| attached.loaded.upgrade())
-        {
-            loaded
-                .set_downloaded_file(track_id.clone(), paths.audio.clone())
-                .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+        if let Some(attached) = self.attached.get(source_id) {
+            let cancellation = library::ReadCancellation::new();
+            if let Some(track) = self
+                .database
+                .track_rows(attached.source_key, &[*track_id], &cancellation)
+                .await
+                .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?
+                .pop()
+            {
+                let metadata = std::fs::metadata(&paths.audio)
+                    .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+                let (storage_root, relative_path) =
+                    local_access_projection(paths).map_err(DownloadFailure::NeedsAttention)?;
+                self.database
+                    .upsert_local_access(
+                        attached.source_key,
+                        &library::LocalAccessWrite {
+                            track_object_id: Some(track.object_id),
+                            path: paths.audio.to_string_lossy().into_owned(),
+                            root: storage_root.to_string_lossy().into_owned(),
+                            relative_path: relative_path.to_string_lossy().into_owned(),
+                            size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+                            mtime_ns: metadata
+                                .modified()
+                                .ok()
+                                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                                .map_or(0, |value| {
+                                    i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
+                                }),
+                            device_id: None,
+                            inode: None,
+                            parser_version: RECORD_VERSION as i64,
+                            title: track.title,
+                            album: track.display_album,
+                            artist: track.display_artist,
+                            disc_number: track.disc_number,
+                            track_number: track.track_number,
+                            duration_millis: track.duration_millis,
+                            media_uri: format!("file://{}", paths.audio.to_string_lossy()),
+                            loudness_analysis_key: track.loudness_analysis_key,
+                        },
+                    )
+                    .await
+                    .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
+            }
         }
         Ok(())
     }
@@ -1554,7 +1732,7 @@ impl Actor {
         active: &mut Vec<ActiveDownload>,
         preserve: bool,
         matches: impl Fn(&ActiveDownload) -> bool,
-    ) -> Vec<TrackId> {
+    ) -> Vec<TrackKey> {
         self.settle_matching(active, preserve, true, matches).await
     }
 
@@ -1573,7 +1751,7 @@ impl Actor {
         preserve: bool,
         commit_completed: bool,
         matches: impl Fn(&ActiveDownload) -> bool,
-    ) -> Vec<TrackId> {
+    ) -> Vec<TrackKey> {
         let mut settling = Vec::new();
         let mut index = 0;
         while index < active.len() {
@@ -1692,7 +1870,7 @@ impl Actor {
     fn queued_owners_for_track(
         &self,
         source_id: &SourceId,
-        track_id: &TrackId,
+        track_id: &TrackKey,
         excluded_subject: Option<&DownloadSubject>,
     ) -> HashSet<DownloadOwner> {
         self.jobs
@@ -1716,7 +1894,7 @@ impl Actor {
         &mut self,
         source_id: &SourceId,
         job_id: &str,
-        track_id: &TrackId,
+        track_id: &TrackKey,
         completed: bool,
     ) {
         let Some(jobs) = self.jobs.get_mut(source_id) else {
@@ -1745,7 +1923,6 @@ impl Actor {
                     .source
                     .as_ref()
                     .is_some_and(|source| source.strong_count() > 0)
-                    && attached.loaded.strong_count() > 0
             });
             if let Some(first) = jobs.first_mut()
                 && available
@@ -1756,13 +1933,7 @@ impl Actor {
         }
     }
 
-    async fn force_remove(
-        &mut self,
-        source_id: &SourceId,
-        loaded: &Weak<Library>,
-        track_ids: Vec<TrackId>,
-        notify: bool,
-    ) {
+    async fn force_remove(&mut self, source_id: &SourceId, track_ids: Vec<TrackKey>, notify: bool) {
         let remove = track_ids.iter().cloned().collect::<HashSet<_>>();
         for job in self.jobs.entry(source_id.clone()).or_default().iter_mut() {
             job.remaining.retain(|track_id| !remove.contains(track_id));
@@ -1775,9 +1946,7 @@ impl Actor {
             .retain(|job| !job.remaining.is_empty());
         self.reconcile_staging(source_id).await;
 
-        let (removed, failed) = self
-            .delete_downloads(source_id, Some(loaded), track_ids)
-            .await;
+        let (removed, failed) = self.delete_downloads(source_id, track_ids).await;
         self.persist_and_publish(source_id).await;
         if notify {
             self.send_removal_notice(removed, failed).await;
@@ -1787,22 +1956,27 @@ impl Actor {
     async fn delete_downloads(
         &self,
         source_id: &SourceId,
-        loaded: Option<&Weak<Library>>,
-        track_ids: impl IntoIterator<Item = TrackId>,
+        track_ids: impl IntoIterator<Item = TrackKey>,
     ) -> (usize, usize) {
         let mut removed = 0usize;
         let mut failed = 0usize;
-        let records = load_download_records(&self.root, source_id).unwrap_or_default();
+        let custom_directory = self
+            .attached
+            .get(source_id)
+            .and_then(|attached| attached.directory.as_deref());
+        let records =
+            load_download_records(&self.root, source_id, custom_directory).unwrap_or_default();
         for track_id in track_ids {
             let paths = records
                 .get(&track_id)
-                .map(|record| record_download_paths(&self.root, source_id, record))
+                .and_then(|record| {
+                    record_download_paths(&self.root, source_id, record, custom_directory).ok()
+                })
                 .unwrap_or_else(|| download_paths(&self.root, source_id, &track_id));
             match remove_download_files(&paths).await {
                 Ok(was_present) => {
-                    if let Some(loaded) = loaded.and_then(Weak::upgrade) {
-                        let _ = loaded.remove_downloaded_file(&track_id);
-                    }
+                    self.remove_download_access(source_id, track_id, &paths)
+                        .await;
                     removed += usize::from(was_present);
                 }
                 Err(error) => {
@@ -1812,6 +1986,49 @@ impl Actor {
             }
         }
         (removed, failed)
+    }
+
+    async fn remove_download_access(
+        &self,
+        source_id: &SourceId,
+        track_key: TrackKey,
+        paths: &DownloadPaths,
+    ) {
+        let Some(attached) = self.attached.get(source_id) else {
+            return;
+        };
+        let cancellation = library::ReadCancellation::new();
+        let Some(track) = self
+            .database
+            .track_rows(attached.source_key, &[track_key], &cancellation)
+            .await
+            .ok()
+            .and_then(|mut rows| rows.pop())
+        else {
+            return;
+        };
+        let Ok(Some(access)) = self
+            .database
+            .resolve_local_access(
+                attached.source_key,
+                Some(&track.object_id),
+                &track.title,
+                &track.display_album,
+                &track.display_artist,
+                track.disc_number,
+                track.track_number,
+                track.duration_millis,
+            )
+            .await
+        else {
+            return;
+        };
+        if Path::new(&access.path) == paths.audio {
+            let _ = self
+                .database
+                .remove_local_access(attached.source_key, access.local_access_file_key)
+                .await;
+        }
     }
 
     async fn send_removal_notice(&self, removed: usize, failed: usize) {
@@ -1827,7 +2044,6 @@ impl Actor {
     async fn remove_rule(
         &mut self,
         source_id: &SourceId,
-        loaded: Option<&Weak<Library>>,
         rule: DownloadRule,
         delete_downloads: bool,
     ) {
@@ -1837,7 +2053,7 @@ impl Actor {
             .or_default()
             .retain(|job| job.subject != subject);
         self.reconcile_staging(source_id).await;
-        self.release_owner(source_id, loaded, &subject, None, !delete_downloads)
+        self.release_owner(source_id, &subject, None, !delete_downloads)
             .await;
         self.persist_and_publish(source_id).await;
     }
@@ -1897,33 +2113,26 @@ impl Actor {
             .or_default()
             .retain(|job| job.id != job_id);
         self.reconcile_staging(source_id).await;
-        let loaded = self
-            .attached
-            .get(source_id)
-            .map(|attached| attached.loaded.clone());
-        self.release_owner(
-            source_id,
-            loaded.as_ref(),
-            &subject,
-            Some(&completed),
-            false,
-        )
-        .await;
+        self.release_owner(source_id, &subject, Some(&completed), false)
+            .await;
         self.persist_and_publish(source_id).await;
     }
 
     async fn release_owner(
         &self,
         source_id: &SourceId,
-        loaded: Option<&Weak<Library>>,
         subject: &DownloadSubject,
-        track_ids: Option<&HashSet<TrackId>>,
+        track_ids: Option<&HashSet<TrackKey>>,
         retain: bool,
     ) {
         if track_ids.is_some_and(HashSet::is_empty) {
             return;
         }
-        let records = match load_download_records(&self.root, source_id) {
+        let custom_directory = self
+            .attached
+            .get(source_id)
+            .and_then(|attached| attached.directory.as_deref());
+        let records = match load_download_records(&self.root, source_id, custom_directory) {
             Ok(records) => records,
             Err(error) => {
                 warn!(%error, %source_id, "could not read download ownership");
@@ -1944,15 +2153,17 @@ impl Actor {
             record
                 .owners
                 .extend(self.queued_owners_for_track(source_id, &track_id, None));
-            let paths = record_download_paths(&self.root, source_id, &record);
+            let Ok(paths) = record_download_paths(&self.root, source_id, &record, custom_directory)
+            else {
+                continue;
+            };
             if record.owners.is_empty() {
                 if let Err(error) = remove_download_files(&paths).await {
                     warn!(%error, %source_id, %track_id, "could not remove unowned download");
                     continue;
                 }
-                if let Some(loaded) = loaded.and_then(Weak::upgrade) {
-                    let _ = loaded.remove_downloaded_file(&track_id);
-                }
+                self.remove_download_access(source_id, track_id, &paths)
+                    .await;
             } else if let Err(error) = write_record(&paths, &record).await {
                 warn!(%error, %source_id, %track_id, "could not update download ownership");
             }
@@ -1979,7 +2190,7 @@ impl Actor {
         }
     }
 
-    async fn clear(&mut self, source_id: &SourceId, loaded: Option<&Weak<Library>>, notify: bool) {
+    async fn clear(&mut self, source_id: &SourceId, notify: bool) {
         let staging_directory = self
             .attached
             .get(source_id)
@@ -1995,8 +2206,17 @@ impl Actor {
             )
             .await
             .map_err(|error| error.to_string())?;
-            for record in load_download_records(&self.root, source_id)? {
-                let paths = record_download_paths(&self.root, source_id, &record.1);
+            for record in
+                load_download_records(&self.root, source_id, staging_directory.as_deref())?
+            {
+                let paths = record_download_paths(
+                    &self.root,
+                    source_id,
+                    &record.1,
+                    staging_directory.as_deref(),
+                )?;
+                self.remove_download_access(source_id, record.0, &paths)
+                    .await;
                 remove_download_files(&paths).await?;
             }
             match tokio::fs::remove_dir_all(&directory).await {
@@ -2008,9 +2228,6 @@ impl Actor {
         .await;
         match result {
             Ok(()) => {
-                if let Some(loaded) = loaded.and_then(Weak::upgrade) {
-                    let _ = loaded.replace_downloaded_files(HashMap::new());
-                }
                 self.publish(source_id).await;
                 if notify {
                     let _ = self
@@ -2054,12 +2271,12 @@ impl Actor {
     }
 
     async fn publish(&self, source_id: &SourceId) {
-        let downloaded_tracks = self
+        let custom_directory = self
             .attached
             .get(source_id)
-            .and_then(|attached| attached.loaded.upgrade())
-            .and_then(|loaded| loaded.downloaded_track_ids().ok())
-            .map_or(0, |tracks| tracks.len());
+            .and_then(|attached| attached.directory.as_deref());
+        let downloaded_tracks = load_download_records(&self.root, source_id, custom_directory)
+            .map_or(0, |records| records.len());
         let jobs = self
             .jobs
             .get(source_id)
@@ -2092,7 +2309,7 @@ impl Actor {
 async fn download_track(
     source_id: SourceId,
     request: StreamRequest,
-    stream: library::ResolvedStream,
+    stream: ResolvedStream,
     paths: DownloadPaths,
     transfers: Arc<TransferClients>,
     cancellation: tokio::sync::oneshot::Receiver<()>,
@@ -2120,6 +2337,8 @@ fn download_source_failure(error: SourceError) -> DownloadFailure {
         | SourceError::Server { .. }
         | SourceError::Cancelled => DownloadFailure::Retry(error.to_string()),
         SourceError::Auth(_)
+        | SourceError::Library(_)
+        | SourceError::Json(_)
         | SourceError::InvalidRequest(_)
         | SourceError::InvalidConfig(_)
         | SourceError::Other(_) => DownloadFailure::NeedsAttention(error.to_string()),
@@ -2160,4 +2379,228 @@ fn reorder_jobs(
 }
 
 #[cfg(test)]
-mod tests;
+mod tests {
+    use super::*;
+
+    async fn download_fixture(
+        source_id: &str,
+        track_object_id: &str,
+    ) -> (tempfile::TempDir, Database, SourceKey, TrackKey) {
+        let directory = tempfile::tempdir().expect("temporary download fixture");
+        let database = Database::open(&directory.path().join("library.sqlite3"))
+            .await
+            .expect("open Library");
+        let mut scan = library::Scan::begin(&database, source_id, "Source", "source", None)
+            .await
+            .expect("begin source scan");
+        scan.write_track(
+            track_object_id,
+            None,
+            "Track",
+            "track artist album",
+            "Album",
+            "Artist",
+            "track",
+            180_000,
+            1,
+            1,
+            None,
+            None,
+            None,
+            Some("https://example.invalid/track"),
+            Some("FLAC"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            [7; 32],
+        )
+        .await
+        .expect("stage Track");
+        let publication = match scan.finish().await.expect("publish source") {
+            library::ScanOutcome::Changed(publication) => publication,
+            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
+        };
+        let track = database
+            .track_key_by_object(
+                publication.source,
+                track_object_id,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .expect("read Track key")
+            .expect("Track exists");
+        (directory, database, publication.source, track)
+    }
+
+    #[test]
+    fn queued_track_keys_survive_restart_serialization() {
+        let source_id = SourceId::new("source");
+        let queue = QueueFile {
+            version: QUEUE_VERSION,
+            source_id: source_id.clone(),
+            jobs: vec![DownloadJob {
+                id: "job".to_string(),
+                subject: DownloadSubject::Track(TrackKey::from_raw(7)),
+                quality: StreamQuality::Original,
+                total_tracks: 1,
+                completed: Vec::new(),
+                remaining: vec![TrackKey::from_raw(7)],
+                state: DownloadQueueState::Queued,
+            }],
+        };
+        let restored: QueueFile =
+            serde_json::from_slice(&serde_json::to_vec(&queue).expect("encode Queue"))
+                .expect("decode Queue");
+        assert_eq!(restored.source_id, source_id);
+        assert_eq!(restored.jobs[0].remaining, [TrackKey::from_raw(7)]);
+    }
+
+    #[tokio::test]
+    async fn released_completed_and_partial_downloads_rebind_on_attach() {
+        let (_database_directory, database, source_key, track_key) =
+            download_fixture("source", "track-object").await;
+        let downloads = tempfile::tempdir().expect("temporary Downloads root");
+        let source_id = SourceId::new("source");
+        let directory = source_directory(downloads.path(), &source_id);
+        std::fs::create_dir_all(&directory).expect("create source Downloads directory");
+        let released_stem = hash_id_bytes(b"track-object");
+        let audio = directory.join(format!("{released_stem}.{AUDIO_EXTENSION}"));
+        std::fs::write(&audio, b"released audio").expect("write released audio");
+        let record = directory.join(format!("{released_stem}.{RECORD_EXTENSION}"));
+        std::fs::write(
+            &record,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 3,
+                "source_id": source_id,
+                "track_id": "track-object",
+                "owners": ["Retained"]
+            }))
+            .expect("encode released record"),
+        )
+        .expect("write released record");
+
+        let (released_part, released_checkpoint) =
+            released_staging_paths(downloads.path(), &source_id, "track-object", None);
+        std::fs::write(&released_part, b"partial").expect("write released partial");
+        std::fs::write(&released_checkpoint, b"checkpoint").expect("write released checkpoint");
+        std::fs::write(
+            directory.join(QUEUE_FILE),
+            serde_json::to_vec(&serde_json::json!({
+                "version": 1,
+                "source_id": source_id,
+                "jobs": [{
+                    "id": "job",
+                    "subject": {"Track": "track-object"},
+                    "quality": "Original",
+                    "total_tracks": 1,
+                    "completed": [],
+                    "remaining": ["track-object"],
+                    "state": "Queued"
+                }]
+            }))
+            .expect("encode released Queue"),
+        )
+        .expect("write released Queue");
+
+        let stale =
+            attach_downloaded_files(downloads.path(), &database, source_key, &source_id, None)
+                .await
+                .expect("attach released download");
+        assert!(stale.is_empty());
+        let records = load_download_records(downloads.path(), &source_id, None)
+            .expect("load migrated records");
+        let migrated = records.get(&track_key).expect("migrated record");
+        assert_eq!(migrated.completed_size, Some(14));
+        assert_eq!(
+            migrated.relative_audio_path.as_deref(),
+            audio.file_name().map(Path::new)
+        );
+        assert!(audio.is_file());
+
+        let jobs = load_queue(downloads.path(), &source_id, &database, source_key, None)
+            .await
+            .expect("migrate released Queue");
+        assert_eq!(jobs[0].remaining, [track_key]);
+        let current = staging_paths(downloads.path(), &source_id, &track_key, None);
+        assert_eq!(
+            std::fs::read(current.audio_part).expect("read migrated partial"),
+            b"partial"
+        );
+        assert_eq!(
+            std::fs::read(current.checkpoint).expect("read migrated checkpoint"),
+            b"checkpoint"
+        );
+    }
+
+    #[tokio::test]
+    async fn released_custom_download_is_authorized_by_current_configuration() {
+        let (_database_directory, database, source_key, track_key) =
+            download_fixture("custom-source", "custom-track").await;
+        let downloads = tempfile::tempdir().expect("temporary Downloads root");
+        let custom = tempfile::tempdir().expect("configured custom root");
+        let source_id = SourceId::new("custom-source");
+        let directory = source_directory(downloads.path(), &source_id);
+        std::fs::create_dir_all(&directory).expect("create source Downloads directory");
+        let relative = PathBuf::from("Artist/Album/custom.audio");
+        let audio = custom.path().join(&relative);
+        std::fs::create_dir_all(audio.parent().expect("custom audio parent"))
+            .expect("create custom audio parent");
+        std::fs::write(&audio, b"custom audio").expect("write custom audio");
+        let record = directory.join(format!(
+            "{}.{RECORD_EXTENSION}",
+            hash_id_bytes(b"custom-track")
+        ));
+        std::fs::write(
+            record,
+            serde_json::to_vec(&serde_json::json!({
+                "version": 3,
+                "source_id": source_id,
+                "track_id": "custom-track",
+                "owners": [{"Subject": {"Rule": "Favorites"}}],
+                "audio_root": custom.path(),
+                "audio_path": audio
+            }))
+            .expect("encode released custom record"),
+        )
+        .expect("write released custom record");
+
+        let stale = attach_downloaded_files(
+            downloads.path(),
+            &database,
+            source_key,
+            &source_id,
+            Some(custom.path()),
+        )
+        .await
+        .expect("attach released custom download");
+        assert!(stale.is_empty());
+        let records = load_download_records(downloads.path(), &source_id, Some(custom.path()))
+            .expect("load migrated custom record");
+        let migrated = records.get(&track_key).expect("migrated custom record");
+        assert!(migrated.custom_storage);
+        assert!(
+            migrated
+                .owners
+                .contains(&DownloadOwner::Subject(DownloadSubject::Rule(
+                    DownloadRule::Favorites
+                )))
+        );
+        assert_eq!(
+            migrated.relative_audio_path.as_deref(),
+            Some(relative.as_path())
+        );
+        assert_eq!(migrated.completed_size, Some(12));
+        assert!(custom.path().join(relative).is_file());
+    }
+}

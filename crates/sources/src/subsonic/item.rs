@@ -1,6 +1,213 @@
 use super::*;
 use crate::policy::normalized_date;
 
+pub(super) async fn stage_album(
+    scan: &mut library::Scan,
+    album: Album,
+) -> library::LibraryResult<()> {
+    let artwork = album
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_album(
+        &album.id,
+        &album.title,
+        &album.title.to_lowercase(),
+        &album.artist,
+        &album.title.to_lowercase(),
+        Some(i64::from(album.year)).filter(|year| *year > 0),
+        album.release_date.as_deref(),
+        album.date_added.as_deref(),
+        album.musicbrainz_album_id.as_deref(),
+        album.musicbrainz_release_group_id.as_deref(),
+        album.is_compilation,
+        artwork.as_deref(),
+        album.favorite,
+        album.user_rating.map(i64::from),
+        None,
+    )
+    .await?;
+    let effective_album_artists = if album.relations.album_artists.is_empty() {
+        &album.relations.artists
+    } else {
+        &album.relations.album_artists
+    };
+    for (position, artist) in effective_album_artists.iter().enumerate() {
+        stage_artist_credit(scan, artist).await?;
+        scan.write_album_artist(&album.id, &artist.id, position as i64)
+            .await?;
+    }
+    for (position, genre) in album.relations.genres.iter().enumerate() {
+        stage_genre_credit(scan, genre).await?;
+        scan.write_album_genre(&album.id, &genre.id, position as i64)
+            .await?;
+    }
+    for (position, value) in album.release_types.iter().enumerate() {
+        scan.write_album_release_type(&album.id, value, position as i64)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn stage_track(
+    scan: &mut library::Scan,
+    track: Track,
+) -> library::LibraryResult<()> {
+    let artwork = track
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    let mut hash = blake3::Hasher::new();
+    hash.update(b"rufin-subsonic-audio-v1\0");
+    hash.update(track.id.as_bytes());
+    hash.update(track.source_path.as_deref().unwrap_or_default().as_bytes());
+    hash.update(
+        track
+            .source_format
+            .as_deref()
+            .unwrap_or_default()
+            .as_bytes(),
+    );
+    hash.update(&track.duration_seconds.to_le_bytes());
+    let normalized = format!(
+        "{} {} {} {}",
+        track.title,
+        track.album,
+        track.artist,
+        track.comment.as_deref().unwrap_or_default()
+    )
+    .to_lowercase();
+    scan.write_track(
+        &track.id,
+        track.album_id.as_deref(),
+        &track.title,
+        &normalized,
+        &track.album,
+        &track.artist,
+        &track.title.to_lowercase(),
+        i64::from(track.duration_seconds) * 1000,
+        i64::from(track.disc_number),
+        i64::from(track.track_number),
+        Some(i64::from(track.year)).filter(|year| *year > 0),
+        track.release_date.as_deref(),
+        track.date_added.as_deref(),
+        None,
+        track.source_format.as_deref(),
+        track.comment.as_deref(),
+        track.bpm.map(i64::from),
+        track.musicbrainz_recording_id.as_deref(),
+        track.musicbrainz_release_track_id.as_deref(),
+        None,
+        None,
+        None,
+        artwork.as_deref(),
+        track.favorite,
+        track.user_rating.map(i64::from),
+        None,
+        track.play_count.map(i64::from),
+        track.skip_count.map(i64::from),
+        track.last_played,
+        *hash.finalize().as_bytes(),
+    )
+    .await?;
+    for (position, artist) in track.relations.artists.iter().enumerate() {
+        stage_artist_credit(scan, artist).await?;
+        scan.write_track_artist(&track.id, &artist.id, position as i64)
+            .await?;
+    }
+    for artist in &track.relations.album_artists {
+        stage_artist_credit(scan, artist).await?;
+    }
+    for (position, genre) in track.relations.genres.iter().enumerate() {
+        stage_genre_credit(scan, genre).await?;
+        scan.write_track_genre(&track.id, &genre.id, position as i64)
+            .await?;
+    }
+    for (position, mood) in track.relations.moods.iter().enumerate() {
+        scan.write_mood(
+            &mood.id,
+            &mood.name,
+            &mood.name.to_lowercase(),
+            &mood.name.to_lowercase(),
+        )
+        .await?;
+        scan.write_track_mood(&track.id, &mood.id, position as i64)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn stage_artist(
+    scan: &mut library::Scan,
+    artist: Artist,
+) -> library::LibraryResult<()> {
+    let artwork = artist
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_artist(
+        &artist.id,
+        &artist.name,
+        &artist.name.to_lowercase(),
+        &artist.name.to_lowercase(),
+        artist.musicbrainz_artist_id.as_deref(),
+        artwork.as_deref(),
+        artist.favorite,
+        artist.user_rating.map(i64::from),
+    )
+    .await
+}
+pub(super) async fn stage_genre(
+    scan: &mut library::Scan,
+    genre: Genre,
+) -> library::LibraryResult<()> {
+    let artwork = genre
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_genre(
+        &genre.id,
+        &genre.name,
+        &genre.name.to_lowercase(),
+        &genre.name.to_lowercase(),
+        artwork.as_deref(),
+    )
+    .await
+}
+async fn stage_artist_credit(
+    scan: &mut library::Scan,
+    artist: &ArtistCredit,
+) -> library::LibraryResult<()> {
+    scan.write_artist(
+        &artist.id,
+        &artist.name,
+        &artist.name.to_lowercase(),
+        &artist.name.to_lowercase(),
+        artist.musicbrainz_artist_id.as_deref(),
+        None,
+        false,
+        None,
+    )
+    .await
+}
+async fn stage_genre_credit(
+    scan: &mut library::Scan,
+    genre: &GenreCredit,
+) -> library::LibraryResult<()> {
+    scan.write_genre(
+        &genre.id,
+        &genre.name,
+        &genre.name.to_lowercase(),
+        &genre.name.to_lowercase(),
+        None,
+    )
+    .await
+}
+
 pub(super) fn image_ref(
     source: &SubsonicSource,
     cover_art: Option<SubsonicId>,
@@ -9,23 +216,15 @@ pub(super) fn image_ref(
 }
 pub(super) fn folder_from_artist(source: &SubsonicSource, artist: SubsonicArtist) -> Folder {
     Folder {
-        id: FolderId::new(source.id("folder", artist.id.0.as_str())),
+        id: String::from(source.id("folder", artist.id.0.as_str())),
         name: artist.name.unwrap_or_else(|| "Untitled Folder".to_string()),
     }
 }
 pub(super) fn folder_from_child(source: &SubsonicSource, child: SubsonicSong) -> Folder {
     Folder {
-        id: FolderId::new(source.id("folder", child.id.0.as_str())),
+        id: String::from(source.id("folder", child.id.0.as_str())),
         name: child.title.unwrap_or_else(|| "Untitled Folder".to_string()),
     }
-}
-pub(super) fn sort_folders_by_name(folders: &mut [Folder]) {
-    folders.sort_by(|left, right| {
-        left.name
-            .to_lowercase()
-            .cmp(&right.name.to_lowercase())
-            .then_with(|| left.id.cmp(&right.id))
-    });
 }
 pub(super) fn genres_from_item(genre: Option<String>, genres: Vec<GenreName>) -> Vec<String> {
     let mut values = Vec::new();
@@ -47,7 +246,7 @@ fn genre_credits_from_item(
     genres_from_item(genre, genres)
         .into_iter()
         .map(|name| GenreCredit {
-            id: GenreId::new(source.id("genre", &name)),
+            id: String::from(source.id("genre", &name)),
             name,
         })
         .collect()
@@ -62,7 +261,7 @@ pub(super) fn moods_from_item(source: &SubsonicSource, moods: Vec<String>) -> Ve
                 .any(|value: &MoodCredit| value.name.eq_ignore_ascii_case(mood))
         {
             values.push(MoodCredit {
-                id: MoodId::new(source.id("mood", mood)),
+                id: String::from(source.id("mood", mood)),
                 name: mood.to_string(),
             });
         }
@@ -76,7 +275,7 @@ fn artist_credit(
 ) -> Option<ArtistCredit> {
     let id = id?;
     (!id.0.trim().is_empty()).then(|| ArtistCredit {
-        id: ArtistId::new(source.id("artist", &id.0)),
+        id: String::from(source.id("artist", &id.0)),
         name: name.to_string(),
         musicbrainz_artist_id: None,
     })
@@ -90,7 +289,7 @@ fn artist_credits_from_refs(
         .into_iter()
         .filter(|artist| !artist.id.0.trim().is_empty())
         .map(|artist| ArtistCredit {
-            id: ArtistId::new(source.id("artist", &artist.id.0)),
+            id: String::from(source.id("artist", &artist.id.0)),
             name: artist.name,
             musicbrainz_artist_id: None,
         })
@@ -161,7 +360,7 @@ pub(super) fn album_from_dto(source: &SubsonicSource, album: SubsonicAlbum) -> A
         }
     };
     Album {
-        id: AlbumId::new(source.id("album", &raw_id)),
+        id: String::from(source.id("album", &raw_id)),
         title: album
             .title
             .or(album.name)
@@ -200,7 +399,7 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         .album_id
         .as_ref()
         .map(raw_id_string)
-        .map(|id| AlbumId::new(source.id("album", &id)));
+        .map(|id| String::from(source.id("album", &id)));
     let structured_artists = artist_credits_from_refs(source, song.artists);
     let album_artist_credits = artist_credits_from_refs(source, song.album_artists);
     let artist = clean_optional(song.display_artist)
@@ -221,8 +420,8 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         song.content_type.as_deref(),
         song.path.as_deref(),
     );
-    Track::new(TrackData {
-        id: TrackId::new(source.id("track", &raw_id)),
+    Track {
+        id: String::from(source.id("track", &raw_id)),
         album_id,
         title: song.title.unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
@@ -231,7 +430,7 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         year: u16_from_option(song.year),
         release_date: None,
         date_added: normalized_date(song.created),
-        last_played: normalized_timestamp(song.played),
+        last_played: crate::policy::unix_seconds(song.played),
         play_count: song
             .play_count
             .map(|value| value.min(u64::from(u32::MAX)) as u32),
@@ -260,7 +459,7 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
             moods,
             music_folders: Vec::new(),
         },
-    })
+    }
 }
 
 pub(super) fn source_format_from_song(
@@ -293,7 +492,7 @@ pub(super) fn source_format_from_song(
 pub(super) fn artist_from_dto(source: &SubsonicSource, artist: SubsonicArtist) -> Artist {
     let raw_id = raw_id_string(&artist.id);
     Artist {
-        id: ArtistId::new(source.id("artist", &raw_id)),
+        id: String::from(source.id("artist", &raw_id)),
         name: artist.name.unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: favorite(&artist.starred),
         last_played: normalized_timestamp(artist.played),
@@ -311,9 +510,10 @@ pub(super) fn artist_from_dto(source: &SubsonicSource, artist: SubsonicArtist) -
 }
 pub(super) fn genre_from_dto(source: &SubsonicSource, genre: SubsonicGenre) -> Genre {
     Genre {
-        id: GenreId::new(source.id("genre", &genre.value)),
+        id: String::from(source.id("genre", &genre.value)),
         name: genre.value,
         image_ref: None,
+        local_artwork: None,
     }
 }
 fn normalized_timestamp(value: Option<String>) -> Option<String> {
@@ -324,11 +524,14 @@ fn normalized_timestamp(value: Option<String>) -> Option<String> {
 
 pub(super) fn playlist_from_dto(source: &SubsonicSource, playlist: SubsonicPlaylist) -> Playlist {
     let raw_id = raw_id_string(&playlist.id);
+    let track_count = playlist.entry.as_ref().map_or(0, Vec::len);
     Playlist {
-        id: PlaylistId::new(source.id("playlist", &raw_id)),
+        id: String::from(source.id("playlist", &raw_id)),
         name: playlist
             .name
             .unwrap_or_else(|| "Untitled Playlist".to_string()),
         image_ref: image_ref(source, playlist.cover_art),
+        duration_seconds: 0,
+        track_count,
     }
 }

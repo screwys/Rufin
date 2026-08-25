@@ -93,22 +93,6 @@ impl DecodedImage {
     }
 }
 
-#[cfg(test)]
-pub(crate) fn decoded_image_for_test(key: ArtworkKey, bytes: usize) -> DecodedImage {
-    assert!(bytes >= 4 && bytes.is_multiple_of(4));
-    let width = u32::try_from(bytes / 4).expect("test image width");
-    DecodedImage {
-        key,
-        cache_path: Arc::new(PathBuf::from("test-artwork")),
-        pixels: RgbaImage {
-            width,
-            height: 1,
-            row_stride: width * 4,
-            rgba: vec![0; bytes].into(),
-        },
-    }
-}
-
 pub fn decode_rgba(bytes: &[u8], render_size: u32) -> Result<RgbaImage, ArtworkError> {
     let image = decode_reader(
         ImageReader::new(Cursor::new(bytes))
@@ -272,6 +256,36 @@ fn encode_png(image: &DynamicImage) -> Result<Vec<u8>, ArtworkError> {
         .write_to(&mut bytes, ImageFormat::Png)
         .map_err(decode_error)?;
     Ok(bytes.into_inner())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn wide_png() -> Vec<u8> {
+        let image = DynamicImage::ImageRgb8(image::RgbImage::from_pixel(
+            400,
+            200,
+            image::Rgb([20, 40, 60]),
+        ));
+        encode_png(&image).expect("encode fixture")
+    }
+
+    #[test]
+    fn normalization_preserves_aspect_ratio_and_emits_png() {
+        let normalized = normalize_for_cache(wide_png(), 100).expect("normalize image");
+        assert_eq!(&normalized.bytes()[..8], b"\x89PNG\r\n\x1a\n");
+        let decoded = decode_rgba(normalized.bytes(), 100).expect("decode normalized image");
+        assert_eq!((decoded.width(), decoded.height()), (100, 50));
+        assert_eq!(decoded.row_stride(), 400);
+    }
+
+    #[test]
+    fn square_thumbnail_crops_before_scaling() {
+        let thumbnail = square_thumbnail_png(&wide_png(), 64).expect("make thumbnail");
+        let decoded = decode_rgba(&thumbnail, 64).expect("decode thumbnail");
+        assert_eq!((decoded.width(), decoded.height()), (64, 64));
+    }
 }
 
 fn decode_error(error: impl std::fmt::Display) -> ArtworkError {

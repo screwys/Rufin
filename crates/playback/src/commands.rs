@@ -1,13 +1,10 @@
 use std::sync::Arc;
 
-use library::{
-    LibraryQueryError, LibraryQueryResult, RadioSeed, RandomCriteria, SourceId, Track, TrackId,
-    TrackList, TrackSelection,
-};
+use library::{RadioSeed, RandomCriteria, SourceKey, TrackKey};
 
 use crate::{
-    AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackOutput,
-    Provenance, QueuePage, QueuePageQuery, RemoteOutput, RepeatMode, SourceSessionEpoch,
+    AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackMedia,
+    PlaybackOutput, Provenance, RemoteOutput, RepeatMode, SourceSessionEpoch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -35,89 +32,12 @@ pub enum QueueOrigin {
     Radio,
 }
 
-/// One already-loaded ordered music selection.
-///
-/// Routes pass either an existing shallow Library order or a small
-/// already-materialized selection. Rufin prepares the compact order away from
-/// GTK, asks Playback for exact context activation, and materializes complete
-/// Track values only when activation misses.
-#[derive(Clone, Debug)]
-pub enum LoadedTrackSelection {
-    Shallow(TrackSelection),
-    Materialized(Arc<[Track]>),
-}
-
-enum SelectionAnchor {
-    Deferred,
-    Missing,
-    Present(TrackId),
-}
-
-impl LoadedTrackSelection {
-    fn anchor(&self, position: usize) -> LibraryQueryResult<SelectionAnchor> {
-        match self {
-            Self::Shallow(selection) => match selection.prepared() {
-                Some(tracks) => Ok(tracks
-                    .track(position)?
-                    .map_or(SelectionAnchor::Missing, |track| {
-                        SelectionAnchor::Present(track.id.clone())
-                    })),
-                None => Ok(SelectionAnchor::Deferred),
-            },
-            Self::Materialized(tracks) => Ok(tracks
-                .get(position)
-                .map_or(SelectionAnchor::Missing, |track| {
-                    SelectionAnchor::Present(track.id.clone())
-                })),
-        }
-    }
-
-    fn prepare(self) -> LibraryQueryResult<Self> {
-        match self {
-            Self::Shallow(selection) => Ok(Self::Shallow(selection.prepare()?.into())),
-            Self::Materialized(tracks) => Ok(Self::Materialized(tracks)),
-        }
-    }
-
-    fn materialize_owned(self) -> LibraryQueryResult<Vec<Track>> {
-        match self {
-            Self::Shallow(selection) => selection.prepare()?.materialize_owned(),
-            Self::Materialized(tracks) => Ok(tracks.iter().cloned().collect()),
-        }
-    }
-
-    pub fn materialize(&self) -> LibraryQueryResult<Arc<[Track]>> {
-        match self {
-            Self::Shallow(selection) => selection.clone().prepare()?.materialize(),
-            Self::Materialized(tracks) => Ok(Arc::clone(tracks)),
-        }
-    }
-}
-
-impl From<TrackList> for LoadedTrackSelection {
-    fn from(value: TrackList) -> Self {
-        Self::Shallow(value.into())
-    }
-}
-
-impl From<TrackSelection> for LoadedTrackSelection {
-    fn from(value: TrackSelection) -> Self {
-        Self::Shallow(value)
-    }
-}
-
-impl From<Arc<[Track]>> for LoadedTrackSelection {
-    fn from(value: Arc<[Track]>) -> Self {
-        Self::Materialized(value)
-    }
-}
-
 #[derive(Clone)]
 pub struct LoadedPlayRequest {
-    pub source_id: SourceId,
+    pub source_key: SourceKey,
     pub source_session_epoch: SourceSessionEpoch,
-    pub tracks: LoadedTrackSelection,
-    anchor_track_id: Option<TrackId>,
+    pub order: Arc<[TrackKey]>,
+    pub anchor: PlaybackMedia,
     pub anchor_index: usize,
     pub placement: QueuePlacement,
     pub origin: QueueOrigin,
@@ -126,68 +46,64 @@ pub struct LoadedPlayRequest {
 
 impl LoadedPlayRequest {
     pub fn now(
-        source_id: SourceId,
+        source_key: SourceKey,
         source_session_epoch: SourceSessionEpoch,
-        tracks: Arc<[Track]>,
+        order: Arc<[TrackKey]>,
+        anchor: PlaybackMedia,
         anchor_index: usize,
-    ) -> Self {
-        let anchor_track_id = tracks
-            .get(anchor_index)
-            .expect("a loaded Play request must identify an available Track")
-            .id
-            .clone();
-        Self {
-            source_id,
+    ) -> Option<Self> {
+        let anchor_key = anchor.track_key?;
+        (order.get(anchor_index) == Some(&anchor_key)).then(|| Self {
+            source_key,
             source_session_epoch,
-            tracks: tracks.into(),
-            anchor_track_id: Some(anchor_track_id),
+            order,
+            anchor,
             anchor_index,
             placement: QueuePlacement::Now,
             origin: QueueOrigin::Manual,
             shuffled_start: false,
-        }
+        })
     }
 
     pub fn one(
-        source_id: SourceId,
+        source_key: SourceKey,
         source_session_epoch: SourceSessionEpoch,
-        track: Track,
+        track: PlaybackMedia,
         placement: QueuePlacement,
-    ) -> Self {
-        let anchor_track_id = track.id.clone();
-        Self {
-            source_id,
+    ) -> Option<Self> {
+        let track_key = track.track_key?;
+        Some(Self {
+            source_key,
             source_session_epoch,
-            tracks: Arc::<[Track]>::from([track]).into(),
-            anchor_track_id: Some(anchor_track_id),
+            order: Arc::from([track_key]),
+            anchor: track,
             anchor_index: 0,
             placement,
             origin: QueueOrigin::Manual,
             shuffled_start: false,
-        }
+        })
     }
 
     #[allow(clippy::too_many_arguments)]
     pub fn context(
-        source_id: SourceId,
+        source_key: SourceKey,
         source_session_epoch: SourceSessionEpoch,
-        tracks: impl Into<LoadedTrackSelection>,
+        order: Arc<[TrackKey]>,
+        anchor: PlaybackMedia,
         anchor_index: usize,
         placement: QueuePlacement,
         context_id: impl Into<String>,
         shuffled_start: bool,
     ) -> Option<Self> {
-        let tracks = tracks.into();
-        let anchor_track_id = match tracks.anchor(anchor_index).ok()? {
-            SelectionAnchor::Deferred => None,
-            SelectionAnchor::Missing => return None,
-            SelectionAnchor::Present(track_id) => Some(track_id),
-        };
+        let anchor_key = anchor.track_key?;
+        if order.get(anchor_index) != Some(&anchor_key) {
+            return None;
+        }
         Some(Self {
-            source_id,
+            source_key,
             source_session_epoch,
-            tracks,
-            anchor_track_id,
+            order,
+            anchor,
             anchor_index,
             placement,
             origin: QueueOrigin::Context(context_id.into()),
@@ -195,49 +111,20 @@ impl LoadedPlayRequest {
         })
     }
 
-    pub(crate) fn activation_context(&self) -> Option<(String, TrackId, usize)> {
+    pub(crate) fn activation_context(&self) -> Option<(String, TrackKey, usize)> {
         let QueueOrigin::Context(context_id) = &self.origin else {
             return None;
         };
-        let anchor_track_id = self.anchor_track_id.as_ref()?;
-        (self.placement == QueuePlacement::Now && !self.shuffled_start).then(|| {
-            (
-                context_id.clone(),
-                anchor_track_id.clone(),
-                self.anchor_index,
-            )
-        })
-    }
-
-    /// Prepares only the compact Library slot order.
-    ///
-    /// Rufin runs this on its loaded-Play executor before asking Playback for
-    /// exact context activation. Complete Track handles remain unmaterialized.
-    pub fn prepare(mut self) -> LibraryQueryResult<Option<Self>> {
-        self.tracks = self.tracks.prepare()?;
-        let anchor_track_id = match self.tracks.anchor(self.anchor_index)? {
-            SelectionAnchor::Present(track_id) => track_id,
-            SelectionAnchor::Missing => return Ok(None),
-            SelectionAnchor::Deferred => {
-                unreachable!("a prepared loaded Track selection must have a concrete order")
-            }
-        };
-        if self
-            .anchor_track_id
-            .as_ref()
-            .is_some_and(|expected| expected != &anchor_track_id)
-        {
-            return Err(LibraryQueryError::StaleTrackSelection);
-        }
-        self.anchor_track_id = Some(anchor_track_id);
-        Ok(Some(self))
+        let anchor_track_id = self.anchor.track_key?;
+        (self.placement == QueuePlacement::Now && !self.shuffled_start)
+            .then(|| (context_id.clone(), anchor_track_id, self.anchor_index))
     }
 
     pub fn placement(&self) -> Placement {
         self.placement.into()
     }
 
-    pub fn materialize_batch(self, shuffle_seed: u64) -> LibraryQueryResult<(Batch, Placement)> {
+    pub fn compact_batch(self, shuffle_seed: u64) -> Option<(Batch, Placement, PlaybackMedia)> {
         let placement = match self.placement {
             QueuePlacement::Now => Placement::Replace {
                 anchor_index: self.anchor_index,
@@ -245,21 +132,17 @@ impl LoadedPlayRequest {
             QueuePlacement::Next => Placement::AfterCurrent,
             QueuePlacement::Last => Placement::End,
         };
-        let tracks = self.tracks.materialize_owned()?;
-        let anchor_track_id = self
-            .anchor_track_id
-            .ok_or(LibraryQueryError::StaleTrackSelection)?;
-        if tracks
-            .get(self.anchor_index)
-            .is_none_or(|track| track.id != anchor_track_id)
-        {
-            return Err(LibraryQueryError::StaleTrackSelection);
+        let anchor_track_id = self.anchor.track_key?;
+        if self.order.get(self.anchor_index) != Some(&anchor_track_id) {
+            return None;
         }
         let origin = self.origin;
-        let items = tracks
+        let items = self
+            .order
             .into_iter()
+            .copied()
             .enumerate()
-            .map(|(source_rank, track)| {
+            .map(|(source_rank, track_key)| {
                 let provenance = match &origin {
                     QueueOrigin::Context(context_id) => Provenance::Context {
                         context_id: context_id.clone(),
@@ -269,12 +152,13 @@ impl LoadedPlayRequest {
                     QueueOrigin::Random => Provenance::Random,
                     QueueOrigin::Radio => Provenance::Radio,
                 };
-                BatchItem::new(track, provenance)
+                BatchItem::new(track_key, provenance)
             })
             .collect();
-        Ok((
+        Some((
             Batch::new(items).with_shuffle_intent(shuffle_seed, self.shuffled_start),
             placement,
+            self.anchor,
         ))
     }
 }
@@ -285,7 +169,7 @@ pub struct QueueReorderRequest {
     pub after: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct RandomPlayRequest {
     pub placement: QueuePlacement,
     pub criteria: RandomCriteria,
@@ -327,7 +211,6 @@ pub trait QueueCommandPort: Send + Sync {
     fn move_after_current(&self, occurrence: OccurrenceId);
     fn reorder(&self, request: QueueReorderRequest);
     fn clear(&self);
-    fn request_page(&self, query: QueuePageQuery) -> Option<QueuePage>;
 }
 
 pub trait RadioCommandPort: Send + Sync {

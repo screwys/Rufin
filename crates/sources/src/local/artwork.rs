@@ -2,7 +2,7 @@ use std::fs;
 use std::io::Read;
 use std::path::{Path, PathBuf};
 
-use library::LocalArtworkRef;
+use crate::LocalImageRef;
 use lofty::file::TaggedFile;
 use lofty::file::TaggedFileExt;
 use lofty::picture::{Picture, PictureType};
@@ -66,8 +66,8 @@ fn sidecar_rank(path: &Path) -> Option<(usize, usize)> {
     Some((stem_rank, extension_rank))
 }
 
-pub(super) fn file_reference(path: &Path, revision: String) -> LocalArtworkRef {
-    LocalArtworkRef::File {
+pub(super) fn file_reference(path: &Path, revision: String) -> LocalImageRef {
+    LocalImageRef::File {
         path: path.to_string_lossy().into_owned(),
         revision,
     }
@@ -77,8 +77,8 @@ pub(super) fn embedded_reference(
     path: &Path,
     picture_index: u32,
     revision: String,
-) -> LocalArtworkRef {
-    LocalArtworkRef::Embedded {
+) -> LocalImageRef {
+    LocalImageRef::Embedded {
         path: path.to_string_lossy().into_owned(),
         picture_index,
         revision,
@@ -89,7 +89,7 @@ pub(super) fn inspect_embedded(
     discoverer: &mut discovery::Reader,
     path: &Path,
     revision: String,
-) -> Option<LocalArtworkRef> {
+) -> Option<LocalImageRef> {
     if let Ok(Some(file)) = read_lofty(path, true) {
         let picture_index =
             best_picture_index(&file, file.primary_tag().or_else(|| file.first_tag()))?;

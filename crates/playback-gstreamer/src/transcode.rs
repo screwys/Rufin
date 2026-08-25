@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_app as gst_app;
-use library::ResolvedStream;
+use playback::ResolvedStream;
 
 use super::{connect_server_certificate_policy, ensure_gstreamer_initialized};
 

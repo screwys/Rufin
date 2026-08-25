@@ -1,6 +1,6 @@
-use library::{SourceId, Track, TrackId};
+use library::{SourceKey, TrackKey};
 
-use crate::RunId;
+use crate::{PlaybackMedia, RunId};
 
 /// The immutable submission facts captured for one playback run.
 ///
@@ -8,14 +8,15 @@ use crate::RunId;
 /// metadata changes must not rewrite a run that has already started.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ListeningTrack {
-    pub source_id: SourceId,
-    pub track_id: TrackId,
+    pub source_key: SourceKey,
+    pub track_key: Option<TrackKey>,
+    pub track_object_id: String,
     pub recording_id: Option<String>,
     pub title: String,
     pub artists: Vec<String>,
     pub album: Option<String>,
-    pub track_number: Option<u16>,
-    pub disc_number: Option<u16>,
+    pub track_number: Option<i64>,
+    pub disc_number: Option<i64>,
     pub duration_millis: u64,
 }
 
@@ -24,29 +25,22 @@ pub struct CompletedScrobble {
     pub play_id: String,
     pub track: ListeningTrack,
     pub started_at_unix_seconds: i64,
+    pub listened_millis: u64,
 }
 
 impl ListeningTrack {
-    pub fn capture(source_id: SourceId, track: &Track) -> Self {
-        let artists = if track.artist_credits().is_empty() {
-            vec![track.artist.clone()]
-        } else {
-            track
-                .artist_credits()
-                .iter()
-                .map(|credit| credit.name.clone())
-                .collect()
-        };
+    pub fn capture(source_key: SourceKey, track: &PlaybackMedia) -> Self {
         Self {
-            source_id,
-            track_id: track.id.clone(),
+            source_key,
+            track_key: track.track_key,
+            track_object_id: track.track_object_id.clone(),
             recording_id: track.musicbrainz_recording_id.clone(),
             title: track.title.clone(),
-            artists,
+            artists: vec![track.artist.clone()],
             album: (!track.album.trim().is_empty()).then(|| track.album.clone()),
-            track_number: (track.track_number > 0).then_some(track.track_number),
-            disc_number: (track.disc_number > 0).then_some(track.disc_number),
-            duration_millis: u64::from(track.duration_seconds).saturating_mul(1_000),
+            track_number: track.track_number.filter(|number| *number > 0),
+            disc_number: track.disc_number.filter(|number| *number > 0),
+            duration_millis: track.duration_millis.max(0) as u64,
         }
     }
 }
@@ -85,8 +79,8 @@ pub enum ListeningFact {
 pub struct ListeningOutcome {
     pub play_id: String,
     pub run: RunId,
-    pub source_id: SourceId,
-    pub track_id: TrackId,
+    pub source_key: SourceKey,
+    pub track_key: Option<TrackKey>,
     pub local_period: String,
     pub qualified_plays: u32,
     pub skips: u32,

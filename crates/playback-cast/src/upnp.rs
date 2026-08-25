@@ -66,10 +66,11 @@ impl QueuedMedia {
             .end_millis()
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
-                stream
-                    .track
-                    .as_ref()
-                    .map(|track| u64::from(track.duration_seconds) * 1_000)
+                stream.track.as_ref().and_then(|track| {
+                    track
+                        .duration_millis
+                        .and_then(|value| u64::try_from(value).ok())
+                })
             });
         let metadata = didl_metadata(&stream, &published);
         Self {
@@ -912,7 +913,12 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
     let duration_millis = media
         .ends_at_millis
         .map(|end| end.saturating_sub(media.starts_at_millis))
-        .unwrap_or_else(|| u64::from(track.duration_seconds) * 1_000);
+        .unwrap_or_else(|| {
+            track
+                .duration_millis
+                .and_then(|value| u64::try_from(value).ok())
+                .unwrap_or_default()
+        });
     let mut fields = format!(
         "<dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album>",
         xml_escape(&track.title),
@@ -920,10 +926,10 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
         xml_escape(&track.artist),
         xml_escape(&track.album),
     );
-    if track.track_number > 0 {
+    if let Some(track_number) = track.track_number.filter(|number| *number > 0) {
         fields.push_str(&format!(
             "<upnp:originalTrackNumber>{}</upnp:originalTrackNumber>",
-            track.track_number
+            track_number
         ));
     }
     if let Some(date) = track
@@ -931,7 +937,12 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
         .as_deref()
         .filter(|date| !date.trim().is_empty())
         .map(str::to_string)
-        .or_else(|| (track.year > 0).then(|| track.year.to_string()))
+        .or_else(|| {
+            track
+                .year
+                .filter(|year| *year > 0)
+                .map(|year| year.to_string())
+        })
     {
         fields.push_str(&format!("<dc:date>{}</dc:date>", xml_escape(&date)));
     }
@@ -956,7 +967,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
             "<res protocolInfo=\"http-get:*:{}:{}\" duration=\"{}\"{}>{}</res>",
             "</item></DIDL-Lite>"
         ),
-        xml_escape(track.id.as_str()),
+        xml_escape(&track.track_object_id),
         fields,
         xml_escape(&media.content_type),
         protocol_info,
@@ -1196,12 +1207,14 @@ mod tests {
             .write_all(b"next")
             .expect("write next track");
         let stream = PreparedStream::from(
-            library::ResolvedStream::new(Url::from_file_path(path).expect("track URL").to_string())
-                .with_window(10_000, 20_000),
+            playback::ResolvedStream::new(
+                Url::from_file_path(path).expect("track URL").to_string(),
+            )
+            .with_window(10_000, 20_000),
         );
         let next = PreparedNext::new(
             RunId::new(2),
-            PreparedStream::from(library::ResolvedStream::new(
+            PreparedStream::from(playback::ResolvedStream::new(
                 Url::from_file_path(next_path)
                     .expect("next track URL")
                     .to_string(),
@@ -1319,7 +1332,7 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(library::ResolvedStream::new(
+        let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ));
         let mut relay =
@@ -1457,7 +1470,7 @@ mod tests {
             .expect("create track")
             .write_all(b"track")
             .expect("write track");
-        let stream = PreparedStream::from(library::ResolvedStream::new(
+        let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
         .with_media(test_track(), Some("audio/mpeg".to_string()));
@@ -1487,7 +1500,7 @@ mod tests {
 
     #[test]
     fn didl_metadata_carries_standard_music_facts_artwork_and_resource() {
-        let stream = PreparedStream::from(library::ResolvedStream::new("file:///track.flac"))
+        let stream = PreparedStream::from(playback::ResolvedStream::new("file:///track.flac"))
             .with_media(test_track(), Some("audio/flac".to_string()));
         let media = PublishedResource {
             uri: "http://192.0.2.10:4000/media".to_string(),
@@ -1513,36 +1526,36 @@ mod tests {
         assert!(metadata.contains("DLNA.ORG_OP=01;DLNA.ORG_CI=0"));
     }
 
-    fn test_track() -> library::Track {
-        library::Track::new(library::TrackData {
-            id: library::TrackId::new("track-1"),
-            album_id: None,
+    fn test_track() -> library::QueueMedia {
+        library::QueueMedia {
+            occurrence_key: library::QueueOccurrenceKey::from_raw(1),
+            track_key: Some(library::TrackKey::from_raw(1)),
+            track_object_id: "track-1".to_string(),
             title: "Track & Title".to_string(),
             artist: "Artist".to_string(),
             album: "Album".to_string(),
-            album_artwork: None,
-            year: 2026,
+            album_display_artist: Some("Album Artist".to_string()),
+            album_key: None,
+            album_object_id: None,
+            primary_artist_object_id: None,
+            media_uri: None,
+            artwork_binding: None,
+            duration_millis: Some(300_000),
+            disc_number: Some(1),
+            track_number: Some(2),
+            year: Some(2026),
             release_date: Some("2026-08-17".to_string()),
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: Some(8),
-            duration_seconds: 300,
-            favorite: true,
-            disc_number: 1,
-            track_number: 2,
-            image_ref: None,
-            local_artwork: None,
+            favorite: Some(true),
+            source_format: Some("flac".to_string()),
             musicbrainz_recording_id: None,
             musicbrainz_release_track_id: None,
-            source_path: None,
-            cue: None,
-            source_format: Some("flac".to_string()),
-            comment: None,
-            skip_count: None,
-            bpm: None,
-            relations: library::TrackRelations::default(),
-        })
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            primary_artist_musicbrainz_id: None,
+            cue_path: None,
+            cue_start_millis: None,
+            cue_end_millis: None,
+        }
     }
 
     fn xml_element(body: &str, name: &str) -> Option<String> {

@@ -1,7 +1,7 @@
 use gst::glib;
 use gst::prelude::*;
 use gstreamer as gst;
-use library::ResolvedStream;
+use playback::ResolvedStream;
 use playback::*;
 use std::collections::VecDeque;
 use std::f64::consts::FRAC_PI_2;
@@ -22,7 +22,9 @@ mod waveform;
 
 pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
-pub use loudness::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
+pub use loudness::{
+    AnalyzedLoudness, LoudnessAnalysis, album_loudness, analyze_loudness_cancellable,
+};
 pub use transcode::TranscodedAudioReader;
 pub use waveform::generate_waveform_peaks_cancellable;
 

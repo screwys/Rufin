@@ -1,112 +1,391 @@
-//! Source-scoped loudness facts produced by Rufin's audio analysis.
+//! Owns persisted EBU R128 facts and selects one missing analysis unit at a time.
+//! Accepted source measurements overwrite Rufin analysis; parsing, scheduling, and tag writing stay outside Library.
 
-use crate::{AlbumId, Track, TrackId};
-use std::sync::Arc;
+use blake3::Hasher;
+use sqlx::{Connection, FromRow, Sqlite, Transaction};
 
-pub const LOUDNESS_ANALYSIS_VERSION: u32 = 1;
+use crate::{
+    AlbumKey, Database, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackKey,
+};
 
-/// A target-neutral loudness observation.
-///
-/// `true_peak_ratio` is linear full scale, where `1.0` is 0 dBFS. Integrated
-/// loudness is absent for successfully analyzed silence.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct LoudnessMeasurement {
+    pub analysis_key: [u8; 32],
     pub integrated_lufs: Option<f64>,
-    pub true_peak_ratio: f64,
+    pub true_peak: Option<f64>,
 }
 
-impl LoudnessMeasurement {
-    pub fn new(integrated_lufs: Option<f64>, true_peak_ratio: f64) -> Result<Self, String> {
-        if integrated_lufs.is_some_and(|value| !value.is_finite()) {
-            return Err("integrated loudness must be finite".to_string());
-        }
-        if !true_peak_ratio.is_finite() || true_peak_ratio < 0.0 {
-            return Err("true peak must be a finite non-negative ratio".to_string());
-        }
+#[derive(Clone, Debug, PartialEq)]
+pub struct TrackLoudnessWork {
+    pub track_key: TrackKey,
+    pub expected_analysis_key: [u8; 32],
+    pub media_uri: String,
+    pub duration_millis: i64,
+    pub cue_path: Option<String>,
+    pub cue_start_millis: Option<i64>,
+    pub cue_end_millis: Option<i64>,
+}
+
+#[derive(Clone, Debug, FromRow, PartialEq)]
+pub struct AlbumLoudnessTrack {
+    pub track_key: TrackKey,
+    pub media_uri: String,
+    pub duration_millis: i64,
+    pub cue_path: Option<String>,
+    pub cue_start_millis: Option<i64>,
+    pub cue_end_millis: Option<i64>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct AlbumLoudnessWork {
+    pub album_key: AlbumKey,
+    pub expected_analysis_key: [u8; 32],
+    pub tracks: Vec<AlbumLoudnessTrack>,
+}
+
+#[derive(FromRow)]
+struct TrackWorkScalar {
+    track_key: TrackKey,
+    expected_analysis_key: Vec<u8>,
+    media_uri: String,
+    duration_millis: i64,
+    cue_path: Option<String>,
+    cue_start_millis: Option<i64>,
+    cue_end_millis: Option<i64>,
+}
+
+impl TryFrom<TrackWorkScalar> for TrackLoudnessWork {
+    type Error = LibraryError;
+    fn try_from(value: TrackWorkScalar) -> Result<Self, Self::Error> {
         Ok(Self {
-            integrated_lufs,
-            true_peak_ratio,
+            track_key: value.track_key,
+            expected_analysis_key: value.expected_analysis_key.try_into().map_err(|_| {
+                LibraryError::InvalidStore(
+                    "Track loudness analysis key is not 32 bytes".to_string(),
+                )
+            })?,
+            media_uri: value.media_uri,
+            duration_millis: value.duration_millis,
+            cue_path: value.cue_path,
+            cue_start_millis: value.cue_start_millis,
+            cue_end_millis: value.cue_end_millis,
         })
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LoudnessItemId {
-    Track(TrackId),
-    Album(AlbumId),
+#[derive(FromRow)]
+struct MeasurementScalar {
+    analysis_key: Vec<u8>,
+    integrated_lufs: Option<f64>,
+    true_peak: Option<f64>,
 }
 
-impl LoudnessItemId {
-    pub(crate) const fn scope(&self) -> &'static str {
-        match self {
-            Self::Track(_) => "track",
-            Self::Album(_) => "album",
-        }
-    }
-
-    pub(crate) fn as_str(&self) -> &str {
-        match self {
-            Self::Track(id) => id.as_str(),
-            Self::Album(id) => id.as_str(),
-        }
+impl TryFrom<MeasurementScalar> for LoudnessMeasurement {
+    type Error = LibraryError;
+    fn try_from(value: MeasurementScalar) -> Result<Self, Self::Error> {
+        Ok(Self {
+            analysis_key: value.analysis_key.try_into().map_err(|_| {
+                LibraryError::InvalidStore("loudness analysis key is not 32 bytes".to_string())
+            })?,
+            integrated_lufs: value.integrated_lufs,
+            true_peak: value.true_peak,
+        })
     }
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct LoudnessMeasurementWrite {
-    pub item: LoudnessItemId,
-    pub analysis_key: [u8; 32],
-    pub measurement: LoudnessMeasurement,
+impl Database {
+    pub async fn track_loudness(
+        &self,
+        source: SourceKey,
+        track: TrackKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<LoudnessMeasurement>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_as::<_, MeasurementScalar>("SELECT measurement.analysis_key,measurement.integrated_lufs,measurement.true_peak FROM loudness_measurements measurement JOIN tracks track ON track.source_key=measurement.source_key AND track.track_key=measurement.entity_key WHERE measurement.source_key=?1 AND measurement.entity_kind='track' AND measurement.entity_key=?2 AND measurement.analysis_key=track.loudness_analysis_key")
+            .bind(source).bind(track).fetch_optional(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        result?.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn album_loudness(
+        &self,
+        source: SourceKey,
+        album: AlbumKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<LoudnessMeasurement>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_as::<_, MeasurementScalar>("SELECT measurement.analysis_key,measurement.integrated_lufs,measurement.true_peak FROM loudness_measurements measurement JOIN albums album ON album.source_key=measurement.source_key AND album.album_key=measurement.entity_key WHERE measurement.source_key=?1 AND measurement.entity_kind='album' AND measurement.entity_key=?2 AND measurement.analysis_key=album.loudness_analysis_key")
+            .bind(source).bind(album).fetch_optional(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        result?.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn next_missing_track_loudness(
+        &self,
+        source: SourceKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<TrackLoudnessWork>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE(access.media_uri,track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track LEFT JOIN local_access_files access ON access.source_key=track.source_key AND access.track_object_id=track.object_id LEFT JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND COALESCE(access.media_uri,track.media_uri) IS NOT NULL AND (measurement.entity_key IS NULL OR measurement.analysis_key<>track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
+            .bind(source).fetch_optional(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        result?.map(TryInto::try_into).transpose()
+    }
+
+    pub async fn next_missing_album_loudness(
+        &self,
+        source: SourceKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<AlbumLoudnessWork>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>("SELECT album.album_key,album.loudness_analysis_key FROM albums album LEFT JOIN loudness_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key WHERE album.source_key=?1 AND (measurement.entity_key IS NULL OR measurement.analysis_key<>album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track LEFT JOIN local_access_files access ON access.source_key=track.source_key AND access.track_object_id=track.object_id WHERE track.album_key=album.album_key AND COALESCE(access.media_uri,track.media_uri) IS NOT NULL) ORDER BY album.album_key LIMIT 1")
+            .bind(source).fetch_optional(&mut *transaction).await?;
+        let result = if let Some((album_key, expected)) = album {
+            let tracks = sqlx::query_as::<_, AlbumLoudnessTrack>("SELECT track.track_key,COALESCE(access.media_uri,track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track LEFT JOIN local_access_files access ON access.source_key=track.source_key AND access.track_object_id=track.object_id WHERE track.source_key=?1 AND track.album_key=?2 AND COALESCE(access.media_uri,track.media_uri) IS NOT NULL ORDER BY track.disc_number,track.track_number,track.track_key")
+                .bind(source).bind(album_key).fetch_all(&mut *transaction).await?;
+            Some(AlbumLoudnessWork {
+                album_key,
+                expected_analysis_key: expected.try_into().map_err(|_| {
+                    LibraryError::InvalidStore(
+                        "Album loudness analysis key is not 32 bytes".to_string(),
+                    )
+                })?,
+                tracks,
+            })
+        } else {
+            None
+        };
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result)
+    }
+
+    pub async fn write_track_source_loudness(
+        &self,
+        source: SourceKey,
+        track: TrackKey,
+        measurement: &LoudnessMeasurement,
+    ) -> LibraryResult<bool> {
+        write_loudness(self, source, "track", track.raw(), measurement, true).await
+    }
+    pub async fn write_album_source_loudness(
+        &self,
+        source: SourceKey,
+        album: AlbumKey,
+        measurement: &LoudnessMeasurement,
+    ) -> LibraryResult<bool> {
+        write_loudness(self, source, "album", album.raw(), measurement, true).await
+    }
+    pub async fn write_track_analyzed_loudness(
+        &self,
+        source: SourceKey,
+        track: TrackKey,
+        measurement: &LoudnessMeasurement,
+    ) -> LibraryResult<bool> {
+        write_loudness(self, source, "track", track.raw(), measurement, false).await
+    }
+    pub async fn write_album_analyzed_loudness(
+        &self,
+        source: SourceKey,
+        album: AlbumKey,
+        measurement: &LoudnessMeasurement,
+    ) -> LibraryResult<bool> {
+        write_loudness(self, source, "album", album.raw(), measurement, false).await
+    }
 }
 
-#[derive(Clone, Copy, Debug, Default, PartialEq)]
-pub struct TrackLoudness {
-    pub track: Option<LoudnessMeasurement>,
-    pub album: Option<LoudnessMeasurement>,
+async fn write_loudness(
+    database: &Database,
+    source: SourceKey,
+    kind: &'static str,
+    key: i64,
+    measurement: &LoudnessMeasurement,
+    source_fact: bool,
+) -> LibraryResult<bool> {
+    validate_measurement(measurement)?;
+    let mut writer = database.writer().await?;
+    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+    let exists = match kind {
+        "track" => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM tracks WHERE source_key=?1 AND track_key=?2",
+            )
+            .bind(source)
+            .bind(key)
+            .fetch_optional(&mut *connection)
+            .await?
+        }
+        "album" => {
+            sqlx::query_scalar::<_, i64>(
+                "SELECT 1 FROM albums WHERE source_key=?1 AND album_key=?2",
+            )
+            .bind(source)
+            .bind(key)
+            .fetch_optional(&mut *connection)
+            .await?
+        }
+        _ => None,
+    };
+    if exists.is_none() {
+        return Err(LibraryError::InvalidRequest(
+            "loudness entity does not belong to the source".to_string(),
+        ));
+    }
+    let sql = match (source_fact, kind) {
+        (true, "track") => {
+            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,?2,?3,?4,?5,?6,'source' FROM tracks WHERE source_key=?1 AND track_key=?3 AND loudness_analysis_key=?4 ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'"
+        }
+        (true, "album") => {
+            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,?2,?3,?4,?5,?6,'source' FROM albums WHERE source_key=?1 AND album_key=?3 AND loudness_analysis_key=?4 ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'"
+        }
+        (false, "track") => {
+            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,?2,?3,?4,?5,?6,'analysis' FROM tracks WHERE source_key=?1 AND track_key=?3 AND loudness_analysis_key=?4 ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak WHERE loudness_measurements.origin='analysis'"
+        }
+        (false, "album") => {
+            "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,?2,?3,?4,?5,?6,'analysis' FROM albums WHERE source_key=?1 AND album_key=?3 AND loudness_analysis_key=?4 ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak WHERE loudness_measurements.origin='analysis'"
+        }
+        _ => unreachable!(),
+    };
+    Ok(sqlx::query(sql)
+        .bind(source)
+        .bind(kind)
+        .bind(key)
+        .bind(measurement.analysis_key.as_slice())
+        .bind(measurement.integrated_lufs)
+        .bind(measurement.true_peak)
+        .execute(connection)
+        .await?
+        .rows_affected()
+        == 1)
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct LoudnessTrackInput {
-    pub track: Track,
-    pub analysis_key: [u8; 32],
-    pub current: Option<LoudnessMeasurement>,
+fn validate_measurement(measurement: &LoudnessMeasurement) -> LibraryResult<()> {
+    if measurement
+        .true_peak
+        .is_some_and(|value| !value.is_finite() || value < 0.0)
+        || measurement
+            .integrated_lufs
+            .is_some_and(|value| !value.is_finite())
+    {
+        return Err(LibraryError::InvalidRequest(
+            "invalid loudness measurement".to_string(),
+        ));
+    }
+    Ok(())
 }
 
-#[derive(Clone, Debug, PartialEq)]
-pub struct LoudnessAlbumInput {
-    pub album_id: AlbumId,
-    pub analysis_key: [u8; 32],
-    pub track_ids: Arc<[TrackId]>,
-    pub current: Option<LoudnessMeasurement>,
+pub(crate) fn source_track_loudness_key(
+    media_uri: Option<&str>,
+    source_format: Option<&str>,
+    duration_millis: i64,
+    cue_path: Option<&str>,
+    cue_start_millis: Option<i64>,
+    cue_end_millis: Option<i64>,
+) -> [u8; 32] {
+    let mut hasher = Hasher::new();
+    hasher.update(b"rufin-track-loudness-v1\0");
+    hash_optional_text(&mut hasher, media_uri);
+    hash_optional_text(&mut hasher, source_format);
+    hasher.update(&duration_millis.to_le_bytes());
+    hash_optional_text(&mut hasher, cue_path);
+    hasher.update(&cue_start_millis.unwrap_or(-1).to_le_bytes());
+    hasher.update(&cue_end_millis.unwrap_or(-1).to_le_bytes());
+    *hasher.finalize().as_bytes()
 }
 
-#[derive(Clone, Debug, Default, PartialEq)]
-pub struct LoudnessAnalysisSnapshot {
-    pub tracks: Arc<[LoudnessTrackInput]>,
-    pub albums: Arc<[LoudnessAlbumInput]>,
+fn hash_optional_text(hasher: &mut Hasher, value: Option<&str>) {
+    let value = value.unwrap_or_default().as_bytes();
+    hasher.update(&(value.len() as u64).to_le_bytes());
+    hasher.update(value);
 }
 
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub(crate) struct StoredLoudnessMeasurement {
-    pub(crate) analysis_key: [u8; 32],
-    pub(crate) measurement: LoudnessMeasurement,
+pub(crate) async fn recompute_album_loudness_key(
+    transaction: &mut Transaction<'_, Sqlite>,
+    album: AlbumKey,
+) -> LibraryResult<[u8; 32]> {
+    let keys=sqlx::query_scalar::<_,Vec<u8>>("SELECT loudness_analysis_key FROM tracks WHERE album_key=?1 ORDER BY disc_number,track_number,sort_text,track_key")
+        .bind(album).fetch_all(&mut **transaction).await?;
+    let mut hasher = Hasher::new();
+    hasher.update(b"rufin-album-loudness-v1\0");
+    for key in keys {
+        hasher.update(&key);
+    }
+    let key = *hasher.finalize().as_bytes();
+    sqlx::query("UPDATE albums SET loudness_analysis_key=?2 WHERE album_key=?1")
+        .bind(album)
+        .bind(key.as_slice())
+        .execute(&mut **transaction)
+        .await?;
+    Ok(key)
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+pub(crate) async fn recompute_album_source_and_current_keys(
+    transaction: &mut Transaction<'_, Sqlite>,
+    album: AlbumKey,
+) -> LibraryResult<()> {
+    let keys=sqlx::query_as::<_,(Vec<u8>,Vec<u8>)>("SELECT source_loudness_analysis_key,loudness_analysis_key FROM tracks WHERE album_key=?1 ORDER BY disc_number,track_number,sort_text,track_key")
+        .bind(album).fetch_all(&mut **transaction).await?;
+    let mut source = Hasher::new();
+    source.update(b"rufin-album-loudness-v1\0");
+    let mut current = Hasher::new();
+    current.update(b"rufin-album-loudness-v1\0");
+    for (source_key, current_key) in keys {
+        source.update(&source_key);
+        current.update(&current_key);
+    }
+    let source = *source.finalize().as_bytes();
+    let current = *current.finalize().as_bytes();
+    sqlx::query("UPDATE albums SET source_loudness_analysis_key=?2,loudness_analysis_key=?3 WHERE album_key=?1")
+        .bind(album).bind(source.as_slice()).bind(current.as_slice())
+        .execute(&mut **transaction).await?;
+    Ok(())
+}
 
-    #[test]
-    fn loudness_measurements_reject_non_finite_values() {
-        assert!(LoudnessMeasurement::new(Some(f64::NAN), 0.5).is_err());
-        assert!(LoudnessMeasurement::new(Some(-18.0), f64::INFINITY).is_err());
-        assert!(LoudnessMeasurement::new(Some(-18.0), -0.1).is_err());
-        assert_eq!(
-            LoudnessMeasurement::new(None, 0.0).expect("silent measurement"),
-            LoudnessMeasurement {
-                integrated_lufs: None,
-                true_peak_ratio: 0.0,
-            }
+pub(crate) async fn initialize_recovered_loudness_keys(
+    transaction: &mut Transaction<'_, Sqlite>,
+) -> LibraryResult<()> {
+    let mut after = 0_i64;
+    loop {
+        let row=sqlx::query_as::<_,(TrackKey,Option<String>,Option<String>,i64,Option<String>,Option<i64>,Option<i64>)>("SELECT track_key,media_uri,source_format,duration_millis,cue_path,cue_start_millis,cue_end_millis FROM tracks WHERE track_key>?1 ORDER BY track_key LIMIT 1")
+            .bind(after).fetch_optional(&mut **transaction).await?;
+        let Some((track, media_uri, source_format, duration, cue_path, cue_start, cue_end)) = row
+        else {
+            break;
+        };
+        after = track.raw();
+        let key = source_track_loudness_key(
+            media_uri.as_deref(),
+            source_format.as_deref(),
+            duration,
+            cue_path.as_deref(),
+            cue_start,
+            cue_end,
         );
+        sqlx::query("UPDATE tracks SET source_loudness_analysis_key=?2,loudness_analysis_key=?2 WHERE track_key=?1")
+            .bind(track)
+            .bind(key.as_slice())
+            .execute(&mut **transaction)
+            .await?;
     }
+    let mut album_after = 0_i64;
+    loop {
+        let album = sqlx::query_scalar::<_, AlbumKey>(
+            "SELECT album_key FROM albums WHERE album_key>?1 ORDER BY album_key LIMIT 1",
+        )
+        .bind(album_after)
+        .fetch_optional(&mut **transaction)
+        .await?;
+        let Some(album) = album else {
+            break;
+        };
+        album_after = album.raw();
+        let key = recompute_album_loudness_key(transaction, album).await?;
+        sqlx::query("UPDATE albums SET source_loudness_analysis_key=?2 WHERE album_key=?1")
+            .bind(album)
+            .bind(key.as_slice())
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
 }

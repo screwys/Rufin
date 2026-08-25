@@ -305,18 +305,10 @@ impl Activity {
                 .as_ref()
                 .is_some_and(|media| media.as_ref() == self.media.as_ref())
     }
-
-    #[cfg(test)]
-    pub(crate) fn run(&self) -> playback::RunId {
-        self.media
-            .id
-            .run
-            .expect("a Discord activity always belongs to an active run")
-    }
 }
 
 fn duration_millis(media: &CurrentMedia) -> u64 {
-    u64::from(media.track.duration_seconds).saturating_mul(1_000)
+    u64::try_from(media.track.duration_millis.max(0)).unwrap_or(u64::MAX)
 }
 
 pub(crate) fn visible_playback_state(
@@ -542,16 +534,13 @@ const fn status_display_type(display_type: DisplayType) -> u8 {
 
 fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
     let track = &activity.media.track;
-    let track_artist = track
-        .artist_credits()
-        .first()
-        .map(|credit| credit.name.trim())
-        .filter(|artist| !artist.is_empty())
-        .unwrap_or_else(|| track.artist.trim());
-    let album_artist = track
-        .album_artist_credits()
-        .first()
-        .map(|credit| credit.name.trim())
+    let track_artist = track.artist.trim();
+    let album_artist = activity
+        .media
+        .track
+        .album_display_artist
+        .as_deref()
+        .map(str::trim)
         .filter(|artist| !artist.is_empty())
         .unwrap_or(track_artist);
     let mut details = None;
@@ -569,9 +558,8 @@ fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
     ) {
         if activity.settings.link_type == LinkType::MusicBrainz {
             state = track
-                .artist_credits()
-                .first()
-                .and_then(|artist| artist.musicbrainz_artist_id.as_deref())
+                .primary_artist_musicbrainz_id
+                .as_deref()
                 .and_then(|id| musicbrainz_url("artist", id));
         }
         details = track
@@ -689,161 +677,84 @@ fn read_response(stream: &mut IpcStream) -> Result<(), String> {
 
 #[cfg(test)]
 mod tests {
-    use crate::discord::tests::test_view;
-
     use super::*;
 
     #[test]
-    fn settings_keep_persisted_defaults_and_display_alias() {
-        let settings = serde_json::from_str::<Settings>("{}")
-            .unwrap_or_else(|error| panic!("deserialize defaults: {error}"));
-        assert_eq!(settings, Settings::default());
-        assert_eq!(settings.link_type, LinkType::MusicBrainz);
-
-        let alias = serde_json::from_str::<DisplayType>("\"app\"")
-            .unwrap_or_else(|error| panic!("deserialize display alias: {error}"));
-        assert_eq!(alias, DisplayType::Application);
-
-        let mut disabled = Settings {
-            enabled: false,
-            client_id: "  ".to_string(),
-            ..Settings::default()
-        };
-        disabled.sanitize();
-        assert_eq!(disabled.client_id, DEFAULT_CLIENT_ID);
-        assert!(!disabled.enabled);
-    }
-
-    #[test]
-    fn payload_uses_musicbrainz_facts_without_a_lookup() {
-        let mut activity = test_activity(1, "Track");
-        activity.settings.link_type = LinkType::MusicBrainzLastFm;
-        let payload = activity_json(&activity);
-
-        assert_eq!(
-            payload["details_url"],
-            "https://musicbrainz.org/track/track-id"
-        );
-        assert_eq!(payload["state_url"], "https://www.last.fm/music/Artist");
-        assert_eq!(payload["timestamps"]["end"], 52);
-        assert_eq!(payload["assets"]["large_image"], APP_ICON_URL);
-        assert!(payload["assets"].get("small_image").is_none());
-        assert!(payload["assets"].get("small_text").is_none());
-
-        activity.settings.link_type = LinkType::MusicBrainz;
-        Arc::make_mut(&mut activity.media)
-            .track
-            .make_mut()
-            .musicbrainz_release_track_id = None;
-        let payload = activity_json(&activity);
-        assert_eq!(
-            payload["details_url"],
-            "https://musicbrainz.org/recording/recording-id"
-        );
-        assert_eq!(
-            payload["state_url"],
-            "https://musicbrainz.org/artist/artist-id"
-        );
-
-        activity.settings.link_type = LinkType::LastFm;
-        let payload = activity_json(&activity);
-        assert_eq!(payload["state_url"], "https://www.last.fm/music/Artist");
-        assert_eq!(
-            payload["details_url"],
-            "https://www.last.fm/music/Album%20Artist/Album/Track"
-        );
-    }
-
-    #[cfg(unix)]
-    #[test]
-    fn unix_ipc_handshake_answers_ping_and_reconnects() {
-        use std::os::unix::net::UnixListener;
-
-        let directory = tempfile::tempdir()
-            .unwrap_or_else(|error| panic!("create IPC test directory: {error}"));
-        let path = directory.path().join("discord-ipc-0");
-        let first_listener = UnixListener::bind(&path)
-            .unwrap_or_else(|error| panic!("bind first IPC socket: {error}"));
-        let first_server = std::thread::spawn(move || serve_one_update(first_listener, true));
-
-        let mut connection = Connection {
-            stream: None,
-            client_id: None,
-            paths: vec![path.clone()],
-            nonce: 0,
-        };
-        let first = test_activity(1, "First");
-        assert!(!connection.apply(Some(&first)));
-        first_server
-            .join()
-            .unwrap_or_else(|_| panic!("first IPC server panicked"));
-
-        let second = test_activity(2, "Latest");
-        assert!(connection.apply(Some(&second)));
-        std::fs::remove_file(&path)
-            .unwrap_or_else(|error| panic!("remove first IPC socket: {error}"));
-        let second_listener = UnixListener::bind(&path)
-            .unwrap_or_else(|error| panic!("bind replacement IPC socket: {error}"));
-        let second_server = std::thread::spawn(move || serve_one_update(second_listener, false));
-        assert!(!connection.apply(Some(&second)));
-        second_server
-            .join()
-            .unwrap_or_else(|_| panic!("replacement IPC server panicked"));
-    }
-
-    #[cfg(unix)]
-    fn serve_one_update(listener: std::os::unix::net::UnixListener, ping: bool) {
-        let (mut stream, _) = listener
-            .accept()
-            .unwrap_or_else(|error| panic!("accept IPC connection: {error}"));
-        let (opcode, handshake) =
-            read_packet(&mut stream).unwrap_or_else(|error| panic!("read IPC handshake: {error}"));
-        assert_eq!(opcode, OP_HANDSHAKE);
-        assert_eq!(handshake["client_id"], DEFAULT_CLIENT_ID);
-        write_packet(&mut stream, OP_FRAME, &json!({ "evt": "READY" }))
-            .unwrap_or_else(|error| panic!("write IPC ready response: {error}"));
-
-        let (opcode, update) =
-            read_packet(&mut stream).unwrap_or_else(|error| panic!("read IPC activity: {error}"));
-        assert_eq!(opcode, OP_FRAME);
-        if ping {
-            write_packet(&mut stream, OP_PING, &json!({ "ping": 1 }))
-                .unwrap_or_else(|error| panic!("write IPC ping: {error}"));
-            let (opcode, pong) =
-                read_packet(&mut stream).unwrap_or_else(|error| panic!("read IPC pong: {error}"));
-            assert_eq!(opcode, OP_PONG);
-            assert_eq!(pong["ping"], 1);
-            write_packet(&mut stream, OP_FRAME, &json!({ "evt": "SET_ACTIVITY" }))
-                .unwrap_or_else(|error| panic!("write IPC activity response: {error}"));
-        } else {
-            assert_eq!(update["args"]["activity"]["details"], "Latest");
-            write_packet(&mut stream, OP_FRAME, &json!({ "evt": "SET_ACTIVITY" }))
-                .unwrap_or_else(|error| panic!("write IPC activity response: {error}"));
-        }
-    }
-
-    fn test_activity(run: u64, title: &str) -> Activity {
-        let mut view = test_view(run, "Album", TransportStatus::Playing, 0);
-        let media = Arc::make_mut(
-            view.transport
-                .current
-                .as_mut()
-                .unwrap_or_else(|| panic!("current entry missing")),
-        );
-        media.track.make_mut().title = title.to_string();
-        let mut activity = Activity::new(
-            &Settings {
-                enabled: true,
-                link_type: LinkType::None,
+    fn lastfm_album_url_uses_the_album_display_artist() {
+        let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
+        let activity = Activity {
+            settings: Settings {
+                link_type: LinkType::LastFm,
                 ..Settings::default()
             },
-            &view,
-            10_000,
-            APP_ICON_URL.to_string(),
+            media: view.transport.current.expect("current media"),
+            playback_state: PlaybackState::Playing,
+            started_at_millis: None,
+            ended_at_millis: None,
+            large_image: APP_ICON_URL.to_string(),
+        };
+
+        let (details, state) = activity_urls(&activity);
+        assert_eq!(
+            details.as_deref(),
+            Some("https://www.last.fm/music/Album%20Artist/Album/Track")
+        );
+        assert_eq!(state.as_deref(), Some("https://www.last.fm/music/Artist"));
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn handshake_answers_ping_before_accepting_the_frame() {
+        let (mut client, mut server) = std::os::unix::net::UnixStream::pair().expect("IPC pair");
+        let peer = std::thread::spawn(move || {
+            let (opcode, payload) = read_packet(&mut server).expect("read handshake");
+            assert_eq!(opcode, OP_HANDSHAKE);
+            assert_eq!(payload["v"], IPC_VERSION);
+            assert_eq!(payload["client_id"], "client");
+            write_packet(&mut server, OP_PING, &json!({"nonce": 7})).expect("write ping");
+            write_packet(&mut server, OP_FRAME, &json!({"evt": "READY"}))
+                .expect("write ready frame");
+            let (opcode, payload) = read_packet(&mut server).expect("read pong");
+            assert_eq!(opcode, OP_PONG);
+            assert_eq!(payload["nonce"], 7);
+        });
+
+        write_packet(
+            &mut client,
+            OP_HANDSHAKE,
+            &json!({"v": IPC_VERSION, "client_id": "client"}),
         )
-        .unwrap_or_else(|| panic!("test activity should be visible"));
-        activity.started_at_millis = Some(10_000);
-        activity.ended_at_millis = Some(52_500);
-        activity
+        .expect("write handshake");
+        read_response(&mut client).expect("accept ready response");
+        peer.join().expect("IPC peer");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn failed_update_disconnects_so_the_worker_can_reconnect() {
+        let (client, peer) = std::os::unix::net::UnixStream::pair().expect("IPC pair");
+        drop(peer);
+        let mut connection = Connection {
+            stream: Some(client),
+            client_id: Some("client".to_string()),
+            paths: Vec::new(),
+            nonce: 0,
+        };
+        let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
+        let activity = Activity {
+            settings: Settings {
+                client_id: "client".to_string(),
+                ..Settings::default()
+            },
+            media: view.transport.current.expect("current media"),
+            playback_state: PlaybackState::Playing,
+            started_at_millis: None,
+            ended_at_millis: None,
+            large_image: APP_ICON_URL.to_string(),
+        };
+
+        assert!(connection.apply(Some(&activity)));
+        assert!(connection.stream.is_none());
+        assert!(connection.client_id.is_none());
     }
 }

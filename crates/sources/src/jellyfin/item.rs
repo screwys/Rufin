@@ -1,16 +1,323 @@
-use std::collections::{BTreeMap, HashMap};
+use std::collections::HashMap;
 use std::path::Path;
 
-use library::{
-    Album, AlbumId, AlbumRelations, Artist, ArtistCredit, ArtistId, Folder, FolderId, Genre,
-    GenreCredit, GenreId, ImageRef, Playlist, PlaylistId, Track, TrackData, TrackId,
-    TrackRelations,
-};
+pub(super) use crate::NativeImageRef as ImageRef;
 use serde::Deserialize;
 
 use crate::policy::{normalized_date, u16_from_option};
 
 use super::{jellyfin_id, stable_hash};
+
+pub(super) async fn stage_album(
+    scan: &mut library::Scan,
+    album: Album,
+) -> library::LibraryResult<()> {
+    let artwork = album
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_album(
+        &album.id,
+        &album.title,
+        &album.title.to_lowercase(),
+        &album.artist,
+        &album.title.to_lowercase(),
+        Some(i64::from(album.year)).filter(|year| *year > 0),
+        album.release_date.as_deref(),
+        album.date_added.as_deref(),
+        album.musicbrainz_album_id.as_deref(),
+        album.musicbrainz_release_group_id.as_deref(),
+        album.is_compilation,
+        artwork.as_deref(),
+        album.favorite,
+        album.user_rating.map(i64::from),
+        None,
+    )
+    .await?;
+    let effective_album_artists = if album.relations.album_artists.is_empty() {
+        &album.relations.artists
+    } else {
+        &album.relations.album_artists
+    };
+    for (position, artist) in effective_album_artists.iter().enumerate() {
+        stage_artist_credit(scan, artist).await?;
+        scan.write_album_artist(&album.id, &artist.id, position as i64)
+            .await?;
+    }
+    for (position, genre) in album.relations.genres.iter().enumerate() {
+        stage_genre_credit(scan, genre).await?;
+        scan.write_album_genre(&album.id, &genre.id, position as i64)
+            .await?;
+    }
+    for (position, release_type) in album.release_types.iter().enumerate() {
+        scan.write_album_release_type(&album.id, release_type, position as i64)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn stage_track(
+    scan: &mut library::Scan,
+    track: Track,
+) -> library::LibraryResult<()> {
+    let artwork = track
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    let mut audio = blake3::Hasher::new();
+    audio.update(b"rufin-jellyfin-audio-v1\0");
+    for value in [
+        track.id.as_str(),
+        track.source_path.as_deref().unwrap_or_default(),
+        track.source_format.as_deref().unwrap_or_default(),
+    ] {
+        audio.update(&(value.len() as u64).to_le_bytes());
+        audio.update(value.as_bytes());
+    }
+    audio.update(&track.duration_seconds.to_le_bytes());
+    let key = *audio.finalize().as_bytes();
+    let normalized_search = format!(
+        "{} {} {} {}",
+        track.title,
+        track.album,
+        track.artist,
+        track.comment.as_deref().unwrap_or_default()
+    )
+    .to_lowercase();
+    scan.write_track(
+        &track.id,
+        track.album_id.as_deref(),
+        &track.title,
+        &normalized_search,
+        &track.album,
+        &track.artist,
+        &track.title.to_lowercase(),
+        i64::from(track.duration_seconds) * 1_000,
+        i64::from(track.disc_number),
+        i64::from(track.track_number),
+        Some(i64::from(track.year)).filter(|year| *year > 0),
+        track.release_date.as_deref(),
+        track.date_added.as_deref(),
+        None,
+        track.source_format.as_deref(),
+        track.comment.as_deref(),
+        track.bpm.map(i64::from),
+        track.musicbrainz_recording_id.as_deref(),
+        track.musicbrainz_release_track_id.as_deref(),
+        None,
+        None,
+        None,
+        artwork.as_deref(),
+        track.favorite,
+        track.user_rating.map(i64::from),
+        None,
+        track.play_count.map(i64::from),
+        track.skip_count.map(i64::from),
+        track.last_played,
+        key,
+    )
+    .await?;
+    for (position, artist) in track.relations.artists.iter().enumerate() {
+        stage_artist_credit(scan, artist).await?;
+        scan.write_track_artist(&track.id, &artist.id, position as i64)
+            .await?;
+    }
+    for artist in &track.relations.album_artists {
+        stage_artist_credit(scan, artist).await?;
+    }
+    for (position, genre) in track.relations.genres.iter().enumerate() {
+        stage_genre_credit(scan, genre).await?;
+        scan.write_track_genre(&track.id, &genre.id, position as i64)
+            .await?;
+    }
+    Ok(())
+}
+
+pub(super) async fn stage_artist(
+    scan: &mut library::Scan,
+    artist: Artist,
+) -> library::LibraryResult<()> {
+    let artwork = artist
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_artist(
+        &artist.id,
+        &artist.name,
+        &artist.name.to_lowercase(),
+        &artist.name.to_lowercase(),
+        artist.musicbrainz_artist_id.as_deref(),
+        artwork.as_deref(),
+        artist.favorite,
+        artist.user_rating.map(i64::from),
+    )
+    .await
+}
+
+pub(super) async fn stage_genre(
+    scan: &mut library::Scan,
+    genre: Genre,
+) -> library::LibraryResult<()> {
+    let artwork = genre
+        .image_ref
+        .as_ref()
+        .map(serde_json::to_vec)
+        .transpose()?;
+    scan.write_genre(
+        &genre.id,
+        &genre.name,
+        &genre.name.to_lowercase(),
+        &genre.name.to_lowercase(),
+        artwork.as_deref(),
+    )
+    .await
+}
+
+async fn stage_artist_credit(
+    scan: &mut library::Scan,
+    artist: &ArtistCredit,
+) -> library::LibraryResult<()> {
+    scan.write_artist(
+        &artist.id,
+        &artist.name,
+        &artist.name.to_lowercase(),
+        &artist.name.to_lowercase(),
+        artist.musicbrainz_artist_id.as_deref(),
+        None,
+        false,
+        None,
+    )
+    .await
+}
+
+async fn stage_genre_credit(
+    scan: &mut library::Scan,
+    genre: &GenreCredit,
+) -> library::LibraryResult<()> {
+    scan.write_genre(
+        &genre.id,
+        &genre.name,
+        &genre.name.to_lowercase(),
+        &genre.name.to_lowercase(),
+        None,
+    )
+    .await
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct ArtistCredit {
+    pub id: String,
+    pub name: String,
+    pub musicbrainz_artist_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct GenreCredit {
+    pub id: String,
+    pub name: String,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct AlbumRelations {
+    pub album_artists: Vec<ArtistCredit>,
+    pub artists: Vec<ArtistCredit>,
+    pub genres: Vec<GenreCredit>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub(super) struct TrackRelations {
+    pub artists: Vec<ArtistCredit>,
+    pub album_artists: Vec<ArtistCredit>,
+    pub genres: Vec<GenreCredit>,
+    pub moods: Vec<String>,
+    pub music_folders: Vec<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Album {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+    pub year: u16,
+    pub release_date: Option<String>,
+    pub date_added: Option<String>,
+    pub last_played: Option<String>,
+    pub play_count: Option<u32>,
+    pub user_rating: Option<u8>,
+    pub favorite: bool,
+    pub color_seed: u32,
+    pub image_ref: Option<ImageRef>,
+    pub local_artwork: Option<()>,
+    pub release_types: Vec<String>,
+    pub is_compilation: Option<bool>,
+    pub musicbrainz_album_id: Option<String>,
+    pub musicbrainz_release_group_id: Option<String>,
+    pub relations: AlbumRelations,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Track {
+    pub id: String,
+    pub album_id: Option<String>,
+    pub title: String,
+    pub artist: String,
+    pub album: String,
+    pub album_artwork: Option<()>,
+    pub year: u16,
+    pub release_date: Option<String>,
+    pub date_added: Option<String>,
+    pub last_played: Option<i64>,
+    pub play_count: Option<u32>,
+    pub user_rating: Option<u8>,
+    pub duration_seconds: u32,
+    pub favorite: bool,
+    pub disc_number: u16,
+    pub track_number: u16,
+    pub image_ref: Option<ImageRef>,
+    pub local_artwork: Option<()>,
+    pub musicbrainz_recording_id: Option<String>,
+    pub musicbrainz_release_track_id: Option<String>,
+    pub source_path: Option<String>,
+    pub cue: Option<()>,
+    pub source_format: Option<String>,
+    pub comment: Option<String>,
+    pub skip_count: Option<u32>,
+    pub bpm: Option<u16>,
+    pub relations: TrackRelations,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Artist {
+    pub id: String,
+    pub name: String,
+    pub favorite: bool,
+    pub last_played: Option<String>,
+    pub play_count: Option<u32>,
+    pub user_rating: Option<u8>,
+    pub image_ref: Option<ImageRef>,
+    pub local_artwork: Option<()>,
+    pub musicbrainz_artist_id: Option<String>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Genre {
+    pub id: String,
+    pub name: String,
+    pub image_ref: Option<ImageRef>,
+    pub local_artwork: Option<()>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct Playlist {
+    pub id: String,
+    pub name: String,
+    pub image_ref: Option<ImageRef>,
+    pub duration_seconds: u32,
+    pub track_count: usize,
+}
 
 pub(super) const ALBUM_FIELDS: &str = "Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
 pub(super) const TRACK_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags";
@@ -34,7 +341,6 @@ pub(super) struct JellyfinItem {
     #[serde(rename = "Type")]
     pub(super) item_type: Option<String>,
     pub(super) collection_type: Option<String>,
-    parent_id: Option<String>,
     album_artist: Option<String>,
     album_artists: Option<Vec<NameIdPair>>,
     artists: Option<Vec<String>>,
@@ -52,6 +358,7 @@ pub(super) struct JellyfinItem {
     run_time_ticks: Option<i64>,
     index_number: Option<i32>,
     parent_index_number: Option<i32>,
+    child_count: Option<i32>,
     user_data: Option<UserData>,
     pub(super) image_tags: Option<HashMap<String, String>>,
     backdrop_image_tags: Option<Vec<String>>,
@@ -82,11 +389,6 @@ pub(super) fn album_from_item(item: JellyfinItem) -> Album {
         .or_else(|| backdrop_image_ref(&item));
     let album_artist_credits = artist_credits_from_pairs(item.album_artists.as_deref());
     let artist_credits = artist_credits_from_pairs(item.artist_items.as_deref());
-    let album_artist_credits = if album_artist_credits.is_empty() {
-        musicbrainz_album_artist_credit(item.album_artist.as_deref(), &item.provider_ids)
-    } else {
-        album_artist_credits
-    };
     let genres = genre_credits_from_pairs(item.genre_items.as_deref());
     let artist = item
         .album_artist
@@ -100,7 +402,7 @@ pub(super) fn album_from_item(item: JellyfinItem) -> Album {
         })
         .unwrap_or_else(|| "Unknown Artist".to_string());
     Album {
-        id: AlbumId::new(jellyfin_id("album", &item.id)),
+        id: String::from(jellyfin_id("album", &item.id)),
         title: item.name.unwrap_or_else(|| "Untitled Album".to_string()),
         artist,
         year: u16_from_option(item.production_year),
@@ -129,47 +431,21 @@ pub(super) fn album_from_item(item: JellyfinItem) -> Album {
     }
 }
 
-fn musicbrainz_album_artist_credit(
-    album_artist: Option<&str>,
-    provider_ids: &Option<HashMap<String, String>>,
-) -> Vec<ArtistCredit> {
-    let Some(name) = album_artist.map(str::trim).filter(|name| !name.is_empty()) else {
-        return Vec::new();
-    };
-    let Some(artist_id) = source_id(provider_ids, "MusicBrainzAlbumArtist") else {
-        return Vec::new();
-    };
-    let artist_id = artist_id.trim();
-    if artist_id.is_empty() {
-        return Vec::new();
-    }
-    vec![ArtistCredit {
-        id: ArtistId::new(jellyfin_id("artist", &format!("musicbrainz:{artist_id}"))),
-        name: name.to_string(),
-        musicbrainz_artist_id: Some(artist_id.to_string()),
-    }]
-}
-
 pub(super) fn track_from_item(item: JellyfinItem) -> Track {
     let image_ref = album_image_ref(&item)
         .or_else(|| primary_image_ref("track", &item.id, &item.image_tags))
         .or_else(|| backdrop_image_ref(&item));
     let artist_credits = artist_credits_from_pairs(item.artist_items.as_deref());
     let album_artist_credits = artist_credits_from_pairs(item.album_artists.as_deref());
-    let album_artist_credits = if album_artist_credits.is_empty() {
-        musicbrainz_album_artist_credit(item.album_artist.as_deref(), &item.provider_ids)
-    } else {
-        album_artist_credits
-    };
     let genres = genre_credits_from_pairs(item.genre_items.as_deref());
     let album_id = item
         .album_id
         .as_deref()
         .filter(|id| !id.trim().is_empty())
-        .map(|id| AlbumId::new(jellyfin_id("album", id)));
+        .map(|id| String::from(jellyfin_id("album", id)));
     let source_format = source_format_from_item(item.container.as_deref(), item.path.as_deref());
-    Track::new(TrackData {
-        id: TrackId::new(jellyfin_id("track", &item.id)),
+    Track {
+        id: String::from(jellyfin_id("track", &item.id)),
         album_id,
         title: item.name.unwrap_or_else(|| "Untitled Track".to_string()),
         artist: item
@@ -186,7 +462,7 @@ pub(super) fn track_from_item(item: JellyfinItem) -> Track {
         year: u16_from_option(item.production_year),
         release_date: normalized_date(item.premiere_date),
         date_added: normalized_date(item.date_created),
-        last_played: normalized_timestamp(
+        last_played: crate::policy::unix_seconds(
             item.user_data
                 .as_ref()
                 .and_then(|data| data.last_played_date.clone()),
@@ -214,7 +490,7 @@ pub(super) fn track_from_item(item: JellyfinItem) -> Track {
             moods: Vec::new(),
             music_folders: Vec::new(),
         },
-    })
+    }
 }
 
 fn source_format_from_item(container: Option<&str>, path: Option<&str>) -> Option<String> {
@@ -234,13 +510,6 @@ fn source_format_from_item(container: Option<&str>, path: Option<&str>) -> Optio
         })
 }
 
-pub(super) fn folder_from_item(item: JellyfinItem) -> Folder {
-    Folder {
-        id: FolderId::new(jellyfin_id("folder", &item.id)),
-        name: item.name.unwrap_or_else(|| "Untitled Folder".to_string()),
-    }
-}
-
 pub(super) fn is_audio_item(item: &JellyfinItem) -> bool {
     item.item_type
         .as_deref()
@@ -249,7 +518,7 @@ pub(super) fn is_audio_item(item: &JellyfinItem) -> bool {
 
 pub(super) fn artist_from_item(item: JellyfinItem) -> Artist {
     Artist {
-        id: ArtistId::new(jellyfin_id("artist", &item.id)),
+        id: String::from(jellyfin_id("artist", &item.id)),
         name: item.name.unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: favorite(&item.user_data),
         last_played: normalized_timestamp(
@@ -265,121 +534,25 @@ pub(super) fn artist_from_item(item: JellyfinItem) -> Artist {
     }
 }
 
-struct ArtistInput {
-    artist: Artist,
-    name_key: Option<String>,
-    name_accessed: bool,
-}
-
-/// Collapses Jellyfin's folder-backed and name-accessed representations before
-/// they cross the source boundary. Jellyfin defines MusicArtist as a
-/// dual-access, name-grouped item; Track and Album relations use the
-/// parentless name aggregate while a folder-backed twin may carry richer
-/// metadata.
-pub(super) fn normalize_artist_items(items: Vec<JellyfinItem>) -> Vec<Artist> {
-    let mut by_id = BTreeMap::<String, ArtistInput>::new();
-    for item in items {
-        let name_key = item
-            .name
-            .as_deref()
-            .map(str::trim)
-            .filter(|name| !name.is_empty())
-            .map(str::to_lowercase);
-        let name_accessed = item
-            .parent_id
-            .as_deref()
-            .is_none_or(|parent| parent.trim().is_empty());
-        let artist = artist_from_item(item);
-        by_id
-            .entry(artist.id.as_str().to_string())
-            .or_insert(ArtistInput {
-                artist,
-                name_key,
-                name_accessed,
-            });
-    }
-
-    let mut named = BTreeMap::<String, Vec<ArtistInput>>::new();
-    let mut independent = Vec::new();
-    for input in by_id.into_values() {
-        match input.name_key.as_ref() {
-            Some(key) => named.entry(key.clone()).or_default().push(input),
-            None => independent.push(input.artist),
-        }
-    }
-
-    for mut group in named.into_values() {
-        let aggregates = group
-            .iter()
-            .enumerate()
-            .filter_map(|(index, input)| input.name_accessed.then_some(index))
-            .collect::<Vec<_>>();
-        if aggregates.len() != 1 {
-            independent.extend(group.into_iter().map(|input| input.artist));
-            continue;
-        }
-        let mut canonical = group.swap_remove(aggregates[0]).artist;
-        merge_artist_group(&mut canonical, group.iter().map(|input| &input.artist));
-        independent.push(canonical);
-    }
-    independent.sort_by(|left, right| left.id.cmp(&right.id));
-    independent
-}
-
-fn merge_artist_group<'a>(canonical: &mut Artist, aliases: impl Iterator<Item = &'a Artist>) {
-    let aliases = aliases.collect::<Vec<_>>();
-    canonical.favorite |= aliases.iter().any(|artist| artist.favorite);
-    canonical.last_played = aliases
-        .iter()
-        .filter_map(|artist| artist.last_played.as_ref())
-        .chain(canonical.last_played.as_ref())
-        .max()
-        .cloned();
-    canonical.play_count = aliases
-        .iter()
-        .filter_map(|artist| artist.play_count)
-        .chain(canonical.play_count)
-        .max();
-    if canonical.user_rating.is_none() {
-        canonical.user_rating = unique(aliases.iter().filter_map(|artist| artist.user_rating));
-    }
-    if canonical.musicbrainz_artist_id.is_none() {
-        canonical.musicbrainz_artist_id = unique(
-            aliases
-                .iter()
-                .filter_map(|artist| artist.musicbrainz_artist_id.clone()),
-        );
-    }
-    if canonical.image_ref.is_none() {
-        canonical.image_ref = unique(aliases.iter().filter_map(|artist| artist.image_ref.clone()));
-    }
-}
-
-fn unique<T: Eq + Clone>(values: impl Iterator<Item = T>) -> Option<T> {
-    let mut unique = None;
-    for value in values {
-        match unique.as_ref() {
-            None => unique = Some(value),
-            Some(current) if current == &value => {}
-            Some(_) => return None,
-        }
-    }
-    unique
-}
-
 pub(super) fn genre_from_item(item: JellyfinItem) -> Genre {
     Genre {
-        id: GenreId::new(jellyfin_id("genre", &item.id)),
+        id: String::from(jellyfin_id("genre", &item.id)),
         name: item.name.unwrap_or_else(|| "Unknown Genre".to_string()),
         image_ref: primary_image_ref("genre", &item.id, &item.image_tags),
+        local_artwork: None,
     }
 }
 
 pub(super) fn playlist_from_item(item: JellyfinItem) -> Playlist {
     Playlist {
-        id: PlaylistId::new(jellyfin_id("playlist", &item.id)),
+        id: String::from(jellyfin_id("playlist", &item.id)),
         name: item.name.unwrap_or_else(|| "Untitled Playlist".to_string()),
         image_ref: primary_image_ref("playlist", &item.id, &item.image_tags),
+        duration_seconds: duration_seconds(item.run_time_ticks),
+        track_count: item
+            .child_count
+            .and_then(|count| usize::try_from(count).ok())
+            .unwrap_or_default(),
     }
 }
 
@@ -389,7 +562,7 @@ fn artist_credits_from_pairs(pairs: Option<&[NameIdPair]>) -> Vec<ArtistCredit> 
         .iter()
         .filter(|pair| !pair.id.trim().is_empty())
         .map(|pair| ArtistCredit {
-            id: ArtistId::new(jellyfin_id("artist", &pair.id)),
+            id: String::from(jellyfin_id("artist", &pair.id)),
             name: pair
                 .name
                 .as_deref()
@@ -407,7 +580,7 @@ fn genre_credits_from_pairs(pairs: Option<&[NameIdPair]>) -> Vec<GenreCredit> {
         .iter()
         .filter(|pair| !pair.id.trim().is_empty())
         .map(|pair| GenreCredit {
-            id: GenreId::new(jellyfin_id("genre", &pair.id)),
+            id: String::from(jellyfin_id("genre", &pair.id)),
             name: pair
                 .name
                 .as_deref()
@@ -472,7 +645,8 @@ fn user_rating(user_data: &Option<UserData>) -> Option<u8> {
     user_data
         .as_ref()
         .and_then(|data| data.rating)
-        .and_then(library::rating_from_ten_point)
+        .filter(|rating| rating.is_finite() && (0.0..=10.0).contains(rating))
+        .map(|rating| rating.round() as u8)
 }
 
 fn normalized_timestamp(value: Option<String>) -> Option<String> {

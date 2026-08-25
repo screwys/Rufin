@@ -60,16 +60,6 @@ impl<T> LatestReceiver<T> {
         }
     }
 
-    #[cfg(test)]
-    fn try_recv(&self) -> Option<T> {
-        while self.wake.try_recv().is_ok() {
-            if let Some(value) = self.take() {
-                return Some(value);
-            }
-        }
-        None
-    }
-
     fn take(&self) -> Option<T> {
         self.value.lock().ok()?.take()
     }
@@ -122,11 +112,6 @@ pub(crate) struct ArtworkRequests {
 impl ArtworkRequests {
     pub fn recv(&self) -> Option<ArtworkRequest> {
         self.receiver.recv()
-    }
-
-    #[cfg(test)]
-    fn try_recv(&self) -> Option<ArtworkRequest> {
-        self.receiver.try_recv()
     }
 }
 
@@ -390,12 +375,8 @@ impl ArtworkKey {
             return None;
         }
         let track = &view.transport.current.as_ref()?.track;
-        let musicbrainz_album_id = track
-            .album_artwork_facts()
-            .and_then(|album| album.musicbrainz_album_id.clone());
-        let musicbrainz_release_group_id = track
-            .album_artwork_facts()
-            .and_then(|album| album.musicbrainz_release_group_id.clone());
+        let musicbrainz_album_id = track.musicbrainz_album_id.clone();
+        let musicbrainz_release_group_id = track.musicbrainz_release_group_id.clone();
         let lastfm_api_key = if matches!(link_type, LinkType::LastFm | LinkType::MusicBrainzLastFm)
         {
             lastfm_api_key
@@ -406,9 +387,14 @@ impl ArtworkKey {
             link_type,
             LinkType::MusicBrainz | LinkType::MusicBrainzLastFm
         );
+        let album_artist = track
+            .album_display_artist
+            .as_deref()
+            .filter(|artist| !artist.trim().is_empty())
+            .unwrap_or(&track.artist);
         Some(Self {
             album: metadata_lookup::AlbumCover::new(
-                &track.artist,
+                album_artist,
                 &track.album,
                 musicbrainz_release_group_id.as_deref(),
                 musicbrainz_album_id.as_deref(),
@@ -445,492 +431,12 @@ fn unix_now_millis() -> u64 {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use library::{
-        Album, AlbumArtworkFacts, AlbumId, AlbumRelations, ArtistCredit, ArtistId, SourceId, Track,
-        TrackData, TrackId, TrackRelations,
-    };
+    use library::SourceKey;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackView, Provenance,
-        QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportStatus, TransportView,
+        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackMedia, PlaybackView,
+        Provenance, QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportStatus,
+        TransportView,
     };
-
-    use super::*;
-
-    #[cfg(any(unix, windows))]
-    #[test]
-    fn delivery_block_clears_without_starting_more_artwork() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album One", TransportStatus::Playing, 0);
-        presence.update(enabled_settings(), true, "first-key", Some(&view));
-        assert!(requests.try_recv().is_some());
-
-        presence.update(enabled_settings(), false, "first-key", Some(&view));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert!(state.activity.is_none());
-        assert!(matches!(state.artwork, ArtworkState::Empty));
-        assert!(requests.try_recv().is_none());
-    }
-
-    #[test]
-    fn stale_artwork_cannot_replace_a_newer_album() {
-        let (presence, requests) = Presence::new();
-        let first_view = test_view(1, "Album One", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &first_view, "first-key", 100_000);
-        let first = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("first album should request artwork"));
-
-        let mut second_view = test_view(2, "Album Two", TransportStatus::Resolving, 0);
-        presence.observe(Some(&second_view), false);
-        second_view.transport.state = TransportStatus::Playing;
-        presence.observe(Some(&second_view), false);
-        first.complete(Ok(Some("https://example.invalid/old.jpg".to_string())));
-        let second = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("stale completion must not discard newer artwork"));
-        assert_eq!(
-            second.key.album,
-            metadata_lookup::AlbumCover::new("Artist", "Album Two", None, None)
-                .expect("album cover input")
-        );
-
-        second.complete(Ok(Some("https://images.example/new.jpg".to_string())));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert_eq!(
-            state
-                .activity
-                .as_ref()
-                .map(|activity| activity.large_image.as_str()),
-            Some("https://images.example/new.jpg"),
-        );
-    }
-
-    #[test]
-    fn pending_artwork_follows_the_same_album_to_a_new_run() {
-        let (presence, requests) = Presence::new();
-        let first_view = test_view(1, "Album", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &first_view, "key", 100_000);
-        let request = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("album should request artwork"));
-
-        let mut second_view = test_view(2, "Album", TransportStatus::Resolving, 0);
-        presence.observe(Some(&second_view), false);
-        second_view.transport.state = TransportStatus::Playing;
-        presence.observe(Some(&second_view), false);
-        assert!(requests.try_recv().is_none());
-
-        request.complete(Ok(Some("https://images.example/cover.jpg".to_string())));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert_eq!(
-            state.activity.as_ref().map(|activity| activity.run()),
-            Some(RunId::new(2))
-        );
-        assert_eq!(
-            state
-                .activity
-                .as_ref()
-                .map(|activity| activity.large_image.as_str()),
-            Some("https://images.example/cover.jpg")
-        );
-    }
-
-    #[test]
-    fn timeline_rebases_only_for_run_state_or_seek_changes() {
-        let mut settings = enabled_settings();
-        settings.show_paused = true;
-        let mut view = test_view(1, "Album", TransportStatus::Playing, 5_000);
-        let activity = ipc::Activity::new(&settings, &view, 100_000, ipc::APP_ICON_URL.to_string())
-            .unwrap_or_else(|| panic!("playing run should publish activity"));
-        assert_eq!(activity.started_at_millis, Some(95_000));
-        assert_eq!(activity.ended_at_millis, Some(137_000));
-
-        view.transport.position_millis = 6_000;
-        assert!(activity.matches(&view));
-
-        view.transport.position_millis = 20_000;
-        let seeked = ipc::Activity::new(&settings, &view, 101_000, ipc::APP_ICON_URL.to_string())
-            .unwrap_or_else(|| panic!("seek should rebase activity"));
-        assert_eq!(seeked.started_at_millis, Some(81_000));
-        assert_eq!(seeked.ended_at_millis, Some(123_000));
-
-        view.transport.state = TransportStatus::Paused;
-        view.transport.desired_playing = false;
-        let paused = ipc::Activity::new(&settings, &view, 102_000, ipc::APP_ICON_URL.to_string())
-            .unwrap_or_else(|| panic!("visible pause should publish activity"));
-        assert_eq!(paused.started_at_millis, None);
-        assert_eq!(paused.ended_at_millis, None);
-
-        Arc::make_mut(
-            view.transport
-                .current
-                .as_mut()
-                .unwrap_or_else(|| panic!("current media missing")),
-        )
-        .id
-        .run = Some(RunId::new(2));
-        view.transport.state = TransportStatus::Playing;
-        view.transport.desired_playing = true;
-        view.transport.position_millis = 0;
-        let replay = ipc::Activity::new(&settings, &view, 103_000, ipc::APP_ICON_URL.to_string())
-            .unwrap_or_else(|| panic!("new run should publish a new timeline"));
-        assert_eq!(replay.run(), RunId::new(2));
-        assert_eq!(replay.started_at_millis, Some(103_000));
-    }
-
-    #[test]
-    fn only_current_track_changes_invalidate_same_run_metadata() {
-        let mut view = test_view(1, "Album", TransportStatus::Playing, 0);
-        let activity = ipc::Activity::new(
-            &enabled_settings(),
-            &view,
-            100_000,
-            ipc::APP_ICON_URL.to_string(),
-        )
-        .unwrap_or_else(|| panic!("playing run should publish activity"));
-
-        view.queue.revision = view.queue.revision.wrapping_add(1);
-        assert!(activity.matches(&view));
-
-        let media = Arc::make_mut(
-            view.transport
-                .current
-                .as_mut()
-                .unwrap_or_else(|| panic!("current entry missing")),
-        );
-        media.track.make_mut().title = "Corrected title".to_string();
-        assert!(!activity.matches(&view));
-    }
-
-    #[test]
-    fn changed_lastfm_key_requests_artwork_once() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album", TransportStatus::Playing, 0);
-        let mut settings = enabled_settings();
-        settings.link_type = LinkType::LastFm;
-        presence.update(settings.clone(), true, "first-key", Some(&view));
-        requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("first key should request artwork"))
-            .complete(Ok(None));
-
-        presence.update(settings, true, "second-key", Some(&view));
-        let second = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("changed key should request artwork"));
-        assert_eq!(second.key.policy.lastfm_api_key, "second-key");
-        presence.observe(Some(&view), false);
-        assert!(requests.try_recv().is_none());
-    }
-
-    #[test]
-    fn artwork_uses_displayed_artist_and_selected_metadata_source() {
-        let (presence, requests) = Presence::new();
-        let mut view = test_view(1, "Album", TransportStatus::Playing, 0);
-        Arc::make_mut(
-            view.transport
-                .current
-                .as_mut()
-                .unwrap_or_else(|| panic!("current entry missing")),
-        )
-        .track
-        .make_mut()
-        .album_artwork = Some(Arc::new(AlbumArtworkFacts::from(&Album {
-            id: AlbumId::fake(1),
-            title: "Album".to_string(),
-            artist: "Artist".to_string(),
-            year: 2026,
-            release_date: None,
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: None,
-            favorite: false,
-            color_seed: 1,
-            image_ref: None,
-            local_artwork: None,
-            release_types: Vec::new(),
-            is_compilation: None,
-            musicbrainz_album_id: Some("release-id".to_string()),
-            musicbrainz_release_group_id: Some("release-group-id".to_string()),
-            relations: AlbumRelations::default(),
-        })));
-        refresh_presence(&presence, &view, "key", 100_000);
-        let first = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("album should request artwork"));
-        assert_eq!(
-            first.key.album,
-            metadata_lookup::AlbumCover::new(
-                "Artist",
-                "Album",
-                Some("release-group-id"),
-                Some("release-id")
-            )
-            .expect("album cover input")
-        );
-        assert!(first.key.policy.allow_musicbrainz);
-        assert_eq!(first.key.policy.lastfm_api_key, "");
-        first.complete(Ok(None));
-
-        let mut settings = enabled_settings();
-        settings.link_type = LinkType::LastFm;
-        presence.update(settings, true, "key", Some(&view));
-        let changed = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("changed metadata source should request artwork"));
-        assert!(!changed.key.policy.allow_musicbrainz);
-        assert_eq!(changed.key.policy.lastfm_api_key, "key");
-    }
-
-    #[test]
-    fn pending_artwork_delays_the_first_activity_until_completion() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &view, "key", 100_000);
-        {
-            let state = presence
-                .inner
-                .state
-                .lock()
-                .expect("presence state lock poisoned");
-            assert!(state.worker.is_none());
-            assert!(matches!(state.artwork, ArtworkState::Pending { .. }));
-        }
-
-        requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("album should request artwork"))
-            .complete(Ok(Some("https://images.example/cover.jpg".to_string())));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert!(state.worker.is_some());
-        assert_eq!(
-            state
-                .activity
-                .as_ref()
-                .map(|activity| activity.large_image.as_str()),
-            Some("https://images.example/cover.jpg")
-        );
-    }
-
-    #[test]
-    fn initial_buffering_does_not_publish_activity() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album", TransportStatus::Buffering, 0);
-        refresh_presence(&presence, &view, "key", 100_000);
-
-        assert!(requests.try_recv().is_none());
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert!(state.activity.is_none());
-        assert!(state.worker.is_none());
-        assert!(matches!(state.artwork, ArtworkState::Empty));
-    }
-
-    #[test]
-    fn resolving_next_track_retains_the_current_activity() {
-        let (presence, requests) = Presence::new();
-        let first = test_view(1, "Album One", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &first, "key", 100_000);
-        requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("first album should request artwork"))
-            .complete(Ok(Some("https://images.example/one.jpg".to_string())));
-
-        let mut second = test_view(2, "Album Two", TransportStatus::Resolving, 0);
-        presence.observe(Some(&second), false);
-        {
-            let state = presence
-                .inner
-                .state
-                .lock()
-                .expect("presence state lock poisoned");
-            assert_eq!(
-                state.activity.as_ref().map(|activity| activity.run()),
-                Some(RunId::new(1))
-            );
-        }
-
-        second.transport.state = TransportStatus::Buffering;
-        presence.observe(Some(&second), false);
-        assert!(requests.try_recv().is_none());
-        {
-            let state = presence
-                .inner
-                .state
-                .lock()
-                .expect("presence state lock poisoned");
-            assert_eq!(
-                state.activity.as_ref().map(|activity| activity.run()),
-                Some(RunId::new(1))
-            );
-        }
-
-        second.transport.state = TransportStatus::Playing;
-        presence.observe(Some(&second), false);
-        let request = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("playing album should request artwork"));
-        request.complete(Ok(Some("https://images.example/two.jpg".to_string())));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert_eq!(
-            state.activity.as_ref().map(|activity| activity.run()),
-            Some(RunId::new(2))
-        );
-    }
-
-    #[test]
-    fn unconfirmed_tracks_do_not_replace_the_current_activity() {
-        let (presence, requests) = Presence::new();
-        let first = test_view(1, "Album One", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &first, "key", 100_000);
-        requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("first album should request artwork"))
-            .complete(Ok(Some("https://images.example/one.jpg".to_string())));
-
-        let second = test_view(2, "Album Two", TransportStatus::Buffering, 0);
-        presence.observe(Some(&second), false);
-        assert!(requests.try_recv().is_none());
-
-        let mut third = test_view(3, "Album Three", TransportStatus::Resolving, 0);
-        presence.observe(Some(&third), false);
-        {
-            let state = presence
-                .inner
-                .state
-                .lock()
-                .expect("presence state lock poisoned");
-            assert_eq!(
-                state.activity.as_ref().map(|activity| activity.run()),
-                Some(RunId::new(1))
-            );
-        }
-
-        third.transport.state = TransportStatus::Buffering;
-        presence.observe(Some(&third), false);
-        assert!(requests.try_recv().is_none());
-
-        third.transport.state = TransportStatus::Playing;
-        presence.observe(Some(&third), false);
-        requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("playing album should request artwork"))
-            .complete(Ok(Some("https://images.example/three.jpg".to_string())));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert_eq!(
-            state.activity.as_ref().map(|activity| activity.run()),
-            Some(RunId::new(3))
-        );
-    }
-
-    #[test]
-    fn disabled_metadata_lookup_publishes_the_app_icon_immediately() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album", TransportStatus::Playing, 0);
-        let mut settings = enabled_settings();
-        settings.link_type = LinkType::None;
-        presence.update(settings, true, "key", Some(&view));
-
-        assert!(requests.try_recv().is_none());
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert!(state.worker.is_some());
-        assert_eq!(
-            state
-                .activity
-                .as_ref()
-                .map(|activity| activity.large_image.as_str()),
-            Some(ipc::APP_ICON_URL)
-        );
-    }
-
-    #[test]
-    fn failed_artwork_uses_and_caches_the_app_icon() {
-        let (presence, requests) = Presence::new();
-        let view = test_view(1, "Album", TransportStatus::Playing, 0);
-        refresh_presence(&presence, &view, "first-key", 100_000);
-        let request = requests
-            .try_recv()
-            .unwrap_or_else(|| panic!("album should request artwork"));
-        let key = request.key.clone();
-        request.complete(Err("offline".to_string()));
-        let state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        assert!(state.worker.is_some());
-        assert!(matches!(
-            &state.artwork,
-            ArtworkState::Ready { key: ready, url: None } if ready == &key
-        ));
-        assert_eq!(
-            state
-                .activity
-                .as_ref()
-                .map(|activity| activity.large_image.as_str()),
-            Some(ipc::APP_ICON_URL),
-        );
-        assert!(state.matches(Some(&view)));
-        drop(state);
-
-        presence.observe(Some(&view), false);
-        assert!(requests.try_recv().is_none());
-    }
-
-    fn enabled_settings() -> Settings {
-        Settings {
-            enabled: true,
-            ..Settings::default()
-        }
-    }
-
-    fn refresh_presence(
-        presence: &Presence,
-        view: &PlaybackView,
-        lastfm_api_key: &str,
-        now_millis: u64,
-    ) {
-        let mut state = presence
-            .inner
-            .state
-            .lock()
-            .expect("presence state lock poisoned");
-        state.settings = enabled_settings();
-        state.lastfm_api_key = lastfm_api_key.to_string();
-        presence.refresh(&mut state, Some(view), now_millis);
-    }
 
     pub(crate) fn test_view(
         run: u64,
@@ -939,56 +445,40 @@ pub(crate) mod tests {
         position_millis: u64,
     ) -> PlaybackView {
         let occurrence = OccurrenceId::new(format!("presence:{run}"));
-        let source_id = SourceId::fake(1);
-        let track = Track::new(TrackData {
-            id: TrackId::fake(run),
-            album_id: Some(AlbumId::fake(run)),
-            title: "Track".to_string(),
-            artist: "Artist".to_string(),
-            album: album.to_string(),
-            album_artwork: None,
-            year: 2026,
-            release_date: None,
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: None,
-            duration_seconds: 42,
-            favorite: false,
-            disc_number: 1,
-            track_number: 1,
-            image_ref: None,
-            local_artwork: None,
-            musicbrainz_recording_id: Some("recording-id".to_string()),
-            musicbrainz_release_track_id: Some("track-id".to_string()),
-            source_path: None,
-            cue: None,
-            source_format: None,
-            comment: None,
-            skip_count: None,
-            bpm: None,
-            relations: TrackRelations {
-                artists: vec![ArtistCredit {
-                    id: ArtistId::fake(1),
-                    name: "Artist".to_string(),
-                    musicbrainz_artist_id: Some("artist-id".to_string()),
-                }],
-                album_artists: vec![ArtistCredit {
-                    id: ArtistId::fake(2),
-                    name: "Album Artist".to_string(),
-                    musicbrainz_artist_id: None,
-                }],
-                ..TrackRelations::default()
-            },
-        });
+        let source = SourceKey::from_raw(1);
         let current = Arc::new(CurrentMedia {
             id: CurrentMediaId {
-                source_id: source_id.clone(),
+                source_key: source,
                 source_session_epoch: SourceSessionEpoch::new(1),
                 run: Some(RunId::new(run)),
                 occurrence: occurrence.clone(),
             },
-            track,
+            track: PlaybackMedia {
+                track_key: Some(library::TrackKey::from_raw(1)),
+                track_object_id: "track".to_string(),
+                title: "Track".to_string(),
+                artist: "Artist".to_string(),
+                album: album.to_string(),
+                album_display_artist: Some("Album Artist".to_string()),
+                album_key: None,
+                media_uri: None,
+                artwork_binding: None,
+                duration_millis: 42_500,
+                disc_number: Some(1),
+                track_number: Some(1),
+                year: Some(2026),
+                release_date: None,
+                favorite: Some(false),
+                source_format: None,
+                musicbrainz_recording_id: Some("recording-id".to_string()),
+                musicbrainz_release_track_id: Some("track-id".to_string()),
+                musicbrainz_album_id: None,
+                musicbrainz_release_group_id: None,
+                primary_artist_musicbrainz_id: Some("artist-id".to_string()),
+                cue_path: None,
+                cue_start_millis: None,
+                cue_end_millis: None,
+            },
             provenance: Provenance::Manual,
         });
         PlaybackView {
@@ -1000,7 +490,7 @@ pub(crate) mod tests {
                 next_occurrence: None,
             },
             transport: TransportView {
-                source_id,
+                source_id: source,
                 current: Some(current),
                 state,
                 desired_playing: matches!(

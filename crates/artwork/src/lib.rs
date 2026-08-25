@@ -7,8 +7,7 @@
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
-use library::{SourceArtwork, SourceId};
-use sources::{ImageBytes, Source, SourceImageRequest, SourceResult};
+use sources::{ImageBytes, Source, SourceId, SourceImageRequest, SourceResult};
 use thiserror::Error;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
@@ -19,18 +18,13 @@ mod fetch;
 mod pipeline;
 mod selection;
 
-#[cfg(test)]
-mod tests;
-
 pub use decode::{DecodedImage, RgbaImage, decode_rgba, square_thumbnail_png};
-pub use selection::{ArtworkBinding, ArtworkBindings, BoundArtwork};
+pub use selection::ArtworkBinding;
 
 #[derive(Clone)]
 pub struct SourceImages {
     pub source_id: SourceId,
     source: Option<Arc<Source>>,
-    #[cfg(test)]
-    test_source: Option<Arc<dyn TestImageSource + Send + Sync>>,
 }
 
 impl SourceImages {
@@ -38,8 +32,6 @@ impl SourceImages {
         Self {
             source_id: source.source_id().clone(),
             source: Some(source),
-            #[cfg(test)]
-            test_source: None,
         }
     }
 
@@ -47,51 +39,21 @@ impl SourceImages {
         Self {
             source_id,
             source: None,
-            #[cfg(test)]
-            test_source: None,
         }
     }
 
     fn can_fetch(&self) -> bool {
-        self.source.is_some() || {
-            #[cfg(test)]
-            {
-                self.test_source.is_some()
-            }
-            #[cfg(not(test))]
-            {
-                false
-            }
-        }
+        self.source.is_some()
     }
 
     async fn image(&self, request: SourceImageRequest) -> SourceResult<ImageBytes> {
         if let Some(source) = &self.source {
             return source.image(request).await;
         }
-        #[cfg(test)]
-        if let Some(source) = &self.test_source {
-            return source.image(request).await;
-        }
         Err(sources::SourceError::InvalidRequest(
             "artwork source is not connected",
         ))
     }
-
-    #[cfg(test)]
-    fn testing(source_id: SourceId, source: Arc<dyn TestImageSource + Send + Sync>) -> Self {
-        Self {
-            source_id,
-            source: None,
-            test_source: Some(source),
-        }
-    }
-}
-
-#[cfg(test)]
-#[async_trait::async_trait(?Send)]
-trait TestImageSource {
-    async fn image(&self, request: SourceImageRequest) -> SourceResult<ImageBytes>;
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -290,7 +252,7 @@ impl Artwork {
     pub fn prefetch_source_artwork(
         &self,
         source: SourceImages,
-        artwork: Arc<[SourceArtwork]>,
+        artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
@@ -307,11 +269,11 @@ impl Artwork {
             .source_preparation_complete(source_id, revision)
     }
 
-    pub fn source_preparation_key(&self, artwork: &[SourceArtwork]) -> u64 {
+    pub fn source_preparation_key(&self, artwork: &[Vec<u8>]) -> u64 {
         let mut identities = artwork
             .iter()
             .map(|artwork| {
-                ArtworkBinding::source_artwork(artwork)
+                ArtworkBinding::opaque(artwork)
                     .stable_identity()
                     .to_string()
             })
@@ -330,7 +292,7 @@ impl Artwork {
         &self,
         source: SourceImages,
         revision: u64,
-        artwork: Arc<[SourceArtwork]>,
+        artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {

@@ -9,8 +9,6 @@ use lofty::file::{FileType, TaggedFile};
 use lofty::probe::Probe;
 use lofty::tag::ItemKey;
 
-use library::{MetadataEditing, MetadataField};
-
 const LOFTY_ALLOCATION_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -38,45 +36,6 @@ impl MetadataWriter {
         self.file_type
     }
 
-    pub(super) fn metadata_editing(self) -> Option<MetadataEditing> {
-        let file_type = self.file_type;
-        let fields = [
-            (MetadataField::Title, ItemKey::TrackTitle),
-            (MetadataField::SortTitle, ItemKey::TrackTitleSortOrder),
-            (MetadataField::Artist, ItemKey::TrackArtist),
-            (MetadataField::Album, ItemKey::AlbumTitle),
-            (MetadataField::AlbumArtist, ItemKey::AlbumArtist),
-            (MetadataField::TrackNumber, ItemKey::TrackNumber),
-            (MetadataField::DiscNumber, ItemKey::DiscNumber),
-            (MetadataField::Year, ItemKey::RecordingDate),
-            (MetadataField::Genre, ItemKey::Genre),
-            (MetadataField::Comment, ItemKey::Comment),
-            (MetadataField::Bpm, ItemKey::IntegerBpm),
-            (
-                MetadataField::MusicBrainzRecordingId,
-                ItemKey::MusicBrainzRecordingId,
-            ),
-            (
-                MetadataField::MusicBrainzReleaseTrackId,
-                ItemKey::MusicBrainzTrackId,
-            ),
-            (
-                MetadataField::MusicBrainzAlbumId,
-                ItemKey::MusicBrainzReleaseId,
-            ),
-            (
-                MetadataField::MusicBrainzReleaseGroupId,
-                ItemKey::MusicBrainzReleaseGroupId,
-            ),
-        ]
-        .into_iter()
-        .filter_map(|(field, key)| {
-            metadata_field_is_writable(file_type.primary_tag_type(), field, key).then_some(field)
-        })
-        .collect::<Vec<_>>();
-        (!fields.is_empty()).then(|| MetadataEditing::new(fields))
-    }
-
     pub(super) fn metadata_key_is_writable(self, key: ItemKey) -> bool {
         metadata_key_is_writable(self.file_type.primary_tag_type(), key)
     }
@@ -85,17 +44,6 @@ impl MetadataWriter {
 fn metadata_key_is_writable(tag_type: lofty::tag::TagType, key: ItemKey) -> bool {
     key.map_key(tag_type).is_some()
         || tag_type == lofty::tag::TagType::Id3v2 && key == ItemKey::MusicBrainzRecordingId
-}
-
-fn metadata_field_is_writable(
-    tag_type: lofty::tag::TagType,
-    field: MetadataField,
-    key: ItemKey,
-) -> bool {
-    if field == MetadataField::Bpm {
-        return bpm_key(tag_type).is_some();
-    }
-    metadata_key_is_writable(tag_type, key)
 }
 
 pub(super) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
@@ -150,14 +98,14 @@ fn canonical_extension(file_type: FileType) -> Option<&'static str> {
 pub(super) fn read_lofty(
     path: &Path,
     read_cover_art: bool,
-) -> lofty::error::Result<Option<TaggedFile>> {
+) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
     read_lofty_file(fs::File::open(path)?, read_cover_art)
 }
 
 pub(super) fn read_lofty_file(
     file: fs::File,
     read_cover_art: bool,
-) -> lofty::error::Result<Option<TaggedFile>> {
+) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
     apply_global_options(
         GlobalOptions::new()
             .allocation_limit(LOFTY_ALLOCATION_MAX_BYTES)
@@ -176,7 +124,7 @@ pub(super) fn read_lofty_file(
 pub(super) fn read_lofty_for_edit(
     path: &Path,
     file_type: FileType,
-) -> lofty::error::Result<Option<TaggedFile>> {
+) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
     apply_global_options(
         GlobalOptions::new()
             .allocation_limit(LOFTY_ALLOCATION_MAX_BYTES)
@@ -215,12 +163,7 @@ mod tests {
         );
         let writer = MetadataWriter::for_path(&path).expect("WAV metadata writer");
         assert_eq!(writer.file_type(), FileType::Wav);
-        assert!(
-            writer
-                .metadata_editing()
-                .expect("WAV editing fields")
-                .includes(MetadataField::Title)
-        );
+        assert!(writer.metadata_key_is_writable(ItemKey::TrackTitle));
     }
 
     #[test]
@@ -228,12 +171,7 @@ mod tests {
         let writer = MetadataWriter {
             file_type: FileType::Mp4,
         };
-        assert!(
-            !writer
-                .metadata_editing()
-                .expect("MP4 editing fields")
-                .includes(MetadataField::Bpm)
-        );
+        assert_eq!(bpm_key(writer.file_type().primary_tag_type()), None);
     }
 
     fn silent_wav() -> Vec<u8> {

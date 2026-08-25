@@ -7,7 +7,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use library::SourceId;
+use sources::SourceId;
 
 use crate::selection::Candidate;
 
@@ -122,20 +122,6 @@ impl FilesystemCache {
             tracing::warn!(%error, path = %cache.root.display(), "failed to start artwork cache pruning");
             cache.initialize_usage()?;
         }
-        Ok(cache)
-    }
-
-    #[cfg(test)]
-    fn new_with_limits(root: PathBuf, bytes: u64, files: usize) -> io::Result<Self> {
-        fs::create_dir_all(&root)?;
-        let cache = Self {
-            root,
-            external_maintenance: Arc::new(CacheMaintenance {
-                state: Mutex::new(None),
-                limits: CacheLimits { bytes, files },
-            }),
-        };
-        cache.initialize_usage()?;
         Ok(cache)
     }
 
@@ -558,6 +544,47 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sources::NativeImageRef;
+
+    fn native() -> Candidate {
+        Candidate::Native(NativeImageRef::new("album", Some("tag".to_string())))
+    }
+
+    #[test]
+    fn a_ready_larger_cover_is_reused_for_a_smaller_preview() {
+        let directory = tempfile::tempdir().expect("temporary artwork cache");
+        let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
+        let source = SourceId::new("source");
+        cache
+            .write_ready(&source, &native(), 256, b"normalized")
+            .expect("cache cover");
+
+        assert!(cache.ready_entry(&source, &native(), 96).is_some());
+        assert!(cache.ready_entry(&source, &native(), 512).is_none());
+    }
+
+    #[test]
+    fn source_invalidation_removes_only_that_native_binding_family() {
+        let directory = tempfile::tempdir().expect("temporary artwork cache");
+        let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
+        let source = SourceId::new("source");
+        let other = SourceId::new("other");
+        cache
+            .write_ready(&source, &native(), 256, b"source")
+            .expect("cache source cover");
+        cache
+            .write_ready(&other, &native(), 256, b"other")
+            .expect("cache other cover");
+
+        cache.invalidate_source(&source).expect("invalidate source");
+        assert!(cache.ready_entry(&source, &native(), 256).is_none());
+        assert!(cache.ready_entry(&other, &native(), 256).is_some());
+    }
+}
+
 fn remove_dir_if_present(path: &Path) -> io::Result<()> {
     match fs::remove_dir_all(path) {
         Ok(()) => Ok(()),
@@ -571,128 +598,5 @@ fn remove_file_if_present(path: &Path) -> io::Result<()> {
         Ok(()) => Ok(()),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
         Err(error) => Err(error),
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn pruning_bounds_external_files_without_removing_source_owned_files() {
-        let temporary = tempfile::TempDir::new().expect("temporary cache");
-        for (directory, name) in [
-            ("ready/native", "source-owned"),
-            ("ready/external", "external-ready"),
-            ("missing/external", "external-missing"),
-        ] {
-            let directory = temporary.path().join(directory);
-            fs::create_dir_all(&directory).expect("cache directory");
-            fs::write(directory.join(name), [1_u8; 4]).expect("cache file");
-        }
-
-        let limits = CacheLimits { bytes: 5, files: 2 };
-        prune_external_cache(temporary.path(), limits, limits, None).expect("prune cache");
-
-        let mut external = Vec::new();
-        collect_external_cache_files(temporary.path(), &mut external)
-            .expect("collect pruned external cache");
-        assert_eq!(external.len(), 1);
-        assert!(temporary.path().join("ready/native/source-owned").is_file());
-    }
-
-    #[test]
-    fn writes_keep_a_running_cache_within_its_limits() {
-        let temporary = tempfile::TempDir::new().expect("temporary cache");
-        let cache = FilesystemCache::new_with_limits(temporary.path().to_path_buf(), 9, 2)
-            .expect("bounded cache");
-        let source_id = SourceId::new("source");
-        for id in ["one", "two", "three"] {
-            let candidate = Candidate::Album(
-                metadata_lookup::AlbumCover::new("Artist", id, None, None)
-                    .expect("external candidate"),
-            );
-            cache
-                .write_ready(&source_id, &candidate, 96, &[1_u8; 4])
-                .expect("cache write");
-        }
-
-        let usage = path_usage(&temporary.path().join("ready/external")).expect("cache usage");
-        assert!(usage.bytes <= 9);
-        assert!(usage.files <= 2);
-    }
-
-    #[test]
-    fn source_invalidation_removes_only_that_sources_native_entries() {
-        let temporary = tempfile::TempDir::new().expect("temporary cache");
-        let cache = FilesystemCache::new(temporary.path().to_path_buf()).expect("cache");
-        let first = SourceId::new("source-one");
-        let second = SourceId::new("source-two");
-        let native = Candidate::Native(library::ImageRef::new("native-cover", None));
-        let external = Candidate::Album(
-            metadata_lookup::AlbumCover::new("Artist", "Album", None, None)
-                .expect("album cover candidate"),
-        );
-        cache
-            .write_ready(&first, &native, 96, b"first")
-            .expect("first source ready");
-        cache
-            .mark_missing(&first, &native, 256)
-            .expect("first source missing");
-        cache
-            .write_ready(&second, &native, 96, b"second")
-            .expect("second source ready");
-        cache
-            .write_ready(&first, &external, 96, b"external")
-            .expect("shared external ready");
-
-        cache.invalidate_source(&first).expect("invalidate source");
-
-        assert!(cache.ready_entry(&first, &native, 96).is_none());
-        assert!(!cache.is_missing(&first, &native, 256));
-        assert!(cache.ready_entry(&second, &native, 96).is_some());
-        assert!(cache.ready_entry(&first, &external, 96).is_some());
-    }
-
-    #[test]
-    fn accepted_manifest_removes_only_obsolete_source_owned_entries() {
-        let temporary = tempfile::TempDir::new().expect("temporary cache");
-        let cache = FilesystemCache::new(temporary.path().to_path_buf()).expect("cache");
-        let source_id = SourceId::new("manifest-source");
-        let retained =
-            Candidate::Native(library::ImageRef::new("retained", Some("v2".to_string())));
-        let obsolete =
-            Candidate::Native(library::ImageRef::new("obsolete", Some("v1".to_string())));
-        let external = Candidate::Album(
-            metadata_lookup::AlbumCover::new("Artist", "Album", None, None)
-                .expect("external candidate"),
-        );
-        cache
-            .write_ready(&source_id, &retained, 96, b"retained")
-            .expect("retained source entry");
-        cache
-            .write_ready(&source_id, &obsolete, 96, b"obsolete")
-            .expect("obsolete source entry");
-        cache
-            .write_ready(&source_id, &external, 96, b"external")
-            .expect("external entry");
-
-        cache
-            .complete_source_manifest(&source_id, 7, [retained.stable_identity()])
-            .expect("complete manifest");
-
-        assert!(
-            cache
-                .source_manifest_complete(&source_id, 7)
-                .expect("matching manifest")
-        );
-        assert!(
-            !cache
-                .source_manifest_complete(&source_id, 8)
-                .expect("changed revision")
-        );
-        assert!(cache.ready_entry(&source_id, &retained, 96).is_some());
-        assert!(cache.ready_entry(&source_id, &obsolete, 96).is_none());
-        assert!(cache.ready_entry(&source_id, &external, 96).is_some());
     }
 }

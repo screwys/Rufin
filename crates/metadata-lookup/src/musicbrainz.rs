@@ -3,10 +3,10 @@
 use std::sync::{Mutex, OnceLock};
 use std::time::{Duration, Instant};
 
-use library::{MetadataItemId, MetadataValues, is_musicbrainz_id};
 use reqwest::Url;
 use reqwest::blocking::Client;
 use serde_json::Value;
+use sources::{AlbumMetadataValues, ArtistMetadataValues, TrackMetadataValues};
 
 use crate::http::{client, fetch_json, fetch_optional_json};
 
@@ -27,18 +27,25 @@ pub fn lookup_album_release(
     }
 }
 
-pub fn identify_metadata(
-    item_id: &MetadataItemId,
-    values: &MetadataValues,
-) -> Result<Option<MetadataValues>, String> {
-    match item_id {
-        MetadataItemId::Track(_) => identify_track(values),
-        MetadataItemId::Album(_) => identify_album(values),
-        MetadataItemId::Artist(_) => identify_artist(values),
-    }
+pub fn identify_track_metadata(
+    values: &TrackMetadataValues,
+) -> Result<Option<TrackMetadataValues>, String> {
+    identify_track(values)
 }
 
-fn identify_track(values: &MetadataValues) -> Result<Option<MetadataValues>, String> {
+pub fn identify_album_metadata(
+    values: &AlbumMetadataValues,
+) -> Result<Option<AlbumMetadataValues>, String> {
+    identify_album(values)
+}
+
+pub fn identify_artist_metadata(
+    values: &ArtistMetadataValues,
+) -> Result<Option<ArtistMetadataValues>, String> {
+    identify_artist(values)
+}
+
+fn identify_track(values: &TrackMetadataValues) -> Result<Option<TrackMetadataValues>, String> {
     if let (Some(release_id), Some(track_id)) = (
         usable(values.musicbrainz_album_id.as_deref()),
         usable(values.musicbrainz_release_track_id.as_deref()),
@@ -70,16 +77,16 @@ fn identify_track(values: &MetadataValues) -> Result<Option<MetadataValues>, Str
     else {
         return Ok(None);
     };
-    Ok(Some(MetadataValues {
+    Ok(Some(TrackMetadataValues {
         title: text(&recording, "title").unwrap_or_default(),
         artist: artist_credit(&recording),
         genre: genres(&recording),
         musicbrainz_recording_id: Some(recording_id.to_string()),
-        ..MetadataValues::default()
+        ..TrackMetadataValues::default()
     }))
 }
 
-fn identify_album(values: &MetadataValues) -> Result<Option<MetadataValues>, String> {
+fn identify_album(values: &AlbumMetadataValues) -> Result<Option<AlbumMetadataValues>, String> {
     if let Some(release_id) = usable(values.musicbrainz_album_id.as_deref()) {
         let Some(release) = fetch_musicbrainz_entity(
             MUSICBRAINZ_RELEASE_SEARCH_URL,
@@ -106,18 +113,17 @@ fn identify_album(values: &MetadataValues) -> Result<Option<MetadataValues>, Str
     else {
         return Ok(None);
     };
-    Ok(Some(MetadataValues {
+    Ok(Some(AlbumMetadataValues {
         title: text(&group, "title").unwrap_or_default(),
-        artist: artist_credit(&group),
         album_artist: artist_credit(&group),
         year: year(&group, "first-release-date"),
         genre: genres(&group),
         musicbrainz_release_group_id: Some(release_group_id.to_string()),
-        ..MetadataValues::default()
+        ..AlbumMetadataValues::default()
     }))
 }
 
-fn identify_artist(values: &MetadataValues) -> Result<Option<MetadataValues>, String> {
+fn identify_artist(values: &ArtistMetadataValues) -> Result<Option<ArtistMetadataValues>, String> {
     let artist_id = usable(values.musicbrainz_artist_id.as_deref())
         .ok_or_else(|| "Add a MusicBrainz artist ID before identifying this artist.".to_string())?;
     let Some(artist) = fetch_musicbrainz_entity(
@@ -129,12 +135,12 @@ fn identify_artist(values: &MetadataValues) -> Result<Option<MetadataValues>, St
     else {
         return Ok(None);
     };
-    Ok(Some(MetadataValues {
-        title: text(&artist, "name").unwrap_or_default(),
-        sort_title: text(&artist, "sort-name"),
+    Ok(Some(ArtistMetadataValues {
+        name: text(&artist, "name").unwrap_or_default(),
+        sort_name: text(&artist, "sort-name"),
         genre: genres(&artist),
         musicbrainz_artist_id: Some(artist_id.to_string()),
-        ..MetadataValues::default()
+        ..ArtistMetadataValues::default()
     }))
 }
 
@@ -153,7 +159,7 @@ fn track_from_release(
     release: &Value,
     release_track_id: Option<&str>,
     recording_id: Option<&str>,
-) -> Option<MetadataValues> {
+) -> Option<TrackMetadataValues> {
     let media = release.get("media")?.as_array()?;
     for medium in media {
         let disc_number = positive_u16(medium.get("position"));
@@ -171,7 +177,7 @@ fn track_from_release(
             }
             let recording = track.get("recording").unwrap_or(track);
             let release_id = text(release, "id");
-            return Some(MetadataValues {
+            return Some(TrackMetadataValues {
                 title: text(recording, "title")
                     .or_else(|| text(track, "title"))
                     .unwrap_or_default(),
@@ -189,17 +195,16 @@ fn track_from_release(
                     .pointer("/release-group/id")
                     .and_then(Value::as_str)
                     .and_then(clean),
-                ..MetadataValues::default()
+                ..TrackMetadataValues::default()
             });
         }
     }
     None
 }
 
-fn album_from_release(release: &Value, release_id: &str) -> MetadataValues {
-    MetadataValues {
+fn album_from_release(release: &Value, release_id: &str) -> AlbumMetadataValues {
+    AlbumMetadataValues {
         title: text(release, "title").unwrap_or_default(),
-        artist: artist_credit(release),
         album_artist: artist_credit(release),
         year: year(release, "date"),
         genre: genres(release).or_else(|| release.get("release-group").and_then(genres)),
@@ -208,7 +213,7 @@ fn album_from_release(release: &Value, release_id: &str) -> MetadataValues {
             .pointer("/release-group/id")
             .and_then(Value::as_str)
             .and_then(clean),
-        ..MetadataValues::default()
+        ..AlbumMetadataValues::default()
     }
 }
 
@@ -225,6 +230,15 @@ fn usable(value: Option<&str>) -> Option<&str> {
     value
         .map(str::trim)
         .filter(|value| is_musicbrainz_id(value))
+}
+
+fn is_musicbrainz_id(value: &str) -> bool {
+    let bytes = value.as_bytes();
+    bytes.len() == 36
+        && bytes.iter().enumerate().all(|(index, byte)| match index {
+            8 | 13 | 18 | 23 => *byte == b'-',
+            _ => byte.is_ascii_hexdigit(),
+        })
 }
 
 fn artist_credit(value: &Value) -> Option<String> {

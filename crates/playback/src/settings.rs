@@ -1,4 +1,3 @@
-use library::StreamQuality;
 use serde::{Deserialize, Serialize};
 
 pub const EQUALIZER_BAND_COUNT: usize = 10;
@@ -12,6 +11,22 @@ pub const DEFAULT_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MIN_AUTO_DJ_REFILL_THRESHOLD: u8 = 1;
 pub const MAX_AUTO_DJ_REFILL_THRESHOLD: u8 = 10;
 const PERCEPTUAL_DB_RANGE: f64 = 50.0;
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum StreamQuality {
+    #[default]
+    Original,
+    MaxBitrateKbps(u32),
+}
+
+impl StreamQuality {
+    pub const fn max_bitrate_kbps(self) -> Option<u32> {
+        match self {
+            Self::Original => None,
+            Self::MaxBitrateKbps(kbps) => Some(kbps),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub enum PlaybackTransitionMode {

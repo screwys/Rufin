@@ -13,17 +13,17 @@ autotests = false
 
 [dependencies]
 blake3.workspace = true
-getrandom.workspace = true
-rusqlite = { workspace = true, features = ["bundled"] }
 serde.workspace = true
 serde_json.workspace = true
+sqlx.workspace = true
 thiserror.workspace = true
-tracing.workspace = true
+tokio = { workspace = true, features = ["macros", "sync", "time"] }
 
 [dev-dependencies]
-proptest = "1.6.0"
-rusqlite = { workspace = true, features = ["trace"] }
 tempfile.workspace = true
+tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
+tracing.workspace = true
+tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

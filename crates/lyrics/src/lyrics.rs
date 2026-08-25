@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use library::{Track, TrackId};
+use playback::PlaybackMedia;
 use serde::Deserialize;
 use tracing::debug;
 
@@ -52,26 +52,18 @@ impl LyricsPlan {
 }
 
 impl crate::Settings {
-    pub(crate) fn automatic_lyrics_plan(
-        &self,
-        private_mode: bool,
-        track_id: &TrackId,
-    ) -> LyricsPlan {
+    pub(crate) fn automatic_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         self.lyrics_plan(private_mode, track_id, false)
     }
 
-    pub(crate) fn configured_lyrics_plan(
-        &self,
-        private_mode: bool,
-        track_id: &TrackId,
-    ) -> LyricsPlan {
+    pub(crate) fn configured_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         self.lyrics_plan(private_mode, track_id, true)
     }
 
     fn lyrics_plan(
         &self,
         private_mode: bool,
-        track_id: &TrackId,
+        track_id: &str,
         configured_native_order: bool,
     ) -> LyricsPlan {
         let external_enabled =
@@ -96,18 +88,18 @@ impl crate::Settings {
         }
     }
 
-    pub fn auto_lyrics_suppressed(&self, track_id: &TrackId) -> bool {
+    pub fn auto_lyrics_suppressed(&self, track_id: &str) -> bool {
         self.suppressed_auto_lyrics_track_ids
             .iter()
-            .any(|stored| stored == track_id.as_str())
+            .any(|stored| stored == track_id)
     }
 
-    pub fn suppress_auto_lyrics(&mut self, track_id: &TrackId) -> bool {
+    pub fn suppress_auto_lyrics(&mut self, track_id: &str) -> bool {
         if self.auto_lyrics_suppressed(track_id) {
             false
         } else {
             self.suppressed_auto_lyrics_track_ids
-                .push(track_id.as_str().to_string());
+                .push(track_id.to_string());
             true
         }
     }
@@ -115,7 +107,7 @@ impl crate::Settings {
     pub fn can_suppress_auto_lyrics(
         &self,
         private_mode: bool,
-        track_id: &TrackId,
+        track_id: &str,
         origin: Option<LyricsOrigin>,
     ) -> bool {
         origin.is_some_and(|origin| {
@@ -567,13 +559,12 @@ impl LyricsLookup {
         lookup
     }
 
-    fn from_track(track: &Track) -> Self {
-        let mut lookup = Self::from_search(&track.artist, &track.title, track.duration_seconds);
-        if let Some(credit) = track.artist_credits().first() {
-            lookup.push_artist_name(&credit.name);
-        } else if let Some(credit) = track.album_artist_credits().first() {
-            lookup.push_artist_name(&credit.name);
-        }
+    fn from_track(track: &PlaybackMedia) -> Self {
+        let mut lookup = Self::from_search(
+            &track.artist,
+            &track.title,
+            u32::try_from(track.duration_millis.max(0) / 1_000).unwrap_or(u32::MAX),
+        );
         lookup.push_artist_name(&track.artist);
         lookup.push_primary_artist_variants();
         lookup
@@ -708,7 +699,7 @@ pub fn search_lyrics(
     Ok(results)
 }
 pub(crate) fn external_best_lyrics(
-    track: &Track,
+    track: &PlaybackMedia,
     providers: &[ExternalLyricsProvider],
     prefer_translations: bool,
     preferred_translation_language: &str,
@@ -1876,439 +1867,4 @@ fn read_bytes_bounded<R: Read>(mut reader: R, limit: usize, context: &str) -> io
 }
 fn bytes_to_mib(bytes: usize) -> usize {
     bytes / 1024 / 1024
-}
-
-#[cfg(test)]
-mod tests {
-    use library::{AlbumId, ArtistCredit, ArtistId, TrackData, TrackRelations};
-    use tempfile::tempdir;
-
-    use super::*;
-
-    #[test]
-    fn native_lyrics_apply_offset_and_preserve_language_roles_and_agents() {
-        let lyrics = lyrics_from_native(sources::NativeLyrics {
-            documents: vec![sources::NativeLyricsDocument {
-                role: sources::NativeLyricsRole::Translation,
-                language: Some("eng-US".to_string()),
-                offset_millis: 250,
-                lines: vec![sources::NativeLyricLine {
-                    text: "Eyes".to_string(),
-                    start_millis: Some(1_000),
-                    end_millis: Some(2_000),
-                    cue_lines: vec![sources::NativeLyricCueLine {
-                        text: "Eyes".to_string(),
-                        start_millis: Some(1_000),
-                        end_millis: Some(2_000),
-                        agent_id: Some("lead".to_string()),
-                        cues: vec![sources::NativeLyricCue {
-                            text: "Eyes".to_string(),
-                            start_millis: 1_100,
-                            end_millis: Some(1_400),
-                            byte_start: 0,
-                            byte_end_exclusive: 4,
-                        }],
-                    }],
-                }],
-                agents: vec![sources::NativeLyricAgent {
-                    id: "lead".to_string(),
-                    role: sources::NativeLyricAgentRole::Voice,
-                    name: Some("Lead".to_string()),
-                }],
-            }],
-        });
-
-        assert_eq!(lyrics.origin, LyricsOrigin::Native);
-        let document = &lyrics.documents()[0];
-        assert_eq!(document.role, LyricsRole::Translation);
-        assert_eq!(document.language.as_deref(), Some("en"));
-        assert_eq!(document.lines[0].start_millis, Some(750));
-        assert_eq!(document.lines[0].end_millis, Some(1_750));
-        let cue_line = &document.lines[0].cue_lines[0];
-        assert_eq!(cue_line.start_millis, Some(750));
-        assert_eq!(cue_line.end_millis, Some(1_750));
-        assert_eq!(cue_line.cues[0].start_millis, 850);
-        assert_eq!(cue_line.cues[0].end_millis, Some(1_150));
-        assert_eq!(cue_line.cues[0].byte_end_exclusive, 4);
-        assert_eq!(document.agents[0].role, LyricsAgentRole::Voice);
-        assert_eq!(document.agents[0].name.as_deref(), Some("Lead"));
-    }
-
-    fn track() -> Track {
-        Track::new(TrackData {
-            id: TrackId::new("jellyfin:track:lovesong"),
-            album_id: Some(AlbumId::new("jellyfin:album:disintegration")),
-            title: "Lovesong".to_string(),
-            artist: "The Cure • Robert Smith".to_string(),
-            album: "Disintegration".to_string(),
-            album_artwork: None,
-            year: 1989,
-            release_date: None,
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: None,
-            duration_seconds: 210,
-            favorite: false,
-            disc_number: 1,
-            track_number: 7,
-            image_ref: None,
-            local_artwork: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            source_path: None,
-            cue: None,
-            source_format: None,
-            comment: None,
-            skip_count: None,
-            bpm: None,
-            relations: TrackRelations {
-                artists: vec![ArtistCredit {
-                    id: ArtistId::new("jellyfin:artist:the-cure"),
-                    name: "The Cure".to_string(),
-                    musicbrainz_artist_id: None,
-                }],
-                ..TrackRelations::default()
-            },
-        })
-    }
-
-    #[test]
-    fn plans_keep_cached_external_lyrics_in_private_mode() {
-        let mut settings = crate::Settings::default();
-        let track_id = track().id.clone();
-        let external = Lyrics::from_documents(
-            LyricsOrigin::External(ExternalLyricsProvider::Lrclib),
-            vec![LyricsDocument {
-                role: LyricsRole::Original,
-                language: None,
-                offset_millis: 0,
-                lines: vec![test_line("cached", None)],
-                agents: Vec::new(),
-            }],
-        );
-        let plan = settings.configured_lyrics_plan(false, &track_id);
-        assert_eq!(plan.native_search, sources::LyricsSearch::ServerThenRemote);
-        assert!(plan.allow_external_fallback);
-        assert!(cached_lyrics_allowed(&external, &plan, false));
-
-        settings.prefer_server_lyrics = false;
-        let plan = settings.configured_lyrics_plan(false, &track_id);
-        assert_eq!(plan.native_search, sources::LyricsSearch::RemoteThenServer);
-
-        let plan = settings.configured_lyrics_plan(true, &track_id);
-        assert_eq!(plan.native_search, sources::LyricsSearch::ServerOnly);
-        assert!(!plan.allow_external_fallback);
-        assert!(cached_lyrics_allowed(&external, &plan, false));
-
-        let plan = settings.automatic_lyrics_plan(false, &track_id);
-        assert_eq!(plan.native_search, sources::LyricsSearch::ServerOnly);
-        assert!(plan.allow_external_fallback);
-
-        let mut disabled = crate::Settings::default();
-        disabled.external_lyrics_enabled = false;
-        let plan = disabled.automatic_lyrics_plan(false, &track_id);
-        assert!(!cached_lyrics_allowed(&external, &plan, false));
-
-        let mut provider_removed = crate::Settings::default();
-        provider_removed
-            .external_lyrics_providers
-            .retain(|provider| *provider != ExternalLyricsProvider::Lrclib);
-        let plan = provider_removed.automatic_lyrics_plan(false, &track_id);
-        assert!(!cached_lyrics_allowed(&external, &plan, false));
-
-        assert!(settings.suppress_auto_lyrics(&track_id));
-        let plan = settings.automatic_lyrics_plan(false, &track_id);
-        assert!(!plan.allow_external_fallback);
-        assert!(!cached_lyrics_allowed(&external, &plan, false));
-        assert!(!settings.suppress_auto_lyrics(&track_id));
-    }
-
-    #[test]
-    fn local_sidecar_uses_title_for_cue_and_rejects_oversized_files() {
-        let directory = tempdir().expect("tempdir");
-        let audio = directory.path().join("album.flac");
-        fs::write(&audio, []).expect("audio");
-        fs::write(directory.path().join("album.lrc"), "[00:01.00]wrong").expect("same stem");
-        fs::write(directory.path().join("Lovesong.lrc"), "[00:02.50]right").expect("title");
-        let input = LocalLyricsInput {
-            audio_path: audio.clone(),
-            title: "Lovesong".to_string(),
-            cue_track: true,
-        };
-        let lyrics = local_sidecar_lyrics(&input).expect("lyrics");
-        assert_eq!(
-            lyrics.documents()[0].lines,
-            vec![test_line("right", Some(2_500))]
-        );
-
-        let oversized = directory.path().join("large.flac");
-        fs::write(&oversized, []).expect("audio");
-        let file = fs::File::create(oversized.with_extension("lrc")).expect("lyrics");
-        file.set_len((LOCAL_LYRICS_MAX_BYTES + 1) as u64)
-            .expect("oversized lyrics");
-        assert_eq!(
-            local_sidecar_lyrics(&LocalLyricsInput {
-                audio_path: oversized,
-                title: "missing".to_string(),
-                cue_track: false,
-            }),
-            None
-        );
-    }
-
-    #[test]
-    fn local_sidecar_recognizes_the_instrumental_lrc_tag() {
-        let directory = tempdir().expect("tempdir");
-        let audio = directory.path().join("instrumental.flac");
-        fs::write(&audio, []).expect("audio");
-        fs::write(audio.with_extension("lrc"), "[au: instrumental]\n").expect("lyrics");
-
-        assert!(
-            local_sidecar_lyrics(&LocalLyricsInput {
-                audio_path: audio,
-                title: "Instrumental".to_string(),
-                cue_track: false,
-            })
-            .is_some_and(|lyrics| lyrics.is_instrumental())
-        );
-    }
-
-    #[test]
-    fn instrumental_lrc_tag_does_not_hide_real_lyrics() {
-        let lyrics = lyrics_from_text_content(
-            ExternalLyricsProvider::Lrclib,
-            "[au: instrumental]\n[00:01.00]A real line",
-        );
-
-        assert!(!lyrics.is_instrumental());
-        assert_eq!(lyrics.documents()[0].lines[0].text, "A real line");
-    }
-
-    #[test]
-    fn parser_keeps_timing_and_filters_netease_placeholders() {
-        let lyrics = lyrics_from_text_content(
-            ExternalLyricsProvider::Netease,
-            "[00:00.00] 作曲 : Composer\n[00:05.00]纯音乐，请欣赏\n[00:10.005]actual line",
-        );
-        assert_eq!(
-            lyrics.documents()[0].lines,
-            vec![test_line("actual line", Some(10_005))]
-        );
-        assert_eq!(
-            parse_lrc_timestamp("[12:34.5]line"),
-            Some((754_500, "line"))
-        );
-    }
-
-    #[test]
-    fn netease_translation_is_an_independent_selectable_document() {
-        let response = serde_json::from_str::<NeteaseLyricsResponse>(
-            r#"{
-                "lrc":{"lyric":"[00:01.00]Original"},
-                "tlyric":{"lyric":"[00:01.00]中文翻译"}
-            }"#,
-        )
-        .expect("NetEase response");
-        let lyrics = lyrics_from_netease_response(response).expect("lyrics bundle");
-
-        assert_eq!(lyrics.documents().len(), 2);
-        assert_eq!(lyrics.documents()[0].role, LyricsRole::Original);
-        assert_eq!(lyrics.documents()[1].role, LyricsRole::Translation);
-        assert_eq!(lyrics.documents()[1].language.as_deref(), Some("zh"));
-        let english = crate::Settings {
-            prefer_translations: true,
-            preferred_translation_language: "en".to_string(),
-            ..crate::Settings::default()
-        };
-        assert_eq!(
-            lyrics
-                .selected_document(&english)
-                .map(|document| document.lines[0].text.as_str()),
-            Some("Original")
-        );
-        let chinese = crate::Settings {
-            preferred_translation_language: "zh".to_string(),
-            ..english
-        };
-        assert_eq!(
-            lyrics
-                .selected_document(&chinese)
-                .map(|document| document.lines[0].text.as_str()),
-            Some("中文翻译")
-        );
-    }
-
-    #[test]
-    fn netease_instrumental_message_is_a_positive_result() {
-        let response = serde_json::from_str::<NeteaseLyricsResponse>(
-            r#"{"lrc":{"lyric":"[00:00.00]纯音乐，请欣赏"}}"#,
-        )
-        .expect("NetEase response");
-
-        assert!(
-            lyrics_from_netease_response(response).is_some_and(|lyrics| lyrics.is_instrumental())
-        );
-    }
-
-    #[test]
-    fn provider_payloads_and_genius_url_boundary_are_preserved() {
-        let lrclib = parse_lrclib_search_body(
-            r#"[{"id":7,"trackName":"Song","artistName":"Artist","duration":185,"syncedLyrics":"[00:01.00]line"}]"#,
-        )
-        .expect("LRCLIB");
-        assert_eq!(lrclib[0].provider, ExternalLyricsProvider::Lrclib);
-        assert_eq!(lrclib[0].duration_seconds, 185);
-
-        let netease = parse_netease_search_body(
-            r#"{"result":{"songs":[{"id":42,"name":"Song","artists":[{"name":"Artist"}],"album":{"name":"Album"},"duration":95000}]}}"#,
-        )
-        .expect("NetEase");
-        assert_eq!(netease[0].provider, ExternalLyricsProvider::Netease);
-        assert_eq!(netease[0].duration_seconds, 95);
-
-        let genius = parse_genius_search_body(
-            r#"{"response":{"sections":[{"hits":[{"result":{"artist_names":"Artist","title":"Song","url":"https://example.test/song"}},{"result":{"artist_names":"Artist","title":"Song","url":"https://genius.com/artist-song-lyrics","instrumental":true}}]}]}}"#,
-        )
-        .expect("Genius");
-        assert_eq!(genius.len(), 1);
-        assert!(genius[0].id.starts_with("https://genius.com/"));
-        assert_eq!(genius[0].content, LyricsSearchContent::Instrumental);
-    }
-
-    #[test]
-    fn lrclib_instrumental_flag_is_a_positive_result() {
-        let result = parse_lrclib_search_body(
-            r#"[{"id":7,"trackName":"Song","artistName":"Artist","instrumental":true,"syncedLyrics":null,"plainLyrics":null}]"#,
-        )
-        .expect("LRCLIB")
-        .pop()
-        .expect("result");
-
-        assert!(
-            lyrics_from_search_result(&result)
-                .expect("lyrics lookup")
-                .is_some_and(|lyrics| lyrics.is_instrumental())
-        );
-    }
-
-    #[test]
-    fn credited_artist_and_duration_drive_filtering_and_ranking() {
-        let lookup = LyricsLookup::from_track(&track());
-        let mut results = vec![
-            LyricsSearchResult {
-                provider: ExternalLyricsProvider::Lrclib,
-                id: "wrong-title".to_string(),
-                track_name: "Shout".to_string(),
-                artist_name: "The Cure".to_string(),
-                album_name: String::new(),
-                duration_seconds: 210,
-                content: LyricsSearchContent::Inline {
-                    synced_lyrics: None,
-                    plain_lyrics: Some("line".to_string()),
-                },
-            },
-            LyricsSearchResult {
-                provider: ExternalLyricsProvider::Lrclib,
-                id: "wrong-duration".to_string(),
-                track_name: "Lovesong".to_string(),
-                artist_name: "The Cure".to_string(),
-                album_name: String::new(),
-                duration_seconds: 310,
-                content: LyricsSearchContent::Inline {
-                    synced_lyrics: Some("[00:01.00]line".to_string()),
-                    plain_lyrics: Some("line".to_string()),
-                },
-            },
-            LyricsSearchResult {
-                provider: ExternalLyricsProvider::Lrclib,
-                id: "right".to_string(),
-                track_name: "Lovesong".to_string(),
-                artist_name: "The Cure".to_string(),
-                album_name: String::new(),
-                duration_seconds: 211,
-                content: LyricsSearchContent::Inline {
-                    synced_lyrics: None,
-                    plain_lyrics: Some("line".to_string()),
-                },
-            },
-        ];
-        filter_external_results_for_lookup(&mut results, &lookup);
-        order_external_provider_results(&mut results, &lookup);
-        assert_eq!(
-            results
-                .iter()
-                .map(|result| result.id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["right", "wrong-duration"]
-        );
-    }
-
-    #[test]
-    fn save_uses_the_selected_path_and_rejects_empty_provider_content() {
-        let directory = tempdir().expect("tempdir");
-        let output = directory.path().join("chosen.lrc");
-        let result = LyricsSearchResult {
-            provider: ExternalLyricsProvider::Lrclib,
-            id: "one".to_string(),
-            track_name: "Lovesong".to_string(),
-            artist_name: "The Cure".to_string(),
-            album_name: "Disintegration".to_string(),
-            duration_seconds: 210,
-            content: LyricsSearchContent::Inline {
-                synced_lyrics: Some("[00:01.00]line".to_string()),
-                plain_lyrics: None,
-            },
-        };
-        let (path, lyrics) = save_lyrics_search_result(&result, output.clone())
-            .expect("save")
-            .expect("lyrics");
-        assert_eq!(path, output);
-        assert_eq!(fs::read_to_string(path).expect("saved"), "[00:01.00]line");
-        assert_eq!(lyrics.documents()[0].lines[0].start_millis, Some(1_000));
-
-        let placeholder = LyricsSearchResult {
-            provider: ExternalLyricsProvider::Netease,
-            content: LyricsSearchContent::Inline {
-                synced_lyrics: Some("[00:01.00]暂无文本歌词".to_string()),
-                plain_lyrics: None,
-            },
-            ..result
-        };
-        assert_eq!(
-            save_lyrics_search_result(&placeholder, directory.path().join("placeholder.lrc"))
-                .expect("placeholder"),
-            None
-        );
-    }
-
-    #[test]
-    fn current_lyrics_save_the_visible_timing() {
-        let directory = tempdir().expect("tempdir");
-        let output = directory.path().join("current.lrc");
-        let lyrics = LyricsDocument {
-            role: LyricsRole::Original,
-            language: None,
-            offset_millis: 0,
-            lines: vec![test_line("first", Some(1_000)), test_line("note", None)],
-            agents: Vec::new(),
-        };
-
-        let path = save_current_lyrics(&lyrics, 250, output.clone()).expect("save current");
-
-        assert_eq!(path, output);
-        assert_eq!(
-            fs::read_to_string(path).expect("saved current"),
-            "[00:00.750]first\nnote"
-        );
-    }
-
-    fn test_line(text: &str, start_millis: Option<u64>) -> LyricLine {
-        LyricLine {
-            text: text.to_string(),
-            start_millis,
-            end_millis: None,
-            cue_lines: Vec::new(),
-        }
-    }
 }

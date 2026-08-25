@@ -6,15 +6,7 @@ use crate::{
     NativeLyrics, NativeLyricsDocument, NativeLyricsRole, SourceConfiguration, SourceEditResult,
     SourceError, SourceResult,
 };
-use library::{
-    Album, AlbumId, AlbumRelations, Artist, ArtistCredit, ArtistId, FavoriteItemId, Folder,
-    FolderId, Genre, GenreCredit, GenreId, HomeItemId, ImageRef, MoodCredit, MoodId, MusicFolder,
-    MusicFolderId, PlayedFilter, Playlist, PlaylistEntry, PlaylistId, PlaylistSnapshot, RadioSeed,
-    RandomCriteria, ResolvedStream, SourceHomeSection, SourceHomeSectionKind, SourceId,
-    StreamQuality, StreamRequest, Track, TrackData, TrackId, TrackRelations,
-    normalize_release_types,
-};
-use playback::{SourceReportFact, SourceReportPhase};
+use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality, StreamRequest};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -23,14 +15,161 @@ use tracing::instrument;
 
 mod client;
 mod item;
-mod navidrome;
 mod refresh;
 
 use client::*;
 use item::*;
 
-#[cfg(test)]
-mod tests;
+use crate::{NativeImageRef as ImageRef, SourceId};
+
+type AlbumId = String;
+type ArtistId = String;
+type FolderId = String;
+type GenreId = String;
+type MusicFolderId = String;
+type PlaylistId = String;
+type TrackId = String;
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct ArtistCredit {
+    id: String,
+    name: String,
+    musicbrainz_artist_id: Option<String>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct GenreCredit {
+    id: String,
+    name: String,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MoodCredit {
+    id: String,
+    name: String,
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct AlbumRelations {
+    album_artists: Vec<ArtistCredit>,
+    artists: Vec<ArtistCredit>,
+    genres: Vec<GenreCredit>,
+}
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+struct TrackRelations {
+    artists: Vec<ArtistCredit>,
+    album_artists: Vec<ArtistCredit>,
+    genres: Vec<GenreCredit>,
+    moods: Vec<MoodCredit>,
+    music_folders: Vec<MusicFolderId>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Album {
+    id: AlbumId,
+    title: String,
+    artist: String,
+    year: u16,
+    release_date: Option<String>,
+    date_added: Option<String>,
+    last_played: Option<String>,
+    play_count: Option<u32>,
+    user_rating: Option<u8>,
+    favorite: bool,
+    color_seed: u32,
+    image_ref: Option<ImageRef>,
+    local_artwork: Option<()>,
+    release_types: Vec<String>,
+    is_compilation: Option<bool>,
+    musicbrainz_album_id: Option<String>,
+    musicbrainz_release_group_id: Option<String>,
+    relations: AlbumRelations,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Track {
+    id: TrackId,
+    album_id: Option<AlbumId>,
+    title: String,
+    artist: String,
+    album: String,
+    album_artwork: Option<()>,
+    year: u16,
+    release_date: Option<String>,
+    date_added: Option<String>,
+    last_played: Option<i64>,
+    play_count: Option<u32>,
+    user_rating: Option<u8>,
+    duration_seconds: u32,
+    favorite: bool,
+    disc_number: u16,
+    track_number: u16,
+    image_ref: Option<ImageRef>,
+    local_artwork: Option<()>,
+    musicbrainz_recording_id: Option<String>,
+    musicbrainz_release_track_id: Option<String>,
+    source_path: Option<String>,
+    cue: Option<()>,
+    source_format: Option<String>,
+    comment: Option<String>,
+    skip_count: Option<u32>,
+    bpm: Option<u16>,
+    relations: TrackRelations,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Artist {
+    id: ArtistId,
+    name: String,
+    favorite: bool,
+    last_played: Option<String>,
+    play_count: Option<u32>,
+    user_rating: Option<u8>,
+    musicbrainz_artist_id: Option<String>,
+    image_ref: Option<ImageRef>,
+    local_artwork: Option<()>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Genre {
+    id: GenreId,
+    name: String,
+    image_ref: Option<ImageRef>,
+    local_artwork: Option<()>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Folder {
+    id: FolderId,
+    name: String,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct MusicFolder {
+    id: MusicFolderId,
+    name: String,
+    image_ref: Option<ImageRef>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct Playlist {
+    id: PlaylistId,
+    name: String,
+    duration_seconds: u32,
+    track_count: usize,
+    image_ref: Option<ImageRef>,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PlaylistEntry {
+    occurrence_id: String,
+    track_id: TrackId,
+}
+#[derive(Clone, Debug, Eq, PartialEq)]
+struct PlaylistSnapshot {
+    playlist: Playlist,
+    entries: Vec<PlaylistEntry>,
+}
+
+fn normalize_release_types(values: Vec<String>) -> Vec<String> {
+    let mut result = Vec::new();
+    for value in values {
+        let value = value.trim().to_lowercase();
+        if !value.is_empty() && !result.contains(&value) {
+            result.push(value);
+        }
+    }
+    result
+}
 
 const SOURCE_CONFIG_VERSION: u32 = 1;
 const NAVIDROME_LIBRARY_VERSION: u32 = 1;
@@ -280,8 +419,6 @@ pub struct SubsonicSource {
     base_url: Url,
     username: String,
     credential: Arc<SubsonicCredential>,
-    navidrome_session: navidrome::NavidromeSession,
-    navidrome_library_version: u32,
     flavor: SubsonicFlavor,
     trust_invalid_cert: bool,
     metadata_editing: AtomicBool,
@@ -318,8 +455,6 @@ impl SubsonicSource {
             base_url,
             username: config.username,
             credential: Arc::new(credential),
-            navidrome_session: navidrome::NavidromeSession::default(),
-            navidrome_library_version: config.navidrome_library_version,
             flavor,
             trust_invalid_cert: config.trust_invalid_cert,
             metadata_editing: AtomicBool::new(false),
@@ -420,12 +555,6 @@ impl SubsonicSource {
             base_url,
             username: canonical_username,
             credential: Arc::new(credential),
-            navidrome_session: navidrome::NavidromeSession::default(),
-            navidrome_library_version: if flavor == SubsonicFlavor::Navidrome {
-                NAVIDROME_LIBRARY_VERSION
-            } else {
-                0
-            },
             flavor,
             trust_invalid_cert,
             metadata_editing: AtomicBool::new(metadata_editing),

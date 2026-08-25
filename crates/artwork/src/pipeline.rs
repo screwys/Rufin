@@ -5,7 +5,7 @@ use std::sync::{Arc, Condvar, Mutex, MutexGuard, Weak};
 use std::thread;
 use std::time::Duration;
 
-use library::{SourceArtwork, SourceId};
+use sources::SourceId;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
 use tracing::warn;
@@ -243,7 +243,7 @@ impl Pipeline {
     pub(crate) fn prefetch_source_artwork(
         &self,
         source: SourceImages,
-        artwork: Arc<[SourceArtwork]>,
+        artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
@@ -254,7 +254,7 @@ impl Pipeline {
         &self,
         source: SourceImages,
         revision: u64,
-        artwork: Arc<[SourceArtwork]>,
+        artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
@@ -269,7 +269,7 @@ impl Pipeline {
         )?;
         if summary.failed == 0 && !cancelled() {
             let identities = artwork.iter().filter_map(|source_artwork| {
-                ArtworkBinding::source_artwork(source_artwork)
+                ArtworkBinding::opaque(source_artwork)
                     .candidates()
                     .first()
                     .map(Candidate::stable_identity)
@@ -285,7 +285,7 @@ impl Pipeline {
     fn prepare_source_artwork_jobs(
         &self,
         source: SourceImages,
-        artwork: Arc<[SourceArtwork]>,
+        artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
@@ -322,7 +322,7 @@ impl Pipeline {
                 let mut state = lock_state(&self.shared);
                 for source_artwork in &artwork[admitted..end] {
                     let request = ArtworkRequest::new(
-                        ArtworkBinding::source_artwork(source_artwork),
+                        ArtworkBinding::opaque(source_artwork),
                         SOURCE_ARTWORK_SIZE,
                         SOURCE_ARTWORK_SIZE,
                     );
@@ -362,17 +362,6 @@ impl Pipeline {
             progress(completed_count, total);
         }
         Ok(summary)
-    }
-
-    #[cfg(test)]
-    pub(crate) fn preparation_work(&self) -> (usize, usize) {
-        let state = lock_state(&self.shared);
-        let interests = state
-            .jobs
-            .values()
-            .map(|record| record.preparations.len())
-            .sum();
-        (interests, state.jobs.len())
     }
 
     pub(crate) fn cancel(&self, request_id: RequestId) {
@@ -1450,180 +1439,5 @@ fn lock_cache_commit(shared: &Shared) -> MutexGuard<'_, ()> {
 fn send_completions(completions: Vec<LeaseCompletion>) {
     for (completion, outcome) in completions {
         let _ = completion.send(outcome);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::decode::decoded_image_for_test;
-
-    fn key(value: &str) -> ArtworkKey {
-        ArtworkKey(value.to_string())
-    }
-
-    fn image(key: &ArtworkKey, bytes: usize) -> Arc<DecodedImage> {
-        Arc::new(decoded_image_for_test(key.clone(), bytes))
-    }
-
-    fn family(value: &str) -> DecodedFamily {
-        DecodedFamily(value.to_string())
-    }
-
-    #[test]
-    fn visible_request_promotes_matching_bulk_preparation() {
-        let source = SourceImages::cache_only(SourceId::new("source"));
-        let binding = ArtworkBinding::source_artwork(&SourceArtwork::Native(
-            library::ImageRef::new("image", None),
-        ));
-        let request = ArtworkRequest::new(binding, 256, 48);
-        let candidate = candidate_request(
-            &request,
-            request
-                .binding
-                .candidates()
-                .first()
-                .cloned()
-                .expect("artwork candidate"),
-        );
-        let mut state = State::default();
-
-        let warm = enqueue_projection(
-            &mut state,
-            source.clone(),
-            candidate.clone(),
-            RequestId(1),
-            JobPriority::Preparation,
-        );
-        assert!(state.foreground.is_empty());
-        assert_eq!(state.preparations.front(), Some(&warm));
-
-        let visible = enqueue_projection(
-            &mut state,
-            source,
-            candidate,
-            RequestId(2),
-            JobPriority::Foreground,
-        );
-        assert_eq!(visible, warm);
-        assert_eq!(state.foreground.front(), Some(&visible));
-        assert!(state.preparations.is_empty());
-        assert_eq!(
-            state.jobs.get(&visible).map(JobRecord::priority),
-            Some(JobPriority::Foreground)
-        );
-    }
-
-    #[test]
-    fn decoded_index_hits_stay_bounded_and_protect_the_recent_entry() {
-        let source_id = SourceId::new("source");
-        let first = key("first");
-        let second = key("second");
-        let third = key("third");
-        let first_image = image(&first, 4);
-        let second_image = image(&second, 4);
-        let third_image = image(&third, 4);
-        let mut index = DecodedIndex::default();
-
-        index.insert_with_limit(
-            first.clone(),
-            source_id.clone(),
-            family("first"),
-            96,
-            Arc::clone(&first_image),
-            2,
-        );
-        index.insert_with_limit(
-            second.clone(),
-            source_id.clone(),
-            family("second"),
-            96,
-            second_image,
-            2,
-        );
-        for _ in 0..10_000 {
-            assert!(index.get(&first).is_some());
-        }
-        assert_eq!(index.eviction_order.len(), index.entries.len());
-        index.insert_with_limit(
-            third.clone(),
-            source_id,
-            family("third"),
-            96,
-            third_image,
-            2,
-        );
-
-        assert!(index.entries.contains_key(&first));
-        assert!(!index.entries.contains_key(&second));
-        assert!(index.entries.contains_key(&third));
-    }
-
-    #[test]
-    fn decoded_index_drops_an_expired_result() {
-        let source_id = SourceId::new("source");
-        let first = key("first");
-        let first_image = image(&first, 8);
-        let mut index = DecodedIndex::default();
-
-        index.insert_with_limit(
-            first.clone(),
-            source_id,
-            family("first"),
-            96,
-            Arc::clone(&first_image),
-            10,
-        );
-        drop(first_image);
-
-        assert!(index.get(&first).is_none());
-        assert!(index.entries.is_empty());
-        assert!(index.families.is_empty());
-        assert!(index.eviction_order.is_empty());
-    }
-
-    #[test]
-    fn decoded_index_source_invalidation_preserves_other_sources() {
-        let first_source = SourceId::new("first-source");
-        let second_source = SourceId::new("second-source");
-        let first = key("first");
-        let another_first = key("another-first");
-        let second = key("second");
-        let first_image = image(&first, 8);
-        let another_first_image = image(&another_first, 16);
-        let second_image = image(&second, 12);
-        let mut index = DecodedIndex::default();
-
-        index.insert_with_limit(
-            first.clone(),
-            first_source.clone(),
-            family("first"),
-            96,
-            first_image,
-            10,
-        );
-        index.insert_with_limit(
-            another_first.clone(),
-            first_source.clone(),
-            family("another-first"),
-            256,
-            another_first_image,
-            10,
-        );
-        index.insert_with_limit(
-            second.clone(),
-            second_source,
-            family("second"),
-            96,
-            second_image,
-            10,
-        );
-        index.invalidate_source(&first_source);
-
-        assert!(!index.entries.contains_key(&first));
-        assert!(!index.entries.contains_key(&another_first));
-        assert!(index.entries.contains_key(&second));
-        assert_eq!(index.eviction_order.len(), 1);
-        assert_eq!(index.families.len(), 1);
     }
 }

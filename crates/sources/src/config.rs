@@ -1,10 +1,31 @@
 use std::path::PathBuf;
 
-use library::SourceId;
 use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{SourceError, SourceInputIdentity, SourceResult, subsonic::SubsonicFlavor};
+
+#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
+#[serde(transparent)]
+pub struct SourceId(String);
+
+impl SourceId {
+    pub fn new(value: impl Into<String>) -> Self {
+        let value = value.into();
+        assert!(!value.is_empty(), "SourceId cannot be empty");
+        Self(value)
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+}
+
+impl std::fmt::Display for SourceId {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.0)
+    }
+}
 
 /// Credential-free source configuration persisted by Rufin Settings.
 ///
@@ -309,7 +330,7 @@ pub(crate) fn encode_provider_payload(
 
 #[cfg(test)]
 mod tests {
-    use library::SourceId;
+    use crate::SourceId;
 
     use super::*;
     use crate::jellyfin::JellyfinSourceConfig;

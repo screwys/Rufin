@@ -5,7 +5,7 @@ use super::{ensure_gstreamer_initialized, lock_recover};
 use gst::prelude::*;
 use gstreamer as gst;
 use gstreamer_audio as gst_audio;
-use library::ResolvedStream;
+use playback::ResolvedStream;
 use playback::{BackendEvent, RunId};
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::collections::VecDeque;

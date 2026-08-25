@@ -3,7 +3,7 @@ use gst::prelude::*;
 use gstreamer as gst;
 #[cfg(test)]
 use gstreamer_app as gst_app;
-use library::TrackLoudness;
+use playback::TrackLoudness;
 use playback::{
     AudioOutput, BackendAudioSettings, EQUALIZER_BAND_COUNT, EqualizerSettings,
     LOUDNESS_NORMALIZATION_TARGET_LUFS, LoudnessNormalizationMode,
@@ -314,30 +314,38 @@ fn internal_loudness_tags(
 ) -> Option<gst::TagList> {
     let measurement = match mode {
         LoudnessNormalizationMode::Off => None,
-        LoudnessNormalizationMode::Track => loudness.track,
-        LoudnessNormalizationMode::Album => loudness.album,
+        LoudnessNormalizationMode::Track => loudness.track.as_ref(),
+        LoudnessNormalizationMode::Album => loudness.album.as_ref(),
     }?;
     let gain = measurement
         .integrated_lufs
         .map_or(0.0, |lufs| LOUDNESS_NORMALIZATION_TARGET_LUFS - lufs);
-    Some(loudness_tag_list(mode, gain, measurement.true_peak_ratio))
+    Some(loudness_tag_list(mode, gain, measurement.true_peak))
 }
 
 fn neutral_loudness_tags(mode: LoudnessNormalizationMode) -> gst::TagList {
-    loudness_tag_list(mode, 0.0, 1.0)
+    loudness_tag_list(mode, 0.0, Some(1.0))
 }
 
-fn loudness_tag_list(mode: LoudnessNormalizationMode, gain: f64, peak: f64) -> gst::TagList {
+fn loudness_tag_list(
+    mode: LoudnessNormalizationMode,
+    gain: f64,
+    peak: Option<f64>,
+) -> gst::TagList {
     let mut tags = gst::TagList::new();
     let tags = tags.make_mut();
     match mode {
         LoudnessNormalizationMode::Off | LoudnessNormalizationMode::Track => {
             tags.add::<gst::tags::TrackGain>(&gain, gst::TagMergeMode::Replace);
-            tags.add::<gst::tags::TrackPeak>(&peak, gst::TagMergeMode::Replace);
+            if let Some(peak) = peak {
+                tags.add::<gst::tags::TrackPeak>(&peak, gst::TagMergeMode::Replace);
+            }
         }
         LoudnessNormalizationMode::Album => {
             tags.add::<gst::tags::AlbumGain>(&gain, gst::TagMergeMode::Replace);
-            tags.add::<gst::tags::AlbumPeak>(&peak, gst::TagMergeMode::Replace);
+            if let Some(peak) = peak {
+                tags.add::<gst::tags::AlbumPeak>(&peak, gst::TagMergeMode::Replace);
+            }
         }
     }
     tags.to_owned()
@@ -355,7 +363,7 @@ fn selected_loudness_tags(
                     gain.get(),
                     incoming
                         .get::<gst::tags::TrackPeak>()
-                        .map_or(1.0, |peak| peak.get()),
+                        .map(|peak| peak.get()),
                 )
             })
         }
@@ -367,7 +375,7 @@ fn selected_loudness_tags(
                     gain.get(),
                     incoming
                         .get::<gst::tags::AlbumPeak>()
-                        .map_or(1.0, |peak| peak.get()),
+                        .map(|peak| peak.get()),
                 )
             })
             .or_else(|| {
@@ -377,7 +385,7 @@ fn selected_loudness_tags(
                         gain.get(),
                         incoming
                             .get::<gst::tags::TrackPeak>()
-                            .map_or(1.0, |peak| peak.get()),
+                            .map(|peak| peak.get()),
                     )
                 })
             }),
@@ -628,6 +636,14 @@ mod tests {
         ensure_gstreamer_initialized().expect("initialize GStreamer");
     }
 
+    fn measurement(integrated_lufs: f64, true_peak: Option<f64>) -> LoudnessMeasurement {
+        LoudnessMeasurement {
+            analysis_key: [1; 32],
+            integrated_lufs: Some(integrated_lufs),
+            true_peak,
+        }
+    }
+
     #[test]
     fn explicit_unavailable_output_does_not_fall_back_to_default() {
         initialize_gstreamer();
@@ -781,8 +797,8 @@ mod tests {
         };
         let graph = AudioGraph::new(&settings).expect("album normalization graph");
         graph.apply_loudness(&TrackLoudness {
-            track: LoudnessMeasurement::new(Some(-21.0), 0.4).ok(),
-            album: LoudnessMeasurement::new(Some(-23.0), 0.8).ok(),
+            track: Some(measurement(-21.0, Some(0.4))),
+            album: Some(measurement(-23.0, Some(0.8))),
         });
 
         let tags = graph
@@ -821,7 +837,7 @@ mod tests {
     #[test]
     fn album_mode_keeps_embedded_track_gain_as_its_fallback() {
         initialize_gstreamer();
-        let embedded = loudness_tag_list(LoudnessNormalizationMode::Track, -3.0, 0.7);
+        let embedded = loudness_tag_list(LoudnessNormalizationMode::Track, -3.0, Some(0.7));
 
         let fallback = selected_loudness_tags(LoudnessNormalizationMode::Album, &embedded)
             .expect("embedded track fallback");
@@ -845,7 +861,7 @@ mod tests {
         };
         let graph = AudioGraph::new(&settings).expect("normalization graph");
         graph.apply_loudness(&TrackLoudness {
-            track: LoudnessMeasurement::new(Some(-23.0), 0.1).ok(),
+            track: Some(measurement(-23.0, Some(0.1))),
             album: None,
         });
         let source = gst::ElementFactory::make("audiotestsrc")
