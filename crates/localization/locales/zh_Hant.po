@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-25 03:51+0000\n"
+"PO-Revision-Date: 2026-08-26 05:51+0000\n"
 "Last-Translator: Tsung-Ying Yu <an920107@gmail.com>\n"
 "Language-Team: Chinese (Traditional Han script) <https://hosted.weblate.org/"
 "projects/rufin/app/zh_Hant/>\n"
@@ -457,10 +457,10 @@ msgid "Cut"
 msgstr "剪下"
 
 msgid "Dance"
-msgstr ""
+msgstr "舞曲"
 
 msgid "Dark"
-msgstr ""
+msgstr "深色"
 
 msgid "Date added"
 msgstr "新增日期"
@@ -577,7 +577,7 @@ msgid "Enter a server address, username, and password"
 msgstr "輸入伺服器位置、使用者名稱與密碼"
 
 msgid "Entire Library"
-msgstr ""
+msgstr "整個媒體庫"
 
 msgid "Equalizer"
 msgstr "等化器"
@@ -781,7 +781,7 @@ msgid "Karaoke mode"
 msgstr ""
 
 msgid "Keep Rufin running after closing the window"
-msgstr ""
+msgstr "讓 Rufin 在視窗關閉後仍然保持運行"
 
 msgid "Keep album transitions gapless when possible"
 msgstr ""
@@ -853,10 +853,10 @@ msgid "Local File Mapping"
 msgstr ""
 
 msgid "Local Folders"
-msgstr ""
+msgstr "本地資料夾"
 
 msgid "Local Prefix"
-msgstr ""
+msgstr "本地前綴"
 
 msgid "Local file access configured"
 msgstr ""
@@ -874,7 +874,7 @@ msgid "Local music folder is unavailable"
 msgstr ""
 
 msgid "Local music folder"
-msgstr ""
+msgstr "本地音樂資料夾"
 
 msgid "Local"
 msgstr "本地"
@@ -1325,7 +1325,7 @@ msgid "Preparing library..."
 msgstr "媒體庫準備中..."
 
 msgid "Preserve pitch"
-msgstr ""
+msgstr "維持音調"
 
 msgid "Preset"
 msgstr "預設集"
@@ -1367,25 +1367,25 @@ msgid "Purple"
 msgstr ""
 
 msgid "Queue a track to begin"
-msgstr ""
+msgstr "將曲目加入佇列的開頭"
 
 msgid "Queue and transitions"
 msgstr ""
 
 msgid "Queue"
-msgstr ""
+msgstr "佇列"
 
 msgid "Queued"
-msgstr ""
+msgstr "已佇列"
 
 msgid "Quit Rufin"
-msgstr ""
+msgstr "離開 Rufin"
 
 msgid "Quit"
-msgstr ""
+msgstr "離開"
 
 msgid "Rating"
-msgstr ""
+msgstr "評分"
 
 msgid "Ready"
 msgstr ""
@@ -1535,7 +1535,7 @@ msgid "Rows"
 msgstr ""
 
 msgid "Rufin data folder"
-msgstr ""
+msgstr "Rufin 資料資料夾"
 
 msgid "Rule actions"
 msgstr ""
@@ -1544,52 +1544,52 @@ msgid "Save Diagnostic Log"
 msgstr ""
 
 msgid "Save Lyrics"
-msgstr ""
+msgstr "儲存歌詞"
 
 msgid "Save Mapping"
 msgstr ""
 
 msgid "Save Server Settings"
-msgstr ""
+msgstr "儲存伺服器設定"
 
 msgid "Save to rescan"
 msgstr ""
 
 msgid "Save"
-msgstr ""
+msgstr "儲存"
 
 msgid "Saved Sources"
 msgstr ""
 
 msgid "Saved to"
-msgstr ""
+msgstr "儲存至"
 
 msgid "Saved"
-msgstr ""
+msgstr "已儲存"
 
 msgid "Saved, sync to preview matches"
 msgstr ""
 
 msgid "Saving..."
-msgstr ""
+msgstr "正在儲存..."
 
 msgid "Search Again"
-msgstr ""
+msgstr "重新搜尋"
 
 msgid "Search Lyrics"
-msgstr ""
+msgstr "搜尋歌詞"
 
 msgid "Search lyrics"
-msgstr ""
+msgstr "搜尋歌詞"
 
 msgid "Search preferences"
-msgstr ""
+msgstr "搜尋偏好設定"
 
 msgid "Search queue"
-msgstr ""
+msgstr "搜尋佇列"
 
 msgid "Search"
-msgstr ""
+msgstr "搜尋"
 
 msgid "Searching Local Network"
 msgstr ""
@@ -1598,19 +1598,19 @@ msgid "Searching for Jellyfin servers on the local network..."
 msgstr ""
 
 msgid "Searching for devices..."
-msgstr ""
+msgstr "正在尋找裝置..."
 
 msgid "Searching will start automatically"
 msgstr ""
 
 msgid "Searching..."
-msgstr ""
+msgstr "正在搜尋..."
 
 msgid "Secret storage"
-msgstr ""
+msgstr "私密儲存空間"
 
 msgid "Secure storage"
-msgstr ""
+msgstr "安全儲存空間"
 
 msgid "Seek Backward"
 msgstr ""
@@ -1625,19 +1625,19 @@ msgid "Seekbar"
 msgstr ""
 
 msgid "Select All"
-msgstr ""
+msgstr "全選"
 
 msgid "Select Download Folder"
-msgstr ""
+msgstr "選擇下載資料夾"
 
 msgid "Select Music Folder"
-msgstr ""
+msgstr "選擇音樂資料夾"
 
 msgid "Select Source"
-msgstr ""
+msgstr "選擇來源"
 
 msgid "Selection"
-msgstr ""
+msgstr "選擇"
 
 msgid "Server Actions"
 msgstr ""
@@ -1686,22 +1686,22 @@ msgid "Shared secret"
 msgstr ""
 
 msgid "Show Rufin"
-msgstr ""
+msgstr "顯示 Rufin"
 
 msgid "Show downloaded badge"
-msgstr ""
+msgstr "顯示已下載圖示"
 
 msgid "Show external service icons on album and artist pages"
-msgstr ""
+msgstr "在專輯與藝人頁面上顯示外部服務的圖示"
 
 msgid "Show external site links"
-msgstr ""
+msgstr "顯示外部連結"
 
 msgid "Show lyrics in the right panel"
-msgstr ""
+msgstr "顯示歌詞在右側邊欄"
 
 msgid "Show lyrics"
-msgstr ""
+msgstr "顯示歌詞"
 
 msgid "Show paused status"
 msgstr ""
@@ -1722,13 +1722,13 @@ msgid "Show visualizer"
 msgstr ""
 
 msgid "Show/hide lyrics"
-msgstr ""
+msgstr "顯示/隱藏歌詞"
 
 msgid "Show/hide right sidebar"
 msgstr "顯示/隱藏右側邊欄"
 
 msgid "Showcase"
-msgstr ""
+msgstr "展示櫃"
 
 msgid "Shuffle off"
 msgstr ""
@@ -1756,10 +1756,10 @@ msgid "Single"
 msgstr ""
 
 msgid "Singles"
-msgstr ""
+msgstr "單曲"
 
 msgid "Skip count"
-msgstr ""
+msgstr "跳過次數"
 
 msgid "Skip same-album crossfade"
 msgstr ""
@@ -1780,16 +1780,16 @@ msgid "Smart playlists"
 msgstr "智慧播放清單"
 
 msgid "Song title"
-msgstr ""
+msgstr "曲名"
 
 msgid "Song"
-msgstr ""
+msgstr "歌曲"
 
 msgid "Sort title"
 msgstr ""
 
 msgid "Sort"
-msgstr ""
+msgstr "排序"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
@@ -1804,22 +1804,22 @@ msgid "Status display"
 msgstr ""
 
 msgid "Stream quality"
-msgstr ""
+msgstr "串流品質"
 
 msgid "Support"
 msgstr ""
 
 msgid "Switching library..."
-msgstr ""
+msgstr "正在切換媒體庫..."
 
 msgid "Synced lyrics"
-msgstr ""
+msgstr "已同步歌詞"
 
 msgid "System default"
-msgstr ""
+msgstr "系統預設值"
 
 msgid "System"
-msgstr ""
+msgstr "系統"
 
 msgid "Teal"
 msgstr ""
@@ -1831,10 +1831,10 @@ msgid "Text"
 msgstr ""
 
 msgid "Theme"
-msgstr ""
+msgstr "主題"
 
 msgid "This device"
-msgstr ""
+msgstr "此裝置"
 
 msgid "This isn't available"
 msgstr ""
@@ -1843,22 +1843,22 @@ msgid "This source cannot edit this field"
 msgstr ""
 
 msgid "Title (merged)"
-msgstr ""
+msgstr "標題（已合併）"
 
 msgid "Title"
-msgstr ""
+msgstr "標題"
 
 msgid "Toggle Fullscreen"
-msgstr ""
+msgstr "切換全螢幕"
 
 msgid "Track number"
-msgstr ""
+msgstr "曲序"
 
 msgid "Track radio"
-msgstr ""
+msgstr "曲目電台"
 
 msgid "Track"
-msgstr ""
+msgstr "曲目"
 
 msgid "Tracks from every playlist"
 msgstr ""
@@ -1873,7 +1873,7 @@ msgid "Transition mode"
 msgstr ""
 
 msgid "Translation language"
-msgstr ""
+msgstr "翻譯語言"
 
 msgid "Troubleshooting"
 msgstr ""
@@ -1894,7 +1894,7 @@ msgid "Type to search"
 msgstr ""
 
 msgid "UPnP"
-msgstr ""
+msgstr "UPnP"
 
 msgid "Undo identified value"
 msgstr ""
@@ -1906,16 +1906,16 @@ msgid "Unmuted"
 msgstr ""
 
 msgid "Update"
-msgstr ""
+msgstr "更新"
 
 msgid "Use API key"
-msgstr ""
+msgstr "使用 API 金鑰"
 
 msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
-msgstr ""
+msgstr "使用 Rufin 資料資料夾"
 
 msgid "Use a number above zero"
 msgstr ""
@@ -1933,13 +1933,13 @@ msgid "User token"
 msgstr ""
 
 msgid "User"
-msgstr ""
+msgstr "使用者"
 
 msgid "Username"
-msgstr ""
+msgstr "使用者名稱"
 
 msgid "Verify server certificate"
-msgstr ""
+msgstr "驗證伺服器的憑證"
 
 msgid "Version History"
 msgstr ""
@@ -1963,67 +1963,67 @@ msgid "Volume scale"
 msgstr ""
 
 msgid "Waiting for connection"
-msgstr ""
+msgstr "正在等候連線"
 
 msgid "Waveform seekbar"
 msgstr ""
 
 msgid "Window"
-msgstr ""
+msgstr "視窗"
 
 msgid "Year"
-msgstr ""
+msgstr "年份"
 
 msgid "Yellow"
-msgstr ""
+msgstr "黃色"
 
 msgid "Yes"
-msgstr ""
+msgstr "是"
 
 msgid "above"
 msgstr ""
 
 msgid "after"
-msgstr ""
+msgstr "晚於"
 
 msgid "before"
-msgstr ""
+msgstr "早於"
 
 msgid "below"
-msgstr ""
+msgstr "低於"
 
 msgid "contains"
-msgstr ""
+msgstr "包含"
 
 msgid "does not contain"
-msgstr ""
+msgstr "不包含"
 
 msgid "does not equal"
-msgstr ""
+msgstr "不等於"
 
 msgid "equals"
-msgstr ""
+msgstr "等於"
 
 msgid "excludes"
-msgstr ""
+msgstr "排除"
 
 msgid "here"
 msgstr ""
 
 msgid "is empty"
-msgstr ""
+msgstr "為空"
 
 msgid "is not empty"
-msgstr ""
+msgstr "不為空"
 
 msgid "is not"
-msgstr ""
+msgstr "不是"
 
 msgid "is"
-msgstr ""
+msgstr "是"
 
 msgid "kbps"
-msgstr ""
+msgstr "kbps"
 
 msgid "range"
 msgstr ""
@@ -2032,40 +2032,35 @@ msgid "to"
 msgstr ""
 
 msgid "today"
-msgstr ""
+msgstr "今天"
 
 msgid "yesterday"
-msgstr ""
+msgstr "昨天"
 
 #, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 張專輯"
 
 #, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 天之前"
 
 #, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "已選擇 {count} 個資料夾"
 
 #, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 個月之前"
 
 #, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 個結果"
 
 #, rust-format
 msgid "{count} track"
@@ -2075,11 +2070,9 @@ msgstr[0] "{count} 首曲目"
 #, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 週之前"
 
 #, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} 年之前"
