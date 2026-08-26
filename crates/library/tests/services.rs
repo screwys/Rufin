@@ -188,6 +188,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             fixture.source,
             &LocalAccessWrite {
                 track_object_id: Some("track-1".to_string()),
+                origin: library::LocalAccessOrigin::Mapping,
                 path: "/generic/local-track.flac".to_string(),
                 root: "/generic".to_string(),
                 relative_path: "local-track.flac".to_string(),
@@ -270,6 +271,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             None,
             None,
             false,
+            None,
             None,
             None,
             None,
@@ -471,6 +473,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(identity.dependencies, dependencies);
     let metadata = LocalAccessWrite {
         track_object_id: None,
+        origin: library::LocalAccessOrigin::Mapping,
         path: "/downloads/metadata.flac".to_string(),
         root: "/downloads".to_string(),
         relative_path: "metadata.flac".to_string(),
@@ -495,6 +498,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .expect("write metadata Local access");
     let exact = LocalAccessWrite {
         track_object_id: Some("track-0".to_string()),
+        origin: library::LocalAccessOrigin::Mapping,
         path: "/downloads/exact.flac".to_string(),
         media_uri: "file:///downloads/exact.flac".to_string(),
         loudness_analysis_key: [8; 32],
@@ -556,7 +560,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     let access_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND track_object_id=?2")
         .bind(fixture.source).bind("track-0").fetch_all(&mut raw).await.expect("Local access plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(
-        access_plan.contains("local_access_remote_idx"),
+        access_plan.contains("local_access_precedence_idx"),
         "{access_plan}"
     );
     let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND normalized_title=?2 AND normalized_album=?3 AND normalized_artist=?4 AND disc_number=?5 AND track_number=?6 AND duration_millis=?7")
@@ -730,6 +734,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
                 artist_name: "Artist".to_string(),
                 album_title: "Album".to_string(),
                 started_at: 100,
+                local_period: "1970-01".to_string(),
                 duration_millis: 180_000,
                 listened_millis: 1000,
                 skipped: false,

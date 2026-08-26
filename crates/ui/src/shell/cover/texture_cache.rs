@@ -6,7 +6,7 @@ use artwork::{DecodedImage, DecodedImageIdentity};
 use gtk::gdk;
 use gtk::glib;
 use gtk::prelude::{Cast, ObjectExt};
-use library::SourceId;
+use sources::SourceId;
 
 const MAX_TEXTURES: usize = 20_480;
 const MAX_TEXTURE_BYTES: usize = 32 * 1024 * 1024;

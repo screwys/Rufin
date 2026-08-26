@@ -23,6 +23,39 @@ const JELLYFIN_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 };
 
 impl JellyfinSource {
+    pub(crate) async fn collection_track_object_ids(
+        &self,
+        collection: &crate::SourceCollection,
+        limit: usize,
+    ) -> SourceResult<Vec<String>> {
+        let mut url = endpoint(&self.base_url, "Items")?;
+        url.query_pairs_mut()
+            .append_pair("UserId", &self.user_id)
+            .append_pair("Recursive", "true")
+            .append_pair("IncludeItemTypes", "Audio")
+            .append_pair("Fields", TRACK_FIELDS)
+            .append_pair("SortBy", "ParentIndexNumber,IndexNumber,SortName")
+            .append_pair("SortOrder", "Ascending")
+            .append_pair("Limit", &limit.clamp(1, 500).to_string());
+        match collection {
+            crate::SourceCollection::Album(id) => {
+                url.query_pairs_mut()
+                    .append_pair("ParentId", raw_item_id(id));
+            }
+            crate::SourceCollection::Artist(id) => {
+                url.query_pairs_mut()
+                    .append_pair("ArtistIds", raw_item_id(id));
+            }
+        }
+        Ok(self
+            .get_json::<ItemQueryResult>(url)
+            .await?
+            .items
+            .into_iter()
+            .filter(is_audio_item)
+            .map(|item| jellyfin_id("track", &item.id))
+            .collect())
+    }
     pub(crate) async fn generated_track_object_ids(
         &self,
         seed: &crate::SourceRadioSeed,

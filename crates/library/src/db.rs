@@ -14,7 +14,7 @@ use sqlx::sqlite::{
 use sqlx::{Connection, Sqlite};
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 
-use crate::{LibraryError, LibraryResult, RecoveryReport, recovery, schema};
+use crate::{LibraryError, LibraryResult, recovery, schema};
 
 const PAGE_SIZE_BYTES: u32 = 4 * 1024;
 const PAGE_CACHE_KIB: i32 = 1024;
@@ -81,6 +81,20 @@ pub struct Database {
 impl Database {
     pub async fn open(path: impl AsRef<Path>) -> LibraryResult<Self> {
         let path = path.as_ref().to_path_buf();
+        match Self::open_final(&path).await {
+            Ok(database) => return Ok(database),
+            Err(error) if recovery::is_store_content_failure(&error) => {}
+            Err(error) => return Err(error),
+        }
+        if matches!(recovery::is_intact_released(&path).await, Ok(true)) {
+            recovery::repair_released(&path).await?;
+        } else {
+            recovery::rebuild_unusable(&path).await?;
+        }
+        Self::open_final(&path).await
+    }
+
+    async fn open_final(path: &Path) -> LibraryResult<Self> {
         let mut writer = open_writer(&path).await?;
         schema::initialize(&mut writer).await?;
         let readers = open_readers(&path).await?;
@@ -93,14 +107,6 @@ impl Database {
                 next_scan: AtomicU64::new(1),
             }),
         })
-    }
-
-    pub async fn released_repair_available(path: impl AsRef<Path>) -> LibraryResult<bool> {
-        recovery::is_intact_released(path.as_ref()).await
-    }
-
-    pub async fn repair_released(path: impl AsRef<Path>) -> LibraryResult<RecoveryReport> {
-        recovery::repair_released(path.as_ref()).await
     }
 
     pub async fn remove_source(&self, source: crate::SourceKey) -> LibraryResult<bool> {

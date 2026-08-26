@@ -28,7 +28,9 @@ impl PlaybackState {
     }
 }
 
-pub(crate) fn current_playback_track(player: Option<&PlaybackView>) -> Option<::library::Track> {
+pub(crate) fn current_playback_track(
+    player: Option<&PlaybackView>,
+) -> Option<playback::PlaybackMedia> {
     player?
         .transport
         .current
@@ -36,10 +38,8 @@ pub(crate) fn current_playback_track(player: Option<&PlaybackView>) -> Option<::
         .map(|entry| entry.track.clone())
 }
 
-pub(crate) fn current_playback_track_id(
-    player: Option<&PlaybackView>,
-) -> Option<::library::TrackId> {
-    current_playback_track(player).map(|track| track.id.clone())
+pub(crate) fn current_playback_track_id(player: Option<&PlaybackView>) -> Option<String> {
+    current_playback_track(player).map(|track| track.track_object_id)
 }
 
 pub(crate) fn current_playback_media_id(player: Option<&PlaybackView>) -> Option<CurrentMediaId> {

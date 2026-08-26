@@ -43,16 +43,11 @@ impl Shell {
             .as_deref()
             .map(|selected| selected.operations.clone())
     }
-
-    pub(crate) fn metadata_editing_available(&self, item_id: library::MetadataItemId) -> bool {
-        self.selected_library()
-            .as_deref()
-            .is_some_and(|selected| selected.operations.metadata_editing_available(&item_id))
-    }
 }
 
 pub(crate) struct Shell {
     pub(crate) quitting: Rc<Cell<bool>>,
+    pub(crate) home_variation: Cell<i64>,
     pub(crate) diagnostics: DiagnosticsHandle,
     pub(crate) appearance: crate::application::style::ApplicationAppearance,
     pub(crate) settings: SettingsState,

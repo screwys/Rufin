@@ -3,7 +3,8 @@
 
 use std::collections::BTreeMap;
 
-use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
+use sqlx::sqlite::SqliteRow;
+use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, PlaylistEntryKey, PlaylistKey,
@@ -47,7 +48,7 @@ impl PlaylistEntrySort {
     }
 }
 
-#[derive(Clone, Debug, FromRow, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistRow {
     pub playlist_key: PlaylistKey,
     pub source_key: SourceKey,
@@ -57,6 +58,33 @@ pub struct PlaylistRow {
     pub artwork_binding: Option<Vec<u8>>,
     pub track_count: i64,
     pub duration_millis: i64,
+    pub downloaded_count: i64,
+    pub representative_artwork: Vec<Vec<u8>>,
+    pub genres: Vec<PlaylistGenreLink>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlaylistGenreLink {
+    pub genre_key: crate::GenreKey,
+    pub name: String,
+}
+
+impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
+    fn from_row(row: &'row SqliteRow) -> Result<Self, sqlx::Error> {
+        Ok(Self {
+            playlist_key: row.try_get("playlist_key")?,
+            source_key: row.try_get("source_key")?,
+            object_id: row.try_get("object_id")?,
+            ownership: row.try_get("ownership")?,
+            name: row.try_get("name")?,
+            artwork_binding: row.try_get("artwork_binding")?,
+            track_count: row.try_get("track_count")?,
+            duration_millis: row.try_get("duration_millis")?,
+            downloaded_count: row.try_get("downloaded_count")?,
+            representative_artwork: Vec::new(),
+            genres: Vec::new(),
+        })
+    }
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -81,6 +109,92 @@ pub struct PlaylistEntryRow {
 }
 
 impl Database {
+    pub async fn playlist_projection_playback(
+        &self,
+        source: SourceKey,
+        playlist: PlaylistKey,
+        entries: &[PlaylistEntryKey],
+        anchor: PlaylistEntryKey,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<(Vec<TrackKey>, usize, TrackRow)>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut order = Vec::with_capacity(entries.len());
+        let mut anchor_position = None;
+        let mut anchor_track = None;
+        for batch in entries.chunks(PLAYLIST_ENTRY_ROW_LIMIT) {
+            let mut query =
+                QueryBuilder::<Sqlite>::new("WITH requested(playlist_entry_key,ordinal) AS (");
+            query.push_values(batch.iter().enumerate(), |mut row, (ordinal, entry)| {
+                row.push_bind(*entry).push_bind(ordinal as i64);
+            });
+            query.push(") SELECT entry.playlist_entry_key,entry.track_key FROM requested JOIN playlist_entries entry USING(playlist_entry_key) JOIN playlists playlist USING(playlist_key) WHERE playlist.source_key=").push_bind(source).push(" AND playlist.playlist_key=").push_bind(playlist).push(" AND entry.track_key IS NOT NULL AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=entry.track_key AND scope.folder_key=").push_bind(folder).push(")) ORDER BY requested.ordinal");
+            for (entry, track) in query
+                .build_query_as::<(PlaylistEntryKey, TrackKey)>()
+                .persistent(false)
+                .fetch_all(&mut *connection)
+                .await?
+            {
+                if entry == anchor {
+                    anchor_position = Some(order.len());
+                    anchor_track = Some(track);
+                }
+                order.push(track);
+            }
+        }
+        let Some((anchor_position, anchor_track)) = anchor_position.zip(anchor_track) else {
+            Database::clear_progress(&mut connection).await?;
+            return Ok(None);
+        };
+        let rows = load_track_rows(&mut connection, source, &[anchor_track]).await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .map(|row| (order, anchor_position, row)))
+    }
+
+    pub async fn playlist_entry_playback(
+        &self,
+        source: SourceKey,
+        playlist: PlaylistKey,
+        entry: PlaylistEntryKey,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<(Vec<TrackKey>, usize, TrackRow)>> {
+        let order = self
+            .playlist_track_order(source, playlist, folder, cancellation)
+            .await?;
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let anchor = sqlx::query_as::<_, (TrackKey, i64)>(
+            "SELECT selected.track_key,
+                    (SELECT count(*) FROM playlist_entries prior
+                     WHERE prior.playlist_key=selected.playlist_key
+                       AND prior.track_key IS NOT NULL
+                       AND prior.position<selected.position
+                       AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=prior.track_key AND scope.folder_key=?4)))
+             FROM playlist_entries selected JOIN playlists playlist USING(playlist_key)
+             WHERE playlist.source_key=?1 AND selected.playlist_key=?2
+               AND selected.playlist_entry_key=?3 AND selected.track_key IS NOT NULL
+               AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=selected.track_key AND scope.folder_key=?4))",
+        )
+        .bind(source)
+        .bind(playlist)
+        .bind(entry)
+        .bind(folder)
+        .fetch_optional(&mut *connection)
+        .await?;
+        Database::clear_progress(&mut connection).await?;
+        let Some((track, position)) = anchor else {
+            return Ok(None);
+        };
+        let rows = self.track_rows(source, &[track], cancellation).await?;
+        Ok(rows
+            .into_iter()
+            .next()
+            .map(|row| (order, position.max(0) as usize, row)))
+    }
+
     pub async fn playlist_key_by_object(
         &self,
         source: SourceKey,
@@ -205,6 +319,34 @@ impl Database {
         Database::clear_progress(&mut connection).await?;
         Ok(result?)
     }
+
+    pub async fn playlist_track_order(
+        &self,
+        source: SourceKey,
+        playlist: PlaylistKey,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackKey>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_scalar::<_, TrackKey>(
+            "SELECT entry.track_key FROM playlist_entries entry
+             JOIN playlists playlist USING(playlist_key)
+             WHERE playlist.source_key=?1 AND playlist.playlist_key=?2
+               AND entry.track_key IS NOT NULL
+               AND (?3 IS NULL OR EXISTS (
+                 SELECT 1 FROM track_folders scope
+                 WHERE scope.track_key=entry.track_key AND scope.folder_key=?3
+               ))
+             ORDER BY entry.position,entry.playlist_entry_key",
+        )
+        .bind(source)
+        .bind(playlist)
+        .bind(folder)
+        .fetch_all(&mut *connection)
+        .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
     pub async fn playlist_rows(
         &self,
         source: SourceKey,
@@ -230,7 +372,8 @@ impl Database {
                       playlist.object_id, playlist.ownership, playlist.name,
                       playlist.artwork_binding,
                       count(entry.playlist_entry_key) AS track_count,
-                      COALESCE(sum(track.duration_millis), 0) AS duration_millis
+                      COALESCE(sum(track.duration_millis), 0) AS duration_millis,
+                      count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN 1 END) AS downloaded_count
                FROM requested JOIN playlists AS playlist USING(playlist_key)
                LEFT JOIN playlist_entries AS entry USING(playlist_key)
                LEFT JOIN tracks AS track USING(track_key)
@@ -239,13 +382,44 @@ impl Database {
         query
             .push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=entry.track_key AND scope.folder_key=").push_bind(folder).push("))")
             .push(" GROUP BY playlist.playlist_key ORDER BY requested.position");
-        let result = query
+        let mut result = query
             .build_query_as::<PlaylistRow>()
             .persistent(false)
             .fetch_all(&mut *connection)
-            .await;
+            .await?;
+        for row in &mut result {
+            row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
+                "SELECT album.artwork_binding FROM playlist_entries entry
+                 JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
+                 WHERE entry.playlist_key=?1 AND track.source_key=?2
+                   AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+                   AND album.artwork_binding IS NOT NULL
+                 GROUP BY album.album_key ORDER BY min(entry.position) LIMIT 4",
+            )
+            .bind(row.playlist_key)
+            .bind(source)
+            .bind(folder)
+            .fetch_all(&mut *connection)
+            .await?;
+            row.genres = sqlx::query_as::<_, (crate::GenreKey, String)>(
+                "SELECT genre.genre_key,genre.name FROM playlist_entries entry
+                 JOIN tracks track USING(track_key) JOIN track_genres relation USING(track_key)
+                 JOIN genres genre USING(genre_key)
+                 WHERE entry.playlist_key=?1 AND track.source_key=?2
+                   AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+                 GROUP BY genre.genre_key ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2",
+            )
+            .bind(row.playlist_key)
+            .bind(source)
+            .bind(folder)
+            .fetch_all(&mut *connection)
+            .await?
+            .into_iter()
+            .map(|(genre_key, name)| PlaylistGenreLink { genre_key, name })
+            .collect();
+        }
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok(result)
     }
 
     pub async fn playlist_entry_rows(

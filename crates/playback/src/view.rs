@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use library::{AlbumKey, QueueMedia, SourceKey, TrackKey, TrackRow};
+use library::{AlbumKey, ArtistKey, QueueMedia, SourceKey, TrackArtistLink, TrackKey, TrackRow};
 
 use crate::sequence::{OccurrenceId, RepeatMode, Sequence};
 use crate::{PlaybackSession, Provenance, RunId, SourceSessionEpoch, TransportStatus};
@@ -8,6 +8,7 @@ use crate::{PlaybackSession, Provenance, RunId, SourceSessionEpoch, TransportSta
 /// The bounded current or prepared-next media facts Playback consumes.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackMedia {
+    pub source_id: String,
     pub track_key: Option<TrackKey>,
     pub track_object_id: String,
     pub title: String,
@@ -15,6 +16,7 @@ pub struct PlaybackMedia {
     pub album: String,
     pub album_display_artist: Option<String>,
     pub album_key: Option<AlbumKey>,
+    pub primary_artist_key: Option<ArtistKey>,
     pub media_uri: Option<String>,
     pub artwork_binding: Option<Vec<u8>>,
     pub duration_millis: i64,
@@ -23,6 +25,8 @@ pub struct PlaybackMedia {
     pub year: Option<i64>,
     pub release_date: Option<String>,
     pub favorite: Option<bool>,
+    pub rating: Option<i64>,
+    pub is_downloaded: bool,
     pub source_format: Option<String>,
     pub musicbrainz_recording_id: Option<String>,
     pub musicbrainz_release_track_id: Option<String>,
@@ -32,11 +36,13 @@ pub struct PlaybackMedia {
     pub cue_path: Option<String>,
     pub cue_start_millis: Option<i64>,
     pub cue_end_millis: Option<i64>,
+    pub artist_links: Vec<TrackArtistLink>,
 }
 
 impl From<QueueMedia> for PlaybackMedia {
     fn from(media: QueueMedia) -> Self {
         Self {
+            source_id: media.source_id,
             track_key: media.track_key,
             track_object_id: media.track_object_id,
             title: media.title,
@@ -44,6 +50,7 @@ impl From<QueueMedia> for PlaybackMedia {
             album: media.album,
             album_display_artist: media.album_display_artist,
             album_key: media.album_key,
+            primary_artist_key: media.primary_artist_key,
             media_uri: media.media_uri,
             artwork_binding: media.artwork_binding,
             duration_millis: media.duration_millis.unwrap_or_default(),
@@ -52,6 +59,8 @@ impl From<QueueMedia> for PlaybackMedia {
             year: media.year,
             release_date: media.release_date,
             favorite: media.favorite,
+            rating: None,
+            is_downloaded: false,
             source_format: media.source_format,
             musicbrainz_recording_id: media.musicbrainz_recording_id,
             musicbrainz_release_track_id: media.musicbrainz_release_track_id,
@@ -61,17 +70,24 @@ impl From<QueueMedia> for PlaybackMedia {
             cue_path: media.cue_path,
             cue_start_millis: media.cue_start_millis,
             cue_end_millis: media.cue_end_millis,
+            artist_links: media.artist_links,
         }
     }
 }
 
 impl From<TrackRow> for PlaybackMedia {
     fn from(track: TrackRow) -> Self {
+        let primary_artist_key = track
+            .artists
+            .first()
+            .or_else(|| track.album_artists.first())
+            .map(|artist| artist.artist_key);
         let album_display_artist = track
             .album_artists
             .first()
             .map(|artist| artist.name.clone());
         Self {
+            source_id: track.source_id.clone(),
             track_key: Some(track.track_key),
             track_object_id: track.object_id,
             title: track.title,
@@ -79,6 +95,7 @@ impl From<TrackRow> for PlaybackMedia {
             album: track.display_album,
             album_display_artist,
             album_key: track.album_key,
+            primary_artist_key,
             media_uri: track.media_uri,
             artwork_binding: track.artwork_binding,
             duration_millis: track.duration_millis,
@@ -87,6 +104,8 @@ impl From<TrackRow> for PlaybackMedia {
             year: track.year,
             release_date: track.release_date,
             favorite: Some(track.favorite),
+            rating: track.rating,
+            is_downloaded: track.is_downloaded,
             source_format: track.source_format,
             musicbrainz_recording_id: track.musicbrainz_recording_id,
             musicbrainz_release_track_id: track.musicbrainz_release_track_id,
@@ -96,6 +115,11 @@ impl From<TrackRow> for PlaybackMedia {
             cue_path: track.cue_path,
             cue_start_millis: track.cue_start_millis,
             cue_end_millis: track.cue_end_millis,
+            artist_links: if track.artists.is_empty() {
+                track.album_artists
+            } else {
+                track.artists
+            },
         }
     }
 }
@@ -106,6 +130,7 @@ pub struct QueueSummaryView {
     pub total: usize,
     pub current_occurrence: Option<OccurrenceId>,
     pub current_index: Option<usize>,
+    pub current_position: Option<usize>,
     pub next_occurrence: Option<OccurrenceId>,
 }
 
@@ -217,6 +242,7 @@ impl Sequence {
             total: self.entries().len(),
             current_occurrence: self.selected().map(|entry| entry.occurrence.clone()),
             current_index: self.selected_index(),
+            current_position: self.selected().map(|entry| entry.canonical_position),
             next_occurrence: next_index
                 .and_then(|index| self.entries().get(index))
                 .map(|entry| entry.occurrence.clone()),

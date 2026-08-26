@@ -2,7 +2,6 @@
 //! Canonical Queue rows and media facts remain in Library SQLite.
 
 use std::fmt;
-use std::sync::Arc;
 
 use library::{QueueOccurrenceKey, SourceKey, TrackKey};
 use thiserror::Error;
@@ -40,7 +39,7 @@ impl fmt::Display for OccurrenceId {
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum RepeatMode {
     #[default]
     Off,
@@ -140,12 +139,14 @@ pub enum SequenceError {
     DuplicateOccurrence,
     #[error("the selected playback occurrence is missing")]
     MissingSelectedOccurrence,
+    #[error("persisted Queue keys do not match the current playback revision")]
+    InvalidPersistedKeys,
 }
 
 #[derive(Clone, Debug)]
 pub struct Sequence {
     source_key: SourceKey,
-    entries: Arc<Vec<SequenceEntry>>,
+    entries: Vec<SequenceEntry>,
     selected_index: Option<usize>,
     repeat_mode: RepeatMode,
     shuffle_enabled: bool,
@@ -158,7 +159,7 @@ impl Sequence {
     pub fn new(source_key: SourceKey) -> Self {
         Self {
             source_key,
-            entries: Arc::new(Vec::new()),
+            entries: Vec::new(),
             selected_index: None,
             repeat_mode: RepeatMode::Off,
             shuffle_enabled: false,
@@ -200,7 +201,7 @@ impl Sequence {
             .saturating_add(1);
         Ok(Self {
             source_key,
-            entries: Arc::new(entries),
+            entries,
             selected_index,
             repeat_mode,
             shuffle_enabled: shuffled,
@@ -214,12 +215,26 @@ impl Sequence {
         self.source_key
     }
 
+    pub fn accept_persisted_keys(
+        &mut self,
+        revision: u64,
+        keys: &[QueueOccurrenceKey],
+    ) -> Result<(), SequenceError> {
+        if self.revision != revision || self.entries.len() != keys.len() {
+            return Err(SequenceError::InvalidPersistedKeys);
+        }
+        for (entry, key) in self.entries.iter_mut().zip(keys) {
+            entry.occurrence_key = Some(*key);
+        }
+        Ok(())
+    }
+
     pub fn entries(&self) -> &[SequenceEntry] {
         &self.entries
     }
 
-    pub(crate) fn shared_entries(&self) -> Arc<Vec<SequenceEntry>> {
-        Arc::clone(&self.entries)
+    pub(crate) fn persistence_entries(&self) -> Vec<SequenceEntry> {
+        self.entries.clone()
     }
 
     pub fn selected(&self) -> Option<&SequenceEntry> {
@@ -342,7 +357,7 @@ impl Sequence {
             Placement::End => self.entries.len(),
         };
         if !matches!(placement, Placement::Replace { .. }) {
-            for entry in Arc::make_mut(&mut self.entries) {
+            for entry in &mut self.entries {
                 if entry.canonical_position >= canonical_start {
                     entry.canonical_position += item_count;
                 }
@@ -363,18 +378,18 @@ impl Sequence {
         let selected_occurrence = match placement {
             Placement::Replace { anchor_index } => {
                 let selected = inserted[anchor_index].occurrence.clone();
-                *Arc::make_mut(&mut self.entries) = inserted;
+                *&mut self.entries = inserted;
                 Some(selected)
             }
             Placement::AfterCurrent => {
                 let at = self
                     .selected_index
                     .map_or(self.entries.len(), |index| index + 1);
-                Arc::make_mut(&mut self.entries).splice(at..at, inserted.drain(..));
+                self.entries.splice(at..at, inserted.drain(..));
                 previous
             }
             Placement::End => {
-                Arc::make_mut(&mut self.entries).append(&mut inserted);
+                self.entries.append(&mut inserted);
                 previous
             }
         };
@@ -419,8 +434,8 @@ impl Sequence {
     pub fn remove(&mut self, occurrence: &OccurrenceId) -> Option<SequenceEntry> {
         let index = self.occurrence_index(occurrence)?;
         let selected = self.selected_index;
-        let removed = Arc::make_mut(&mut self.entries).remove(index);
-        for entry in Arc::make_mut(&mut self.entries) {
+        let removed = self.entries.remove(index);
+        for entry in &mut self.entries {
             if entry.canonical_position > removed.canonical_position {
                 entry.canonical_position -= 1;
             }
@@ -452,10 +467,10 @@ impl Sequence {
             return false;
         }
         let selected = self.selected().map(|entry| entry.occurrence.clone());
-        let mut entry = Arc::make_mut(&mut self.entries).remove(old_index);
+        let mut entry = self.entries.remove(old_index);
         let old_canonical = entry.canonical_position;
         let canonical_target = new_index.min(self.entries.len());
-        for current in Arc::make_mut(&mut self.entries) {
+        for current in &mut self.entries {
             if canonical_target < old_canonical
                 && (canonical_target..old_canonical).contains(&current.canonical_position)
             {
@@ -467,7 +482,7 @@ impl Sequence {
             }
         }
         entry.canonical_position = canonical_target;
-        Arc::make_mut(&mut self.entries).insert(target, entry);
+        self.entries.insert(target, entry);
         self.selected_index = selected
             .as_ref()
             .and_then(|selected| self.occurrence_index(selected));
@@ -484,7 +499,7 @@ impl Sequence {
         if self.entries.is_empty() {
             return false;
         }
-        Arc::make_mut(&mut self.entries).clear();
+        self.entries.clear();
         self.selected_index = None;
         self.progress_millis = 0;
         self.bump_revision();
@@ -497,10 +512,8 @@ impl Sequence {
             return false;
         }
         while self.entries.len() > keep {
-            let removed = Arc::make_mut(&mut self.entries)
-                .pop()
-                .expect("upcoming entry");
-            for entry in Arc::make_mut(&mut self.entries) {
+            let removed = &mut self.entries.pop().expect("upcoming entry");
+            for entry in &mut self.entries {
                 if entry.canonical_position > removed.canonical_position {
                     entry.canonical_position -= 1;
                 }
@@ -525,8 +538,8 @@ impl Sequence {
         let mut selected = selected;
         while index < selected && auto_dj_before > keep {
             if self.entries[index].provenance == Provenance::AutoDj {
-                let removed = Arc::make_mut(&mut self.entries).remove(index);
-                for entry in Arc::make_mut(&mut self.entries) {
+                let removed = self.entries.remove(index);
+                for entry in &mut self.entries {
                     if entry.canonical_position > removed.canonical_position {
                         entry.canonical_position -= 1;
                     }
@@ -584,7 +597,7 @@ impl Sequence {
         if enabled {
             self.shuffle(seed, selected.as_ref());
         } else {
-            Arc::make_mut(&mut self.entries).sort_by_key(|entry| entry.canonical_position);
+            self.entries.sort_by_key(|entry| entry.canonical_position);
         }
         self.selected_index = selected
             .as_ref()
@@ -613,7 +626,7 @@ impl Sequence {
     }
 
     fn shuffle(&mut self, mut seed: u64, pinned: Option<&OccurrenceId>) {
-        let entries = Arc::make_mut(&mut self.entries);
+        let entries = &mut self.entries;
         for index in (1..entries.len()).rev() {
             seed ^= seed << 13;
             seed ^= seed >> 7;

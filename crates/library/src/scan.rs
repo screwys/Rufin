@@ -52,9 +52,18 @@ pub struct CachedSource {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum ScanOutcome {
     Changed(Publication),
+    ArtworkChanged(Publication),
     Identical(Publication),
     Stale,
     Failed,
+}
+
+/// One relation fact in a bounded Scan page.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScanLink<'a> {
+    pub owner_id: &'a str,
+    pub related_id: &'a str,
+    pub position: i64,
 }
 
 /// One bounded, connection-owned source scan.
@@ -70,6 +79,7 @@ pub struct Scan {
     accepted_at: i64,
     batch_writer: Option<tokio::sync::OwnedMutexGuard<Option<sqlx::SqliteConnection>>>,
     point_update: bool,
+    local_point_update: bool,
     failed: bool,
 }
 
@@ -77,6 +87,7 @@ pub struct Scan {
 struct AcceptedSource {
     source_key: i64,
     catalog_digest: Vec<u8>,
+    artwork_digest: Vec<u8>,
     catalog_revision: i64,
 }
 
@@ -170,6 +181,7 @@ impl Scan {
                 .unwrap_or_default(),
             batch_writer: None,
             point_update: false,
+            local_point_update: false,
             failed: false,
         })
     }
@@ -188,6 +200,7 @@ impl Scan {
         )
         .await?;
         scan.point_update = true;
+        scan.local_point_update = source_id == "local:server:library";
         Ok(scan)
     }
 
@@ -366,6 +379,7 @@ impl Scan {
         baseline_play_count: Option<i64>,
         baseline_skip_count: Option<i64>,
         baseline_last_played: Option<i64>,
+        source_path: Option<&str>,
         loudness_analysis_key: [u8; 32],
     ) -> LibraryResult<()> {
         self.require_id("track", object_id)?;
@@ -393,6 +407,7 @@ impl Scan {
             release_date.unwrap_or_default().as_bytes(),
             date_added.unwrap_or_default().as_bytes(),
             media_uri.unwrap_or_default().as_bytes(),
+            source_path.unwrap_or_default().as_bytes(),
             source_format.unwrap_or_default().as_bytes(),
             comment.unwrap_or_default().as_bytes(),
             musicbrainz_recording_id.unwrap_or_default().as_bytes(),
@@ -407,7 +422,7 @@ impl Scan {
                     object_id, album_object_id, title, normalized_search,
                     display_album, display_artist, sort_text, duration_millis,
                     disc_number, track_number, year, release_date, date_added,
-                    media_uri, source_format, comment, bpm,
+                    media_uri, source_path, source_format, comment, bpm,
                     musicbrainz_recording_id, musicbrainz_release_track_id,
                     cue_path, cue_start_millis, cue_end_millis, artwork_binding,
                     favorite, rating, first_seen_at, baseline_play_count,
@@ -417,7 +432,7 @@ impl Scan {
                 ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9,
                 ?10, ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18,
                 ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, ?27,
-                ?28, ?29, ?30
+                ?28, ?29, ?30, ?31
              ) ON CONFLICT(object_id) DO NOTHING",
             )
             .bind(object_id)
@@ -434,6 +449,7 @@ impl Scan {
             .bind(release_date)
             .bind(date_added)
             .bind(media_uri)
+            .bind(source_path)
             .bind(source_format)
             .bind(comment)
             .bind(bpm)
@@ -498,6 +514,168 @@ impl Scan {
         .await
     }
 
+    pub async fn write_local_file(
+        &mut self,
+        file: &crate::LocalFileWrite,
+        dependencies: &[String],
+    ) -> LibraryResult<()> {
+        if file.path.is_empty()
+            || file.root.is_empty()
+            || !file.path.starts_with(&file.root)
+            || file.mtime_ns < 0
+            || dependencies.iter().any(String::is_empty)
+        {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "invalid Local observation".to_string(),
+            ));
+        }
+        self.require_row_bytes(&[
+            file.path.as_bytes(),
+            file.root.as_bytes(),
+            file.relative_path.as_bytes(),
+        ])?;
+        self.stage(
+            sqlx::query("INSERT INTO temp.scan_local_files(path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10) ON CONFLICT(path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parse_version=excluded.parse_version,state=excluded.state")
+                .bind(&file.path)
+                .bind(&file.root)
+                .bind(&file.relative_path)
+                .bind(file.kind.as_str())
+                .bind(file.size_bytes)
+                .bind(file.mtime_ns)
+                .bind(file.device_id)
+                .bind(file.inode)
+                .bind(file.parse_version)
+                .bind(file.state.as_str()),
+        )
+        .await?;
+        self.stage(
+            sqlx::query("DELETE FROM temp.scan_local_file_dependencies WHERE path=?1")
+                .bind(&file.path),
+        )
+        .await?;
+        for (position, dependency) in dependencies.iter().enumerate() {
+            self.require_row_bytes(&[file.path.as_bytes(), dependency.as_bytes()])?;
+            self.stage(
+                sqlx::query("INSERT INTO temp.scan_local_file_dependencies(path,dependency_path,position) VALUES (?1,?2,?3)")
+                    .bind(&file.path)
+                    .bind(dependency)
+                    .bind(position as i64),
+            )
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn write_local_files(
+        &mut self,
+        files: &[(crate::LocalFileWrite, Vec<String>)],
+    ) -> LibraryResult<()> {
+        if files.len() > 128 {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "Local observation batch exceeds 128 files".to_string(),
+            ));
+        }
+        if files.is_empty() {
+            return Ok(());
+        }
+        for (file, dependencies) in files {
+            if file.path.is_empty()
+                || file.root.is_empty()
+                || !file.path.starts_with(&file.root)
+                || file.mtime_ns < 0
+                || dependencies.iter().any(String::is_empty)
+            {
+                self.failed = true;
+                return Err(LibraryError::InvalidScan(
+                    "invalid Local observation".to_string(),
+                ));
+            }
+            self.require_row_bytes(&[
+                file.path.as_bytes(),
+                file.root.as_bytes(),
+                file.relative_path.as_bytes(),
+            ])?;
+        }
+        let mut observations = QueryBuilder::<Sqlite>::new(
+            "INSERT INTO temp.scan_local_files(path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state) ",
+        );
+        observations.push_values(files, |mut row, (file, _)| {
+            row.push_bind(&file.path)
+                .push_bind(&file.root)
+                .push_bind(&file.relative_path)
+                .push_bind(file.kind.as_str())
+                .push_bind(file.size_bytes)
+                .push_bind(file.mtime_ns)
+                .push_bind(file.device_id)
+                .push_bind(file.inode)
+                .push_bind(file.parse_version)
+                .push_bind(file.state.as_str());
+        });
+        observations.push(" ON CONFLICT(path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parse_version=excluded.parse_version,state=excluded.state");
+        self.stage(observations.build()).await?;
+
+        let mut clear = QueryBuilder::<Sqlite>::new(
+            "DELETE FROM temp.scan_local_file_dependencies WHERE path IN (",
+        );
+        let mut separated = clear.separated(",");
+        for (file, _) in files {
+            separated.push_bind(&file.path);
+        }
+        separated.push_unseparated(")");
+        self.stage(clear.build()).await?;
+
+        let dependency_count = files
+            .iter()
+            .map(|(_, dependencies)| dependencies.len())
+            .sum::<usize>();
+        if dependency_count > 0 {
+            let mut dependencies = QueryBuilder::<Sqlite>::new(
+                "INSERT INTO temp.scan_local_file_dependencies(path,dependency_path,position) ",
+            );
+            dependencies.push_values(
+                files.iter().flat_map(|(file, values)| {
+                    values
+                        .iter()
+                        .enumerate()
+                        .map(move |(position, dependency)| (&file.path, dependency, position))
+                }),
+                |mut row, (path, dependency, position)| {
+                    row.push_bind(path)
+                        .push_bind(dependency)
+                        .push_bind(position as i64);
+                },
+            );
+            self.stage(dependencies.build()).await?;
+        }
+        Ok(())
+    }
+
+    pub async fn remove_local_file_path(&mut self, path: &str) -> LibraryResult<()> {
+        if path.is_empty() {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "invalid Local removal path".to_string(),
+            ));
+        }
+        self.stage(
+            sqlx::query("INSERT OR IGNORE INTO temp.scan_local_file_removals(path) VALUES (?1)")
+                .bind(path),
+        )
+        .await
+    }
+
+    pub async fn invalidate_local_album_artwork_directory(
+        &mut self,
+        prefix: &str,
+    ) -> LibraryResult<()> {
+        let Some(source) = self.existing_source_key else {
+            return Ok(());
+        };
+        self.stage(sqlx::query("INSERT OR IGNORE INTO temp.scan_artwork_invalidations(album_object_id) SELECT DISTINCT album.object_id FROM albums album JOIN tracks track USING(album_key) WHERE track.source_key=?1 AND track.source_path>=?2 AND track.source_path<(?2||char(1114111))").bind(source).bind(prefix)).await
+    }
+
     pub async fn local_dependency_paths(&mut self, paths: &[String]) -> LibraryResult<Vec<String>> {
         if paths.is_empty() {
             return Ok(Vec::new());
@@ -516,9 +694,190 @@ impl Scan {
         fetch_local_dependency_paths(connection, paths).await
     }
 
+    pub async fn local_inventory_path_page(
+        &mut self,
+        kind: crate::LocalFileKind,
+        after: Option<&str>,
+        exclude_cue_dependencies: bool,
+        limit: usize,
+    ) -> LibraryResult<Vec<String>> {
+        let query = || {
+            sqlx::query_scalar::<_, String>(
+                "SELECT file.path FROM temp.scan_local_files file
+             WHERE file.kind=?1 AND file.path>?2
+               AND (?3=0 OR NOT EXISTS (
+                 SELECT 1 FROM temp.scan_local_dependency_paths dependency
+                 WHERE dependency.path=file.path
+               ))
+             ORDER BY file.path LIMIT ?4",
+            )
+            .bind(kind.as_str())
+            .bind(after.unwrap_or(""))
+            .bind(exclude_cue_dependencies)
+            .bind(limit.clamp(1, 128) as i64)
+        };
+        if let Some(writer) = self.batch_writer.as_mut() {
+            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+            return Ok(query().fetch_all(&mut *connection).await?);
+        }
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(query().fetch_all(&mut *connection).await?)
+    }
+
     pub async fn retain_local_media_path(&mut self, path: &str) -> LibraryResult<()> {
         self.retain_local_tracks("track.media_uri=('file://'||?2)", path)
             .await
+    }
+
+    pub async fn write_local_component_paths(&mut self, paths: &[String]) -> LibraryResult<()> {
+        if paths.is_empty() {
+            return Ok(());
+        }
+        if paths.len() > 128 {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "Local component staging batch exceeds 128 paths".to_string(),
+            ));
+        }
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "INSERT OR IGNORE INTO temp.scan_local_component_paths(path) ",
+        );
+        query.push_values(paths, |mut row, path| {
+            row.push_bind(path);
+        });
+        self.stage(query.build()).await
+    }
+
+    pub async fn write_local_component_prefixes(
+        &mut self,
+        source: SourceKey,
+        prefixes: &[String],
+    ) -> LibraryResult<()> {
+        if prefixes.is_empty() {
+            return Ok(());
+        }
+        if prefixes.len() > 128 {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "Local component prefix batch exceeds 128 paths".to_string(),
+            ));
+        }
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(prefix) AS (");
+        query.push_values(prefixes, |mut row, prefix| {
+            row.push_bind(prefix);
+        });
+        query.push(
+            ") INSERT OR IGNORE INTO temp.scan_local_component_paths(path)
+             SELECT file.path FROM requested JOIN local_files file
+               ON file.source_key=",
+        );
+        query.push_bind(source);
+        query.push(" AND file.path LIKE requested.prefix||'%'");
+        self.stage(query.build()).await
+    }
+
+    pub async fn expand_local_component(&mut self, source: SourceKey) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query(
+                "INSERT OR IGNORE INTO temp.scan_local_component_paths(path)
+                 SELECT file.path FROM temp.scan_local_component_paths seed
+                 JOIN local_files directory
+                   ON directory.source_key=?1 AND directory.path=seed.path
+                      AND directory.kind='directory'
+                 JOIN local_files file
+                   ON file.source_key=?1 AND file.path LIKE directory.path||'/%'",
+            )
+            .bind(source),
+        )
+        .await?;
+        self.stage(
+            sqlx::query(
+                "WITH RECURSIVE component(path) AS (
+                     SELECT path FROM temp.scan_local_component_paths
+                     UNION
+                     SELECT dependency.dependency_path
+                     FROM component current
+                     JOIN local_files file
+                       ON file.source_key=?1 AND file.path=current.path
+                     JOIN local_file_dependencies dependency USING(local_file_key)
+                     UNION
+                     SELECT file.path
+                     FROM component current
+                     JOIN local_file_dependencies dependency
+                       ON dependency.dependency_path=current.path
+                     JOIN local_files file
+                       ON file.source_key=?1
+                      AND file.local_file_key=dependency.local_file_key
+                 )
+                 INSERT OR IGNORE INTO temp.scan_local_component_paths(path)
+                 SELECT path FROM component",
+            )
+            .bind(source),
+        )
+        .await
+    }
+
+    pub async fn local_component_path_page(
+        &mut self,
+        after: Option<&str>,
+        limit: usize,
+    ) -> LibraryResult<Vec<String>> {
+        let query = || {
+            sqlx::query_scalar::<_, String>(
+                "SELECT path FROM temp.scan_local_component_paths
+                 WHERE path>?1 ORDER BY path LIMIT ?2",
+            )
+            .bind(after.unwrap_or(""))
+            .bind(limit.clamp(1, 128) as i64)
+        };
+        if let Some(writer) = self.batch_writer.as_mut() {
+            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+            return Ok(query().fetch_all(&mut *connection).await?);
+        }
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(query().fetch_all(&mut *connection).await?)
+    }
+
+    pub async fn remove_local_component_tracks(&mut self, source: SourceKey) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query(
+                "INSERT OR IGNORE INTO temp.scan_removals(entity_kind,object_id)
+                 SELECT 'track',track.object_id FROM tracks track
+                 JOIN temp.scan_local_component_paths component
+                   ON track.media_uri='file://'||component.path
+                      OR track.cue_path=component.path
+                 WHERE track.source_key=?1",
+            )
+            .bind(source),
+        )
+        .await
+    }
+
+    pub async fn retain_local_media_paths(&mut self, paths: &[String]) -> LibraryResult<()> {
+        if paths.len() > 128 {
+            self.failed = true;
+            return Err(LibraryError::InvalidScan(
+                "retained Local media batch exceeds 128 paths".to_string(),
+            ));
+        }
+        if paths.is_empty() {
+            return Ok(());
+        }
+        self.stage(sqlx::query("DELETE FROM temp.scan_retained_paths"))
+            .await?;
+        let mut requested =
+            QueryBuilder::<Sqlite>::new("INSERT INTO temp.scan_retained_paths(path) ");
+        requested.push_values(paths, |mut row, path| {
+            row.push_bind(path);
+        });
+        self.stage(requested.build()).await?;
+        self.retain_local_tracks_where(
+            "track.media_uri IN (SELECT 'file://'||path FROM temp.scan_retained_paths)",
+            None,
+        )
+        .await
     }
 
     pub async fn retain_local_cue_path(&mut self, path: &str) -> LibraryResult<()> {
@@ -530,6 +889,14 @@ impl Scan {
         predicate: &'static str,
         value: &str,
     ) -> LibraryResult<()> {
+        self.retain_local_tracks_where(predicate, Some(value)).await
+    }
+
+    async fn retain_local_tracks_where(
+        &mut self,
+        predicate: &'static str,
+        value: Option<&str>,
+    ) -> LibraryResult<()> {
         let Some(source_key) = self.existing_source_key else {
             return Ok(());
         };
@@ -538,7 +905,7 @@ impl Scan {
                 "INSERT OR IGNORE INTO temp.scan_albums(object_id,title,normalized_title,display_artist,sort_text,year,release_date,date_added,musicbrainz_release_id,musicbrainz_release_group_id,is_compilation,artwork_binding,favorite,rating,first_seen_at,source_loudness_analysis_key,loudness_analysis_key) SELECT DISTINCT album.object_id,album.title,album.normalized_title,album.display_artist,album.sort_text,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.artwork_binding,album.source_favorite,album.source_rating,album.first_seen_at,album.source_loudness_analysis_key,album.loudness_analysis_key FROM albums album JOIN tracks track USING(album_key) WHERE track.source_key=?1 AND {predicate}"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_tracks(object_id,album_object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,media_uri,source_format,comment,bpm,musicbrainz_recording_id,musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis,artwork_binding,favorite,rating,first_seen_at,baseline_play_count,baseline_skip_count,baseline_last_played,source_loudness_analysis_key) SELECT track.object_id,album.object_id,track.title,track.normalized_search,track.display_album,track.display_artist,track.sort_text,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.artwork_binding,track.source_favorite,track.source_rating,track.first_seen_at,baseline.play_count,baseline.skip_count,baseline.last_played_at,track.source_loudness_analysis_key FROM tracks track LEFT JOIN albums album USING(album_key) LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id WHERE track.source_key=?1 AND {predicate}"
+                "INSERT OR IGNORE INTO temp.scan_tracks(object_id,album_object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,media_uri,source_path,source_format,comment,bpm,musicbrainz_recording_id,musicbrainz_release_track_id,cue_path,cue_start_millis,cue_end_millis,artwork_binding,favorite,rating,first_seen_at,baseline_play_count,baseline_skip_count,baseline_last_played,source_loudness_analysis_key) SELECT track.object_id,album.object_id,track.title,track.normalized_search,track.display_album,track.display_artist,track.sort_text,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_path,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.artwork_binding,track.source_favorite,track.source_rating,track.first_seen_at,baseline.play_count,baseline.skip_count,baseline.last_played_at,track.source_loudness_analysis_key FROM tracks track LEFT JOIN albums album USING(album_key) LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' WHERE track.source_key=?1 AND {predicate}"
             ),
             format!(
                 "INSERT OR IGNORE INTO temp.scan_artists SELECT DISTINCT artist.object_id,artist.name,artist.normalized_name,artist.sort_text,artist.musicbrainz_artist_id,artist.artwork_binding,artist.source_favorite,artist.source_rating FROM artists artist WHERE artist.source_key=?1 AND (EXISTS(SELECT 1 FROM track_artists relation JOIN tracks track USING(track_key) WHERE relation.artist_key=artist.artist_key AND {predicate}) OR EXISTS(SELECT 1 FROM album_artists relation JOIN albums album USING(album_key) JOIN tracks track USING(album_key) WHERE relation.artist_key=artist.artist_key AND {predicate}))"
@@ -575,12 +942,12 @@ impl Scan {
             ),
         ];
         for statement in statements {
-            self.stage(
-                sqlx::query(sqlx::AssertSqlSafe(statement))
-                    .bind(source_key)
-                    .bind(value),
-            )
-            .await?;
+            let query = sqlx::query(sqlx::AssertSqlSafe(statement)).bind(source_key);
+            if let Some(value) = value {
+                self.stage(query.bind(value)).await?;
+            } else {
+                self.stage(query).await?;
+            }
         }
         Ok(())
     }
@@ -744,6 +1111,14 @@ impl Scan {
         .await
     }
 
+    pub async fn write_track_artists(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_links_batch(
+            "INSERT INTO temp.scan_track_artists(owner_id,related_id,position) ",
+            links,
+        )
+        .await
+    }
+
     pub async fn write_album_genre(
         &mut self,
         album_id: &str,
@@ -789,6 +1164,14 @@ impl Scan {
         .await
     }
 
+    pub async fn write_track_genres(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_links_batch(
+            "INSERT INTO temp.scan_track_genres(owner_id,related_id,position) ",
+            links,
+        )
+        .await
+    }
+
     pub async fn write_track_mood(
         &mut self,
         track_id: &str,
@@ -802,6 +1185,32 @@ impl Scan {
             position,
         )
         .await
+    }
+
+    pub async fn write_track_moods(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_links_batch(
+            "INSERT INTO temp.scan_track_moods(owner_id,related_id,position) ",
+            links,
+        )
+        .await
+    }
+
+    pub async fn write_local_album_artists(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_local_album_union_batch("temp.scan_album_artists", links)
+            .await
+    }
+
+    pub async fn write_local_album_genres(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_local_album_union_batch("temp.scan_album_genres", links)
+            .await
+    }
+
+    pub async fn write_local_album_release_types(
+        &mut self,
+        links: &[ScanLink<'_>],
+    ) -> LibraryResult<()> {
+        self.write_local_album_union_batch("temp.scan_album_release_types", links)
+            .await
     }
 
     pub async fn write_track_folder(
@@ -999,7 +1408,7 @@ impl Scan {
         }
         let mut transaction = connection.begin().await?;
         let current = sqlx::query_as::<_, AcceptedSource>(
-            "SELECT source_key, catalog_digest, catalog_revision
+            "SELECT source_key, catalog_digest, artwork_digest, catalog_revision
              FROM sources WHERE object_id=?1",
         )
         .bind(&self.source_id)
@@ -1011,6 +1420,25 @@ impl Scan {
         }
         if let Some(current) = &current {
             if current.catalog_digest.as_slice() == catalog_digest {
+                if current.artwork_digest.as_slice() != artwork_digest {
+                    publish_artwork_bindings(&mut transaction, current.source_key).await?;
+                    publish_local_files(&mut transaction, current.source_key, true).await?;
+                    sqlx::query(
+                        "UPDATE sources SET display_name=?2,normalized_name=?3,freshness=?4,artwork_digest=?5 WHERE source_key=?1",
+                    )
+                    .bind(current.source_key)
+                    .bind(&self.display_name)
+                    .bind(&self.normalized_name)
+                    .bind(self.freshness.as_ref().map(Freshness::as_bytes))
+                    .bind(artwork_digest.as_slice())
+                    .execute(&mut *transaction)
+                    .await?;
+                    transaction.commit().await?;
+                    return Ok(ScanOutcome::ArtworkChanged(publication(
+                        current.source_key,
+                        current.catalog_revision,
+                    )?));
+                }
                 sqlx::query(
                     "UPDATE sources
                      SET display_name=?2, normalized_name=?3, freshness=?4
@@ -1022,6 +1450,7 @@ impl Scan {
                 .bind(self.freshness.as_ref().map(Freshness::as_bytes))
                 .execute(&mut *transaction)
                 .await?;
+                publish_local_files(&mut transaction, current.source_key, true).await?;
                 transaction.commit().await?;
                 return Ok(ScanOutcome::Identical(publication(
                     current.source_key,
@@ -1054,6 +1483,7 @@ impl Scan {
         publish_activity_baseline(&mut transaction, source_key).await?;
         publish_source_loudness(&mut transaction, source_key, true).await?;
         publish_links(&mut transaction, source_key, true).await?;
+        publish_local_files(&mut transaction, source_key, true).await?;
         let revision = self.expected_revision.unwrap_or(0) + 1;
         sqlx::query(
             "UPDATE sources
@@ -1095,6 +1525,24 @@ impl Scan {
             transaction.rollback().await?;
             return Ok(ScanOutcome::Stale);
         }
+        let catalog_changed=sqlx::query_scalar::<_,bool>("SELECT EXISTS(SELECT 1 FROM temp.scan_tracks UNION ALL SELECT 1 FROM temp.scan_albums UNION ALL SELECT 1 FROM temp.scan_artists UNION ALL SELECT 1 FROM temp.scan_genres UNION ALL SELECT 1 FROM temp.scan_moods UNION ALL SELECT 1 FROM temp.scan_folders UNION ALL SELECT 1 FROM temp.scan_playlists UNION ALL SELECT 1 FROM temp.scan_removals)").fetch_one(&mut *transaction).await?;
+        if !catalog_changed {
+            publish_local_files(&mut transaction, source_key, false).await?;
+            let artwork_changed =
+                publish_artwork_invalidations(&mut transaction, source_key).await? > 0;
+            if artwork_changed {
+                sqlx::query("UPDATE sources SET artwork_digest=randomblob(32) WHERE source_key=?1")
+                    .bind(source_key)
+                    .execute(&mut *transaction)
+                    .await?;
+            }
+            transaction.commit().await?;
+            return Ok(if artwork_changed {
+                ScanOutcome::ArtworkChanged(publication(source_key, revision)?)
+            } else {
+                ScanOutcome::Identical(publication(source_key, revision)?)
+            });
+        }
         sqlx::query(
             "UPDATE temp.scan_albums AS staged SET
                  source_loudness_analysis_key=(SELECT album.source_loudness_analysis_key FROM albums album WHERE album.source_key=?1 AND album.object_id=staged.object_id),
@@ -1122,6 +1570,11 @@ impl Scan {
         publish_source_loudness(&mut transaction, source_key, false).await?;
         publish_links(&mut transaction, source_key, false).await?;
         publish_removals(&mut transaction, source_key).await?;
+        publish_artwork_invalidations(&mut transaction, source_key).await?;
+        if self.local_point_update {
+            prune_local_orphans(&mut transaction, source_key).await?;
+        }
+        publish_local_files(&mut transaction, source_key, false).await?;
         let revision = revision + 1;
         sqlx::query("UPDATE sources SET freshness=NULL,catalog_revision=?2 WHERE source_key=?1")
             .bind(source_key)
@@ -1164,6 +1617,77 @@ impl Scan {
                 .bind(position),
         )
         .await
+    }
+
+    async fn write_links_batch(
+        &mut self,
+        prefix: &'static str,
+        links: &[ScanLink<'_>],
+    ) -> LibraryResult<()> {
+        if links.is_empty() {
+            return Ok(());
+        }
+        for link in links {
+            self.require_id("link owner", link.owner_id)?;
+            self.require_id("link target", link.related_id)?;
+            if link.position < 0 {
+                self.failed = true;
+                return Err(LibraryError::InvalidScan(
+                    "link position cannot be negative".to_string(),
+                ));
+            }
+            self.require_row_bytes(&[link.owner_id.as_bytes(), link.related_id.as_bytes()])?;
+        }
+        let mut query = QueryBuilder::<Sqlite>::new(prefix);
+        query.push_values(links, |mut row, link| {
+            row.push_bind(link.owner_id)
+                .push_bind(link.related_id)
+                .push_bind(link.position);
+        });
+        self.stage(query.build()).await
+    }
+
+    async fn write_local_album_union_batch(
+        &mut self,
+        table: &'static str,
+        links: &[ScanLink<'_>],
+    ) -> LibraryResult<()> {
+        if links.is_empty() {
+            return Ok(());
+        }
+        for link in links {
+            self.require_id("album", link.owner_id)?;
+            self.require_id("Album relation", link.related_id)?;
+            self.require_row_bytes(&[link.owner_id.as_bytes(), link.related_id.as_bytes()])?;
+        }
+        let mut query = QueryBuilder::<Sqlite>::new("WITH input(owner_id,related_id,ordinal) AS (");
+        query.push_values(links.iter().enumerate(), |mut row, (ordinal, link)| {
+            row.push_bind(link.owner_id)
+                .push_bind(link.related_id)
+                .push_bind(ordinal as i64);
+        });
+        query.push(
+            "), deduplicated AS (
+                 SELECT owner_id,related_id,min(ordinal) AS ordinal
+                 FROM input GROUP BY owner_id,related_id
+             ), ranked AS (
+                 SELECT owner_id,related_id,
+                        row_number() OVER (PARTITION BY owner_id ORDER BY ordinal)-1 AS offset
+                 FROM deduplicated
+             ) INSERT OR IGNORE INTO ",
+        );
+        query.push(table);
+        query.push(
+            "(owner_id,related_id,position)
+             SELECT owner_id,related_id,
+                    COALESCE((SELECT max(position)+1 FROM ",
+        );
+        query.push(table);
+        query.push(
+            " existing WHERE existing.owner_id=ranked.owner_id),0)+offset
+             FROM ranked",
+        );
+        self.stage(query.build()).await
     }
 
     async fn write_local_album_union(
@@ -1303,6 +1827,26 @@ impl Scan {
     }
 }
 
+async fn publish_artwork_bindings(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+) -> LibraryResult<()> {
+    for sql in [
+        "UPDATE tracks SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id) WHERE source_key=?1 AND EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id)",
+        "UPDATE albums SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_albums staged WHERE staged.object_id=albums.object_id) WHERE source_key=?1 AND EXISTS(SELECT 1 FROM temp.scan_albums staged WHERE staged.object_id=albums.object_id)",
+        "UPDATE artists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_artists staged WHERE staged.object_id=artists.object_id) WHERE source_key=?1 AND EXISTS(SELECT 1 FROM temp.scan_artists staged WHERE staged.object_id=artists.object_id)",
+        "UPDATE genres SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_genres staged WHERE staged.object_id=genres.object_id) WHERE source_key=?1 AND EXISTS(SELECT 1 FROM temp.scan_genres staged WHERE staged.object_id=genres.object_id)",
+        "UPDATE folders SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_folders staged WHERE staged.object_id=folders.object_id) WHERE source_key=?1 AND EXISTS(SELECT 1 FROM temp.scan_folders staged WHERE staged.object_id=folders.object_id)",
+        "UPDATE playlists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_playlists staged WHERE staged.object_id=playlists.object_id) WHERE source_key=?1 AND ownership='source' AND EXISTS(SELECT 1 FROM temp.scan_playlists staged WHERE staged.object_id=playlists.object_id)",
+    ] {
+        sqlx::query(sql)
+            .bind(source_key)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
+}
+
 impl Database {
     pub async fn cached_source(
         &self,
@@ -1434,7 +1978,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              sort_text TEXT NOT NULL, duration_millis INTEGER NOT NULL,
              disc_number INTEGER NOT NULL, track_number INTEGER NOT NULL,
              year INTEGER, release_date TEXT, date_added TEXT, media_uri TEXT,
-             source_format TEXT, comment TEXT, bpm INTEGER,
+             source_path TEXT, source_format TEXT, comment TEXT, bpm INTEGER,
              musicbrainz_recording_id TEXT, musicbrainz_release_track_id TEXT,
              cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
              artwork_binding BLOB, favorite INTEGER NOT NULL,
@@ -1450,11 +1994,24 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
          CREATE TEMP TABLE scan_local_dependency_paths(
              path TEXT PRIMARY KEY
          ) STRICT;
+         CREATE TEMP TABLE scan_local_files(
+             path TEXT PRIMARY KEY, root TEXT NOT NULL, relative_path TEXT NOT NULL,
+             kind TEXT NOT NULL, size_bytes INTEGER, mtime_ns INTEGER NOT NULL,
+             device_id INTEGER, inode INTEGER, parse_version INTEGER, state TEXT NOT NULL
+         ) STRICT;
+         CREATE TEMP TABLE scan_local_file_dependencies(
+             path TEXT NOT NULL, dependency_path TEXT NOT NULL, position INTEGER NOT NULL,
+             PRIMARY KEY(path,dependency_path)
+         ) STRICT;
+         CREATE TEMP TABLE scan_local_file_removals(path TEXT PRIMARY KEY) STRICT;
+         CREATE TEMP TABLE scan_retained_paths(path TEXT PRIMARY KEY) STRICT;
+         CREATE TEMP TABLE scan_local_component_paths(path TEXT PRIMARY KEY) STRICT;
          CREATE TEMP TABLE scan_removals(
              entity_kind TEXT NOT NULL,
              object_id TEXT NOT NULL,
              PRIMARY KEY(entity_kind,object_id)
          ) STRICT;
+         CREATE TEMP TABLE scan_artwork_invalidations(album_object_id TEXT PRIMARY KEY) STRICT;
          CREATE TEMP TABLE scan_artists(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
@@ -1536,8 +2093,14 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
 
 async fn drop_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql(
-        "DROP TABLE IF EXISTS temp.scan_removals;
+        "DROP TABLE IF EXISTS temp.scan_artwork_invalidations;
+         DROP TABLE IF EXISTS temp.scan_removals;
          DROP TABLE IF EXISTS temp.scan_local_dependency_paths;
+         DROP TABLE IF EXISTS temp.scan_local_file_dependencies;
+         DROP TABLE IF EXISTS temp.scan_local_file_removals;
+         DROP TABLE IF EXISTS temp.scan_local_files;
+         DROP TABLE IF EXISTS temp.scan_retained_paths;
+         DROP TABLE IF EXISTS temp.scan_local_component_paths;
          DROP TABLE IF EXISTS temp.scan_home_entries;
          DROP TABLE IF EXISTS temp.scan_playlist_entries;
          DROP TABLE IF EXISTS temp.scan_playlists;
@@ -1591,7 +2154,7 @@ async fn prepare_album_loudness_keys(
         let page = {
             let mut writer = database.writer().await?;
             let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            sqlx::query_as::<_,StagedAlbumAudioKey>("SELECT track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id,track.source_loudness_analysis_key source_key,COALESCE(access.loudness_analysis_key,track.source_loudness_analysis_key) current_key FROM temp.scan_tracks track LEFT JOIN local_access_files access ON access.source_key=?6 AND access.track_object_id=track.object_id WHERE track.album_object_id IS NOT NULL AND (track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id)>(?1,?2,?3,?4,?5) ORDER BY track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT ?7")
+            sqlx::query_as::<_,StagedAlbumAudioKey>("SELECT track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id,track.source_loudness_analysis_key source_key,COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.source_key=?6 AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.source_loudness_analysis_key) current_key FROM temp.scan_tracks track WHERE track.album_object_id IS NOT NULL AND (track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id)>(?1,?2,?3,?4,?5) ORDER BY track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT ?7")
                 .bind(&last.0).bind(last.1).bind(last.2).bind(&last.3).bind(&last.4)
                 .bind(source_key).bind(DIGEST_PAGE_ROWS).fetch_all(&mut *connection).await?
         };
@@ -2113,7 +2676,7 @@ async fn publish_entities(
         "INSERT INTO tracks(
              source_key, object_id, album_key, title, normalized_search,
              display_album, display_artist, sort_text, duration_millis,
-             disc_number, track_number, year, release_date, date_added, media_uri,
+             disc_number, track_number, year, release_date, date_added, media_uri, source_path,
              source_format, comment, bpm, musicbrainz_recording_id,
              musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis,
              artwork_binding, source_favorite, source_rating, first_seen_at,
@@ -2122,17 +2685,20 @@ async fn publish_entities(
                   item.normalized_search, item.display_album, item.display_artist,
                   item.sort_text, item.duration_millis, item.disc_number,
                   item.track_number, item.year, item.release_date, item.date_added,
-                  item.media_uri, item.source_format, item.comment, item.bpm,
+                  item.media_uri, item.source_path, item.source_format, item.comment, item.bpm,
                   item.musicbrainz_recording_id, item.musicbrainz_release_track_id,
                   item.cue_path, item.cue_start_millis, item.cue_end_millis,
                   item.artwork_binding, item.favorite, item.rating, item.first_seen_at,
                   item.source_loudness_analysis_key,
-                  COALESCE(access.loudness_analysis_key,item.source_loudness_analysis_key)
+                  COALESCE((SELECT access.loudness_analysis_key
+                            FROM local_access_files AS access
+                            WHERE access.source_key=?1 AND access.track_object_id=item.object_id
+                            ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
+                                     access.local_access_file_key LIMIT 1),
+                           item.source_loudness_analysis_key)
            FROM temp.scan_tracks AS item
            LEFT JOIN albums AS album
              ON album.source_key = ?1 AND album.object_id = item.album_object_id
-           LEFT JOIN local_access_files AS access
-             ON access.source_key=?1 AND access.track_object_id=item.object_id
            WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
              album_key=excluded.album_key, title=excluded.title,
@@ -2142,7 +2708,7 @@ async fn publish_entities(
              duration_millis=excluded.duration_millis,
              disc_number=excluded.disc_number, track_number=excluded.track_number,
              year=excluded.year, release_date=excluded.release_date,
-             date_added=excluded.date_added, media_uri=excluded.media_uri,
+             date_added=excluded.date_added, media_uri=excluded.media_uri, source_path=excluded.source_path,
              source_format=excluded.source_format, comment=excluded.comment,
              bpm=excluded.bpm, musicbrainz_recording_id=excluded.musicbrainz_recording_id,
              musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,
@@ -2273,6 +2839,7 @@ async fn publish_activity_baseline(
            AND NOT EXISTS (
                SELECT 1 FROM activity_baseline current
                WHERE current.source_key=?1
+                 AND current.period='lifetime' AND current.item_kind='track'
                  AND current.track_object_id=staged.object_id
            )",
     )
@@ -2286,21 +2853,114 @@ async fn publish_removals(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
 ) -> LibraryResult<()> {
-    for (kind, table, ownership) in [
-        ("track", "tracks", ""),
-        ("album", "albums", ""),
-        ("artist", "artists", ""),
-        ("genre", "genres", ""),
-        ("playlist", "playlists", " AND ownership='source'"),
+    for (kind, table, staged, ownership) in [
+        ("track", "tracks", "scan_tracks", ""),
+        ("album", "albums", "scan_albums", ""),
+        ("artist", "artists", "scan_artists", ""),
+        ("genre", "genres", "scan_genres", ""),
+        (
+            "playlist",
+            "playlists",
+            "scan_playlists",
+            " AND ownership='source'",
+        ),
     ] {
         let sql = format!(
             "DELETE FROM {table} WHERE source_key=?1{ownership} AND object_id IN (
                  SELECT object_id FROM temp.scan_removals WHERE entity_kind=?2
-             )"
+             ) AND NOT EXISTS (SELECT 1 FROM temp.{staged} staged WHERE staged.object_id={table}.object_id)"
         );
         sqlx::query(sqlx::AssertSqlSafe(sql))
             .bind(source_key)
             .bind(kind)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    Ok(())
+}
+
+async fn publish_local_files(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+    full: bool,
+) -> LibraryResult<()> {
+    if full {
+        sqlx::query(
+            "DELETE FROM local_files WHERE source_key=?1
+             AND path NOT IN (SELECT path FROM temp.scan_local_files)",
+        )
+        .bind(source_key)
+        .execute(&mut **transaction)
+        .await?;
+    } else {
+        sqlx::query(
+            "DELETE FROM local_files WHERE source_key=?1
+             AND path IN (SELECT path FROM temp.scan_local_file_removals)",
+        )
+        .bind(source_key)
+        .execute(&mut **transaction)
+        .await?;
+    }
+    sqlx::query(
+        "INSERT INTO local_files(
+             source_key,path,root,relative_path,kind,size_bytes,mtime_ns,
+             device_id,inode,parse_version,state
+         )
+         SELECT ?1,path,root,relative_path,kind,size_bytes,mtime_ns,
+                device_id,inode,parse_version,state
+         FROM temp.scan_local_files WHERE true
+         ON CONFLICT(source_key,path) DO UPDATE SET
+             root=excluded.root,relative_path=excluded.relative_path,
+             kind=excluded.kind,size_bytes=excluded.size_bytes,
+             mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,
+             inode=excluded.inode,parse_version=excluded.parse_version,
+             state=excluded.state",
+    )
+    .bind(source_key)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "DELETE FROM local_file_dependencies WHERE local_file_key IN (
+             SELECT file.local_file_key FROM local_files file
+             JOIN temp.scan_local_files staged USING(path)
+             WHERE file.source_key=?1
+         )",
+    )
+    .bind(source_key)
+    .execute(&mut **transaction)
+    .await?;
+    sqlx::query(
+        "INSERT INTO local_file_dependencies(local_file_key,dependency_path,position)
+         SELECT file.local_file_key,dependency.dependency_path,dependency.position
+         FROM temp.scan_local_file_dependencies dependency
+         JOIN local_files file ON file.source_key=?1 AND file.path=dependency.path",
+    )
+    .bind(source_key)
+    .execute(&mut **transaction)
+    .await?;
+    Ok(())
+}
+
+async fn publish_artwork_invalidations(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+) -> LibraryResult<u64> {
+    Ok(sqlx::query("UPDATE albums SET artwork_binding=NULL WHERE source_key=?1 AND object_id IN (SELECT album_object_id FROM temp.scan_artwork_invalidations) AND artwork_binding IS NOT NULL").bind(source_key).execute(&mut **transaction).await?.rows_affected())
+}
+
+async fn prune_local_orphans(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+) -> LibraryResult<()> {
+    for sql in [
+        "DELETE FROM albums WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM tracks WHERE tracks.album_key=albums.album_key)",
+        "DELETE FROM artists WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_artists WHERE track_artists.artist_key=artists.artist_key) AND NOT EXISTS (SELECT 1 FROM album_artists WHERE album_artists.artist_key=artists.artist_key)",
+        "DELETE FROM genres WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_genres WHERE track_genres.genre_key=genres.genre_key) AND NOT EXISTS (SELECT 1 FROM album_genres WHERE album_genres.genre_key=genres.genre_key)",
+        "DELETE FROM moods WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_moods WHERE track_moods.mood_key=moods.mood_key)",
+        "DELETE FROM folders WHERE source_key=?1 AND NOT EXISTS (SELECT 1 FROM track_folders WHERE track_folders.folder_key=folders.folder_key)",
+    ] {
+        sqlx::query(sql)
+            .bind(source_key)
             .execute(&mut **transaction)
             .await?;
     }
@@ -2596,11 +3256,14 @@ mod tests {
                 "EXPLAIN QUERY PLAN SELECT track.album_object_id,
                          track.disc_number,track.track_number,track.sort_text,
                          track.object_id,track.source_loudness_analysis_key,
-                         COALESCE(access.loudness_analysis_key,
+                         COALESCE((SELECT access.loudness_analysis_key
+                                   FROM local_access_files access
+                                   WHERE access.source_key=?6
+                                     AND access.track_object_id=track.object_id
+                                   ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
+                                            access.local_access_file_key LIMIT 1),
                                   track.source_loudness_analysis_key)
                      FROM temp.scan_tracks track
-                     LEFT JOIN local_access_files access
-                       ON access.source_key=?6 AND access.track_object_id=track.object_id
                      WHERE track.album_object_id IS NOT NULL
                        AND (track.album_object_id,track.disc_number,track.track_number,
                             track.sort_text,track.object_id)>(?1,?2,?3,?4,?5)

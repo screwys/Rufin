@@ -10,11 +10,119 @@ use crate::{
     BackendEvent, BackendFailure, Batch, ClockSample, LoadedPlayRequest, MaterializationId,
     MaterializationReservation, Placement, PlaybackBackend, PlaybackNotice,
     PlaybackOutput as SelectedPlaybackOutput, PlaybackProjection, PlaybackSession,
-    PlaybackSettings, PreparedStream, QueuePersistence, RunId, Sequence, SequenceError,
+    PlaybackSettings, PreparedStream, RunId, Sequence, SequenceEntry, SequenceError,
     SessionCommand, SessionEffect, SessionUpdate, SourceSessionEpoch,
 };
 
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(33);
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct QueuePersistenceChange {
+    pub expected_revision: u64,
+    pub rows_changed: bool,
+}
+
+#[derive(Clone, Debug)]
+pub struct QueuePersistence {
+    source_key: SourceKey,
+    revision: u64,
+    rows: QueueRows,
+    current: Option<crate::OccurrenceId>,
+    progress_millis: u64,
+    repeat_mode: crate::RepeatMode,
+    shuffled: bool,
+    rows_changed: bool,
+}
+
+#[derive(Clone, Debug)]
+enum QueueRows {
+    Full {
+        entries: Vec<SequenceEntry>,
+        traversal: Option<Vec<crate::OccurrenceId>>,
+    },
+    Traversal(Vec<crate::OccurrenceId>),
+}
+
+impl QueuePersistence {
+    pub(crate) fn capture(sequence: &Sequence, change: QueuePersistenceChange) -> Self {
+        let rows = if change.rows_changed {
+            QueueRows::Full {
+                entries: sequence.persistence_entries(),
+                traversal: None,
+            }
+        } else {
+            QueueRows::Traversal(
+                sequence
+                    .entries()
+                    .iter()
+                    .map(|entry| entry.occurrence.clone())
+                    .collect(),
+            )
+        };
+        Self {
+            source_key: sequence.source_key(),
+            revision: sequence.revision(),
+            rows,
+            current: sequence.selected().map(|entry| entry.occurrence.clone()),
+            progress_millis: sequence.progress_millis(),
+            repeat_mode: sequence.repeat_mode(),
+            shuffled: sequence.shuffle_enabled(),
+            rows_changed: change.rows_changed,
+        }
+    }
+    pub fn coalesce(&mut self, newer: Self) {
+        if self.source_key != newer.source_key || newer.revision < self.revision {
+            return;
+        }
+        if self.rows_changed && !newer.rows_changed {
+            if let (QueueRows::Full { traversal, .. }, QueueRows::Traversal(order)) =
+                (&mut self.rows, &newer.rows)
+            {
+                *traversal = Some(order.clone());
+            }
+            self.revision = newer.revision;
+            self.current = newer.current;
+            self.progress_millis = newer.progress_millis;
+            self.repeat_mode = newer.repeat_mode;
+            self.shuffled = newer.shuffled;
+            return;
+        }
+        *self = newer;
+    }
+    pub const fn source_key(&self) -> SourceKey {
+        self.source_key
+    }
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+    pub fn full_entries(&self) -> Option<&[SequenceEntry]> {
+        match &self.rows {
+            QueueRows::Full { entries, .. } => Some(entries),
+            QueueRows::Traversal(_) => None,
+        }
+    }
+    pub fn traversal(&self) -> Option<&[crate::OccurrenceId]> {
+        match &self.rows {
+            QueueRows::Traversal(entries) => Some(entries),
+            QueueRows::Full { traversal, .. } => traversal.as_deref(),
+        }
+    }
+    pub fn current(&self) -> Option<&crate::OccurrenceId> {
+        self.current.as_ref()
+    }
+    pub const fn progress_millis(&self) -> u64 {
+        self.progress_millis
+    }
+    pub const fn repeat_mode(&self) -> crate::RepeatMode {
+        self.repeat_mode
+    }
+    pub const fn shuffled(&self) -> bool {
+        self.shuffled
+    }
+    pub const fn rows_changed(&self) -> bool {
+        self.rows_changed
+    }
+}
 
 #[derive(Debug, Error)]
 pub enum PlaybackError {
@@ -654,6 +762,48 @@ fn run_playback_outputs(
             }
             PlaybackOutput::Shutdown => break,
         }
+    }
+}
+
+#[cfg(test)]
+mod persistence_tests {
+    use super::*;
+    use crate::{BatchItem, Placement, Provenance};
+
+    #[test]
+    fn traversal_coalesces_into_one_pending_structural_order() {
+        let mut sequence = Sequence::new(SourceKey::from_raw(1));
+        let change = sequence
+            .apply_batch_with_change(
+                Batch::new(
+                    (1..=4)
+                        .map(|key| BatchItem::new(TrackKey::from_raw(key), Provenance::Manual))
+                        .collect(),
+                ),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("batch");
+        let mut pending = QueuePersistence::capture(
+            &sequence,
+            QueuePersistenceChange {
+                expected_revision: change.expected_revision,
+                rows_changed: true,
+            },
+        );
+        let revision = sequence.revision();
+        sequence.set_shuffle_seed(true, 7);
+        let newer = QueuePersistence::capture(
+            &sequence,
+            QueuePersistenceChange {
+                expected_revision: revision,
+                rows_changed: false,
+            },
+        );
+        let expected = newer.traversal().expect("traversal").to_vec();
+        pending.coalesce(newer);
+        assert!(pending.rows_changed());
+        assert_eq!(pending.traversal().expect("coalesced traversal"), expected);
+        assert_eq!(pending.full_entries().expect("full rows").len(), 4);
     }
 }
 

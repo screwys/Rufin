@@ -25,6 +25,7 @@ lyrics.workspace = true
 playback.workspace = true
 secrets.workspace = true
 serde.workspace = true
+sources.workspace = true
 tracing.workspace = true
 tokio = { workspace = true, features = ["rt-multi-thread"] }
 

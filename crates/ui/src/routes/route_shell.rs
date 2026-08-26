@@ -110,10 +110,6 @@ impl LibraryToolbarProjection {
         self.widget.clone()
     }
 
-    pub(crate) fn set_layout_control_visible(&self, visible: bool) {
-        self.layout.set_visible(visible);
-    }
-
     pub(crate) fn detach_controls(&self) -> gtk::Widget {
         if let Some(parent) = self
             .controls
@@ -123,6 +119,10 @@ impl LibraryToolbarProjection {
             parent.remove(&self.controls);
         }
         self.controls.clone().upcast()
+    }
+
+    pub(crate) fn set_layout_control_visible(&self, visible: bool) {
+        self.layout.set_visible(visible);
     }
 
     pub(crate) fn apply(&self, key: LibraryListKey, settings: &LibraryListSettings) {
@@ -979,19 +979,6 @@ fn set_library_command_button_content(
     content.append(&gtk::Image::from_icon_name(icon_name));
     content.append(&localized_label(label));
     button.set_child(Some(&content));
-}
-
-pub(crate) fn non_propagating_width_scroller() -> gtk::ScrolledWindow {
-    let clip = gtk::ScrolledWindow::new();
-    clip.add_css_class("non-propagating-width-clip");
-    configure_fill_width_clip(&clip, gtk::PolicyType::Never);
-    // Unlike a route-level clip, this scroller must pass its allocated width
-    // into the embedded child's height-for-width measurement.
-    clip.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
-    clip.set_propagate_natural_height(true);
-    clip.set_hexpand(true);
-    clip.set_halign(gtk::Align::Fill);
-    clip
 }
 
 #[cfg(test)]

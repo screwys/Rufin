@@ -115,6 +115,7 @@ fn identify_album(values: &AlbumMetadataValues) -> Result<Option<AlbumMetadataVa
     };
     Ok(Some(AlbumMetadataValues {
         title: text(&group, "title").unwrap_or_default(),
+        artist: artist_credit(&group),
         album_artist: artist_credit(&group),
         year: year(&group, "first-release-date"),
         genre: genres(&group),
@@ -205,6 +206,7 @@ fn track_from_release(
 fn album_from_release(release: &Value, release_id: &str) -> AlbumMetadataValues {
     AlbumMetadataValues {
         title: text(release, "title").unwrap_or_default(),
+        artist: artist_credit(release),
         album_artist: artist_credit(release),
         year: year(release, "date"),
         genre: genres(release).or_else(|| release.get("release-group").and_then(genres)),

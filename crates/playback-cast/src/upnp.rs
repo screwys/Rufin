@@ -66,11 +66,10 @@ impl QueuedMedia {
             .end_millis()
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
-                stream.track.as_ref().and_then(|track| {
-                    track
-                        .duration_millis
-                        .and_then(|value| u64::try_from(value).ok())
-                })
+                stream
+                    .track
+                    .as_ref()
+                    .and_then(|track| u64::try_from(track.duration_millis).ok())
             });
         let metadata = didl_metadata(&stream, &published);
         Self {
@@ -913,12 +912,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
     let duration_millis = media
         .ends_at_millis
         .map(|end| end.saturating_sub(media.starts_at_millis))
-        .unwrap_or_else(|| {
-            track
-                .duration_millis
-                .and_then(|value| u64::try_from(value).ok())
-                .unwrap_or_default()
-        });
+        .unwrap_or_else(|| u64::try_from(track.duration_millis).unwrap_or_default());
     let mut fields = format!(
         "<dc:title>{}</dc:title><dc:creator>{}</dc:creator><upnp:artist>{}</upnp:artist><upnp:album>{}</upnp:album>",
         xml_escape(&track.title),
@@ -1526,9 +1520,9 @@ mod tests {
         assert!(metadata.contains("DLNA.ORG_OP=01;DLNA.ORG_CI=0"));
     }
 
-    fn test_track() -> library::QueueMedia {
-        library::QueueMedia {
-            occurrence_key: library::QueueOccurrenceKey::from_raw(1),
+    fn test_track() -> playback::PlaybackMedia {
+        playback::PlaybackMedia {
+            source_id: "source".to_string(),
             track_key: Some(library::TrackKey::from_raw(1)),
             track_object_id: "track-1".to_string(),
             title: "Track & Title".to_string(),
@@ -1536,16 +1530,17 @@ mod tests {
             album: "Album".to_string(),
             album_display_artist: Some("Album Artist".to_string()),
             album_key: None,
-            album_object_id: None,
-            primary_artist_object_id: None,
+            primary_artist_key: None,
             media_uri: None,
             artwork_binding: None,
-            duration_millis: Some(300_000),
+            duration_millis: 300_000,
             disc_number: Some(1),
             track_number: Some(2),
             year: Some(2026),
             release_date: Some("2026-08-17".to_string()),
             favorite: Some(true),
+            rating: None,
+            is_downloaded: false,
             source_format: Some("flac".to_string()),
             musicbrainz_recording_id: None,
             musicbrainz_release_track_id: None,
@@ -1555,6 +1550,7 @@ mod tests {
             cue_path: None,
             cue_start_millis: None,
             cue_end_millis: None,
+            artist_links: Vec::new(),
         }
     }
 

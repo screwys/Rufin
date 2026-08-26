@@ -1,35 +1,42 @@
 use std::rc::Rc;
 
 use crate::shell::Shell;
-use ::library::{PlaylistEdit, PlaylistId, SmartPlaylist};
+use ::library::{PlaylistKey, SmartPlaylistRow};
 use adw::prelude::*;
 use localization::tr;
+
+use super::SmartPlaylistChange;
 
 impl Shell {
     pub(crate) fn rename_playlist_dialog(
         self: &Rc<Self>,
-        playlist_id: PlaylistId,
+        playlist_id: PlaylistKey,
         current_name: String,
     ) {
         let Some(source) = self.selected_source_operations() else {
             return;
         };
         self.rename_playlist_dialog_inner(current_name, move |name| {
-            source.edit_playlist(PlaylistEdit::Rename {
-                playlist_id: playlist_id.clone(),
-                name,
-            });
+            source.rename_playlist(playlist_id, name);
         });
     }
 
-    pub(crate) fn rename_smart_playlist_dialog(self: &Rc<Self>, playlist: SmartPlaylist) {
-        let Some(source) = self.selected_source_operations() else {
+    pub(crate) fn rename_smart_playlist_dialog(self: &Rc<Self>, playlist: SmartPlaylistRow) {
+        if self.selected_library().is_none() {
             return;
-        };
-        let playlist_id = playlist.id.clone();
+        }
+        let playlist_id = playlist.smart_playlist_key;
         let definition = playlist.definition.clone();
+        let shell = Rc::clone(self);
         self.rename_playlist_dialog_inner(playlist.name, move |name| {
-            source.update_smart_playlist(playlist_id.clone(), name, definition.clone());
+            shell.publish_smart_playlist_change(
+                SmartPlaylistChange::Update {
+                    key: playlist_id,
+                    name,
+                    definition: definition.clone(),
+                },
+                None,
+            );
         });
     }
 

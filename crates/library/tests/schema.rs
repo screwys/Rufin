@@ -1,6 +1,6 @@
 use std::path::Path;
 
-use library::Database;
+use library::{CalendarActivityPeriod, Database, ReadCancellation, SourceKey};
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 
@@ -20,6 +20,13 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
     let path = directory.path().join("library.sqlite3");
     let _database = Database::open(&path).await.expect("open fresh Store");
     let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read final schema version"),
+        41
+    );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
          WHERE type='table' AND name NOT LIKE 'sqlite_%'
@@ -69,22 +76,27 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     create_released_store(&path).await;
-    assert!(Database::open(&path).await.is_err());
-    assert!(
-        path.exists(),
-        "ordinary open preserves the released Store in place"
-    );
-    assert!(
-        Database::released_repair_available(&path)
-            .await
-            .expect("inspect released Store")
-    );
-    let report = Database::repair_released(&path)
+    let database = Database::open(&path)
         .await
-        .expect("explicitly repair released Store");
-    assert!(report.preserved_store.exists());
-    let database = Database::open(&path).await.expect("open repaired Store");
+        .expect("automatically repair and open released Store");
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("read Store directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.sqlite3.recovered-")),
+        "automatic repair preserves the released Store beside the final Store"
+    );
     let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read recovered schema version"),
+        41
+    );
     assert_eq!(
         sqlx::query_as::<_, (String, i64)>("SELECT object_id, catalog_revision FROM sources",)
             .fetch_one(&mut reader)
@@ -101,6 +113,42 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         .await
         .expect("read recovered user facts"),
         (1, 80)
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (Option<String>, Option<String>)>(
+            "SELECT media_uri,source_path FROM tracks WHERE object_id='released-track'",
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read recovered provider path"),
+        (None, Some("/music/track.flac".to_string()))
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, i64)>("SELECT period,item_kind,play_count FROM activity_baseline WHERE source_key=(SELECT source_key FROM sources WHERE object_id='released-source') ORDER BY period")
+            .fetch_all(&mut reader).await.expect("read recovered Activity periods"),
+        [("2025-06".to_string(), "track".to_string(), 3), ("lifetime".to_string(), "track".to_string(), 4)]
+    );
+    let month = database
+        .calendar_activity_summary(
+            SourceKey::from_raw(1),
+            CalendarActivityPeriod::Month {
+                year: 2025,
+                month: 6,
+            },
+            10,
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("query recovered calendar Activity");
+    assert_eq!(month.tracks[0].play_count, 3);
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM home_entries WHERE source_key=1 AND section_id='most-played'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read recovered Home"),
+        1
     );
     assert_eq!(
         sqlx::query_as::<_, (String, i64, i64, String, Option<String>, Option<i64>)>(
@@ -225,7 +273,7 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         (
             Some("released-album".to_string()),
             Some("released-artist".to_string()),
-            Some(b"/music/local-cover.jpg".to_vec()),
+            Some(br#"{"File":{"path":"/music/local-cover.jpg","revision":"released"}}"#.to_vec(),),
         )
     );
     assert_eq!(
@@ -243,8 +291,19 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
             "release-id".to_string(),
             "release-group-id".to_string(),
             "artist-id".to_string(),
-            21,
+            43,
         )
+    );
+    let genre_binding = sqlx::query_scalar::<_, Vec<u8>>(
+        "SELECT artwork_binding FROM genres WHERE object_id='released-genre'",
+    )
+    .fetch_one(&mut reader)
+    .await
+    .expect("read recovered Genre artwork binding");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&genre_binding)
+            .expect("decode recovered native artwork binding"),
+        serde_json::json!({"item_id":"genre-image","tag":"genre-tag"})
     );
     assert_eq!(
         sqlx::query_as::<_, (String, String, String, String, String)>(
@@ -289,7 +348,7 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
                 i64,
                 i64,
                 i64,
-                String,
+                Option<String>,
                 String,
                 String,
                 String,
@@ -314,7 +373,7 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
             1,
             2024,
             1,
-            "/music/track.flac".to_string(),
+            None,
             "FLAC".to_string(),
             "recording-id".to_string(),
             "/music/album.cue".to_string(),
@@ -358,8 +417,8 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         ("Released Track".to_string(), 95)
     );
     assert_eq!(
-        sqlx::query_as::<_, (String, String, String)>(
-            "SELECT normalized_title,normalized_album,media_uri FROM local_access_files"
+        sqlx::query_as::<_, (String, String, String, String)>(
+            "SELECT normalized_title,normalized_album,media_uri,origin FROM local_access_files"
         )
         .fetch_one(&mut reader)
         .await
@@ -367,23 +426,59 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         (
             "released track".to_string(),
             "released album".to_string(),
-            "/music/track.flac".to_string()
+            "file:///music/track.flac".to_string(),
+            "mapping".to_string()
         )
     );
     drop(database);
     let devel_path = directory.path().join("devel.sqlite3");
     let mut devel = connection(&devel_path, true).await;
-    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=99; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create intermediate Devel Store");
+    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=42; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unreleased schema-42 Store");
     devel.close().await.expect("close Devel Store");
-    assert!(
-        !Database::released_repair_available(&devel_path)
+    let _database = Database::open(&devel_path)
+        .await
+        .expect("shared automatic fallback rebuilds unsupported Store content");
+    let mut rebuilt = connection(&devel_path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut rebuilt)
             .await
-            .expect("inspect Devel Store")
+            .expect("read rebuilt final schema version"),
+        41
     );
-    assert!(Database::repair_released(&devel_path).await.is_err());
     assert!(
         devel_path.exists(),
-        "explicit repair leaves Devel Store untouched"
+        "automatic fallback reopens a usable Store at the configured path"
+    );
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("read Store directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("devel.sqlite3.recovered-")),
+        "automatic fallback preserves unsupported Store content"
+    );
+}
+
+#[tokio::test]
+async fn not_a_database_is_preserved_and_rebuilt_automatically() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    std::fs::write(&path, b"not a sqlite database").expect("write invalid Store");
+
+    let _database = Database::open(&path)
+        .await
+        .expect("automatically preserve and rebuild invalid Store content");
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("read Store directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.sqlite3.recovered-"))
     );
 }
 
@@ -395,7 +490,7 @@ async fn create_released_store(path: &Path) {
          CREATE TABLE source_libraries(
              library_id INTEGER PRIMARY KEY, source_id TEXT NOT NULL,
              input_digest BLOB NOT NULL, content_digest BLOB,
-             freshness_marker BLOB, accepted_at INTEGER
+             freshness_marker BLOB, home_digest BLOB, home_json TEXT, accepted_at INTEGER
          ) STRICT;
          CREATE TABLE albums(
              library_id INTEGER NOT NULL, album_id TEXT NOT NULL,
@@ -494,7 +589,8 @@ async fn create_released_store(path: &Path) {
              release_types_json TEXT,is_compilation INTEGER
          ) STRICT;
          INSERT INTO source_libraries VALUES(
-             1, 'released-source', zeroblob(32), zeroblob(32), X'01', 1
+             1, 'released-source', zeroblob(32), zeroblob(32), X'01', zeroblob(32),
+             '{\"kind\":\"Source\",\"sections\":[{\"kind\":\"MostPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"released-track\"}]}]}', 1
          );
          INSERT INTO albums VALUES(
              1, 'released-album', 'Released Album', 'Released Artist',
@@ -553,6 +649,9 @@ async fn create_released_store(path: &Path) {
          );
          INSERT INTO listening_aggregates VALUES(
              'released-source','released-track','lifetime','track',4,2,90
+         );
+         INSERT INTO listening_aggregates VALUES(
+             'released-source','released-track','2025-06','track',3,0,NULL
          );
          INSERT INTO recent_plays VALUES(
              'released-play','released-source','released-track','Released Track',

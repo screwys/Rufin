@@ -98,6 +98,56 @@ pub(crate) struct FilesystemCache {
 }
 
 impl FilesystemCache {
+    pub(crate) fn begin_source_manifest(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+    ) -> io::Result<PathBuf> {
+        let path = self.root.join("manifest-staging").join(format!(
+            "{}-{}-{}-{}",
+            digest(source_id.as_str()),
+            revision,
+            std::process::id(),
+            TEMP_FILE_SEQUENCE.fetch_add(1, Ordering::Relaxed)
+        ));
+        fs::create_dir_all(&path)?;
+        Ok(path)
+    }
+
+    pub(crate) fn mark_source_manifest_identity(
+        &self,
+        staging: &Path,
+        identity: &str,
+    ) -> io::Result<()> {
+        if !identity.is_empty() {
+            fs::write(staging.join(digest(identity)), [])?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn complete_source_manifest_staging(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+        staging: &Path,
+    ) -> io::Result<()> {
+        let source = digest(source_id.as_str());
+        reconcile_source_directory_marked(
+            &self.root.join("ready/native").join(&source),
+            staging,
+            true,
+        )?;
+        reconcile_source_directory_marked(
+            &self.root.join("missing/native").join(source),
+            staging,
+            false,
+        )?;
+        atomic_write(
+            &self.source_manifest_path(source_id),
+            revision.to_string().as_bytes(),
+        )?;
+        remove_dir_if_present(staging)
+    }
     pub(crate) fn new(root: PathBuf) -> io::Result<Self> {
         fs::create_dir_all(&root)?;
         let cache = Self {
@@ -479,6 +529,35 @@ fn reconcile_source_directory(
             continue;
         }
         if retained.contains(&name.to_string_lossy().into_owned()) {
+            continue;
+        }
+        let entry_path = entry.path();
+        if entry_path.is_dir() {
+            remove_dir_if_present(&entry_path)?;
+        } else {
+            remove_file_if_present(&entry_path)?;
+        }
+    }
+    Ok(())
+}
+
+fn reconcile_source_directory_marked(
+    path: &Path,
+    staging: &Path,
+    keep_manifest: bool,
+) -> io::Result<()> {
+    let entries = match fs::read_dir(path) {
+        Ok(entries) => entries,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    for entry in entries {
+        let entry = entry?;
+        let name = entry.file_name();
+        if keep_manifest && name == ".manifest" {
+            continue;
+        }
+        if staging.join(&name).is_file() {
             continue;
         }
         let entry_path = entry.path();

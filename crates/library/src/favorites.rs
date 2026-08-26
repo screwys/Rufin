@@ -8,7 +8,7 @@ use crate::{AlbumKey, ArtistKey, Database, LibraryError, LibraryResult, SourceKe
 
 const FAVORITE_DELIVERY_LIMIT: usize = 500;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum FavoriteTarget {
     Track(TrackKey),
     Album(AlbumKey),

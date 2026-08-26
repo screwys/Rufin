@@ -17,7 +17,7 @@ pub use downloads::{
 };
 pub use events::ProductReceivers;
 pub use inputs::{
-    HomePublication, PlaybackPublication, RuntimeInputs, SelectedLibrary, SelectedLibraryUpdate,
+    CatalogPublication, FavoriteSettlement, PlaybackPublication, RuntimeInputs, SelectedLibrary,
     SourceEvent, SourceNotice, SourceNoticeKind,
 };
 pub use release_update::{
@@ -27,6 +27,7 @@ pub use scrobbling::{
     LastFmPreferences, LibreFmPreferences, ListenBrainzPreferences, ScrobblingConnection,
     ScrobblingConnectionEvent, ScrobblingHandle, ScrobblingPort, ScrobblingPreferences,
 };
+pub use source::LibraryRefreshTrigger;
 pub use source::{SelectedSourceHandle, SelectedSourcePort, SourceHandle, SourcePort};
 pub use waveform::WaveformProjection;
 

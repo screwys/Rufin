@@ -125,6 +125,9 @@ msgstr ""
 msgid "Accent color"
 msgstr ""
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr ""
 
@@ -164,9 +167,6 @@ msgstr ""
 msgid "Added to favorites"
 msgstr ""
 
-msgid "Added to"
-msgstr ""
-
 msgid "Album Artists"
 msgstr ""
 
@@ -200,7 +200,13 @@ msgstr ""
 msgid "All tracks"
 msgstr ""
 
+msgid "All"
+msgstr ""
+
 msgid "Any genre"
+msgstr ""
+
+msgid "Any"
 msgstr ""
 
 msgid "App settings"
@@ -213,9 +219,6 @@ msgid "Appears On"
 msgstr ""
 
 msgid "Application name"
-msgstr ""
-
-msgid "Artist / Album"
 msgstr ""
 
 msgid "Artist albums"
@@ -476,9 +479,6 @@ msgstr ""
 msgid "Default right sidebar"
 msgstr ""
 
-msgid "Delete Playlist"
-msgstr ""
-
 msgid "Delete"
 msgstr ""
 
@@ -510,9 +510,6 @@ msgid "Discography"
 msgstr ""
 
 msgid "Discord"
-msgstr ""
-
-msgid "Don't duplicate"
 msgstr ""
 
 msgid "Download Folder"
@@ -552,6 +549,9 @@ msgid "EP"
 msgstr ""
 
 msgid "EPs"
+msgstr ""
+
+msgid "Edit Smart Playlist"
 msgstr ""
 
 msgid "Edit metadata"
@@ -935,13 +935,25 @@ msgstr ""
 msgid "More actions"
 msgstr ""
 
-msgid "Most Played"
+msgid "Most Played (Lifetime)"
 msgstr ""
 
-msgid "Most Skipped"
+msgid "Most Played (Monthly)"
+msgstr ""
+
+msgid "Most Played (Weekly)"
+msgstr ""
+
+msgid "Most Played (Yearly)"
 msgstr ""
 
 msgid "Most played"
+msgstr ""
+
+msgid "Move Last"
+msgstr ""
+
+msgid "Move Next"
 msgstr ""
 
 msgid "Move down"
@@ -1040,9 +1052,6 @@ msgstr ""
 msgid "Next audio device"
 msgstr ""
 
-msgid "Next page"
-msgstr ""
-
 msgid "Next"
 msgstr ""
 
@@ -1116,9 +1125,6 @@ msgid "Nothing here yet"
 msgstr ""
 
 msgid "Nothing in this folder"
-msgstr ""
-
-msgid "Nothing played yet"
 msgstr ""
 
 msgid "Nothing playing"
@@ -1338,9 +1344,6 @@ msgstr ""
 msgid "Previous audio device"
 msgstr ""
 
-msgid "Previous page"
-msgstr ""
-
 msgid "Previous"
 msgstr ""
 
@@ -1369,6 +1372,9 @@ msgid "Queue a track to begin"
 msgstr ""
 
 msgid "Queue and transitions"
+msgstr ""
+
+msgid "Queue is empty"
 msgstr ""
 
 msgid "Queue"
@@ -1422,6 +1428,9 @@ msgstr ""
 msgid "Release"
 msgstr ""
 
+msgid "Releases"
+msgstr ""
+
 msgid "Remote lyrics"
 msgstr ""
 
@@ -1464,9 +1473,6 @@ msgstr ""
 msgid "Remove from Queue"
 msgstr ""
 
-msgid "Remove from playlist"
-msgstr ""
-
 msgid "Remove prefix"
 msgstr ""
 
@@ -1507,12 +1513,6 @@ msgid "Reset to defaults"
 msgstr ""
 
 msgid "Reset"
-msgstr ""
-
-msgid "Restore Default"
-msgstr ""
-
-msgid "Restore"
 msgstr ""
 
 msgid "Resume"
@@ -1826,6 +1826,9 @@ msgstr ""
 msgid "Techno"
 msgstr ""
 
+msgid "Template"
+msgstr ""
+
 msgid "Text"
 msgstr ""
 
@@ -1886,9 +1889,6 @@ msgstr ""
 msgid "Turn on private mode"
 msgstr ""
 
-msgid "Type to search or create a new playlist"
-msgstr ""
-
 msgid "Type to search"
 msgstr ""
 
@@ -1914,6 +1914,9 @@ msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
+msgstr ""
+
+msgid "Use Template"
 msgstr ""
 
 msgid "Use a number above zero"

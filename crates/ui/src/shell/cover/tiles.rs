@@ -135,28 +135,6 @@ impl Shell {
         (widget, tile)
     }
 
-    pub(crate) fn cover_tile_for_candidates(
-        self: &Rc<Self>,
-        candidates: ArtworkBinding,
-        size: i32,
-        fetch_size: u32,
-    ) -> gtk::Widget {
-        self.cover_tile_for_candidate_dimensions(candidates, size, size, fetch_size)
-    }
-
-    pub(crate) fn cover_tile_for_candidate_dimensions(
-        self: &Rc<Self>,
-        candidates: ArtworkBinding,
-        width: i32,
-        height: i32,
-        fetch_size: u32,
-    ) -> gtk::Widget {
-        let tile = ArtworkTile::new_sized(width, height);
-        let widget = tile.widget();
-        self.bind_artwork_tile(&tile, candidates, width.max(height), fetch_size);
-        widget
-    }
-
     pub(crate) fn elastic_cover_group_tile_for_artwork(
         self: &Rc<Self>,
         artwork: &[ArtworkBinding],

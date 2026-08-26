@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::LocalImageRef;
+use lofty::file::FileType;
 use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
 use lofty::tag::{ItemKey, Tag};
@@ -119,10 +120,24 @@ pub(super) struct Worker {
 pub(super) fn read_basic_audio(worker: &mut Worker, path: PathBuf) -> Option<BasicAudioMetadata> {
     let file = fs::File::open(&path).ok()?;
     let tagged_file = read_lofty_file(file, false).ok().flatten();
-    let tagged_file = tagged_file.filter(lofty_supplies_required_audio);
+    let topology_admitted = tagged_file
+        .as_ref()
+        .filter(|file| requires_topology_admission(file.file_type()))
+        .map(|_| worker.discovery.read(&path));
+    let tagged_file = tagged_file.filter(|file| {
+        if requires_topology_admission(file.file_type()) {
+            topology_admitted.as_ref().is_some_and(Option::is_some)
+        } else {
+            lofty_supplies_required_audio(file)
+        }
+    });
     let discovered = tagged_file
         .is_none()
-        .then(|| worker.discovery.read(&path))
+        .then(|| {
+            topology_admitted
+                .flatten()
+                .or_else(|| worker.discovery.read(&path))
+        })
         .flatten();
     let Some(tagged_file) = tagged_file.as_ref() else {
         return Some(basic_audio_metadata_from_discoverer(
@@ -147,8 +162,21 @@ pub(super) fn read_media(
         Err(_) => return MediaRead::Unreadable,
     };
     let tagged_file = read_lofty_file(file, false).ok().flatten();
-    let tagged_file = tagged_file.filter(lofty_supplies_required_audio);
+    let topology_admitted = tagged_file
+        .as_ref()
+        .filter(|file| requires_topology_admission(file.file_type()))
+        .map(|_| worker.discovery.read(&path));
+    let tagged_file = tagged_file.filter(|file| {
+        if requires_topology_admission(file.file_type()) {
+            topology_admitted.as_ref().is_some_and(Option::is_some)
+        } else {
+            lofty_supplies_required_audio(file)
+        }
+    });
     let discovered = if tagged_file.is_none() {
+        if topology_admitted.is_some_and(|admitted| admitted.is_none()) {
+            return MediaRead::Rejected;
+        }
         let Some(discovered) = worker.discovery.read(&path) else {
             return MediaRead::Rejected;
         };
@@ -261,6 +289,13 @@ fn lofty_duration_seconds(tagged_file: &lofty::file::TaggedFile) -> u32 {
 
 fn lofty_supplies_required_audio(file: &lofty::file::TaggedFile) -> bool {
     !file.properties().duration().is_zero()
+}
+
+fn requires_topology_admission(file_type: FileType) -> bool {
+    matches!(
+        file_type,
+        FileType::Mp4 | FileType::Opus | FileType::Vorbis | FileType::Speex
+    )
 }
 
 // Vorbis-style R128 gain is a signed Q7.8 dB adjustment to the -23 LUFS target.

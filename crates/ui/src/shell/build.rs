@@ -25,7 +25,6 @@ use crate::preferences::dialogs::release_notes::{
     check_for_release_update, schedule_periodic_release_checks,
 };
 use crate::preferences::source::SourceState;
-use crate::routes::route::Route;
 use crate::runtime::RuntimeInputs;
 use crate::settings::SettingsState;
 use localization::{effective_language_preference, set_language_preference, tr};
@@ -48,7 +47,7 @@ use super::navigation::{
     build_compact_navigation, build_normal_navigation, install_normal_navigation_activation,
     normal_sidebar_header,
 };
-use super::route::{RouteStack, RouteViewport};
+use super::route::RouteViewport;
 use super::selected_ui::SelectedUiState;
 use super::startup::StartupState;
 use super::window_state::initial_window_size;
@@ -119,9 +118,7 @@ pub fn build(
         current: RefCell::new(settings.clone()),
         persistence: settings_handle,
     };
-    let navigation = NavigationState {
-        routes: RefCell::new(RouteStack::new(Route::Home)),
-    };
+    let navigation = NavigationState::new();
     let selected_ui = SelectedUiState::new();
     let source = SourceState {
         configured: RefCell::new(configured_sources),
@@ -495,6 +492,11 @@ pub fn build(
 
     let shell = Rc::new(Shell {
         quitting,
+        home_variation: Cell::new(
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |elapsed| elapsed.as_nanos() as i64),
+        ),
         diagnostics,
         appearance,
         settings: settings_state,

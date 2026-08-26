@@ -148,6 +148,18 @@ pub enum SourceRadioSeed {
     Genre(String),
 }
 
+pub enum SourceCollection {
+    Album(String),
+    Artist(String),
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SourceHomeSection {
+    MostPlayed,
+    RecentlyPlayed,
+    RecentlyReleased,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum JellyfinLiveChange {
     Items {
@@ -449,13 +461,17 @@ impl Source {
             freshness,
         )
         .await?;
-        let initial_local = matches!(&self.implementation, Implementation::Local(_))
-            && scan.existing_source().is_none();
         let cancelled_fn = || cancelled.load(Ordering::Relaxed);
         match &self.implementation {
             Implementation::Local(source) => {
                 source
-                    .stage_catalog(database, &mut scan, progress, &cancelled_fn)
+                    .stage_catalog(
+                        database,
+                        &mut scan,
+                        progress,
+                        &cancelled_fn,
+                        accept_freshness,
+                    )
                     .await?
             }
             Implementation::Jellyfin(source) => {
@@ -470,20 +486,39 @@ impl Source {
             }
         }
         let outcome = scan.finish().await?;
-        if let Implementation::Local(source) = &self.implementation
-            && let ScanOutcome::Changed(publication) = outcome
-        {
-            if initial_local {
-                source
-                    .persist_initial_observations(database, publication.source, &cancelled_fn)
-                    .await?;
-            }
-            source
-                .reconcile_observations(database, publication.source)
-                .await?;
-            return Ok(ScanOutcome::Changed(publication));
-        }
         Ok(outcome)
+    }
+
+    pub async fn rescan_local(
+        &self,
+        database: &Database,
+        display_name: &str,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: Arc<AtomicBool>,
+    ) -> SourceResult<ScanOutcome> {
+        let Implementation::Local(source) = &self.implementation else {
+            return Err(SourceError::InvalidRequest(
+                "Local rescan belongs to another source",
+            ));
+        };
+        let mut scan = Scan::begin(
+            database,
+            self.source_id.as_str(),
+            display_name,
+            &display_name.to_lowercase(),
+            None,
+        )
+        .await?;
+        source
+            .stage_catalog(
+                database,
+                &mut scan,
+                progress,
+                &|| cancelled.load(Ordering::Relaxed),
+                true,
+            )
+            .await?;
+        Ok(scan.finish().await?)
     }
 
     async fn freshness(&self) -> SourceResult<Option<Freshness>> {
@@ -543,7 +578,9 @@ impl Source {
 
     pub async fn live_search(&self, query: &str, limit: usize) -> SourceResult<LiveSearchResults> {
         match &self.implementation {
-            Implementation::Local(_) => Ok(LiveSearchResults::default()),
+            Implementation::Local(_) => Err(SourceError::InvalidRequest(
+                "Local Search is Database-owned",
+            )),
             Implementation::Jellyfin(source) => source.live_search(query, limit).await,
             Implementation::OpenSubsonic(source) => source.live_search(query, limit).await,
         }
@@ -573,6 +610,27 @@ impl Source {
             Implementation::Jellyfin(source) => source.set_rating(object_id, rating).await,
             Implementation::OpenSubsonic(source) => source.set_rating(object_id, rating).await,
         }
+    }
+
+    pub async fn write_local_track_rating(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        track: library::TrackKey,
+        rating: Option<u8>,
+    ) -> SourceResult<()> {
+        let Implementation::Local(local) = &self.implementation else {
+            return Ok(());
+        };
+        let Some((path, format)) = self.metadata_track_path(database, source, track).await? else {
+            return Err(SourceError::NotFound);
+        };
+        crate::local::metadata::write_rating(&path, format.as_deref(), rating)
+            .map_err(|error| SourceError::Other(error.to_string()))?;
+        local
+            .publish_paths(database, source, self.source_id.as_str(), &[path])
+            .await?;
+        Ok(())
     }
 
     fn metadata_account_available(&self) -> bool {
@@ -650,7 +708,27 @@ impl Source {
             .await
             .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        crate::local::read_track_metadata(track_key, &path, format.as_deref())
+        let mut metadata = crate::local::read_track_metadata(track_key, &path, format.as_deref())?;
+        let cancellation = library::ReadCancellation::new();
+        let track = database
+            .track_rows(source, &[track_key], &cancellation)
+            .await
+            .map_err(metadata_database_error)?
+            .pop()
+            .ok_or(crate::SourceMetadataError::Unavailable)?;
+        if metadata.values.musicbrainz_recording_id.is_none()
+            && track.musicbrainz_recording_id.is_some()
+        {
+            metadata.values.musicbrainz_recording_id = track.musicbrainz_recording_id;
+            metadata.rufin_filled.musicbrainz_recording_id = true;
+        }
+        if metadata.values.musicbrainz_release_track_id.is_none()
+            && track.musicbrainz_release_track_id.is_some()
+        {
+            metadata.values.musicbrainz_release_track_id = track.musicbrainz_release_track_id;
+            metadata.rufin_filled.musicbrainz_release_track_id = true;
+        }
+        Ok(metadata)
     }
 
     async fn jellyfin_track_metadata_available(
@@ -793,6 +871,28 @@ impl Source {
             .await
     }
 
+    pub async fn identify_track_metadata(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        track_key: library::TrackKey,
+        values: &crate::TrackMetadataValues,
+    ) -> Result<Option<(crate::TrackMetadataValues, String)>, String> {
+        let Implementation::Jellyfin(jellyfin) = &self.implementation else {
+            return Ok(None);
+        };
+        let cancellation = library::ReadCancellation::new();
+        let track = database
+            .track_rows(source, &[track_key], &cancellation)
+            .await
+            .map_err(|error| error.to_string())?
+            .pop()
+            .ok_or_else(|| "Track is no longer current".to_string())?;
+        jellyfin
+            .identify_track_metadata(&track.object_id, values)
+            .await
+    }
+
     pub async fn identify_artist_metadata(
         &self,
         database: &Database,
@@ -822,7 +922,7 @@ impl Source {
         track_key: library::TrackKey,
         expected_revision: &str,
         application: Option<&str>,
-        values: crate::TrackMetadataValues,
+        edit: crate::TrackMetadataEdit,
     ) -> Result<library::TrackRow, crate::SourceMetadataError> {
         let cancellation = library::ReadCancellation::new();
         let track = database
@@ -839,20 +939,14 @@ impl Source {
                         "track",
                         expected_revision,
                         application,
-                        |item| super::jellyfin::metadata::apply_track_values(item, &values),
+                        |item| super::jellyfin::metadata::apply_track_edit(item, &edit),
                     )
                     .await?;
                 self.publish_jellyfin_metadata(database, raw).await?;
             }
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                self.write_file_track_metadata(
-                    database,
-                    source,
-                    &track,
-                    expected_revision,
-                    &values,
-                )
-                .await?;
+                self.write_file_track_metadata(database, source, &track, expected_revision, &edit)
+                    .await?;
             }
         }
         database
@@ -870,7 +964,7 @@ impl Source {
         album_key: library::AlbumKey,
         expected_revision: &str,
         application: Option<&str>,
-        values: crate::AlbumMetadataValues,
+        edit: crate::AlbumMetadataEdit,
     ) -> Result<library::AlbumRow, crate::SourceMetadataError> {
         let cancellation = library::ReadCancellation::new();
         let album = database
@@ -887,20 +981,14 @@ impl Source {
                         "album",
                         expected_revision,
                         application,
-                        |item| super::jellyfin::metadata::apply_album_values(item, &values),
+                        |item| super::jellyfin::metadata::apply_album_edit(item, &edit),
                     )
                     .await?;
                 self.publish_jellyfin_metadata(database, raw).await?;
             }
             Implementation::Local(_) | Implementation::OpenSubsonic(_) => {
-                self.write_file_album_metadata(
-                    database,
-                    source,
-                    &album,
-                    expected_revision,
-                    &values,
-                )
-                .await?;
+                self.write_file_album_metadata(database, source, &album, expected_revision, &edit)
+                    .await?;
             }
         }
         database
@@ -918,7 +1006,7 @@ impl Source {
         artist_key: library::ArtistKey,
         expected_revision: &str,
         application: Option<&str>,
-        values: crate::ArtistMetadataValues,
+        edit: crate::ArtistMetadataEdit,
     ) -> Result<library::ArtistRow, crate::SourceMetadataError> {
         let cancellation = library::ReadCancellation::new();
         let artist = database
@@ -935,7 +1023,7 @@ impl Source {
                         "artist",
                         expected_revision,
                         application,
-                        |item| super::jellyfin::metadata::apply_artist_values(item, &values),
+                        |item| super::jellyfin::metadata::apply_artist_edit(item, &edit),
                     )
                     .await?;
                 self.publish_jellyfin_metadata(database, raw).await?;
@@ -946,7 +1034,7 @@ impl Source {
                     source,
                     &artist,
                     expected_revision,
-                    &values,
+                    &edit,
                 )
                 .await?;
             }
@@ -1030,14 +1118,14 @@ impl Source {
         source: library::SourceKey,
         track: &library::TrackRow,
         expected_revision: &str,
-        values: &crate::TrackMetadataValues,
+        edit: &crate::TrackMetadataEdit,
     ) -> Result<(), crate::SourceMetadataError> {
         let (path, format) = self
             .metadata_track_path(database, source, track.track_key)
             .await
             .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
-        crate::local::metadata::write_track(&path, format.as_deref(), expected_revision, values)?;
+        crate::local::metadata::write_track(&path, format.as_deref(), expected_revision, edit)?;
         match &self.implementation {
             Implementation::Local(local) => {
                 local
@@ -1063,7 +1151,7 @@ impl Source {
                     .update_track_metadata(
                         source,
                         track.track_key,
-                        track_write_from_values(track, values),
+                        track_write_from_values(track, &edit.values),
                     )
                     .await
                     .map_err(metadata_database_error)?;
@@ -1079,7 +1167,7 @@ impl Source {
         source: library::SourceKey,
         album: &library::AlbumRow,
         expected_revision: &str,
-        values: &crate::AlbumMetadataValues,
+        edit: &crate::AlbumMetadataEdit,
     ) -> Result<(), crate::SourceMetadataError> {
         let targets = self
             .album_metadata_targets(database, source, album.album_key)
@@ -1092,7 +1180,7 @@ impl Source {
             .iter()
             .map(|target| (target.path.clone(), target.format.clone()))
             .collect::<Vec<_>>();
-        crate::local::metadata::write_album_batch(&file_targets, expected_revision, values)?;
+        crate::local::metadata::write_album_batch(&file_targets, expected_revision, edit)?;
         match &self.implementation {
             Implementation::Local(local) => {
                 local
@@ -1119,21 +1207,24 @@ impl Source {
                         source,
                         album.album_key,
                         library::AlbumMetadataWrite {
-                            title: values.title.clone(),
-                            normalized_title: values.title.to_lowercase(),
-                            display_artist: values
+                            title: edit.values.title.clone(),
+                            normalized_title: edit.values.title.to_lowercase(),
+                            display_artist: edit
+                                .values
                                 .album_artist
                                 .clone()
                                 .unwrap_or_else(|| album.display_artist.clone()),
-                            sort_text: values
+                            sort_text: edit
+                                .values
                                 .sort_title
                                 .clone()
-                                .unwrap_or_else(|| values.title.to_lowercase()),
-                            year: values.year.map(i64::from),
+                                .unwrap_or_else(|| edit.values.title.to_lowercase()),
+                            year: edit.values.year.map(i64::from),
                             release_date: album.release_date.clone(),
                             date_added: album.date_added.clone(),
-                            musicbrainz_release_id: values.musicbrainz_album_id.clone(),
-                            musicbrainz_release_group_id: values
+                            musicbrainz_release_id: edit.values.musicbrainz_album_id.clone(),
+                            musicbrainz_release_group_id: edit
+                                .values
                                 .musicbrainz_release_group_id
                                 .clone(),
                             is_compilation: album.is_compilation,
@@ -1153,7 +1244,7 @@ impl Source {
         source: library::SourceKey,
         artist: &library::ArtistRow,
         expected_revision: &str,
-        values: &crate::ArtistMetadataValues,
+        edit: &crate::ArtistMetadataEdit,
     ) -> Result<(), crate::SourceMetadataError> {
         let targets = self
             .artist_metadata_targets(database, source, artist.artist_key)
@@ -1170,7 +1261,7 @@ impl Source {
             &file_targets,
             expected_revision,
             &artist.name,
-            values,
+            edit,
         )?;
         match &self.implementation {
             Implementation::Local(local) => {
@@ -1198,13 +1289,14 @@ impl Source {
                         source,
                         artist.artist_key,
                         library::ArtistMetadataWrite {
-                            name: values.name.clone(),
-                            normalized_name: values.name.to_lowercase(),
-                            sort_text: values
+                            name: edit.values.name.clone(),
+                            normalized_name: edit.values.name.to_lowercase(),
+                            sort_text: edit
+                                .values
                                 .sort_name
                                 .clone()
-                                .unwrap_or_else(|| values.name.to_lowercase()),
-                            musicbrainz_artist_id: values.musicbrainz_artist_id.clone(),
+                                .unwrap_or_else(|| edit.values.name.to_lowercase()),
+                            musicbrainz_artist_id: edit.values.musicbrainz_artist_id.clone(),
                         },
                     )
                     .await
@@ -1364,7 +1456,9 @@ impl Source {
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<LiveFolderPage> {
         match &self.implementation {
-            Implementation::Local(_) => Ok(LiveFolderPage::default()),
+            Implementation::Local(_) => Err(SourceError::InvalidRequest(
+                "Local Folder browsing is Database-owned",
+            )),
             Implementation::Jellyfin(source) => {
                 source
                     .browse_folder(folder_object_id, music_folder_object_id)
@@ -1391,6 +1485,33 @@ impl Source {
             Implementation::OpenSubsonic(source) => {
                 source.generated_track_object_ids(seed, limit).await
             }
+        }
+    }
+
+    pub async fn collection_track_object_ids(
+        &self,
+        collection: &SourceCollection,
+        limit: usize,
+    ) -> SourceResult<Vec<String>> {
+        match &self.implementation {
+            Implementation::Local(_) => Ok(Vec::new()),
+            Implementation::Jellyfin(source) => {
+                source.collection_track_object_ids(collection, limit).await
+            }
+            Implementation::OpenSubsonic(source) => {
+                source.collection_track_object_ids(collection, limit).await
+            }
+        }
+    }
+
+    pub async fn home_section(
+        &self,
+        section: SourceHomeSection,
+    ) -> SourceResult<Vec<library::HomeEntryInput>> {
+        match &self.implementation {
+            Implementation::Local(_) => Ok(Vec::new()),
+            Implementation::Jellyfin(source) => source.home_section(section).await,
+            Implementation::OpenSubsonic(source) => source.home_section(section).await,
         }
     }
 
@@ -1462,12 +1583,135 @@ impl Source {
         }
     }
 
+    pub async fn apply_local_change(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        change: LocalLiveChange,
+    ) -> SourceResult<Option<ScanOutcome>> {
+        match (&self.implementation, change) {
+            (Implementation::Local(local), LocalLiveChange::Paths(paths)) => local
+                .publish_paths(database, source, self.source_id.as_str(), &paths)
+                .await
+                .map(Some),
+            (Implementation::Local(_), LocalLiveChange::Rescan) => Ok(None),
+            _ => Err(SourceError::InvalidRequest(
+                "Local change belongs to another source",
+            )),
+        }
+    }
+
     pub async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
         match &self.implementation {
             Implementation::Local(_) => Ok(()),
             Implementation::Jellyfin(source) => source.report_playback(report).await,
             Implementation::OpenSubsonic(source) => source.report_playback(report).await,
         }
+    }
+
+    pub async fn apply_local_mapping(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        root: &std::path::Path,
+        server_prefix: Option<&str>,
+        local_prefix: Option<&str>,
+    ) -> SourceResult<usize> {
+        let root =
+            std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
+        database.clear_mapping_access(source).await?;
+        let mut after = None;
+        let mut accepted = 0;
+        loop {
+            let tracks = database
+                .mapping_track_page(source, after, 128, &library::ReadCancellation::new())
+                .await?;
+            if tracks.is_empty() {
+                break;
+            }
+            after = tracks.last().map(|track| track.track_key);
+            for track in tracks {
+                let relative = match server_prefix {
+                    Some(prefix) => track
+                        .source_path
+                        .strip_prefix(prefix)
+                        .map(|value| value.trim_start_matches(['/', '\\'])),
+                    None => Some(track.source_path.trim_start_matches(['/', '\\'])),
+                };
+                let Some(relative) = relative else { continue };
+                let mut path = root.clone();
+                if let Some(prefix) = local_prefix.filter(|prefix| !prefix.trim().is_empty()) {
+                    path.push(prefix);
+                }
+                path.push(relative.replace('\\', "/"));
+                let Ok(path) = std::fs::canonicalize(path) else {
+                    continue;
+                };
+                if !path.starts_with(&root) || !path.is_file() {
+                    continue;
+                }
+                let metadata = std::fs::metadata(&path)
+                    .map_err(|error| SourceError::Other(error.to_string()))?;
+                let mtime_ns = metadata
+                    .modified()
+                    .ok()
+                    .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+                    .and_then(|value| i64::try_from(value.as_nanos()).ok())
+                    .unwrap_or_default();
+                #[cfg(unix)]
+                let (device_id, inode) = {
+                    use std::os::unix::fs::MetadataExt;
+                    (
+                        i64::try_from(metadata.dev()).ok(),
+                        i64::try_from(metadata.ino()).ok(),
+                    )
+                };
+                #[cfg(not(unix))]
+                let (device_id, inode) = (None, None);
+                let media_uri = url::Url::from_file_path(&path)
+                    .map_err(|()| {
+                        SourceError::Other("could not create mapped file URI".to_string())
+                    })?
+                    .to_string();
+                let relative_path = path
+                    .strip_prefix(&root)
+                    .unwrap_or(&path)
+                    .to_string_lossy()
+                    .into_owned();
+                let mut hash = blake3::Hasher::new();
+                hash.update(path.to_string_lossy().as_bytes());
+                hash.update(&metadata.len().to_le_bytes());
+                hash.update(&mtime_ns.to_le_bytes());
+                database
+                    .upsert_local_access(
+                        source,
+                        &library::LocalAccessWrite {
+                            track_object_id: Some(track.object_id),
+                            origin: library::LocalAccessOrigin::Mapping,
+                            path: path.to_string_lossy().into_owned(),
+                            root: root.to_string_lossy().into_owned(),
+                            relative_path,
+                            size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+                            mtime_ns,
+                            device_id,
+                            inode,
+                            parser_version: 1,
+                            title: track.title,
+                            album: track.album,
+                            artist: track.artist,
+                            disc_number: track.disc_number,
+                            track_number: track.track_number,
+                            duration_millis: track.duration_millis,
+                            media_uri,
+                            loudness_analysis_key: *hash.finalize().as_bytes(),
+                        },
+                    )
+                    .await?;
+                accepted += 1;
+            }
+        }
+        accepted += crate::local::apply_metadata_mapping(database, source, &root).await?;
+        Ok(accepted)
     }
 }
 
@@ -1494,19 +1738,35 @@ fn album_metadata_from_targets(
     if values.album_artist.is_none() {
         values.album_artist = Some(album.display_artist.clone());
     }
+    if values.artist.is_none() {
+        values.artist = Some(album.display_artist.clone());
+    }
+    let source_values = values.clone();
+    let mut rufin_filled = crate::AlbumMetadataWritable::default();
+    if values.musicbrainz_album_id.is_none() && album.musicbrainz_release_id.is_some() {
+        values.musicbrainz_album_id = album.musicbrainz_release_id.clone();
+        rufin_filled.musicbrainz_album_id = true;
+    }
+    if values.musicbrainz_release_group_id.is_none() && album.musicbrainz_release_group_id.is_some()
+    {
+        values.musicbrainz_release_group_id = album.musicbrainz_release_group_id.clone();
+        rufin_filled.musicbrainz_release_group_id = true;
+    }
     let mut mixed = crate::AlbumMetadataMixed::default();
     for target in &targets[1..] {
         let observed =
             crate::local::read_album_metadata_values(&target.path, target.format.as_deref())?;
-        mixed.title |= observed.title != values.title;
-        mixed.sort_title |= observed.sort_title != values.sort_title;
-        mixed.album_artist |= observed.album_artist != values.album_artist;
-        mixed.year |= observed.year != values.year;
-        mixed.genre |= observed.genre != values.genre;
-        mixed.comment |= observed.comment != values.comment;
-        mixed.musicbrainz_album_id |= observed.musicbrainz_album_id != values.musicbrainz_album_id;
+        mixed.title |= observed.title != source_values.title;
+        mixed.sort_title |= observed.sort_title != source_values.sort_title;
+        mixed.artist |= observed.artist != source_values.artist;
+        mixed.album_artist |= observed.album_artist != source_values.album_artist;
+        mixed.year |= observed.year != source_values.year;
+        mixed.genre |= observed.genre != source_values.genre;
+        mixed.comment |= observed.comment != source_values.comment;
+        mixed.musicbrainz_album_id |=
+            observed.musicbrainz_album_id != source_values.musicbrainz_album_id;
         mixed.musicbrainz_release_group_id |=
-            observed.musicbrainz_release_group_id != values.musicbrainz_release_group_id;
+            observed.musicbrainz_release_group_id != source_values.musicbrainz_release_group_id;
     }
     let paths = targets
         .iter()
@@ -1517,6 +1777,7 @@ fn album_metadata_from_targets(
         writable: crate::AlbumMetadataWritable {
             title: track.writable.album,
             sort_title: track.writable.sort_title,
+            artist: track.writable.artist,
             album_artist: track.writable.album_artist,
             year: track.writable.year,
             genre: track.writable.genre,
@@ -1527,7 +1788,9 @@ fn album_metadata_from_targets(
         },
         source_search: false,
         revision: Some(crate::local::metadata::combined_revision(&paths)?),
+        source_values,
         values,
+        rufin_filled,
         track_count: targets.len(),
         mixed,
     })
@@ -1542,11 +1805,17 @@ fn artist_metadata_from_targets(
         .ok_or(crate::SourceMetadataError::Unavailable)?;
     let track =
         crate::local::read_track_metadata(first.track_key, &first.path, first.format.as_deref())?;
-    let values = crate::local::read_artist_metadata_values(
+    let mut values = crate::local::read_artist_metadata_values(
         &first.path,
         first.format.as_deref(),
         &artist.name,
     )?;
+    let source_values = values.clone();
+    let mut rufin_filled = crate::ArtistMetadataWritable::default();
+    if values.musicbrainz_artist_id.is_none() && artist.musicbrainz_artist_id.is_some() {
+        values.musicbrainz_artist_id = artist.musicbrainz_artist_id.clone();
+        rufin_filled.musicbrainz_artist_id = true;
+    }
     let mut mixed = crate::ArtistMetadataMixed::default();
     for target in &targets[1..] {
         let observed = crate::local::read_artist_metadata_values(
@@ -1554,11 +1823,11 @@ fn artist_metadata_from_targets(
             target.format.as_deref(),
             &artist.name,
         )?;
-        mixed.sort_name |= observed.sort_name != values.sort_name;
-        mixed.genre |= observed.genre != values.genre;
-        mixed.comment |= observed.comment != values.comment;
+        mixed.sort_name |= observed.sort_name != source_values.sort_name;
+        mixed.genre |= observed.genre != source_values.genre;
+        mixed.comment |= observed.comment != source_values.comment;
         mixed.musicbrainz_artist_id |=
-            observed.musicbrainz_artist_id != values.musicbrainz_artist_id;
+            observed.musicbrainz_artist_id != source_values.musicbrainz_artist_id;
     }
     let paths = targets
         .iter()
@@ -1576,7 +1845,9 @@ fn artist_metadata_from_targets(
         },
         source_search: false,
         revision: Some(crate::local::metadata::combined_revision(&paths)?),
+        source_values,
         values,
+        rufin_filled,
         track_count: targets.len(),
         mixed,
     })
@@ -1630,6 +1901,30 @@ fn track_write_from_values(
         cue_start_millis: track.cue_start_millis,
         cue_end_millis: track.cue_end_millis,
         loudness_analysis_key: track.loudness_analysis_key,
+    }
+}
+
+#[cfg(test)]
+mod live_acquisition_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn local_search_and_folder_are_unavailable_not_successfully_empty() {
+        let directory = tempfile::tempdir().unwrap();
+        let local =
+            crate::local::LocalSource::from_roots(vec![directory.path().to_path_buf()]).unwrap();
+        let source = Source::new(
+            SourceId::new(crate::local::LOCAL_LIBRARY_SOURCE_ID),
+            Implementation::Local(local),
+        );
+        assert!(matches!(
+            source.live_search("track", 20).await,
+            Err(SourceError::InvalidRequest(_))
+        ));
+        assert!(matches!(
+            source.browse_folder(None, None).await,
+            Err(SourceError::InvalidRequest(_))
+        ));
     }
 }
 

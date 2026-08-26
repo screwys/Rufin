@@ -116,6 +116,7 @@ pub(super) async fn stage_track(
         track.play_count.map(i64::from),
         track.skip_count.map(i64::from),
         track.last_played,
+        track.source_path.as_deref(),
         key,
     )
     .await?;

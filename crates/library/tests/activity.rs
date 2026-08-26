@@ -15,6 +15,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         artist_name: "Stored Artist".to_string(),
         album_title: "Stored Album".to_string(),
         started_at: 1_700_000_000,
+        local_period: "2023-11".to_string(),
         duration_millis: 180_000,
         listened_millis: 90_000,
         skipped: false,

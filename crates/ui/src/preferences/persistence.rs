@@ -1,10 +1,10 @@
 use std::rc::Rc;
 
+use crate::settings::HomeBlockKind;
 use crate::{
     AccentPreference, LeftSidebarMode, LibraryColumnWidth, LibraryListKey, LibraryListSettings,
     ThemePreference,
 };
-use ::library::HomeBlockKind;
 use adw::prelude::*;
 use desktop_integration::{DisplayType, LinkType};
 use localization::set_language_preference;
@@ -527,34 +527,6 @@ impl Shell {
                 }
             }
             list.row_column_widths != previous
-        });
-    }
-
-    pub(crate) fn save_folder_column_widths(&self, widths: [i32; 3]) {
-        self.update_app_settings("folder column widths", |settings| {
-            let next = [Some(widths[0]), Some(widths[1]), Some(widths[2])];
-            let previous = [
-                settings.folder_view.name_column_width,
-                settings.folder_view.detail_column_width,
-                settings.folder_view.duration_column_width,
-            ];
-            if next == previous {
-                return false;
-            }
-            settings.folder_view.name_column_width = next[0];
-            settings.folder_view.detail_column_width = next[1];
-            settings.folder_view.duration_column_width = next[2];
-            true
-        });
-    }
-
-    pub(crate) fn save_folder_tree_width(&self, width: i32) {
-        self.update_app_settings("folder tree width", |settings| {
-            if settings.folder_view.tree_width == Some(width) {
-                return false;
-            }
-            settings.folder_view.tree_width = Some(width);
-            true
         });
     }
 

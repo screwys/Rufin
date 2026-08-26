@@ -1,6 +1,7 @@
 //! Stores opaque accepted artwork bindings and pages distinct bindings for preparation.
 //! Fetching, disk caching, decoding, and fallback choice remain outside Library.
 
+use futures_util::TryStreamExt;
 use sqlx::{Connection, FromRow};
 
 use crate::{
@@ -23,7 +24,112 @@ pub struct LocalAlbumArtworkCandidate {
     pub media_uri: String,
 }
 
+#[derive(Clone, Debug, FromRow, PartialEq)]
+pub struct LocalArtworkObservation {
+    pub path: String,
+    pub size_bytes: Option<i64>,
+    pub mtime_ns: i64,
+}
+
 impl Database {
+    pub async fn local_directory_album_count(
+        &self,
+        source: SourceKey,
+        prefix: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<i64> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_scalar::<_, i64>(
+            "SELECT count(DISTINCT track.album_key) FROM tracks track
+             WHERE track.source_key=?1 AND track.album_key IS NOT NULL
+               AND track.media_uri>=('file://'||?2)
+               AND track.media_uri<('file://'||?2||char(1114111))",
+        )
+        .bind(source)
+        .bind(prefix)
+        .fetch_one(&mut *connection)
+        .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
+    pub async fn local_sidecar_candidate(
+        &self,
+        source: SourceKey,
+        directory_prefix: &str,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<LocalArtworkObservation>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_as::<_, LocalArtworkObservation>(
+            "WITH images AS (
+               SELECT path,size_bytes,mtime_ns,
+                 CASE
+                   WHEN lower(path)=lower(?2||'cover.jpg') THEN 0 WHEN lower(path)=lower(?2||'cover.jpeg') THEN 1
+                   WHEN lower(path)=lower(?2||'cover.png') THEN 2 WHEN lower(path)=lower(?2||'cover.webp') THEN 3
+                   WHEN lower(path)=lower(?2||'folder.jpg') THEN 4 WHEN lower(path)=lower(?2||'folder.jpeg') THEN 5
+                   WHEN lower(path)=lower(?2||'folder.png') THEN 6 WHEN lower(path)=lower(?2||'folder.webp') THEN 7
+                   WHEN lower(path)=lower(?2||'front.jpg') THEN 8 WHEN lower(path)=lower(?2||'front.jpeg') THEN 9
+                   WHEN lower(path)=lower(?2||'front.png') THEN 10 WHEN lower(path)=lower(?2||'front.webp') THEN 11
+                   WHEN lower(path)=lower(?2||'album.jpg') THEN 12 WHEN lower(path)=lower(?2||'album.jpeg') THEN 13
+                   WHEN lower(path)=lower(?2||'album.png') THEN 14 WHEN lower(path)=lower(?2||'album.webp') THEN 15
+                 END rank
+               FROM local_files WHERE source_key=?1 AND kind='image'
+                 AND path>=?2 AND path<(?2||char(1114111))
+                 AND instr(substr(path,length(?2)+1),'/')=0
+             ), counted AS (SELECT count(*) total FROM images)
+             SELECT path,size_bytes,mtime_ns FROM images,counted
+             WHERE rank IS NOT NULL OR total=1 ORDER BY rank NULLS LAST,path LIMIT 1",
+        ).bind(source).bind(directory_prefix).fetch_optional(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
+    pub async fn write_album_artwork_bindings(
+        &self,
+        source: SourceKey,
+        bindings: &[(AlbumKey, Vec<u8>)],
+    ) -> LibraryResult<usize> {
+        if bindings.len() > ARTWORK_PAGE_LIMIT
+            || bindings
+                .iter()
+                .any(|(_, binding)| binding.len() > ARTWORK_BINDING_BYTES)
+        {
+            return Err(LibraryError::InvalidRequest(
+                "invalid Album artwork batch".to_string(),
+            ));
+        }
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let mut changed = 0;
+        for (album, binding) in bindings {
+            changed += sqlx::query("UPDATE albums SET artwork_binding=?3 WHERE source_key=?1 AND album_key=?2 AND artwork_binding IS NOT ?3")
+                .bind(source).bind(album).bind(binding).execute(&mut *transaction).await?.rows_affected() as usize;
+        }
+        transaction.commit().await?;
+        Ok(changed)
+    }
+
+    pub async fn finalize_artwork_digest(&self, source: SourceKey) -> LibraryResult<[u8; 32]> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut hasher = blake3::Hasher::new();
+        {
+            let mut rows = sqlx::query_scalar::<_, Vec<u8>>("SELECT binding FROM (SELECT artwork_binding binding FROM tracks WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM albums WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM artists WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM genres WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM folders WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM playlists WHERE source_key=?1 AND artwork_binding IS NOT NULL UNION SELECT artwork_binding FROM home_entries WHERE source_key=?1 AND artwork_binding IS NOT NULL) ORDER BY binding").bind(source).fetch(&mut *connection);
+            while let Some(binding) = rows.try_next().await? {
+                hasher.update(&(binding.len() as u64).to_le_bytes());
+                hasher.update(&binding);
+            }
+        }
+        let digest = *hasher.finalize().as_bytes();
+        sqlx::query("UPDATE sources SET artwork_digest=?2 WHERE source_key=?1")
+            .bind(source)
+            .bind(digest.as_slice())
+            .execute(connection)
+            .await?;
+        Ok(digest)
+    }
+
     pub async fn local_album_artwork_candidates(
         &self,
         source: SourceKey,

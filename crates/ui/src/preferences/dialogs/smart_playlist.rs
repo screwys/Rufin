@@ -8,15 +8,160 @@ use crate::shell::Shell;
 use crate::shell::actions::text_button;
 use crate::shell::actions::{ADD_ICON, REMOVE_ICON};
 use ::library::{
-    SmartPlaylistBuiltin, SmartPlaylistDefinition, SmartPlaylistRule, SmartPlaylistRuleField,
-    SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSortField,
-    smart_playlists::{self as smart_policy, SmartPlaylistRuleValueKind},
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistKey, SmartPlaylistRule,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort,
 };
 use adw::prelude::*;
 use localization::{msgid, tr};
 
 const SMART_PLAYLIST_DIALOG_WIDTH: i32 = 700;
 const SMART_PLAYLIST_DIALOG_HEIGHT: i32 = 510;
+
+#[derive(Clone)]
+pub(crate) enum SmartPlaylistChange {
+    Create {
+        name: String,
+        definition: SmartPlaylistDefinition,
+    },
+    Update {
+        key: SmartPlaylistKey,
+        name: String,
+        definition: SmartPlaylistDefinition,
+    },
+    Delete(SmartPlaylistKey),
+    Move {
+        dragged: SmartPlaylistKey,
+        target: SmartPlaylistKey,
+        after: bool,
+    },
+}
+
+impl Shell {
+    pub(crate) fn publish_smart_playlist_change(
+        self: &Rc<Self>,
+        change: SmartPlaylistChange,
+        settled: Option<Rc<dyn Fn(Result<(), String>)>>,
+    ) {
+        let Some(selected) = self.selected_library().as_deref().cloned() else {
+            return;
+        };
+        let database = std::sync::Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let epoch = selected.source_session_epoch;
+        let task = selected.runtime.spawn(async move {
+            let accepted = match change {
+                SmartPlaylistChange::Create { name, definition } => database
+                    .create_smart_playlist(source, &name, &definition)
+                    .await
+                    .map(|_| true),
+                SmartPlaylistChange::Update {
+                    key,
+                    name,
+                    definition,
+                } => {
+                    database
+                        .update_smart_playlist(source, key, &name, &definition)
+                        .await
+                }
+                SmartPlaylistChange::Delete(key) => {
+                    database.delete_smart_playlist(source, key).await
+                }
+                SmartPlaylistChange::Move {
+                    dragged,
+                    target,
+                    after,
+                } => {
+                    database
+                        .move_smart_playlist(source, dragged, target, after)
+                        .await
+                }
+            };
+            accepted
+                .map_err(|error| error.to_string())
+                .and_then(|accepted| {
+                    accepted
+                        .then_some(())
+                        .ok_or_else(|| "Smart Playlist is no longer current".to_string())
+                })
+        });
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let result = task
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result);
+            let Some(shell) = shell.upgrade() else { return };
+            let still_current = shell.selected_library().as_deref().is_some_and(|selected| {
+                selected.source_key == source && selected.source_session_epoch == epoch
+            });
+            if result.is_ok() && still_current {
+                shell.render_current_route();
+                crate::routes::playlist_picker::refresh_context_playlist_picker(&shell);
+                crate::shell::navigation::refresh_sidebar_pins(&shell);
+            }
+            if let Err(error) = result.as_ref() {
+                shell.show_control_feedback_toast(error.clone());
+            }
+            if let Some(settled) = settled.as_ref() {
+                settled(result);
+            }
+        });
+    }
+}
+
+#[derive(Clone)]
+struct SmartPlaylistTemplate {
+    name: &'static str,
+    definition: SmartPlaylistDefinition,
+}
+
+fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
+    let most_played = |name, activity_period| SmartPlaylistTemplate {
+        name,
+        definition: SmartPlaylistDefinition {
+            match_all: Vec::new(),
+            match_any: Vec::new(),
+            sort_field: SmartPlaylistSort::PlayCount,
+            descending: true,
+            activity_period,
+            limit: Some(100),
+        },
+    };
+    vec![
+        most_played(
+            msgid("Most Played (Weekly)"),
+            SmartPlaylistActivityPeriod::Weekly,
+        ),
+        most_played(
+            msgid("Most Played (Monthly)"),
+            SmartPlaylistActivityPeriod::Monthly,
+        ),
+        most_played(
+            msgid("Most Played (Yearly)"),
+            SmartPlaylistActivityPeriod::Yearly,
+        ),
+        most_played(
+            msgid("Most Played (Lifetime)"),
+            SmartPlaylistActivityPeriod::Lifetime,
+        ),
+        SmartPlaylistTemplate {
+            name: msgid("Never Played"),
+            definition: SmartPlaylistDefinition {
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::Played,
+                    operator: SmartPlaylistRuleOperator::Is,
+                    value: Some(SmartPlaylistRuleValue::Bool(false)),
+                }],
+                match_any: Vec::new(),
+                sort_field: SmartPlaylistSort::Title,
+                descending: false,
+                activity_period: SmartPlaylistActivityPeriod::Lifetime,
+                limit: None,
+            },
+        },
+    ]
+}
 
 type RerenderSlot = Rc<RefCell<Option<Weak<dyn Fn()>>>>;
 
@@ -33,36 +178,77 @@ struct SmartPlaylistEditor {
     match_any: Rc<RefCell<Vec<SmartPlaylistRule>>>,
     sort: gtk::DropDown,
     descending: gtk::CheckButton,
+    activity_period: gtk::DropDown,
     limit: gtk::Entry,
+}
+
+struct TemplatePicker {
+    apply: Rc<dyn Fn()>,
 }
 
 impl Shell {
     pub(crate) fn new_smart_playlist_dialog(self: &Rc<Self>) {
+        self.load_smart_playlist_suggestions(None);
+    }
+
+    pub(crate) fn edit_smart_playlist_dialog(self: &Rc<Self>, playlist: library::SmartPlaylistRow) {
+        self.load_smart_playlist_suggestions(Some(playlist));
+    }
+
+    fn load_smart_playlist_suggestions(
+        self: &Rc<Self>,
+        playlist: Option<library::SmartPlaylistRow>,
+    ) {
         let Some(selected) = self.selected_library().as_deref().cloned() else {
             return;
         };
-        let missing_defaults = selected
-            .library
-            .missing_builtin_smart_playlists()
-            .ok()
-            .unwrap_or_default();
-        let value_suggestions = self.smart_playlist_rule_value_suggestions();
+        let database = std::sync::Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let folder = selected.music_folder_key;
+        let task = selected.runtime.spawn(async move {
+            database
+                .smart_playlist_value_suggestions(source, folder, &library::ReadCancellation::new())
+                .await
+        });
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let Some(shell) = shell.upgrade() else { return };
+            let suggestions = task
+                .await
+                .ok()
+                .and_then(Result::ok)
+                .map(|values| RuleValueSuggestions {
+                    genres: values.genres,
+                    moods: values.moods,
+                })
+                .unwrap_or_default();
+            if let Some(playlist) = playlist {
+                shell.present_edit_smart_playlist_dialog(playlist, suggestions);
+            } else {
+                shell.present_new_smart_playlist_dialog(suggestions);
+            }
+        });
+    }
+
+    fn present_new_smart_playlist_dialog(self: &Rc<Self>, value_suggestions: RuleValueSuggestions) {
+        let templates = smart_playlist_templates();
         let editor = smart_playlist_editor(None, None);
-        let (content, default_dropdown) =
-            smart_playlist_editor_content(&editor, missing_defaults.as_slice(), value_suggestions);
+        let (content, template_picker) =
+            smart_playlist_editor_content(&editor, &templates, value_suggestions);
         let actions = dialog_action_row();
-        let restore =
-            (!missing_defaults.is_empty()).then(|| dialog_button("Restore Default", None));
+        let restore = template_picker
+            .as_ref()
+            .map(|_| dialog_button(msgid("Use Template"), None));
         if let Some(restore) = &restore {
             actions.append(restore);
         }
-        let cancel = dialog_button("Cancel", None);
-        let create = dialog_button("Create", Some("suggested-action"));
+        let cancel = dialog_button(msgid("Cancel"), None);
+        let create = dialog_button(msgid("Create"), Some("suggested-action"));
         sync_editor_button_enabled(&create, &editor);
         actions.append(&cancel);
         actions.append(&create);
 
-        let dialog = smart_playlist_dialog("New Smart Playlist", &content, &actions);
+        let dialog = smart_playlist_dialog(msgid("New Smart Playlist"), &content, &actions);
         connect_editor_name_validation(&create, &editor);
 
         {
@@ -74,51 +260,80 @@ impl Shell {
             });
         }
 
-        let source = selected.operations;
         if let Some(restore) = restore {
-            let source = source.clone();
-            let dialog = dialog.downgrade();
+            let apply = Rc::clone(&template_picker.expect("template button has a picker").apply);
             restore.connect_clicked(move |_| {
-                if let Some(default_dropdown) = default_dropdown.as_ref() {
-                    let selected = default_dropdown.selected() as usize;
-                    if let Some(builtin) = missing_defaults.get(selected).copied() {
-                        source.restore_builtin_smart_playlist(builtin);
-                    }
-                }
-                if let Some(dialog) = dialog.upgrade() {
-                    dialog.close();
-                }
+                apply();
             });
         }
         {
+            let shell = Rc::clone(self);
             let dialog = dialog.downgrade();
             create.connect_clicked(move |_| {
                 let Some((name, definition)) = editor.definition() else {
                     return;
                 };
-                source.create_smart_playlist(name, definition);
-                if let Some(dialog) = dialog.upgrade() {
-                    dialog.close();
-                }
+                let dialog = dialog.clone();
+                shell.publish_smart_playlist_change(
+                    SmartPlaylistChange::Create { name, definition },
+                    Some(Rc::new(move |result| {
+                        if result.is_ok()
+                            && let Some(dialog) = dialog.upgrade()
+                        {
+                            dialog.close();
+                        }
+                    })),
+                );
             });
         }
         self.present_selected_dialog(&dialog);
     }
-}
 
-impl Shell {
-    fn smart_playlist_rule_value_suggestions(&self) -> RuleValueSuggestions {
-        let (genres, moods) = self
-            .selected_library()
-            .as_deref()
-            .and_then(|selected| {
-                selected
-                    .library
-                    .smart_playlist_rule_value_suggestions()
-                    .ok()
-            })
-            .unwrap_or_default();
-        RuleValueSuggestions { genres, moods }
+    fn present_edit_smart_playlist_dialog(
+        self: &Rc<Self>,
+        playlist: library::SmartPlaylistRow,
+        value_suggestions: RuleValueSuggestions,
+    ) {
+        let editor = smart_playlist_editor(Some(&playlist.name), Some(&playlist.definition));
+        let (content, _) = smart_playlist_editor_content(&editor, &[], value_suggestions);
+        let actions = dialog_action_row();
+        let cancel = dialog_button(msgid("Cancel"), None);
+        let save = dialog_button(msgid("Save"), Some("suggested-action"));
+        sync_editor_button_enabled(&save, &editor);
+        actions.append(&cancel);
+        actions.append(&save);
+        let dialog = smart_playlist_dialog(msgid("Edit Smart Playlist"), &content, &actions);
+        connect_editor_name_validation(&save, &editor);
+        let cancel_dialog = dialog.downgrade();
+        cancel.connect_clicked(move |_| {
+            if let Some(dialog) = cancel_dialog.upgrade() {
+                dialog.close();
+            }
+        });
+        let save_dialog = dialog.downgrade();
+        let shell = Rc::clone(self);
+        let key = playlist.smart_playlist_key;
+        save.connect_clicked(move |_| {
+            let Some((name, definition)) = editor.definition() else {
+                return;
+            };
+            let dialog = save_dialog.clone();
+            shell.publish_smart_playlist_change(
+                SmartPlaylistChange::Update {
+                    key,
+                    name,
+                    definition,
+                },
+                Some(Rc::new(move |result| {
+                    if result.is_ok()
+                        && let Some(dialog) = dialog.upgrade()
+                    {
+                        dialog.close();
+                    }
+                })),
+            );
+        });
+        self.present_selected_dialog(&dialog);
     }
 }
 
@@ -142,15 +357,24 @@ impl SmartPlaylistEditor {
             .parse::<usize>()
             .ok()
             .filter(|value| *value > 0);
-        let sort_field = smart_policy::sort_fields()
+        let sort_field = SmartPlaylistSort::ALL
             .get(self.sort.selected() as usize)
             .copied()
-            .unwrap_or(SmartPlaylistSortField::Title);
+            .unwrap_or(SmartPlaylistSort::Title);
         let definition = SmartPlaylistDefinition {
             match_all: self.match_all.borrow().clone(),
             match_any: self.match_any.borrow().clone(),
             sort_field,
             descending: self.descending.is_active(),
+            activity_period: [
+                SmartPlaylistActivityPeriod::Weekly,
+                SmartPlaylistActivityPeriod::Monthly,
+                SmartPlaylistActivityPeriod::Yearly,
+                SmartPlaylistActivityPeriod::Lifetime,
+            ]
+            .get(self.activity_period.selected() as usize)
+            .copied()
+            .unwrap_or(SmartPlaylistActivityPeriod::Lifetime),
             limit,
         };
         Some((name, definition))
@@ -167,9 +391,7 @@ fn smart_playlist_editor(
         name_entry.set_text(name);
     }
 
-    let definition = definition
-        .cloned()
-        .unwrap_or_else(smart_policy::default_definition);
+    let definition = definition.cloned().unwrap_or_default();
     let sort_labels = sort_labels();
     let sort = dropdown_from_labels(&sort_labels, sort_index(definition.sort_field));
     let descending = gtk::CheckButton::with_label(&tr("Descending"));
@@ -186,27 +408,36 @@ fn smart_playlist_editor(
         match_any: Rc::new(RefCell::new(definition.match_any)),
         sort,
         descending,
+        activity_period: dropdown_from_titles(
+            &["Weekly", "Monthly", "Yearly", "Lifetime"],
+            match definition.activity_period {
+                SmartPlaylistActivityPeriod::Weekly => 0,
+                SmartPlaylistActivityPeriod::Monthly => 1,
+                SmartPlaylistActivityPeriod::Yearly => 2,
+                SmartPlaylistActivityPeriod::Lifetime => 3,
+            },
+        ),
         limit,
     }
 }
 
 fn smart_playlist_editor_content(
     editor: &SmartPlaylistEditor,
-    missing_defaults: &[SmartPlaylistBuiltin],
+    templates: &[SmartPlaylistTemplate],
     value_suggestions: RuleValueSuggestions,
-) -> (gtk::Widget, Option<gtk::DropDown>) {
+) -> (gtk::Widget, Option<TemplatePicker>) {
     let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
     content.set_margin_top(4);
     content.set_margin_bottom(4);
     content.set_margin_start(4);
     content.set_margin_end(4);
 
-    let default_dropdown = if missing_defaults.is_empty() {
+    let default_dropdown = if templates.is_empty() {
         None
     } else {
-        let default_titles = missing_defaults
+        let default_titles = templates
             .iter()
-            .map(|builtin| tr(builtin.title()))
+            .map(|template| tr(template.name))
             .collect::<Vec<_>>();
         let default_refs = default_titles
             .iter()
@@ -214,7 +445,7 @@ fn smart_playlist_editor_content(
             .collect::<Vec<_>>();
         let default_dropdown = dropdown_from_titles(&default_refs, 0);
         default_dropdown.set_hexpand(true);
-        let row = labeled_row("Restore", &[default_dropdown.clone().upcast()]);
+        let row = labeled_row(msgid("Template"), &[default_dropdown.clone().upcast()]);
         content.append(&row);
         Some(default_dropdown)
     };
@@ -222,9 +453,10 @@ fn smart_playlist_editor_content(
     content.append(&editor.name);
 
     let settings = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    settings.append(&labeled_control("Sort", &editor.sort));
+    settings.append(&labeled_control(msgid("Sort"), &editor.sort));
     settings.append(&editor.descending);
-    settings.append(&labeled_control("Limit", &editor.limit));
+    settings.append(&labeled_control(msgid("Activity"), &editor.activity_period));
+    settings.append(&labeled_control(msgid("Limit"), &editor.limit));
     content.append(&settings);
 
     let rules = gtk::Box::new(gtk::Orientation::Vertical, 10);
@@ -247,14 +479,14 @@ fn smart_playlist_editor_content(
             };
             append_rule_list(
                 &rules,
-                "All",
+                msgid("All"),
                 Rc::clone(&match_all),
                 Rc::clone(&value_suggestions),
                 Rc::clone(&rerender),
             );
             append_rule_list(
                 &rules,
-                "Any",
+                msgid("Any"),
                 Rc::clone(&match_any),
                 Rc::clone(&value_suggestions),
                 rerender,
@@ -263,13 +495,52 @@ fn smart_playlist_editor_content(
     };
     *rerender_slot.borrow_mut() = Some(Rc::downgrade(&rerender));
     rerender();
+    let template_picker = default_dropdown.map(|dropdown| {
+        let templates = templates.to_vec();
+        let editor = editor.clone();
+        let rerender = Rc::clone(&rerender);
+        TemplatePicker {
+            apply: Rc::new(move || {
+                let Some(template) = templates.get(dropdown.selected() as usize) else {
+                    return;
+                };
+                editor.name.set_text(&tr(template.name));
+                editor
+                    .match_all
+                    .replace(template.definition.match_all.clone());
+                editor
+                    .match_any
+                    .replace(template.definition.match_any.clone());
+                editor
+                    .sort
+                    .set_selected(sort_index(template.definition.sort_field) as u32);
+                editor.descending.set_active(template.definition.descending);
+                editor
+                    .activity_period
+                    .set_selected(match template.definition.activity_period {
+                        SmartPlaylistActivityPeriod::Weekly => 0,
+                        SmartPlaylistActivityPeriod::Monthly => 1,
+                        SmartPlaylistActivityPeriod::Yearly => 2,
+                        SmartPlaylistActivityPeriod::Lifetime => 3,
+                    });
+                editor.limit.set_text(
+                    &template
+                        .definition
+                        .limit
+                        .map(|value| value.to_string())
+                        .unwrap_or_default(),
+                );
+                rerender();
+            }),
+        }
+    });
     content.append(&rules);
 
     let scroller = gtk::ScrolledWindow::new();
     scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     scroller.set_max_content_height(SMART_PLAYLIST_DIALOG_HEIGHT);
     scroller.set_child(Some(&content));
-    (scroller.upcast(), default_dropdown)
+    (scroller.upcast(), template_picker)
 }
 
 fn append_rule_list(
@@ -301,7 +572,7 @@ fn append_rule_list(
         add_rule.connect_clicked(move |_| {
             rules
                 .borrow_mut()
-                .push(smart_policy::default_rule(SmartPlaylistRuleField::Title));
+                .push(SmartPlaylistRuleField::Title.default_rule());
             rerender();
         });
     }
@@ -343,19 +614,19 @@ fn append_rule_row(
         let rules = Rc::clone(&rules);
         let rerender = Rc::clone(&rerender);
         field.connect_selected_notify(move |dropdown| {
-            let selected = smart_policy::rule_fields()
+            let selected = SmartPlaylistRuleField::ALL
                 .get(dropdown.selected() as usize)
                 .copied()
                 .unwrap_or(SmartPlaylistRuleField::Title);
             if let Some(rule) = rules.borrow_mut().get_mut(index) {
-                *rule = smart_policy::default_rule(selected);
+                *rule = selected.default_rule();
             }
             rerender();
         });
     }
     row.append(&field);
 
-    let operators = smart_policy::rule_ops(rule.field);
+    let operators = rule.field.operators();
     let operator_titles = op_labels(rule.field, operators);
     let operator = dropdown_from_labels(&operator_titles, operator_index(operators, rule.operator));
     operator.set_size_request(150, -1);
@@ -402,7 +673,9 @@ fn append_value_editor(
     index: usize,
     rule: &SmartPlaylistRule,
 ) {
-    match smart_policy::value_kind(rule.field, rule.operator)
+    match rule
+        .field
+        .value_kind(rule.operator)
         .unwrap_or(SmartPlaylistRuleValueKind::None)
     {
         SmartPlaylistRuleValueKind::None => {
@@ -446,7 +719,7 @@ fn append_value_editor(
             }
         }
         SmartPlaylistRuleValueKind::Number => {
-            let (min, max, default) = smart_policy::number_bounds(rule.field);
+            let (min, max, default) = rule.field.number_bounds();
             let value = match rule.value.as_ref() {
                 Some(SmartPlaylistRuleValue::Number(value)) => *value,
                 _ => default,
@@ -461,7 +734,7 @@ fn append_value_editor(
             container.append(&spin);
         }
         SmartPlaylistRuleValueKind::NumberRange => {
-            let (min_bound, max_bound, default) = smart_policy::number_bounds(rule.field);
+            let (min_bound, max_bound, default) = rule.field.number_bounds();
             let (min_value, max_value) = match rule.value.as_ref() {
                 Some(SmartPlaylistRuleValue::NumberRange { min, max }) => (*min, *max),
                 _ => (default, default),
@@ -627,16 +900,16 @@ fn change_rule_operator(
         let Some(rule) = rules.get_mut(index) else {
             return;
         };
-        let operators = smart_policy::rule_ops(rule.field);
-        let Some(spec) = operators
+        let operators = rule.field.operators();
+        let Some(operator) = operators
             .get(selected as usize)
             .copied()
             .or_else(|| operators.first().copied())
         else {
             return;
         };
-        rule.operator = spec.operator;
-        rule.value = smart_policy::default_value(rule.field, spec.operator);
+        rule.operator = operator;
+        rule.value = rule.field.default_value(operator);
     }
     after_change();
 }
@@ -656,14 +929,14 @@ fn remove_rule(
 }
 
 fn field_labels() -> Vec<String> {
-    smart_policy::rule_fields()
+    SmartPlaylistRuleField::ALL
         .iter()
         .map(|field| tr(field_title(*field)))
         .collect()
 }
 
 fn sort_labels() -> Vec<String> {
-    smart_policy::sort_fields()
+    SmartPlaylistSort::ALL
         .iter()
         .map(|field| tr(sort_title(*field)))
         .collect()
@@ -671,11 +944,11 @@ fn sort_labels() -> Vec<String> {
 
 fn op_labels(
     field: SmartPlaylistRuleField,
-    operators: &[smart_policy::SmartPlaylistRuleOp],
+    operators: &[SmartPlaylistRuleOperator],
 ) -> Vec<String> {
     operators
         .iter()
-        .map(|spec| tr(op_title(field, spec.operator)))
+        .map(|operator| tr(op_title(field, *operator)))
         .collect()
 }
 
@@ -699,19 +972,19 @@ fn field_title(field: SmartPlaylistRuleField) -> &'static str {
     }
 }
 
-fn sort_title(field: SmartPlaylistSortField) -> &'static str {
+fn sort_title(field: SmartPlaylistSort) -> &'static str {
     match field {
-        SmartPlaylistSortField::Title => msgid("Title"),
-        SmartPlaylistSortField::Artist => msgid("Artist"),
-        SmartPlaylistSortField::Album => msgid("Album"),
-        SmartPlaylistSortField::Year => msgid("Year"),
-        SmartPlaylistSortField::DateAdded => msgid("Date added"),
-        SmartPlaylistSortField::LastPlayed => msgid("Last played"),
-        SmartPlaylistSortField::PlayCount => msgid("Play count"),
-        SmartPlaylistSortField::SkipCount => msgid("Skip count"),
-        SmartPlaylistSortField::Bpm => msgid("BPM"),
-        SmartPlaylistSortField::Rating => msgid("Rating"),
-        SmartPlaylistSortField::Duration => msgid("Duration"),
+        SmartPlaylistSort::Title => msgid("Title"),
+        SmartPlaylistSort::Artist => msgid("Artist"),
+        SmartPlaylistSort::Album => msgid("Album"),
+        SmartPlaylistSort::Year => msgid("Year"),
+        SmartPlaylistSort::DateAdded => msgid("Date added"),
+        SmartPlaylistSort::LastPlayed => msgid("Last played"),
+        SmartPlaylistSort::PlayCount => msgid("Play count"),
+        SmartPlaylistSort::SkipCount => msgid("Skip count"),
+        SmartPlaylistSort::Bpm => msgid("BPM"),
+        SmartPlaylistSort::Rating => msgid("Rating"),
+        SmartPlaylistSort::Duration => msgid("Duration"),
     }
 }
 
@@ -761,24 +1034,24 @@ fn searchable_dropdown_from_labels(labels: &[String], selected: usize) -> gtk::D
 }
 
 fn field_index(field: SmartPlaylistRuleField) -> usize {
-    smart_policy::rule_fields()
+    SmartPlaylistRuleField::ALL
         .iter()
         .position(|candidate| *candidate == field)
         .unwrap_or(0)
 }
 
 fn operator_index(
-    operators: &[smart_policy::SmartPlaylistRuleOp],
+    operators: &[SmartPlaylistRuleOperator],
     operator: SmartPlaylistRuleOperator,
 ) -> usize {
     operators
         .iter()
-        .position(|spec| spec.operator == operator)
+        .position(|candidate| *candidate == operator)
         .unwrap_or(0)
 }
 
-fn sort_index(sort: SmartPlaylistSortField) -> usize {
-    smart_policy::sort_fields()
+fn sort_index(sort: SmartPlaylistSort) -> usize {
+    SmartPlaylistSort::ALL
         .iter()
         .position(|field| *field == sort)
         .unwrap_or(0)

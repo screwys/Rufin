@@ -4,10 +4,10 @@ use std::{
     sync::Arc,
 };
 
-use ::library::{AlbumDetail, AlbumId, AlbumSummary, FavoriteItemId, Library, MusicFolderId};
+use ::library::{AlbumDetail, AlbumKey, AlbumRow, FavoriteTarget};
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 
+use crate::LibraryListKey;
 use crate::favorites::{
     album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
@@ -15,8 +15,7 @@ use crate::format_duration_units;
 use crate::localization::bind_label_text_with;
 use crate::shell::Shell;
 use crate::shell::actions::{ActionButtonVariant, configure_action_button};
-use crate::shell::route::{LatestMountedRouteRead, MountedRoute, SelectedRouteIdentity};
-use crate::{LibraryListKey, LibraryListSettings};
+use crate::shell::route::{LatestMountedRouteRead, MountedRoute};
 use ::library::RadioSeed;
 use localization::{msgid, tr, track_count_text};
 use playback::RadioPlayRequest;
@@ -31,7 +30,6 @@ use super::detail_showcase::{
     detail_playback_controls, detail_radio_button, fit_detail_text, fitted_detail_title_label,
     media_detail_showcase,
 };
-use super::library_fields::nonzero_year;
 use super::release_kind::album_release_kind_label;
 use super::route::Route;
 use super::route_layout::{
@@ -40,40 +38,31 @@ use super::route_layout::{
     detail_showcase_cover_size,
 };
 use super::routes::SearchableTrackOptions;
-use super::track_model::{
-    PreparedTrackProjection, TrackProjectionRequest, prepare_track_projection,
-};
+use super::track_model::{PreparedTrackProjection, TrackProjectionRequest};
 
 const ALBUM_DETAIL_ROUTE_INSET: i32 = PRIMARY_ROUTE_MARGIN_START + PRIMARY_ROUTE_MARGIN_END;
 
 #[derive(Clone)]
 struct AlbumDetailReadRequest {
-    identity: SelectedRouteIdentity,
     tracks: TrackProjectionRequest,
-}
-
-struct PreparedAlbumDetail {
-    summary: AlbumSummary,
-    tracks: PreparedTrackProjection,
 }
 
 impl Shell {
     pub(crate) fn album_detail_view(
         self: &Rc<Self>,
-        album_id: AlbumId,
+        album_id: AlbumKey,
         detail: Option<AlbumDetail>,
-        loaded: Arc<Library>,
-        music_folder_id: Option<MusicFolderId>,
+        selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(
                 self.placeholder_view("Album", msgid("This isn't available")),
             );
         };
-        let album = Arc::clone(&detail.summary.album);
-        let tracks = detail.tracks.clone();
-        let current_album = Rc::new(RefCell::new(detail.summary.clone()));
-        let context_id = format!("album:{}", album_id.as_str());
+        let album = detail.album.clone();
+        let tracks = detail.track_order.clone();
+        let current_album = Rc::new(RefCell::new(detail.album.clone()));
+        let context_id = format!("album:{album_id}");
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings.current.borrow().external_site_links.clone(),
         ));
@@ -101,6 +90,7 @@ impl Shell {
             set_library_table_content_height(&resize_scroller, row_count, None);
         });
         let track_projection = self.searchable_track_collection(
+            &selected,
             tracks,
             LibraryListKey::AlbumDetailTracks,
             SearchableTrackOptions {
@@ -113,12 +103,12 @@ impl Shell {
         let cover_size = detail_showcase_cover_size(inner_content_width);
         let cover = detail_cover_projection(
             self,
-            ArtworkBinding::album_artwork(&detail.summary.artwork),
+            super::library_fields::opaque_artwork(detail.album.artwork_binding.as_deref()),
             cover_size,
             "album-detail-cover",
         );
-        let facts = DetailSummaryProjection::new(&album_summary_items(&detail.summary));
-        let track_count = Rc::new(Cell::new(detail.summary.track_count));
+        let facts = DetailSummaryProjection::new(&album_summary_items(&detail.album));
+        let track_count = Rc::new(Cell::new(detail.album.track_count.max(0) as u32));
         let localized_track_count = Rc::clone(&track_count);
         facts.bind_text_with(1, move || {
             track_count_text(u64::from(localized_track_count.get()))
@@ -149,16 +139,16 @@ impl Shell {
         let radio_album = Rc::clone(&current_album);
         radio.connect_clicked(move |_| {
             radio_controller.play_radio(RadioPlayRequest::now(RadioSeed::Album(
-                radio_album.borrow().album.id.clone(),
+                radio_album.borrow().album_key,
             )));
         });
         kind_row.append(&radio);
         let genres = gtk::Box::new(gtk::Orientation::Horizontal, 2);
         kind_row.append(&genres);
-        self.append_album_genre_buttons(&genres, &album.relations.genres);
+        self.append_album_genre_buttons(&genres, &album.genres);
 
         let title = fitted_detail_title_label(&album.title);
-        let artist = gtk::Label::new(Some(&album.artist));
+        let artist = gtk::Label::new(Some(&album.display_artist));
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
         artist.set_halign(gtk::Align::Start);
@@ -167,7 +157,7 @@ impl Shell {
         artist.set_width_request(1);
         artist.set_width_chars(1);
         artist.set_max_width_chars(32);
-        fit_detail_text(&artist, &album.artist);
+        fit_detail_text(&artist, &album.display_artist);
         let artist_links = DetailLinkBinding::new(&artist, self);
         artist_links.bind(album_artist_links(&album));
         text_stack.append(&kind_row);
@@ -182,11 +172,12 @@ impl Shell {
         let play_tracks = track_projection.clone();
         let play_context_id = context_id.clone();
         let play: CollectionPlay = Rc::new(move |placement, shuffled_start| {
-            if let Some(request) =
-                play_tracks.source_play_request(placement, &play_context_id, shuffled_start)
-            {
-                play_controller.play_loaded(request);
-            }
+            play_tracks.play_source(
+                play_controller.clone(),
+                placement,
+                play_context_id.clone(),
+                shuffled_start,
+            );
         });
         let cover_controls = detail_playback_controls(
             &actions,
@@ -206,12 +197,12 @@ impl Shell {
             .expect("album detail has a Favorite cover control")
             .clone();
         for button in [favorite, hover_favorite] {
-            self.register_favorite_button(album_favorite_key(&album.id), &button);
+            self.register_favorite_button(album_favorite_key(&album.album_key), &button);
             let shell = Rc::clone(self);
-            let favorite_album_id = album.id.clone();
+            let favorite_album_id = album.album_key;
             button.connect_clicked(move |button| {
                 shell.set_favorite_with_feedback(
-                    FavoriteItemId::Album(favorite_album_id.clone()),
+                    FavoriteTarget::Album(favorite_album_id),
                     !favorite_button_is_active(button),
                     Some(button),
                 );
@@ -242,7 +233,12 @@ impl Shell {
             self,
             MediaDetailShowcase {
                 route_class: "album-detail-showcase",
-                seed: album.color_seed,
+                seed: album
+                    .object_id
+                    .bytes()
+                    .fold(2_166_136_261_u32, |hash, byte| {
+                        hash.wrapping_mul(16_777_619) ^ u32::from(byte)
+                    }),
                 initial_width: inner_content_width,
                 cover: cover.clone(),
                 cover_controls,
@@ -282,110 +278,63 @@ impl Shell {
         );
         route_stack.set_visible_child_name("content");
 
-        let identity = self.mounted_route_read_identity(
-            Route::AlbumDetail(album_id.clone()),
-            &loaded,
-            music_folder_id.clone(),
-        );
         let apply = {
             let shell = Rc::clone(self);
-            let album_id = album_id.clone();
-            let route_stack = route_stack.clone();
-            let current_album = Rc::clone(&current_album);
-            let cover = cover.clone();
-            let facts = facts.clone();
-            let track_count = Rc::clone(&track_count);
-            let kind_message = Rc::clone(&kind_message);
-            let kind = kind.clone();
-            let genres = genres.clone();
-            let title = title.clone();
-            let artist = artist.clone();
-            let artist_links = artist_links.clone();
-            let external_links = external_links.clone();
             let track_projection = track_projection.clone();
+            let route = Route::AlbumDetail(album_id);
             Rc::new(
-                move |request: AlbumDetailReadRequest,
-                      result: Result<Option<PreparedAlbumDetail>, String>| {
-                    if !shell.mounted_route_read_is_current(&request.identity) {
+                move |_: AlbumDetailReadRequest,
+                      result: Result<PreparedTrackProjection, String>| {
+                    if shell.navigation.routes.borrow().current() != &route {
                         return;
                     }
-                    let next = match result {
-                        Ok(next) => next,
-                        Err(error) => {
-                            tracing::warn!(%error, "failed to read the mounted Album route");
-                            return;
+                    match result {
+                        Ok(prepared) => {
+                            track_projection.replace_prepared(prepared);
                         }
-                    };
-                    let Some(next) = next else {
-                        route_stack.set_visible_child_name("missing");
-                        return;
-                    };
-                    if !track_projection.replace_prepared(next.tracks) {
-                        return;
+                        Err(error) => tracing::warn!(%error, "failed to read Album Track order"),
                     }
-                    let album = Arc::clone(&next.summary.album);
-                    debug_assert_eq!(album.id, album_id);
-                    cover.replace(&shell, ArtworkBinding::album_artwork(&next.summary.artwork));
-                    facts.replace(&album_summary_items(&next.summary));
-                    track_count.set(next.summary.track_count);
-                    let next_kind = album_release_kind_label(&album);
-                    kind_message.replace(next_kind);
-                    kind.set_text(&tr(next_kind));
-                    title.set_text(&album.title);
-                    fit_detail_text(&title, &album.title);
-                    artist_links.bind(album_artist_links(&album));
-                    fit_detail_text(&artist, &album.artist);
-                    while let Some(child) = genres.first_child() {
-                        genres.remove(&child);
-                    }
-                    shell.append_album_genre_buttons(&genres, &album.relations.genres);
-                    shell.update_visible_favorite_buttons(
-                        &FavoriteItemId::Album(album.id.clone()),
-                        album.favorite,
-                    );
-                    external_links.replace(album_external_links(&shell, &album));
-                    current_album.replace(next.summary);
-                    route_stack.set_visible_child_name("content");
                 },
             )
         };
-        let load = {
-            let loaded = Arc::clone(&loaded);
-            let album_id = album_id.clone();
-            let music_folder_id = music_folder_id.clone();
-            Arc::new(move |request: &AlbumDetailReadRequest| {
-                load_album_detail(
-                    &loaded,
-                    &album_id,
-                    music_folder_id.as_ref(),
-                    &request.tracks.settings,
-                )
-                .and_then(|detail| {
-                    detail
-                        .map(|detail| {
-                            prepare_track_projection(detail.tracks, request.tracks.clone())
-                                .map(|tracks| PreparedAlbumDetail {
-                                    summary: detail.summary,
-                                    tracks,
-                                })
-                                .map_err(|error| error.to_string())
-                        })
-                        .transpose()
+        let database = Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let folder = selected.music_folder_key;
+        let load = Arc::new(move |request: AlbumDetailReadRequest| {
+            let database = Arc::clone(&database);
+            Box::pin(async move {
+                let cancellation = library::ReadCancellation::new();
+                let order = database
+                    .album_track_order(
+                        source,
+                        album_id,
+                        folder,
+                        &request.tracks.query,
+                        request.tracks.settings.sort_key.track_sort(),
+                        request.tracks.settings.descending,
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())?;
+                Ok::<_, String>(PreparedTrackProjection {
+                    order,
+                    request: request.tracks,
                 })
-            })
-        };
-        let read = LatestMountedRouteRead::new_with_request(apply, load, "mounted Album route");
+            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+        });
+        let read = LatestMountedRouteRead::new_with_request(
+            selected.runtime.clone(),
+            apply,
+            load,
+            "mounted Album route",
+        );
         {
             let read = Rc::downgrade(&read);
-            let identity = identity.clone();
             track_projection.connect_search_request(move |tracks| {
                 let Some(read) = read.upgrade() else {
                     return;
                 };
-                read.request_with_if_running(AlbumDetailReadRequest {
-                    identity: identity.clone(),
-                    tracks,
-                });
+                read.request_with(AlbumDetailReadRequest { tracks });
             });
         }
         let resume = {
@@ -395,12 +344,11 @@ impl Shell {
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
             let read = Rc::clone(&read);
-            let identity = identity.clone();
             Rc::new(move || {
                 let external_link_settings =
                     shell.settings.current.borrow().external_site_links.clone();
                 if *applied_external_link_settings.borrow() != external_link_settings {
-                    external_links.replace(album_external_links(&shell, &album.borrow().album));
+                    external_links.replace(album_external_links(&shell, &album.borrow()));
                     applied_external_link_settings.replace(external_link_settings);
                 }
                 let settings = shell
@@ -411,100 +359,45 @@ impl Shell {
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
-                read.request_with_if_running(AlbumDetailReadRequest {
-                    identity: identity.clone(),
-                    tracks: track_projection.projection_request(),
-                });
-            })
-        };
-        let update = {
-            let album_id = album_id.clone();
-            let track_projection = track_projection.clone();
-            let read = Rc::clone(&read);
-            let identity = identity.clone();
-            let music_folder_id = music_folder_id.clone();
-            Rc::new(move |update: &crate::runtime::SelectedLibraryUpdate| {
-                let replacements = update.change.tracks.as_slice();
-                if !update.change.albums.contains(&album_id)
-                    && !update.change.album_releases.contains(&album_id)
-                {
-                    let exact_membership = matches!(
-                        replacements,
-                        [replacement]
-                            if replacement
-                                .track
-                                .as_ref()
-                                .is_some_and(|track| track.album_id.is_some())
-                    );
-                    if replacements.is_empty()
-                        || (exact_membership
-                            && track_projection.apply_track_replacement(replacements, |track| {
-                                track.album_id.as_ref() == Some(&album_id)
-                                    && music_folder_id.as_ref().is_none_or(|folder_id| {
-                                        track.relations.music_folders.contains(folder_id)
-                                    })
-                            }))
-                    {
-                        return;
-                    }
-                }
                 read.request_with(AlbumDetailReadRequest {
-                    identity: identity.clone(),
                     tracks: track_projection.projection_request(),
                 });
             })
         };
-        MountedRoute::new(route_stack.upcast(), resume)
-            .with_item_navigation(item_navigation)
-            .with_library_update(update)
+        MountedRoute::new(route_stack.upcast(), resume).with_item_navigation(item_navigation)
     }
 
     fn append_album_genre_buttons(
         self: &Rc<Self>,
         row: &gtk::Box,
-        genres: &[::library::GenreCredit],
+        genres: &[::library::AlbumGenreLink],
     ) {
         for genre in genres.iter().filter(|genre| !genre.name.trim().is_empty()) {
             let button = detail_genre_pill_button(genre.name.trim());
             let shell = Rc::clone(self);
-            let genre_id = genre.id.clone();
-            button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(genre_id.clone())));
+            let genre_id = genre.genre_key;
+            button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(genre_id)));
             row.append(&button);
         }
     }
 }
 
-pub(crate) fn load_album_detail(
-    loaded: &Arc<Library>,
-    album_id: &AlbumId,
-    music_folder_id: Option<&MusicFolderId>,
-    settings: &LibraryListSettings,
-) -> Result<Option<AlbumDetail>, String> {
-    let mut detail = loaded
-        .album_detail(album_id, music_folder_id)
-        .map_err(|error| error.to_string())?;
-    if let Some(detail) = detail.as_mut() {
-        detail.tracks = detail
-            .tracks
-            .sorted(settings.sort_key.track_sort(), settings.descending)
-            .map_err(|error| error.to_string())?;
-    }
-    Ok(detail)
-}
-
-fn album_summary_items(summary: &AlbumSummary) -> Vec<(&'static str, String)> {
+fn album_summary_items(summary: &AlbumRow) -> Vec<(&'static str, String)> {
     vec![
         (
             "rufin-x-office-calendar-symbolic",
-            nonzero_year(summary.album.year),
+            summary
+                .year
+                .map(|year| year.to_string())
+                .unwrap_or_default(),
         ),
         (
             "rufin-tracks-symbolic",
-            track_count_text(summary.track_count.into()),
+            track_count_text(summary.track_count.max(0) as u64),
         ),
         (
             "rufin-preferences-system-time-symbolic",
-            format_duration_units(summary.duration_seconds),
+            format_duration_units((summary.duration_millis.max(0) / 1_000) as u32),
         ),
     ]
 }

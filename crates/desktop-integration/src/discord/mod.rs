@@ -454,6 +454,7 @@ pub(crate) mod tests {
                 occurrence: occurrence.clone(),
             },
             track: PlaybackMedia {
+                source_id: "source".to_string(),
                 track_key: Some(library::TrackKey::from_raw(1)),
                 track_object_id: "track".to_string(),
                 title: "Track".to_string(),
@@ -461,6 +462,7 @@ pub(crate) mod tests {
                 album: album.to_string(),
                 album_display_artist: Some("Album Artist".to_string()),
                 album_key: None,
+                primary_artist_key: None,
                 media_uri: None,
                 artwork_binding: None,
                 duration_millis: 42_500,
@@ -469,6 +471,8 @@ pub(crate) mod tests {
                 year: Some(2026),
                 release_date: None,
                 favorite: Some(false),
+                rating: None,
+                is_downloaded: false,
                 source_format: None,
                 musicbrainz_recording_id: Some("recording-id".to_string()),
                 musicbrainz_release_track_id: Some("track-id".to_string()),
@@ -478,6 +482,7 @@ pub(crate) mod tests {
                 cue_path: None,
                 cue_start_millis: None,
                 cue_end_millis: None,
+                artist_links: Vec::new(),
             },
             provenance: Provenance::Manual,
         });
@@ -487,6 +492,7 @@ pub(crate) mod tests {
                 total: 1,
                 current_occurrence: Some(occurrence),
                 current_index: Some(0),
+                current_position: Some(0),
                 next_occurrence: None,
             },
             transport: TransportView {

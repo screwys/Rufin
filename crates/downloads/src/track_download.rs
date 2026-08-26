@@ -979,6 +979,7 @@ pub(super) async fn attach_downloaded_files(
                     source_key,
                     &library::LocalAccessWrite {
                         track_object_id: Some(track.object_id.clone()),
+                        origin: library::LocalAccessOrigin::Download,
                         path: paths.audio.to_string_lossy().into_owned(),
                         root: storage_root.to_string_lossy().into_owned(),
                         relative_path: relative_path.to_string_lossy().into_owned(),

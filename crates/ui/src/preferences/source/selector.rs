@@ -1,9 +1,10 @@
 use std::{rc::Rc, sync::Arc};
 
-use ::library::{MusicFolder, MusicFolderId, SourceId};
+use ::library::FolderRow;
 use adw::prelude::*;
 use gtk::gio;
 use localization::tr;
+use sources::SourceId;
 
 use crate::preferences::{
     present_add_server_preferences_dialog, present_library_preferences_dialog,
@@ -27,8 +28,8 @@ struct SourceMenuContent {
     selected_source_id: Option<SourceId>,
     sources: Arc<[SourceSummary]>,
     local_folders: Arc<[LocalFolder]>,
-    music_folders: Arc<[Arc<MusicFolder>]>,
-    selected_music_folder_id: Option<MusicFolderId>,
+    music_folders: Arc<[FolderRow]>,
+    selected_music_folder_id: Option<String>,
 }
 
 pub(crate) fn install_source_menu_actions(shell: &Rc<Shell>) {
@@ -135,13 +136,13 @@ fn source_menu_content(
 
     let icon_name = configured_source_icon_name(&source);
     let music_folders = selected
-        .filter(|selected| selected.source_id == source.id)
-        .and_then(|selected| selected.library.music_folders().ok())
+        .filter(|selected| selected.artwork.source_id == source.id)
+        .map(|selected| Arc::clone(&selected.music_folders))
         .unwrap_or_else(|| Arc::from([]));
     let selected_music_folder_id = if music_folders.is_empty() {
         None
     } else {
-        selected.and_then(|selected| selected.music_folder_id.clone())
+        selected.and_then(|selected| selected.music_folder_object_id.clone())
     };
     let name = configured_source_display_name(&source);
     SourceMenuContent {
@@ -197,7 +198,7 @@ fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent) {
     );
     shell.chrome.window.add_action(&all_music);
     for (index, folder) in content.music_folders.iter().enumerate() {
-        let folder_id = folder.id.clone();
+        let folder_id = folder.object_id.clone();
         let action = choice_action(
             &format!("{MUSIC_FOLDER_CHOICE_ACTION_PREFIX}{}", index + 1),
             content.selected_music_folder_id.as_ref() == Some(&folder_id),
@@ -219,12 +220,12 @@ fn choice_action(name: &str, active: bool, select: impl Fn() + 'static) -> gio::
     action
 }
 
-fn select_music_folder(shell: &Shell, folder_id: Option<MusicFolderId>) {
+fn select_music_folder(shell: &Shell, folder_id: Option<String>) {
     popdown_primary_menu(shell);
     let selected_folder_id = shell
         .selected_library()
         .as_deref()
-        .and_then(|selected| selected.music_folder_id.clone());
+        .and_then(|selected| selected.music_folder_object_id.clone());
     if selected_folder_id.as_ref() == folder_id.as_ref() {
         return;
     }

@@ -60,6 +60,153 @@ pub enum SmartPlaylistRuleValue {
     DateRange { start: String, end: String },
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum SmartPlaylistRuleValueKind {
+    None,
+    Text,
+    Number,
+    NumberRange,
+    Date,
+    DateRange,
+    Bool,
+}
+
+const TEXT_OPERATORS: &[SmartPlaylistRuleOperator] = &[
+    SmartPlaylistRuleOperator::Contains,
+    SmartPlaylistRuleOperator::NotContains,
+    SmartPlaylistRuleOperator::Equals,
+    SmartPlaylistRuleOperator::NotEquals,
+    SmartPlaylistRuleOperator::IsEmpty,
+    SmartPlaylistRuleOperator::IsNotEmpty,
+];
+const NUMBER_OPERATORS: &[SmartPlaylistRuleOperator] = &[
+    SmartPlaylistRuleOperator::Above,
+    SmartPlaylistRuleOperator::Below,
+    SmartPlaylistRuleOperator::Equals,
+    SmartPlaylistRuleOperator::NotEquals,
+    SmartPlaylistRuleOperator::Between,
+    SmartPlaylistRuleOperator::IsEmpty,
+    SmartPlaylistRuleOperator::IsNotEmpty,
+];
+const BOOL_OPERATORS: &[SmartPlaylistRuleOperator] = &[
+    SmartPlaylistRuleOperator::Is,
+    SmartPlaylistRuleOperator::IsNot,
+];
+const DATE_OPERATORS: &[SmartPlaylistRuleOperator] = &[
+    SmartPlaylistRuleOperator::Before,
+    SmartPlaylistRuleOperator::After,
+    SmartPlaylistRuleOperator::Equals,
+    SmartPlaylistRuleOperator::NotEquals,
+    SmartPlaylistRuleOperator::Between,
+    SmartPlaylistRuleOperator::IsEmpty,
+    SmartPlaylistRuleOperator::IsNotEmpty,
+];
+
+impl SmartPlaylistRuleField {
+    pub const ALL: [Self; 15] = [
+        Self::Title,
+        Self::Artist,
+        Self::Album,
+        Self::Comment,
+        Self::Genre,
+        Self::Mood,
+        Self::Bpm,
+        Self::Rating,
+        Self::Year,
+        Self::Favorite,
+        Self::Played,
+        Self::PlayCount,
+        Self::SkipCount,
+        Self::LastPlayed,
+        Self::DateAdded,
+    ];
+
+    pub fn operators(self) -> &'static [SmartPlaylistRuleOperator] {
+        match self {
+            Self::Title | Self::Artist | Self::Album | Self::Comment | Self::Genre | Self::Mood => {
+                TEXT_OPERATORS
+            }
+            Self::Favorite | Self::Played => BOOL_OPERATORS,
+            Self::LastPlayed | Self::DateAdded => DATE_OPERATORS,
+            _ => NUMBER_OPERATORS,
+        }
+    }
+
+    pub fn value_kind(
+        self,
+        operator: SmartPlaylistRuleOperator,
+    ) -> Option<SmartPlaylistRuleValueKind> {
+        if !self.operators().contains(&operator) {
+            return None;
+        }
+        if matches!(
+            operator,
+            SmartPlaylistRuleOperator::IsEmpty | SmartPlaylistRuleOperator::IsNotEmpty
+        ) {
+            return Some(SmartPlaylistRuleValueKind::None);
+        }
+        Some(match self {
+            Self::Favorite | Self::Played => SmartPlaylistRuleValueKind::Bool,
+            Self::LastPlayed | Self::DateAdded
+                if operator == SmartPlaylistRuleOperator::Between =>
+            {
+                SmartPlaylistRuleValueKind::DateRange
+            }
+            Self::LastPlayed | Self::DateAdded => SmartPlaylistRuleValueKind::Date,
+            Self::Bpm | Self::Rating | Self::Year | Self::PlayCount | Self::SkipCount
+                if operator == SmartPlaylistRuleOperator::Between =>
+            {
+                SmartPlaylistRuleValueKind::NumberRange
+            }
+            Self::Bpm | Self::Rating | Self::Year | Self::PlayCount | Self::SkipCount => {
+                SmartPlaylistRuleValueKind::Number
+            }
+            _ => SmartPlaylistRuleValueKind::Text,
+        })
+    }
+
+    pub fn number_bounds(self) -> (i64, i64, i64) {
+        match self {
+            Self::Rating => (0, 10, 0),
+            Self::Year => (0, 3000, 2000),
+            Self::Bpm => (0, 1000, 120),
+            _ => (0, i32::MAX as i64, 0),
+        }
+    }
+
+    pub fn default_value(
+        self,
+        operator: SmartPlaylistRuleOperator,
+    ) -> Option<SmartPlaylistRuleValue> {
+        match self.value_kind(operator)? {
+            SmartPlaylistRuleValueKind::None => None,
+            SmartPlaylistRuleValueKind::Text => Some(SmartPlaylistRuleValue::Text(String::new())),
+            SmartPlaylistRuleValueKind::Number => {
+                Some(SmartPlaylistRuleValue::Number(self.number_bounds().2))
+            }
+            SmartPlaylistRuleValueKind::NumberRange => Some(SmartPlaylistRuleValue::NumberRange {
+                min: self.number_bounds().2,
+                max: self.number_bounds().2,
+            }),
+            SmartPlaylistRuleValueKind::Date => Some(SmartPlaylistRuleValue::Date(String::new())),
+            SmartPlaylistRuleValueKind::DateRange => Some(SmartPlaylistRuleValue::DateRange {
+                start: String::new(),
+                end: String::new(),
+            }),
+            SmartPlaylistRuleValueKind::Bool => Some(SmartPlaylistRuleValue::Bool(true)),
+        }
+    }
+
+    pub fn default_rule(self) -> SmartPlaylistRule {
+        let operator = self.operators()[0];
+        SmartPlaylistRule {
+            field: self,
+            operator,
+            value: self.default_value(operator),
+        }
+    }
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 #[serde(deny_unknown_fields)]
 pub struct SmartPlaylistRule {
@@ -82,6 +229,22 @@ pub enum SmartPlaylistSort {
     Bpm,
     Rating,
     Duration,
+}
+
+impl SmartPlaylistSort {
+    pub const ALL: [Self; 11] = [
+        Self::Title,
+        Self::Artist,
+        Self::Album,
+        Self::Year,
+        Self::DateAdded,
+        Self::LastPlayed,
+        Self::PlayCount,
+        Self::SkipCount,
+        Self::Bpm,
+        Self::Rating,
+        Self::Duration,
+    ];
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -116,6 +279,19 @@ pub struct SmartPlaylistDefinition {
     pub limit: Option<usize>,
 }
 
+impl Default for SmartPlaylistDefinition {
+    fn default() -> Self {
+        Self {
+            match_all: Vec::new(),
+            match_any: Vec::new(),
+            sort_field: SmartPlaylistSort::Title,
+            descending: false,
+            activity_period: SmartPlaylistActivityPeriod::Lifetime,
+            limit: None,
+        }
+    }
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SmartPlaylistRow {
     pub smart_playlist_key: SmartPlaylistKey,
@@ -126,6 +302,14 @@ pub struct SmartPlaylistRow {
     pub position: i64,
     pub track_count: i64,
     pub duration_millis: i64,
+    pub downloaded_count: i64,
+    pub artwork_bindings: Vec<Vec<u8>>,
+}
+
+#[derive(Clone, Debug, Default, Eq, PartialEq)]
+pub struct SmartPlaylistValueSuggestions {
+    pub genres: Vec<String>,
+    pub moods: Vec<String>,
 }
 
 impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
@@ -141,11 +325,48 @@ impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
             position: row.try_get("position")?,
             track_count: row.try_get("track_count")?,
             duration_millis: row.try_get("duration_millis")?,
+            downloaded_count: 0,
+            artwork_bindings: Vec::new(),
         })
     }
 }
 
 impl Database {
+    pub async fn smart_playlist_value_suggestions(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<SmartPlaylistValueSuggestions> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let genres = sqlx::query_scalar::<_, String>(
+            "SELECT genre.name FROM genres genre WHERE genre.source_key=?1
+             AND (?2 IS NULL OR EXISTS (
+               SELECT 1 FROM track_genres relation JOIN track_folders scope USING(track_key)
+               WHERE relation.genre_key=genre.genre_key AND scope.folder_key=?2))
+             ORDER BY genre.sort_text,genre.genre_key LIMIT 100",
+        )
+        .bind(source)
+        .bind(folder)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let moods = sqlx::query_scalar::<_, String>(
+            "SELECT mood.name FROM moods mood WHERE mood.source_key=?1
+             AND (?2 IS NULL OR EXISTS (
+               SELECT 1 FROM track_moods relation JOIN track_folders scope USING(track_key)
+               WHERE relation.mood_key=mood.mood_key AND scope.folder_key=?2))
+             ORDER BY mood.sort_text,mood.mood_key LIMIT 100",
+        )
+        .bind(source)
+        .bind(folder)
+        .fetch_all(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(SmartPlaylistValueSuggestions { genres, moods })
+    }
+
     pub async fn smart_playlist_key_by_object(
         &self,
         source: SourceKey,
@@ -274,6 +495,15 @@ impl Database {
             .await?;
             row.track_count = facts.0;
             row.duration_millis = facts.1;
+            row.downloaded_count = facts.2;
+            row.artwork_bindings = membership_artwork(
+                &mut transaction,
+                source,
+                row.smart_playlist_key,
+                folder,
+                now,
+            )
+            .await?;
         }
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
@@ -355,6 +585,75 @@ impl Database {
         )
     }
 
+    pub async fn move_smart_playlist(
+        &self,
+        source: SourceKey,
+        dragged: SmartPlaylistKey,
+        target: SmartPlaylistKey,
+        after: bool,
+    ) -> LibraryResult<bool> {
+        if dragged == target {
+            return Ok(false);
+        }
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let positions = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
+            "SELECT
+               (SELECT position FROM smart_playlists WHERE source_key=?1 AND smart_playlist_key=?2),
+               (SELECT position FROM smart_playlists WHERE source_key=?1 AND smart_playlist_key=?3)",
+        )
+        .bind(source)
+        .bind(dragged)
+        .bind(target)
+        .fetch_optional(&mut *transaction)
+        .await?;
+        let Some((Some(dragged_position), Some(target_position))) = positions else {
+            transaction.rollback().await?;
+            return Ok(false);
+        };
+        let mut insertion = target_position + i64::from(after);
+        if dragged_position < insertion {
+            insertion -= 1;
+        }
+        if insertion == dragged_position {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        if insertion < dragged_position {
+            sqlx::query(
+                "UPDATE smart_playlists SET position=position+1
+                 WHERE source_key=?1 AND position>=?2 AND position<?3",
+            )
+            .bind(source)
+            .bind(insertion)
+            .bind(dragged_position)
+            .execute(&mut *transaction)
+            .await?;
+        } else {
+            sqlx::query(
+                "UPDATE smart_playlists SET position=position-1
+                 WHERE source_key=?1 AND position>?2 AND position<=?3",
+            )
+            .bind(source)
+            .bind(dragged_position)
+            .bind(insertion)
+            .execute(&mut *transaction)
+            .await?;
+        }
+        sqlx::query(
+            "UPDATE smart_playlists SET position=?3
+             WHERE source_key=?1 AND smart_playlist_key=?2",
+        )
+        .bind(source)
+        .bind(dragged)
+        .bind(insertion)
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(true)
+    }
+
     pub async fn smart_playlist_track_order(
         &self,
         source: SourceKey,
@@ -386,16 +685,43 @@ async fn membership_facts(
     key: SmartPlaylistKey,
     folder: Option<FolderKey>,
     now: i64,
-) -> LibraryResult<(i64, i64)> {
+) -> LibraryResult<(i64, i64, i64)> {
     let sql = format!("{SMART_POLICY_SQL}\n{SMART_FACTS_SELECT}");
-    Ok(sqlx::query_as::<_, (i64, i64)>(AssertSqlSafe(sql.as_str()))
-        .persistent(false)
-        .bind(source)
-        .bind(now)
-        .bind(folder)
-        .bind(key)
-        .fetch_one(&mut **transaction)
-        .await?)
+    Ok(
+        sqlx::query_as::<_, (i64, i64, i64)>(AssertSqlSafe(sql.as_str()))
+            .persistent(false)
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(key)
+            .fetch_one(&mut **transaction)
+            .await?,
+    )
+}
+
+async fn membership_artwork(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    source: SourceKey,
+    key: SmartPlaylistKey,
+    folder: Option<FolderKey>,
+    now: i64,
+) -> LibraryResult<Vec<Vec<u8>>> {
+    let sql = format!(
+        "{SMART_POLICY_SQL}\nSELECT album.artwork_binding
+         FROM selected JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
+         WHERE definition_key=?4 AND album.artwork_binding IS NOT NULL
+         GROUP BY album.album_key ORDER BY min(membership_position) LIMIT 4"
+    );
+    Ok(
+        sqlx::query_scalar::<_, Vec<u8>>(AssertSqlSafe(sql.as_str()))
+            .persistent(false)
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(key)
+            .fetch_all(&mut **transaction)
+            .await?,
+    )
 }
 
 fn require_name(name: &str) -> LibraryResult<&str> {
@@ -427,73 +753,34 @@ fn normalize_definition(definition: &mut SmartPlaylistDefinition) -> LibraryResu
         .iter_mut()
         .chain(&mut definition.match_any)
     {
-        let empty = matches!(
-            rule.operator,
-            SmartPlaylistRuleOperator::IsEmpty | SmartPlaylistRuleOperator::IsNotEmpty
-        );
-        let valid = match rule.field {
-            SmartPlaylistRuleField::Title
-            | SmartPlaylistRuleField::Artist
-            | SmartPlaylistRuleField::Album
-            | SmartPlaylistRuleField::Comment
-            | SmartPlaylistRuleField::Genre
-            | SmartPlaylistRuleField::Mood => {
-                empty && rule.value.is_none()
-                    || matches!(
-                        (&rule.operator, &rule.value),
-                        (
-                            SmartPlaylistRuleOperator::Contains
-                                | SmartPlaylistRuleOperator::NotContains
-                                | SmartPlaylistRuleOperator::Equals
-                                | SmartPlaylistRuleOperator::NotEquals,
-                            Some(SmartPlaylistRuleValue::Text(_))
-                        )
-                    )
-            }
-            SmartPlaylistRuleField::Bpm
-            | SmartPlaylistRuleField::Rating
-            | SmartPlaylistRuleField::Year
-            | SmartPlaylistRuleField::PlayCount
-            | SmartPlaylistRuleField::SkipCount => {
-                empty && rule.value.is_none()
-                    || matches!(
-                        (&rule.operator, &rule.value),
-                        (
-                            SmartPlaylistRuleOperator::Above
-                                | SmartPlaylistRuleOperator::Below
-                                | SmartPlaylistRuleOperator::Equals
-                                | SmartPlaylistRuleOperator::NotEquals,
-                            Some(SmartPlaylistRuleValue::Number(_))
-                        ) | (
-                            SmartPlaylistRuleOperator::Between,
-                            Some(SmartPlaylistRuleValue::NumberRange { .. })
-                        )
-                    )
-            }
-            SmartPlaylistRuleField::Favorite | SmartPlaylistRuleField::Played => matches!(
-                (&rule.operator, &rule.value),
-                (
-                    SmartPlaylistRuleOperator::Is | SmartPlaylistRuleOperator::IsNot,
+        let valid = matches!(
+            (rule.field.value_kind(rule.operator), &rule.value),
+            (Some(SmartPlaylistRuleValueKind::None), None)
+                | (
+                    Some(SmartPlaylistRuleValueKind::Text),
+                    Some(SmartPlaylistRuleValue::Text(_))
+                )
+                | (
+                    Some(SmartPlaylistRuleValueKind::Number),
+                    Some(SmartPlaylistRuleValue::Number(_))
+                )
+                | (
+                    Some(SmartPlaylistRuleValueKind::NumberRange),
+                    Some(SmartPlaylistRuleValue::NumberRange { .. })
+                )
+                | (
+                    Some(SmartPlaylistRuleValueKind::Date),
+                    Some(SmartPlaylistRuleValue::Date(_))
+                )
+                | (
+                    Some(SmartPlaylistRuleValueKind::DateRange),
+                    Some(SmartPlaylistRuleValue::DateRange { .. })
+                )
+                | (
+                    Some(SmartPlaylistRuleValueKind::Bool),
                     Some(SmartPlaylistRuleValue::Bool(_))
                 )
-            ),
-            SmartPlaylistRuleField::LastPlayed | SmartPlaylistRuleField::DateAdded => {
-                empty && rule.value.is_none()
-                    || matches!(
-                        (&rule.operator, &rule.value),
-                        (
-                            SmartPlaylistRuleOperator::Before
-                                | SmartPlaylistRuleOperator::After
-                                | SmartPlaylistRuleOperator::Equals
-                                | SmartPlaylistRuleOperator::NotEquals,
-                            Some(SmartPlaylistRuleValue::Date(_))
-                        ) | (
-                            SmartPlaylistRuleOperator::Between,
-                            Some(SmartPlaylistRuleValue::DateRange { .. })
-                        )
-                    )
-            }
-        };
+        );
         if !valid {
             return Err(LibraryError::InvalidRequest(
                 "Smart Playlist rule operator and value do not match the field".to_string(),
@@ -675,6 +962,7 @@ facts AS (
     LEFT JOIN activity_baseline AS baseline
       ON baseline.source_key=track.source_key
      AND baseline.track_object_id=track.object_id
+     AND baseline.period='lifetime' AND baseline.item_kind='track'
     LEFT JOIN window_listens AS window
       ON window.definition_key=definition.definition_key
      AND window.track_key=track.track_key
@@ -881,9 +1169,9 @@ ORDER BY membership_position
 "#;
 
 const SMART_FACTS_SELECT: &str = r#"
-SELECT count(*), COALESCE(sum(duration_millis), 0)
-FROM selected
-WHERE definition_key=?4
+SELECT count(*), COALESCE(sum(duration_millis), 0),
+       count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=?1 AND access.track_object_id=selected.object_id AND access.origin='download') THEN 1 END)
+FROM selected WHERE definition_key=?4
 "#;
 
 const SMART_LIST_SELECT: &str = r#"

@@ -22,41 +22,48 @@ mod smart_playlists;
 mod tracks;
 
 pub use activity::{
-    ActivityBaseline, ActivityHistoryRow, ActivityPeriod, ActivityTrackRow, ListenDeliveryTarget,
-    ListenWrite, PendingListenDelivery,
+    ActivityAlbumRow, ActivityArtistRow, ActivityBaseline, ActivityGenreRow, ActivityHistoryRow,
+    ActivityPeriod, ActivityTrackRow, CalendarActivityPeriod, CalendarActivitySummary,
+    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
-pub use artwork::{ArtworkPreparationPage, LocalAlbumArtworkCandidate};
+pub use artwork::{ArtworkPreparationPage, LocalAlbumArtworkCandidate, LocalArtworkObservation};
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
-    AlbumReleaseResult, AlbumRow, AlbumSort, ArtistDetail, ArtistMetadataWrite, ArtistRow,
-    ArtistSort, FolderRow, GenreDetail, GenreRow, GenreSort, MoodDetail, MoodRow, MoodSort,
+    AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
+    ArtistDetail, ArtistMetadataWrite, ArtistRow, ArtistSort, FolderRow, GenreDetail, GenreRow,
+    GenreSort, MoodDetail, MoodRow, MoodSort,
 };
 pub use db::{Database, ReadCancellation};
 pub use favorites::{FavoriteTarget, PendingFavorite};
-pub use home::{HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomeTrackRow};
+pub use home::{
+    HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage, HomeProviderSection,
+    HomeSectionRows, HomeShowcaseRow, HomeTrackRow,
+};
 pub use keys::{
-    AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
-    LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, QueueOccurrenceKey, SmartPlaylistKey,
-    SourceKey, TrackKey,
+    AlbumDetailRouteKey, AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey,
+    LocalAccessFileKey, LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, QueueOccurrenceKey,
+    SmartPlaylistKey, SourceKey, TrackKey,
 };
 pub use local::{
-    LocalAccessRow, LocalAccessWrite, LocalFileKind, LocalFileRow, LocalFileState, LocalFileWrite,
+    LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind, LocalFileRow,
+    LocalFileState, LocalFileWrite, MappingTrackRow,
 };
 pub use loudness::{AlbumLoudnessTrack, AlbumLoudnessWork, LoudnessMeasurement, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
-pub use playlists::{PlaylistEntryRow, PlaylistEntrySort, PlaylistRow, PlaylistSort};
+pub use playlists::{
+    PlaylistEntryRow, PlaylistEntrySort, PlaylistGenreLink, PlaylistRow, PlaylistSort,
+};
 pub use queue::{
     QueueCompactOccurrence, QueueCurrentNext, QueueMedia, QueuePageRow, QueueProvenance,
     QueueRepeatMode, QueueRestore, QueueState,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
-pub use recovery::RecoveryReport;
-pub use scan::{CachedSource, Freshness, Publication, Scan, ScanOutcome};
+pub use scan::{CachedSource, Freshness, Publication, Scan, ScanLink, ScanOutcome};
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
     SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistSort,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
 };
 pub use tracks::{
     TrackArtistLink, TrackDetail, TrackGenreLink, TrackMetadataWrite, TrackRow, TrackSort,
@@ -95,3 +102,9 @@ pub enum LibraryError {
 }
 
 pub type LibraryResult<T> = Result<T, LibraryError>;
+
+impl LibraryError {
+    pub fn is_store_path_io(&self) -> bool {
+        matches!(self, Self::Io(_) | Self::Sqlite(sqlx::Error::Io(_)))
+    }
+}

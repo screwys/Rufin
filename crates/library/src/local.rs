@@ -7,7 +7,7 @@ use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 
 use crate::{
     Database, LibraryError, LibraryResult, LocalAccessFileKey, LocalFileKey, ReadCancellation,
-    SourceKey, loudness::recompute_album_loudness_key,
+    SourceKey, TrackKey, loudness::recompute_album_loudness_key,
 };
 
 const LOCAL_FILE_PAGE_LIMIT: usize = 128;
@@ -82,6 +82,7 @@ struct LocalDependency {
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalAccessWrite {
     pub track_object_id: Option<String>,
+    pub origin: LocalAccessOrigin,
     pub path: String,
     pub root: String,
     pub relative_path: String,
@@ -104,6 +105,7 @@ pub struct LocalAccessWrite {
 pub struct LocalAccessRow {
     pub local_access_file_key: LocalAccessFileKey,
     pub track_object_id: Option<String>,
+    pub origin: LocalAccessOrigin,
     pub path: String,
     pub root: String,
     pub relative_path: String,
@@ -115,8 +117,39 @@ pub struct LocalAccessRow {
     pub media_uri: String,
 }
 
-impl LocalFileKind {
+#[derive(Clone, Debug, FromRow, PartialEq)]
+pub struct MappingTrackRow {
+    pub track_key: TrackKey,
+    pub object_id: String,
+    pub source_path: String,
+    pub title: String,
+    pub album: String,
+    pub artist: String,
+    pub disc_number: i64,
+    pub track_number: i64,
+    pub duration_millis: i64,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, sqlx::Type)]
+#[sqlx(type_name = "TEXT", rename_all = "lowercase")]
+pub enum LocalAccessOrigin {
+    Local,
+    Mapping,
+    Download,
+}
+
+impl LocalAccessOrigin {
     fn as_str(self) -> &'static str {
+        match self {
+            Self::Local => "local",
+            Self::Mapping => "mapping",
+            Self::Download => "download",
+        }
+    }
+}
+
+impl LocalFileKind {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Media => "media",
             Self::Cue => "cue",
@@ -138,7 +171,7 @@ impl LocalFileKind {
 }
 
 impl LocalFileState {
-    fn as_str(self) -> &'static str {
+    pub(crate) fn as_str(self) -> &'static str {
         match self {
             Self::Accepted => "accepted",
             Self::Rejected => "rejected",
@@ -160,6 +193,197 @@ impl LocalFileState {
 }
 
 impl Database {
+    pub async fn source_counts(
+        &self,
+        source: SourceKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<(usize, usize)> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let(album,track)=sqlx::query_as::<_,(i64,i64)>("SELECT (SELECT count(*) FROM albums WHERE source_key=?1),(SELECT count(*) FROM tracks WHERE source_key=?1)").bind(source).fetch_one(&mut *connection).await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok((
+            usize::try_from(album).unwrap_or_default(),
+            usize::try_from(track).unwrap_or_default(),
+        ))
+    }
+
+    pub async fn mapping_access_count(
+        &self,
+        source: SourceKey,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<usize> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let count=sqlx::query_scalar::<_,i64>("SELECT count(DISTINCT track_object_id) FROM local_access_files WHERE source_key=?1 AND origin='mapping' AND track_object_id IS NOT NULL").bind(source).fetch_one(&mut *connection).await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(usize::try_from(count).unwrap_or_default())
+    }
+
+    pub async fn clear_mapping_access(&self, source: SourceKey) -> LibraryResult<u64> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let removed =
+            sqlx::query("DELETE FROM local_access_files WHERE source_key=?1 AND origin='mapping'")
+                .bind(source)
+                .execute(&mut *connection)
+                .await?
+                .rows_affected();
+        sqlx::query("UPDATE tracks SET loudness_analysis_key=COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.source_key=tracks.source_key AND access.track_object_id=tracks.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),source_loudness_analysis_key) WHERE source_key=?1")
+            .bind(source).execute(&mut *connection).await?;
+        Ok(removed)
+    }
+
+    pub async fn mapping_track_page(
+        &self,
+        source: SourceKey,
+        after: Option<TrackKey>,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<MappingTrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let rows = sqlx::query_as::<_, MappingTrackRow>(
+            "SELECT track_key,object_id,source_path,title,display_album album,display_artist artist,disc_number,track_number,duration_millis
+             FROM tracks WHERE source_key=?1 AND track_key>?2 AND source_path IS NOT NULL
+             ORDER BY track_key LIMIT ?3",
+        ).bind(source).bind(after.map_or(0, TrackKey::raw)).bind(limit.clamp(1,128) as i64)
+        .fetch_all(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows?)
+    }
+
+    pub async fn mapping_track_object(
+        &self,
+        source: SourceKey,
+        title: &str,
+        album: &str,
+        artist: &str,
+        disc_number: i64,
+        track_number: i64,
+        duration_millis: i64,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<String>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result=sqlx::query_scalar("SELECT object_id FROM tracks WHERE source_key=?1 AND normalized_search IS NOT NULL AND lower(title)=lower(?2) AND lower(display_album)=lower(?3) AND lower(display_artist)=lower(?4) AND disc_number=?5 AND track_number=?6 AND abs(duration_millis-?7)<=2000 ORDER BY track_key LIMIT 1")
+            .bind(source).bind(title).bind(album).bind(artist).bind(disc_number).bind(track_number).bind(duration_millis).fetch_optional(&mut *connection).await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
+    pub async fn local_directory_page(
+        &self,
+        source: SourceKey,
+        after: Option<&str>,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<LocalFileRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let scalars = sqlx::query_as::<_, LocalFileScalar>(
+            "SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state
+             FROM local_files WHERE source_key=?1 AND kind='directory' AND path>?2
+             ORDER BY path LIMIT ?3",
+        )
+        .bind(source)
+        .bind(after.unwrap_or(""))
+        .bind(limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64)
+        .fetch_all(&mut *transaction)
+        .await?;
+        let rows = load_local_file_rows(&mut transaction, scalars).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    /// Returns the bounded persisted Local component touched by exact watcher paths.
+    /// Direct observations, CUE owners of changed dependencies, and directory siblings of
+    /// changed artwork are resolved from the accepted observation ledger without walking roots.
+    pub async fn local_component_file_page(
+        &self,
+        source: SourceKey,
+        paths: &[String],
+        image_directories: &[String],
+        after: Option<LocalFileKey>,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<LocalFileRow>> {
+        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local watcher batch exceeds 128 paths".to_string(),
+            ));
+        }
+        if paths.is_empty() && image_directories.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        if image_directories.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local artwork directory batch exceeds 128 paths".to_string(),
+            ));
+        }
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
+        if paths.is_empty() {
+            query.push("SELECT NULL,NULL WHERE 0");
+        } else {
+            query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
+                row.push_bind(path).push_bind(position as i64);
+            });
+        }
+        query.push("), artwork_directory(prefix) AS (");
+        if image_directories.is_empty() {
+            query.push("SELECT NULL WHERE 0");
+        } else {
+            query.push_values(image_directories, |mut row, directory| {
+                row.push_bind(directory);
+            });
+        }
+        query.push(") SELECT DISTINCT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.parse_version,file.state FROM local_files file WHERE file.source_key=")
+            .push_bind(source)
+            .push(" AND file.local_file_key>")
+            .push_bind(after.map_or(0, LocalFileKey::raw))
+            .push(" AND (EXISTS(SELECT 1 FROM requested WHERE requested.path=file.path) OR EXISTS(SELECT 1 FROM local_file_dependencies dependency JOIN requested ON requested.path=dependency.dependency_path WHERE dependency.local_file_key=file.local_file_key) OR EXISTS(SELECT 1 FROM artwork_directory WHERE file.path>=artwork_directory.prefix AND file.path<artwork_directory.prefix||char(1114111))) ORDER BY file.local_file_key LIMIT ")
+            .push_bind(limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64);
+        let scalars = query
+            .build_query_as::<LocalFileScalar>()
+            .persistent(false)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = load_local_file_rows(&mut transaction, scalars).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    pub async fn local_track_objects_for_paths(
+        &self,
+        source: SourceKey,
+        paths: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Local component batch exceeds 128 paths".to_string(),
+            ));
+        }
+        if paths.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
+        query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
+            row.push_bind(path).push_bind(position as i64);
+        });
+        query.push(") SELECT DISTINCT track.object_id FROM requested JOIN tracks track ON track.source_key=")
+            .push_bind(source)
+            .push(" AND (track.media_uri='file://'||requested.path OR track.cue_path=requested.path) ORDER BY track.object_id");
+        let result = query
+            .build_query_scalar()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
     pub async fn local_accepted_paths(
         &self,
         source: SourceKey,
@@ -400,11 +624,11 @@ impl Database {
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
         if let Some(track_object_id) = access.track_object_id.as_deref() {
-            sqlx::query("DELETE FROM local_access_files WHERE source_key=?1 AND track_object_id=?2 AND path<>?3")
-                .bind(source).bind(track_object_id).bind(&access.path).execute(&mut *transaction).await?;
+            sqlx::query("DELETE FROM local_access_files WHERE source_key=?1 AND track_object_id=?2 AND origin=?3 AND path<>?4")
+                .bind(source).bind(track_object_id).bind(access.origin.as_str()).bind(&access.path).execute(&mut *transaction).await?;
         }
-        let key=sqlx::query_scalar::<_, LocalAccessFileKey>("INSERT INTO local_access_files(source_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,title,normalized_title,album,normalized_album,artist,normalized_artist,disc_number,track_number,duration_millis,media_uri,loudness_analysis_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,lower(?11),?12,lower(?12),?13,lower(?13),?14,?15,?16,?17,?18) ON CONFLICT(source_key,path) DO UPDATE SET track_object_id=excluded.track_object_id,root=excluded.root,relative_path=excluded.relative_path,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parser_version=excluded.parser_version,title=excluded.title,normalized_title=excluded.normalized_title,album=excluded.album,normalized_album=excluded.normalized_album,artist=excluded.artist,normalized_artist=excluded.normalized_artist,disc_number=excluded.disc_number,track_number=excluded.track_number,duration_millis=excluded.duration_millis,media_uri=excluded.media_uri,loudness_analysis_key=excluded.loudness_analysis_key RETURNING local_access_file_key")
-            .bind(source).bind(access.track_object_id.as_deref()).bind(&access.path).bind(&access.root)
+        let key=sqlx::query_scalar::<_, LocalAccessFileKey>("INSERT INTO local_access_files(source_key,track_object_id,origin,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,title,normalized_title,album,normalized_album,artist,normalized_artist,disc_number,track_number,duration_millis,media_uri,loudness_analysis_key) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,lower(?12),?13,lower(?13),?14,lower(?14),?15,?16,?17,?18,?19) ON CONFLICT(source_key,path) DO UPDATE SET track_object_id=excluded.track_object_id,origin=excluded.origin,root=excluded.root,relative_path=excluded.relative_path,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parser_version=excluded.parser_version,title=excluded.title,normalized_title=excluded.normalized_title,album=excluded.album,normalized_album=excluded.normalized_album,artist=excluded.artist,normalized_artist=excluded.normalized_artist,disc_number=excluded.disc_number,track_number=excluded.track_number,duration_millis=excluded.duration_millis,media_uri=excluded.media_uri,loudness_analysis_key=excluded.loudness_analysis_key RETURNING local_access_file_key")
+            .bind(source).bind(access.track_object_id.as_deref()).bind(access.origin.as_str()).bind(&access.path).bind(&access.root)
             .bind(&access.relative_path).bind(access.size_bytes).bind(access.mtime_ns)
             .bind(access.device_id).bind(access.inode).bind(access.parser_version)
             .bind(&access.title).bind(&access.album).bind(&access.artist).bind(access.disc_number)
@@ -417,7 +641,7 @@ impl Database {
                     "SELECT track_key,album_key FROM tracks WHERE source_key=?1 AND object_id=?2",
                 )
                 .bind(source)
-                .bind(track_object_id)
+                .bind(&track_object_id)
                 .fetch_optional(&mut *transaction)
                 .await?
         {
@@ -447,12 +671,12 @@ impl Database {
     ) -> LibraryResult<Option<LocalAccessRow>> {
         let mut connection = self.acquire_playback().await?;
         if let Some(track_object_id) = track_object_id {
-            if let Some(row) = sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND track_object_id=?2")
+            if let Some(row) = sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,origin,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND track_object_id=?2 ORDER BY CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,local_access_file_key LIMIT 1")
                 .bind(source).bind(track_object_id).fetch_optional(&mut *connection).await? {
                 return Ok(Some(row));
             }
         }
-        Ok(sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND normalized_title=lower(?2) AND normalized_album=lower(?3) AND normalized_artist=lower(?4) AND disc_number=?5 AND track_number=?6 AND duration_millis=?7 ORDER BY local_access_file_key LIMIT 1")
+        Ok(sqlx::query_as::<_, LocalAccessRow>("SELECT local_access_file_key,track_object_id,origin,path,root,relative_path,size_bytes,mtime_ns,device_id,inode,parser_version,media_uri FROM local_access_files WHERE source_key=?1 AND normalized_title=lower(?2) AND normalized_album=lower(?3) AND normalized_artist=lower(?4) AND disc_number=?5 AND track_number=?6 AND duration_millis=?7 ORDER BY CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,local_access_file_key LIMIT 1")
             .bind(source).bind(title).bind(album).bind(artist).bind(disc_number)
             .bind(track_number).bind(duration_millis).fetch_optional(&mut *connection).await?)
     }
@@ -482,12 +706,12 @@ impl Database {
                     "SELECT track_key,album_key FROM tracks WHERE source_key=?1 AND object_id=?2",
                 )
                 .bind(source)
-                .bind(track_object_id)
+                .bind(&track_object_id)
                 .fetch_optional(&mut *transaction)
                 .await?
         {
-            sqlx::query("UPDATE tracks SET loudness_analysis_key=source_loudness_analysis_key WHERE track_key=?1")
-                .bind(track).execute(&mut *transaction).await?;
+            sqlx::query("UPDATE tracks SET loudness_analysis_key=COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.source_key=?2 AND access.track_object_id=?3 ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),source_loudness_analysis_key) WHERE track_key=?1")
+                .bind(track).bind(source).bind(&track_object_id).execute(&mut *transaction).await?;
             if let Some(album) = album {
                 recompute_album_loudness_key(&mut transaction, album).await?;
             }

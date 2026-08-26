@@ -1,5 +1,4 @@
 mod backend;
-mod checkpoint;
 mod commands;
 mod listening;
 mod runtime;
@@ -9,7 +8,6 @@ mod settings;
 mod view;
 
 pub use backend::*;
-pub use checkpoint::*;
 pub use commands::*;
 pub use listening::*;
 pub use runtime::*;

@@ -10,6 +10,7 @@ use std::path::{Path, PathBuf};
 use lofty::prelude::{Accessor, TaggedFileExt};
 use lofty::tag::ItemKey;
 use serde::Deserialize;
+use walkdir::WalkDir;
 
 use crate::source::SourceReadProgress;
 use crate::{
@@ -113,8 +114,17 @@ impl LocalSource {
         scan: &mut library::Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
+        reuse_unchanged: bool,
     ) -> SourceResult<()> {
-        scan::stage_catalog(database, &self.roots, scan, progress, cancelled).await
+        scan::stage_catalog(
+            database,
+            &self.roots,
+            scan,
+            progress,
+            cancelled,
+            reuse_unchanged,
+        )
+        .await
     }
 
     pub(super) async fn publish_metadata_paths(
@@ -129,40 +139,14 @@ impl LocalSource {
             .await
     }
 
-    pub(super) async fn persist_initial_observations(
+    pub(super) async fn publish_paths(
         &self,
         database: &library::Database,
         source: library::SourceKey,
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<()> {
-        scan::persist_initial_observations(database, source, &self.roots, cancelled).await
-    }
-
-    pub(super) async fn reconcile_observations(
-        &self,
-        database: &library::Database,
-        source: library::SourceKey,
-    ) -> SourceResult<()> {
-        let cancellation = library::ReadCancellation::new();
-        let mut after = None;
-        loop {
-            let page = database
-                .local_file_page(source, after, 128, &cancellation)
-                .await?;
-            if page.is_empty() {
-                return Ok(());
-            }
-            for file in &page {
-                if fs::symlink_metadata(&file.path)
-                    .is_err_and(|error| error.kind() == std::io::ErrorKind::NotFound)
-                {
-                    database
-                        .remove_local_file(source, file.local_file_key)
-                        .await?;
-                }
-            }
-            after = page.last().map(|file| file.local_file_key);
-        }
+        source_id: &str,
+        paths: &[PathBuf],
+    ) -> SourceResult<library::ScanOutcome> {
+        scan::publish_paths(database, source, source_id, &self.roots, paths).await
     }
 
     pub(crate) fn image_bytes(&self, artwork: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
@@ -209,6 +193,7 @@ impl LocalSource {
         let mut discoverer = discovery::Reader::default();
         let mut completed = 0;
         let mut next_album = None;
+        let mut writes = Vec::with_capacity(candidates.len());
         for candidate in candidates {
             next_album = Some(candidate.album_key);
             let path = PathBuf::from(
@@ -217,46 +202,52 @@ impl LocalSource {
                     .strip_prefix("file://")
                     .unwrap_or(&candidate.media_uri),
             );
-            let revision = fs::metadata(&path)
-                .ok()
-                .and_then(|metadata| metadata.modified().ok())
-                .and_then(|modified| modified.duration_since(std::time::UNIX_EPOCH).ok())
-                .map(|duration| {
-                    format!(
-                        "{}-{}",
-                        fs::metadata(&path)
-                            .map(|metadata| metadata.len())
-                            .unwrap_or_default(),
-                        duration.as_nanos()
-                    )
-                })
-                .unwrap_or_default();
-            let images = path
-                .parent()
-                .and_then(|parent| fs::read_dir(parent).ok())
-                .into_iter()
-                .flatten()
-                .filter_map(Result::ok)
-                .map(|entry| entry.path())
-                .filter(|path| artwork::supported_image(path))
-                .collect::<Vec<_>>();
-            let binding = artwork::sidecar(&images)
-                .map(|image| artwork::file_reference(&image, revision.clone()))
-                .or_else(|| artwork::inspect_embedded(&mut discoverer, &path, revision));
-            if let Some(binding) = binding {
-                let binding = serde_json::to_vec(&binding)?;
-                let digest = *blake3::hash(&binding).as_bytes();
-                database
-                    .write_album_artwork_binding(
-                        source,
-                        candidate.album_key,
-                        Some(&binding),
-                        digest,
-                    )
-                    .await?;
+            let path_text = path.to_string_lossy().into_owned();
+            let observations = database
+                .local_component_file_page(
+                    source,
+                    std::slice::from_ref(&path_text),
+                    &[],
+                    None,
+                    128,
+                    &cancellation,
+                )
+                .await?;
+            let media = observations.iter().find(|file| file.path == path_text);
+            let media_revision = media.map(observation_revision).unwrap_or_default();
+            let directory = path.parent().map(directory_prefix);
+            let parent = path.parent().and_then(Path::parent).map(directory_prefix);
+            let mut sidecar = None;
+            for prefix in directory.into_iter().chain(parent) {
+                if database
+                    .local_directory_album_count(source, &prefix, &cancellation)
+                    .await?
+                    != 1
+                {
+                    continue;
+                }
+                if let Some(image) = database
+                    .local_sidecar_candidate(source, &prefix, &cancellation)
+                    .await?
+                {
+                    sidecar = Some(artwork::file_reference(
+                        &PathBuf::from(&image.path),
+                        observation_revision_values(image.size_bytes, image.mtime_ns),
+                    ));
+                    break;
+                }
             }
+            let binding = sidecar
+                .or_else(|| artwork::inspect_embedded(&mut discoverer, &path, media_revision))
+                .map(|binding| serde_json::to_vec(&binding))
+                .transpose()?
+                .unwrap_or_else(|| br#"{"no_art":true}"#.to_vec());
+            writes.push((candidate.album_key, binding));
             completed += 1;
         }
+        database
+            .write_album_artwork_bindings(source, &writes)
+            .await?;
         Ok(crate::ArtworkPreparationProgress {
             completed,
             next_album,
@@ -275,6 +266,105 @@ impl LocalSource {
             should_stop,
         )
     }
+}
+
+pub(crate) async fn apply_metadata_mapping(
+    database: &library::Database,
+    source: library::SourceKey,
+    root: &Path,
+) -> SourceResult<usize> {
+    let mut worker = media::Worker::default();
+    let mut accepted = 0;
+    for entry in WalkDir::new(root).follow_links(false) {
+        let entry = entry.map_err(|error| SourceError::Other(error.to_string()))?;
+        if !entry.file_type().is_file() {
+            continue;
+        }
+        let path = entry.into_path();
+        let Some(metadata) = media::read_basic_audio(&mut worker, path.clone()) else {
+            continue;
+        };
+        let object_id = database
+            .mapping_track_object(
+                source,
+                &metadata.title,
+                &metadata.album,
+                &metadata.artist,
+                i64::from(metadata.disc_number),
+                i64::from(metadata.track_number),
+                i64::from(metadata.duration_seconds) * 1000,
+                &library::ReadCancellation::new(),
+            )
+            .await?;
+        let Some(object_id) = object_id else { continue };
+        let file = fs::metadata(&path).map_err(|error| SourceError::Other(error.to_string()))?;
+        let mtime_ns = file
+            .modified()
+            .ok()
+            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+            .and_then(|value| i64::try_from(value.as_nanos()).ok())
+            .unwrap_or_default();
+        #[cfg(unix)]
+        let (device_id, inode) = {
+            use std::os::unix::fs::MetadataExt;
+            (
+                i64::try_from(file.dev()).ok(),
+                i64::try_from(file.ino()).ok(),
+            )
+        };
+        #[cfg(not(unix))]
+        let (device_id, inode) = (None, None);
+        let media_uri = url::Url::from_file_path(&path)
+            .map_err(|()| SourceError::Other("could not create mapped file URI".to_string()))?
+            .to_string();
+        let mut hash = blake3::Hasher::new();
+        hash.update(path.to_string_lossy().as_bytes());
+        hash.update(&file.len().to_le_bytes());
+        hash.update(&mtime_ns.to_le_bytes());
+        database
+            .upsert_local_access(
+                source,
+                &library::LocalAccessWrite {
+                    track_object_id: Some(object_id),
+                    origin: library::LocalAccessOrigin::Mapping,
+                    path: path.to_string_lossy().into_owned(),
+                    root: root.to_string_lossy().into_owned(),
+                    relative_path: path
+                        .strip_prefix(root)
+                        .unwrap_or(&path)
+                        .to_string_lossy()
+                        .into_owned(),
+                    size_bytes: i64::try_from(file.len()).unwrap_or(i64::MAX),
+                    mtime_ns,
+                    device_id,
+                    inode,
+                    parser_version: 1,
+                    title: metadata.title,
+                    album: metadata.album,
+                    artist: metadata.artist,
+                    disc_number: i64::from(metadata.disc_number),
+                    track_number: i64::from(metadata.track_number),
+                    duration_millis: i64::from(metadata.duration_seconds) * 1000,
+                    media_uri,
+                    loudness_analysis_key: *hash.finalize().as_bytes(),
+                },
+            )
+            .await?;
+        accepted += 1;
+    }
+    Ok(accepted)
+}
+
+fn directory_prefix(path: &Path) -> String {
+    format!("{}/", path.to_string_lossy().trim_end_matches('/'))
+}
+
+fn observation_revision(file: &library::LocalFileRow) -> String {
+    observation_revision_values(file.size_bytes, file.mtime_ns)
+}
+
+fn observation_revision_values(size_bytes: Option<i64>, mtime_ns: i64) -> String {
+    format!("{}-{mtime_ns}", size_bytes.unwrap_or_default())
 }
 
 pub(crate) fn connect(input: LocalFolderHostInput) -> SourceResult<ConnectedSource> {
@@ -470,7 +560,9 @@ pub(super) fn read_track_metadata(
         writable,
         source_search: false,
         revision: Some(format!("{}:{modified}", metadata.len())),
+        source_values: values.clone(),
         values,
+        rufin_filled: crate::TrackMetadataWritable::default(),
     })
 }
 
@@ -498,6 +590,7 @@ pub(super) fn read_album_metadata_values(
             .map(|value| value.trim().to_string())
             .unwrap_or_default(),
         sort_title: text(ItemKey::AlbumTitleSortOrder),
+        artist: text(ItemKey::TrackArtist),
         album_artist: text(ItemKey::AlbumArtist),
         year: tag.and_then(|tag| tag.date()).map(|value| value.year),
         genre: tag

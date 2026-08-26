@@ -132,6 +132,7 @@ pub struct TrackGenreLink {
 pub struct TrackRow {
     pub track_key: TrackKey,
     pub source_key: SourceKey,
+    pub source_id: String,
     pub object_id: String,
     pub album_key: Option<AlbumKey>,
     pub title: String,
@@ -159,6 +160,7 @@ pub struct TrackRow {
     pub last_played: Option<i64>,
     pub play_count: i64,
     pub skip_count: i64,
+    pub is_downloaded: bool,
     pub artists: Vec<TrackArtistLink>,
     pub album_artists: Vec<TrackArtistLink>,
     pub genres: Vec<TrackGenreLink>,
@@ -168,6 +170,7 @@ pub struct TrackRow {
 struct TrackScalar {
     track_key: TrackKey,
     source_key: SourceKey,
+    source_id: String,
     object_id: String,
     album_key: Option<AlbumKey>,
     title: String,
@@ -195,6 +198,7 @@ struct TrackScalar {
     last_played: Option<i64>,
     play_count: i64,
     skip_count: i64,
+    is_downloaded: bool,
 }
 
 #[derive(FromRow)]
@@ -270,6 +274,117 @@ impl Database {
         Ok(result?)
     }
 
+    pub async fn track_keys_by_objects(
+        &self,
+        source: SourceKey,
+        object_ids: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackKey>> {
+        if object_ids.len() > TRACK_ROW_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Track identity page exceeds 256 rows".to_string(),
+            ));
+        }
+        if object_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(object_id,position) AS (");
+        query.push_values(
+            object_ids.iter().enumerate(),
+            |mut row, (position, object_id)| {
+                row.push_bind(object_id).push_bind(position as i64);
+            },
+        );
+        query.push(
+            ") SELECT track.track_key FROM requested
+             JOIN tracks track ON track.object_id=requested.object_id
+             WHERE track.source_key=",
+        );
+        query.push_bind(source).push(" ORDER BY requested.position");
+        let result = query
+            .build_query_scalar::<TrackKey>()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
+    pub async fn track_subset_order(
+        &self,
+        source: SourceKey,
+        candidates: &[TrackKey],
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackKey>> {
+        if candidates.len() > TRACK_ROW_LIMIT {
+            return Err(LibraryError::InvalidRequest(
+                "Track subset exceeds 256 rows".to_string(),
+            ));
+        }
+        if candidates.is_empty() {
+            return Ok(Vec::new());
+        }
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(track_key,position) AS (");
+        query.push_values(candidates.iter().enumerate(), |mut row, (position, key)| {
+            row.push_bind(*key).push_bind(position as i64);
+        });
+        if sort.uses_activity() {
+            query.push(
+                "),listen_activity AS (
+                   SELECT track_key,count(*) play_count,max(started_at) last_played
+                   FROM listens WHERE source_key=",
+            );
+            query.push_bind(source).push(
+                " AND track_key IS NOT NULL GROUP BY track_key),activity AS (
+                   SELECT track.track_key,
+                     COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0) play_count,
+                     CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played
+                          WHEN listen.last_played IS NULL THEN baseline.last_played_at
+                          ELSE max(baseline.last_played_at,listen.last_played) END last_played
+                   FROM tracks track
+                   LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'
+                   LEFT JOIN listen_activity listen USING(track_key)
+                   WHERE track.source_key=",
+            );
+            query.push_bind(source).push(
+                ") SELECT track.track_key FROM requested
+                   JOIN tracks track USING(track_key) JOIN activity USING(track_key)
+                   WHERE track.source_key=",
+            );
+        } else {
+            query.push(
+                ") SELECT track.track_key FROM requested JOIN tracks track USING(track_key)
+                   WHERE track.source_key=",
+            );
+        }
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        query
+            .push_bind(source)
+            .push(" AND (")
+            .push_bind(filter.is_empty())
+            .push(" OR instr(track.normalized_search,")
+            .push_bind(&filter)
+            .push(")>0 OR CAST(track.year AS TEXT)=")
+            .push_bind(&filter)
+            .push(") ORDER BY ")
+            .push(sort.order_sql(descending));
+        if sort.uses_activity() {
+            query.push(",track.track_key");
+        }
+        let result = query
+            .build_query_scalar::<TrackKey>()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
     pub async fn track_order(
         &self,
         source: SourceKey,
@@ -285,6 +400,29 @@ impl Database {
             descending,
             favorites_only,
             folder,
+            "",
+            cancellation,
+        )
+        .await
+    }
+
+    pub async fn track_route_order(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        favorites_only: bool,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackKey>> {
+        self.track_order_where(
+            source,
+            sort,
+            descending,
+            favorites_only,
+            folder,
+            filter,
             cancellation,
         )
         .await
@@ -297,6 +435,7 @@ impl Database {
         descending: bool,
         favorites_only: bool,
         folder: Option<FolderKey>,
+        filter: &str,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<TrackKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -311,11 +450,12 @@ impl Database {
             )
         };
         if matches!(sort, TrackSort::LastPlayed | TrackSort::PlayCount) {
-            query.push_bind(source).push(" AND track_key IS NOT NULL GROUP BY track_key), activity AS (SELECT track.track_key,COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0) play_count,CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played WHEN listen.last_played IS NULL THEN baseline.last_played_at ELSE max(baseline.last_played_at,listen.last_played) END last_played FROM tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id LEFT JOIN listen_activity listen USING(track_key) WHERE track.source_key=").push_bind(source).push(") SELECT track.track_key FROM tracks track JOIN activity USING(track_key) WHERE track.source_key=").push_bind(source);
+            query.push_bind(source).push(" AND track_key IS NOT NULL GROUP BY track_key), activity AS (SELECT track.track_key,COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0) play_count,CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played WHEN listen.last_played IS NULL THEN baseline.last_played_at ELSE max(baseline.last_played_at,listen.last_played) END last_played FROM tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' LEFT JOIN listen_activity listen USING(track_key) WHERE track.source_key=").push_bind(source).push(") SELECT track.track_key FROM tracks track JOIN activity USING(track_key) WHERE track.source_key=").push_bind(source);
         } else {
             query.push_bind(source);
         }
-        query.push(" AND (").push_bind(!favorites_only).push(" OR COALESCE(track.user_favorite,track.source_favorite)=1) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=").push_bind(folder).push(")) ORDER BY ");
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        query.push(" AND (").push_bind(!favorites_only).push(" OR COALESCE(track.user_favorite,track.source_favorite)=1) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=").push_bind(folder).push(")) AND (").push_bind(filter.is_empty()).push(" OR instr(track.normalized_search,").push_bind(&filter).push(")>0 OR CAST(track.year AS TEXT)=").push_bind(&filter).push(") ORDER BY ");
         if matches!(sort, TrackSort::LastPlayed) {
             query.push(if descending {
                 "activity.last_played DESC NULLS LAST"
@@ -429,7 +569,7 @@ impl Database {
                  musicbrainz_recording_id=?18, musicbrainz_release_track_id=?19,
                  cue_path=?20, cue_start_millis=?21, cue_end_millis=?22,
                  source_loudness_analysis_key=?23,
-                 loudness_analysis_key=COALESCE((SELECT loudness_analysis_key FROM local_access_files access WHERE access.source_key=tracks.source_key AND access.track_object_id=tracks.object_id),?23)
+                 loudness_analysis_key=COALESCE((SELECT loudness_analysis_key FROM local_access_files access WHERE access.source_key=tracks.source_key AND access.track_object_id=tracks.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),?23)
              WHERE source_key=?1 AND track_key=?2",
         )
         .bind(source)
@@ -490,7 +630,7 @@ pub(crate) async fn load_track_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT track.track_key,track.source_key,track.object_id,track.album_key,track.title,track.display_album,track.display_artist,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.loudness_analysis_key,COALESCE(track.artwork_binding,album.artwork_binding) artwork_binding,COALESCE(track.user_favorite,track.source_favorite) favorite,COALESCE(track.user_rating,track.source_rating)/10 rating,(SELECT max(value) FROM (SELECT baseline.last_played_at value FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id UNION ALL SELECT listen.started_at FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key)) last_played,COALESCE((SELECT baseline.play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id),0)+(SELECT count(*) FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key) play_count,COALESCE((SELECT baseline.skip_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id),0)+COALESCE((SELECT sum(listen.skipped) FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key),0) skip_count FROM requested JOIN tracks track USING(track_key) LEFT JOIN albums album ON album.album_key=track.album_key WHERE track.source_key=");
+    query.push(") SELECT track.track_key,track.source_key,source.object_id source_id,track.object_id,track.album_key,track.title,track.display_album,track.display_artist,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.loudness_analysis_key,COALESCE(track.artwork_binding,album.artwork_binding) artwork_binding,COALESCE(track.user_favorite,track.source_favorite) favorite,COALESCE(track.user_rating,track.source_rating)/10 rating,(SELECT max(value) FROM (SELECT baseline.last_played_at value FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' UNION ALL SELECT listen.started_at FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key)) last_played,COALESCE((SELECT baseline.play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0)+(SELECT count(*) FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key) play_count,COALESCE((SELECT baseline.skip_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0)+COALESCE((SELECT sum(listen.skipped) FROM listens listen WHERE listen.source_key=track.source_key AND listen.track_key=track.track_key),0) skip_count,EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') is_downloaded FROM requested JOIN tracks track USING(track_key) JOIN sources source ON source.source_key=track.source_key LEFT JOIN albums album ON album.album_key=track.album_key WHERE track.source_key=");
     query.push_bind(source).push(" ORDER BY requested.position");
     let scalars = query
         .build_query_as::<TrackScalar>()
@@ -573,6 +713,7 @@ pub(crate) async fn load_track_rows(
         rows.push(TrackRow {
             track_key: scalar.track_key,
             source_key: scalar.source_key,
+            source_id: scalar.source_id,
             object_id: scalar.object_id,
             album_key: scalar.album_key,
             title: scalar.title,
@@ -600,6 +741,7 @@ pub(crate) async fn load_track_rows(
             last_played: scalar.last_played,
             play_count: scalar.play_count,
             skip_count: scalar.skip_count,
+            is_downloaded: scalar.is_downloaded,
             artists: artists.get(&key).cloned().unwrap_or_default(),
             album_artists: album_artists.get(&key).cloned().unwrap_or_default(),
             genres: genres.get(&key).cloned().unwrap_or_default(),

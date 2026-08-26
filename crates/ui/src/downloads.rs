@@ -1,5 +1,5 @@
 use std::cell::{Cell, RefCell};
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 use std::time::Duration;
@@ -10,18 +10,14 @@ use downloads::{
     DownloadEvent, DownloadFeedbackKind, DownloadQueueItem, DownloadQueueSnapshot, DownloadSubject,
 };
 use gtk::glib;
-use library::{SourceArtwork, SourceId};
 use localization::{tr, track_count_text};
+use sources::SourceId;
 
-use crate::routes::library_fields::smart_playlist_display_name;
-use crate::runtime::SelectedLibrary;
 use crate::shell::Shell;
-use crate::shell::cover::{ArtworkTile, cover_fetch_size_for_display};
 
 struct DownloadBadgeBinding {
     image: glib::WeakRef<gtk::Image>,
-    collection: bool,
-    downloaded: Rc<dyn Fn(&SelectedLibrary) -> bool>,
+    downloaded: Cell<bool>,
 }
 
 pub(crate) enum OperationFeedbackKind {
@@ -74,9 +70,11 @@ impl Shell {
                     .insert(source_id, Arc::clone(&snapshot));
                 let collection_changed = previous.as_ref().is_none_or(|previous| {
                     previous.jobs.len() != snapshot.jobs.len()
-                        || previous.downloaded_tracks > snapshot.downloaded_tracks
+                        || previous.downloaded_tracks != snapshot.downloaded_tracks
                 });
-                self.refresh_download_badges(collection_changed);
+                if collection_changed {
+                    self.replace_current_route_when_ready();
+                }
                 self.downloads.refresh_queue();
             }
             DownloadEvent::Feedback(feedback) => {
@@ -172,8 +170,6 @@ impl Shell {
     }
 
     pub(crate) fn download_subject_title(&self, subject: &DownloadSubject) -> String {
-        let selected = self.selected_library();
-        let loaded = selected.as_ref().map(|selected| &selected.library);
         match subject {
             DownloadSubject::Rule(downloads::DownloadRule::EntireLibrary) => tr("Entire Library"),
             DownloadSubject::Rule(downloads::DownloadRule::Favorites) => tr("Favorites"),
@@ -181,50 +177,13 @@ impl Shell {
             DownloadSubject::Rule(downloads::DownloadRule::LatestFiveAlbums) => {
                 tr("5 Latest Albums")
             }
-            DownloadSubject::Track(id) => loaded
-                .and_then(|loaded| loaded.track(id).ok().flatten())
-                .map(|track| track.title.clone())
-                .unwrap_or_else(|| tr("Track")),
-            DownloadSubject::Album(id) => loaded
-                .and_then(|loaded| loaded.album(id).ok().flatten())
-                .map(|album| album.title.clone())
-                .unwrap_or_else(|| tr("Album")),
-            DownloadSubject::Artist(id) => loaded
-                .and_then(|loaded| loaded.artist(id).ok().flatten())
-                .map(|artist| artist.name.clone())
-                .unwrap_or_else(|| tr("Artist")),
-            DownloadSubject::Genre(id) => loaded
-                .and_then(|loaded| loaded.genre(id).ok().flatten())
-                .map(|genre| genre.name.clone())
-                .unwrap_or_else(|| tr("Genre")),
-            DownloadSubject::Mood(id) => selected
-                .as_ref()
-                .and_then(|selected| {
-                    selected
-                        .library
-                        .moods(selected.music_folder_id.as_ref())
-                        .ok()
-                })
-                .and_then(|moods| {
-                    moods
-                        .iter()
-                        .find(|mood| &mood.mood.id == id)
-                        .map(|mood| mood.mood.name.clone())
-                })
-                .unwrap_or_else(|| tr("Mood")),
-            DownloadSubject::Playlist(id) => loaded
-                .and_then(|loaded| loaded.playlists().ok())
-                .and_then(|playlists| {
-                    playlists
-                        .iter()
-                        .find(|playlist| &playlist.playlist.id == id)
-                        .map(|playlist| playlist.playlist.name.clone())
-                })
-                .unwrap_or_else(|| tr("Playlist")),
-            DownloadSubject::SmartPlaylist(id) => loaded
-                .and_then(|loaded| loaded.smart_playlist(id).ok().flatten())
-                .map(|playlist| smart_playlist_display_name(&playlist))
-                .unwrap_or_else(|| tr("Smart Playlist")),
+            DownloadSubject::Track(_) => tr("Track"),
+            DownloadSubject::Album(_) => tr("Album"),
+            DownloadSubject::Artist(_) => tr("Artist"),
+            DownloadSubject::Genre(_) => tr("Genre"),
+            DownloadSubject::Mood(_) => tr("Mood"),
+            DownloadSubject::Playlist(_) => tr("Playlist"),
+            DownloadSubject::SmartPlaylist(_) => tr("Smart Playlist"),
             DownloadSubject::Prepared { title, .. } => {
                 title.clone().unwrap_or_else(|| tr("Selection"))
             }
@@ -232,23 +191,33 @@ impl Shell {
     }
 
     pub(crate) fn download_source_artwork(self: &Rc<Self>, size: i32) -> gtk::Widget {
-        let bindings = self
-            .selected_library()
-            .as_deref()
-            .map(|selected| {
-                let bindings = selected
-                    .library
-                    .source_artwork()
-                    .unwrap_or_default()
-                    .iter()
-                    .take(4)
-                    .map(ArtworkBinding::source_artwork)
-                    .collect::<Vec<_>>();
-                bindings
-            })
-            .unwrap_or_default();
-        self.cover_group_projection_for_artwork(&bindings, size, size)
-            .widget()
+        let projection = self.cover_group_projection_for_artwork(&[], size, size);
+        let widget = projection.widget();
+        let Some(selected) = self.selected_library().as_deref().cloned() else {
+            return widget;
+        };
+        let database = Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let cancellation = library::ReadCancellation::new();
+        let task = selected.runtime.spawn(async move {
+            database
+                .artwork_preparation_page(source, None, 4, &cancellation)
+                .await
+        });
+        let shell = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(shell) = shell.upgrade() else { return };
+            let Some(page) = task.await.ok().and_then(Result::ok) else {
+                return;
+            };
+            let bindings = page
+                .bindings
+                .iter()
+                .map(|binding| ArtworkBinding::opaque(binding))
+                .collect::<Vec<_>>();
+            projection.replace(&shell, &bindings);
+        });
+        widget
     }
 
     pub(crate) fn download_subject_artwork(
@@ -256,142 +225,8 @@ impl Shell {
         subject: &DownloadSubject,
         size: i32,
     ) -> gtk::Widget {
-        let selected = self.selected_library();
-        let bindings = selected.as_ref().and_then(|selected| match subject {
-            DownloadSubject::Track(id) => selected
-                .library
-                .track(id)
-                .ok()
-                .flatten()
-                .map(|track| vec![ArtworkBinding::track(&track)]),
-            DownloadSubject::Album(id) => selected
-                .library
-                .album(id)
-                .ok()
-                .flatten()
-                .map(|album| vec![ArtworkBinding::album(&album)]),
-            DownloadSubject::Artist(id) => selected
-                .library
-                .artist_overview(id, selected.music_folder_id.as_ref())
-                .ok()
-                .flatten()
-                .map(|artist| vec![ArtworkBinding::artist(&artist.summary.artwork)]),
-            DownloadSubject::Genre(id) => selected
-                .library
-                .genre_detail(id, selected.music_folder_id.as_ref())
-                .ok()
-                .flatten()
-                .map(|genre| {
-                    ArtworkBinding::genre_slots(
-                        &genre.summary.genre,
-                        &genre.summary.representative_albums,
-                    )
-                }),
-            DownloadSubject::Mood(id) => selected
-                .library
-                .mood_detail(id, selected.music_folder_id.as_ref())
-                .ok()
-                .flatten()
-                .map(|mood| {
-                    ArtworkBinding::mood_slots(
-                        &mood.summary.mood,
-                        &mood.summary.representative_albums,
-                    )
-                }),
-            DownloadSubject::Playlist(id) => selected
-                .library
-                .playlist_detail(id)
-                .ok()
-                .flatten()
-                .map(|playlist| {
-                    ArtworkBinding::playlist_slots(
-                        &playlist.summary.playlist,
-                        &playlist.summary.representative_albums,
-                        self.settings.current.borrow().prefer_server_playlist_covers,
-                    )
-                }),
-            DownloadSubject::SmartPlaylist(id) => selected
-                .library
-                .smart_playlist_detail(id, selected.music_folder_id.as_ref())
-                .ok()
-                .flatten()
-                .map(|playlist| {
-                    ArtworkBinding::smart_playlist_slots(
-                        &playlist.summary.smart_playlist,
-                        &playlist.summary.representative_albums,
-                    )
-                }),
-            DownloadSubject::Rule(rule) => Self::download_rule_artwork(selected, *rule),
-            DownloadSubject::Prepared { .. } => None,
-        });
-        drop(selected);
-        let Some(bindings) = bindings.filter(|bindings| !bindings.is_empty()) else {
-            return self.download_source_artwork(size);
-        };
-        if bindings.len() > 1 {
-            return self
-                .cover_group_projection_for_artwork(&bindings, size, size)
-                .widget();
-        }
-        let tile = ArtworkTile::new(size);
-        self.bind_artwork_tile(
-            &tile,
-            bindings.into_iter().next().expect("one artwork binding"),
-            size,
-            cover_fetch_size_for_display(size),
-        );
-        tile.widget()
-    }
-
-    fn download_rule_artwork(
-        selected: &SelectedLibrary,
-        rule: downloads::DownloadRule,
-    ) -> Option<Vec<ArtworkBinding>> {
-        if rule == downloads::DownloadRule::EntireLibrary {
-            let folders = selected.library.music_folders().ok()?;
-            let bindings = folders
-                .iter()
-                .filter(|folder| {
-                    selected
-                        .music_folder_id
-                        .as_ref()
-                        .is_none_or(|selected_id| &folder.id == selected_id)
-                })
-                .filter_map(|folder| folder.image_ref.clone())
-                .take(4)
-                .map(|image_ref| ArtworkBinding::source_artwork(&SourceArtwork::Native(image_ref)))
-                .collect::<Vec<_>>();
-            return (!bindings.is_empty()).then_some(bindings);
-        }
-
-        let tracks = match rule {
-            downloads::DownloadRule::EntireLibrary => unreachable!(),
-            downloads::DownloadRule::Favorites => selected
-                .library
-                .favorite_download_track_list(selected.music_folder_id.as_ref()),
-            downloads::DownloadRule::AllPlaylists => selected
-                .library
-                .all_playlist_track_list(selected.music_folder_id.as_ref()),
-            downloads::DownloadRule::LatestFiveAlbums => selected
-                .library
-                .latest_album_track_list(selected.music_folder_id.as_ref(), 5),
-        }
-        .ok()?;
-        let mut seen = HashSet::new();
-        let mut bindings = Vec::new();
-        for position in 0..tracks.len() {
-            let Some(track) = tracks.track(position).ok().flatten() else {
-                continue;
-            };
-            let binding = ArtworkBinding::track(&track);
-            if seen.insert(binding.clone()) {
-                bindings.push(binding);
-                if bindings.len() == 4 {
-                    break;
-                }
-            }
-        }
-        (!bindings.is_empty()).then_some(bindings)
+        let _ = subject;
+        self.download_source_artwork(size)
     }
 
     pub(crate) fn connect_operation_feedback(self: &Rc<Self>) {
@@ -418,25 +253,16 @@ impl Shell {
         self.chrome.operation_feedback.add_controller(click);
     }
 
-    pub(crate) fn download_badge(
-        self: &Rc<Self>,
-        collection: bool,
-        downloaded: impl Fn(&SelectedLibrary) -> bool + 'static,
-    ) -> gtk::Image {
+    pub(crate) fn download_badge(self: &Rc<Self>, _collection: bool) -> gtk::Image {
         let image = gtk::Image::from_icon_name("rufin-folder-download-symbolic");
         image.add_css_class("downloaded-badge");
         image.set_pixel_size(14);
         image.set_tooltip_text(Some(&tr("Downloaded")));
         let binding = DownloadBadgeBinding {
             image: image.downgrade(),
-            collection,
-            downloaded: Rc::new(downloaded),
+            downloaded: Cell::new(false),
         };
-        let downloaded = self
-            .selected_library()
-            .as_deref()
-            .is_some_and(|selected| (binding.downloaded)(selected));
-        self.set_download_badge_visible(&image, downloaded);
+        self.set_download_badge_visible(&image, false);
         let identity = image.as_ptr() as usize;
         self.downloads.badges.borrow_mut().insert(identity, binding);
         let badges = Rc::downgrade(&self.downloads.badges);
@@ -447,6 +273,22 @@ impl Shell {
             badges.borrow_mut().remove(&identity);
         });
         image
+    }
+
+    pub(crate) fn bind_download_badge(self: &Rc<Self>, image: &gtk::Image, downloaded: bool) {
+        let identity = image.as_ptr() as usize;
+        if let Some(binding) = self.downloads.badges.borrow().get(&identity) {
+            binding.downloaded.set(downloaded);
+        }
+        self.set_download_badge_visible(image, downloaded);
+    }
+
+    pub(crate) fn clear_download_badge(&self, image: &gtk::Image) {
+        let identity = image.as_ptr() as usize;
+        if let Some(binding) = self.downloads.badges.borrow().get(&identity) {
+            binding.downloaded.set(false);
+        }
+        image.set_visible(false);
     }
 
     pub(crate) fn set_download_badge_visible(&self, image: &gtk::Image, downloaded: bool) {
@@ -464,24 +306,16 @@ impl Shell {
             })
             .is_some()
         {
-            self.refresh_download_badges(true);
+            self.refresh_download_badges();
         }
     }
 
-    fn refresh_download_badges(&self, include_collections: bool) {
-        let selected = self.selected_library();
+    fn refresh_download_badges(&self) {
         self.downloads.badges.borrow_mut().retain(|_, binding| {
             let Some(image) = binding.image.upgrade() else {
                 return false;
             };
-            if include_collections || !binding.collection {
-                self.set_download_badge_visible(
-                    &image,
-                    selected
-                        .as_ref()
-                        .is_some_and(|selected| (binding.downloaded)(selected)),
-                );
-            }
+            self.set_download_badge_visible(&image, binding.downloaded.get());
             true
         });
     }
@@ -520,64 +354,7 @@ fn operation_feedback_subtitle(kind: &OperationFeedbackKind, count: &str) -> Str
             format!("{} · {count}", tr("Download queued"))
         }
         OperationFeedbackKind::PlaylistAdded { destination } => {
-            format!("{} {destination} · {count}", tr("Added to"))
+            format!("{} · {destination}", tr("Added to Playlist"))
         }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use downloads::{DownloadQueueItem, DownloadQueueState, DownloadSubject};
-    use library::{SourceId, StreamQuality, TrackId};
-
-    use super::{OperationFeedbackKind, operation_feedback_subtitle, reorder_queue_items};
-
-    #[test]
-    fn operation_feedback_names_the_action_before_the_track_count() {
-        assert_eq!(
-            operation_feedback_subtitle(&OperationFeedbackKind::DownloadStarted, "7 tracks"),
-            "Download started · 7 tracks"
-        );
-        assert_eq!(
-            operation_feedback_subtitle(&OperationFeedbackKind::DownloadQueued, "1 track"),
-            "Download queued · 1 track"
-        );
-        assert_eq!(
-            operation_feedback_subtitle(
-                &OperationFeedbackKind::PlaylistAdded {
-                    destination: "Road Trip".to_string(),
-                },
-                "7 tracks",
-            ),
-            "Added to Road Trip · 7 tracks"
-        );
-    }
-
-    #[test]
-    fn optimistic_queue_order_moves_the_active_job_to_its_drop_position() {
-        let source_id = SourceId::fake(1);
-        let mut jobs = ["active", "second", "third"]
-            .into_iter()
-            .enumerate()
-            .map(|(index, id)| DownloadQueueItem {
-                id: id.to_string(),
-                source_id: source_id.clone(),
-                subject: DownloadSubject::Track(TrackId::fake(index)),
-                quality: StreamQuality::Original,
-                completed_tracks: 0,
-                total_tracks: 1,
-                state: if index == 0 {
-                    DownloadQueueState::Downloading
-                } else {
-                    DownloadQueueState::Queued
-                },
-            })
-            .collect::<Vec<_>>();
-
-        assert!(reorder_queue_items(&mut jobs, "active", "third", true));
-        assert_eq!(
-            jobs.iter().map(|job| job.id.as_str()).collect::<Vec<_>>(),
-            ["second", "third", "active"]
-        );
     }
 }

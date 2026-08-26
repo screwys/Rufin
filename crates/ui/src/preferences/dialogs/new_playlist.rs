@@ -1,7 +1,6 @@
 use std::rc::Rc;
 
 use crate::shell::Shell;
-use ::library::PlaylistEdit;
 use adw::prelude::*;
 use localization::tr;
 
@@ -23,10 +22,7 @@ impl Shell {
                 if !name.is_empty()
                     && let Some(source) = source.as_ref()
                 {
-                    source.edit_playlist(PlaylistEdit::Create {
-                        name,
-                        track_ids: Vec::new(),
-                    });
+                    source.create_playlist(name, Vec::new());
                 }
             }
         });

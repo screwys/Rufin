@@ -141,6 +141,7 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
         Some(20 + position),
         Some(position),
         Some(1_700_000_000 + position),
+        None,
         [position as u8 + 1; 32],
     )
     .await
@@ -392,7 +393,8 @@ async fn failed_and_stale_publications_are_atomic() {
     failed
         .write_track(
             "", None, "Bad", "bad", "", "", "bad", 0, 0, 0, None, None, None, None, None, None,
-            None, None, None, None, None, None, None, false, None, None, None, None, None, [0; 32],
+            None, None, None, None, None, None, None, false, None, None, None, None, None, None,
+            [0; 32],
         )
         .await
         .expect_err("empty identity fails staging");
@@ -443,6 +445,7 @@ async fn failed_and_stale_publications_are_atomic() {
             None,
             None,
             false,
+            None,
             None,
             None,
             None,
@@ -532,6 +535,7 @@ async fn ordinary_private_library_scan_is_bounded() {
             None,
             None,
             false,
+            None,
             None,
             None,
             None,

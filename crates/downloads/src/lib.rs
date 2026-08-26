@@ -1610,6 +1610,12 @@ impl Actor {
         joined: Result<Result<(), DownloadFailure>, tokio::task::JoinError>,
         remaining_active: &mut Vec<ActiveDownload>,
     ) {
+        if self
+            .find_job_mut(&active.source_id, &active.job_id)
+            .is_none()
+        {
+            return;
+        }
         let ActiveDownload {
             source_id,
             job_id,
@@ -1628,9 +1634,6 @@ impl Actor {
                 "download task failed: {error}"
             ))),
         };
-        if self.find_job_mut(&source_id, &job_id).is_none() {
-            return;
-        }
         match result {
             Ok(()) => {
                 self.remove_job_track(&source_id, &job_id, &track_id, true);
@@ -1696,6 +1699,7 @@ impl Actor {
                         attached.source_key,
                         &library::LocalAccessWrite {
                             track_object_id: Some(track.object_id),
+                            origin: library::LocalAccessOrigin::Download,
                             path: paths.audio.to_string_lossy().into_owned(),
                             root: storage_root.to_string_lossy().into_owned(),
                             relative_path: relative_path.to_string_lossy().into_owned(),
@@ -2423,6 +2427,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             [7; 32],
         )
         .await
@@ -2602,5 +2607,159 @@ mod tests {
         );
         assert_eq!(migrated.completed_size, Some(12));
         assert!(custom.path().join(relative).is_file());
+    }
+
+    fn actor_for_test(
+        root: &Path,
+        database: Database,
+        source_id: &SourceId,
+        source_key: SourceKey,
+    ) -> Actor {
+        let (events, _) = async_channel::unbounded();
+        let (prepared_rules, _) = async_channel::unbounded();
+        Actor {
+            root: Arc::new(root.to_path_buf()),
+            database,
+            events,
+            transfers: Arc::new(TransferClients::default()),
+            prepared_rules,
+            attached: HashMap::from([(
+                source_id.clone(),
+                AttachedSource {
+                    source_key,
+                    source: None,
+                    folder: None,
+                    directory: None,
+                },
+            )]),
+            selected: Some(source_id.clone()),
+            settings: HashMap::new(),
+            running_rules: None,
+            pending_rules: None,
+            jobs: HashMap::new(),
+            paused: false,
+            next_job: 0,
+        }
+    }
+
+    fn test_job(track: TrackKey) -> DownloadJob {
+        DownloadJob {
+            id: "job".to_string(),
+            subject: DownloadSubject::Track(track),
+            quality: StreamQuality::Original,
+            total_tracks: 1,
+            completed: Vec::new(),
+            remaining: vec![track],
+            state: DownloadQueueState::Downloading,
+        }
+    }
+
+    #[tokio::test]
+    async fn pausing_cancels_active_work_and_keeps_the_job_queued() {
+        let (_library, database, source_key, track) = download_fixture("pause", "track").await;
+        let root = tempfile::tempdir().expect("Downloads root");
+        let source_id = SourceId::new("pause");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        actor.jobs.insert(source_id.clone(), vec![test_job(track)]);
+        let paths = download_paths(root.path(), &source_id, &track);
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = cancelled.await;
+            Err(DownloadFailure::Retry("cancelled".to_string()))
+        });
+        let mut active = vec![ActiveDownload {
+            source_id: source_id.clone(),
+            job_id: "job".to_string(),
+            track_id: track,
+            subject: DownloadSubject::Track(track),
+            paths,
+            cancellation: Some(cancel),
+            task,
+        }];
+
+        actor.apply(Command::SetPaused(true), &mut active).await;
+
+        assert!(actor.paused);
+        assert!(active.is_empty());
+        assert_eq!(actor.jobs[&source_id][0].state, DownloadQueueState::Queued);
+    }
+
+    #[tokio::test]
+    async fn cancelling_removes_the_job_and_reconciles_its_staging_file() {
+        let (_library, database, source_key, track) = download_fixture("cancel", "track").await;
+        let root = tempfile::tempdir().expect("Downloads root");
+        let source_id = SourceId::new("cancel");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        actor.jobs.insert(source_id.clone(), vec![test_job(track)]);
+        let paths = download_paths(root.path(), &source_id, &track);
+        std::fs::create_dir_all(paths.audio_part.parent().expect("staging parent"))
+            .expect("create staging");
+        std::fs::write(&paths.audio_part, b"partial").expect("write staging");
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = cancelled.await;
+            Err(DownloadFailure::Retry("cancelled".to_string()))
+        });
+        let mut active = vec![ActiveDownload {
+            source_id: source_id.clone(),
+            job_id: "job".to_string(),
+            track_id: track,
+            subject: DownloadSubject::Track(track),
+            paths: paths.clone(),
+            cancellation: Some(cancel),
+            task,
+        }];
+
+        actor.cancel(&source_id, "job", &mut active).await;
+
+        assert!(actor.jobs[&source_id].is_empty());
+        assert!(active.is_empty());
+        assert!(!paths.audio_part.exists());
+    }
+
+    #[tokio::test]
+    async fn stale_completed_transfer_cannot_commit_after_its_job_was_removed() {
+        let (_library, database, source_key, track) = download_fixture("stale", "track").await;
+        let root = tempfile::tempdir().expect("Downloads root");
+        let source_id = SourceId::new("stale");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let paths = download_paths(root.path(), &source_id, &track);
+        std::fs::create_dir_all(paths.audio_part.parent().expect("staging parent"))
+            .expect("create staging");
+        std::fs::write(&paths.audio_part, b"complete bytes").expect("write completed staging");
+        let active = ActiveDownload {
+            source_id: source_id.clone(),
+            job_id: "removed".to_string(),
+            track_id: track,
+            subject: DownloadSubject::Track(track),
+            paths: paths.clone(),
+            cancellation: None,
+            task: tokio::spawn(async { Ok(()) }),
+        };
+
+        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+
+        assert!(!paths.audio.exists());
+        assert!(paths.audio_part.exists());
+    }
+
+    #[tokio::test]
+    async fn authoritative_rule_change_is_retained_while_prior_rules_prepare() {
+        let (_library, database, source_key, _) = download_fixture("rules", "track").await;
+        let root = tempfile::tempdir().expect("Downloads root");
+        let source_id = SourceId::new("rules");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let mut first = DownloadRules::default();
+        first.set(DownloadRule::Favorites, true);
+        actor.schedule_rules(&source_id, first, true);
+        assert!(actor.running_rules.is_some());
+        let mut replacement = DownloadRules::default();
+        replacement.set(DownloadRule::LatestFiveAlbums, true);
+        actor.schedule_rules(&source_id, replacement, true);
+
+        assert_eq!(
+            actor.pending_rules.as_ref().map(|intent| intent.rules),
+            Some(replacement)
+        );
     }
 }

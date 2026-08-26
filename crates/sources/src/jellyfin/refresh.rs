@@ -6,6 +6,78 @@ use super::*;
 use crate::source::{SourceReadProgress, SourceReadStage};
 
 impl JellyfinSource {
+    pub(crate) async fn home_section(
+        &self,
+        section: crate::SourceHomeSection,
+    ) -> SourceResult<Vec<library::HomeEntryInput>> {
+        let (section_id, item_type, sort_by, kind) = match section {
+            crate::SourceHomeSection::MostPlayed => (
+                "most-played",
+                "Audio",
+                "PlayCount,SortName",
+                library::HomeEntryKind::Track,
+            ),
+            crate::SourceHomeSection::RecentlyPlayed => (
+                "recently-played",
+                "Audio",
+                "DatePlayed,SortName",
+                library::HomeEntryKind::Track,
+            ),
+            crate::SourceHomeSection::RecentlyReleased => (
+                "recently-released",
+                "MusicAlbum",
+                "ProductionYear,PremiereDate,SortName",
+                library::HomeEntryKind::Album,
+            ),
+        };
+        let page = self
+            .item_page_sorted(item_type, 0, 24, sort_by, "Descending")
+            .await?;
+        page.items
+            .into_iter()
+            .enumerate()
+            .map(|(position, item)| {
+                let (entity_object_id, title, subtitle, artwork_binding) = match kind {
+                    library::HomeEntryKind::Track => {
+                        let track = track_from_item(item);
+                        (
+                            track.id,
+                            track.title,
+                            track.artist,
+                            track
+                                .image_ref
+                                .as_ref()
+                                .map(serde_json::to_vec)
+                                .transpose()?,
+                        )
+                    }
+                    library::HomeEntryKind::Album => {
+                        let album = album_from_item(item);
+                        (
+                            album.id,
+                            album.title,
+                            album.artist,
+                            album
+                                .image_ref
+                                .as_ref()
+                                .map(serde_json::to_vec)
+                                .transpose()?,
+                        )
+                    }
+                    _ => unreachable!(),
+                };
+                Ok(library::HomeEntryInput {
+                    section_id: section_id.to_string(),
+                    position: position as i64,
+                    kind,
+                    entity_object_id,
+                    title,
+                    subtitle,
+                    artwork_binding,
+                })
+            })
+            .collect()
+    }
     pub(crate) async fn apply_live_items(
         &self,
         database: &library::Database,

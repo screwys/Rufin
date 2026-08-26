@@ -1,12 +1,11 @@
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
-use std::sync::Arc;
 
 use adw::prelude::*;
 use downloads::{DownloadQueueState, DownloadRule};
 use gtk::gio;
-use library::StreamQuality;
+use playback::StreamQuality;
 
 use localization::{msgid, tr};
 
@@ -466,7 +465,7 @@ fn add_download_rules(
     group: &adw::PreferencesGroup,
     shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
-    source_id: &library::SourceId,
+    source_id: &sources::SourceId,
     rules: crate::settings::DownloadRules,
 ) -> gtk::MenuButton {
     let mut rows = Vec::new();
@@ -583,7 +582,7 @@ fn add_download_rules(
 
 fn remove_download_rule(
     shell: &Rc<Shell>,
-    source_id: library::SourceId,
+    source_id: sources::SourceId,
     rule: DownloadRule,
     delete_downloads: bool,
     row: &adw::ActionRow,
@@ -596,15 +595,10 @@ fn remove_download_rule(
         })
         .is_some();
     if removed {
-        let loaded = shell
-            .selected_library()
-            .as_deref()
-            .filter(|selected| selected.source_id == source_id)
-            .map(|selected| Arc::clone(&selected.library));
         shell
             .products
             .downloads
-            .remove_rule(source_id, loaded, rule, delete_downloads);
+            .remove_rule(source_id, rule, delete_downloads);
         row.set_visible(false);
     }
 }
@@ -612,7 +606,7 @@ fn remove_download_rule(
 fn confirm_remove_download_rule(
     shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
-    source_id: library::SourceId,
+    source_id: sources::SourceId,
     rule: DownloadRule,
     row: adw::ActionRow,
 ) {
@@ -671,7 +665,7 @@ fn download_rule_action_name(rule: DownloadRule) -> &'static str {
 fn add_download_queue(
     queue: &adw::PreferencesGroup,
     shell: &Rc<Shell>,
-    source_id: &library::SourceId,
+    source_id: &sources::SourceId,
     pause_downloads: &gtk::Button,
 ) -> gtk::Widget {
     let queue_rows = Rc::new(std::cell::RefCell::new(Vec::<gtk::Widget>::new()));
@@ -895,7 +889,7 @@ fn download_queue_item_subtitle(job: &downloads::DownloadQueueItem) -> String {
 fn confirm_remove_all_downloads(
     shell: &Rc<Shell>,
     preferences_dialog: &adw::Dialog,
-    source_id: library::SourceId,
+    source_id: sources::SourceId,
 ) {
     let dialog = adw::AlertDialog::builder()
         .heading(tr("Remove All Downloads"))
@@ -927,15 +921,7 @@ fn confirm_remove_all_downloads(
                     })
                     .is_some();
             if rules_disabled {
-                let loaded = shell
-                    .selected_library()
-                    .as_deref()
-                    .filter(|selected| selected.source_id == source_id)
-                    .map(|selected| Arc::clone(&selected.library));
-                shell
-                    .products
-                    .downloads
-                    .clear(source_id.clone(), loaded, true);
+                shell.products.downloads.clear(source_id.clone(), true);
                 if let Some(preferences_dialog) = preferences_dialog.upgrade() {
                     preferences_dialog.close();
                 }

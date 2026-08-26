@@ -1,9 +1,0 @@
-# Seeds for failure cases proptest has generated in the past. It is
-# automatically read and these particular cases re-run before any
-# novel cases are generated.
-#
-# It is recommended to check this file in to source control so that
-# everyone who runs the test benefits from these saved cases.
-cc ef779c2ab67bc370e3bccf8aa2f4818428c9444d3d0b5c5919c204cb61efb8b5 # shrinks to operations = [LocalExactPatch(2, 0)]
-cc 249c2f4fe51b5c2ce095a294aac29f5a342227b0517ae666969486671814d519 # shrinks to operations = [Restart, Favorite(OpenSubsonic, 1, 0, true), Refresh(Jellyfin), Forget(Jellyfin), CandidateDrop(Local, false), Restart, Forget(Jellyfin), Forget(Jellyfin), Refresh(Local), CandidateDrop(Jellyfin, true), CandidateDrop(Jellyfin, true), Playlist(Local), Forget(OpenSubsonic), RemoteExactPatch(Jellyfin), RemoteExactPatch(Jellyfin)]
-cc 005c10151358e27db7c3d1782f66a14258bb92b38933a79a6ba4bc56ac6eaa3d # shrinks to operations = [Forget(Local), Favorite(Local, 2, 1, false), Restart, Restart, CandidateDrop(Jellyfin, false), Refresh(OpenSubsonic), CandidateDrop(Jellyfin, false), Forget(Jellyfin)]

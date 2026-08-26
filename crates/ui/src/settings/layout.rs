@@ -1,8 +1,8 @@
 use std::collections::HashSet;
 
-use library::{AlbumId, ArtistId, GenreId, PlaylistId, SmartPlaylistId, SourceId};
 use localization::msgid;
 use serde::{Deserialize, Deserializer, Serialize};
+use sources::SourceId;
 
 use super::sidebar::{
     available_detail_track_fields, available_sort_fields, default_descending,
@@ -337,24 +337,30 @@ pub struct SidebarRouteItemSettings {
 pub enum SidebarPin {
     Album {
         source_id: SourceId,
-        album_id: AlbumId,
+        album_id: String,
     },
     Artist {
         source_id: SourceId,
-        artist_id: ArtistId,
+        artist_id: String,
+        #[serde(default, skip_serializing_if = "is_false")]
+        album_artist: bool,
     },
     Genre {
         source_id: SourceId,
-        genre_id: GenreId,
+        genre_id: String,
     },
     Playlist {
         source_id: SourceId,
-        playlist_id: PlaylistId,
+        playlist_id: String,
     },
     SmartPlaylist {
         source_id: SourceId,
-        playlist_id: SmartPlaylistId,
+        playlist_id: String,
     },
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 impl SidebarPin {
     pub fn source_id(&self) -> &SourceId {
@@ -450,7 +456,7 @@ impl SidebarSettings {
     pub fn import_playlist_pins_once(
         &mut self,
         source_id: SourceId,
-        playlist_ids: impl IntoIterator<Item = PlaylistId>,
+        playlist_ids: impl IntoIterator<Item = String>,
     ) -> bool {
         if self.playlist_pin_imported_sources.contains(&source_id) {
             return false;
@@ -721,6 +727,76 @@ impl LibraryField {
             | Self::AlbumCount => library::TrackSort::Title,
         }
     }
+
+    pub fn album_sort(self) -> library::AlbumSort {
+        match self {
+            Self::AlbumArtist | Self::Artist => library::AlbumSort::AlbumArtist,
+            Self::Year => library::AlbumSort::Year,
+            Self::ReleaseDate => library::AlbumSort::ReleaseDate,
+            Self::DateAdded => library::AlbumSort::DateAdded,
+            Self::LastPlayed => library::AlbumSort::LastPlayed,
+            Self::PlayCount => library::AlbumSort::PlayCount,
+            Self::UserRating => library::AlbumSort::Rating,
+            Self::SongCount => library::AlbumSort::TrackCount,
+            Self::Duration => library::AlbumSort::Duration,
+            Self::Favorite => library::AlbumSort::Favorite,
+            _ => library::AlbumSort::Title,
+        }
+    }
+
+    pub fn artist_sort(self) -> library::ArtistSort {
+        match self {
+            Self::AlbumCount => library::ArtistSort::AlbumCount,
+            Self::SongCount => library::ArtistSort::TrackCount,
+            Self::LastPlayed => library::ArtistSort::LastPlayed,
+            Self::PlayCount => library::ArtistSort::PlayCount,
+            Self::UserRating => library::ArtistSort::Rating,
+            Self::Favorite => library::ArtistSort::Favorite,
+            _ => library::ArtistSort::Title,
+        }
+    }
+
+    pub fn playlist_sort(self) -> library::PlaylistSort {
+        match self {
+            Self::SongCount => library::PlaylistSort::TrackCount,
+            Self::Duration => library::PlaylistSort::Duration,
+            _ => library::PlaylistSort::Title,
+        }
+    }
+
+    pub fn playlist_entry_sort(self) -> library::PlaylistEntrySort {
+        match self {
+            Self::Artist => library::PlaylistEntrySort::Artist,
+            Self::Album => library::PlaylistEntrySort::Album,
+            Self::Title | Self::TitleMerged => library::PlaylistEntrySort::Title,
+            _ => library::PlaylistEntrySort::Position,
+        }
+    }
+
+    pub fn smart_playlist_sort(self) -> library::SmartPlaylistListSort {
+        match self {
+            Self::RowIndex => library::SmartPlaylistListSort::Position,
+            Self::SongCount => library::SmartPlaylistListSort::TrackCount,
+            Self::Duration => library::SmartPlaylistListSort::Duration,
+            _ => library::SmartPlaylistListSort::Title,
+        }
+    }
+
+    pub fn genre_sort(self) -> library::GenreSort {
+        match self {
+            Self::AlbumCount => library::GenreSort::AlbumCount,
+            Self::SongCount => library::GenreSort::TrackCount,
+            _ => library::GenreSort::Title,
+        }
+    }
+
+    pub fn mood_sort(self) -> library::MoodSort {
+        match self {
+            Self::SongCount => library::MoodSort::TrackCount,
+            Self::Duration => library::MoodSort::Duration,
+            _ => library::MoodSort::Title,
+        }
+    }
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LibraryListSettings {
@@ -801,20 +877,6 @@ impl LibraryListSettings {
             .iter()
             .find(|entry| entry.field == field)
             .map(|entry| entry.width)
-    }
-
-    pub(crate) fn uses_track_activity(&self) -> bool {
-        let fields = match self.layout {
-            LibraryLayout::Row => &self.row_fields,
-            LibraryLayout::Grid => &self.grid_fields,
-            LibraryLayout::Detail => &self.detail_track_fields,
-        };
-        matches!(
-            self.sort_key,
-            LibraryField::LastPlayed | LibraryField::PlayCount
-        ) || fields
-            .iter()
-            .any(|field| matches!(field, LibraryField::LastPlayed | LibraryField::PlayCount))
     }
 
     fn migrate_defaults(&mut self, key: LibraryListKey) {

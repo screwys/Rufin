@@ -7,10 +7,11 @@ use std::time::UNIX_EPOCH;
 use lofty::config::WriteOptions;
 use lofty::file::TaggedFileExt;
 use lofty::prelude::{Accessor, TagExt};
+use lofty::tag::items::popularimeter::{Popularimeter, StarRating};
 use lofty::tag::{ItemKey, Tag};
 
 use super::lofty_metadata::{MetadataWriter, bpm_key, read_lofty_for_edit};
-use crate::{AlbumMetadataValues, ArtistMetadataValues, SourceMetadataError, TrackMetadataValues};
+use crate::{AlbumMetadataEdit, ArtistMetadataEdit, SourceMetadataError, TrackMetadataEdit};
 
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
     let metadata = fs::metadata(path).map_err(write_error)?;
@@ -36,58 +37,117 @@ pub(crate) fn write_track(
     path: &Path,
     source_format: Option<&str>,
     expected_revision: &str,
-    values: &TrackMetadataValues,
+    edit: &TrackMetadataEdit,
 ) -> Result<(), SourceMetadataError> {
     if revision(path)? != expected_revision {
         return Err(SourceMetadataError::Conflict);
     }
+    let values = &edit.values;
+    let changed = &edit.changed;
     let prepared = prepare_file(path, source_format, |tag, writer| {
-        tag.set_title(values.title.trim().to_string());
-        set_text(
-            tag,
-            ItemKey::TrackTitleSortOrder,
-            values.sort_title.as_deref(),
-        );
-        set_text(tag, ItemKey::TrackArtist, values.artist.as_deref());
-        set_text(tag, ItemKey::AlbumTitle, values.album.as_deref());
-        set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
-        set_number(tag, ItemKey::TrackNumber, values.track_number);
-        set_number(tag, ItemKey::DiscNumber, values.disc_number);
-        set_number(tag, ItemKey::RecordingDate, values.year);
-        set_text(tag, ItemKey::Genre, values.genre.as_deref());
-        set_text(tag, ItemKey::Comment, values.comment.as_deref());
-        tag.remove_key(ItemKey::Bpm);
-        tag.remove_key(ItemKey::IntegerBpm);
-        if let (Some(value), Some(key)) =
-            (values.bpm, bpm_key(writer.file_type().primary_tag_type()))
-        {
-            tag.insert_text(key, value.to_string());
+        if changed.title {
+            tag.set_title(values.title.trim().to_string());
         }
-        set_text(
-            tag,
-            ItemKey::MusicBrainzRecordingId,
-            values.musicbrainz_recording_id.as_deref(),
-        );
-        set_text(
-            tag,
-            ItemKey::MusicBrainzTrackId,
-            values.musicbrainz_release_track_id.as_deref(),
-        );
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseId,
-            values.musicbrainz_album_id.as_deref(),
-        );
-        set_text(
-            tag,
-            ItemKey::MusicBrainzReleaseGroupId,
-            values.musicbrainz_release_group_id.as_deref(),
-        );
-        set_text(
-            tag,
-            ItemKey::MusicBrainzArtistId,
-            values.musicbrainz_artist_id.as_deref(),
-        );
+        if changed.sort_title {
+            set_text(
+                tag,
+                ItemKey::TrackTitleSortOrder,
+                values.sort_title.as_deref(),
+            );
+        }
+        if changed.artist {
+            set_text(tag, ItemKey::TrackArtist, values.artist.as_deref());
+        }
+        if changed.album {
+            set_text(tag, ItemKey::AlbumTitle, values.album.as_deref());
+        }
+        if changed.album_artist {
+            set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
+        }
+        if changed.track_number {
+            set_number(tag, ItemKey::TrackNumber, values.track_number);
+        }
+        if changed.disc_number {
+            set_number(tag, ItemKey::DiscNumber, values.disc_number);
+        }
+        if changed.year {
+            set_number(tag, ItemKey::RecordingDate, values.year);
+        }
+        if changed.genre {
+            set_text(tag, ItemKey::Genre, values.genre.as_deref());
+        }
+        if changed.comment {
+            set_text(tag, ItemKey::Comment, values.comment.as_deref());
+        }
+        if changed.bpm {
+            tag.remove_key(ItemKey::Bpm);
+            tag.remove_key(ItemKey::IntegerBpm);
+            if let (Some(value), Some(key)) =
+                (values.bpm, bpm_key(writer.file_type().primary_tag_type()))
+            {
+                tag.insert_text(key, value.to_string());
+            }
+        }
+        if changed.musicbrainz_recording_id {
+            set_text(
+                tag,
+                ItemKey::MusicBrainzRecordingId,
+                values.musicbrainz_recording_id.as_deref(),
+            );
+        }
+        if changed.musicbrainz_release_track_id {
+            set_text(
+                tag,
+                ItemKey::MusicBrainzTrackId,
+                values.musicbrainz_release_track_id.as_deref(),
+            );
+        }
+        if changed.musicbrainz_album_id {
+            set_text(
+                tag,
+                ItemKey::MusicBrainzReleaseId,
+                values.musicbrainz_album_id.as_deref(),
+            );
+        }
+        if changed.musicbrainz_release_group_id {
+            set_text(
+                tag,
+                ItemKey::MusicBrainzReleaseGroupId,
+                values.musicbrainz_release_group_id.as_deref(),
+            );
+        }
+        if changed.musicbrainz_artist_id {
+            set_text(
+                tag,
+                ItemKey::MusicBrainzArtistId,
+                values.musicbrainz_artist_id.as_deref(),
+            );
+        }
+    })?;
+    commit_batch(vec![prepared])
+}
+
+pub(crate) fn write_rating(
+    path: &Path,
+    source_format: Option<&str>,
+    rating: Option<u8>,
+) -> Result<(), SourceMetadataError> {
+    let prepared = prepare_file(path, source_format, |tag, _| {
+        tag.remove_key(ItemKey::Popularimeter);
+        if let Some(rating) = rating.filter(|rating| *rating > 0) {
+            let stars = rating.div_ceil(2).clamp(1, 5);
+            let stars = match stars {
+                1 => StarRating::One,
+                2 => StarRating::Two,
+                3 => StarRating::Three,
+                4 => StarRating::Four,
+                _ => StarRating::Five,
+            };
+            tag.insert_text(
+                ItemKey::Popularimeter,
+                Popularimeter::musicbee(stars, 0).to_string(),
+            );
+        }
     })?;
     commit_batch(vec![prepared])
 }
@@ -95,7 +155,7 @@ pub(crate) fn write_track(
 pub(crate) fn write_album_batch(
     targets: &[(PathBuf, Option<String>)],
     expected_revision: &str,
-    values: &AlbumMetadataValues,
+    edit: &AlbumMetadataEdit,
 ) -> Result<(), SourceMetadataError> {
     let paths = targets
         .iter()
@@ -104,29 +164,50 @@ pub(crate) fn write_album_batch(
     if combined_revision(&paths)? != expected_revision {
         return Err(SourceMetadataError::Conflict);
     }
+    let values = &edit.values;
+    let changed = &edit.changed;
     let mut prepared = Vec::with_capacity(targets.len());
     for (path, format) in targets {
         prepared.push(prepare_file(path, format.as_deref(), |tag, _| {
-            set_text(tag, ItemKey::AlbumTitle, Some(&values.title));
-            set_text(
-                tag,
-                ItemKey::AlbumTitleSortOrder,
-                values.sort_title.as_deref(),
-            );
-            set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
-            set_number(tag, ItemKey::RecordingDate, values.year);
-            set_text(tag, ItemKey::Genre, values.genre.as_deref());
-            set_text(tag, ItemKey::Comment, values.comment.as_deref());
-            set_text(
-                tag,
-                ItemKey::MusicBrainzReleaseId,
-                values.musicbrainz_album_id.as_deref(),
-            );
-            set_text(
-                tag,
-                ItemKey::MusicBrainzReleaseGroupId,
-                values.musicbrainz_release_group_id.as_deref(),
-            );
+            if changed.title {
+                set_text(tag, ItemKey::AlbumTitle, Some(&values.title));
+            }
+            if changed.sort_title {
+                set_text(
+                    tag,
+                    ItemKey::AlbumTitleSortOrder,
+                    values.sort_title.as_deref(),
+                );
+            }
+            if changed.artist {
+                set_text(tag, ItemKey::TrackArtist, values.artist.as_deref());
+            }
+            if changed.album_artist {
+                set_text(tag, ItemKey::AlbumArtist, values.album_artist.as_deref());
+            }
+            if changed.year {
+                set_number(tag, ItemKey::RecordingDate, values.year);
+            }
+            if changed.genre {
+                set_text(tag, ItemKey::Genre, values.genre.as_deref());
+            }
+            if changed.comment {
+                set_text(tag, ItemKey::Comment, values.comment.as_deref());
+            }
+            if changed.musicbrainz_album_id {
+                set_text(
+                    tag,
+                    ItemKey::MusicBrainzReleaseId,
+                    values.musicbrainz_album_id.as_deref(),
+                );
+            }
+            if changed.musicbrainz_release_group_id {
+                set_text(
+                    tag,
+                    ItemKey::MusicBrainzReleaseGroupId,
+                    values.musicbrainz_release_group_id.as_deref(),
+                );
+            }
         })?);
     }
     commit_batch(prepared)
@@ -136,7 +217,7 @@ pub(crate) fn write_artist_batch(
     targets: &[(PathBuf, Option<String>)],
     expected_revision: &str,
     previous_name: &str,
-    values: &ArtistMetadataValues,
+    edit: &ArtistMetadataEdit,
 ) -> Result<(), SourceMetadataError> {
     let paths = targets
         .iter()
@@ -145,26 +226,38 @@ pub(crate) fn write_artist_batch(
     if combined_revision(&paths)? != expected_revision {
         return Err(SourceMetadataError::Conflict);
     }
+    let values = &edit.values;
+    let changed = &edit.changed;
     let mut prepared = Vec::with_capacity(targets.len());
     for (path, format) in targets {
         prepared.push(prepare_file(path, format.as_deref(), |tag, _| {
-            let artists = tag
-                .artist()
-                .map(|value| replace_name(&value, previous_name, &values.name))
-                .unwrap_or_else(|| values.name.clone());
-            tag.set_artist(artists);
-            set_text(
-                tag,
-                ItemKey::TrackArtistSortOrder,
-                values.sort_name.as_deref(),
-            );
-            set_text(tag, ItemKey::Genre, values.genre.as_deref());
-            set_text(tag, ItemKey::Comment, values.comment.as_deref());
-            set_text(
-                tag,
-                ItemKey::MusicBrainzArtistId,
-                values.musicbrainz_artist_id.as_deref(),
-            );
+            if changed.name {
+                let artists = tag
+                    .artist()
+                    .map(|value| replace_name(&value, previous_name, &values.name))
+                    .unwrap_or_else(|| values.name.clone());
+                tag.set_artist(artists);
+            }
+            if changed.sort_name {
+                set_text(
+                    tag,
+                    ItemKey::TrackArtistSortOrder,
+                    values.sort_name.as_deref(),
+                );
+            }
+            if changed.genre {
+                set_text(tag, ItemKey::Genre, values.genre.as_deref());
+            }
+            if changed.comment {
+                set_text(tag, ItemKey::Comment, values.comment.as_deref());
+            }
+            if changed.musicbrainz_artist_id {
+                set_text(
+                    tag,
+                    ItemKey::MusicBrainzArtistId,
+                    values.musicbrainz_artist_id.as_deref(),
+                );
+            }
         })?);
     }
     commit_batch(prepared)
@@ -317,6 +410,34 @@ fn write_error(error: impl std::fmt::Display) -> SourceMetadataError {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::{
+        AlbumMetadataValues, AlbumMetadataWritable, TrackMetadataValues, TrackMetadataWritable,
+    };
+
+    fn track_edit(values: TrackMetadataValues) -> TrackMetadataEdit {
+        TrackMetadataEdit {
+            values,
+            changed: TrackMetadataWritable {
+                title: true,
+                sort_title: true,
+                artist: true,
+                album: true,
+                album_artist: true,
+                track_number: true,
+                disc_number: true,
+                year: true,
+                genre: true,
+                comment: true,
+                bpm: true,
+                locked: true,
+                musicbrainz_recording_id: true,
+                musicbrainz_release_track_id: true,
+                musicbrainz_album_id: true,
+                musicbrainz_release_group_id: true,
+                musicbrainz_artist_id: true,
+            },
+        }
+    }
 
     #[test]
     fn available_local_track_metadata_reads_and_writes_the_same_file() {
@@ -333,7 +454,7 @@ mod tests {
             ..TrackMetadataValues::default()
         };
 
-        write_track(&path, Some("wav"), &before, &values).expect("write metadata");
+        write_track(&path, Some("wav"), &before, &track_edit(values)).expect("write metadata");
         let read =
             super::super::read_track_metadata(library::TrackKey::from_raw(1), &path, Some("wav"))
                 .expect("read metadata");
@@ -350,18 +471,19 @@ mod tests {
             directory.path().join("one.wav"),
             directory.path().join("two.wav"),
         ];
-        for path in &paths {
+        for (index, path) in paths.iter().enumerate() {
             fs::write(path, silent_wav()).expect("write WAV");
             let before = revision(path).expect("file revision");
             write_track(
                 path,
                 Some("wav"),
                 &before,
-                &TrackMetadataValues {
+                &track_edit(TrackMetadataValues {
                     title: path.file_stem().unwrap().to_string_lossy().into_owned(),
                     album: Some("Before".to_string()),
+                    genre: Some(format!("Genre {index}")),
                     ..TrackMetadataValues::default()
-                },
+                }),
             )
             .expect("seed Track metadata");
         }
@@ -374,19 +496,31 @@ mod tests {
         write_album_batch(
             &targets,
             &before,
-            &AlbumMetadataValues {
-                title: "After".to_string(),
-                album_artist: Some("Album Artist".to_string()),
-                ..AlbumMetadataValues::default()
+            &AlbumMetadataEdit {
+                values: AlbumMetadataValues {
+                    title: "After".to_string(),
+                    album_artist: Some("Album Artist".to_string()),
+                    ..AlbumMetadataValues::default()
+                },
+                changed: AlbumMetadataWritable {
+                    title: true,
+                    album_artist: true,
+                    ..AlbumMetadataWritable::default()
+                },
             },
         )
         .expect("write Album metadata");
 
-        for path in &paths {
+        for (index, path) in paths.iter().enumerate() {
             let values = super::super::read_album_metadata_values(path, Some("wav"))
                 .expect("read Album metadata");
             assert_eq!(values.title, "After");
             assert_eq!(values.album_artist.as_deref(), Some("Album Artist"));
+            assert_eq!(
+                values.genre.as_deref(),
+                Some(format!("Genre {index}").as_str()),
+                "an untouched mixed aggregate field keeps each Track's value"
+            );
         }
     }
 

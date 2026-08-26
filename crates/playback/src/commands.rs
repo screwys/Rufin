@@ -111,6 +111,26 @@ impl LoadedPlayRequest {
         })
     }
 
+    pub fn random(
+        source_key: SourceKey,
+        source_session_epoch: SourceSessionEpoch,
+        order: Arc<[TrackKey]>,
+        anchor: PlaybackMedia,
+        placement: QueuePlacement,
+    ) -> Option<Self> {
+        let anchor_key = anchor.track_key?;
+        (order.first() == Some(&anchor_key)).then(|| Self {
+            source_key,
+            source_session_epoch,
+            order,
+            anchor,
+            anchor_index: 0,
+            placement,
+            origin: QueueOrigin::Random,
+            shuffled_start: false,
+        })
+    }
+
     pub(crate) fn activation_context(&self) -> Option<(String, TrackKey, usize)> {
         let QueueOrigin::Context(context_id) = &self.origin else {
             return None;
@@ -172,6 +192,7 @@ pub struct QueueReorderRequest {
 #[derive(Clone, Debug, PartialEq)]
 pub struct RandomPlayRequest {
     pub placement: QueuePlacement,
+    pub requested: usize,
     pub criteria: RandomCriteria,
 }
 

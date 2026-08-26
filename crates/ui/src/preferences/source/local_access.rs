@@ -3,17 +3,14 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::runtime::source::{
-    CredentialInput, CredentialPreset, LocalAccessStatus, OpenSubsonicAuthentication,
-    SelectedSourceHandle, SourceHandle, SourceLocalAccess, SourceSummary,
-};
-use ::library::{
-    LocalAccessMapping, MetadataItemId, SourceId, project_local_access_path,
-    reported_path_is_absolute,
+    CredentialInput, CredentialPreset, LocalAccessStatus, OpenSubsonicAuthentication, SourceHandle,
+    SourceLocalAccess, SourceSummary,
 };
 use adw::prelude::*;
 use gtk::{gio, glib};
 
 use localization::{tr, trn_with};
+use sources::SourceId;
 
 use super::field_layout::{
     compact_field_row_group, install_compact_field_row_responsiveness,
@@ -61,7 +58,6 @@ struct LocalAccessEditor {
     folder: Rc<RefCell<Option<PathBuf>>>,
     server_prefix: glib::WeakRef<adw::EntryRow>,
     local_prefix: Option<glib::WeakRef<adw::EntryRow>>,
-    metadata: Option<(SelectedSourceHandle, MetadataItemId)>,
     operation: RefCell<LocalAccessOperation>,
     on_success: Rc<dyn Fn()>,
 }
@@ -73,7 +69,6 @@ impl LocalAccessEditor {
         folder: Option<PathBuf>,
         server_prefix: &adw::EntryRow,
         local_prefix: Option<&adw::EntryRow>,
-        metadata: Option<(SelectedSourceHandle, MetadataItemId)>,
         on_success: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         Rc::new(Self {
@@ -82,7 +77,6 @@ impl LocalAccessEditor {
             folder: Rc::new(RefCell::new(folder)),
             server_prefix: server_prefix.downgrade(),
             local_prefix: local_prefix.map(|row| row.downgrade()),
-            metadata,
             operation: RefCell::new(LocalAccessOperation::Editing),
             on_success,
         })
@@ -162,10 +156,7 @@ impl LocalAccessEditor {
         let Some(input) = source_local_access(self.source_id.clone(), &self.draft()) else {
             return;
         };
-        let receiver = match self.metadata.clone() {
-            Some((source, item_id)) => source.save_metadata_local_access(input, item_id),
-            None => self.source.save_local_access(input),
-        };
+        let receiver = self.source.save_local_access(input);
         self.operation.replace(LocalAccessOperation::Pending);
         update();
         let editor = Rc::downgrade(self);
@@ -237,11 +228,16 @@ fn manage_server_content(
     };
     let current_sample = {
         let player = shell.selected_playback();
-        let source_id = player
-            .as_ref()
-            .map(|player| player.transport.source_id.clone());
-        let source_path =
-            current_playback_track(player.as_deref()).and_then(|track| track.source_path.clone());
+        let source_id = shell.selected_library().as_deref().and_then(|selected| {
+            player
+                .as_ref()
+                .is_some_and(|player| player.transport.source_id == selected.source_key)
+                .then(|| selected.artwork.source_id.clone())
+        });
+        let source_path = current_playback_track(player.as_deref())
+            .and_then(|track| track.media_uri)
+            .and_then(|uri| gio::File::for_uri(&uri).path())
+            .map(|path| path.to_string_lossy().into_owned());
         source_id.zip(source_path)
     };
     let sample_source_path = preferred_server_sample(
@@ -419,7 +415,6 @@ fn manage_server_content(
         saved_folder,
         &server_prefix,
         Some(&local_prefix),
-        None,
         Rc::new(move || close_manage_server(&exit_for_save)),
     );
     let update_state: Rc<dyn Fn()> = Rc::new({
@@ -516,7 +511,6 @@ pub(crate) fn metadata_local_access_recovery_form(
     shell: &Rc<Shell>,
     source_path: &str,
     selected: &crate::runtime::SelectedLibrary,
-    item_id: MetadataItemId,
     on_success: Rc<dyn Fn()>,
 ) -> gtk::Widget {
     let summary = shell
@@ -525,7 +519,7 @@ pub(crate) fn metadata_local_access_recovery_form(
         .borrow()
         .local_access
         .iter()
-        .find(|summary| summary.source_id == selected.source_id)
+        .find(|summary| summary.source_id == selected.artwork.source_id)
         .cloned();
     let access = summary.as_ref().and_then(|summary| summary.access.clone());
     let suggested = summary
@@ -616,11 +610,10 @@ pub(crate) fn metadata_local_access_recovery_form(
 
     let editor = LocalAccessEditor::new(
         shell,
-        selected.source_id.clone(),
+        selected.artwork.source_id.clone(),
         folder,
         &server_prefix,
         None,
-        Some((selected.operations.clone(), item_id)),
         on_success,
     );
     let update: Rc<dyn Fn()> = Rc::new({
@@ -969,6 +962,36 @@ struct LocalAccessDraft {
     folder: Option<PathBuf>,
     server_prefix: String,
     local_prefix: String,
+}
+
+struct LocalAccessMapping {
+    root_path: PathBuf,
+    server_prefix: Option<String>,
+    local_prefix: Option<String>,
+}
+
+fn reported_path_is_absolute(value: &str) -> bool {
+    Path::new(value).is_absolute()
+        || value.as_bytes().get(1) == Some(&b':')
+        || value.starts_with("\\\\")
+}
+
+fn project_local_access_path(value: &str, mapping: &LocalAccessMapping) -> Option<PathBuf> {
+    if let Some(server_prefix) = mapping.server_prefix.as_deref() {
+        let suffix = value.strip_prefix(server_prefix)?;
+        let suffix = suffix.trim_start_matches(['/', '\\']);
+        let base = mapping
+            .local_prefix
+            .as_deref()
+            .map(PathBuf::from)
+            .unwrap_or_else(|| mapping.root_path.clone());
+        return Some(base.join(suffix.replace('\\', "/")));
+    }
+    if reported_path_is_absolute(value) {
+        Some(PathBuf::from(value))
+    } else {
+        Some(mapping.root_path.join(value.replace('\\', "/")))
+    }
 }
 
 fn source_local_access(source_id: SourceId, draft: &LocalAccessDraft) -> Option<SourceLocalAccess> {

@@ -3,10 +3,9 @@ use std::rc::Rc;
 use std::sync::Arc;
 use std::time::Duration;
 
-use gtk::glib;
-use gtk::prelude::{EditableExt, WidgetExt};
+use gtk::prelude::{EditableExt, FileExt, WidgetExt};
+use gtk::{gio, glib};
 use localization::tr;
-use playback::QueuePageQuery;
 use tracing::warn;
 
 use crate::player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
@@ -21,8 +20,8 @@ use crate::runtime::source::{
     SourceProgress,
 };
 use crate::runtime::{
-    HomePublication, ProductReceivers, SelectedLibraryUpdate, SourceEvent, SourceNotice,
-    SourceNoticeKind, WaveformProjection,
+    CatalogPublication, ProductReceivers, SourceEvent, SourceNotice, SourceNoticeKind,
+    WaveformProjection,
 };
 
 use super::Shell;
@@ -100,7 +99,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
         } => {
             apply_selected_source(shell, configured, selected, *playback);
         }
-        SourceEvent::LibraryReplaced {
+        SourceEvent::CatalogReplaced {
             configured,
             selected,
         } => {
@@ -108,17 +107,11 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
         }
         SourceEvent::Operation(operation) => apply_source_operation(shell, operation),
         SourceEvent::ArtworkPreparation {
-            source_id,
+            source_key,
             revision,
             progress,
-        } => apply_source_artwork_preparation(shell, source_id, revision, progress),
-        SourceEvent::Home(publication) => apply_home_publication(shell, publication),
-        SourceEvent::HomeReplaced {
-            source_id,
-            source_session_epoch,
-            home,
-        } => apply_home_replacement(shell, source_id, source_session_epoch, home),
-        SourceEvent::LibraryUpdate(update) => apply_selected_library_update(shell, update),
+        } => apply_source_artwork_preparation(shell, source_key, revision, progress),
+        SourceEvent::CatalogPublished(publication) => apply_catalog_publication(shell, publication),
         SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
         SourceEvent::ReleaseSelected { acknowledged } => {
             release_selected_source(shell);
@@ -129,7 +122,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
 
 fn apply_playback_publication(shell: &Rc<Shell>, publication: crate::runtime::PlaybackPublication) {
     let matches_selected = shell.selected_library().as_deref().is_some_and(|selected| {
-        selected.source_id == publication.source_id
+        selected.source_key == publication.source_key
             && selected.source_session_epoch == publication.source_session_epoch
     });
     if matches_selected {
@@ -141,7 +134,7 @@ fn release_selected_source(shell: &Rc<Shell>) {
     let released_source = shell
         .selected_library()
         .as_deref()
-        .map(|selected| selected.source_id.clone());
+        .map(|selected| selected.artwork.source_id.clone());
     shell.clear_mounted_routes();
     shell.release_selected_navigation();
     shell.reset_cover_pipeline_state();
@@ -198,11 +191,8 @@ fn finish_source_assignment(
     let previous_source_id = previous
         .selected
         .as_ref()
-        .map(|selected| selected.source_id.clone());
-    let next_source_id = next
-        .selected
-        .as_ref()
-        .map(|selected| selected.source_id.clone());
+        .map(|selected| selected.source_key);
+    let next_source_id = next.selected.as_ref().map(|selected| selected.source_key);
     let previous_epoch = previous
         .selected
         .as_ref()
@@ -211,30 +201,34 @@ fn finish_source_assignment(
         .selected
         .as_ref()
         .map(|selected| selected.source_session_epoch);
-    let previous_scope = previous
-        .selected
-        .as_ref()
-        .and_then(|selected| selected.music_folder_id.clone());
-    let next_scope = next
-        .selected
-        .as_ref()
-        .and_then(|selected| selected.music_folder_id.clone());
     let previous_loaded = previous
         .selected
         .as_ref()
-        .map(|selected| Arc::clone(&selected.library));
+        .map(|selected| Arc::clone(&selected.database));
     let next_loaded = next
         .selected
         .as_ref()
-        .map(|selected| Arc::clone(&selected.library));
+        .map(|selected| Arc::clone(&selected.database));
+    let previous_scope = previous.selected.as_ref().map(|selected| {
+        (
+            selected.music_folder_key,
+            selected.music_folder_object_id.clone(),
+        )
+    });
+    let next_scope = next.selected.as_ref().map(|selected| {
+        (
+            selected.music_folder_key,
+            selected.music_folder_object_id.clone(),
+        )
+    });
     let source_changed = previous_source_id != next_source_id;
     let session_changed = previous_epoch != next_epoch;
-    let scope_changed = previous_scope != next_scope;
     let library_changed = match (&previous_loaded, &next_loaded) {
         (Some(previous), Some(next)) => !Arc::ptr_eq(previous, next),
         (None, None) => false,
         _ => true,
     };
+    let scope_changed = previous_scope != next_scope;
     let entered_first_run = next.first_run && !previous.first_run;
     let left_first_run = previous.first_run && !next.first_run;
 
@@ -251,12 +245,8 @@ fn finish_source_assignment(
 
     refresh_context_playlist_picker(shell);
     shell.sync_bottom_player_favorite();
-    let imported_playlist_pins = shell.import_remote_playlist_pins_once();
-    let rebuild_sidebar = source_changed
-        || session_changed
-        || scope_changed
-        || library_changed
-        || imported_playlist_pins;
+    shell.import_remote_playlist_pins_once();
+    let rebuild_sidebar = source_changed || session_changed || library_changed || scope_changed;
 
     if next.selected.is_none() {
         if rebuild_sidebar {
@@ -276,9 +266,7 @@ fn finish_source_assignment(
         shell.clear_mounted_routes();
         shell.reset_cover_pipeline_state();
         shell.reset_navigation_to_home();
-    } else if scope_changed {
-        shell.replace_current_route_when_ready();
-    } else if session_changed || library_changed {
+    } else if session_changed || library_changed || scope_changed {
         // A mounted Home owns its current snapshot for the duration of the
         // visit. Other routes keep their current page until its replacement
         // projection is ready.
@@ -314,11 +302,7 @@ fn apply_selected_source(
         selected: Some(selected.clone()),
     };
     let previous_player = shell.selected_playback().as_deref().cloned();
-    let playback::PlaybackProjection {
-        view,
-        queue_page,
-        notices,
-    } = playback;
+    let playback::PlaybackProjection { view, notices } = playback;
 
     *shell.source.configured.borrow_mut() = configured;
     shell
@@ -326,7 +310,6 @@ fn apply_selected_source(
         .install(super::selected_ui::SelectedUiSession::new(
             selected,
             view.clone(),
-            queue_page,
         ));
     shell.attach_selected_ui_roots();
 
@@ -349,74 +332,34 @@ fn apply_selected_library_replacement(
     finish_source_assignment(shell, previous, next);
 }
 
-fn apply_home_publication(shell: &Rc<Shell>, publication: HomePublication) {
-    let matches_selected = {
-        let Some(mut session) = shell.selected_ui.session_mut() else {
-            return;
-        };
-        let selected = &mut session.library;
-        if selected.source_id != publication.source_id
-            || selected.source_session_epoch != publication.source_session_epoch
-        {
-            false
-        } else {
-            selected.home = Arc::clone(&publication.home);
-            true
-        }
-    };
-    if matches_selected && matches!(shell.navigation.routes.borrow().current(), Route::Home) {
-        shell.apply_home_section_to_mounted_route(publication.kind, publication.home);
-    }
-}
-
-fn apply_home_replacement(
-    shell: &Rc<Shell>,
-    source_id: library::SourceId,
-    source_session_epoch: playback::SourceSessionEpoch,
-    home: Arc<library::HomeSnapshot>,
-) {
-    let Some(mut session) = shell.selected_ui.session_mut() else {
+fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication) {
+    let matches_selected = shell.selected_library().as_deref().is_some_and(|selected| {
+        selected.source_key == publication.source_key
+            && selected.source_session_epoch == publication.source_session_epoch
+    });
+    if !matches_selected {
         return;
-    };
-    let selected = &mut session.library;
-    if selected.source_id == source_id && selected.source_session_epoch == source_session_epoch {
-        selected.home = home;
     }
-}
-
-fn apply_selected_library_update(shell: &Rc<Shell>, update: SelectedLibraryUpdate) {
-    {
-        let Some(mut session) = shell.selected_ui.session_mut() else {
-            return;
-        };
-        let selected = &mut session.library;
-        if selected.source_id != update.source_id
-            || selected.source_session_epoch != update.source_session_epoch
-        {
-            return;
+    if let Some(favorite) = publication.favorite {
+        shell.apply_favorite_settlement(favorite.target, favorite.requested, favorite.effective);
+        if favorite.requested != favorite.effective {
+            shell.show_feedback_toast(tr("Could not update favorites"));
         }
-        if let Some(home) = &update.home {
-            selected.home = Arc::clone(home);
-        }
+        shell.apply_favorite_settlement_to_mounted_route(favorite);
+        return;
     }
-
-    if let Some(acknowledgement) = &update.change.favorite {
-        shell.apply_favorite_changed(acknowledgement.item.clone(), acknowledgement.favorite);
+    refresh_context_playlist_picker(shell);
+    super::navigation::refresh_sidebar_pins(shell);
+    if shell.navigation.routes.borrow().current() == &Route::Home {
+        shell.refresh_mounted_home();
+    } else {
+        shell.refresh_mounted_catalog();
     }
-    shell.apply_queue_track_replacements(&update.change.tracks);
-
-    if shell.sidebar_pins_changed(&update.change) {
-        shell.rebuild_sidebar_navigation();
-    }
-    if !update.change.playlists.is_empty() {
-        refresh_context_playlist_picker(shell);
-    }
-    shell.apply_library_update_to_mounted_route(&update);
 }
 
 fn apply_source_notice(shell: &Rc<Shell>, notice: SourceNotice) {
     let matches_selected = shell.selected_library().as_deref().is_some_and(|selected| {
-        selected.source_id == notice.source_id
+        selected.source_key == notice.source_key
             && selected.source_session_epoch == notice.source_session_epoch
     });
     if !matches_selected {
@@ -589,15 +532,15 @@ fn apply_source_refresh_feedback(
 }
 
 fn apply_source_artwork_preparation(
-    shell: &Shell,
-    source_id: library::SourceId,
+    shell: &Rc<Shell>,
+    source_key: library::SourceKey,
     revision: u64,
     progress: Option<SourceProgress>,
 ) {
     let matches_selected = shell
         .selected_library()
         .as_deref()
-        .is_some_and(|selected| selected.source_id == source_id);
+        .is_some_and(|selected| selected.source_key == source_key);
     if !matches_selected
         || matches!(
             *shell.source.operation.borrow(),
@@ -628,6 +571,7 @@ fn apply_source_artwork_preparation(
         }
         None if shell.source.artwork_preparation_revision.get() == Some(revision) => {
             shell.source.artwork_preparation_revision.set(None);
+            shell.refresh_artwork_bindings();
             finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
         }
         None => {}
@@ -691,14 +635,10 @@ fn apply_source_discovery(shell: &Rc<Shell>, update: DiscoveryUpdate) {
 
 fn apply_playback_projection(shell: &Rc<Shell>, projection: playback::PlaybackProjection) {
     let previous_player = shell.selected_playback().as_deref().cloned();
-    let playback::PlaybackProjection {
-        view,
-        queue_page,
-        notices,
-    } = projection;
-    let queue_page_changed = queue_page
-        .map(|queue_page| shell.apply_queue_page_projection(queue_page))
-        .unwrap_or(false);
+    let playback::PlaybackProjection { view, notices } = projection;
+    let queue_page_changed = previous_player.as_ref().is_none_or(|previous| {
+        previous.queue.revision != view.queue.revision || previous.queue.total != view.queue.total
+    });
     shell.selected_ui.replace_player(view.clone());
     finish_playback_projection(shell, previous_player, view, notices, queue_page_changed);
 }
@@ -714,6 +654,10 @@ fn finish_playback_projection(
         previous_player.as_ref(),
         &next_player,
         &shell.source.configured.borrow(),
+        shell
+            .selected_library()
+            .as_deref()
+            .map(|selected| &selected.artwork.source_id),
     ) {
         show_local_folder_recovery(shell, folder);
     }
@@ -757,21 +701,8 @@ fn finish_playback_projection(
         next_player.queue.current_occurrence.as_ref(),
     );
 
-    if shell
-        .selected_queue()
-        .is_some_and(|queue| queue.filter.borrow().trim().is_empty())
-        && let Some(current_index) = next_player.queue.current_index
-        && shell.selected_queue().is_some_and(|queue| {
-            queue.page.borrow().as_ref().is_none_or(|page| {
-                page.query.follows_current()
-                    && !page
-                        .rows
-                        .iter()
-                        .any(|row| row.absolute_index == current_index)
-            })
-        })
-    {
-        shell.request_queue_page(QueuePageQuery::current());
+    if queue_panel_changed && shell.selected_queue().is_some() {
+        shell.request_queue_page();
     }
 
     let previous_route_track = route_current_track(previous_player.as_ref());
@@ -864,25 +795,30 @@ fn unavailable_local_folder_for_failed_playback(
     previous: Option<&playback::PlaybackView>,
     next: &playback::PlaybackView,
     configured: &ConfiguredSources,
+    selected_source_id: Option<&sources::SourceId>,
 ) -> Option<String> {
     let error = next.transport.error.as_ref()?;
     if previous.and_then(|player| player.transport.error.as_ref()) == Some(error) {
         return None;
     }
+    let source_id = selected_source_id?;
     if !configured
         .sources
         .iter()
-        .any(|source| source.id == next.transport.source_id && source.kind == "local")
+        .any(|source| &source.id == source_id && source.kind == "local")
     {
         return None;
     }
-    let source_path = next
+    let media_uri = next
         .transport
         .current
         .as_ref()?
         .track
-        .source_path
+        .media_uri
         .as_deref()?;
+    let file = gio::File::for_uri(media_uri);
+    let source_path = file.path()?;
+    let source_path = source_path.to_str()?;
     unavailable_local_folder_for_path(&configured.local_folders, source_path)
 }
 
@@ -986,10 +922,10 @@ fn apply_lyrics_event(shell: &Rc<Shell>, event: lyrics::LyricsEvent) {
 
 #[cfg(test)]
 mod tests {
-    use library::SourceId;
     use playback::{
         ControlsView, PlaybackView, QueueSummaryView, RepeatMode, TransportStatus, TransportView,
     };
+    use sources::SourceId;
 
     use super::{
         bottom_player_can_update_position_only, media_controls_static_state_changed,
@@ -1094,7 +1030,7 @@ mod tests {
         let folders = [LocalFolder {
             path: root_text.clone(),
         }];
-        let track = root.join("Artist").join("Track.flac");
+        let track = root.join("ArtistRow").join("TrackRow.flac");
 
         assert_eq!(
             unavailable_local_folder_for_path(&folders, &track.to_string_lossy()),
@@ -1158,10 +1094,11 @@ mod tests {
                 total: 0,
                 current_occurrence: None,
                 current_index: None,
+                current_position: None,
                 next_occurrence: None,
             },
             transport: TransportView {
-                source_id: SourceId::new("tick-source"),
+                source_id: library::SourceKey::from_raw(1),
                 current: None,
                 state: TransportStatus::Stopped,
                 desired_playing: false,

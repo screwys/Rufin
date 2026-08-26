@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::format_duration;
-use crate::routes::detail_links::{DetailLinkBinding, DetailLinks, track_artist_links};
+use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
 use crate::routes::route::Route;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -475,7 +475,9 @@ impl Shell {
             .as_ref()
             .and_then(|player| player.transport.current.as_ref());
         let favorite = current.is_some_and(|entry| {
-            self.projected_track_favorite(&entry.track.id, entry.track.favorite)
+            entry.track.track_key.is_some_and(|track| {
+                self.projected_track_favorite(&track, entry.track.favorite.unwrap_or(false))
+            })
         });
         set_favorite_button_active(&self.player_view.player_controls.favorite_button, favorite);
     }
@@ -525,9 +527,7 @@ impl Shell {
         let current = player
             .as_ref()
             .and_then(|player| player.transport.current.as_ref());
-        let source_id = player
-            .as_ref()
-            .map(|player| player.transport.source_id.clone());
+        let source_id = current.map(|entry| sources::SourceId::new(entry.track.source_id.clone()));
         let state = player
             .as_ref()
             .map(|player| player.transport.effective_state())
@@ -562,7 +562,12 @@ impl Shell {
                 self.bind_playback_artwork_tile(
                     &controls.cover,
                     source_id,
-                    ArtworkBinding::track(&entry.track),
+                    entry
+                        .track
+                        .artwork_binding
+                        .as_deref()
+                        .map(ArtworkBinding::opaque)
+                        .unwrap_or_default(),
                     MEDIUM_COVER_SIZE as i32,
                     MEDIUM_COVER_SIZE,
                 );
@@ -582,7 +587,7 @@ impl Shell {
                 .map(|entry| entry.track.album.as_str())
                 .unwrap_or("");
             let album_route = current
-                .and_then(|entry| entry.track.album_id.clone())
+                .and_then(|entry| entry.track.album_key)
                 .map(Route::AlbumDetail);
             if let Some(title_links) = controls.title_links.borrow().as_ref() {
                 title_links.bind(DetailLinks::route(&title, album_route.clone()));
@@ -590,11 +595,15 @@ impl Shell {
                 controls.title.set_text(&title);
             }
             if let Some(artist_links) = controls.artist_links.borrow().as_ref() {
-                artist_links.bind(
-                    current
-                        .map(|entry| track_artist_links(&entry.track))
-                        .unwrap_or_else(|| DetailLinks::text(&artist)),
-                );
+                artist_links.bind(current.map_or_else(
+                    || DetailLinks::text(&artist),
+                    |entry| {
+                        crate::routes::detail_links::playback_artist_links(
+                            &artist,
+                            &entry.track.artist_links,
+                        )
+                    },
+                ));
             } else {
                 controls.artist.set_text(&artist);
             }
@@ -613,14 +622,19 @@ impl Shell {
                 .set_sensitive(current.is_some_and(|entry| !entry.track.album.is_empty()));
             controls.favorite_button.set_sensitive(current.is_some());
             let rating_available = current.is_some_and(|entry| {
-                self.rating_available(&library::FavoriteItemId::Track(entry.track.id.clone()))
+                entry.track.track_key.is_some_and(|track| {
+                    self.rating_available(&library::FavoriteTarget::Track(track))
+                })
             });
             controls.rating_available.set(rating_available);
             controls.rating.widget().set_sensitive(rating_available);
             controls.rating.widget().set_visible(rating_available);
-            controls
-                .rating
-                .set_rating(current.and_then(|entry| entry.track.user_rating));
+            controls.rating.set_rating(current.and_then(|entry| {
+                entry
+                    .track
+                    .rating
+                    .and_then(|value| u8::try_from(value).ok())
+            }));
         }
 
         controls.play_icon_playing.set(matches!(

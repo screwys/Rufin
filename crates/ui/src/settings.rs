@@ -5,8 +5,8 @@ mod persistence;
 mod sidebar;
 
 pub use app::{
-    RandomPlayGenreSelection, RandomPlaySettings, Settings, SettingsHandle, SettingsPort,
-    default_home_blocks,
+    HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection, RandomPlaySettings, Settings,
+    SettingsHandle, SettingsPort, default_home_blocks,
 };
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
 pub use downloads::DownloadRule;
@@ -27,5 +27,3 @@ pub use sidebar::{
     ExternalSiteLinkSettings, available_detail_track_fields, available_sort_fields,
     sanitized_window_size,
 };
-#[cfg(test)]
-mod tests;

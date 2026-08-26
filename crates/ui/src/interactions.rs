@@ -10,8 +10,6 @@ use crate::settings::{ContextMenuItem, ContextMenuSettings};
 use crate::shell::Shell;
 use crate::shell::actions::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
 
-const CONTEXT_MENU_PLAYLIST_MAX_HEIGHT: i32 = 320;
-const CONTEXT_MENU_PLAYLIST_MIN_WIDTH: i32 = 380;
 const NATIVE_MENU_SELECTION_CLASS: &str = "rufin-menu-selection";
 const NATIVE_MENU_SELECTED_CLASS: &str = "rufin-menu-selected";
 const NATIVE_MENU_PARENT_GRAB_CLASS: &str = "rufin-menu-parent-grab";
@@ -397,34 +395,6 @@ fn append_menu_action(menu: &gio::Menu, label: &str, action: &str, icon_name: &s
     menu.append_item(&menu_action_item(&tr(label), action, icon_name));
 }
 
-pub(crate) fn context_menu_scroll_page(child: &impl IsA<gtk::Widget>) -> gtk::ScrolledWindow {
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_min_content_width(CONTEXT_MENU_PLAYLIST_MIN_WIDTH);
-    scroller.set_propagate_natural_width(true);
-    scroller.set_propagate_natural_height(false);
-    scroller.set_max_content_height(CONTEXT_MENU_PLAYLIST_MAX_HEIGHT);
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(child));
-    scroller
-}
-pub(crate) fn close_context_surface(widget: &impl IsA<gtk::Widget>) {
-    if let Some(popover) = widget
-        .as_ref()
-        .ancestor(gtk::Popover::static_type())
-        .and_then(|widget| widget.downcast::<gtk::Popover>().ok())
-    {
-        popdown_popover(&popover);
-        return;
-    }
-    if let Some(dialog) = widget
-        .as_ref()
-        .ancestor(adw::Dialog::static_type())
-        .and_then(|widget| widget.downcast::<adw::Dialog>().ok())
-    {
-        dialog.close();
-    }
-}
 pub(crate) fn radio_context_submenu(group: &str) -> gio::Menu {
     let menu = gio::Menu::new();
     append_menu_action(&menu, "Play", &format!("{group}.play-radio"), PLAY_ICON);

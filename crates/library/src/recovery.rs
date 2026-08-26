@@ -89,6 +89,30 @@ pub(crate) async fn repair_released(path: &Path) -> LibraryResult<RecoveryReport
     Ok(report)
 }
 
+pub(crate) async fn rebuild_unusable(path: &Path) -> LibraryResult<()> {
+    if path.exists() {
+        let preserved = unique_sibling(path, "recovered")?;
+        fs::rename(path, &preserved)?;
+        preserve_sidecar(path, &preserved, "-wal")?;
+        preserve_sidecar(path, &preserved, "-shm")?;
+    }
+    let mut destination = db::open_writer(path).await?;
+    schema::initialize(&mut destination).await?;
+    destination.close().await?;
+    Ok(())
+}
+
+pub(crate) fn is_store_content_failure(error: &LibraryError) -> bool {
+    match error {
+        LibraryError::UnsupportedStore { .. } | LibraryError::InvalidStore(_) => true,
+        LibraryError::Sqlite(sqlx::Error::Database(error)) => error
+            .code()
+            .as_deref()
+            .is_some_and(|code| code == "11" || code == "26"),
+        _ => false,
+    }
+}
+
 async fn salvage_released(
     destination: &mut SqliteConnection,
     released_path: &Path,
@@ -137,7 +161,7 @@ async fn salvage_released(
                 album.musicbrainz_release_id, album.musicbrainz_release_group_id,
                 album.is_compilation,
                 CASE WHEN album.image_item_id IS NULL THEN NULL ELSE
-                    CAST(album.image_item_id || char(0) || COALESCE(album.image_tag, '') AS BLOB)
+                    CAST(json_object('item_id', album.image_item_id, 'tag', album.image_tag) AS BLOB)
                 END,
                 album.favorite, album.user_rating, NULL
          FROM released.albums AS album
@@ -159,7 +183,7 @@ async fn salvage_released(
         "INSERT INTO tracks(
              source_key, object_id, album_key, title, normalized_search,
              display_album, display_artist, sort_text, duration_millis,
-             disc_number, track_number, year, release_date, date_added, media_uri,
+             disc_number, track_number, year, release_date, date_added, media_uri, source_path,
              source_format, comment, bpm, musicbrainz_recording_id,
              musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis,
              artwork_binding, source_favorite, source_rating, first_seen_at
@@ -174,12 +198,18 @@ async fn salvage_released(
                 track.display_artist, lower(track.title),
                 track.duration_seconds * 1000, track.disc_number,
                 track.track_number, track.year, track.release_date,
-                track.date_added, track.source_path, track.source_format,
+                track.date_added,
+                CASE WHEN library.source_id<>'local:server:library' THEN NULL
+                     WHEN track.source_path IS NULL THEN NULL
+                     WHEN substr(track.source_path,1,7)='file://' THEN track.source_path
+                     ELSE 'file://' || track.source_path END,
+                track.source_path,
+                track.source_format,
                 track.comment, track.bpm, track.musicbrainz_recording_id,
                 track.musicbrainz_release_track_id, track.cue_path,
                 track.cue_start_millis, track.cue_end_millis,
                 CASE WHEN track.image_item_id IS NULL THEN NULL ELSE
-                    CAST(track.image_item_id || char(0) || COALESCE(track.image_tag, '') AS BLOB)
+                    CAST(json_object('item_id', track.image_item_id, 'tag', track.image_tag) AS BLOB)
                 END,
                 track.favorite, track.user_rating, NULL
          FROM released.tracks AS track
@@ -197,9 +227,53 @@ async fn salvage_released(
            )",
     )
     .await?;
+    salvage_family(
+        &mut transaction,
+        report,
+        "Track first-seen facts",
+        "UPDATE tracks SET first_seen_at=(SELECT import.first_seen_at FROM released.local_imports import JOIN sources source ON source.object_id=import.source_id WHERE source.source_key=tracks.source_key AND import.track_id=tracks.object_id) WHERE first_seen_at IS NULL",
+    )
+    .await?;
+    salvage_family(
+        &mut transaction,
+        report,
+        "Album first-seen facts",
+        "UPDATE albums SET first_seen_at=(SELECT min(track.first_seen_at) FROM tracks track WHERE track.album_key=albums.album_key) WHERE first_seen_at IS NULL",
+    )
+    .await?;
     salvage_named_entities(&mut transaction, report).await?;
     salvage_relationships(&mut transaction, report).await?;
     salvage_playlists(&mut transaction, report).await?;
+    salvage_family(
+        &mut transaction,
+        report,
+        "cached Home",
+        "INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,artwork_binding)
+         SELECT source.source_key,
+                CASE json_extract(section.value,'$.kind')
+                  WHEN 'MostPlayed' THEN 'most-played' WHEN 'NewlyAdded' THEN 'newly-added'
+                  WHEN 'RecentlyPlayed' THEN 'recently-played' WHEN 'RecentlyReleased' THEN 'recently-released' END,
+                CAST(item.key AS INTEGER),json_extract(item.value,'$.kind'),
+                CASE json_extract(item.value,'$.kind')
+                  WHEN 'track' THEN track.track_key WHEN 'album' THEN album.album_key END,
+                CASE json_extract(item.value,'$.kind')
+                  WHEN 'track' THEN track.title WHEN 'album' THEN album.title END,
+                CASE json_extract(item.value,'$.kind')
+                  WHEN 'track' THEN track.display_artist WHEN 'album' THEN album.display_artist END,
+                CASE json_extract(item.value,'$.kind')
+                  WHEN 'track' THEN COALESCE(track.artwork_binding,track_album.artwork_binding)
+                  WHEN 'album' THEN album.artwork_binding END
+         FROM released.source_libraries library
+         JOIN sources source ON source.object_id=library.source_id
+         JOIN json_each(json_extract(library.home_json,'$.sections')) section
+         JOIN json_each(json_extract(section.value,'$.items')) item
+         LEFT JOIN tracks track ON track.source_key=source.source_key AND json_extract(item.value,'$.kind')='track' AND track.object_id=json_extract(item.value,'$.id')
+         LEFT JOIN albums track_album ON track_album.album_key=track.album_key
+         LEFT JOIN albums album ON album.source_key=source.source_key AND json_extract(item.value,'$.kind')='album' AND album.object_id=json_extract(item.value,'$.id')
+         WHERE library.home_json IS NOT NULL AND library.accepted_at IS NOT NULL
+           AND library.library_id=(SELECT max(current.library_id) FROM released.source_libraries current WHERE current.source_id=library.source_id AND current.accepted_at IS NOT NULL)
+           AND (track.track_key IS NOT NULL OR album.album_key IS NOT NULL)",
+    ).await?;
     salvage_album_release(&mut transaction, report).await?;
     salvage_user_facts(&mut transaction, report).await?;
     salvage_queue(&mut transaction, report).await?;
@@ -410,7 +484,7 @@ async fn salvage_named_entities(
              SELECT source.source_key, item.artist_id, item.name,
                     lower(item.name), lower(item.name), item.musicbrainz_artist_id,
                     CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
-                        CAST(item.image_item_id || char(0) || COALESCE(item.image_tag, '') AS BLOB)
+                        CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                     END,
                     item.favorite, item.user_rating
              FROM released.artists AS item
@@ -432,7 +506,7 @@ async fn salvage_named_entities(
              SELECT source.source_key, item.genre_id, item.name,
                     lower(item.name), lower(item.name),
                     CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
-                        CAST(item.image_item_id || char(0) || COALESCE(item.image_tag, '') AS BLOB)
+                        CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                     END
              FROM released.genres AS item
              JOIN released.source_libraries AS library USING (library_id)
@@ -453,7 +527,7 @@ async fn salvage_named_entities(
              SELECT source.source_key, item.folder_id, item.name,
                     lower(item.name), lower(item.name),
                     CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
-                        CAST(item.image_item_id || char(0) || COALESCE(item.image_tag, '') AS BLOB)
+                        CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                     END
              FROM released.music_folders AS item
              JOIN released.source_libraries AS library USING (library_id)
@@ -486,7 +560,7 @@ async fn salvage_playlists(
          SELECT source.source_key, 'source', item.playlist_id, item.name,
                 lower(item.name), lower(item.name),
                 CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
-                    CAST(item.image_item_id || char(0) || COALESCE(item.image_tag, '') AS BLOB)
+                    CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                 END
          FROM released.source_playlists AS item
          JOIN released.source_libraries AS library USING (library_id)
@@ -693,23 +767,26 @@ async fn salvage_user_facts(
         (
             "activity baseline",
             "INSERT INTO activity_baseline(
-                 source_key, track_object_id, play_count, skip_count, last_played_at
+                 source_key, period, item_kind, track_object_id,
+                 play_count, skip_count, last_played_at
              )
-             SELECT source.source_key, item.item_id, item.play_count,
+             SELECT source.source_key, item.period, item.item_kind,
+                    item.item_id, item.play_count,
                     COALESCE(item.skip_count, 0), item.last_played_at
              FROM released.listening_aggregates AS item
              JOIN sources AS source ON source.object_id=item.source_id
-             WHERE item.period='lifetime' AND item.item_kind='track'",
+             WHERE item.period='lifetime'
+                OR (length(item.period)=7 AND substr(item.period,5,1)='-')",
         ),
         (
             "recent listens",
-            "INSERT INTO listens(
+             "INSERT INTO listens(
                  external_id, source_key, track_key, track_object_id, track_title,
-                 artist_name, album_title, started_at, duration_millis, listened_millis, skipped
+                 artist_name, album_title, started_at, local_period, duration_millis, listened_millis, skipped
              )
              SELECT item.play_id, source.source_key, track.track_key, item.track_id,
                     item.track_title, item.artist_name, COALESCE(item.album_title, ''),
-                    item.played_at, COALESCE(track.duration_millis, 0), 0, 0
+                    item.played_at, strftime('%Y-%m',item.played_at,'unixepoch'), COALESCE(track.duration_millis, 0), 0, 0
              FROM released.recent_plays AS item
              JOIN sources AS source ON source.object_id=item.source_id
              LEFT JOIN tracks AS track
@@ -793,11 +870,25 @@ async fn salvage_queue(
                 NULL,
                 json_extract(fallback.value, '$.album_id'),
                 json_extract(fallback.value, '$.primary_artist_id'),
-                json_extract(fallback.value, '$.source_path'),
-                COALESCE(
-                    CAST(json_extract(fallback.value, '$.image_ref') AS BLOB),
-                    CAST(json_extract(fallback.value, '$.local_artwork') AS BLOB)
-                ),
+                CASE
+                    WHEN source.object_id<>'local:server:library' THEN NULL
+                    WHEN json_extract(fallback.value, '$.source_path') IS NULL THEN NULL
+                    WHEN substr(json_extract(fallback.value, '$.source_path'),1,7)='file://'
+                        THEN json_extract(fallback.value, '$.source_path')
+                    ELSE 'file://' || json_extract(fallback.value, '$.source_path')
+                END,
+                CASE
+                    WHEN json_extract(fallback.value, '$.image_ref') IS NOT NULL
+                        THEN CAST(json_extract(fallback.value, '$.image_ref') AS BLOB)
+                    WHEN json_extract(fallback.value, '$.local_artwork') IS NOT NULL
+                        THEN CAST(json_object(
+                            'File', json_object(
+                                'path', json_extract(fallback.value, '$.local_artwork'),
+                                'revision', 'released'
+                            )
+                        ) AS BLOB)
+                    ELSE NULL
+                END,
                 json_extract(fallback.value, '$.duration_seconds') * 1000,
                 json_extract(fallback.value, '$.disc_number'),
                 json_extract(fallback.value, '$.track_number'),
@@ -906,17 +997,19 @@ async fn salvage_local(
         report,
         "Local access files",
         "INSERT INTO local_access_files(
-             source_key, path, root, relative_path, size_bytes, mtime_ns,
+             source_key, origin, path, root, relative_path, size_bytes, mtime_ns,
              device_id, inode, parser_version, title, normalized_title,
              album, normalized_album, artist, normalized_artist,
              disc_number, track_number, duration_millis, media_uri
          )
-         SELECT source.source_key, item.path, item.root, item.relative_path,
+         SELECT source.source_key, 'mapping', item.path, item.root, item.relative_path,
                 item.size_bytes, item.mtime_ns, item.device_id, item.inode,
                 item.parser_version, item.title, lower(item.title),
                 item.album, lower(item.album), item.artist, lower(item.artist),
                 item.disc_number, item.track_number,
-                item.duration_seconds * 1000, item.path
+                item.duration_seconds * 1000,
+                CASE WHEN substr(item.path,1,7)='file://' THEN item.path
+                     ELSE 'file://' || item.path END
          FROM released.local_access_files AS item
          JOIN sources AS source ON source.object_id=item.source_id",
     )
@@ -927,10 +1020,11 @@ async fn salvage_local(
         "listen outbox",
         "INSERT OR IGNORE INTO listens(
              external_id, source_key, track_object_id, track_title,
-             artist_name, album_title, started_at, duration_millis, listened_millis, skipped
+             artist_name, album_title, started_at, local_period, duration_millis, listened_millis, skipped
          )
          SELECT item.play_id, NULL, '', item.track_title, item.artist_name,
                 COALESCE(item.album_title, ''), item.started_at,
+                strftime('%Y-%m',item.started_at,'unixepoch'),
                 item.duration_millis, item.duration_millis, 0
          FROM released.pending_scrobbles AS item;
          INSERT INTO listen_outbox(

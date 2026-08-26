@@ -4,7 +4,7 @@
 use sqlx::{QueryBuilder, Sqlite};
 
 use crate::{
-    AlbumKey, ArtistKey, Database, GenreKey, LibraryError, LibraryResult, PlaylistKey,
+    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult, PlaylistKey,
     ReadCancellation, SourceKey, TrackKey,
 };
 
@@ -16,6 +16,7 @@ pub enum RadioSeed {
     Track(TrackKey),
     Album(AlbumKey),
     Artist(ArtistKey),
+    AlbumArtist(ArtistKey),
     Genre(GenreKey),
     Playlist(PlaylistKey),
 }
@@ -26,6 +27,7 @@ impl RadioSeed {
             Self::Track(_) => 0,
             Self::Album(_) => 1,
             Self::Artist(_) => 2,
+            Self::AlbumArtist(_) => 5,
             Self::Genre(_) => 3,
             Self::Playlist(_) => 4,
         }
@@ -36,13 +38,14 @@ impl RadioSeed {
             Self::Track(key) => key.raw(),
             Self::Album(key) => key.raw(),
             Self::Artist(key) => key.raw(),
+            Self::AlbumArtist(key) => key.raw(),
             Self::Genre(key) => key.raw(),
             Self::Playlist(key) => key.raw(),
         }
     }
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum PlayedFilter {
     #[default]
     All,
@@ -138,6 +141,14 @@ impl Database {
             .push_bind(seed.raw())
             .push(")) OR (")
             .push_bind(seed.kind())
+            .push(
+                "=5 AND EXISTS (
+                 SELECT 1 FROM album_artists
+                 WHERE album_key=track.album_key AND artist_key=",
+            )
+            .push_bind(seed.raw())
+            .push(")) OR (")
+            .push_bind(seed.kind())
             .push("=1 AND track.album_key<>").push_bind(seed.raw()).push(" AND (EXISTS (SELECT 1 FROM tracks candidate JOIN album_genres candidate_genre USING(album_key) JOIN album_genres seeded_genre ON seeded_genre.genre_key=candidate_genre.genre_key WHERE candidate.track_key=track.track_key AND seeded_genre.album_key=").push_bind(seed.raw()).push(") OR EXISTS (SELECT 1 FROM tracks candidate JOIN album_artists candidate_artist USING(album_key) JOIN album_artists seeded_artist ON seeded_artist.artist_key=candidate_artist.artist_key WHERE candidate.track_key=track.track_key AND seeded_artist.album_key=").push_bind(seed.raw()).push("))) OR (")
             .push_bind(seed.kind())
             .push(
@@ -204,6 +215,7 @@ impl Database {
     pub async fn random_candidates(
         &self,
         source: SourceKey,
+        folder: Option<FolderKey>,
         criteria: &RandomCriteria,
         extra_excluded: &[TrackKey],
         requested: usize,
@@ -234,6 +246,11 @@ impl Database {
                 .push_bind(source)
                 .push(" AND track.track_key>")
                 .push_bind(after)
+                .push(" AND (")
+                .push_bind(folder)
+                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
+                .push_bind(folder)
+                .push("))")
                 .push(" AND (")
                 .push_bind(!wrapped)
                 .push(" OR track.track_key<")
@@ -266,6 +283,7 @@ impl Database {
                  SELECT 1 FROM activity_baseline AS baseline
                  WHERE baseline.source_key=track.source_key
                    AND baseline.track_object_id=track.object_id
+                   AND baseline.period='lifetime' AND baseline.item_kind='track'
                    AND baseline.play_count>0
              ) AND NOT EXISTS (
                  SELECT 1 FROM listens WHERE track_key=track.track_key
@@ -277,6 +295,7 @@ impl Database {
                  SELECT 1 FROM activity_baseline AS baseline
                  WHERE baseline.source_key=track.source_key
                    AND baseline.track_object_id=track.object_id
+                   AND baseline.period='lifetime' AND baseline.item_kind='track'
                    AND baseline.play_count>0
              ) OR EXISTS (
                  SELECT 1 FROM listens WHERE track_key=track.track_key

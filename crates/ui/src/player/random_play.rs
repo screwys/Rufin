@@ -1,8 +1,12 @@
 use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use ::library::{GenreId, GenreSummary, PlayedFilter, RandomCriteria};
+use ::library::{GenreRow, GenreSort, PlayedFilter, RandomCriteria, ReadCancellation};
 use adw::prelude::*;
+use gtk::glib;
 use playback::{QueuePlacement, RandomPlayRequest};
+use tracing::warn;
 
 use localization::tr;
 
@@ -33,18 +37,52 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
-    let genres = selected
-        .library
-        .genres(selected.music_folder_id.as_ref())
-        .unwrap_or_default();
+    let database = Arc::clone(&selected.database);
+    let source = selected.source_key;
+    let folder = selected.music_folder_key;
+    let cancellation = ReadCancellation::new();
+    let runtime = selected.runtime.clone();
+    let task = runtime.spawn(async move {
+        let order = database
+            .genre_order(source, folder, GenreSort::Title, false, &cancellation)
+            .await?;
+        let mut genres = Vec::with_capacity(order.len());
+        for keys in order.chunks(128) {
+            genres.extend(
+                database
+                    .genre_rows(source, keys, folder, &cancellation)
+                    .await?,
+            );
+        }
+        Ok::<_, library::LibraryError>(genres)
+    });
+    let shell = Rc::downgrade(shell);
+    glib::spawn_future_local(async move {
+        let Some(shell) = shell.upgrade() else {
+            return;
+        };
+        match task.await.ok().and_then(Result::ok) {
+            Some(genres) => present_random_play_dialog_loaded(&shell, selected, genres),
+            None => warn!("failed to load Random Play genres"),
+        }
+    });
+}
+
+fn present_random_play_dialog_loaded(
+    shell: &Rc<Shell>,
+    selected: crate::runtime::SelectedLibrary,
+    genres: Vec<GenreRow>,
+) {
     let played_filters = [
         PlayedFilter::All,
         PlayedFilter::Unplayed,
         PlayedFilter::Played,
     ];
     let saved = shell.settings.current.borrow().random_play.clone();
-    let selected_genre =
-        saved.selected_genre_id(&selected.source_id, selected.music_folder_id.as_ref());
+    let selected_genre = saved.selected_genre_id(
+        &selected.artwork.source_id,
+        selected.music_folder_object_id.as_deref(),
+    );
 
     let toolbar = adw::ToolbarView::new();
     let header = adw::HeaderBar::new();
@@ -123,8 +161,7 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
         &dialog,
         &controls,
         &genres,
-        &selected.source_id,
-        selected.music_folder_id.as_ref(),
+        &selected,
         QueuePlacement::Next,
     );
     connect_action(
@@ -133,8 +170,7 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
         &dialog,
         &controls,
         &genres,
-        &selected.source_id,
-        selected.music_folder_id.as_ref(),
+        &selected,
         QueuePlacement::Now,
     );
     connect_action(
@@ -143,8 +179,7 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
         &dialog,
         &controls,
         &genres,
-        &selected.source_id,
-        selected.music_folder_id.as_ref(),
+        &selected,
         QueuePlacement::Last,
     );
 
@@ -166,17 +201,17 @@ fn connect_year_toggle(check: &gtk::CheckButton, spinner: &gtk::SpinButton) {
     });
 }
 
-fn genre_dropdown(genres: &[GenreSummary], selected: Option<&GenreId>) -> gtk::DropDown {
+fn genre_dropdown(genres: &[GenreRow], selected: Option<&str>) -> gtk::DropDown {
     let mut labels = Vec::with_capacity(genres.len() + 1);
     labels.push(tr("Any genre"));
-    labels.extend(genres.iter().map(|genre| genre.genre.name.clone()));
+    labels.extend(genres.iter().map(|genre| genre.name.clone()));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     let model = gtk::StringList::new(&refs);
     let dropdown = gtk::DropDown::new(Some(model), None::<gtk::Expression>);
     dropdown.set_enable_search(true);
     dropdown.set_selected(
         selected
-            .and_then(|selected| genres.iter().position(|genre| &genre.genre.id == selected))
+            .and_then(|selected| genres.iter().position(|genre| genre.object_id == selected))
             .map_or(0, |index| index as u32 + 1),
     );
     dropdown
@@ -236,31 +271,29 @@ fn connect_action(
     shell: &Rc<Shell>,
     dialog: &adw::Dialog,
     controls: &RandomPlayControls,
-    genres: &[GenreSummary],
-    source_id: &library::SourceId,
-    music_folder_id: Option<&library::MusicFolderId>,
+    genres: &[GenreRow],
+    selected: &crate::runtime::SelectedLibrary,
     placement: QueuePlacement,
 ) {
     let shell = Rc::clone(shell);
     let dialog = dialog.downgrade();
     let controls = controls.clone();
     let genres = genres.to_vec();
-    let source_id = source_id.clone();
-    let music_folder_id = music_folder_id.cloned();
+    let selected = selected.clone();
     button.connect_clicked(move |_| {
         let Some(settings) = settings_from_controls(
             &controls,
             &genres,
-            source_id.clone(),
-            music_folder_id.clone(),
+            selected.artwork.source_id.clone(),
+            selected.music_folder_object_id.clone(),
         ) else {
             return;
         };
         let request = request_from_settings(
             &settings,
             &genres,
-            &source_id,
-            music_folder_id.as_ref(),
+            &selected.artwork.source_id,
+            selected.music_folder_object_id.as_deref(),
             placement,
         );
         shell.update_app_settings("random play settings", |current| {
@@ -270,7 +303,7 @@ fn connect_action(
             current.random_play = settings;
             true
         });
-        shell.products.playback.radio.play_random(request);
+        execute_random(&shell, selected.clone(), request);
         if let Some(dialog) = dialog.upgrade() {
             dialog.close();
         }
@@ -279,11 +312,11 @@ fn connect_action(
 
 fn settings_from_controls(
     controls: &RandomPlayControls,
-    genres: &[GenreSummary],
-    source_id: library::SourceId,
-    music_folder_id: Option<library::MusicFolderId>,
+    genres: &[GenreRow],
+    source_id: sources::SourceId,
+    music_folder_id: Option<String>,
 ) -> Option<RandomPlaySettings> {
-    let (genre_id, _) = selected_genre(genres, controls.genre.selected());
+    let genre_id = selected_genre(genres, controls.genre.selected());
     let played_filter = [
         PlayedFilter::All,
         PlayedFilter::Unplayed,
@@ -312,23 +345,24 @@ fn settings_from_controls(
 
 fn request_from_settings(
     settings: &RandomPlaySettings,
-    genres: &[GenreSummary],
-    source_id: &library::SourceId,
-    music_folder_id: Option<&library::MusicFolderId>,
+    genres: &[GenreRow],
+    source_id: &sources::SourceId,
+    music_folder_id: Option<&str>,
     placement: QueuePlacement,
 ) -> RandomPlayRequest {
     let genre = settings
         .selected_genre_id(source_id, music_folder_id)
-        .and_then(|selected| genres.iter().find(|genre| &genre.genre.id == selected));
+        .and_then(|selected| genres.iter().find(|genre| genre.object_id == selected));
     RandomPlayRequest {
         placement,
+        requested: settings.limit,
         criteria: RandomCriteria {
-            limit: settings.limit,
-            min_year: settings.min_year,
-            max_year: settings.max_year,
-            genre_id: genre.map(|genre| genre.genre.id.clone()),
-            genre_name: genre.map(|genre| genre.genre.name.clone()),
-            played_filter: settings.played_filter,
+            min_year: settings.min_year.map(i64::from),
+            max_year: settings.max_year.map(i64::from),
+            genre: genre.map(|genre| genre.genre_key),
+            played: settings.played_filter,
+            require_media: false,
+            variation: random_variation(),
         },
     }
 }
@@ -337,38 +371,121 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
-    let genres = selected
-        .library
-        .genres(selected.music_folder_id.as_ref())
-        .unwrap_or_default();
     let settings = shell.settings.current.borrow().random_play.clone();
-    shell
-        .products
-        .playback
-        .radio
-        .play_random(request_from_settings(
-            &settings,
-            &genres,
-            &selected.source_id,
-            selected.music_folder_id.as_ref(),
+    let database = Arc::clone(&selected.database);
+    let source = selected.source_key;
+    let genre_object_id = settings
+        .selected_genre_id(
+            &selected.artwork.source_id,
+            selected.music_folder_object_id.as_deref(),
+        )
+        .map(str::to_owned);
+    let runtime = selected.runtime.clone();
+    let queue = shell.products.playback.queue.clone();
+    runtime.spawn(async move {
+        let cancellation = ReadCancellation::new();
+        let genre = match genre_object_id {
+            Some(object_id) => database
+                .genre_key_by_object(source, &object_id, &cancellation)
+                .await
+                .ok()
+                .flatten(),
+            None => None,
+        };
+        let request = RandomPlayRequest {
             placement,
-        ));
+            requested: settings.limit,
+            criteria: RandomCriteria {
+                min_year: settings.min_year.map(i64::from),
+                max_year: settings.max_year.map(i64::from),
+                genre,
+                played: settings.played_filter,
+                require_media: false,
+                variation: random_variation(),
+            },
+        };
+        execute_random_task(selected, request, queue).await;
+    });
 }
 
-fn selected_genre(genres: &[GenreSummary], selected: u32) -> (Option<GenreId>, Option<String>) {
+fn selected_genre(genres: &[GenreRow], selected: u32) -> Option<String> {
     if selected == gtk::INVALID_LIST_POSITION || selected == 0 {
-        return (None, None);
+        return None;
     }
-    let Some(genre) = genres.get((selected - 1) as usize) else {
-        return (None, None);
+    genres
+        .get((selected - 1) as usize)
+        .map(|genre| genre.object_id.clone())
+}
+
+fn execute_random(
+    shell: &Shell,
+    selected: crate::runtime::SelectedLibrary,
+    request: RandomPlayRequest,
+) {
+    let runtime = selected.runtime.clone();
+    let queue = shell.products.playback.queue.clone();
+    runtime.spawn(execute_random_task(selected, request, queue));
+}
+
+async fn execute_random_task(
+    selected: crate::runtime::SelectedLibrary,
+    request: RandomPlayRequest,
+    queue: playback::QueueHandle,
+) {
+    let cancellation = ReadCancellation::new();
+    let order = match selected
+        .database
+        .random_candidates(
+            selected.source_key,
+            selected.music_folder_key,
+            &request.criteria,
+            &[],
+            request.requested,
+            &cancellation,
+        )
+        .await
+    {
+        Ok(order) => Arc::<[library::TrackKey]>::from(order),
+        Err(error) => {
+            warn!(%error, "failed to select Random Play tracks");
+            return;
+        }
     };
-    (Some(genre.genre.id.clone()), Some(genre.genre.name.clone()))
+    let Some(anchor_key) = order.first().copied() else {
+        return;
+    };
+    let Some(anchor) = selected
+        .database
+        .track_rows(selected.source_key, &[anchor_key], &cancellation)
+        .await
+        .ok()
+        .and_then(|mut rows| rows.pop())
+        .map(playback::PlaybackMedia::from)
+    else {
+        return;
+    };
+    if let Some(request) = playback::LoadedPlayRequest::random(
+        selected.source_key,
+        selected.source_session_epoch,
+        order,
+        anchor,
+        request.placement,
+    ) {
+        queue.play_loaded(request);
+    }
+}
+
+fn random_variation() -> i64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos() as i64)
 }
 
 #[cfg(test)]
 mod tests {
-    use library::{PlayedFilter, SourceId};
+    use library::PlayedFilter;
     use playback::QueuePlacement;
+    use sources::SourceId;
 
     use super::{RandomPlaySettings, request_from_settings};
 
@@ -390,12 +507,11 @@ mod tests {
         ] {
             let request = request_from_settings(&settings, &[], &source_id, None, placement);
             assert_eq!(request.placement, placement);
-            assert_eq!(request.criteria.limit, 24);
+            assert_eq!(request.requested, 24);
             assert_eq!(request.criteria.min_year, Some(1995));
             assert_eq!(request.criteria.max_year, Some(2015));
-            assert_eq!(request.criteria.played_filter, PlayedFilter::Unplayed);
-            assert!(request.criteria.genre_id.is_none());
-            assert!(request.criteria.genre_name.is_none());
+            assert_eq!(request.criteria.played, PlayedFilter::Unplayed);
+            assert!(request.criteria.genre.is_none());
         }
     }
 }

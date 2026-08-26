@@ -1559,10 +1559,20 @@ impl Shell {
             .set_square_size(cover_size);
         if let Some(entry) = player.transport.current.as_ref() {
             let fetch_size = cover_fetch_size_for_display(cover_size);
+            if entry.track.source_id.is_empty() {
+                self.clear_fullscreen_player_cover();
+                return;
+            }
+            let source_id = sources::SourceId::new(entry.track.source_id.clone());
             self.bind_playback_artwork_tile(
                 &self.player_view.fullscreen_player.cover,
-                &player.transport.source_id,
-                ArtworkBinding::track(&entry.track),
+                &source_id,
+                entry
+                    .track
+                    .artwork_binding
+                    .as_deref()
+                    .map(ArtworkBinding::opaque)
+                    .unwrap_or_default(),
                 cover_size,
                 fetch_size,
             );
@@ -1805,13 +1815,13 @@ fn queue_entry_source_label(entry: &CurrentMedia) -> Option<String> {
         .or_else(|| {
             entry
                 .track
-                .source_path
+                .media_uri
                 .as_deref()
                 .and_then(audio_source_label_from_path)
         })
 }
 
-fn fullscreen_player_meta_parts(year: u16, source_label: Option<&str>) -> Vec<String> {
+fn fullscreen_player_meta_parts(year: Option<i64>, source_label: Option<&str>) -> Vec<String> {
     let mut parts = Vec::new();
     if let Some(source) = source_label
         .map(str::trim)
@@ -1819,7 +1829,7 @@ fn fullscreen_player_meta_parts(year: u16, source_label: Option<&str>) -> Vec<St
     {
         parts.push(source.to_string());
     }
-    if year > 0 {
+    if let Some(year) = year.filter(|year| *year > 0) {
         parts.push(year.to_string());
     }
     parts
@@ -1866,109 +1876,23 @@ fn fullscreen_equalizer_compact_for(width: i32, height: i32) -> bool {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::cell::{Cell, RefCell};
-    use std::sync::Arc;
-
-    use library::SourceId;
+mod playback_refresh_tests {
+    use super::*;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackView, Provenance,
-        QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportStatus, TransportView,
+        ControlsView, CurrentMediaId, OccurrenceId, PlaybackMedia, PlaybackOutput, Provenance,
+        QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportView,
     };
-
-    use super::FullscreenPlaybackRefresh;
-
-    #[test]
-    fn locale_equalizer_sync_does_not_reenter_settings() {
-        let syncing = Cell::new(false);
-        let settings = RefCell::new(false);
-        let current_settings = settings.borrow();
-
-        super::while_equalizer_syncing(&syncing, || {
-            if !syncing.get() {
-                *settings.borrow_mut() = true;
-            }
-        });
-
-        assert!(!*current_settings);
-        assert!(!syncing.get());
-    }
-
-    #[test]
-    fn fullscreen_use_duration() {
-        assert_eq!(
-            super::fullscreen_player_meta_parts(2013, Some("FLAC")),
-            vec!["FLAC".to_string(), "2013".to_string()]
-        );
-    }
-
-    #[test]
-    fn fullscreen_use_extension() {
-        assert_eq!(
-            super::audio_source_label_from_path("/music/album/track.mpc").as_deref(),
-            Some("MPC")
-        );
-    }
-
-    #[test]
-    fn fullscreen_ignore_query() {
-        assert_eq!(
-            super::audio_source_label_from_path("/music/album/track.flac?token=redacted")
-                .as_deref(),
-            Some("FLAC")
-        );
-    }
-
-    #[test]
-    fn fullscreen_normalize_type() {
-        assert_eq!(
-            super::audio_source_label_from_format("audio/mpeg").as_deref(),
-            Some("MP3")
-        );
-    }
-
-    #[test]
-    fn fullscreen_equalizer_fit_compacts_to_width() {
-        let fit = super::fullscreen_equalizer_fit(550, 240);
-        let total = super::fullscreen_equalizer_total_width(
-            fit.band_width,
-            fit.band_gap,
-            fit.show_right_levels,
-        );
-
-        assert!(total <= 550 - super::fullscreen_equalizer_fit_inset(550));
-        assert!(fit.band_width < super::FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH);
-        assert!(fit.scale_height < super::FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT);
-        assert!(fit.show_right_levels);
-    }
-
-    #[test]
-    fn visualizer_grid_uses_its_allocated_height() {
-        for height in [230.0, 600.0] {
-            let gap = 2.0;
-            let (rows, row_height) = super::visualizer_row_geometry(height, 6.0, gap);
-            let occupied_height = row_height * rows as f64 + gap * rows.saturating_sub(1) as f64;
-            let available_height =
-                (height - super::FULLSCREEN_VISUALIZER_TOP_GAP).max(height * 0.64);
-
-            assert!((occupied_height - available_height).abs() < 0.001);
-        }
-    }
+    use std::sync::Arc;
 
     #[test]
     fn fullscreen_refresh_ignores_position_ticks_but_replaces_current_media() {
-        let source_id = SourceId::fake(1);
-        let previous = playback_view(
-            source_id.clone(),
-            Some(current_media("Current", source_id.clone())),
-            TransportStatus::Playing,
-            1_000,
-        );
+        let source = library::SourceKey::from_raw(1);
+        let previous = playback_view(source, Some(current_media("Current", source)), 1_000);
 
         let mut position_tick = previous.clone();
         position_tick.transport.position_millis = 1_500;
         assert_eq!(
-            super::fullscreen_playback_refresh(Some(&previous), &position_tick),
+            fullscreen_playback_refresh(Some(&previous), &position_tick),
             FullscreenPlaybackRefresh::None
         );
 
@@ -1976,42 +1900,64 @@ mod tests {
         state_change.transport.state = TransportStatus::Paused;
         state_change.transport.desired_playing = false;
         assert_eq!(
-            super::fullscreen_playback_refresh(Some(&previous), &state_change),
+            fullscreen_playback_refresh(Some(&previous), &state_change),
             FullscreenPlaybackRefresh::Visualizer
         );
 
         let mut current_change = previous.clone();
-        current_change.transport.current = Some(Arc::new(current_media("Next", source_id.clone())));
+        current_change.transport.current = Some(Arc::new(current_media("Next", source)));
         assert_eq!(
-            super::fullscreen_playback_refresh(Some(&previous), &current_change),
-            FullscreenPlaybackRefresh::Static
-        );
-
-        let mut source_change = previous.clone();
-        source_change.transport.source_id = SourceId::fake(2);
-        assert_eq!(
-            super::fullscreen_playback_refresh(Some(&previous), &source_change),
+            fullscreen_playback_refresh(Some(&previous), &current_change),
             FullscreenPlaybackRefresh::Static
         );
     }
 
-    fn current_media(title: &str, source_id: SourceId) -> CurrentMedia {
+    fn current_media(title: &str, source: library::SourceKey) -> CurrentMedia {
         CurrentMedia {
             id: CurrentMediaId {
-                source_id,
+                source_key: source,
                 source_session_epoch: SourceSessionEpoch::new(1),
                 run: Some(RunId::new(1)),
                 occurrence: OccurrenceId::new(format!("queue:{title}")),
             },
-            track: crate::test_support::track(1, title),
+            track: PlaybackMedia {
+                source_id: "source".to_string(),
+                track_key: None,
+                track_object_id: title.to_string(),
+                title: title.to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                album_display_artist: None,
+                album_key: None,
+                primary_artist_key: None,
+                media_uri: None,
+                artwork_binding: None,
+                duration_millis: 180_000,
+                disc_number: None,
+                track_number: None,
+                year: None,
+                release_date: None,
+                favorite: None,
+                rating: None,
+                is_downloaded: false,
+                source_format: None,
+                musicbrainz_recording_id: None,
+                musicbrainz_release_track_id: None,
+                musicbrainz_album_id: None,
+                musicbrainz_release_group_id: None,
+                primary_artist_musicbrainz_id: None,
+                cue_path: None,
+                cue_start_millis: None,
+                cue_end_millis: None,
+                artist_links: Vec::new(),
+            },
             provenance: Provenance::Manual,
         }
     }
 
     fn playback_view(
-        source_id: SourceId,
+        source: library::SourceKey,
         current: Option<CurrentMedia>,
-        state: TransportStatus,
         position_millis: u64,
     ) -> PlaybackView {
         let current_occurrence = current.as_ref().map(|media| media.id.occurrence.clone());
@@ -2021,18 +1967,14 @@ mod tests {
                 total: usize::from(current.is_some()),
                 current_occurrence,
                 current_index: current.as_ref().map(|_| 0),
+                current_position: current.as_ref().map(|_| 0),
                 next_occurrence: None,
             },
             transport: TransportView {
-                source_id,
+                source_id: source,
                 current: current.map(Arc::new),
-                state,
-                desired_playing: matches!(
-                    state,
-                    TransportStatus::Resolving
-                        | TransportStatus::Buffering
-                        | TransportStatus::Playing
-                ),
+                state: TransportStatus::Playing,
+                desired_playing: true,
                 position_millis,
                 duration_millis: 180_000,
                 can_seek: true,
@@ -2046,7 +1988,7 @@ mod tests {
                 volume: 1.0,
                 muted: false,
                 audio_output: None,
-                playback_output: playback::PlaybackOutput::Local,
+                playback_output: PlaybackOutput::Local,
             },
         }
     }

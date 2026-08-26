@@ -811,17 +811,20 @@ button.suggested-action:disabled {
   box-shadow: none;
 }
 
-row.entry.metadata-identified-change {
+row.entry.metadata-identified-change,
+entry.metadata-identified-change {
   background: color-mix(in srgb, var(--accent-bg-color) 10%, var(--card-bg-color));
   box-shadow: inset 3px 0 var(--accent-color);
 }
 
-row.entry.metadata-identified-change:dir(rtl) {
+row.entry.metadata-identified-change:dir(rtl),
+entry.metadata-identified-change:dir(rtl) {
   box-shadow: inset -3px 0 var(--accent-color);
 }
 
 @media (prefers-contrast: more) {
-  row.entry.metadata-identified-change {
+  row.entry.metadata-identified-change,
+  entry.metadata-identified-change {
     background: color-mix(in srgb, var(--accent-bg-color) 18%, var(--card-bg-color));
   }
 }
@@ -1275,6 +1278,10 @@ row.entry.password:focus-within {
 
 .player-progress-row label {
   font-size: 12px;
+}
+
+.player-timestamp {
+  font-feature-settings: "tnum";
 }
 
 scale.player-progress slider {
@@ -2288,4 +2295,41 @@ modelbutton.rufin-menu-selected:dir(rtl) {
 
 .rating-star.rated {
   color: var(--accent-color);
+}
+.track-skeleton {
+  background-color: transparent;
+  background-image: linear-gradient(
+    rgba(128, 128, 128, 0.16),
+    rgba(128, 128, 128, 0.16)
+  );
+  background-position: center;
+  background-repeat: no-repeat;
+  background-size: 100% 16px;
+  border-radius: 6px;
+  color: transparent;
+}
+.collection-grid-cover-skeleton {
+  background-color: rgba(128, 128, 128, 0.16);
+  background-image: none;
+  border-radius: 12px;
+  color: transparent;
+}
+.cover-pending {
+  background-color: rgba(128, 128, 128, 0.16);
+}
+.track-skeleton.cover-pending,
+.track-skeleton .cover-pending {
+  background-color: transparent;
+  box-shadow: none;
+}
+.collection-grid-text-skeleton {
+  background-color: transparent;
+  background-image: linear-gradient(
+    rgba(128, 128, 128, 0.16),
+    rgba(128, 128, 128, 0.16)
+  );
+  background-position: left center;
+  background-repeat: no-repeat;
+  background-size: 70% 14px;
+  color: transparent;
 }

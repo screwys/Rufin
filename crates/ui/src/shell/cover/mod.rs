@@ -77,7 +77,7 @@ const fn artwork_binding_needs_work(
 #[derive(Clone)]
 pub(super) struct LiveArtworkBinding {
     tile: ArtworkTileWeak,
-    source_id: Option<::library::SourceId>,
+    source_id: Option<::sources::SourceId>,
     artwork: ArtworkBinding,
     render_size: i32,
     fetch_size: u32,
@@ -189,13 +189,13 @@ impl Shell {
         )
     }
 
-    fn artwork_source(&self, source_id: Option<&::library::SourceId>) -> Option<SourceImages> {
+    fn artwork_source(&self, source_id: Option<&::sources::SourceId>) -> Option<SourceImages> {
         let selected = self.selected_library();
         match source_id {
             None => selected.as_ref().map(|selected| selected.artwork.clone()),
             Some(source_id) => selected
                 .as_ref()
-                .filter(|selected| &selected.source_id == source_id)
+                .filter(|selected| &selected.artwork.source_id == source_id)
                 .map_or_else(
                     || Some(SourceImages::cache_only(source_id.clone())),
                     |selected| Some(selected.artwork.clone()),
@@ -227,7 +227,7 @@ impl Shell {
     pub(crate) fn bind_playback_artwork_tile(
         self: &Rc<Self>,
         tile: &ArtworkTile,
-        source_id: &::library::SourceId,
+        source_id: &::sources::SourceId,
         artwork: ArtworkBinding,
         render_size: i32,
         fetch_size: u32,
@@ -247,7 +247,7 @@ impl Shell {
     }
 
     fn bind_live_artwork_tile(self: &Rc<Self>, tile: &ArtworkTile, binding: LiveArtworkBinding) {
-        if binding.artwork.is_empty() {
+        if binding.artwork.stable_identity().is_empty() {
             self.cancel_artwork_tile_request(tile);
             tile.bind_missing();
             self.artwork
@@ -370,7 +370,7 @@ impl Shell {
         self: &Rc<Self>,
         tile: &ArtworkTile,
         generation: u64,
-        source_id: ::library::SourceId,
+        source_id: ::sources::SourceId,
         refresh_desktop_on_ready: bool,
         pending: artwork::PendingArtwork,
     ) {
@@ -453,13 +453,13 @@ impl Shell {
 
     fn texture_for_decoded(
         &self,
-        source_id: &::library::SourceId,
+        source_id: &::sources::SourceId,
         image: Arc<artwork::DecodedImage>,
     ) -> Option<gtk::gdk::Texture> {
         self.artwork.textures.borrow_mut().texture(source_id, image)
     }
 
-    pub(crate) fn release_artwork_textures(&self, source_id: &::library::SourceId) {
+    pub(crate) fn release_artwork_textures(&self, source_id: &::sources::SourceId) {
         self.artwork.textures.borrow_mut().release_source(source_id);
     }
 
@@ -586,11 +586,16 @@ impl Shell {
 
     pub(crate) fn current_playback_cached_artwork_path(
         &self,
-        source_id: &::library::SourceId,
+        source_id: &::sources::SourceId,
         media: &playback::CurrentMedia,
         preferred_size: u32,
     ) -> Option<PlaybackArtworkPath> {
-        let candidates = ArtworkBinding::track(&media.track);
+        let candidates = media
+            .track
+            .artwork_binding
+            .as_deref()
+            .map(ArtworkBinding::opaque)
+            .unwrap_or_default();
         let settings = self.settings.current.borrow().clone();
         let external = artwork_external_policy(&settings);
         let request =

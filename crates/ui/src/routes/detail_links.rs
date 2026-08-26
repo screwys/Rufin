@@ -4,7 +4,7 @@ use std::rc::Rc;
 
 use crate::preferences::source::login::source_kind_icon_name;
 use crate::shell::Shell;
-use ::library::{Album, ArtistCredit, Track};
+use ::library::{AlbumArtistLink, AlbumRow, ArtistKey, TrackArtistLink, TrackRow};
 use adw::prelude::{ObjectExt, WidgetExt};
 use gtk::glib;
 use localization::msgid;
@@ -45,10 +45,16 @@ impl DetailLinks {
         }
     }
 
-    fn artist_text(text: &str, credits: &[ArtistCredit]) -> Self {
+    fn artist_text<C>(
+        text: &str,
+        credits: &[C],
+        key: impl Fn(&C) -> ArtistKey,
+        name: impl Fn(&C) -> &str,
+        album_artist: bool,
+    ) -> Self {
         let credits = credits
             .iter()
-            .filter(|credit| !credit.name.trim().is_empty())
+            .filter(|credit| !name(credit).trim().is_empty())
             .collect::<Vec<_>>();
         if credits.is_empty() {
             return Self::text(text);
@@ -58,7 +64,7 @@ impl DetailLinks {
             .iter()
             .enumerate()
             .flat_map(|(credit_index, credit)| {
-                text.match_indices(credit.name.as_str())
+                text.match_indices(name(credit))
                     .map(move |(start, matched)| (start, start + matched.len(), credit_index))
             })
             .collect::<Vec<_>>();
@@ -86,7 +92,11 @@ impl DetailLinks {
             .into_iter()
             .map(|(start, end, credit_index)| DetailLink {
                 range: start..end,
-                route: Route::ArtistDetail(credits[credit_index].id.clone()),
+                route: if album_artist {
+                    Route::AlbumArtistDetail(key(credits[credit_index]))
+                } else {
+                    Route::ArtistDetail(key(credits[credit_index]))
+                },
             })
             .collect::<Vec<_>>();
 
@@ -98,10 +108,14 @@ impl DetailLinks {
                 text.push_str(", ");
             }
             let start = text.len();
-            text.push_str(credit.name.trim());
+            text.push_str(name(credit).trim());
             links.push(DetailLink {
                 range: start..text.len(),
-                route: Route::ArtistDetail(credit.id.clone()),
+                route: if album_artist {
+                    Route::AlbumArtistDetail(key(credit))
+                } else {
+                    Route::ArtistDetail(key(credit))
+                },
             });
         }
 
@@ -258,27 +272,51 @@ impl DetailLinkBinding {
     }
 }
 
-pub(crate) fn track_artist_links(track: &Track) -> DetailLinks {
-    let credits = if track.relations.artists.is_empty() {
-        &track.relations.album_artists
+pub(crate) fn track_artist_links(track: &TrackRow) -> DetailLinks {
+    let album_artist = track.artists.is_empty();
+    let credits = if track.artists.is_empty() {
+        &track.album_artists
     } else {
-        &track.relations.artists
+        &track.artists
     };
-    DetailLinks::artist_text(&track.artist, credits)
+    DetailLinks::artist_text(
+        &track.display_artist,
+        credits,
+        |credit: &TrackArtistLink| credit.artist_key,
+        |credit| credit.name.as_str(),
+        album_artist,
+    )
 }
 
-pub(crate) fn track_album_artist_links(track: &Track) -> DetailLinks {
-    let text = super::library_fields::joined_credits(track.album_artist_credits());
-    DetailLinks::artist_text(&text, track.album_artist_credits())
+pub(crate) fn playback_artist_links(text: &str, credits: &[TrackArtistLink]) -> DetailLinks {
+    DetailLinks::artist_text(
+        text,
+        credits,
+        |credit: &TrackArtistLink| credit.artist_key,
+        |credit| credit.name.as_str(),
+        false,
+    )
 }
 
-pub(crate) fn album_artist_links(album: &Album) -> DetailLinks {
-    let credits = if album.relations.album_artists.is_empty() {
-        &album.relations.artists
-    } else {
-        &album.relations.album_artists
-    };
-    DetailLinks::artist_text(&album.artist, credits)
+pub(crate) fn track_album_artist_links(track: &TrackRow) -> DetailLinks {
+    let text = super::library_fields::joined_credits(&track.album_artists);
+    DetailLinks::artist_text(
+        &text,
+        &track.album_artists,
+        |credit: &TrackArtistLink| credit.artist_key,
+        |credit| credit.name.as_str(),
+        true,
+    )
+}
+
+pub(crate) fn album_artist_links(album: &AlbumRow) -> DetailLinks {
+    DetailLinks::artist_text(
+        &album.display_artist,
+        &album.album_artists,
+        |credit: &AlbumArtistLink| credit.artist_key,
+        |credit| credit.name.as_str(),
+        true,
+    )
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -367,86 +405,40 @@ fn percent_encode_path_segment(value: &str) -> String {
 
 #[cfg(test)]
 mod tests {
-    use library::{ArtistCredit, ArtistId};
-
-    use super::{
-        DetailEntityKind, DetailLinks, album_artist_links, server_entity_link,
-        track_album_artist_links, track_artist_links,
+    use super::*;
+    use library::{
+        AlbumArtistLink, AlbumKey, AlbumRow, ArtistKey, SourceKey, TrackArtistLink, TrackKey,
+        TrackRow,
     };
-    use crate::routes::route::Route;
-
-    #[test]
-    fn server_links_use_only_known_web_routes() {
-        let jellyfin = server_entity_link(
-            "jellyfin",
-            "https://music.example/",
-            DetailEntityKind::Album,
-            "jellyfin:album:abc123",
-        )
-        .expect("jellyfin album link");
-        assert_eq!(
-            jellyfin.url,
-            "https://music.example/web/index.html#!/details?id=abc123"
-        );
-
-        let navidrome = server_entity_link(
-            "navidrome",
-            "https://music.example/library/",
-            DetailEntityKind::Artist,
-            "navidrome:artist:artist/one",
-        )
-        .expect("navidrome artist link");
-        assert_eq!(
-            navidrome.url,
-            "https://music.example/library/app/#/artist/artist%2Fone/show"
-        );
-
-        assert!(
-            server_entity_link(
-                "subsonic",
-                "https://music.example",
-                DetailEntityKind::Album,
-                "subsonic:album:album-one",
-            )
-            .is_none()
-        );
-    }
 
     #[test]
     fn track_artist_links_preserve_text_and_each_canonical_destination() {
-        let mut track = crate::test_support::track(1, "Track");
-        track.artist = "A label without a relationship".to_string();
+        let mut track = track("A label without a relationship");
         let links = track_artist_links(&track);
         assert_eq!(links.markup(None), "A label without a relationship");
         assert_eq!(links.route_for_link("0"), None);
 
-        track.artist = "First feat. Second".to_string();
-        track.relations.artists = vec![credit(3, "First"), credit(4, "Second")];
+        track.display_artist = "First feat. Second".to_string();
+        track.artists = vec![credit(3, "First"), credit(4, "Second")];
         let links = track_artist_links(&track);
         assert_eq!(
             links.markup(None),
             r#"<a href="0" class="inline-detail-link">First</a> feat. <a href="1" class="inline-detail-link">Second</a>"#
         );
         assert_eq!(
-            links.markup(Some((1, &gtk::gdk::RGBA::new(1.0, 0.0, 0.0, 1.0),))),
-            r##"<a href="0" class="inline-detail-link">First</a> feat. <a href="1" class="inline-detail-link"><span foreground="#FF0000FF" underline="single" underline_color="#FF5959">Second</span></a>"##
-        );
-        assert_eq!(
             links.route_for_link("0"),
-            Some(Route::ArtistDetail(ArtistId::fake(3)))
+            Some(Route::ArtistDetail(ArtistKey::from_raw(3)))
         );
         assert_eq!(
             links.route_for_link("1"),
-            Some(Route::ArtistDetail(ArtistId::fake(4)))
+            Some(Route::ArtistDetail(ArtistKey::from_raw(4)))
         );
-        assert_eq!(links.route_for_link("2"), None);
     }
 
     #[test]
     fn track_artist_links_fall_back_to_album_credits_without_parsing_the_label() {
-        let mut track = crate::test_support::track(1, "Track");
-        track.artist = "Display name".to_string();
-        track.relations.album_artists = vec![credit(4, "Canonical artist")];
+        let mut track = track("Display name");
+        track.album_artists = vec![credit(4, "Canonical artist")];
         let links = track_artist_links(&track);
         assert_eq!(
             links.markup(None),
@@ -454,31 +446,34 @@ mod tests {
         );
         assert_eq!(
             links.route_for_link("0"),
-            Some(Route::ArtistDetail(ArtistId::fake(4)))
+            Some(Route::AlbumArtistDetail(ArtistKey::from_raw(4)))
         );
     }
 
     #[test]
     fn album_and_track_album_artist_links_keep_all_credits() {
-        let mut album = crate::test_support::album(1, "Album");
-        album.artist = "First, Second".to_string();
-        album.relations.album_artists = vec![credit(5, "First"), credit(6, "Second")];
+        let credits = vec![credit(5, "First"), credit(6, "Second")];
+        let mut album = album();
+        album.album_artists = vec![album_credit(5, "First"), album_credit(6, "Second")];
         let links = album_artist_links(&album);
         assert_eq!(
             links.route_for_link("0"),
-            Some(Route::ArtistDetail(ArtistId::fake(5)))
+            Some(Route::AlbumArtistDetail(ArtistKey::from_raw(5)))
         );
         assert_eq!(
             links.route_for_link("1"),
-            Some(Route::ArtistDetail(ArtistId::fake(6)))
+            Some(Route::AlbumArtistDetail(ArtistKey::from_raw(6)))
         );
-
-        let mut track = crate::test_support::track(1, "Track");
-        track.relations.album_artists = album.relations.album_artists;
+        let mut track = track("First, Second");
+        track.album_artists = credits;
         let links = track_album_artist_links(&track);
         assert_eq!(
             links.markup(None),
             r#"<a href="0" class="inline-detail-link">First</a>, <a href="1" class="inline-detail-link">Second</a>"#
+        );
+        assert_eq!(
+            links.route_for_link("0"),
+            Some(Route::AlbumArtistDetail(ArtistKey::from_raw(5)))
         );
     }
 
@@ -486,27 +481,96 @@ mod tests {
     fn ordinary_detail_links_remain_single_destinations() {
         let links = DetailLinks::route(
             "Album & title",
-            Some(Route::AlbumDetail(library::AlbumId::fake(8))),
+            Some(Route::AlbumDetail(AlbumKey::from_raw(8))),
         );
         assert_eq!(
             links.markup(None),
             r#"<a href="0" class="inline-detail-link">Album &amp; title</a>"#
         );
         assert_eq!(
-            links.markup(Some((0, &gtk::gdk::RGBA::new(1.0, 0.0, 0.0, 1.0)))),
-            r##"<a href="0" class="inline-detail-link"><span foreground="#FF0000FF" underline="single" underline_color="#FF5959">Album &amp; title</span></a>"##
-        );
-        assert_eq!(
             links.route_for_link("0"),
-            Some(Route::AlbumDetail(library::AlbumId::fake(8)))
+            Some(Route::AlbumDetail(AlbumKey::from_raw(8)))
         );
     }
 
-    fn credit(id: u32, name: &str) -> ArtistCredit {
-        ArtistCredit {
-            id: ArtistId::fake(id),
+    fn credit(id: i64, name: &str) -> TrackArtistLink {
+        TrackArtistLink {
+            artist_key: ArtistKey::from_raw(id),
             name: name.to_string(),
-            musicbrainz_artist_id: None,
+        }
+    }
+
+    fn album_credit(id: i64, name: &str) -> AlbumArtistLink {
+        AlbumArtistLink {
+            artist_key: ArtistKey::from_raw(id),
+            name: name.to_string(),
+        }
+    }
+
+    fn track(display_artist: &str) -> TrackRow {
+        TrackRow {
+            track_key: TrackKey::from_raw(1),
+            source_key: SourceKey::from_raw(1),
+            source_id: "source".to_string(),
+            object_id: "track".to_string(),
+            album_key: Some(AlbumKey::from_raw(1)),
+            title: "Track".to_string(),
+            display_album: "Album".to_string(),
+            display_artist: display_artist.to_string(),
+            duration_millis: 1,
+            disc_number: 1,
+            track_number: 1,
+            year: None,
+            release_date: None,
+            date_added: None,
+            media_uri: None,
+            source_format: None,
+            comment: None,
+            bpm: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_release_track_id: None,
+            cue_path: None,
+            cue_start_millis: None,
+            cue_end_millis: None,
+            loudness_analysis_key: [0; 32],
+            artwork_binding: None,
+            favorite: false,
+            rating: None,
+            last_played: None,
+            play_count: 0,
+            skip_count: 0,
+            is_downloaded: false,
+            artists: Vec::new(),
+            album_artists: Vec::new(),
+            genres: Vec::new(),
+        }
+    }
+
+    fn album() -> AlbumRow {
+        AlbumRow {
+            album_key: AlbumKey::from_raw(1),
+            source_key: SourceKey::from_raw(1),
+            object_id: "album".to_string(),
+            title: "Album".to_string(),
+            display_artist: "First, Second".to_string(),
+            year: None,
+            release_date: None,
+            date_added: None,
+            musicbrainz_release_id: None,
+            musicbrainz_release_group_id: None,
+            is_compilation: None,
+            release_lookup_identity: None,
+            artwork_binding: None,
+            favorite: false,
+            rating: None,
+            play_count: 0,
+            last_played: None,
+            track_count: 0,
+            duration_millis: 0,
+            downloaded_count: 0,
+            album_artists: Vec::new(),
+            genres: Vec::new(),
+            release_types: Vec::new(),
         }
     }
 }

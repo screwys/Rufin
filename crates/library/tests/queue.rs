@@ -1,4 +1,7 @@
-use library::{LocalAccessWrite, QueueCompactOccurrence, QueueRepeatMode, ReadCancellation};
+use library::{
+    LocalAccessWrite, QueueCompactOccurrence, QueueRepeatMode, ReadCancellation,
+    SmartPlaylistDefinition,
+};
 
 use super::support::{connection, fixture};
 
@@ -11,6 +14,7 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
             fixture.source,
             &LocalAccessWrite {
                 track_object_id: Some("track-0".to_string()),
+                origin: library::LocalAccessOrigin::Mapping,
                 path: "/downloads/track-0.flac".to_string(),
                 root: "/downloads".to_string(),
                 relative_path: "track-0.flac".to_string(),
@@ -167,6 +171,8 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
         page[0].primary_artist_object_id.as_deref(),
         Some("artist-a")
     );
+    assert_eq!(page[0].album_key, Some(fixture.albums[0]));
+    assert_eq!(page[0].primary_artist_key, Some(fixture.artists[0]));
     assert_ne!(page[0].occurrence_key, page[1].occurrence_key);
     assert_eq!(page[2].source_format.as_deref(), Some("FLAC"));
     let traversal = [
@@ -243,7 +249,7 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
             provenance: row.provenance.clone(),
         })
         .collect::<Vec<_>>();
-    let compact_restore = fixture
+    fixture
         .database
         .persist_compact_queue(
             fixture.source,
@@ -256,6 +262,11 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
         )
         .await
         .expect("persist compact Queue");
+    let compact_restore = fixture
+        .database
+        .restore_queue(fixture.source)
+        .await
+        .expect("restore compact Queue");
     assert_eq!(compact_restore.occurrences.len(), 3);
     assert_eq!(compact_restore.current.as_ref().unwrap().title, "Offline");
     assert_eq!(
@@ -364,4 +375,196 @@ async fn compact_queue_reuses_object_identity_before_the_persisted_key_is_known(
         .expect("count persisted occurrence"),
         1
     );
+}
+
+#[tokio::test]
+async fn occurrence_media_and_progress_follow_the_requested_transition() {
+    let fixture = fixture().await;
+    let mut setup = connection(&fixture.path).await;
+    for (position, track) in fixture.tracks.iter().take(3).enumerate() {
+        sqlx::query("UPDATE tracks SET media_uri=?2 WHERE track_key=?1")
+            .bind(track)
+            .bind(format!("file:///transition-{position}.flac"))
+            .execute(&mut setup)
+            .await
+            .expect("set exact transition URI");
+        sqlx::query(
+            "INSERT INTO loudness_measurements(
+                 source_key,entity_kind,entity_key,analysis_key,
+                 integrated_lufs,true_peak,origin
+             ) SELECT source_key,'track',track_key,loudness_analysis_key,?2,NULL,'analysis'
+               FROM tracks WHERE track_key=?1",
+        )
+        .bind(track)
+        .bind(-18.0 + position as f64)
+        .execute(&mut setup)
+        .await
+        .expect("set exact transition loudness");
+    }
+    drop(setup);
+    let occurrences = fixture
+        .tracks
+        .iter()
+        .take(3)
+        .enumerate()
+        .map(|(position, track)| QueueCompactOccurrence {
+            occurrence_key: None,
+            object_id: format!("transition-{position}"),
+            track_key: Some(*track),
+            canonical_position: position as i64,
+            traversal_position: position as i64,
+            provenance: library::QueueProvenance::Manual,
+        })
+        .collect::<Vec<_>>();
+    fixture
+        .database
+        .persist_compact_queue(
+            fixture.source,
+            occurrences.iter().cloned(),
+            Some("transition-0"),
+            Some("transition-1"),
+            0,
+            QueueRepeatMode::None,
+            false,
+        )
+        .await
+        .expect("persist transition Queue");
+
+    for (position, occurrence) in occurrences.iter().enumerate() {
+        let media = fixture
+            .database
+            .queue_media_for_occurrence(fixture.source, &occurrence.object_id)
+            .await
+            .expect("resolve exact occurrence")
+            .expect("occurrence media");
+        assert_eq!(media.track_key, occurrence.track_key);
+        assert_eq!(
+            media.media_uri.as_deref(),
+            Some(format!("file:///transition-{position}.flac").as_str())
+        );
+        assert_eq!(media.track_number, Some(position as i64 + 1));
+        assert_eq!(media.title, ["Alpha", "Beta", "Gamma"][position]);
+        let loudness = fixture
+            .database
+            .track_loudness(
+                fixture.source,
+                occurrence.track_key.expect("transition Track"),
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("resolve exact transition loudness")
+            .expect("transition loudness");
+        assert_eq!(loudness.integrated_lufs, Some(-18.0 + position as f64));
+        fixture
+            .database
+            .persist_queue_progress(
+                fixture.source,
+                Some(&occurrence.object_id),
+                (position as i64 + 1) * 1000,
+            )
+            .await
+            .expect("persist exact progress");
+        let restored = fixture
+            .database
+            .restore_queue(fixture.source)
+            .await
+            .expect("restore progress");
+        assert_eq!(restored.state.current, Some(media.occurrence_key));
+        assert_eq!(restored.state.progress_millis, (position as i64 + 1) * 1000);
+    }
+}
+
+#[tokio::test]
+async fn album_playlist_and_smart_playlist_materialize_exact_queue_media() {
+    let fixture = fixture().await;
+    let cancellation = ReadCancellation::new();
+    let album = fixture
+        .database
+        .album_track_order(
+            fixture.source,
+            fixture.albums[0],
+            None,
+            "",
+            library::TrackSort::TrackNumber,
+            false,
+            &cancellation,
+        )
+        .await
+        .expect("Album Track order");
+    let playlist = fixture
+        .database
+        .create_playlist(fixture.source, "Collection", &fixture.tracks[..3])
+        .await
+        .expect("create Playlist")
+        .expect("Playlist key");
+    let playlist = fixture
+        .database
+        .playlist_track_order(fixture.source, playlist, None, &cancellation)
+        .await
+        .expect("Playlist Track order");
+    let smart = fixture
+        .database
+        .create_smart_playlist(
+            fixture.source,
+            "Everything",
+            &SmartPlaylistDefinition::default(),
+        )
+        .await
+        .expect("create Smart Playlist");
+    let smart = fixture
+        .database
+        .smart_playlist_track_order(fixture.source, smart, None, 0, &cancellation)
+        .await
+        .expect("Smart Playlist Track order");
+
+    for (name, order) in [("album", album), ("playlist", playlist), ("smart", smart)] {
+        assert!(!order.is_empty(), "{name} order");
+        let occurrences = order
+            .iter()
+            .enumerate()
+            .map(|(position, track)| QueueCompactOccurrence {
+                occurrence_key: None,
+                object_id: format!("{name}-{position}"),
+                track_key: Some(*track),
+                canonical_position: position as i64,
+                traversal_position: position as i64,
+                provenance: library::QueueProvenance::Context {
+                    context_id: name.to_string(),
+                    source_rank: position as i64,
+                },
+            })
+            .collect::<Vec<_>>();
+        fixture
+            .database
+            .persist_compact_queue(
+                fixture.source,
+                occurrences.iter().cloned(),
+                Some(&occurrences[0].object_id),
+                occurrences.get(1).map(|entry| entry.object_id.as_str()),
+                0,
+                QueueRepeatMode::None,
+                false,
+            )
+            .await
+            .expect("persist collection Queue");
+        for (position, occurrence) in occurrences.iter().enumerate() {
+            let media = fixture
+                .database
+                .queue_media_for_occurrence(fixture.source, &occurrence.object_id)
+                .await
+                .expect("resolve collection occurrence")
+                .expect("collection media");
+            assert_eq!(media.track_key, Some(order[position]));
+            let expected_object = fixture
+                .database
+                .track_rows(fixture.source, &[order[position]], &cancellation)
+                .await
+                .expect("expected collection Track")
+                .pop()
+                .expect("expected Track row")
+                .object_id;
+            assert_eq!(media.track_object_id, expected_object);
+            assert_eq!(media.media_uri.as_deref(), Some("file:///track.flac"));
+        }
+    }
 }

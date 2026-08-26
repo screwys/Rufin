@@ -1,8 +1,6 @@
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-use ::library::{
-    AlbumSummary, ArtistSummary, PlaylistSummary, SmartPlaylist, SmartPlaylistSummary, Track,
-};
+use ::library::{AlbumRow, ArtistRow, PlaylistRow, SmartPlaylistRow, TrackArtistLink, TrackRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::{gio, glib};
@@ -13,245 +11,131 @@ use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use localization::{album_count_text, track_count_text};
 use localization::{msgid, tr};
 
-use super::album_detail::ALBUM_DETAIL_META_LABEL_HEIGHT;
+use super::sparse_model::SparseItem;
 
-pub(crate) fn smart_playlist_display_name(playlist: &SmartPlaylist) -> String {
-    playlist
-        .builtin
-        .map(|builtin| tr(builtin.title()))
-        .unwrap_or_else(|| playlist.name.clone())
+pub(crate) fn smart_playlist_display_name(playlist: &SmartPlaylistRow) -> String {
+    playlist.name.clone()
 }
 
-pub(crate) fn sort_playlists(playlists: &mut [PlaylistSummary], settings: &LibraryListSettings) {
-    playlists.sort_by(|left, right| {
-        apply_desc(
-            compare_playlist(left, right, settings.sort_key),
-            settings.descending,
-        )
-    });
-}
-pub(crate) fn sort_smart_playlists(
-    playlists: &mut [SmartPlaylistSummary],
-    settings: &LibraryListSettings,
-) {
-    playlists.sort_by(|left, right| {
-        apply_desc(
-            compare_smart_playlist(left, right, settings.sort_key),
-            settings.descending,
-        )
-    });
-}
-pub(crate) fn sort_tracks(tracks: &mut [Track], settings: &LibraryListSettings) {
-    tracks.sort_by(|left, right| {
-        ::library::compare_tracks(
-            left,
-            right,
-            settings.sort_key.track_sort(),
-            settings.descending,
-        )
-    });
-}
-pub(crate) fn compare_album(
-    left: &AlbumSummary,
-    right: &AlbumSummary,
-    field: LibraryField,
-) -> Ordering {
-    let left_album = &left.album;
-    let right_album = &right.album;
-    match field {
-        LibraryField::AlbumArtist => cmp_string(&left_album.artist, &right_album.artist),
-        LibraryField::Year => left_album.year.cmp(&right_album.year),
-        LibraryField::ReleaseDate => {
-            cmp_option_string(&left_album.release_date, &right_album.release_date)
-        }
-        LibraryField::DateAdded => {
-            cmp_option_string(&left_album.date_added, &right_album.date_added)
-        }
-        LibraryField::LastPlayed => {
-            cmp_option_string(&left_album.last_played, &right_album.last_played)
-        }
-        LibraryField::PlayCount => cmp_option_u32(left_album.play_count, right_album.play_count),
-        LibraryField::UserRating => cmp_option_u8(left_album.user_rating, right_album.user_rating),
-        LibraryField::SongCount => left.track_count.cmp(&right.track_count),
-        LibraryField::Duration => left.duration_seconds.cmp(&right.duration_seconds),
-        LibraryField::Favorite => left_album.favorite.cmp(&right_album.favorite),
-        _ => cmp_string(&left_album.title, &right_album.title),
-    }
-    .then_with(|| cmp_string(&left_album.title, &right_album.title))
-}
-pub(crate) fn compare_artist(
-    left: &ArtistSummary,
-    right: &ArtistSummary,
-    field: LibraryField,
-) -> Ordering {
-    let left_artist = &left.artist;
-    let right_artist = &right.artist;
-    match field {
-        LibraryField::AlbumCount => left.album_count.cmp(&right.album_count),
-        LibraryField::SongCount => left.track_count.cmp(&right.track_count),
-        LibraryField::LastPlayed => {
-            cmp_option_string(&left_artist.last_played, &right_artist.last_played)
-        }
-        LibraryField::PlayCount => cmp_option_u32(left_artist.play_count, right_artist.play_count),
-        LibraryField::UserRating => {
-            cmp_option_u8(left_artist.user_rating, right_artist.user_rating)
-        }
-        LibraryField::Favorite => left_artist.favorite.cmp(&right_artist.favorite),
-        _ => cmp_string(&left_artist.name, &right_artist.name),
-    }
-    .then_with(|| cmp_string(&left_artist.name, &right_artist.name))
-}
-pub(crate) fn compare_playlist(
-    left: &PlaylistSummary,
-    right: &PlaylistSummary,
-    field: LibraryField,
-) -> Ordering {
-    match field {
-        LibraryField::SongCount => left.track_count.cmp(&right.track_count),
-        LibraryField::Duration => left.duration_seconds.cmp(&right.duration_seconds),
-        _ => cmp_string(&left.playlist.name, &right.playlist.name),
-    }
-    .then_with(|| cmp_string(&left.playlist.name, &right.playlist.name))
-}
-pub(crate) fn compare_smart_playlist(
-    left: &SmartPlaylistSummary,
-    right: &SmartPlaylistSummary,
-    field: LibraryField,
-) -> Ordering {
-    match field {
-        LibraryField::RowIndex => left
-            .smart_playlist
-            .position
-            .cmp(&right.smart_playlist.position),
-        LibraryField::SongCount => left.track_count.cmp(&right.track_count),
-        LibraryField::Duration => left.duration_seconds.cmp(&right.duration_seconds),
-        _ => cmp_string(&left.smart_playlist.name, &right.smart_playlist.name),
-    }
-    .then_with(|| cmp_string(&left.smart_playlist.name, &right.smart_playlist.name))
-}
-pub(crate) fn album_field_missing(album: &AlbumSummary, field: LibraryField) -> bool {
-    match field {
-        LibraryField::ReleaseDate => album.album.release_date.is_none(),
-        LibraryField::DateAdded => album.album.date_added.is_none(),
-        LibraryField::LastPlayed => album.album.last_played.is_none(),
-        LibraryField::PlayCount => album.album.play_count.is_none(),
-        LibraryField::UserRating => album.album.user_rating.is_none(),
-        _ => false,
-    }
-}
-pub(crate) fn artist_field_missing(artist: &ArtistSummary, field: LibraryField) -> bool {
-    match field {
-        LibraryField::LastPlayed => artist.artist.last_played.is_none(),
-        LibraryField::PlayCount => artist.artist.play_count.is_none(),
-        LibraryField::UserRating => artist.artist.user_rating.is_none(),
-        _ => false,
-    }
-}
-pub(crate) fn album_item_field(album: &library::Album, field: LibraryField) -> String {
+pub(crate) fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => album.title.clone(),
-        LibraryField::AlbumArtist | LibraryField::Artist => album.artist.clone(),
-        LibraryField::Year => nonzero_year(album.year),
+        LibraryField::AlbumArtist | LibraryField::Artist => album.display_artist.clone(),
+        LibraryField::Year => optional_year(album.year),
         LibraryField::ReleaseDate => album.release_date.clone().unwrap_or_default(),
         LibraryField::DateAdded => album.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_calendar_date(album.last_played.as_deref()),
-        LibraryField::PlayCount => option_count(album.play_count),
-        LibraryField::UserRating => option_rating(album.user_rating),
-        LibraryField::Genre => album.genre_names().collect::<Vec<_>>().join(", "),
+        LibraryField::LastPlayed => display_unix_date(album.last_played),
+        LibraryField::PlayCount => count(album.play_count),
+        LibraryField::UserRating => stored_rating(album.rating),
+        LibraryField::Genre => album
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
         LibraryField::Favorite => favorite_text(album.favorite),
         _ => String::new(),
     }
 }
-pub(crate) fn album_field(album: &AlbumSummary, field: LibraryField) -> String {
+pub(crate) fn album_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
-        LibraryField::SongCount => track_count_text(album.track_count.into()),
-        LibraryField::Duration => crate::format_duration(album.duration_seconds),
-        _ => album_item_field(&album.album, field),
+        LibraryField::SongCount => track_count_text(album.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            crate::format_duration((album.duration_millis.max(0) / 1_000) as u32)
+        }
+        _ => album_item_field(album, field),
     }
 }
-pub(crate) fn artist_item_field(artist: &library::Artist, field: LibraryField) -> String {
+pub(crate) fn artist_item_field(artist: &ArtistRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => artist.name.clone(),
-        LibraryField::LastPlayed => display_calendar_date(artist.last_played.as_deref()),
-        LibraryField::PlayCount => option_count(artist.play_count),
-        LibraryField::UserRating => option_rating(artist.user_rating),
+        LibraryField::LastPlayed => display_unix_date(artist.last_played),
+        LibraryField::PlayCount => count(artist.play_count),
+        LibraryField::UserRating => stored_rating(artist.rating),
         LibraryField::Favorite => favorite_text(artist.favorite),
         _ => String::new(),
     }
 }
-pub(crate) fn artist_field(artist: &ArtistSummary, field: LibraryField) -> String {
+pub(crate) fn artist_field(artist: &ArtistRow, field: LibraryField) -> String {
     match field {
-        LibraryField::AlbumCount => album_count_text(artist.album_count.into()),
-        LibraryField::SongCount => track_count_text(artist.track_count.into()),
-        _ => artist_item_field(&artist.artist, field),
+        LibraryField::AlbumCount => album_count_text(artist.album_count.max(0) as u64),
+        LibraryField::SongCount => track_count_text(artist.track_count.max(0) as u64),
+        _ => artist_item_field(artist, field),
     }
 }
-pub(crate) fn playlist_field(playlist: &PlaylistSummary, field: LibraryField) -> String {
+pub(crate) fn playlist_field(playlist: &PlaylistRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => playlist.playlist.name.clone(),
-        LibraryField::SongCount => track_count_text(playlist.track_count.into()),
-        LibraryField::Duration => format_duration_units(playlist.duration_seconds),
+        LibraryField::Title | LibraryField::TitleMerged => playlist.name.clone(),
+        LibraryField::SongCount => track_count_text(playlist.track_count.max(0) as u64),
+        LibraryField::Duration => {
+            format_duration_units((playlist.duration_millis.max(0) / 1_000) as u32)
+        }
         _ => String::new(),
     }
 }
-pub(crate) fn smart_playlist_field(playlist: &SmartPlaylistSummary, field: LibraryField) -> String {
+pub(crate) fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) -> String {
     match field {
-        LibraryField::Title | LibraryField::TitleMerged => {
-            smart_playlist_display_name(&playlist.smart_playlist)
-        }
+        LibraryField::Title | LibraryField::TitleMerged => smart_playlist_display_name(playlist),
         LibraryField::SongCount if playlist.track_count > 0 => {
-            track_count_text(playlist.track_count.into())
+            track_count_text(playlist.track_count as u64)
         }
-        LibraryField::Duration if playlist.duration_seconds > 0 => {
-            format_duration_units(playlist.duration_seconds)
+        LibraryField::Duration if playlist.duration_millis > 0 => {
+            format_duration_units((playlist.duration_millis / 1_000) as u32)
         }
         _ => String::new(),
     }
 }
-pub(crate) fn track_field(track: &Track, field: LibraryField) -> String {
+pub(crate) fn track_field(track: &TrackRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => track.title.clone(),
-        LibraryField::Artist => track.artist.clone(),
-        LibraryField::AlbumArtist => joined_credits(track.album_artist_credits()),
-        LibraryField::Album => track.album.clone(),
-        LibraryField::Year => nonzero_year(track.year),
+        LibraryField::Artist => track.display_artist.clone(),
+        LibraryField::AlbumArtist => joined_credits(&track.album_artists),
+        LibraryField::Album => track.display_album.clone(),
+        LibraryField::Year => optional_year(track.year),
         LibraryField::ReleaseDate => track.release_date.clone().unwrap_or_default(),
         LibraryField::DateAdded => track.date_added.clone().unwrap_or_default(),
-        LibraryField::LastPlayed => display_calendar_date(track.last_played.as_deref()),
-        LibraryField::PlayCount => option_count(track.play_count),
-        LibraryField::UserRating => option_rating(track.user_rating),
-        LibraryField::Genre => track.genre_names().collect::<Vec<_>>().join(", "),
+        LibraryField::LastPlayed => display_unix_date(track.last_played),
+        LibraryField::PlayCount => count(track.play_count),
+        LibraryField::UserRating => stored_rating(track.rating),
+        LibraryField::Genre => track
+            .genres
+            .iter()
+            .map(|genre| genre.name.as_str())
+            .collect::<Vec<_>>()
+            .join(", "),
         LibraryField::Bpm => track.bpm.map(|bpm| bpm.to_string()).unwrap_or_default(),
         LibraryField::DiscNumber => track.disc_number.to_string(),
         LibraryField::TrackNumber => format!("{}-{:02}", track.disc_number, track.track_number),
-        LibraryField::Duration => crate::format_duration(track.duration_seconds),
+        LibraryField::Duration => {
+            crate::format_duration((track.duration_millis.max(0) / 1_000) as u32)
+        }
         LibraryField::Favorite => favorite_text(track.favorite),
         _ => String::new(),
     }
 }
-pub(crate) fn album_matches_query(album: &AlbumSummary, query: &str) -> bool {
-    album.album.title.to_lowercase().contains(query)
-        || album.album.artist.to_lowercase().contains(query)
-        || album
-            .album
-            .genre_names()
-            .collect::<Vec<_>>()
-            .join(" ")
-            .to_lowercase()
-            .contains(query)
-        || album.album.year.to_string().contains(query)
-}
-pub(crate) fn artist_matches_query(artist: &ArtistSummary, query: &str) -> bool {
-    artist.artist.name.to_lowercase().contains(query)
-}
-pub(crate) fn playlist_matches_query(playlist: &PlaylistSummary, query: &str) -> bool {
-    playlist.playlist.name.to_lowercase().contains(query)
-}
-pub(crate) fn smart_playlist_matches_query(playlist: &SmartPlaylistSummary, query: &str) -> bool {
-    playlist.smart_playlist.name.to_lowercase().contains(query)
-}
 fn boxed_item<T: Clone + 'static>(boxed: &glib::BoxedAnyObject) -> Option<T> {
-    boxed.try_borrow::<T>().ok().map(|item| item.clone())
+    if let Ok(item) = boxed.try_borrow::<T>() {
+        return Some(item.clone());
+    }
+    macro_rules! ready {
+        ($key:ty) => {
+            if let Ok(item) = boxed.try_borrow::<SparseItem<$key, T>>() {
+                return match &*item {
+                    SparseItem::Ready(row) => Some((**row).clone()),
+                    SparseItem::Placeholder(_) => None,
+                };
+            }
+        };
+    }
+    ready!(library::TrackKey);
+    ready!(library::AlbumKey);
+    ready!(library::ArtistKey);
+    ready!(library::GenreKey);
+    ready!(library::MoodKey);
+    ready!(library::PlaylistKey);
+    ready!(library::PlaylistEntryKey);
+    ready!(library::SmartPlaylistKey);
+    None
 }
 
 pub(crate) fn item_at<T: Clone + 'static>(
@@ -272,7 +156,17 @@ pub(crate) fn track_artwork_at_from_item(item: &gtk::ListItem) -> Option<Artwork
     let boxed = item
         .item()
         .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())?;
-    boxed_item::<Track>(&boxed).map(|track| ArtworkBinding::track(&track))
+    boxed_item::<TrackRow>(&boxed).map(|track| {
+        track
+            .artwork_binding
+            .as_deref()
+            .map(ArtworkBinding::opaque)
+            .unwrap_or_default()
+    })
+}
+
+pub(crate) fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
+    binding.map(ArtworkBinding::opaque).unwrap_or_default()
 }
 pub(crate) fn clear_list_item_child(_: &gtk::SignalListItemFactory, item: &glib::Object) {
     if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
@@ -330,56 +224,6 @@ fn configure_collection_grid_label(label: &gtk::Label) {
     label.set_hexpand(true);
     label.set_vexpand(false);
     label.set_yalign(0.5);
-}
-pub(crate) fn album_detail_meta_label(text: &str, css_class: &str, width: i32) -> gtk::Widget {
-    let wrap = css_class == "track-title";
-    let height = if wrap {
-        ALBUM_DETAIL_META_LABEL_HEIGHT * 2
-    } else {
-        ALBUM_DETAIL_META_LABEL_HEIGHT
-    };
-    let label = gtk::Label::new(Some(text));
-    if !css_class.is_empty() {
-        label.add_css_class(css_class);
-    }
-    label.set_xalign(0.5);
-    label.set_wrap(wrap);
-    if wrap {
-        label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        label.set_lines(2);
-        label.set_single_line_mode(false);
-    } else {
-        label.set_single_line_mode(true);
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    }
-    label.set_width_chars(1);
-    label.set_halign(gtk::Align::Fill);
-    label.set_hexpand(false);
-
-    let clip = gtk::ScrolledWindow::new();
-    clip.add_css_class("card-label-clip");
-    clip.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
-    clip.set_overflow(gtk::Overflow::Hidden);
-    clip.set_width_request(width);
-    clip.set_height_request(height);
-    clip.set_size_request(width, height);
-    clip.set_min_content_width(width);
-    clip.set_max_content_width(width);
-    clip.set_min_content_height(height);
-    clip.set_max_content_height(height);
-    clip.set_propagate_natural_width(false);
-    clip.set_propagate_natural_height(false);
-    clip.set_hexpand(false);
-    clip.set_child(Some(&label));
-    clip.upcast()
-}
-pub(crate) fn album_fact_text(album: &AlbumSummary) -> String {
-    format!(
-        "{} • {} • {}",
-        nonzero_year(album.album.year),
-        track_count_text(album.track_count.into()),
-        format_duration_units(album.duration_seconds)
-    )
 }
 #[derive(Clone, Copy, Eq, PartialEq)]
 pub(crate) enum LibraryFieldSet {
@@ -807,146 +651,37 @@ pub(crate) fn compact_header_column_width(header: &str, min_width: i32) -> i32 {
     let width = tr(header).chars().count().min(i32::MAX as usize / 8) as i32 * 8 + 20;
     width.max(min_width)
 }
-pub(crate) fn apply_desc(ordering: Ordering, descending: bool) -> Ordering {
-    if descending {
-        ordering.reverse()
-    } else {
-        ordering
-    }
+fn count(value: i64) -> String {
+    value.max(0).to_string()
 }
-pub(crate) fn cmp_string(left: &str, right: &str) -> Ordering {
-    left.to_lowercase().cmp(&right.to_lowercase())
-}
-pub(crate) fn cmp_option_string(left: &Option<String>, right: &Option<String>) -> Ordering {
-    match (left, right) {
-        (Some(left), Some(right)) => cmp_string(left, right),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-pub(crate) fn cmp_option_u32(left: Option<u32>, right: Option<u32>) -> Ordering {
-    match (left, right) {
-        (Some(left), Some(right)) => left.cmp(&right),
-        (Some(_), None) => Ordering::Less,
-        (None, Some(_)) => Ordering::Greater,
-        (None, None) => Ordering::Equal,
-    }
-}
-pub(crate) fn cmp_option_u8(left: Option<u8>, right: Option<u8>) -> Ordering {
-    cmp_option_u32(left.map(u32::from), right.map(u32::from))
-}
-pub(crate) fn option_count(value: Option<u32>) -> String {
-    value.map(|value| value.to_string()).unwrap_or_default()
-}
-pub(crate) fn option_rating(value: Option<u8>) -> String {
+
+fn stored_rating(value: Option<i64>) -> String {
     value
-        .map(|value| format!("{:.1}", f64::from(value) / 2.0))
+        .map(|value| format!("{:.1}", value as f64 / 2.0))
+        .unwrap_or_default()
+}
+
+fn optional_year(year: Option<i64>) -> String {
+    year.filter(|year| *year != 0)
+        .map(|year| year.to_string())
+        .unwrap_or_default()
+}
+
+fn display_unix_date(value: Option<i64>) -> String {
+    value
+        .and_then(|value| glib::DateTime::from_unix_local(value).ok())
+        .and_then(|value| value.format("%Y-%m-%d").ok())
+        .map(|value| value.to_string())
         .unwrap_or_default()
 }
 pub(crate) fn favorite_text(favorite: bool) -> String {
     if favorite { "♥" } else { "" }.to_string()
 }
-pub(crate) fn nonzero_year(year: u16) -> String {
-    if year == 0 {
-        String::new()
-    } else {
-        year.to_string()
-    }
-}
-
-fn display_calendar_date(value: Option<&str>) -> String {
-    let Some(value) = value else {
-        return String::new();
-    };
-    value
-        .get(..10)
-        .filter(|date| {
-            date.as_bytes().get(4) == Some(&b'-') && date.as_bytes().get(7) == Some(&b'-')
-        })
-        .unwrap_or(value)
-        .to_string()
-}
-pub(crate) fn joined_credits(credits: &[library::ArtistCredit]) -> String {
+pub(crate) fn joined_credits(credits: &[TrackArtistLink]) -> String {
     credits
         .iter()
         .map(|credit| credit.name.trim())
         .filter(|name| !name.is_empty())
         .collect::<Vec<_>>()
         .join(", ")
-}
-
-#[cfg(test)]
-mod tests {
-    use ::library::SmartPlaylistSummary;
-
-    use crate::{LibraryField, LibraryListKey, LibraryListSettings};
-
-    use super::{
-        LibraryFieldSet, album_field, album_item_field, display_calendar_date, set_field_enabled,
-        smart_playlist_field,
-    };
-
-    fn smart_playlist_with_stats(track_count: u32, duration_seconds: u32) -> SmartPlaylistSummary {
-        crate::test_support::smart_playlist_summary(
-            crate::test_support::smart_playlist("test", "Smart Mix"),
-            track_count,
-            duration_seconds,
-        )
-    }
-
-    #[test]
-    fn cards_smart_zeroes() {
-        let empty = smart_playlist_with_stats(0, 0);
-        assert!(smart_playlist_field(&empty, LibraryField::SongCount).is_empty());
-        assert!(smart_playlist_field(&empty, LibraryField::Duration).is_empty());
-
-        let resolved = smart_playlist_with_stats(2, 120);
-        assert_eq!(
-            smart_playlist_field(&resolved, LibraryField::SongCount),
-            "2 tracks"
-        );
-        assert_eq!(
-            smart_playlist_field(&resolved, LibraryField::Duration),
-            "2m 0s"
-        );
-    }
-
-    #[test]
-    fn live_album_fields_do_not_invent_library_summary_counts() {
-        let album = crate::test_support::album("album", "Live result");
-        assert_eq!(album_item_field(&album, LibraryField::Title), "Live result");
-        assert!(album_item_field(&album, LibraryField::SongCount).is_empty());
-
-        let summary = crate::test_support::album_summary(album, 3, 180);
-        assert_eq!(album_field(&summary, LibraryField::SongCount), "3 tracks");
-    }
-
-    #[test]
-    fn last_played_keeps_timestamp_precision_out_of_visible_cells() {
-        assert_eq!(
-            display_calendar_date(Some("2026-07-13T17:31:12Z")),
-            "2026-07-13"
-        );
-        assert_eq!(
-            display_calendar_date(Some("provider-value")),
-            "provider-value"
-        );
-        assert!(display_calendar_date(None).is_empty());
-    }
-
-    #[test]
-    fn enabling_field_appends() {
-        let mut settings = LibraryListSettings::for_key(LibraryListKey::Tracks);
-
-        set_field_enabled(
-            &mut settings,
-            LibraryListKey::Tracks,
-            LibraryFieldSet::Row,
-            LibraryField::DiscNumber,
-            true,
-        );
-
-        assert_eq!(settings.row_fields.last(), Some(&LibraryField::DiscNumber));
-    }
 }

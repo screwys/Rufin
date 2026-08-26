@@ -22,10 +22,11 @@ pub use config::{
     SourceConfiguration, SourceId, SourceSettingsInput, SourceSetupInput,
 };
 pub use operations::{
-    AlbumMetadata, AlbumMetadataMixed, AlbumMetadataValues, AlbumMetadataWritable, ArtistMetadata,
-    ArtistMetadataMixed, ArtistMetadataValues, ArtistMetadataWritable, ImageBytes, LyricsSearch,
-    NativeLyricAgent, NativeLyricAgentRole, NativeLyricCue, NativeLyricCueLine, NativeLyricLine,
-    NativeLyrics, NativeLyricsDocument, NativeLyricsRole, SourceMetadataError, TrackMetadata,
+    AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
+    AlbumMetadataWritable, ArtistMetadata, ArtistMetadataEdit, ArtistMetadataMixed,
+    ArtistMetadataValues, ArtistMetadataWritable, ImageBytes, LyricsSearch, NativeLyricAgent,
+    NativeLyricAgentRole, NativeLyricCue, NativeLyricCueLine, NativeLyricLine, NativeLyrics,
+    NativeLyricsDocument, NativeLyricsRole, SourceMetadataError, TrackMetadata, TrackMetadataEdit,
     TrackMetadataValues, TrackMetadataWritable,
 };
 pub use source::*;

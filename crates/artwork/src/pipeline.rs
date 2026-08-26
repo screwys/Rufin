@@ -151,6 +151,40 @@ enum Resolution {
 type LeaseCompletion = (oneshot::Sender<ArtworkOutcome>, ArtworkOutcome);
 
 impl Pipeline {
+    pub(crate) fn begin_source_manifest(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+    ) -> std::io::Result<std::path::PathBuf> {
+        self.shared.cache.begin_source_manifest(source_id, revision)
+    }
+
+    pub(crate) fn mark_source_manifest(
+        &self,
+        staging: &std::path::Path,
+        bindings: &[Vec<u8>],
+    ) -> std::io::Result<()> {
+        for binding in bindings {
+            if let Some(candidate) = ArtworkBinding::opaque(binding).candidates().first() {
+                self.shared
+                    .cache
+                    .mark_source_manifest_identity(staging, &candidate.stable_identity())?;
+            }
+        }
+        Ok(())
+    }
+
+    pub(crate) fn complete_source_manifest(
+        &self,
+        source_id: &SourceId,
+        revision: u64,
+        staging: &std::path::Path,
+    ) -> std::io::Result<()> {
+        let _commit = lock_cache_commit(&self.shared);
+        self.shared
+            .cache
+            .complete_source_manifest_staging(source_id, revision, staging)
+    }
     pub(crate) fn new(cache_root: &Path, runtime: Handle) -> Result<Self, ArtworkError> {
         let cache = FilesystemCache::new(cache_root.to_path_buf())?;
         let fetch = FetchContext::new().map_err(ArtworkError::FetchSetup)?;
@@ -326,6 +360,10 @@ impl Pipeline {
                         SOURCE_ARTWORK_SIZE,
                         SOURCE_ARTWORK_SIZE,
                     );
+                    if request.binding.candidates().is_empty() {
+                        let _ = completion.send(BackgroundResult::Missing);
+                        continue;
+                    }
                     if decoded_for_request(&mut state, &self.shared.cache, &source, &request)
                         .0
                         .is_some()
@@ -1434,6 +1472,64 @@ fn lock_cache_commit(shared: &Shared) -> MutexGuard<'_, ()> {
         .cache_commit
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use sources::NativeImageRef;
+
+    #[test]
+    fn durable_no_art_binding_completes_as_missing() {
+        let directory = tempfile::tempdir().expect("cache");
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .build()
+            .expect("runtime");
+        let pipeline = Pipeline::new(directory.path(), runtime.handle().clone()).expect("pipeline");
+        let summary = pipeline
+            .prefetch_source_artwork(
+                SourceImages::cache_only(SourceId::new("source")),
+                Arc::from([br#"{"no_art":true}"#.to_vec()]),
+                &|_, _| {},
+                &|| false,
+            )
+            .expect("prepare no-art");
+        assert_eq!(summary.missing, 1);
+        assert_eq!(summary.failed, 0);
+    }
+
+    #[test]
+    fn identical_foreground_requests_share_one_fetch_job() {
+        let mut state = State::default();
+        let source = SourceImages::cache_only(SourceId::new("source"));
+        let request = CandidateRequest {
+            candidate: Candidate::Native(NativeImageRef::new("album", Some("tag".to_string()))),
+            fetch_size: 256,
+            render_size: 144,
+            external: ExternalPolicy::default(),
+        };
+        let first = enqueue_projection(
+            &mut state,
+            source.clone(),
+            request.clone(),
+            RequestId(1),
+            JobPriority::Foreground,
+        );
+        let second = enqueue_projection(
+            &mut state,
+            source,
+            request,
+            RequestId(2),
+            JobPriority::Foreground,
+        );
+
+        assert_eq!(first, second);
+        assert_eq!(state.jobs.len(), 1);
+        assert_eq!(state.foreground.len(), 1);
+        let job = state.jobs.get(&first).expect("shared job");
+        assert_eq!(job.subscribers.len(), 2);
+        assert_eq!(job.foreground_subscribers.len(), 2);
+    }
 }
 
 fn send_completions(completions: Vec<LeaseCompletion>) {

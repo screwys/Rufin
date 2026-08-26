@@ -83,15 +83,6 @@ pub(crate) fn primary_route_scroll_adjustment(root: &gtk::Widget) -> Option<gtk:
     None
 }
 
-pub(crate) fn route_scroller_widget(scroller: gtk::ScrolledWindow) -> gtk::Widget {
-    let (_, vertical_policy) = scroller.policy();
-    if vertical_policy != gtk::PolicyType::Never {
-        mark_route_scroll_owner(&scroller);
-        scroller.set_overlay_scrolling(true);
-    }
-    scroller.upcast()
-}
-
 pub(crate) fn route_boundary(view: gtk::Widget) -> gtk::Widget {
     let scroller = gtk::ScrolledWindow::new();
     configure_fill_width_clip(&scroller, gtk::PolicyType::Never);
@@ -100,6 +91,15 @@ pub(crate) fn route_boundary(view: gtk::Widget) -> gtk::Widget {
     scroller.set_vexpand(true);
     scroller.set_child(Some(&view));
     scroller.upcast::<gtk::Widget>()
+}
+
+pub(crate) fn route_scroller_widget(scroller: gtk::ScrolledWindow) -> gtk::Widget {
+    let (_, vertical_policy) = scroller.policy();
+    if vertical_policy != gtk::PolicyType::Never {
+        mark_route_scroll_owner(&scroller);
+        scroller.set_overlay_scrolling(true);
+    }
+    scroller.upcast()
 }
 
 pub(crate) fn detail_route_scroller(content: gtk::Widget) -> gtk::ScrolledWindow {

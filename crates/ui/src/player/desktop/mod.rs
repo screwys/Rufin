@@ -13,8 +13,8 @@ use adw::prelude::*;
 #[cfg(target_os = "linux")]
 use ashpd::desktop::background::Background;
 use gtk::glib;
-use library::SourceId;
 use playback::{CurrentMedia, PlaybackView, PositionDiscontinuity, TransportHandle};
+use sources::SourceId;
 use tracing::{info, warn};
 
 use crate::Settings as UiSettings;
@@ -142,10 +142,14 @@ impl Shell {
         player: Option<&PlaybackView>,
         refresh_current: bool,
     ) {
+        let source_id = self
+            .selected_library()
+            .as_deref()
+            .map(|selected| selected.artwork.source_id.clone());
         let artwork = player.and_then(|player| {
             player.transport.current.as_deref().and_then(|media| {
                 self.current_playback_cached_artwork_path(
-                    &player.transport.source_id,
+                    source_id.as_ref()?,
                     media,
                     THUMB_COVER_SIZE,
                 )
@@ -170,12 +174,16 @@ impl Shell {
 
     pub(crate) fn update_media_controls_after(&self, discontinuity: Option<PositionDiscontinuity>) {
         let playback = self.selected_playback();
+        let source_id = self
+            .selected_library()
+            .as_deref()
+            .map(|selected| selected.artwork.source_id.clone());
         let art_url = playback.as_ref().and_then(|playback| {
             playback
                 .transport
                 .current
                 .as_deref()
-                .and_then(|media| self.current_art_url(&playback.transport.source_id, media))
+                .and_then(|media| self.current_art_url(source_id.as_ref()?, media))
         });
         self.desktop
             .media_controls

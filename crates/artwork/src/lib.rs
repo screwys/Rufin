@@ -223,7 +223,41 @@ pub struct Artwork {
     pipeline: Arc<pipeline::Pipeline>,
 }
 
+pub struct SourceManifest {
+    pipeline: Arc<pipeline::Pipeline>,
+    source_id: SourceId,
+    revision: u64,
+    staging: PathBuf,
+}
+
+impl SourceManifest {
+    pub fn record_page(&self, bindings: &[Vec<u8>]) -> Result<(), ArtworkError> {
+        Ok(self
+            .pipeline
+            .mark_source_manifest(&self.staging, bindings)?)
+    }
+
+    pub fn finish(self) -> Result<(), ArtworkError> {
+        Ok(self
+            .pipeline
+            .complete_source_manifest(&self.source_id, self.revision, &self.staging)?)
+    }
+}
+
 impl Artwork {
+    pub fn begin_source_manifest(
+        &self,
+        source_id: SourceId,
+        revision: u64,
+    ) -> Result<SourceManifest, ArtworkError> {
+        let staging = self.pipeline.begin_source_manifest(&source_id, revision)?;
+        Ok(SourceManifest {
+            pipeline: Arc::clone(&self.pipeline),
+            source_id,
+            revision,
+            staging,
+        })
+    }
     pub fn new(cache_root: impl AsRef<Path>, runtime: Handle) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
         let pipeline = pipeline::Pipeline::new(&cache_root, runtime)?;

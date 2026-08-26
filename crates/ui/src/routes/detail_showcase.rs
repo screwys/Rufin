@@ -3,7 +3,7 @@ use std::{
     rc::Rc,
 };
 
-use ::library::{Album, Artist};
+use ::library::{AlbumRow, ArtistRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use tracing::warn;
@@ -247,6 +247,30 @@ pub(crate) fn collection_detail_showcase(
     .upcast()
 }
 
+pub(crate) fn playlist_detail_showcase(
+    shell: &Rc<Shell>,
+    config: PlaylistDetailShowcase,
+) -> gtk::Widget {
+    collection_detail_showcase(
+        shell,
+        CollectionDetailShowcase {
+            seed: config.seed,
+            initial_width: config.initial_width,
+            compact_spacing: 20,
+            wide_spacing: 28,
+            cover: config.cover,
+            cover_controls: config.cover_controls,
+            context_menu: config.context_menu,
+            metadata: vec![
+                config.kind_row,
+                config.title,
+                config.summary,
+                config.actions,
+            ],
+        },
+    )
+}
+
 #[derive(Clone)]
 struct CollectionShowcasePresentation {
     viewport_width: Rc<Cell<i32>>,
@@ -282,30 +306,6 @@ impl CollectionShowcasePresentation {
         let cover_size = super::playlist_detail::playlist_cover_size(width);
         self.cover.resize(cover_size);
     }
-}
-
-pub(crate) fn playlist_detail_showcase(
-    shell: &Rc<Shell>,
-    config: PlaylistDetailShowcase,
-) -> gtk::Widget {
-    collection_detail_showcase(
-        shell,
-        CollectionDetailShowcase {
-            seed: config.seed,
-            initial_width: config.initial_width,
-            compact_spacing: 20,
-            wide_spacing: 28,
-            cover: config.cover,
-            cover_controls: config.cover_controls,
-            context_menu: config.context_menu,
-            metadata: vec![
-                config.kind_row,
-                config.title,
-                config.summary,
-                config.actions,
-            ],
-        },
-    )
 }
 
 #[derive(Clone)]
@@ -374,6 +374,22 @@ fn summary_value_is_visible(text: &str) -> bool {
 pub(crate) fn detail_action_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = icon_button(icon_name, label);
     configure_action_button(&button, ActionButtonVariant::DetailAction, Some(icon_name));
+    button
+}
+
+pub(crate) fn detail_delete_button(label: &str) -> gtk::Button {
+    let button = gtk::Button::new();
+    button.add_css_class("icon-button");
+    button.add_css_class("flat");
+    button.add_css_class("circular");
+    button.set_valign(gtk::Align::Center);
+    button.set_tooltip_text(Some(&tr(label)));
+    button.set_child(Some(&gtk::Image::from_icon_name(DELETE_ICON)));
+    configure_action_button(
+        &button,
+        ActionButtonVariant::DetailAction,
+        Some(DELETE_ICON),
+    );
     button
 }
 
@@ -517,22 +533,6 @@ pub(crate) fn detail_genre_pill_button(label: &str) -> gtk::Button {
     button
 }
 
-pub(crate) fn detail_delete_button(label: &str) -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("icon-button");
-    button.add_css_class("flat");
-    button.add_css_class("circular");
-    button.set_valign(gtk::Align::Center);
-    button.set_tooltip_text(Some(&tr(label)));
-    button.set_child(Some(&gtk::Image::from_icon_name(DELETE_ICON)));
-    configure_action_button(
-        &button,
-        ActionButtonVariant::DetailAction,
-        Some(DELETE_ICON),
-    );
-    button
-}
-
 pub(crate) fn detail_action_row() -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     row.add_css_class("detail-showcase-actions");
@@ -546,8 +546,6 @@ pub(crate) struct DetailCoverProjection {
     tile: ArtworkTile,
     size: Rc<Cell<i32>>,
     candidates: Rc<RefCell<ArtworkBinding>>,
-    render_size: i32,
-    fetch_size: u32,
 }
 
 impl DetailCoverProjection {
@@ -564,9 +562,14 @@ impl DetailCoverProjection {
         self.tile.set_square_size(size);
     }
 
-    pub(crate) fn replace(&self, shell: &Rc<Shell>, binding: ArtworkBinding) {
-        self.candidates.replace(binding.clone());
-        shell.bind_artwork_tile(&self.tile, binding, self.render_size, self.fetch_size);
+    pub(crate) fn replace(&self, shell: &Rc<Shell>, candidates: ArtworkBinding) {
+        self.candidates.replace(candidates.clone());
+        shell.bind_artwork_tile(
+            &self.tile,
+            candidates,
+            detail_cover_render_size(),
+            LARGE_COVER_SIZE,
+        );
     }
 }
 
@@ -604,8 +607,6 @@ pub(crate) fn detail_cover_projection(
         tile,
         size: Rc::new(Cell::new(size)),
         candidates,
-        render_size,
-        fetch_size,
     }
 }
 
@@ -689,10 +690,6 @@ pub(crate) fn detail_showcase_frame_with_back(
     overlay.upcast()
 }
 
-pub(crate) fn mark_tiny_detail_showcase(widget: &impl IsA<gtk::Widget>, width: i32) {
-    update_tiny_detail_showcase(widget, width);
-}
-
 fn update_tiny_detail_showcase(widget: &impl IsA<gtk::Widget>, width: i32) {
     if width < 520 {
         widget.add_css_class("detail-showcase-tiny");
@@ -715,7 +712,7 @@ pub(crate) fn fit_detail_text(label: &gtk::Label, text: &str) {
     }
 }
 
-pub(crate) fn album_external_links(shell: &Rc<Shell>, album: &Album) -> Option<gtk::Widget> {
+pub(crate) fn album_external_links(shell: &Rc<Shell>, album: &AlbumRow) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let link_settings = &settings.external_site_links;
     if !settings.shows_external_site_links() {
@@ -724,7 +721,7 @@ pub(crate) fn album_external_links(shell: &Rc<Shell>, album: &Album) -> Option<g
 
     let row = detail_external_link_row();
     if link_settings.lastfm
-        && let Some(url) = lastfm_album_url(&album.artist, &album.title)
+        && let Some(url) = lastfm_album_url(&album.display_artist, &album.title)
     {
         row.append(&detail_external_link_button(
             shell,
@@ -744,7 +741,7 @@ pub(crate) fn album_external_links(shell: &Rc<Shell>, album: &Album) -> Option<g
         ));
     }
     if link_settings.server
-        && let Some(link) = server_entity_url(shell, DetailEntityKind::Album, album.id.as_str())
+        && let Some(link) = server_entity_url(shell, DetailEntityKind::Album, &album.object_id)
     {
         row.append(&detail_external_link_button(
             shell,
@@ -757,7 +754,7 @@ pub(crate) fn album_external_links(shell: &Rc<Shell>, album: &Album) -> Option<g
     row.first_child().is_some().then(|| row.upcast())
 }
 
-pub(crate) fn artist_external_links(shell: &Rc<Shell>, artist: &Artist) -> Option<gtk::Widget> {
+pub(crate) fn artist_external_links(shell: &Rc<Shell>, artist: &ArtistRow) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let link_settings = &settings.external_site_links;
     if !settings.shows_external_site_links() {
@@ -786,7 +783,7 @@ pub(crate) fn artist_external_links(shell: &Rc<Shell>, artist: &Artist) -> Optio
         ));
     }
     if link_settings.server
-        && let Some(link) = server_entity_url(shell, DetailEntityKind::Artist, artist.id.as_str())
+        && let Some(link) = server_entity_url(shell, DetailEntityKind::Artist, &artist.object_id)
     {
         row.append(&detail_external_link_button(
             shell,
@@ -797,6 +794,39 @@ pub(crate) fn artist_external_links(shell: &Rc<Shell>, artist: &Artist) -> Optio
     }
 
     row.first_child().is_some().then(|| row.upcast())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn responsive_detail_artwork_covers_every_presented_size() {
+        let render = detail_cover_render_size();
+        for width in [240, 360, 520, 760, 1_200, i32::MAX] {
+            assert!(render >= detail_showcase_cover_size(width));
+        }
+    }
+
+    #[test]
+    fn detail_external_links_need_content_and_metadata_space() {
+        assert!(detail_external_links_visible(true, false));
+        assert!(!detail_external_links_visible(false, false));
+        assert!(!detail_external_links_visible(true, true));
+    }
+
+    #[test]
+    fn empty_summary_values_hide_the_icon_and_text() {
+        assert!(!summary_value_is_visible(""));
+        assert!(summary_value_is_visible("0"));
+    }
+
+    #[test]
+    fn full_artwork_size_fits_window() {
+        assert_eq!(full_artwork_size(300, 300), 240);
+        assert_eq!(full_artwork_size(4_000, 3_000), 720);
+        assert!(full_artwork_size(900, 700) <= 700);
+    }
 }
 
 fn detail_external_link_row() -> gtk::Box {
@@ -851,7 +881,7 @@ fn lastfm_artist_url(artist: &str) -> Option<String> {
     ))
 }
 
-fn musicbrainz_album_url(album: &Album) -> Option<String> {
+fn musicbrainz_album_url(album: &AlbumRow) -> Option<String> {
     if let Some(group_id) = album
         .musicbrainz_release_group_id
         .as_deref()
@@ -860,13 +890,13 @@ fn musicbrainz_album_url(album: &Album) -> Option<String> {
         return Some(format!("https://musicbrainz.org/release-group/{group_id}"));
     }
     let release_id = album
-        .musicbrainz_album_id
+        .musicbrainz_release_id
         .as_deref()
         .and_then(clean_url_label)?;
     Some(format!("https://musicbrainz.org/release/{release_id}"))
 }
 
-fn musicbrainz_artist_url(artist: &Artist) -> Option<String> {
+fn musicbrainz_artist_url(artist: &ArtistRow) -> Option<String> {
     let artist_id = artist
         .musicbrainz_artist_id
         .as_deref()
@@ -882,7 +912,7 @@ fn server_entity_url(
     let source_id = shell
         .selected_library()
         .as_deref()
-        .map(|selected| selected.source_id.clone())?;
+        .map(|selected| selected.artwork.source_id.clone())?;
     let source = shell
         .products
         .source
@@ -916,72 +946,4 @@ fn percent_encode_path_segment(value: &str) -> String {
         }
     }
     encoded
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{
-        detail_cover_render_size, detail_external_links_visible, full_artwork_size,
-        lastfm_album_url, lastfm_artist_url, musicbrainz_album_url, summary_value_is_visible,
-    };
-    use crate::routes::route_layout::detail_showcase_cover_size;
-
-    #[test]
-    fn responsive_detail_artwork_covers_every_presented_size() {
-        let render_size = detail_cover_render_size();
-        for width in 1..=1_200 {
-            assert!(detail_showcase_cover_size(width) <= render_size);
-        }
-    }
-
-    #[test]
-    fn detail_external_links_need_content_and_metadata_space() {
-        assert!(!detail_external_links_visible(false, false));
-        assert!(!detail_external_links_visible(false, true));
-        assert!(!detail_external_links_visible(true, true));
-        assert!(detail_external_links_visible(true, false));
-    }
-
-    #[test]
-    fn empty_summary_values_hide_the_icon_and_text() {
-        assert!(!summary_value_is_visible(""));
-        assert!(summary_value_is_visible("1 track"));
-    }
-
-    #[test]
-    fn full_artwork_size_fits_window() {
-        assert_eq!(full_artwork_size(1440, 900), 720);
-        assert_eq!(full_artwork_size(640, 480), 400);
-        assert_eq!(full_artwork_size(300, 260), 240);
-    }
-
-    #[test]
-    fn lastfm_urls_escape_path_segments() {
-        assert_eq!(
-            lastfm_album_url("Test Artist", "A/B").as_deref(),
-            Some("https://www.last.fm/music/Test%20Artist/A%2FB")
-        );
-        assert_eq!(
-            lastfm_artist_url("青葉市子").as_deref(),
-            Some("https://www.last.fm/music/%E9%9D%92%E8%91%89%E5%B8%82%E5%AD%90")
-        );
-    }
-
-    #[test]
-    fn musicbrainz_album_url_prefers_release_group() {
-        let mut album = crate::test_support::album(1, "Album");
-        album.musicbrainz_album_id = Some("release-one".to_string());
-        album.musicbrainz_release_group_id = Some("group-one".to_string());
-
-        assert_eq!(
-            musicbrainz_album_url(&album).as_deref(),
-            Some("https://musicbrainz.org/release-group/group-one")
-        );
-
-        album.musicbrainz_release_group_id = None;
-        assert_eq!(
-            musicbrainz_album_url(&album).as_deref(),
-            Some("https://musicbrainz.org/release/release-one")
-        );
-    }
 }

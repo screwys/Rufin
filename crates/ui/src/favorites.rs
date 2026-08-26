@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::localization::bind_widget_tooltip;
 use crate::shell::Shell;
-use ::library::{AlbumId, ArtistId, FavoriteItemId, TrackId};
+use ::library::{AlbumKey, ArtistKey, FavoriteTarget, TrackKey};
 use adw::prelude::*;
 use gtk::glib;
 use localization::tr;
@@ -12,9 +12,9 @@ pub(crate) const FAVORITE_REMOVE_ICON: &str = "rufin-heart-filled-symbolic";
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum FavoriteControlKey {
-    Album(String),
-    Track(String),
-    Artist(String),
+    Album(AlbumKey),
+    Track(TrackKey),
+    Artist(ArtistKey),
 }
 
 #[derive(Default)]
@@ -31,7 +31,7 @@ struct DynamicFavoriteControl {
 #[derive(Default)]
 pub(crate) struct FavoriteSessionState {
     controls: FavoriteControls,
-    pending_intents: RefCell<HashMap<FavoriteItemId, bool>>,
+    pending_intents: RefCell<HashMap<FavoriteTarget, bool>>,
 }
 
 impl Shell {
@@ -69,23 +69,23 @@ impl Shell {
     }
 }
 
-pub(crate) fn album_favorite_key(album_id: &AlbumId) -> FavoriteControlKey {
-    FavoriteControlKey::Album(album_id.as_str().to_string())
+pub(crate) fn album_favorite_key(album_id: &AlbumKey) -> FavoriteControlKey {
+    FavoriteControlKey::Album(*album_id)
 }
 
-pub(crate) fn track_favorite_key(track_id: &TrackId) -> FavoriteControlKey {
-    FavoriteControlKey::Track(track_id.as_str().to_string())
+pub(crate) fn track_favorite_key(track_id: &TrackKey) -> FavoriteControlKey {
+    FavoriteControlKey::Track(*track_id)
 }
 
-pub(crate) fn artist_favorite_key(artist_id: &ArtistId) -> FavoriteControlKey {
-    FavoriteControlKey::Artist(artist_id.as_str().to_string())
+pub(crate) fn artist_favorite_key(artist_id: &ArtistKey) -> FavoriteControlKey {
+    FavoriteControlKey::Artist(*artist_id)
 }
 
-fn favorite_control_key(item_id: &FavoriteItemId) -> FavoriteControlKey {
+fn favorite_control_key(item_id: &FavoriteTarget) -> FavoriteControlKey {
     match item_id {
-        FavoriteItemId::Album(album_id) => album_favorite_key(album_id),
-        FavoriteItemId::Track(track_id) => track_favorite_key(track_id),
-        FavoriteItemId::Artist(artist_id) => artist_favorite_key(artist_id),
+        FavoriteTarget::Album(album_id) => album_favorite_key(album_id),
+        FavoriteTarget::Track(track_id) => track_favorite_key(track_id),
+        FavoriteTarget::Artist(artist_id) => artist_favorite_key(artist_id),
     }
 }
 
@@ -189,13 +189,18 @@ impl Shell {
             .selected_playback()
             .as_deref()
             .and_then(|player| player.transport.current.as_ref())
-            .map(|entry| (entry.track.id.clone(), entry.track.favorite))
+            .and_then(|entry| {
+                Some((
+                    entry.track.track_key?,
+                    entry.track.favorite.unwrap_or(false),
+                ))
+            })
         else {
             return;
         };
         let favorite = !self.projected_track_favorite(&track_id, playback_fallback);
         self.set_favorite_with_feedback(
-            FavoriteItemId::Track(track_id),
+            FavoriteTarget::Track(track_id),
             favorite,
             Some(&self.player_view.player_controls.favorite_button),
         );
@@ -203,13 +208,13 @@ impl Shell {
 
     pub(crate) fn projected_track_favorite(
         &self,
-        track_id: &TrackId,
+        track_id: &TrackKey,
         playback_fallback: bool,
     ) -> bool {
-        self.projected_item_favorite(&FavoriteItemId::Track(track_id.clone()), playback_fallback)
+        self.projected_item_favorite(&FavoriteTarget::Track(track_id.clone()), playback_fallback)
     }
 
-    pub(crate) fn projected_item_favorite(&self, item_id: &FavoriteItemId, fallback: bool) -> bool {
+    pub(crate) fn projected_item_favorite(&self, item_id: &FavoriteTarget, fallback: bool) -> bool {
         if let Some(pending) = self.selected_ui.session().and_then(|session| {
             session
                 .favorites
@@ -220,32 +225,10 @@ impl Shell {
         }) {
             return pending;
         }
-        self.selected_library()
-            .as_deref()
-            .and_then(|selected| match item_id {
-                FavoriteItemId::Track(id) => selected
-                    .library
-                    .track(id)
-                    .ok()
-                    .flatten()
-                    .map(|track| track.favorite),
-                FavoriteItemId::Album(id) => selected
-                    .library
-                    .album(id)
-                    .ok()
-                    .flatten()
-                    .map(|album| album.favorite),
-                FavoriteItemId::Artist(id) => selected
-                    .library
-                    .artist(id)
-                    .ok()
-                    .flatten()
-                    .map(|artist| artist.favorite),
-            })
-            .unwrap_or(fallback)
+        fallback
     }
 
-    pub(crate) fn update_visible_favorite_buttons(&self, item_id: &FavoriteItemId, favorite: bool) {
+    pub(crate) fn update_visible_favorite_buttons(&self, item_id: &FavoriteTarget, favorite: bool) {
         let key = favorite_control_key(item_id);
         if let Some(session) = self.selected_ui.session() {
             update_favorite_controls(&session.favorites.controls, &key, favorite);
@@ -254,14 +237,14 @@ impl Shell {
 
     pub(crate) fn set_favorite_with_feedback(
         self: &Rc<Self>,
-        item_id: FavoriteItemId,
+        item_id: FavoriteTarget,
         favorite: bool,
         button: Option<&gtk::Button>,
     ) {
         let Some(source) = self.selected_source_operations() else {
             return;
         };
-        let track_favorite_changed = matches!(item_id, FavoriteItemId::Track(_));
+        let track_favorite_changed = matches!(item_id, FavoriteTarget::Track(_));
         if let Some(session) = self.selected_ui.session() {
             session
                 .favorites
@@ -285,28 +268,29 @@ impl Shell {
         self.show_control_feedback_toast(title);
     }
 
-    pub(crate) fn apply_favorite_changed(
+    pub(crate) fn apply_favorite_settlement(
         self: &Rc<Self>,
-        item_id: FavoriteItemId,
-        favorite: bool,
+        item_id: FavoriteTarget,
+        requested: bool,
+        effective: bool,
     ) -> bool {
-        if !self.favorite_response_matches_pending(&item_id, favorite) {
+        if !self.favorite_response_matches_pending(&item_id, requested) {
             return false;
         }
-        self.update_visible_favorite_buttons(&item_id, favorite);
-        if matches!(item_id, FavoriteItemId::Track(_)) {
+        self.update_visible_favorite_buttons(&item_id, effective);
+        if matches!(item_id, FavoriteTarget::Track(_)) {
             self.sync_bottom_player_favorite();
         }
         true
     }
 
-    fn favorite_response_matches_pending(&self, item_id: &FavoriteItemId, favorite: bool) -> bool {
+    fn favorite_response_matches_pending(&self, item_id: &FavoriteTarget, requested: bool) -> bool {
         let Some(session) = self.selected_ui.session() else {
             return false;
         };
         let mut pending = session.favorites.pending_intents.borrow_mut();
         match pending.get(item_id).copied() {
-            Some(intent) if intent == favorite => {
+            Some(intent) if intent == requested => {
                 pending.remove(item_id);
                 true
             }

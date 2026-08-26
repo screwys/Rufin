@@ -1,9 +1,9 @@
-use library::{AlbumId, ArtistId, FolderId, GenreId, MoodId, PlaylistId, SmartPlaylistId};
+use library::{AlbumKey, ArtistKey, GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey};
 use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub(crate) struct FolderPathItem {
-    pub(crate) id: FolderId,
+    pub(crate) id: String,
     pub(crate) name: String,
 }
 
@@ -14,20 +14,25 @@ pub(crate) enum Route {
     Favorites,
     History,
     Albums,
-    AlbumDetail(AlbumId),
+    AlbumDetail(AlbumKey),
     Tracks,
     Artists,
-    ArtistDetail(ArtistId),
-    ArtistDiscography(ArtistId),
-    ArtistTracks(ArtistId),
+    ArtistDetail(ArtistKey),
+    ArtistDiscography(ArtistKey),
+    ArtistTracks(ArtistKey),
+    ArtistFavoriteTracks(ArtistKey),
     AlbumArtists,
+    AlbumArtistDetail(ArtistKey),
+    AlbumArtistDiscography(ArtistKey),
+    AlbumArtistTracks(ArtistKey),
+    AlbumArtistFavoriteTracks(ArtistKey),
     Genres,
-    GenreDetail(GenreId),
+    GenreDetail(GenreKey),
     Moods,
-    MoodDetail(MoodId),
+    MoodDetail(MoodKey),
     Folders { path: Vec<FolderPathItem> },
     Playlists,
-    PlaylistDetail(PlaylistId),
+    PlaylistDetail(PlaylistKey),
     SmartPlaylists,
-    SmartPlaylistDetail(SmartPlaylistId),
+    SmartPlaylistDetail(SmartPlaylistKey),
 }

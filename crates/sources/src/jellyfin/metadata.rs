@@ -33,12 +33,27 @@ impl JellyfinSource {
     ) -> Result<TrackMetadata, SourceMetadataError> {
         let raw = raw_id(&track.object_id, "track")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
+        let source_values = track_values(&item, &track);
+        let mut values = source_values.clone();
+        let mut rufin_filled = crate::TrackMetadataWritable::default();
+        if values.musicbrainz_recording_id.is_none() && track.musicbrainz_recording_id.is_some() {
+            values.musicbrainz_recording_id = track.musicbrainz_recording_id.clone();
+            rufin_filled.musicbrainz_recording_id = true;
+        }
+        if values.musicbrainz_release_track_id.is_none()
+            && track.musicbrainz_release_track_id.is_some()
+        {
+            values.musicbrainz_release_track_id = track.musicbrainz_release_track_id.clone();
+            rufin_filled.musicbrainz_release_track_id = true;
+        }
         Ok(TrackMetadata {
             track_key: track.track_key,
             writable: track_writable(&editor),
-            source_search: false,
+            source_search: true,
             revision: Some(revision(&item)?),
-            values: track_values(&item, &track),
+            source_values,
+            values,
+            rufin_filled,
         })
     }
 
@@ -48,12 +63,27 @@ impl JellyfinSource {
     ) -> Result<AlbumMetadata, SourceMetadataError> {
         let raw = raw_id(&album.object_id, "album")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
+        let source_values = album_values(&item, &album);
+        let mut values = source_values.clone();
+        let mut rufin_filled = crate::AlbumMetadataWritable::default();
+        if values.musicbrainz_album_id.is_none() && album.musicbrainz_release_id.is_some() {
+            values.musicbrainz_album_id = album.musicbrainz_release_id.clone();
+            rufin_filled.musicbrainz_album_id = true;
+        }
+        if values.musicbrainz_release_group_id.is_none()
+            && album.musicbrainz_release_group_id.is_some()
+        {
+            values.musicbrainz_release_group_id = album.musicbrainz_release_group_id.clone();
+            rufin_filled.musicbrainz_release_group_id = true;
+        }
         Ok(AlbumMetadata {
             album_key: album.album_key,
             writable: album_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
-            values: album_values(&item, &album),
+            source_values,
+            values,
+            rufin_filled,
             track_count: album.track_count.max(0) as usize,
             mixed: crate::AlbumMetadataMixed::default(),
         })
@@ -65,12 +95,21 @@ impl JellyfinSource {
     ) -> Result<ArtistMetadata, SourceMetadataError> {
         let raw = raw_id(&artist.object_id, "artist")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
+        let source_values = artist_values(&item, &artist);
+        let mut values = source_values.clone();
+        let mut rufin_filled = crate::ArtistMetadataWritable::default();
+        if values.musicbrainz_artist_id.is_none() && artist.musicbrainz_artist_id.is_some() {
+            values.musicbrainz_artist_id = artist.musicbrainz_artist_id.clone();
+            rufin_filled.musicbrainz_artist_id = true;
+        }
         Ok(ArtistMetadata {
             artist_key: artist.artist_key,
             writable: artist_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
-            values: artist_values(&item, &artist),
+            source_values,
+            values,
+            rufin_filled,
             track_count: artist.track_count.max(0) as usize,
             mixed: crate::ArtistMetadataMixed::default(),
         })
@@ -152,6 +191,18 @@ impl JellyfinSource {
         Ok(select_album_identification(values, &results))
     }
 
+    pub(crate) async fn identify_track_metadata(
+        &self,
+        object_id: &str,
+        values: &TrackMetadataValues,
+    ) -> Result<Option<(TrackMetadataValues, String)>, String> {
+        let raw = raw_id(object_id, "track").map_err(|error| error.to_string())?;
+        let results = self
+            .remote_search(raw, "Audio", &values.title, values.year)
+            .await?;
+        Ok(select_track_identification(values, &results))
+    }
+
     pub(crate) async fn identify_artist_metadata(
         &self,
         object_id: &str,
@@ -185,77 +236,153 @@ impl JellyfinSource {
     }
 }
 
-pub(crate) fn apply_track_values(item: &mut Map<String, Value>, values: &TrackMetadataValues) {
-    set_required(item, "Name", &values.title);
-    set_string(item, "ForcedSortName", values.sort_title.as_deref());
-    set_named_if_changed(item, "ArtistItems", values.artist.as_deref());
-    set_string(item, "Album", values.album.as_deref());
-    set_named_if_changed(item, "AlbumArtists", values.album_artist.as_deref());
-    set_number(item, "IndexNumber", values.track_number);
-    set_number(item, "ParentIndexNumber", values.disc_number);
-    set_number(item, "ProductionYear", values.year);
-    set_strings(item, "Genres", values.genre.as_deref());
-    set_string(item, "Overview", values.comment.as_deref());
-    if let Some(locked) = values.locked {
+pub(crate) fn apply_track_edit(item: &mut Map<String, Value>, edit: &crate::TrackMetadataEdit) {
+    let values = &edit.values;
+    let changed = &edit.changed;
+    if changed.title {
+        set_required(item, "Name", &values.title);
+    }
+    if changed.sort_title {
+        set_string(item, "ForcedSortName", values.sort_title.as_deref());
+    }
+    if changed.artist {
+        set_named_if_changed(item, "ArtistItems", values.artist.as_deref());
+    }
+    if changed.album {
+        set_string(item, "Album", values.album.as_deref());
+    }
+    if changed.album_artist {
+        set_named_if_changed(item, "AlbumArtists", values.album_artist.as_deref());
+    }
+    if changed.track_number {
+        set_number(item, "IndexNumber", values.track_number);
+    }
+    if changed.disc_number {
+        set_number(item, "ParentIndexNumber", values.disc_number);
+    }
+    if changed.year {
+        set_number(item, "ProductionYear", values.year);
+    }
+    if changed.genre {
+        set_strings(item, "Genres", values.genre.as_deref());
+    }
+    if changed.comment {
+        set_string(item, "Overview", values.comment.as_deref());
+    }
+    if changed.locked
+        && let Some(locked) = values.locked
+    {
         item.insert("LockData".to_string(), Value::Bool(locked));
     }
-    set_provider(
-        item,
-        "MusicBrainzRecording",
-        values.musicbrainz_recording_id.as_deref(),
-    );
-    set_provider(
-        item,
-        "MusicBrainzTrack",
-        values.musicbrainz_release_track_id.as_deref(),
-    );
-    set_provider(
-        item,
-        "MusicBrainzAlbum",
-        values.musicbrainz_album_id.as_deref(),
-    );
-    set_provider(
-        item,
-        "MusicBrainzReleaseGroup",
-        values.musicbrainz_release_group_id.as_deref(),
-    );
+    if changed.musicbrainz_recording_id {
+        set_provider(
+            item,
+            "MusicBrainzRecording",
+            values.musicbrainz_recording_id.as_deref(),
+        );
+    }
+    if changed.musicbrainz_release_track_id {
+        set_provider(
+            item,
+            "MusicBrainzTrack",
+            values.musicbrainz_release_track_id.as_deref(),
+        );
+    }
+    if changed.musicbrainz_album_id {
+        set_provider(
+            item,
+            "MusicBrainzAlbum",
+            values.musicbrainz_album_id.as_deref(),
+        );
+    }
+    if changed.musicbrainz_release_group_id {
+        set_provider(
+            item,
+            "MusicBrainzReleaseGroup",
+            values.musicbrainz_release_group_id.as_deref(),
+        );
+    }
+    if changed.musicbrainz_artist_id {
+        set_provider(
+            item,
+            "MusicBrainzArtist",
+            values.musicbrainz_artist_id.as_deref(),
+        );
+    }
 }
 
-pub(crate) fn apply_album_values(item: &mut Map<String, Value>, values: &AlbumMetadataValues) {
-    set_required(item, "Name", &values.title);
-    set_string(item, "ForcedSortName", values.sort_title.as_deref());
-    set_named_if_changed(item, "AlbumArtists", values.album_artist.as_deref());
-    set_number(item, "ProductionYear", values.year);
-    set_strings(item, "Genres", values.genre.as_deref());
-    set_string(item, "Overview", values.comment.as_deref());
-    if let Some(locked) = values.locked {
+pub(crate) fn apply_album_edit(item: &mut Map<String, Value>, edit: &crate::AlbumMetadataEdit) {
+    let values = &edit.values;
+    let changed = &edit.changed;
+    if changed.title {
+        set_required(item, "Name", &values.title);
+    }
+    if changed.sort_title {
+        set_string(item, "ForcedSortName", values.sort_title.as_deref());
+    }
+    if changed.artist {
+        set_named_if_changed(item, "ArtistItems", values.artist.as_deref());
+    }
+    if changed.album_artist {
+        set_named_if_changed(item, "AlbumArtists", values.album_artist.as_deref());
+    }
+    if changed.year {
+        set_number(item, "ProductionYear", values.year);
+    }
+    if changed.genre {
+        set_strings(item, "Genres", values.genre.as_deref());
+    }
+    if changed.comment {
+        set_string(item, "Overview", values.comment.as_deref());
+    }
+    if changed.locked
+        && let Some(locked) = values.locked
+    {
         item.insert("LockData".to_string(), Value::Bool(locked));
     }
-    set_provider(
-        item,
-        "MusicBrainzAlbum",
-        values.musicbrainz_album_id.as_deref(),
-    );
-    set_provider(
-        item,
-        "MusicBrainzReleaseGroup",
-        values.musicbrainz_release_group_id.as_deref(),
-    );
+    if changed.musicbrainz_album_id {
+        set_provider(
+            item,
+            "MusicBrainzAlbum",
+            values.musicbrainz_album_id.as_deref(),
+        );
+    }
+    if changed.musicbrainz_release_group_id {
+        set_provider(
+            item,
+            "MusicBrainzReleaseGroup",
+            values.musicbrainz_release_group_id.as_deref(),
+        );
+    }
 }
 
-pub(crate) fn apply_artist_values(item: &mut Map<String, Value>, values: &ArtistMetadataValues) {
-    set_required(item, "Name", &values.name);
-    set_string(item, "ForcedSortName", values.sort_name.as_deref());
-    set_strings(item, "Genres", values.genre.as_deref());
-    set_string(item, "Overview", values.comment.as_deref());
-    if let Some(locked) = values.locked {
+pub(crate) fn apply_artist_edit(item: &mut Map<String, Value>, edit: &crate::ArtistMetadataEdit) {
+    let values = &edit.values;
+    let changed = &edit.changed;
+    if changed.name {
+        set_required(item, "Name", &values.name);
+    }
+    if changed.sort_name {
+        set_string(item, "ForcedSortName", values.sort_name.as_deref());
+    }
+    if changed.genre {
+        set_strings(item, "Genres", values.genre.as_deref());
+    }
+    if changed.comment {
+        set_string(item, "Overview", values.comment.as_deref());
+    }
+    if changed.locked
+        && let Some(locked) = values.locked
+    {
         item.insert("LockData".to_string(), Value::Bool(locked));
     }
-    set_provider(
-        item,
-        "MusicBrainzArtist",
-        values.musicbrainz_artist_id.as_deref(),
-    );
+    if changed.musicbrainz_artist_id {
+        set_provider(
+            item,
+            "MusicBrainzArtist",
+            values.musicbrainz_artist_id.as_deref(),
+        );
+    }
 }
 
 fn track_values(item: &Value, fallback: &library::TrackRow) -> TrackMetadataValues {
@@ -284,15 +411,14 @@ fn album_values(item: &Value, fallback: &library::AlbumRow) -> AlbumMetadataValu
     AlbumMetadataValues {
         title: string(item, "Name").unwrap_or_else(|| fallback.title.clone()),
         sort_title: string(item, "ForcedSortName"),
+        artist: named(item, "ArtistItems").or_else(|| Some(fallback.display_artist.clone())),
         album_artist: named(item, "AlbumArtists").or_else(|| Some(fallback.display_artist.clone())),
         year: number(item, "ProductionYear"),
         genre: string_array(item, "Genres"),
         comment: string(item, "Overview"),
         locked: boolean(item, "LockData"),
-        musicbrainz_album_id: provider(item, "MusicBrainzAlbum")
-            .or_else(|| fallback.musicbrainz_release_id.clone()),
-        musicbrainz_release_group_id: provider(item, "MusicBrainzReleaseGroup")
-            .or_else(|| fallback.musicbrainz_release_group_id.clone()),
+        musicbrainz_album_id: provider(item, "MusicBrainzAlbum"),
+        musicbrainz_release_group_id: provider(item, "MusicBrainzReleaseGroup"),
     }
 }
 
@@ -303,8 +429,7 @@ fn artist_values(item: &Value, fallback: &library::ArtistRow) -> ArtistMetadataV
         genre: string_array(item, "Genres"),
         comment: string(item, "Overview"),
         locked: boolean(item, "LockData"),
-        musicbrainz_artist_id: provider(item, "MusicBrainzArtist")
-            .or_else(|| fallback.musicbrainz_artist_id.clone()),
+        musicbrainz_artist_id: provider(item, "MusicBrainzArtist"),
     }
 }
 
@@ -334,6 +459,7 @@ fn album_writable(info: &EditorInfo) -> AlbumMetadataWritable {
     AlbumMetadataWritable {
         title: true,
         sort_title: true,
+        artist: true,
         album_artist: true,
         year: true,
         genre: true,
@@ -388,7 +514,49 @@ fn select_album_identification(
     let mut values = previous.clone();
     values.title = string(selected, "Name").unwrap_or_else(|| values.title.clone());
     values.year = number(selected, "ProductionYear").or(values.year);
+    values.artist = named(selected, "ArtistItems").or(values.artist);
     values.album_artist = named(selected, "AlbumArtists").or(values.album_artist);
+    values.musicbrainz_album_id =
+        provider(selected, "MusicBrainzAlbum").or(values.musicbrainz_album_id);
+    values.musicbrainz_release_group_id =
+        provider(selected, "MusicBrainzReleaseGroup").or(values.musicbrainz_release_group_id);
+    Some((values, serde_json::to_string(selected).ok()?))
+}
+
+fn select_track_identification(
+    previous: &TrackMetadataValues,
+    results: &[Value],
+) -> Option<(TrackMetadataValues, String)> {
+    let exact = results
+        .iter()
+        .filter(|value| {
+            previous
+                .musicbrainz_recording_id
+                .as_deref()
+                .is_some_and(|id| provider(value, "MusicBrainzRecording").as_deref() == Some(id))
+                || previous
+                    .musicbrainz_release_track_id
+                    .as_deref()
+                    .is_some_and(|id| provider(value, "MusicBrainzTrack").as_deref() == Some(id))
+        })
+        .collect::<Vec<_>>();
+    let selected = match exact.as_slice() {
+        [one] => *one,
+        [] => select_result(&previous.title, previous.year, results)?,
+        _ => return None,
+    };
+    let mut values = previous.clone();
+    values.title = string(selected, "Name").unwrap_or_else(|| values.title.clone());
+    values.year = number(selected, "ProductionYear").or(values.year);
+    values.artist = named(selected, "ArtistItems")
+        .or_else(|| string_array(selected, "Artists"))
+        .or(values.artist);
+    values.album = string(selected, "Album").or(values.album);
+    values.album_artist = named(selected, "AlbumArtists").or(values.album_artist);
+    values.musicbrainz_recording_id =
+        provider(selected, "MusicBrainzRecording").or(values.musicbrainz_recording_id);
+    values.musicbrainz_release_track_id =
+        provider(selected, "MusicBrainzTrack").or(values.musicbrainz_release_track_id);
     values.musicbrainz_album_id =
         provider(selected, "MusicBrainzAlbum").or(values.musicbrainz_album_id);
     values.musicbrainz_release_group_id =
@@ -624,8 +792,10 @@ mod tests {
         .expect("open Jellyfin");
         source.metadata_editing.store(true, Ordering::Release);
 
+        let mut row = track_row();
+        row.musicbrainz_release_track_id = Some("rufin-release-track".to_string());
         let metadata = source
-            .read_track_metadata(track_row())
+            .read_track_metadata(row)
             .await
             .expect("read Track metadata");
         assert!(metadata.writable.title);
@@ -636,6 +806,12 @@ mod tests {
             metadata.values.musicbrainz_recording_id.as_deref(),
             Some("recording")
         );
+        assert_eq!(metadata.source_values.musicbrainz_release_track_id, None);
+        assert_eq!(
+            metadata.values.musicbrainz_release_track_id.as_deref(),
+            Some("rufin-release-track")
+        );
+        assert!(metadata.rufin_filled.musicbrainz_release_track_id);
     }
 
     #[test]
@@ -646,19 +822,51 @@ mod tests {
             .cloned()
             .unwrap();
         preserve_complete_artist_items(&mut item);
-        apply_track_values(
+        apply_track_edit(
             &mut item,
-            &TrackMetadataValues {
-                title: "Track".to_string(),
-                artist: Some("Artist".to_string()),
-                ..TrackMetadataValues::default()
+            &crate::TrackMetadataEdit {
+                values: TrackMetadataValues {
+                    title: "Track".to_string(),
+                    artist: Some("Artist".to_string()),
+                    ..TrackMetadataValues::default()
+                },
+                changed: crate::TrackMetadataWritable {
+                    title: true,
+                    artist: true,
+                    ..crate::TrackMetadataWritable::default()
+                },
             },
         );
         assert_eq!(item["ArtistItems"], original);
     }
 
+    #[test]
+    fn track_identification_prefers_the_exact_recording_identity() {
+        let previous = TrackMetadataValues {
+            title: "Current title".to_string(),
+            musicbrainz_recording_id: Some("recording".to_string()),
+            ..TrackMetadataValues::default()
+        };
+        let results = vec![
+            json!({"Name":"Wrong", "ProviderIds":{"MusicBrainzRecording":"other"}}),
+            json!({
+                "Name":"Identified title",
+                "Artists":["Identified artist"],
+                "Album":"Identified album",
+                "ProviderIds":{"MusicBrainzRecording":"recording"}
+            }),
+        ];
+
+        let (identified, _) =
+            select_track_identification(&previous, &results).expect("exact identification");
+        assert_eq!(identified.title, "Identified title");
+        assert_eq!(identified.artist.as_deref(), Some("Identified artist"));
+        assert_eq!(identified.album.as_deref(), Some("Identified album"));
+    }
+
     fn track_row() -> library::TrackRow {
         library::TrackRow {
+            source_id: "source".to_string(),
             track_key: library::TrackKey::from_raw(1),
             source_key: library::SourceKey::from_raw(1),
             object_id: "jellyfin:track:track".to_string(),
@@ -688,6 +896,7 @@ mod tests {
             last_played: None,
             play_count: 0,
             skip_count: 0,
+            is_downloaded: false,
             artists: Vec::new(),
             album_artists: Vec::new(),
             genres: Vec::new(),

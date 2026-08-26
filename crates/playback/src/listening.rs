@@ -21,11 +21,13 @@ pub struct ListeningTrack {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct CompletedScrobble {
+pub struct ActivityListen {
     pub play_id: String,
     pub track: ListeningTrack,
     pub started_at_unix_seconds: i64,
+    pub local_period: String,
     pub listened_millis: u64,
+    pub skipped: bool,
 }
 
 impl ListeningTrack {

@@ -1,7 +1,7 @@
 use crate::{
     EqualizerSettings, LoudnessNormalizationMode, PlaybackSettings, StreamQuality, VolumeScale,
 };
-use library::{LoudnessMeasurement, QueueMedia};
+use library::LoudnessMeasurement;
 use serde::{Deserialize, Serialize};
 use std::fmt;
 use std::net::IpAddr;
@@ -188,7 +188,7 @@ pub enum NextTransition {
 pub struct PreparedStream {
     pub stream: Box<ResolvedStream>,
     pub loudness: TrackLoudness,
-    pub track: Option<Box<QueueMedia>>,
+    pub track: Option<Box<crate::PlaybackMedia>>,
     pub content_type: Option<String>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
@@ -218,7 +218,7 @@ impl PreparedStream {
         self
     }
 
-    pub fn with_media(mut self, track: QueueMedia, content_type: Option<String>) -> Self {
+    pub fn with_media(mut self, track: crate::PlaybackMedia, content_type: Option<String>) -> Self {
         self.track = Some(Box::new(track));
         self.content_type = content_type;
         self

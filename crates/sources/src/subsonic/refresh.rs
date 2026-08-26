@@ -18,6 +18,48 @@ struct ScanWait {
 }
 
 impl SubsonicSource {
+    pub(crate) async fn home_section(
+        &self,
+        section: crate::SourceHomeSection,
+    ) -> SourceResult<Vec<library::HomeEntryInput>> {
+        let (section_id, list_type, extra) = match section {
+            crate::SourceHomeSection::MostPlayed => ("most-played", "frequent", Vec::new()),
+            crate::SourceHomeSection::RecentlyPlayed => ("recently-played", "recent", Vec::new()),
+            crate::SourceHomeSection::RecentlyReleased => (
+                "recently-released",
+                "byYear",
+                vec![
+                    ("fromYear", current_year().to_string()),
+                    ("toYear", "0".to_string()),
+                ],
+            ),
+        };
+        let mut query = vec![("type", list_type.to_string()), ("size", "24".to_string())];
+        query.extend(extra);
+        let body: AlbumListBody = self.get_json("getAlbumList2", &query).await?;
+        body.album_list
+            .album
+            .into_iter()
+            .enumerate()
+            .map(|(position, dto)| {
+                let album = album_from_dto(self, dto);
+                let artwork_binding = album
+                    .image_ref
+                    .as_ref()
+                    .map(serde_json::to_vec)
+                    .transpose()?;
+                Ok(library::HomeEntryInput {
+                    section_id: section_id.to_string(),
+                    position: position as i64,
+                    kind: library::HomeEntryKind::Album,
+                    entity_object_id: album.id,
+                    title: album.title,
+                    subtitle: album.artist,
+                    artwork_binding,
+                })
+            })
+            .collect()
+    }
     pub(crate) async fn freshness(&self) -> SourceResult<Option<Freshness>> {
         let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
         if body.scan_status.scanning {

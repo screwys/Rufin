@@ -646,7 +646,7 @@ fn set_transition_mode_shortcut(shell: &Rc<Shell>, mode: PlaybackTransitionMode)
 
 fn refresh_selected_library(shell: &Shell) {
     if let Some(source) = shell.selected_source_operations() {
-        source.refresh_library();
+        source.refresh_library(crate::runtime::LibraryRefreshTrigger::GlobalAction);
     }
 }
 

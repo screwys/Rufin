@@ -162,6 +162,7 @@ CREATE TABLE tracks (
     release_date TEXT,
     date_added TEXT,
     media_uri TEXT,
+    source_path TEXT,
     source_format TEXT,
     comment TEXT,
     bpm INTEGER,
@@ -401,6 +402,11 @@ CREATE TABLE listens (
     artist_name TEXT NOT NULL,
     album_title TEXT NOT NULL,
     started_at INTEGER NOT NULL CHECK (started_at >= 0),
+    local_period TEXT NOT NULL CHECK (
+        length(local_period)=7 AND substr(local_period,5,1)='-'
+        AND substr(local_period,1,4) NOT GLOB '*[^0-9]*'
+        AND substr(local_period,6,2) IN ('01','02','03','04','05','06','07','08','09','10','11','12')
+    ),
     duration_millis INTEGER NOT NULL CHECK (duration_millis >= 0),
     listened_millis INTEGER NOT NULL CHECK (listened_millis >= 0),
     skipped INTEGER NOT NULL DEFAULT 0 CHECK (skipped IN (0, 1))
@@ -410,11 +416,13 @@ CREATE INDEX listens_track_idx ON listens(source_key, track_key, started_at DESC
 
 CREATE TABLE activity_baseline (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+    period TEXT NOT NULL DEFAULT 'lifetime',
+    item_kind TEXT NOT NULL DEFAULT 'track' CHECK (item_kind IN ('track','artist','genre')),
     track_object_id TEXT NOT NULL CHECK (track_object_id <> ''),
     play_count INTEGER NOT NULL CHECK (play_count >= 0),
     skip_count INTEGER NOT NULL CHECK (skip_count >= 0),
     last_played_at INTEGER,
-    PRIMARY KEY (source_key, track_object_id)
+    PRIMARY KEY (source_key, period, item_kind, track_object_id)
 ) STRICT;
 
 CREATE TABLE listen_outbox (
@@ -565,6 +573,7 @@ CREATE TABLE local_files (
     UNIQUE (source_key, path)
 ) STRICT;
 CREATE INDEX local_files_identity_idx ON local_files(source_key, device_id, inode);
+CREATE INDEX local_files_kind_path_idx ON local_files(source_key, kind, path);
 
 CREATE TABLE local_file_dependencies (
     local_file_key INTEGER NOT NULL REFERENCES local_files ON DELETE CASCADE,
@@ -578,6 +587,7 @@ CREATE TABLE local_access_files (
     local_access_file_key INTEGER PRIMARY KEY,
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     track_object_id TEXT,
+    origin TEXT NOT NULL CHECK (origin IN ('local', 'mapping', 'download')),
     path TEXT NOT NULL CHECK (path <> ''),
     root TEXT NOT NULL CHECK (root <> ''),
     relative_path TEXT NOT NULL,
@@ -602,8 +612,13 @@ CREATE TABLE local_access_files (
     UNIQUE (source_key, path)
 ) STRICT;
 CREATE UNIQUE INDEX local_access_remote_idx
-    ON local_access_files(source_key, track_object_id)
+    ON local_access_files(source_key, track_object_id, origin)
     WHERE track_object_id IS NOT NULL;
+CREATE INDEX local_access_precedence_idx ON local_access_files(
+    source_key, track_object_id,
+    (CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END),
+    local_access_file_key
+) WHERE track_object_id IS NOT NULL;
 CREATE INDEX local_access_match_idx ON local_access_files(
     source_key, normalized_title, normalized_album, normalized_artist,
     disc_number, track_number, duration_millis

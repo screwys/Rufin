@@ -488,20 +488,23 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .expect("Album Artist filter"),
         [fixture.artists[0]]
     );
-    assert!(
+    assert_eq!(
         fixture
             .database
             .search(
                 fixture.source,
                 None,
                 false,
-                &SearchRequest::new("artist a"),
+                &SearchRequest::new("artist b"),
                 &cancel
             )
             .await
-            .expect("direct Artist Search")
+            .expect("multi-term Artist Search")
             .artists
-            .is_empty()
+            .into_iter()
+            .map(|artist| artist.name)
+            .collect::<Vec<_>>(),
+        ["Artist B"]
     );
     assert_eq!(
         fixture

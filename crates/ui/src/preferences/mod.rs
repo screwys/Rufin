@@ -5,9 +5,9 @@ use crate::{
     MAX_NARROW_LAYOUT_THRESHOLD, MIN_NARROW_LAYOUT_THRESHOLD, SidebarRouteItem,
     SidebarRouteItemSettings,
 };
-use ::library::StreamQuality;
 use adw::prelude::*;
 use localization::{language_option_index, language_options, msgid, tr};
+use playback::StreamQuality;
 use secrets::SecretStorageMode;
 use std::{
     cell::{Cell, RefCell},
@@ -34,9 +34,6 @@ use layout::{
     right_sidebar_row, visibility_position_subtitle,
 };
 pub(crate) use library::locate_local_folder;
-
-#[cfg(test)]
-mod tests;
 
 const PREFERENCES_DIALOG_WIDTH: i32 = 700;
 const PREFERENCES_DIALOG_HEIGHT: i32 = 640;

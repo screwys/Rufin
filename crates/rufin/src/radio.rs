@@ -1,22 +1,15 @@
-//! Random play, manual radio, and AutoDJ composition.
-//!
-//! Concrete Sources acquire native candidates, the selected `Library`
-//! applies Rufin's common fallback and dedupe rules, and Playback alone mutates
-//! the queue. This module retains no recommendation catalog or selected-source
-//! state.
+//! Provider-first Radio/AutoDJ with bounded Database fallback; Random is Database-owned.
 
-use std::sync::Arc;
-
-use library::{Library, RadioComposition, RadioSeed, RandomComposition, Track};
+use library::{RadioSeed, ReadCancellation};
 use playback::{
     AutoDjRequest, Batch, BatchItem, Placement, Playback, Provenance, RadioPlayRequest,
     RandomPlayRequest,
 };
-use sources::NativeSourceResult;
+use sources::SourceRadioSeed;
 use tracing::warn;
 
 use crate::playback::random_u64;
-use crate::source::{WeakActiveSource, source_error_allows_cache};
+use crate::source::WeakActiveSource;
 
 const MANUAL_RADIO_COUNT: usize = 20;
 
@@ -26,66 +19,38 @@ pub(crate) fn request_auto_dj(
     playback: Playback,
     request: AutoDjRequest,
 ) {
-    let Some(initial) = selected.upgrade().and_then(|selected| selected.resolve()) else {
-        return;
-    };
-    if initial.library.source_id() != &request.source_id {
-        let _ = playback.auto_dj_unavailable(
-            request.source_id,
-            request.seed_occurrence,
-            Some("the selected source changed".to_string()),
-        );
-        return;
-    }
-    let source = initial.source.clone();
-    let local_source = initial.configuration.is_local();
     runtime.spawn(async move {
-        let limit = request.requested_count.saturating_mul(4).clamp(1, 500);
-        let source_unavailable = source.is_none() && !local_source;
-        let native = match source.as_ref() {
-            Some(source) => {
-                source
-                    .generated_tracks(&RadioSeed::Track(request.seed_track_id.clone()), limit)
-                    .await
-            }
-            None => Ok(NativeSourceResult::Unavailable),
-        };
-        let (native, require_local_playback) = match native {
-            Ok(NativeSourceResult::Available(tracks)) => (Some(tracks), false),
-            Ok(NativeSourceResult::Unavailable) => (None, source_unavailable),
-            Err(error) => (None, source_error_allows_cache(&error)),
-        };
-        let Some(current) = selected.upgrade().and_then(|selected| selected.resolve()) else {
+        let Some(current) = selected.upgrade().and_then(|session| session.resolve()) else {
             return;
         };
-        let result = compose_radio(
-            Arc::clone(&current.library),
-            RadioComposition {
-                seed: RadioSeed::Track(request.seed_track_id),
-                native,
-                excluded_track_ids: Vec::new(),
-                limit: request.requested_count,
-                include_seed_track: false,
-                require_local_playback,
-                variation: random_u64(),
-            },
+        if current.source_key != request.source_id {
+            return;
+        }
+        let candidates = radio_candidates(
+            &current,
+            RadioSeed::Track(request.seed_track_id),
+            request.requested_count,
+            false,
         )
         .await;
-        let _ = tokio::task::spawn_blocking(move || match result {
-            Ok(candidates) => playback.complete_auto_dj_candidates(
-                request.source_id,
-                request.seed_occurrence,
-                candidates,
-                request.requested_count,
-                random_u64(),
-            ),
-            Err(error) => playback.auto_dj_unavailable(
-                request.source_id,
-                request.seed_occurrence,
-                Some(error.to_string()),
-            ),
-        })
-        .await;
+        match candidates {
+            Ok(candidates) => {
+                let _ = playback.complete_auto_dj_candidates(
+                    request.source_id,
+                    request.seed_occurrence,
+                    candidates,
+                    request.requested_count,
+                    random_u64(),
+                );
+            }
+            Err(error) => {
+                let _ = playback.auto_dj_unavailable(
+                    request.source_id,
+                    request.seed_occurrence,
+                    Some(error),
+                );
+            }
+        }
     });
 }
 
@@ -96,71 +61,19 @@ pub(crate) fn play_radio(
     request: RadioPlayRequest,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let placement: Placement = request.placement.into();
-    let reservation = match playback.reserve_materialization(placement) {
-        Ok(reservation) => reservation,
-        Err(error) => {
-            warn!(%error, "could not reserve radio queue work");
-            return None;
-        }
-    };
-    let Some(initial) = selected.upgrade().and_then(|selected| selected.resolve()) else {
-        return None;
-    };
-    let source = initial.source.clone();
-    let local_source = initial.configuration.is_local();
+    let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
-        let include_seed_track = match &request.seed {
-            RadioSeed::Track(seed_track_id) => {
-                reservation.current_track_id.as_ref() != Some(seed_track_id)
-            }
-            RadioSeed::Album(_)
-            | RadioSeed::Artist(_)
-            | RadioSeed::Genre { .. }
-            | RadioSeed::Playlist(_) => false,
-        };
-        let excluded_track_ids = if matches!(placement, Placement::Replace { .. }) {
-            reservation.current_track_id.clone().into_iter().collect()
-        } else {
-            reservation.queued_track_ids.clone()
-        };
-        let source_unavailable = source.is_none() && !local_source;
-        let native = match source.as_ref() {
-            Some(source) => {
-                source
-                    .generated_tracks(&request.seed, MANUAL_RADIO_COUNT)
-                    .await
-            }
-            None => Ok(NativeSourceResult::Unavailable),
-        };
-        let (native, require_local_playback) = match native {
-            Ok(NativeSourceResult::Available(tracks)) => (Some(tracks), false),
-            Ok(NativeSourceResult::Unavailable) => (None, source_unavailable),
-            Err(error) => (None, source_error_allows_cache(&error)),
-        };
-        let Some(current) = selected.upgrade().and_then(|selected| selected.resolve()) else {
+        let Some(current) = selected.upgrade().and_then(|session| session.resolve()) else {
             return;
         };
-        let composed = compose_radio(
-            Arc::clone(&current.library),
-            RadioComposition {
-                seed: request.seed,
-                native,
-                excluded_track_ids,
-                limit: MANUAL_RADIO_COUNT,
-                include_seed_track,
-                require_local_playback,
-                variation: random_u64(),
-            },
-        )
-        .await;
+        let candidates = radio_candidates(&current, request.seed, MANUAL_RADIO_COUNT, true).await;
         complete_materialization(
             playback,
             reservation,
             placement,
-            composed.map_err(|error| error.to_string()),
+            candidates,
             Provenance::Radio,
-        )
-        .await;
+        );
     }))
 }
 
@@ -171,108 +84,170 @@ pub(crate) fn play_random(
     request: RandomPlayRequest,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let placement: Placement = request.placement.into();
-    let reservation = match playback.reserve_materialization(placement) {
-        Ok(reservation) => reservation,
-        Err(error) => {
-            warn!(%error, "could not reserve random queue work");
-            return None;
-        }
-    };
-    let Some(initial) = selected.upgrade().and_then(|selected| selected.resolve()) else {
-        return None;
-    };
-    let source = initial.source.clone();
+    let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
-        let native = match source.as_ref() {
-            Some(source) => source.random_tracks(&request.criteria).await,
-            None => Ok(NativeSourceResult::Unavailable),
-        };
-        let Some(current) = selected.upgrade().and_then(|selected| selected.resolve()) else {
+        let Some(current) = selected.upgrade().and_then(|session| session.resolve()) else {
             return;
         };
-        let native = match native {
-            Ok(NativeSourceResult::Available(tracks)) => tracks,
-            Ok(NativeSourceResult::Unavailable) | Err(_) => Vec::new(),
-        };
-        let tracks = compose_random(
-            Arc::clone(&current.library),
-            RandomComposition {
-                native,
-                criteria: request.criteria,
-                music_folder_id: current.music_folder_id.clone(),
-                variation: random_u64(),
-            },
-        )
-        .await;
-        complete_materialization(playback, reservation, placement, tracks, Provenance::Random)
-            .await;
+        let excluded = reservation.current_track_id.into_iter().collect::<Vec<_>>();
+        let candidates = current
+            .database
+            .random_candidates(
+                current.source_key,
+                current.music_folder_key,
+                &request.criteria,
+                &excluded,
+                request.requested,
+                &ReadCancellation::new(),
+            )
+            .await
+            .map_err(|error| error.to_string());
+        complete_materialization(
+            playback,
+            reservation,
+            placement,
+            candidates,
+            Provenance::Random,
+        );
     }))
 }
 
-async fn compose_radio(
-    loaded: Arc<Library>,
-    request: RadioComposition,
-) -> Result<Vec<Track>, String> {
-    tokio::task::spawn_blocking(move || {
-        loaded
-            .compose_radio(request)
-            .map_err(|error| error.to_string())
-    })
-    .await
-    .map_err(|error| format!("radio composition worker failed: {error}"))?
-}
-
-async fn compose_random(
-    loaded: Arc<Library>,
-    request: RandomComposition,
-) -> Result<Vec<Track>, String> {
-    tokio::task::spawn_blocking(move || {
-        let tracks = loaded
-            .compose_random(request)
-            .map_err(|error| error.to_string())?;
-        if tracks.is_empty() {
-            Err("no matching random tracks were found".to_string())
-        } else {
-            Ok(tracks)
+async fn radio_candidates(
+    selected: &crate::source::SelectedSourceState,
+    seed: RadioSeed,
+    requested: usize,
+    include_seed: bool,
+) -> Result<Vec<library::TrackKey>, String> {
+    let native_seed = source_seed(selected, seed).await?;
+    let mut native = if let (Some(source), Some(seed)) = (&selected.source, native_seed) {
+        match source
+            .generated_track_object_ids(&seed, requested.min(256))
+            .await
+        {
+            Ok(ids) => selected
+                .database
+                .track_keys_by_objects(selected.source_key, &ids, &ReadCancellation::new())
+                .await
+                .map_err(|error| error.to_string())?,
+            Err(_) => Vec::new(),
         }
-    })
-    .await
-    .map_err(|error| format!("random composition worker failed: {error}"))?
+    } else {
+        Vec::new()
+    };
+    native.truncate(requested);
+    if native.len() == requested {
+        return Ok(native);
+    }
+    let mut excluded = native.clone();
+    if !include_seed && let RadioSeed::Track(track) = seed {
+        excluded.push(track);
+    }
+    excluded.sort_unstable();
+    excluded.dedup();
+    let fallback = selected
+        .database
+        .radio_candidates(
+            selected.source_key,
+            seed,
+            &excluded,
+            requested - native.len(),
+            selected.source.is_none(),
+            random_u64() as i64,
+            &ReadCancellation::new(),
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    native.extend(fallback);
+    Ok(native)
 }
 
-async fn complete_materialization(
+async fn source_seed(
+    selected: &crate::source::SelectedSourceState,
+    seed: RadioSeed,
+) -> Result<Option<SourceRadioSeed>, String> {
+    let cancel = ReadCancellation::new();
+    Ok(match seed {
+        RadioSeed::Track(key) => selected
+            .database
+            .track_rows(selected.source_key, &[key], &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Track(row.object_id)),
+        RadioSeed::Album(key) => selected
+            .database
+            .album_rows(selected.source_key, &[key], None, &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Album(row.object_id)),
+        RadioSeed::Artist(key) => selected
+            .database
+            .artist_rows(selected.source_key, &[key], false, None, &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Artist(row.object_id)),
+        RadioSeed::AlbumArtist(key) => selected
+            .database
+            .artist_rows(selected.source_key, &[key], true, None, &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Artist(row.object_id)),
+        RadioSeed::Genre(key) => selected
+            .database
+            .genre_rows(selected.source_key, &[key], None, &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Genre(row.object_id)),
+        RadioSeed::Playlist(key) => selected
+            .database
+            .playlist_rows(selected.source_key, &[key], None, &cancel)
+            .await
+            .map_err(|e| e.to_string())?
+            .pop()
+            .map(|row| SourceRadioSeed::Playlist(row.object_id)),
+    })
+}
+
+fn complete_materialization(
     playback: Playback,
     reservation: playback::MaterializationReservation,
     placement: Placement,
-    tracks: Result<Vec<Track>, String>,
+    candidates: Result<Vec<library::TrackKey>, String>,
     provenance: Provenance,
 ) {
-    let _ = tokio::task::spawn_blocking(move || match tracks {
-        Ok(tracks) if !tracks.is_empty() => {
+    match candidates {
+        Ok(candidates) if !candidates.is_empty() => {
             let batch = Batch::new(
-                tracks
+                candidates
                     .into_iter()
-                    .map(|track| BatchItem::new(track, provenance.clone()))
+                    .map(|key| BatchItem::new(key, provenance.clone()))
                     .collect(),
             );
-            playback.complete_materialization(
+            if let Err(error) = playback.complete_materialization(
                 reservation.id,
                 reservation.source_id,
                 batch,
                 placement,
-            )
+                None,
+            ) {
+                warn!(%error, "could not complete queue materialization");
+            }
         }
-        Ok(_) => playback
-            .fail_materialization(
+        Ok(_) => {
+            let _ =
+                playback.cancel_materialization(reservation.id, reservation.source_id, placement);
+        }
+        Err(error) => {
+            let _ = playback.fail_materialization(
                 reservation.id,
                 reservation.source_id,
                 placement,
-                "no matching tracks were found".to_string(),
-            )
-            .map(|_| false),
-        Err(error) => playback
-            .fail_materialization(reservation.id, reservation.source_id, placement, error)
-            .map(|_| false),
-    })
-    .await;
+                error,
+            );
+        }
+    }
 }

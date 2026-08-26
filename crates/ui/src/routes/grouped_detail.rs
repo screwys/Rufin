@@ -1,13 +1,11 @@
 use std::rc::Rc;
 
-use ::library::TrackList;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use localization::msgid;
 
 use crate::LibraryListKey;
 use crate::shell::Shell;
-use crate::shell::cover::CoverGroupProjection;
 
 use super::collections::CollectionPlay;
 use super::collections::library_route_inset;
@@ -20,9 +18,7 @@ use super::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
     detail_route_inner_width,
 };
-use super::route_shell::LibraryToolbarProjection;
 use super::routes::{SearchableTrackOptions, TrackListProjection};
-use super::track_model::PreparedTrackProjection;
 
 pub(crate) struct GroupedDetailData {
     pub(super) key: LibraryListKey,
@@ -32,7 +28,9 @@ pub(crate) struct GroupedDetailData {
     pub(super) seed: u32,
     pub(super) summary_items: Vec<(&'static str, String)>,
     pub(super) context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub(super) tracks: TrackList,
+    pub(super) selected: crate::runtime::SelectedLibrary,
+    pub(super) tracks: Vec<library::TrackKey>,
+    pub(super) play_order: Option<Vec<library::TrackKey>>,
     pub(super) table_context: &'static str,
     pub(super) playback_context: String,
     pub(super) play_label: &'static str,
@@ -41,30 +39,12 @@ pub(crate) struct GroupedDetailData {
 #[derive(Clone)]
 pub(crate) struct GroupedDetailView {
     root: gtk::Widget,
-    title: gtk::Label,
     tracks: TrackListProjection,
-    track_stack: gtk::Stack,
-    toolbar: LibraryToolbarProjection,
-    cover: CoverGroupProjection,
-    summary: DetailSummaryProjection,
 }
 
 impl GroupedDetailView {
     pub(crate) fn widget(&self) -> gtk::Widget {
         self.root.clone()
-    }
-
-    pub(crate) fn apply_library_list_settings(
-        &self,
-        key: LibraryListKey,
-        settings: &crate::LibraryListSettings,
-    ) {
-        self.tracks.apply_library_list_settings(key, settings);
-        self.toolbar.apply(key, settings);
-    }
-
-    pub(crate) fn bind_summary_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
-        self.summary.bind_text_with(index, text);
     }
 
     pub(crate) fn tracks(&self) -> &TrackListProjection {
@@ -73,43 +53,6 @@ impl GroupedDetailView {
 
     pub(crate) fn item_navigation(&self) -> crate::shell::route::MountedRouteItemNavigation {
         self.tracks.item_navigation()
-    }
-
-    pub(crate) fn replace_prepared(
-        &self,
-        shell: &Rc<Shell>,
-        title: &str,
-        artwork: &[ArtworkBinding],
-        summary_items: &[(&str, String)],
-        tracks: PreparedTrackProjection,
-    ) -> bool {
-        if !self.tracks.replace_prepared(tracks) {
-            return false;
-        }
-        self.replace_facts(shell, title, artwork, summary_items);
-        self.sync_track_stack();
-        true
-    }
-
-    fn replace_facts(
-        &self,
-        shell: &Rc<Shell>,
-        title: &str,
-        artwork: &[ArtworkBinding],
-        summary_items: &[(&str, String)],
-    ) {
-        self.title.set_text(title);
-        self.cover.replace(shell, artwork);
-        self.summary.replace(summary_items);
-    }
-
-    fn sync_track_stack(&self) {
-        self.track_stack
-            .set_visible_child_name(if self.tracks.source_is_empty() {
-                "empty"
-            } else {
-                "tracks"
-            });
     }
 }
 
@@ -126,7 +69,9 @@ impl Shell {
             seed,
             summary_items,
             context_menu,
+            selected,
             tracks,
+            play_order,
             table_context,
             playback_context,
             play_label,
@@ -147,6 +92,7 @@ impl Shell {
             playlist_cover_size(i32::MAX),
         );
         let track_projection = self.searchable_track_collection(
+            &selected,
             tracks,
             key,
             SearchableTrackOptions {
@@ -157,15 +103,56 @@ impl Shell {
             },
         );
         let controller = self.products.playback.queue.clone();
-        let play_tracks = track_projection.clone();
         let play_context = playback_context;
-        let play: CollectionPlay = Rc::new(move |placement, shuffled_start| {
-            if let Some(request) =
-                play_tracks.source_play_request(placement, &play_context, shuffled_start)
-            {
-                controller.play_loaded(request);
-            }
-        });
+        let play: CollectionPlay = if let Some(order) = play_order {
+            let database = std::sync::Arc::clone(&selected.database);
+            let source = selected.source_key;
+            let epoch = selected.source_session_epoch;
+            let runtime = selected.runtime.clone();
+            let order: std::sync::Arc<[library::TrackKey]> = order.into();
+            Rc::new(move |placement, shuffled_start| {
+                let Some(anchor_key) = order.first().copied() else {
+                    return;
+                };
+                let database = std::sync::Arc::clone(&database);
+                let controller = controller.clone();
+                let order = std::sync::Arc::clone(&order);
+                let context = play_context.clone();
+                runtime.spawn(async move {
+                    let cancellation = library::ReadCancellation::new();
+                    let Some(anchor) = database
+                        .track_rows(source, &[anchor_key], &cancellation)
+                        .await
+                        .ok()
+                        .and_then(|mut rows| rows.pop())
+                    else {
+                        return;
+                    };
+                    if let Some(request) = playback::LoadedPlayRequest::context(
+                        source,
+                        epoch,
+                        order,
+                        playback::PlaybackMedia::from(anchor),
+                        0,
+                        placement,
+                        context,
+                        shuffled_start,
+                    ) {
+                        controller.play_loaded(request);
+                    }
+                });
+            })
+        } else {
+            let play_tracks = track_projection.clone();
+            Rc::new(move |placement, shuffled_start| {
+                play_tracks.play_source(
+                    controller.clone(),
+                    placement,
+                    play_context.clone(),
+                    shuffled_start,
+                );
+            })
+        };
         let actions = detail_action_row();
         actions.set_halign(gtk::Align::Start);
         let cover_controls =
@@ -231,12 +218,7 @@ impl Shell {
 
         GroupedDetailView {
             root: wrapper.upcast(),
-            title: title_label,
             tracks: track_projection,
-            track_stack,
-            toolbar,
-            cover,
-            summary,
         }
     }
 }

@@ -2,16 +2,14 @@ use std::cell::{Ref, RefCell, RefMut};
 use std::rc::Rc;
 
 use adw::prelude::*;
-use playback::{PlaybackView, QueuePage};
+use playback::PlaybackView;
 
 use crate::favorites::FavoriteSessionState;
 use crate::player::lyrics::search::connect_lyrics_search_controls;
 use crate::player::lyrics::state::SelectedLyricsState;
 use crate::player::queue::QueueState;
 use crate::player::queue::clear_queue_panel_children;
-use crate::preferences::dialogs::metadata::EditorState;
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
-use crate::routes::playlist_picker::PlaylistPickerState;
 use crate::runtime::{SelectedLibrary, WaveformProjection};
 
 use super::Shell;
@@ -26,17 +24,13 @@ pub(crate) struct SelectedUiSession {
     pub(crate) playback: SelectedPlaybackState,
     pub(crate) queue: QueueState,
     pub(crate) lyrics: SelectedLyricsState,
-    pub(crate) playlist_picker: PlaylistPickerState,
     pub(crate) favorites: FavoriteSessionState,
     pub(crate) dialogs: SelectedDialogState,
+    playlist_picker_refresh: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl SelectedUiSession {
-    pub(crate) fn new(
-        library: SelectedLibrary,
-        player: PlaybackView,
-        queue_page: Option<QueuePage>,
-    ) -> Self {
+    pub(crate) fn new(library: SelectedLibrary, player: PlaybackView) -> Self {
         Self {
             library,
             playback: SelectedPlaybackState {
@@ -44,11 +38,11 @@ impl SelectedUiSession {
                 waveform: WaveformProjection::default(),
                 seek_preview_seconds: None,
             },
-            queue: QueueState::new(queue_page),
+            queue: QueueState::new(),
             lyrics: SelectedLyricsState::new(),
-            playlist_picker: PlaylistPickerState::default(),
             favorites: FavoriteSessionState::default(),
             dialogs: SelectedDialogState::default(),
+            playlist_picker_refresh: RefCell::new(None),
         }
     }
 }
@@ -62,7 +56,6 @@ pub(crate) struct SelectedPlaybackState {
 #[derive(Default)]
 pub(crate) struct SelectedDialogState {
     dialogs: RefCell<Vec<adw::Dialog>>,
-    metadata_editors: RefCell<Vec<Rc<EditorState>>>,
 }
 
 impl SelectedDialogState {
@@ -77,13 +70,6 @@ impl SelectedDialogState {
         self.dialogs
             .borrow_mut()
             .retain(|current| current != dialog);
-        self.metadata_editors
-            .borrow_mut()
-            .retain(|editor| editor.dialog() != dialog);
-    }
-
-    fn register_metadata_editor(&self, editor: Rc<EditorState>) {
-        self.metadata_editors.borrow_mut().push(editor);
     }
 
     fn close_all(&self) {
@@ -91,7 +77,6 @@ impl SelectedDialogState {
         for dialog in dialogs {
             dialog.force_close();
         }
-        self.metadata_editors.borrow_mut().clear();
     }
 }
 
@@ -171,6 +156,20 @@ impl SelectedUiState {
 }
 
 impl Shell {
+    pub(crate) fn set_playlist_picker_refresh(&self, refresh: Option<Rc<dyn Fn()>>) {
+        if let Some(session) = self.selected_ui.session() {
+            session.playlist_picker_refresh.replace(refresh);
+        }
+    }
+
+    pub(crate) fn refresh_playlist_picker(&self) {
+        if let Some(session) = self.selected_ui.session()
+            && let Some(refresh) = session.playlist_picker_refresh.borrow().as_ref()
+        {
+            refresh();
+        }
+    }
+
     pub(crate) fn selected_library(&self) -> Option<Ref<'_, SelectedLibrary>> {
         self.selected_ui
             .session()
@@ -195,12 +194,6 @@ impl Shell {
             .map(|session| Ref::map(session, |session| &session.lyrics))
     }
 
-    pub(crate) fn selected_playlist_picker(&self) -> Option<Ref<'_, PlaylistPickerState>> {
-        self.selected_ui
-            .session()
-            .map(|session| Ref::map(session, |session| &session.playlist_picker))
-    }
-
     pub(crate) fn present_selected_dialog<D>(self: &Rc<Self>, dialog: &D)
     where
         D: IsA<adw::Dialog> + Clone + 'static,
@@ -222,14 +215,6 @@ impl Shell {
             }
         });
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
-    }
-
-    pub(crate) fn own_selected_metadata_editor(&self, editor: Rc<EditorState>) {
-        let session = self
-            .selected_ui
-            .session()
-            .expect("a metadata editor requires its selected UI session");
-        session.dialogs.register_metadata_editor(editor);
     }
 
     pub(crate) fn attach_selected_ui_roots(self: &Rc<Self>) {

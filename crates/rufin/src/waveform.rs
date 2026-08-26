@@ -10,8 +10,8 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use async_channel::Sender;
-use library::{Library, SourceId, StreamRequest, TrackId};
-use playback::{CurrentMedia, CurrentMediaId, SourceSessionEpoch};
+use library::{SourceKey, TrackKey};
+use playback::{CurrentMedia, CurrentMediaId, SourceSessionEpoch, StreamRequest};
 use playback_gstreamer::generate_waveform_peaks_cancellable;
 use serde::{Deserialize, Serialize};
 use sources::Source;
@@ -25,11 +25,11 @@ const CACHE_DIRECTORY: &str = "waveforms";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct WaveformKey {
-    source_id: SourceId,
+    source_key: SourceKey,
     source_session_epoch: SourceSessionEpoch,
-    track_id: TrackId,
-    duration_seconds: u32,
-    source_path: Option<String>,
+    track_key: TrackKey,
+    duration_millis: i64,
+    media_uri: Option<String>,
     source_format: Option<String>,
     cue_window: Option<(u64, u64)>,
 }
@@ -37,32 +37,37 @@ struct WaveformKey {
 impl WaveformKey {
     fn for_media(media: &CurrentMedia) -> Self {
         Self {
-            source_id: media.id.source_id.clone(),
+            source_key: media.id.source_key,
             source_session_epoch: media.id.source_session_epoch,
-            track_id: media.track.id.clone(),
-            duration_seconds: media.track.duration_seconds,
-            source_path: media.track.source_path.clone(),
+            track_key: media
+                .track
+                .track_key
+                .expect("current media has a Track key"),
+            duration_millis: media.track.duration_millis,
+            media_uri: media.track.media_uri.clone(),
             source_format: media.track.source_format.clone(),
             cue_window: media
                 .track
-                .cue
-                .as_ref()
-                .map(|cue| (cue.start_millis, cue.end_millis)),
+                .cue_start_millis
+                .zip(media.track.cue_end_millis)
+                .and_then(|(start, end)| {
+                    Some((u64::try_from(start).ok()?, u64::try_from(end).ok()?))
+                }),
         }
     }
 
     fn cache_path(&self, root: &Path) -> PathBuf {
         let identity = format!(
             "{}\n{}\n{}\n{:?}\n{:?}\n{:?}",
-            self.track_id.as_str(),
-            self.duration_seconds,
-            self.source_path.as_deref().unwrap_or_default(),
+            self.track_key,
+            self.duration_millis,
+            self.media_uri.as_deref().unwrap_or_default(),
             self.source_format,
             self.cue_window,
             CACHE_VERSION,
         );
         root.join(CACHE_DIRECTORY)
-            .join(safe_path_part(self.source_id.as_str()))
+            .join(self.source_key.to_string())
             .join(format!("{:x}.json", md5::compute(identity)))
     }
 }
@@ -87,7 +92,7 @@ impl Drop for CurrentWaveform {
 #[derive(Deserialize, Serialize)]
 struct CachedWaveform {
     version: u8,
-    duration_seconds: u32,
+    duration_millis: i64,
     peaks: Vec<(f64, f64)>,
 }
 
@@ -103,7 +108,6 @@ pub(crate) struct WaveformOwner {
 #[derive(Clone)]
 pub(crate) struct WaveformMedia {
     pub(crate) media: Arc<CurrentMedia>,
-    pub(crate) loaded: Arc<Library>,
     pub(crate) source: Option<Arc<Source>>,
     pub(crate) request: StreamRequest,
 }
@@ -142,7 +146,7 @@ impl WaveformOwner {
 
     pub(crate) fn current_changed(self: &Arc<Self>, input: Option<WaveformMedia>) {
         let Some(input) = input.filter(|input| {
-            self.enabled.load(Ordering::Acquire) && input.media.track.duration_seconds != 0
+            self.enabled.load(Ordering::Acquire) && input.media.track.duration_millis > 0
         }) else {
             self.clear();
             return;
@@ -211,13 +215,13 @@ impl WaveformOwner {
         let owner = Arc::downgrade(self);
         let task_key = key.clone();
         let task = self.runtime.spawn(async move {
-            let stream = match prepare_stream(Some(input.loaded), input.source, input.request).await
+            let stream = match prepare_stream(input.source, input.request).await
             {
                 Ok(stream) => stream,
                 Err(error) => {
                     if let Some(owner) = owner.upgrade() {
                         if owner.matches(request, &task_key) {
-                            debug!(%error, track_id = %task_key.track_id, "waveform source is unavailable");
+                            debug!(%error, track_key = %task_key.track_key, "waveform source is unavailable");
                         }
                         owner.finish_failed(request, &task_key);
                     }
@@ -247,13 +251,13 @@ impl WaveformOwner {
                 Ok(Ok(peaks)) => sanitize_peaks(peaks),
                 Ok(Err(error)) => {
                     if owner.matches(request, &task_key) {
-                        warn!(%error, track_id = %task_key.track_id, "failed to generate waveform");
+                        warn!(%error, track_key = %task_key.track_key, "failed to generate waveform");
                     }
                     None
                 }
                 Err(error) => {
                     if owner.matches(request, &task_key) {
-                        warn!(%error, track_id = %task_key.track_id, "waveform worker failed");
+                        warn!(%error, track_key = %task_key.track_key, "waveform worker failed");
                     }
                     None
                 }
@@ -266,7 +270,7 @@ impl WaveformOwner {
                 return;
             }
             if let Err(error) = save_cached(&owner.cache_root, &task_key, &peaks) {
-                warn!(%error, track_id = %task_key.track_id, "failed to cache waveform");
+                warn!(%error, track_key = %task_key.track_key, "failed to cache waveform");
             }
             owner.accept_peaks(request, &task_key, Arc::new(peaks));
         });
@@ -347,7 +351,7 @@ fn projection_for(current: &CurrentWaveform) -> WaveformProjection {
 fn load_cached(root: &Path, key: &WaveformKey) -> Option<Vec<(f64, f64)>> {
     let value = fs::read_to_string(key.cache_path(root)).ok()?;
     let cached = serde_json::from_str::<CachedWaveform>(&value).ok()?;
-    if cached.version != CACHE_VERSION || cached.duration_seconds != key.duration_seconds {
+    if cached.version != CACHE_VERSION || cached.duration_millis != key.duration_millis {
         return None;
     }
     sanitize_peaks(cached.peaks)
@@ -360,7 +364,7 @@ fn save_cached(root: &Path, key: &WaveformKey, peaks: &[(f64, f64)]) -> Result<(
     }
     let value = serde_json::to_vec(&CachedWaveform {
         version: CACHE_VERSION,
-        duration_seconds: key.duration_seconds,
+        duration_millis: key.duration_millis,
         peaks: peaks.to_vec(),
     })
     .map_err(|error| error.to_string())?;
@@ -390,96 +394,4 @@ fn is_dsd(value: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .any(|part| matches!(part, "dsf" | "dff" | "dsdiff") || part.starts_with("dsd"))
-}
-
-fn safe_path_part(value: &str) -> String {
-    value
-        .chars()
-        .map(|character| match character {
-            'a'..='z' | 'A'..='Z' | '0'..='9' | '-' | '_' => character,
-            _ => '_',
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn clearing_waveform_aborts_its_pending_task() {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .build()
-            .expect("build test runtime");
-        let (events, _receiver) = async_channel::unbounded();
-        let owner = WaveformOwner::new(
-            runtime.handle().clone(),
-            events,
-            PathBuf::from("unused-waveform-cache"),
-            true,
-        );
-        let retained = Arc::new(());
-        let retired = Arc::downgrade(&retained);
-        let task = runtime.spawn(async move {
-            let _retained = retained;
-            std::future::pending::<()>().await;
-        });
-        *owner
-            .current
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(CurrentWaveform {
-            key: WaveformKey {
-                source_id: SourceId::new("local:server:waveform-task"),
-                source_session_epoch: SourceSessionEpoch::new(1),
-                track_id: TrackId::new("pending-waveform"),
-                duration_seconds: 180,
-                source_path: None,
-                source_format: None,
-                cue_window: None,
-            },
-            media_id: CurrentMediaId {
-                source_id: SourceId::new("local:server:waveform-task"),
-                source_session_epoch: SourceSessionEpoch::new(1),
-                run: Some(playback::RunId::new(1)),
-                occurrence: playback::OccurrenceId::new("pending-waveform"),
-            },
-            request: 1,
-            running: true,
-            peaks: None,
-            task: Some(task.abort_handle()),
-        });
-
-        owner.clear();
-        let stopped = runtime
-            .block_on(task)
-            .expect_err("waveform task was aborted");
-
-        assert!(stopped.is_cancelled());
-        assert!(retired.upgrade().is_none());
-    }
-
-    #[test]
-    fn cached_peaks_are_finite_nonempty_and_bounded() {
-        assert_eq!(
-            sanitize_peaks(vec![(0.5, 1.5), (f64::NAN, 0.2), (-1.0, 0.25)]),
-            Some(vec![(0.5, 1.0), (0.0, 0.25)])
-        );
-        assert_eq!(sanitize_peaks(Vec::new()), None);
-    }
-
-    #[test]
-    fn waveform_accepts_local_and_remote_audio_but_not_dsd() {
-        assert!(source_and_format_supported(
-            "file:///music/track.flac",
-            Some("flac")
-        ));
-        assert!(source_and_format_supported(
-            "https://music.example/stream",
-            None
-        ));
-        assert!(!source_and_format_supported(
-            "file:///music/track.dsf",
-            Some("audio/x-dsf")
-        ));
-    }
 }

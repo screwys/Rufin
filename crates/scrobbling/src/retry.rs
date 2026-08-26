@@ -3,10 +3,10 @@ use std::sync::{Arc, Mutex};
 use std::thread::JoinHandle;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use library::{
-    Database, ListenDeliveryTarget, ListenWrite, PendingListenDelivery, ReadCancellation,
-};
-use playback::{CompletedScrobble, ListeningTrack, external_scrobble_threshold_millis};
+#[cfg(test)]
+use library::ListenWrite;
+use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
+use playback::{ListeningTrack, external_scrobble_threshold_millis};
 use reqwest::blocking::Client;
 use tracing::warn;
 
@@ -111,7 +111,7 @@ enum TargetSettings {
     ListenBrainz(ListenBrainzSettings),
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 enum DeliveryService {
     LastFm,
     LibreFm,
@@ -304,63 +304,35 @@ impl Scrobbler {
         }
     }
 
-    pub fn completed_play(&self, completed: &CompletedScrobble) -> Result<usize, String> {
-        self.accept_completed_play(completed, true)
-    }
-
-    fn accept_completed_play(
-        &self,
-        completed: &CompletedScrobble,
-        wake_worker: bool,
-    ) -> Result<usize, String> {
+    pub fn listen_delivery_targets(&self, track: &ListeningTrack) -> Vec<ListenDeliveryTarget> {
         let targets = {
-            let state = self
-                .state
-                .lock()
-                .map_err(|_| "scrobbling settings lock was poisoned".to_string())?;
+            let state = self.state.lock().ok();
+            let Some(state) = state else {
+                return Vec::new();
+            };
             if state.private_mode {
-                return Ok(0);
+                return Vec::new();
             }
-            if external_scrobble_threshold_millis(completed.track.duration_millis).is_some() {
+            if external_scrobble_threshold_millis(track.duration_millis).is_some() {
                 targets(&state.settings, false)
             } else {
                 Vec::new()
             }
         };
-        let Some(track) = SubmissionTrack::capture(&completed.track) else {
-            return Ok(0);
-        };
-        let deliveries = targets
+        targets
             .into_iter()
             .map(|target| ListenDeliveryTarget {
                 service: target.service.as_str().to_string(),
                 account_id: target.account_id,
                 next_attempt_at: Some(unix_seconds()),
             })
-            .collect::<Vec<_>>();
-        let accepted = deliveries.len();
-        self.runtime
-            .block_on(self.database.record_listen(
-                completed.track.source_key,
-                &ListenWrite {
-                    external_id: completed.play_id.clone(),
-                    track_key: completed.track.track_key,
-                    track_object_id: completed.track.track_object_id.clone(),
-                    track_title: track.title,
-                    artist_name: track.artist,
-                    album_title: track.album,
-                    started_at: completed.started_at_unix_seconds,
-                    duration_millis: i64::try_from(track.duration_millis).unwrap_or(i64::MAX),
-                    listened_millis: i64::try_from(completed.listened_millis).unwrap_or(i64::MAX),
-                    skipped: false,
-                },
-                &deliveries,
-            ))
-            .map_err(|error| error.to_string())?;
-        if wake_worker && accepted > 0 {
+            .collect()
+    }
+
+    pub fn listen_recorded(&self, delivery_count: usize) {
+        if delivery_count > 0 {
             self.worker.wake();
         }
-        Ok(accepted)
     }
 }
 
@@ -443,11 +415,16 @@ fn deliver_due(
             return;
         }
     };
+    let mut stopped = std::collections::HashSet::new();
     for pending in pending {
         let Some(service) = DeliveryService::parse(&pending.service) else {
             let _ = runtime.block_on(database.complete_listen_delivery(pending.outbox_key));
             continue;
         };
+        let account = (service, pending.account_id.clone());
+        if stopped.contains(&account) {
+            continue;
+        }
         let Some(current) = current_target(state, service, &pending.account_id) else {
             continue;
         };
@@ -455,13 +432,16 @@ fn deliver_due(
             track: SubmissionTrack::from_pending(&pending),
             started_at_unix_seconds: pending.started_at,
         };
-        let _ = finish_delivery(
+        if finish_delivery(
             database,
             runtime,
             pending,
             now,
             submit(client, &current, &submission),
-        );
+        ) == DeliveryFlow::StopAccount
+        {
+            stopped.insert(account);
+        }
     }
 }
 
@@ -755,6 +735,7 @@ mod tests {
             None,
             None,
             None,
+            None,
             [1; 32],
         )
         .await
@@ -799,33 +780,41 @@ mod tests {
             )
         })
         .expect("start Scrobbler");
-        let completed = CompletedScrobble {
-            play_id: "play".to_string(),
-            track: ListeningTrack {
-                source_key: publication.source,
-                track_key: Some(track_key),
-                track_object_id: "track".to_string(),
-                recording_id: None,
-                title: "Track".to_string(),
-                artists: vec!["Artist".to_string()],
-                album: Some("Album".to_string()),
-                track_number: Some(1),
-                disc_number: Some(1),
-                duration_millis: 180_000,
-            },
-            started_at_unix_seconds: 100,
-            listened_millis: 90_000,
+        let track = ListeningTrack {
+            source_key: publication.source,
+            track_key: Some(track_key),
+            track_object_id: "track".to_string(),
+            recording_id: None,
+            title: "Track".to_string(),
+            artists: vec!["Artist".to_string()],
+            album: Some("Album".to_string()),
+            track_number: Some(1),
+            disc_number: Some(1),
+            duration_millis: 180_000,
         };
-        tokio::task::block_in_place(|| {
-            assert_eq!(
-                scrobbler.accept_completed_play(&completed, false).unwrap(),
-                2
-            );
-            assert_eq!(
-                scrobbler.accept_completed_play(&completed, false).unwrap(),
-                2
-            );
-        });
+        let deliveries = scrobbler.listen_delivery_targets(&track);
+        assert_eq!(deliveries.len(), 2);
+        let listen = ListenWrite {
+            external_id: "play".to_string(),
+            track_key: track.track_key,
+            track_object_id: track.track_object_id.clone(),
+            track_title: track.title.clone(),
+            artist_name: track.artists.join(", "),
+            album_title: track.album.clone().unwrap_or_default(),
+            started_at: 100,
+            local_period: "1970-01".to_string(),
+            duration_millis: 180_000,
+            listened_millis: 90_000,
+            skipped: false,
+        };
+        database
+            .record_listen(publication.source, &listen, &deliveries)
+            .await
+            .expect("record Activity");
+        database
+            .record_listen(publication.source, &listen, &deliveries)
+            .await
+            .expect("record Activity idempotently");
 
         assert_eq!(
             database

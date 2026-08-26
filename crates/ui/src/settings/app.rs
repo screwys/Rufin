@@ -3,15 +3,16 @@ use std::rc::Rc;
 
 use desktop_integration::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
-use library::{GenreId, HomeBlockKind, MusicFolderId, PlayedFilter, SourceId, StreamQuality};
-use localization::{default_language_preference, sanitize_language_preference};
+use library::PlayedFilter;
+use localization::{default_language_preference, msgid, sanitize_language_preference};
 use lyrics::Settings as LyricsSettings;
 use playback::{
     DEFAULT_AUTO_DJ_REFILL_THRESHOLD, MAX_AUTO_DJ_REFILL_THRESHOLD, MIN_AUTO_DJ_REFILL_THRESHOLD,
-    PlaybackSettings, RepeatMode,
+    PlaybackSettings, RepeatMode, StreamQuality,
 };
 use secrets::SecretStorageMode;
 use serde::{Deserialize, Serialize};
+use sources::SourceId;
 
 use super::{
     AccentPreference, ContextMenuSettings, ExternalSiteLinkSettings, FolderViewSettings,
@@ -29,8 +30,8 @@ const MAX_RANDOM_PLAY_YEAR: u16 = 2050;
 pub struct RandomPlayGenreSelection {
     pub source_id: SourceId,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub music_folder_id: Option<MusicFolderId>,
-    pub genre_id: GenreId,
+    pub music_folder_id: Option<String>,
+    pub genre_id: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -59,11 +60,11 @@ impl RandomPlaySettings {
     pub fn selected_genre_id(
         &self,
         source_id: &SourceId,
-        music_folder_id: Option<&MusicFolderId>,
-    ) -> Option<&GenreId> {
+        music_folder_id: Option<&str>,
+    ) -> Option<&str> {
         self.genre.as_ref().and_then(|genre| {
-            (&genre.source_id == source_id && genre.music_folder_id.as_ref() == music_folder_id)
-                .then_some(&genre.genre_id)
+            (&genre.source_id == source_id && genre.music_folder_id.as_deref() == music_folder_id)
+                .then_some(genre.genre_id.as_str())
         })
     }
 
@@ -81,6 +82,63 @@ impl RandomPlaySettings {
 
     fn is_default(&self) -> bool {
         self == &Self::default()
+    }
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum HomeBlockKind {
+    Showcase,
+    Explore,
+    MostPlayed,
+    NewlyAdded,
+    RecentlyPlayed,
+    RecentlyReleased,
+    Genres,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum HomeSectionKind {
+    Explore,
+    MostPlayed,
+    NewlyAdded,
+    RecentlyPlayed,
+    RecentlyReleased,
+}
+
+impl HomeBlockKind {
+    pub const fn all() -> [Self; 7] {
+        [
+            Self::Showcase,
+            Self::Explore,
+            Self::MostPlayed,
+            Self::NewlyAdded,
+            Self::RecentlyPlayed,
+            Self::RecentlyReleased,
+            Self::Genres,
+        ]
+    }
+
+    pub fn title(self) -> &'static str {
+        match self {
+            Self::Showcase => msgid("Showcase"),
+            Self::Explore => msgid("Explore"),
+            Self::MostPlayed => msgid("Most played"),
+            Self::NewlyAdded => msgid("Newly added"),
+            Self::RecentlyPlayed => msgid("Recently played"),
+            Self::RecentlyReleased => msgid("Recently released"),
+            Self::Genres => msgid("Featured genres"),
+        }
+    }
+
+    pub const fn section_kind(self) -> Option<HomeSectionKind> {
+        match self {
+            Self::Explore => Some(HomeSectionKind::Explore),
+            Self::MostPlayed => Some(HomeSectionKind::MostPlayed),
+            Self::NewlyAdded => Some(HomeSectionKind::NewlyAdded),
+            Self::RecentlyPlayed => Some(HomeSectionKind::RecentlyPlayed),
+            Self::RecentlyReleased => Some(HomeSectionKind::RecentlyReleased),
+            Self::Showcase | Self::Genres => None,
+        }
     }
 }
 

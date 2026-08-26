@@ -44,18 +44,27 @@ pub struct TrackMetadataWritable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct TrackMetadataEdit {
+    pub values: TrackMetadataValues,
+    pub changed: TrackMetadataWritable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackMetadata {
     pub track_key: library::TrackKey,
     pub writable: TrackMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
+    pub source_values: TrackMetadataValues,
     pub values: TrackMetadataValues,
+    pub rufin_filled: TrackMetadataWritable,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct AlbumMetadataValues {
     pub title: String,
     pub sort_title: Option<String>,
+    pub artist: Option<String>,
     pub album_artist: Option<String>,
     pub year: Option<u16>,
     pub genre: Option<String>,
@@ -69,6 +78,7 @@ pub struct AlbumMetadataValues {
 pub struct AlbumMetadataWritable {
     pub title: bool,
     pub sort_title: bool,
+    pub artist: bool,
     pub album_artist: bool,
     pub year: bool,
     pub genre: bool,
@@ -79,12 +89,20 @@ pub struct AlbumMetadataWritable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct AlbumMetadataEdit {
+    pub values: AlbumMetadataValues,
+    pub changed: AlbumMetadataWritable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AlbumMetadata {
     pub album_key: library::AlbumKey,
     pub writable: AlbumMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
+    pub source_values: AlbumMetadataValues,
     pub values: AlbumMetadataValues,
+    pub rufin_filled: AlbumMetadataWritable,
     pub track_count: usize,
     pub mixed: AlbumMetadataMixed,
 }
@@ -93,6 +111,7 @@ pub struct AlbumMetadata {
 pub struct AlbumMetadataMixed {
     pub title: bool,
     pub sort_title: bool,
+    pub artist: bool,
     pub album_artist: bool,
     pub year: bool,
     pub genre: bool,
@@ -122,12 +141,20 @@ pub struct ArtistMetadataWritable {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ArtistMetadataEdit {
+    pub values: ArtistMetadataValues,
+    pub changed: ArtistMetadataWritable,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtistMetadata {
     pub artist_key: library::ArtistKey,
     pub writable: ArtistMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
+    pub source_values: ArtistMetadataValues,
     pub values: ArtistMetadataValues,
+    pub rufin_filled: ArtistMetadataWritable,
     pub track_count: usize,
     pub mixed: ArtistMetadataMixed,
 }
@@ -147,6 +174,8 @@ pub enum SourceMetadataError {
     Unavailable,
     #[error("metadata changed before it was saved")]
     Conflict,
+    #[error("local access is required for {source_path}")]
+    LocalAccessRequired { source_path: String },
     #[error("metadata was saved but its source refresh failed: {0}")]
     SavedRefreshFailed(String),
     #[error("metadata failed: {0}")]

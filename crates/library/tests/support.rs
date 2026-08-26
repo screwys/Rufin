@@ -136,6 +136,7 @@ pub async fn fixture() -> Fixture {
             None,
             None,
             None,
+            None,
             [index as u8 + 1; 32],
         )
         .await

@@ -1,38 +1,34 @@
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
-use std::rc::Rc;
+use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
-use ::library::AlbumSummary;
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::layout::width_allocation_owner;
-use crate::localization::{bind_search_placeholder, localized_label};
+use crate::layout::{configure_fill_width_clip, width_allocation_owner};
 use crate::shell::Shell;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
-use localization::msgid;
 
 use super::cards;
-use super::collections::{CollectionTableProjection, album_table};
+use super::collections::{CollectionTableProjection, album_table, library_route_inset};
 use super::grid_cells::{AlbumGridCell, ReusableCollectionGridCell, collection_grid_column_count};
-use super::library_fields::{COLLECTION_GRID_MIN_CARD_WIDTH, album_matches_query};
-use super::models::{replace_albums_in_model, sort_albums};
-use super::release_kind::{AlbumReleaseKind, album_release_kind};
+use super::library_fields::{COLLECTION_GRID_MIN_CARD_WIDTH, item_at};
 use super::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
-use super::route_shell::{LibraryToolbarProjection, non_propagating_width_scroller};
+use super::route_shell::LibraryToolbarProjection;
+use super::sparse_model::SparseRouteModel;
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
-const ARTIST_RELEASE_SECTION_COUNT: usize = 6;
 
 #[derive(Clone)]
 pub(super) struct ArtistRouteSearchTarget {
     pub(super) search: gtk::SearchEntry,
     pub(super) focus: Rc<dyn Fn()>,
 }
+
 pub(super) struct ArtistReleaseRoutePreamble {
     pub(super) header: gtk::Widget,
     pub(super) favorite: Option<(gtk::Widget, gtk::SearchEntry)>,
@@ -54,13 +50,12 @@ pub(super) struct ArtistReleaseProjections {
 }
 
 struct ArtistAlbumProjection {
-    source: RefCell<Arc<Vec<AlbumSummary>>>,
-    visible: RefCell<Arc<Vec<AlbumSummary>>>,
+    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    source_present: Cell<bool>,
     search: gtk::SearchEntry,
     header: gtk::Widget,
     toolbar: LibraryToolbarProjection,
     rows: gio::ListStore,
-    row_model: gio::ListStore,
     row_table: RefCell<Option<CollectionTableProjection>>,
     row_surface: RefCell<Option<gtk::Widget>>,
     body_layout: Cell<Option<LibraryLayout>>,
@@ -68,7 +63,7 @@ struct ArtistAlbumProjection {
     columns: Rc<Cell<usize>>,
     applied_settings: RefCell<LibraryListSettings>,
     shell: Rc<Shell>,
-    playback_context: String,
+    lane: Rc<super::named_detail::NamedOrderLane>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -83,7 +78,7 @@ enum ArtistRouteRow {
         widget: gtk::Widget,
     },
     AlbumGrid {
-        albums: Arc<Vec<AlbumSummary>>,
+        section: Weak<ArtistAlbumProjection>,
         start: usize,
         len: usize,
         columns: usize,
@@ -91,59 +86,71 @@ enum ArtistRouteRow {
     },
 }
 
-struct ArtistRouteListCell<Cell> {
+struct ArtistRouteListCell {
     root: gtk::Box,
-    grid_cells: Vec<ArtistGridSlot<Cell>>,
+    grid_cells: Vec<ArtistGridSlot>,
     grid_columns: usize,
     grid_mode: bool,
 }
 
-struct ArtistGridSlot<Cell> {
-    cell: Cell,
+struct ArtistGridSlot {
+    cell: AlbumGridCell,
     widget: gtk::Widget,
 }
 
 impl ArtistAlbumProjection {
     fn new(
         shell: &Rc<Shell>,
+        selected: &crate::runtime::SelectedLibrary,
         title: &'static str,
-        albums: Vec<AlbumSummary>,
+        order: Vec<library::AlbumKey>,
         layout: Rc<Cell<LibraryLayout>>,
         columns: Rc<Cell<usize>>,
-        playback_context: String,
     ) -> Rc<Self> {
-        let key = LibraryListKey::ArtistAlbums;
         let search = gtk::SearchEntry::new();
-        bind_search_placeholder(&search, "Search");
+        search.set_placeholder_text(Some(&localization::tr("Search")));
         search.set_hexpand(true);
-        let toolbar = shell.library_toolbar_projection(key, search.clone());
+        let toolbar =
+            shell.library_toolbar_projection(LibraryListKey::ArtistAlbums, search.clone());
         let header = gtk::Box::new(gtk::Orientation::Vertical, ARTIST_RELEASE_HEADER_GAP);
         header.set_hexpand(true);
         header.set_halign(gtk::Align::Fill);
-        let heading = localized_label(title);
+        let heading = crate::localization::localized_label(title);
         heading.add_css_class("section-heading");
         heading.set_xalign(0.0);
         header.append(&heading);
         header.append(&toolbar.widget());
-
-        let settings = shell.settings.current.borrow().library_list(key);
-        let albums = Arc::new(albums);
-        let source = RefCell::new(Arc::clone(&albums));
-        let visible = RefCell::new(albums);
-        let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
         let header: gtk::Widget = header.upcast();
-        rows.append(&glib::BoxedAnyObject::new(ArtistRouteRow::Static {
-            widget: header.clone(),
-        }));
-        let row_model = gio::ListStore::new::<glib::BoxedAnyObject>();
+        let rows = static_artist_route_model(header.clone());
+
+        let database = Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let folder = selected.music_folder_key;
+        let load = Arc::new(
+            move |keys: Vec<library::AlbumKey>, cancellation: library::ReadCancellation| {
+                let database = Arc::clone(&database);
+                Box::pin(async move {
+                    database
+                        .album_rows(source, &keys, folder, &cancellation)
+                        .await
+                        .map_err(|error| error.to_string())
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
+        let settings = shell
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::ArtistAlbums);
+        let source_present = !order.is_empty();
+        let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), load);
         let projection = Rc::new(Self {
-            source,
-            visible,
-            search: search.clone(),
+            sparse,
+            source_present: Cell::new(source_present),
+            search,
             header,
             toolbar,
             rows,
-            row_model,
             row_table: RefCell::new(None),
             row_surface: RefCell::new(None),
             body_layout: Cell::new(None),
@@ -151,50 +158,39 @@ impl ArtistAlbumProjection {
             columns,
             applied_settings: RefCell::new(settings),
             shell: Rc::clone(shell),
-            playback_context,
+            lane: Rc::new(super::named_detail::NamedOrderLane::new()),
         });
-        let changed_projection = Rc::downgrade(&projection);
-        search.connect_search_changed(move |_| {
-            if let Some(projection) = changed_projection.upgrade() {
-                projection.recompute();
-            }
-        });
-        projection.recompute();
+        let weak = Rc::downgrade(&projection);
+        projection
+            .sparse
+            .list_model()
+            .connect_items_changed(move |_, position, removed, added| {
+                if let Some(projection) = weak.upgrade() {
+                    projection.refresh_grid_range(position, removed, added);
+                }
+            });
+        projection.refresh_body();
         projection
     }
 
-    fn recompute(&self) {
-        let query = self.search.text().trim().to_lowercase();
-        let next = {
-            let source = self.source.borrow();
-            if query.is_empty() {
-                Arc::clone(&source)
-            } else {
-                Arc::new(
-                    source
-                        .iter()
-                        .filter(|album| album_matches_query(album, &query))
-                        .cloned()
-                        .collect::<Vec<_>>(),
-                )
-            }
-        };
-        self.visible.replace(Arc::clone(&next));
-        replace_albums_in_model(&self.row_model, next.iter().cloned());
-        self.refresh_body();
-    }
-
     fn source_is_empty(&self) -> bool {
-        self.source.borrow().is_empty()
+        !self.source_present.get()
     }
 
-    fn replace_prepared(&self, albums: Vec<AlbumSummary>) {
-        self.source.replace(Arc::new(albums));
-        self.recompute();
+    fn search(&self) -> gtk::SearchEntry {
+        self.search.clone()
     }
 
-    fn visible(&self) -> Arc<Vec<AlbumSummary>> {
-        Arc::clone(&self.visible.borrow())
+    fn rows(&self) -> gio::ListStore {
+        self.rows.clone()
+    }
+
+    fn replace_order(self: &Rc<Self>, order: Vec<library::AlbumKey>, authoritative: bool) {
+        if authoritative {
+            self.source_present.set(!order.is_empty());
+        }
+        self.sparse.replace_order(order);
+        self.refresh_body();
     }
 
     fn row_widget(&self, settings: &LibraryListSettings) -> gtk::Widget {
@@ -204,12 +200,11 @@ impl ArtistAlbumProjection {
             }
             return surface.clone();
         }
-
         let table = album_table(
             &self.shell,
-            self.row_model.clone(),
+            self.sparse.list_model(),
             LibraryListKey::ArtistAlbums,
-            Some(self.playback_context.clone()),
+            None,
         );
         table.apply_fields(&settings.row_fields);
         let clip = non_propagating_width_scroller();
@@ -225,11 +220,7 @@ impl ArtistAlbumProjection {
         surface
     }
 
-    fn rows(&self) -> gio::ListStore {
-        self.rows.clone()
-    }
-
-    fn refresh_body(&self) {
+    fn refresh_body(self: &Rc<Self>) {
         if self.source_is_empty() {
             self.header.set_visible(false);
             self.header.set_margin_bottom(0);
@@ -237,69 +228,95 @@ impl ArtistAlbumProjection {
             self.body_layout.set(None);
             return;
         }
-
         self.header.set_visible(true);
-        let layout = self.layout.get();
-        let visible = self.visible();
-        match layout {
+        match self.layout.get() {
             LibraryLayout::Row => {
                 self.header.set_margin_bottom(ARTIST_RELEASE_HEADER_GAP);
-                if self.body_layout.get() != Some(LibraryLayout::Row) {
-                    let settings = self.applied_settings.borrow().clone();
-                    let row = self.row_widget(&settings);
-                    row.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
-                    replace_artist_release_body(
-                        &self.rows,
-                        vec![ArtistRouteRow::Static { widget: row }],
-                    );
-                }
+                let settings = self.applied_settings.borrow().clone();
+                let row = self.row_widget(&settings);
+                row.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
+                replace_artist_release_body(
+                    &self.rows,
+                    vec![ArtistRouteRow::Static { widget: row }],
+                );
             }
-            LibraryLayout::Grid => {
-                self.header.set_margin_bottom(if visible.is_empty() {
+            LibraryLayout::Grid | LibraryLayout::Detail => {
+                self.header.set_margin_bottom(if self.sparse.len() == 0 {
                     ARTIST_RELEASE_SECTION_GAP
                 } else {
                     ARTIST_RELEASE_HEADER_GAP
                 });
-                let mut rows = Vec::new();
-                append_grid_rows(&mut rows, visible, self.columns.get());
-                replace_artist_release_body(&self.rows, rows);
+                replace_artist_release_body(&self.rows, self.grid_rows(0, self.grid_row_count()));
             }
-            LibraryLayout::Detail => unreachable!("artist detail layout normalizes to grid"),
         }
-        self.body_layout.set(Some(layout));
+        self.body_layout.set(Some(self.layout.get()));
     }
 
-    fn apply_settings(&self, settings: &LibraryListSettings) {
-        let previous = self.applied_settings.borrow().clone();
-        let sort_changed =
-            previous.sort_key != settings.sort_key || previous.descending != settings.descending;
-        if sort_changed {
-            let mut source = self.source.borrow_mut();
-            let source_items: &mut Vec<AlbumSummary> = Arc::make_mut(&mut *source);
-            sort_albums(source_items, settings);
+    fn grid_row_count(&self) -> usize {
+        self.sparse.len().div_ceil(self.columns.get().max(1))
+    }
+
+    fn grid_rows(self: &Rc<Self>, start_row: usize, end_row: usize) -> Vec<ArtistRouteRow> {
+        let columns = self.columns.get().max(1);
+        let count = self.sparse.len();
+        let row_count = self.grid_row_count();
+        (start_row..end_row.min(row_count))
+            .map(|row| {
+                let start = row * columns;
+                ArtistRouteRow::AlbumGrid {
+                    section: Rc::downgrade(self),
+                    start,
+                    len: (count - start).min(columns),
+                    columns,
+                    margin_bottom: if row + 1 == row_count {
+                        ARTIST_RELEASE_SECTION_GAP
+                    } else {
+                        0
+                    },
+                }
+            })
+            .collect()
+    }
+
+    fn refresh_grid_range(self: &Rc<Self>, position: u32, removed: u32, added: u32) {
+        if self.layout.get() != LibraryLayout::Grid || self.source_is_empty() {
+            return;
         }
-        if previous.row_fields != settings.row_fields
-            && let Some(table) = self.row_table.borrow().as_ref()
-        {
-            table.apply_fields(&settings.row_fields);
+        let columns = self.columns.get().max(1);
+        let row_count = self.grid_row_count();
+        if row_count == 0 {
+            return;
         }
+        let first = (position as usize / columns).min(row_count - 1);
+        let changed = removed.max(added).max(1) as usize;
+        let end = (position as usize)
+            .saturating_add(changed)
+            .div_ceil(columns)
+            .min(row_count)
+            .max(first + 1);
+        let additions = self
+            .grid_rows(first, end)
+            .into_iter()
+            .map(glib::BoxedAnyObject::new)
+            .collect::<Vec<_>>();
+        self.rows
+            .splice((first + 1) as u32, (end - first) as u32, &additions);
+    }
+
+    fn apply_settings(self: &Rc<Self>, settings: &LibraryListSettings) {
         self.toolbar.apply(LibraryListKey::ArtistAlbums, settings);
         self.applied_settings.replace(settings.clone());
-        if sort_changed {
-            self.recompute();
-        } else if self.body_layout.get() != Some(self.layout.get()) {
-            self.refresh_body();
-        }
+        self.refresh_body();
     }
 }
 
 impl ArtistReleaseProjections {
     pub(super) fn new(
         shell: &Rc<Shell>,
+        selected: &crate::runtime::SelectedLibrary,
         preamble: ArtistReleaseRoutePreamble,
-        albums: Arc<[AlbumSummary]>,
-        appears_on: Arc<[AlbumSummary]>,
-        playback_context: String,
+        titles: [&'static str; 6],
+        orders: [Vec<library::AlbumKey>; 6],
     ) -> Self {
         let settings = shell
             .settings
@@ -308,33 +325,22 @@ impl ArtistReleaseProjections {
             .library_list(LibraryListKey::ArtistAlbums);
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
-        let partitioned = partition_artist_releases(albums, appears_on);
-        let titles = [
-            AlbumReleaseKind::Album.section_title(),
-            AlbumReleaseKind::Ep.section_title(),
-            AlbumReleaseKind::Single.section_title(),
-            AlbumReleaseKind::Collection.section_title(),
-            AlbumReleaseKind::Other.section_title(),
-            msgid("Appears On"),
-        ];
-        let section_playback_context = playback_context.clone();
         let sections = Rc::new(
             titles
                 .into_iter()
-                .zip(partitioned)
-                .map(|(title, albums)| {
+                .zip(orders)
+                .map(|(title, order)| {
                     ArtistAlbumProjection::new(
                         shell,
+                        selected,
                         title,
-                        albums,
+                        order,
                         Rc::clone(&layout),
                         Rc::clone(&columns),
-                        section_playback_context.clone(),
                     )
                 })
                 .collect::<Vec<_>>(),
         );
-
         let ArtistReleaseRoutePreamble {
             header,
             favorite,
@@ -343,7 +349,6 @@ impl ArtistReleaseProjections {
         } = preamble;
         header.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
         let header_rows = static_artist_route_model(header);
-
         let favorite_search = favorite.as_ref().map(|(_, search)| search.clone());
         let favorite_widget = favorite.map(|(widget, _)| {
             widget.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
@@ -355,12 +360,11 @@ impl ArtistReleaseProjections {
             .map_or_else(gio::ListStore::new::<glib::BoxedAnyObject>, |widget| {
                 static_artist_route_model(widget.clone())
             });
-
         empty.set_visible(
             !favorite_present && sections.iter().all(|section| section.source_is_empty()),
         );
         let empty_rows = static_artist_route_model(empty.clone());
-        let mut section_models = Vec::with_capacity(ARTIST_RELEASE_SECTION_COUNT + 3);
+        let mut section_models = Vec::with_capacity(sections.len() + 3);
         section_models.push(header_rows);
         section_models.push(favorite_rows);
         section_models.extend(sections.iter().map(|section| section.rows()));
@@ -371,26 +375,13 @@ impl ArtistReleaseProjections {
             model_sections.append(model);
         }
         let rows = gtk::FlattenListModel::new(Some(model_sections));
-
         let grid_fields = Rc::new(RefCell::new(settings.grid_fields.clone()));
-        let cell_shell = Rc::clone(shell);
-        let grid_playback_context = playback_context;
-        let (list, apply_grid_fields) =
-            artist_route_list(rows.clone(), Rc::clone(&grid_fields), move |fields| {
-                AlbumGridCell::new(
-                    Rc::clone(&cell_shell),
-                    fields,
-                    Some(grid_playback_context.clone()),
-                )
-            });
+        let (list, apply_grid_fields) = artist_route_list(shell, rows, Rc::clone(&grid_fields));
         list.set_margin_top(ROUTE_TOP_MARGIN);
-
         let resize_columns = Rc::clone(&columns);
         let resize_layout = Rc::clone(&layout);
         let resize_sections = Rc::clone(&sections);
-        let scroller = detail_route_scroller(super::collections::library_route_inset(
-            list.clone().upcast(),
-        ));
+        let scroller = detail_route_scroller(library_route_inset(list.clone().upcast()));
         let owner = width_allocation_owner(&scroller, move |width| {
             if resize_layout.get() == LibraryLayout::Row {
                 return;
@@ -403,31 +394,27 @@ impl ArtistReleaseProjections {
                 }
             }
         });
-        let surface = owner.upcast();
-
         let mut search_targets = HashMap::new();
-        if let Some(favorite_search) = favorite_search {
+        if let Some(search) = favorite_search {
             search_targets.insert(
                 ArtistRouteTarget::Favorite,
-                virtual_search_target(&list, Rc::clone(&section_models), 1, favorite_search),
+                virtual_search_target(&list, Rc::clone(&section_models), 1, search),
             );
         }
         for (index, section) in sections.iter().enumerate() {
-            let target = ArtistRouteTarget::Release(index);
             search_targets.insert(
-                target,
+                ArtistRouteTarget::Release(index),
                 virtual_search_target(
                     &list,
                     Rc::clone(&section_models),
                     index + 2,
-                    section.search.clone(),
+                    section.search(),
                 ),
             );
         }
-
         Self {
             sections,
-            surface,
+            surface: owner.upcast(),
             layout,
             favorite: favorite_widget,
             favorite_present: Rc::new(Cell::new(favorite_present)),
@@ -442,22 +429,42 @@ impl ArtistReleaseProjections {
         self.surface.clone()
     }
 
-    pub(super) fn replace_prepared(
+    pub(super) fn section_search(&self, index: usize) -> Option<gtk::SearchEntry> {
+        self.sections.get(index).map(|section| section.search())
+    }
+
+    pub(super) fn section_lane(
         &self,
-        albums: Arc<[AlbumSummary]>,
-        appears_on: Arc<[AlbumSummary]>,
-        favorite_present: bool,
+        index: usize,
+    ) -> Option<Rc<super::named_detail::NamedOrderLane>> {
+        self.sections
+            .get(index)
+            .map(|section| Rc::clone(&section.lane))
+    }
+
+    pub(super) fn replace_section_order(
+        &self,
+        index: usize,
+        order: Vec<library::AlbumKey>,
+        authoritative: bool,
     ) {
-        let partitioned = partition_artist_releases(albums, appears_on);
-        self.favorite_present.set(favorite_present);
+        if let Some(section) = self.sections.get(index) {
+            section.replace_order(order, authoritative);
+        }
+        self.sync_empty();
+    }
+
+    pub(super) fn set_favorite_present(&self, present: bool) {
+        self.favorite_present.set(present);
         if let Some(favorite) = self.favorite.as_ref() {
-            favorite.set_visible(favorite_present);
+            favorite.set_visible(present);
         }
-        for (section, albums) in self.sections.iter().zip(partitioned) {
-            section.replace_prepared(albums);
-        }
+        self.sync_empty();
+    }
+
+    fn sync_empty(&self) {
         self.empty.set_visible(
-            !favorite_present
+            !self.favorite_present.get()
                 && self
                     .sections
                     .iter()
@@ -477,20 +484,10 @@ impl ArtistReleaseProjections {
         self.search_targets.get(&target).cloned()
     }
 
-    pub(super) fn apply_library_list_settings(
-        &self,
-        key: LibraryListKey,
-        settings: &LibraryListSettings,
-    ) {
-        if key != LibraryListKey::ArtistAlbums {
-            return;
-        }
-        let previous_layout = self.layout.get();
+    pub(super) fn apply_library_list_settings(&self, settings: &LibraryListSettings) {
         let next_layout = normalized_artist_layout(settings.layout);
         let previous_fields = self.grid_fields.borrow().clone();
-        if previous_layout != next_layout {
-            self.layout.set(next_layout);
-        }
+        self.layout.set(next_layout);
         for section in self.sections.iter() {
             section.apply_settings(settings);
         }
@@ -508,53 +505,6 @@ fn normalized_artist_layout(layout: LibraryLayout) -> LibraryLayout {
     }
 }
 
-fn release_section_index(kind: AlbumReleaseKind) -> usize {
-    match kind {
-        AlbumReleaseKind::Album => 0,
-        AlbumReleaseKind::Ep => 1,
-        AlbumReleaseKind::Single => 2,
-        AlbumReleaseKind::Collection => 3,
-        AlbumReleaseKind::Other => 4,
-    }
-}
-
-fn partition_artist_releases(
-    albums: Arc<[AlbumSummary]>,
-    appears_on: Arc<[AlbumSummary]>,
-) -> [Vec<AlbumSummary>; ARTIST_RELEASE_SECTION_COUNT] {
-    let mut sections: [Vec<AlbumSummary>; ARTIST_RELEASE_SECTION_COUNT] =
-        std::array::from_fn(|_| Vec::new());
-    for album in albums.iter().cloned() {
-        sections[release_section_index(album_release_kind(&album.album))].push(album);
-    }
-    sections[5].extend(appears_on.iter().cloned());
-    sections
-}
-
-fn append_grid_rows(
-    rows: &mut Vec<ArtistRouteRow>,
-    albums: Arc<Vec<AlbumSummary>>,
-    columns: usize,
-) {
-    let columns = columns.max(1);
-    let row_count = albums.len().div_ceil(columns);
-    for row in 0..row_count {
-        let start = row * columns;
-        let len = (albums.len() - start).min(columns);
-        rows.push(ArtistRouteRow::AlbumGrid {
-            albums: Arc::clone(&albums),
-            start,
-            len,
-            columns,
-            margin_bottom: if row + 1 == row_count {
-                ARTIST_RELEASE_SECTION_GAP
-            } else {
-                0
-            },
-        });
-    }
-}
-
 fn static_artist_route_model(widget: gtk::Widget) -> gio::ListStore {
     let model = gio::ListStore::new::<glib::BoxedAnyObject>();
     model.append(&glib::BoxedAnyObject::new(ArtistRouteRow::Static {
@@ -568,25 +518,21 @@ fn replace_artist_release_body(model: &gio::ListStore, rows: Vec<ArtistRouteRow>
         .into_iter()
         .map(glib::BoxedAnyObject::new)
         .collect::<Vec<_>>();
-    model.splice(1, model.n_items().saturating_sub(1), &additions);
+    replace_artist_release_objects(model, &additions);
 }
 
-fn artist_route_list<Cell, Make>(
+fn replace_artist_release_objects(model: &gio::ListStore, additions: &[glib::BoxedAnyObject]) {
+    model.splice(1, model.n_items().saturating_sub(1), additions);
+}
+
+fn artist_route_list(
+    shell: &Rc<Shell>,
     model: gtk::FlattenListModel,
     fields: Rc<RefCell<Vec<LibraryField>>>,
-    make_cell: Make,
-) -> (gtk::ListView, Rc<dyn Fn(&[LibraryField])>)
-where
-    Cell: ReusableCollectionGridCell<AlbumSummary>,
-    Make: Fn(&[LibraryField]) -> Cell + 'static,
-{
+) -> (gtk::ListView, Rc<dyn Fn(&[LibraryField])>) {
     let selection = gtk::NoSelection::new(Some(model));
     let factory = gtk::SignalListItemFactory::new();
-    let cells = Rc::new(RefCell::new(
-        HashMap::<usize, ArtistRouteListCell<Cell>>::new(),
-    ));
-    let make_cell = Rc::new(make_cell);
-
+    let cells = Rc::new(RefCell::new(HashMap::<usize, ArtistRouteListCell>::new()));
     let setup_cells = Rc::clone(&cells);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -608,10 +554,9 @@ where
             },
         );
     });
-
     let bind_cells = Rc::clone(&cells);
     let bind_fields = Rc::clone(&fields);
-    let bind_make_cell = Rc::clone(&make_cell);
+    let bind_shell = Rc::clone(shell);
     factory.connect_bind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -627,33 +572,34 @@ where
         let Some(state) = states.get_mut(&(item.as_ptr() as usize)) else {
             return;
         };
-        state.root.set_margin_bottom(match &row {
-            ArtistRouteRow::Static { .. } => 0,
-            ArtistRouteRow::AlbumGrid { margin_bottom, .. } => *margin_bottom,
-        });
         match row {
             ArtistRouteRow::Static { widget } => {
                 clear_grid_state(state, true);
                 state.root.set_orientation(gtk::Orientation::Vertical);
                 state.root.set_homogeneous(false);
+                state.root.set_margin_bottom(0);
                 if widget.parent().is_none() {
                     state.root.append(&widget);
                 }
             }
             ArtistRouteRow::AlbumGrid {
-                albums,
+                section,
                 start,
                 len,
                 columns,
-                ..
+                margin_bottom,
             } => {
+                let Some(section) = section.upgrade() else {
+                    return;
+                };
                 if !state.grid_mode || state.grid_columns != columns {
                     clear_grid_state(state, true);
                     state.root.set_orientation(gtk::Orientation::Horizontal);
                     state.root.set_homogeneous(true);
                     state.root.add_css_class("album-grid");
                     for _ in 0..columns {
-                        let cell = bind_make_cell(&bind_fields.borrow());
+                        let cell =
+                            AlbumGridCell::new(Rc::clone(&bind_shell), &bind_fields.borrow(), None);
                         let widget = cell.widget();
                         let wrapper = cards::collection_grid_card_inset(
                             &widget,
@@ -665,22 +611,25 @@ where
                     state.grid_columns = columns;
                     state.grid_mode = true;
                 }
+                state.root.set_margin_bottom(margin_bottom);
+                let model = section.sparse.list_model();
                 for (offset, slot) in state.grid_cells.iter().enumerate() {
-                    if offset < len {
-                        slot.widget.set_visible(true);
-                        slot.cell.bind(
-                            start.saturating_add(offset) as u32,
-                            albums[start + offset].clone(),
-                        );
-                    } else {
+                    if offset >= len {
                         slot.cell.clear();
                         slot.widget.set_visible(false);
+                        continue;
+                    }
+                    slot.widget.set_visible(true);
+                    let position = start + offset;
+                    if let Some(album) = item_at::<library::AlbumRow>(&model, position as u32) {
+                        slot.cell.bind(position as u32, album);
+                    } else {
+                        slot.cell.clear();
                     }
                 }
             }
         }
     });
-
     let unbind_cells = Rc::clone(&cells);
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -694,7 +643,6 @@ where
             }
         }
     });
-
     let teardown_cells = Rc::clone(&cells);
     factory.connect_teardown(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -708,14 +656,12 @@ where
         }
         item.set_child(None::<&gtk::Widget>);
     });
-
     let list = gtk::ListView::new(Some(selection), Some(factory));
     list.add_css_class("artist-release-list");
     list.set_single_click_activate(false);
     list.set_hexpand(true);
     list.set_halign(gtk::Align::Fill);
     list.set_vexpand(true);
-
     let apply_cells = Rc::clone(&cells);
     let apply_fields = Rc::new(move |fields: &[LibraryField]| {
         for state in apply_cells.borrow().values() {
@@ -727,10 +673,7 @@ where
     (list, apply_fields)
 }
 
-fn clear_grid_state<Cell: ReusableCollectionGridCell<AlbumSummary>>(
-    state: &mut ArtistRouteListCell<Cell>,
-    remove: bool,
-) {
+fn clear_grid_state(state: &mut ArtistRouteListCell, remove: bool) {
     for slot in &state.grid_cells {
         slot.cell.clear();
         slot.widget.set_visible(false);
@@ -748,6 +691,17 @@ fn remove_box_children(root: &gtk::Box) {
     while let Some(child) = root.first_child() {
         root.remove(&child);
     }
+}
+
+fn non_propagating_width_scroller() -> gtk::ScrolledWindow {
+    let clip = gtk::ScrolledWindow::new();
+    clip.add_css_class("non-propagating-width-clip");
+    configure_fill_width_clip(&clip, gtk::PolicyType::Never);
+    clip.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
+    clip.set_propagate_natural_height(true);
+    clip.set_hexpand(true);
+    clip.set_halign(gtk::Align::Fill);
+    clip
 }
 
 fn virtual_search_target(
@@ -789,98 +743,31 @@ fn virtual_search_target(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ::library::{Album, AlbumArtwork, AlbumId, AlbumRelations};
-
-    fn album(index: u64) -> AlbumSummary {
-        let album = Arc::new(Album {
-            id: AlbumId::fake(index),
-            title: format!("Album {index}"),
-            artist: "Artist".to_string(),
-            year: 2026,
-            release_date: None,
-            date_added: None,
-            last_played: None,
-            play_count: None,
-            user_rating: None,
-            favorite: false,
-            color_seed: index as u32,
-            image_ref: None,
-            local_artwork: None,
-            release_types: Vec::new(),
-            is_compilation: None,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            relations: AlbumRelations::default(),
-        });
-        AlbumSummary {
-            artwork: AlbumArtwork {
-                album: Arc::clone(&album),
-                representative_track: None,
-            },
-            album,
-            track_count: 1,
-            duration_seconds: 60,
-        }
-    }
 
     #[test]
-    fn grid_rows_preserve_every_album_once_at_each_column_count() {
-        let albums = Arc::new((0..37).map(album).collect::<Vec<_>>());
-        for columns in 1..=8 {
-            let mut rows = Vec::new();
-            append_grid_rows(&mut rows, Arc::clone(&albums), columns);
-            let projected = rows
-                .into_iter()
-                .flat_map(|row| match row {
-                    ArtistRouteRow::AlbumGrid {
-                        albums, start, len, ..
-                    } => albums[start..start + len]
-                        .iter()
-                        .map(|album| album.album.id.clone())
-                        .collect::<Vec<_>>(),
-                    ArtistRouteRow::Static { .. } => Vec::new(),
+    fn grid_rows_preserve_every_album_position_at_each_column_count() {
+        for columns in 1..=6 {
+            let count = 17_usize;
+            let positions = (0..count.div_ceil(columns))
+                .flat_map(|row| {
+                    let start = row * columns;
+                    start..(start + (count - start).min(columns))
                 })
                 .collect::<Vec<_>>();
-            assert_eq!(
-                projected,
-                albums
-                    .iter()
-                    .map(|album| album.album.id.clone())
-                    .collect::<Vec<_>>()
-            );
+            assert_eq!(positions, (0..count).collect::<Vec<_>>());
         }
     }
 
     #[test]
     fn section_body_updates_leave_header_item_in_place() {
-        fn row(albums: &Arc<Vec<AlbumSummary>>, start: usize) -> ArtistRouteRow {
-            ArtistRouteRow::AlbumGrid {
-                albums: Arc::clone(albums),
-                start,
-                len: 1,
-                columns: 1,
-                margin_bottom: 0,
-            }
-        }
-
-        let albums = Arc::new((0..4).map(album).collect::<Vec<_>>());
-        let section = gio::ListStore::new::<glib::BoxedAnyObject>();
-        let header = glib::BoxedAnyObject::new(row(&albums, 0));
-        section.append(&header);
-        section.append(&glib::BoxedAnyObject::new(row(&albums, 1)));
-        let changes = Rc::new(RefCell::new(Vec::new()));
-        let changed = Rc::clone(&changes);
-        section.connect_items_changed(move |_, position, removed, added| {
-            changed.borrow_mut().push((position, removed, added));
-        });
-
-        replace_artist_release_body(&section, vec![row(&albums, 1), row(&albums, 3)]);
-
-        let current_header = section
-            .item(0)
-            .and_downcast::<glib::BoxedAnyObject>()
-            .expect("section header");
-        assert_eq!(current_header.as_ptr(), header.as_ptr());
-        assert_eq!(&*changes.borrow(), &[(1, 1, 2)]);
+        let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
+        rows.append(&glib::BoxedAnyObject::new(0_u8));
+        let identity = rows.item(0).unwrap();
+        replace_artist_release_objects(&rows, &[glib::BoxedAnyObject::new(1_u8)]);
+        assert_eq!(rows.item(0).unwrap(), identity);
+        assert_eq!(rows.n_items(), 2);
+        replace_artist_release_objects(&rows, &[]);
+        assert_eq!(rows.item(0).unwrap(), identity);
+        assert_eq!(rows.n_items(), 1);
     }
 }

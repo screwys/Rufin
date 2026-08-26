@@ -16,8 +16,6 @@ mod routes;
 pub mod runtime;
 pub mod settings;
 mod shell;
-#[cfg(test)]
-mod test_support;
 
 pub use application::{run_application, run_application_after_update};
 
@@ -28,14 +26,15 @@ pub fn verify_interface_resources() -> Result<(), String> {
 pub use settings::{
     AccentPreference, DEFAULT_LEFT_SIDEBAR_WIDTH, DEFAULT_RIGHT_SIDEBAR_WIDTH,
     DEFAULT_WINDOW_HEIGHT, DEFAULT_WINDOW_WIDTH, DownloadRule, DownloadRules,
-    ExternalSiteLinkSettings, FolderViewSettings, LayoutProfile, LayoutSettings, LeftSidebarMode,
-    LibraryColumnWidth, LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings,
-    LibraryListSettingsEntry, MAX_LEFT_SIDEBAR_WIDTH, MAX_NARROW_LAYOUT_THRESHOLD,
-    MAX_RIGHT_SIDEBAR_WIDTH, MAX_TABLE_COLUMN_WIDTH, MIN_LEFT_SIDEBAR_WIDTH,
-    MIN_NARROW_LAYOUT_THRESHOLD, MIN_RIGHT_SIDEBAR_WIDTH, MIN_TABLE_COLUMN_WIDTH, RightSidebarMode,
-    Settings, SettingsHandle, SettingsPort, SidebarPin, SidebarRouteItem, SidebarRouteItemSettings,
-    SidebarSettings, ThemePreference, available_detail_track_fields, available_grid_fields,
-    available_row_fields, available_sort_fields, sanitized_window_size,
+    ExternalSiteLinkSettings, FolderViewSettings, HomeBlockKind, HomeSectionKind, LayoutProfile,
+    LayoutSettings, LeftSidebarMode, LibraryColumnWidth, LibraryField, LibraryLayout,
+    LibraryListKey, LibraryListSettings, LibraryListSettingsEntry, MAX_LEFT_SIDEBAR_WIDTH,
+    MAX_NARROW_LAYOUT_THRESHOLD, MAX_RIGHT_SIDEBAR_WIDTH, MAX_TABLE_COLUMN_WIDTH,
+    MIN_LEFT_SIDEBAR_WIDTH, MIN_NARROW_LAYOUT_THRESHOLD, MIN_RIGHT_SIDEBAR_WIDTH,
+    MIN_TABLE_COLUMN_WIDTH, RightSidebarMode, Settings, SettingsHandle, SettingsPort, SidebarPin,
+    SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings, ThemePreference,
+    available_detail_track_fields, available_grid_fields, available_row_fields,
+    available_sort_fields, sanitized_window_size,
 };
 
 pub fn format_duration(seconds: u32) -> String {

@@ -1,44 +1,35 @@
-use std::{
-    cell::{Cell, RefCell},
-    rc::Rc,
-    sync::Arc,
-};
+use std::rc::Rc;
+use std::sync::Arc;
+use std::time::{SystemTime, UNIX_EPOCH};
 
-use ::library::{
-    Library, MusicFolderId, PlaylistDetail, PlaylistEdit, PlaylistId, PlaylistSummary, RadioSeed,
-    SmartPlaylistDetail, SmartPlaylistId, SmartPlaylistSummary,
-};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
+use gtk::glib;
+use library::{
+    Database, PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow,
+};
+use localization::{msgid, track_count_text};
 
-use crate::LibraryListKey;
 use crate::format_duration_units;
-use crate::localization::{bind_label_text_with, localized_label};
+use crate::localization::localized_label;
+use crate::player::state::current_playback_track;
 use crate::shell::Shell;
 use crate::shell::actions::{ADD_ICON, EDIT_ICON};
 use crate::shell::cover::presentation::stable_seed;
-use crate::shell::route::{LatestMountedRouteRead, MountedRoute, SelectedRouteIdentity};
-use localization::{msgid, tr, track_count_text};
-use playback::RadioPlayRequest;
+use crate::shell::route::MountedRoute;
+use crate::{LibraryListKey, LibraryListSettings};
 
 use super::collection_context::{
     present_playlist_context_menu, present_smart_playlist_context_menu,
 };
-use super::collections::{CollectionPlay, library_route_inset};
+use super::collections::{CollectionPlay, PlaybackTarget, library_route_inset};
 use super::detail_showcase::{
-    PlaylistDetailShowcase, detail_action_button, detail_action_row, detail_delete_button,
-    detail_genre_pill_button, detail_playback_controls, detail_radio_button, detail_title_label,
+    DetailSummaryProjection, PlaylistDetailShowcase, detail_action_button, detail_action_row,
+    detail_delete_button, detail_playback_controls, detail_radio_button, detail_title_label,
     playlist_detail_showcase,
-};
-use super::library_fields::smart_playlist_display_name;
-use super::playlist_entry_model::{
-    PlaylistEntryProjectionRequest, PreparedPlaylistEntries, prepare_playlist_entry_projection,
 };
 use super::route::Route;
 use super::route_layout::{PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_inner_width};
-use super::track_model::{
-    PreparedTrackProjection, TrackProjectionRequest, prepare_track_projection,
-};
 
 const PLAYLIST_DETAIL_COMPACT_WIDTH: i32 = 760;
 const PLAYLIST_DETAIL_COVER_ONLY_WIDTH: i32 = 420;
@@ -46,29 +37,647 @@ const PLAYLIST_DETAIL_TINY_COVER_SIZE: i32 = 150;
 const PLAYLIST_DETAIL_WIDE_COVER_SIZE: i32 = 208;
 
 #[derive(Clone)]
-struct SmartPlaylistDetailReadRequest {
-    identity: SelectedRouteIdentity,
-    tracks: TrackProjectionRequest,
-}
-
-struct PreparedSmartPlaylistDetail {
-    summary: SmartPlaylistSummary,
-    tracks: PreparedTrackProjection,
+pub(crate) struct PlaylistDetailData {
+    pub(crate) summary: PlaylistRow,
+    pub(crate) entries: Vec<library::PlaylistEntryKey>,
 }
 
 #[derive(Clone)]
-struct PlaylistDetailReadRequest {
-    identity: SelectedRouteIdentity,
-    entries: PlaylistEntryProjectionRequest,
+pub(crate) struct SmartPlaylistDetailData {
+    pub(crate) summary: SmartPlaylistRow,
+    pub(crate) tracks: Vec<library::TrackKey>,
 }
 
-struct PreparedPlaylistDetail {
-    summary: PlaylistSummary,
-    entries: PreparedPlaylistEntries,
+#[derive(Clone)]
+enum PlaylistDetailOwner {
+    Saved {
+        key: PlaylistKey,
+        summary: PlaylistRow,
+    },
+    Smart {
+        key: SmartPlaylistKey,
+        summary: SmartPlaylistRow,
+    },
 }
 
-pub(crate) fn playlist_detail_compact_for_width(width: i32) -> bool {
-    width < PLAYLIST_DETAIL_COMPACT_WIDTH
+enum PlaylistDetailMembership {
+    Saved(Vec<library::PlaylistEntryKey>),
+    Smart(Vec<library::TrackKey>),
+}
+
+impl PlaylistDetailOwner {
+    fn key(&self) -> LibraryListKey {
+        match self {
+            Self::Saved { .. } => LibraryListKey::PlaylistTracks,
+            Self::Smart { .. } => LibraryListKey::SmartPlaylistTracks,
+        }
+    }
+
+    fn name(&self) -> &str {
+        match self {
+            Self::Saved { summary, .. } => &summary.name,
+            Self::Smart { summary, .. } => &summary.name,
+        }
+    }
+
+    fn seed(&self) -> u32 {
+        match self {
+            Self::Saved { summary, .. } => stable_seed(&summary.object_id),
+            Self::Smart { summary, .. } => stable_seed(&summary.object_id),
+        }
+    }
+
+    fn track_count(&self) -> i64 {
+        match self {
+            Self::Saved { summary, .. } => summary.track_count,
+            Self::Smart { summary, .. } => summary.track_count,
+        }
+    }
+
+    fn duration_millis(&self) -> i64 {
+        match self {
+            Self::Saved { summary, .. } => summary.duration_millis,
+            Self::Smart { summary, .. } => summary.duration_millis,
+        }
+    }
+
+    fn artwork(&self, prefer_server: bool) -> Vec<ArtworkBinding> {
+        match self {
+            Self::Saved { summary, .. } => {
+                let server = summary.artwork_binding.iter();
+                let representative = summary.representative_artwork.iter();
+                if prefer_server {
+                    server
+                        .chain(representative)
+                        .map(|binding| ArtworkBinding::opaque(binding))
+                        .collect()
+                } else {
+                    representative
+                        .chain(server)
+                        .map(|binding| ArtworkBinding::opaque(binding))
+                        .collect()
+                }
+            }
+            Self::Smart { summary, .. } => summary
+                .artwork_bindings
+                .iter()
+                .map(|binding| ArtworkBinding::opaque(binding))
+                .collect(),
+        }
+    }
+
+    fn target(&self) -> PlaybackTarget {
+        match self {
+            Self::Saved { key, .. } => PlaybackTarget::Playlist(*key),
+            Self::Smart { key, .. } => PlaybackTarget::SmartPlaylist(*key),
+        }
+    }
+
+    fn context_id(&self) -> String {
+        match self {
+            Self::Saved { key, .. } => format!("playlist:{key}"),
+            Self::Smart { key, .. } => format!("smart-playlist:{key}"),
+        }
+    }
+
+    fn saved_key(&self) -> Option<PlaylistKey> {
+        match self {
+            Self::Saved { key, .. } => Some(*key),
+            Self::Smart { .. } => None,
+        }
+    }
+
+    fn smart_key(&self) -> Option<SmartPlaylistKey> {
+        match self {
+            Self::Smart { key, .. } => Some(*key),
+            Self::Saved { .. } => None,
+        }
+    }
+
+    fn install_context(
+        &self,
+        shell: &Rc<Shell>,
+        target: &gtk::Widget,
+        play: CollectionPlay,
+        position: Option<(f64, f64)>,
+    ) {
+        match self {
+            Self::Saved { summary, .. } => {
+                present_playlist_context_menu(target, shell, summary.clone(), Some(play), position)
+            }
+            Self::Smart { summary, .. } => present_smart_playlist_context_menu(
+                target,
+                shell,
+                summary.clone(),
+                Some(play),
+                position,
+            ),
+        }
+    }
+}
+
+impl Shell {
+    pub(crate) fn smart_playlist_detail_route(
+        self: &Rc<Self>,
+        key: SmartPlaylistKey,
+        detail: Option<SmartPlaylistDetailData>,
+        selected: crate::runtime::SelectedLibrary,
+    ) -> MountedRoute {
+        let Some(detail) = detail else {
+            return MountedRoute::static_widget(
+                self.placeholder_view(msgid("Smart Playlist"), msgid("This isn't available")),
+            );
+        };
+        self.shared_playlist_detail_route(
+            PlaylistDetailOwner::Smart {
+                key,
+                summary: detail.summary,
+            },
+            PlaylistDetailMembership::Smart(detail.tracks),
+            selected,
+        )
+    }
+
+    pub(crate) fn playlist_detail_route(
+        self: &Rc<Self>,
+        key: PlaylistKey,
+        detail: Option<PlaylistDetailData>,
+        selected: crate::runtime::SelectedLibrary,
+    ) -> MountedRoute {
+        let Some(detail) = detail else {
+            return MountedRoute::static_widget(
+                self.placeholder_view(msgid("Playlist"), msgid("This isn't available")),
+            );
+        };
+        self.shared_playlist_detail_route(
+            PlaylistDetailOwner::Saved {
+                key,
+                summary: detail.summary,
+            },
+            PlaylistDetailMembership::Saved(detail.entries),
+            selected,
+        )
+    }
+
+    fn shared_playlist_detail_route(
+        self: &Rc<Self>,
+        owner: PlaylistDetailOwner,
+        membership: PlaylistDetailMembership,
+        selected: crate::runtime::SelectedLibrary,
+    ) -> MountedRoute {
+        let key = owner.key();
+        let owner_state = Rc::new(std::cell::RefCell::new(owner.clone()));
+        let context = match owner {
+            PlaylistDetailOwner::Saved { .. } => "playlist-detail",
+            PlaylistDetailOwner::Smart { .. } => "smart-playlist-detail",
+        };
+        let (tracks_widget, item_navigation, apply_membership_settings) = match membership {
+            PlaylistDetailMembership::Saved(entries) => {
+                let playlist = owner
+                    .saved_key()
+                    .expect("saved Playlist membership has one Playlist key");
+                let entries = self.playlist_entries_view(&selected, playlist, entries);
+                let navigation = entries.item_navigation();
+                let widget = entries.widget();
+                let database = Arc::clone(&selected.database);
+                let runtime = selected.runtime.clone();
+                let source = selected.source_key;
+                let folder = selected.music_folder_key;
+                let entries_apply = entries.clone();
+                let request_order: Rc<
+                    dyn Fn(u64, super::playlist_entry_model::PlaylistEntryProjectionRequest),
+                > = Rc::new(move |generation, request| {
+                    let database = Arc::clone(&database);
+                    let entries = entries_apply.clone();
+                    let cancellation = ReadCancellation::new();
+                    let task = runtime.spawn(async move {
+                        database
+                            .playlist_entry_order(
+                                source,
+                                playlist,
+                                folder,
+                                request.settings.sort_key.playlist_entry_sort(),
+                                request.settings.descending,
+                                &request.query,
+                                &cancellation,
+                            )
+                            .await
+                    });
+                    glib::spawn_future_local(async move {
+                        if let Ok(Ok(order)) = task.await {
+                            entries.replace_order(generation, order);
+                        }
+                    });
+                });
+                let search_request = Rc::clone(&request_order);
+                entries.connect_search_request(move |generation, request| {
+                    search_request(generation, request);
+                });
+                let apply_entries = entries.clone();
+                let apply_request = Rc::clone(&request_order);
+                let apply = Rc::new(move |settings: &LibraryListSettings| {
+                    apply_entries
+                        .apply_library_list_settings(LibraryListKey::PlaylistTracks, settings);
+                    let (generation, request) = apply_entries.begin_order_request();
+                    apply_request(generation, request);
+                }) as Rc<dyn Fn(&LibraryListSettings)>;
+                (widget, navigation, apply)
+            }
+            PlaylistDetailMembership::Smart(tracks) => {
+                let smart = owner
+                    .smart_key()
+                    .expect("Smart Playlist membership has one Smart Playlist key");
+                let (widget, tracks, toolbar) = self.scrolling_track_projection(
+                    &selected,
+                    tracks,
+                    key,
+                    context,
+                    owner.context_id(),
+                );
+                let navigation = tracks.item_navigation();
+                let apply_tracks = tracks.clone();
+                let apply_toolbar = toolbar.clone();
+                let database = Arc::clone(&selected.database);
+                let runtime = selected.runtime.clone();
+                let source = selected.source_key;
+                let folder = selected.music_folder_key;
+                let lane = Rc::new(super::named_detail::NamedOrderLane::new());
+                let apply = Rc::new(move |settings: &LibraryListSettings| {
+                    apply_tracks.apply_library_list_settings(key, settings);
+                    apply_toolbar.apply(key, settings);
+                    let request = apply_tracks.projection_request();
+                    let (generation, cancellation) = lane.begin();
+                    let database = Arc::clone(&database);
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .map_or(0, |duration| duration.as_secs() as i64);
+                    let task = runtime.spawn(async move {
+                        database
+                            .smart_playlist_track_order(source, smart, folder, now, &cancellation)
+                            .await
+                    });
+                    let tracks = apply_tracks.clone();
+                    let lane = Rc::clone(&lane);
+                    glib::spawn_future_local(async move {
+                        if let Ok(Ok(order)) = task.await
+                            && lane.finish(generation)
+                        {
+                            tracks.replace_prepared(super::track_model::PreparedTrackProjection {
+                                order,
+                                request,
+                            });
+                        }
+                    });
+                }) as Rc<dyn Fn(&LibraryListSettings)>;
+                (widget, navigation, apply)
+            }
+        };
+        let wrapper = gtk::Box::new(
+            gtk::Orientation::Vertical,
+            if owner.saved_key().is_some() { 20 } else { 18 },
+        );
+        wrapper.add_css_class("route-content");
+        wrapper.set_hexpand(true);
+        wrapper.set_width_request(1);
+        wrapper.set_vexpand(true);
+        wrapper.set_margin_top(ROUTE_TOP_MARGIN);
+
+        let width = detail_route_inner_width(self, PRIMARY_ROUTE_MARGIN_START);
+        let artwork = owner.artwork(self.settings.current.borrow().prefer_server_playlist_covers);
+        let cover = self.cover_group_projection_for_artwork(
+            &artwork,
+            playlist_cover_size(width),
+            playlist_cover_size(i32::MAX),
+        );
+        cover.widget().add_css_class("playlist-detail-cover");
+        let title = detail_title_label(owner.name());
+        let kind_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        kind_slot.append(&self.playlist_detail_kind_row(&owner));
+        let summary = DetailSummaryProjection::new(&[
+            (
+                "rufin-tracks-symbolic",
+                track_count_text(owner.track_count().max(0) as u64),
+            ),
+            (
+                "rufin-preferences-system-time-symbolic",
+                format_duration_units((owner.duration_millis().max(0) / 1_000) as u32),
+            ),
+        ]);
+        let actions = detail_action_row();
+        actions.set_halign(gtk::Align::Start);
+        let target = owner.target();
+        let play_shell = Rc::clone(self);
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            target.play(&play_shell, placement, shuffled);
+        });
+        let controls = detail_playback_controls(
+            &actions,
+            msgid("Play playlist"),
+            None,
+            false,
+            Rc::clone(&play),
+        );
+        match &owner {
+            PlaylistDetailOwner::Saved { key, summary: _ } => {
+                let rename = detail_action_button(EDIT_ICON, "Rename");
+                let rename_shell = Rc::clone(self);
+                let playlist = *key;
+                let rename_owner = Rc::clone(&owner_state);
+                rename.connect_clicked(move |_| {
+                    let name = rename_owner.borrow().name().to_string();
+                    rename_shell.rename_playlist_dialog(playlist, name);
+                });
+                actions.append(&rename);
+
+                let add_current = detail_action_button(ADD_ICON, "Add current");
+                add_current.set_sensitive(
+                    current_playback_track(self.selected_playback().as_deref())
+                        .and_then(|track| track.track_key)
+                        .is_some(),
+                );
+                let add_shell = Rc::clone(self);
+                let playlist = *key;
+                add_current.connect_clicked(move |_| {
+                    let Some(track) =
+                        current_playback_track(add_shell.selected_playback().as_deref())
+                            .and_then(|track| track.track_key)
+                    else {
+                        return;
+                    };
+                    if let Some(operations) = add_shell.selected_source_operations() {
+                        let skip_duplicates = add_shell
+                            .selected_library()
+                            .as_deref()
+                            .is_none_or(|selected| !selected.playlist_tracks_can_repeat);
+                        operations.add_playlist_tracks(playlist, vec![track], skip_duplicates);
+                    }
+                });
+                actions.append(&add_current);
+
+                let delete = detail_delete_button("Delete");
+                let delete_shell = Rc::clone(self);
+                let playlist = *key;
+                let delete_owner = Rc::clone(&owner_state);
+                delete.connect_clicked(move |_| {
+                    let name = delete_owner.borrow().name().to_string();
+                    let dialog = adw::AlertDialog::builder()
+                        .heading(localization::tr("Delete Playlist"))
+                        .body(format!("Delete \"{name}\"?"))
+                        .build();
+                    dialog.add_response("cancel", &localization::tr("Cancel"));
+                    dialog.add_response("delete", &localization::tr("Delete"));
+                    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
+                    let shell = Rc::clone(&delete_shell);
+                    dialog.connect_response(None, move |_, response| {
+                        if response != "delete" {
+                            return;
+                        }
+                        if let Some(operations) = shell.selected_source_operations() {
+                            operations.delete_playlist(playlist);
+                            shell.navigate(super::route::Route::Playlists);
+                        }
+                    });
+                    delete_shell.present_selected_dialog(&dialog);
+                });
+                actions.append(&delete);
+            }
+            PlaylistDetailOwner::Smart { summary, .. } => {
+                let edit = detail_action_button(EDIT_ICON, "Edit");
+                let edit_shell = Rc::clone(self);
+                let edit_owner = Rc::clone(&owner_state);
+                edit.connect_clicked(move |_| {
+                    if let PlaylistDetailOwner::Smart { summary, .. } = &*edit_owner.borrow() {
+                        edit_shell.edit_smart_playlist_dialog(summary.clone());
+                    }
+                });
+                actions.append(&edit);
+
+                let delete = detail_delete_button("Delete");
+                let delete_shell = Rc::clone(self);
+                let delete_summary = summary.clone();
+                delete.connect_clicked(move |_| {
+                    delete_shell.publish_smart_playlist_change(
+                        crate::preferences::dialogs::SmartPlaylistChange::Delete(
+                            delete_summary.smart_playlist_key,
+                        ),
+                        None,
+                    );
+                    delete_shell.navigate(super::route::Route::SmartPlaylists);
+                });
+                actions.append(&delete);
+            }
+        }
+
+        let menu_shell = Rc::clone(self);
+        let menu_owner = Rc::clone(&owner_state);
+        let menu_play = Rc::clone(&play);
+        let context_menu = Rc::new(move |target: &gtk::Widget, position| {
+            menu_owner.borrow().install_context(
+                &menu_shell,
+                target,
+                Rc::clone(&menu_play),
+                position,
+            );
+        });
+        let showcase = playlist_detail_showcase(
+            self,
+            PlaylistDetailShowcase {
+                seed: owner.seed(),
+                initial_width: width,
+                cover: cover.clone(),
+                cover_controls: controls,
+                context_menu: Some(context_menu),
+                kind_row: kind_slot.clone().upcast(),
+                title: title.clone().upcast(),
+                summary: summary.widget(),
+                actions: actions.upcast(),
+            },
+        );
+        wrapper.append(&library_route_inset(showcase));
+        wrapper.append(&tracks_widget);
+
+        let resume = {
+            let shell = Rc::clone(self);
+            let apply_membership_settings = Rc::clone(&apply_membership_settings);
+            Rc::new(move || {
+                let settings = shell.settings.current.borrow().library_list(key);
+                apply_membership_settings(&settings);
+            })
+        };
+        let refresh = {
+            let shell = Rc::downgrade(self);
+            let selected = selected.clone();
+            let owner = Rc::clone(&owner_state);
+            let title = title.clone();
+            let summary = summary.clone();
+            let cover = cover.clone();
+            let kind_slot = kind_slot.clone();
+            let apply_membership_settings = Rc::clone(&apply_membership_settings);
+            Rc::new(move || {
+                let Some(shell) = shell.upgrade() else { return };
+                let list_settings = shell.settings.current.borrow().library_list(key);
+                apply_membership_settings(&list_settings);
+                let database = Arc::clone(&selected.database);
+                let source = selected.source_key;
+                let folder = selected.music_folder_key;
+                let owner_key = owner.borrow().clone();
+                let task = selected.runtime.spawn(async move {
+                    let cancellation = ReadCancellation::new();
+                    match owner_key {
+                        PlaylistDetailOwner::Saved { key, .. } => database
+                            .playlist_rows(source, &[key], folder, &cancellation)
+                            .await
+                            .map_err(|error| error.to_string())?
+                            .pop()
+                            .map(|summary| PlaylistDetailOwner::Saved { key, summary }),
+                        PlaylistDetailOwner::Smart { key, .. } => {
+                            let now = SystemTime::now()
+                                .duration_since(UNIX_EPOCH)
+                                .map_or(0, |duration| duration.as_secs() as i64);
+                            database
+                                .smart_playlist_rows(source, &[key], folder, now, &cancellation)
+                                .await
+                                .map_err(|error| error.to_string())?
+                                .pop()
+                                .map(|summary| PlaylistDetailOwner::Smart { key, summary })
+                        }
+                    }
+                    .ok_or_else(|| "Playlist is no longer current".to_string())
+                });
+                let shell = Rc::downgrade(&shell);
+                let owner = Rc::clone(&owner);
+                let title = title.clone();
+                let summary = summary.clone();
+                let cover = cover.clone();
+                let kind_slot = kind_slot.clone();
+                glib::spawn_future_local(async move {
+                    let Ok(Ok(next)) = task.await else { return };
+                    let Some(shell) = shell.upgrade() else { return };
+                    title.set_text(next.name());
+                    summary.replace(&[
+                        (
+                            "rufin-tracks-symbolic",
+                            track_count_text(next.track_count().max(0) as u64),
+                        ),
+                        (
+                            "rufin-preferences-system-time-symbolic",
+                            format_duration_units((next.duration_millis().max(0) / 1_000) as u32),
+                        ),
+                    ]);
+                    cover.replace(
+                        &shell,
+                        &next.artwork(
+                            shell
+                                .settings
+                                .current
+                                .borrow()
+                                .prefer_server_playlist_covers,
+                        ),
+                    );
+                    while let Some(child) = kind_slot.first_child() {
+                        kind_slot.remove(&child);
+                    }
+                    kind_slot.append(&shell.playlist_detail_kind_row(&next));
+                    owner.replace(next);
+                });
+            }) as Rc<dyn Fn()>
+        };
+        MountedRoute::new(wrapper.upcast(), resume)
+            .with_item_navigation(item_navigation)
+            .with_catalog_refresh(refresh)
+    }
+
+    fn playlist_detail_kind_row(self: &Rc<Self>, owner: &PlaylistDetailOwner) -> gtk::Box {
+        let kind = localized_label("Playlist");
+        kind.add_css_class("eyebrow");
+        kind.set_xalign(0.0);
+        kind.set_halign(gtk::Align::Start);
+        kind.set_valign(gtk::Align::Center);
+        kind.set_margin_end(6);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
+        row.add_css_class("album-detail-kind-row");
+        row.add_css_class("album-detail-genre-row");
+        row.set_valign(gtk::Align::Center);
+        row.set_halign(gtk::Align::Start);
+        row.append(&kind);
+        if let PlaylistDetailOwner::Saved { key, .. } = owner {
+            let radio = detail_radio_button();
+            let controller = self.products.playback.radio.clone();
+            let key = *key;
+            radio.connect_clicked(move |_| {
+                controller.play_radio(playback::RadioPlayRequest::now(
+                    library::RadioSeed::Playlist(key),
+                ));
+            });
+            row.append(&radio);
+        }
+        if let PlaylistDetailOwner::Saved { summary, .. } = owner {
+            for genre in &summary.genres {
+                let button = super::detail_showcase::detail_genre_pill_button(&genre.name);
+                let shell = Rc::clone(self);
+                let key = genre.genre_key;
+                button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(key)));
+                row.append(&button);
+            }
+        }
+        row
+    }
+}
+
+pub(crate) async fn load_playlist_detail(
+    database: &Database,
+    source: library::SourceKey,
+    folder: Option<library::FolderKey>,
+    key: PlaylistKey,
+    settings: &LibraryListSettings,
+    cancellation: &ReadCancellation,
+) -> Result<Option<PlaylistDetailData>, String> {
+    let summary = database
+        .playlist_rows(source, &[key], folder, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+        .pop();
+    let Some(summary) = summary else {
+        return Ok(None);
+    };
+    let entries = database
+        .playlist_entry_order(
+            source,
+            key,
+            folder,
+            settings.sort_key.playlist_entry_sort(),
+            settings.descending,
+            "",
+            cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(PlaylistDetailData { summary, entries }))
+}
+
+pub(crate) async fn load_smart_playlist_detail(
+    database: &Database,
+    source: library::SourceKey,
+    folder: Option<library::FolderKey>,
+    key: SmartPlaylistKey,
+    cancellation: &ReadCancellation,
+) -> Result<Option<SmartPlaylistDetailData>, String> {
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_secs() as i64);
+    let summary = database
+        .smart_playlist_rows(source, &[key], folder, now, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+        .pop();
+    let Some(summary) = summary else {
+        return Ok(None);
+    };
+    let tracks = database
+        .smart_playlist_track_order(source, key, folder, now, cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(SmartPlaylistDetailData { summary, tracks }))
 }
 
 pub(crate) fn playlist_cover_size(width: i32) -> i32 {
@@ -84,764 +693,35 @@ pub(crate) fn playlist_cover_size(width: i32) -> i32 {
     }
 }
 
-impl Shell {
-    fn playlist_detail_kind_row(
-        self: &Rc<Self>,
-        genres: &[Arc<::library::Genre>],
-        radio_playlist: Option<PlaylistId>,
-    ) -> gtk::Box {
-        let kind = localized_label("Playlist");
-        kind.add_css_class("eyebrow");
-        kind.set_xalign(0.0);
-        kind.set_halign(gtk::Align::Start);
-        kind.set_valign(gtk::Align::Center);
-        kind.set_margin_end(6);
-
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        row.add_css_class("album-detail-kind-row");
-        row.add_css_class("album-detail-genre-row");
-        row.set_valign(gtk::Align::Center);
-        row.set_halign(gtk::Align::Start);
-        row.append(&kind);
-        if let Some(playlist_id) = radio_playlist {
-            let radio = detail_radio_button();
-            let controller = self.products.playback.radio.clone();
-            radio.connect_clicked(move |_| {
-                controller.play_radio(RadioPlayRequest::now(RadioSeed::Playlist(
-                    playlist_id.clone(),
-                )));
-            });
-            row.append(&radio);
-        }
-
-        for genre in genres {
-            let button = detail_genre_pill_button(genre.name.trim());
-            let shell = Rc::clone(self);
-            let genre_id = genre.id.clone();
-            button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(genre_id.clone())));
-            row.append(&button);
-        }
-        row
-    }
-
-    pub(crate) fn smart_playlist_detail_route(
-        self: &Rc<Self>,
-        smart_playlist_id: SmartPlaylistId,
-        detail: Option<Arc<SmartPlaylistDetail>>,
-        loaded: Arc<Library>,
-        music_folder_id: Option<MusicFolderId>,
-    ) -> MountedRoute {
-        let Some(detail) = detail else {
-            return MountedRoute::static_widget(
-                self.placeholder_view(msgid("Smart Playlist"), msgid("This isn't available")),
-            );
-        };
-        let initial_summary = detail.summary.clone();
-        let header = Rc::new(RefCell::new(initial_summary.clone()));
-        let seed = stable_seed(smart_playlist_id.as_str());
-        let context_id = format!("smart-playlist:{}", smart_playlist_id.as_str());
-        let (tracks_widget, tracks, tracks_toolbar) = self.scrolling_track_projection(
-            detail.tracks.clone(),
-            LibraryListKey::SmartPlaylistTracks,
-            "smart-playlist-detail",
-            context_id.clone(),
-        );
-        let content_width = detail_route_inner_width(self, PRIMARY_ROUTE_MARGIN_START);
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        wrapper.add_css_class("route-content");
-        wrapper.set_hexpand(true);
-        wrapper.set_halign(gtk::Align::Fill);
-        wrapper.set_width_request(1);
-        wrapper.set_vexpand(true);
-        wrapper.set_margin_top(ROUTE_TOP_MARGIN);
-
-        let artwork = ArtworkBinding::smart_playlist_slots(
-            &initial_summary.smart_playlist,
-            &initial_summary.representative_albums,
-        );
-        let cover = self.cover_group_projection_for_artwork(
-            &artwork,
-            playlist_cover_size(content_width),
-            playlist_cover_size(i32::MAX),
-        );
-        cover.widget().add_css_class("playlist-detail-cover");
-        let title = detail_title_label(&smart_playlist_display_name(
-            &initial_summary.smart_playlist,
-        ));
-        let kind_row = self.playlist_detail_kind_row(&[], None);
-        let summary = PlaylistDetailSummary::new(
-            initial_summary.track_count,
-            initial_summary.duration_seconds,
-        );
-        let actions = detail_action_row();
-        actions.set_halign(gtk::Align::Start);
-
-        let controller = self.products.playback.queue.clone();
-        let play_tracks = tracks.clone();
-        let play_context_id = context_id.clone();
-        let play: CollectionPlay = Rc::new(move |placement, shuffled_start| {
-            if let Some(request) =
-                play_tracks.source_play_request(placement, &play_context_id, shuffled_start)
-            {
-                controller.play_loaded(request);
-            }
-        });
-        let cover_controls = detail_playback_controls(
-            &actions,
-            msgid("Play smart playlist"),
-            None,
-            false,
-            Rc::clone(&play),
-        );
-
-        let rename = detail_action_button(EDIT_ICON, "Rename");
-        let shell = Rc::clone(self);
-        let rename_header = Rc::clone(&header);
-        rename.connect_clicked(move |_| {
-            shell.rename_smart_playlist_dialog((*rename_header.borrow().smart_playlist).clone());
-        });
-        actions.append(&rename);
-        let delete = detail_delete_button("Delete");
-        let delete_shell = Rc::clone(self);
-        let delete_header = Rc::clone(&header);
-        delete.connect_clicked(move |_| {
-            let playlist_id = delete_header.borrow().smart_playlist.id.clone();
-            if let Some(source) = delete_shell.selected_source_operations() {
-                source.delete_smart_playlist(playlist_id);
-            }
-            delete_shell.navigate(Route::SmartPlaylists);
-        });
-        actions.append(&delete);
-
-        let menu_shell = Rc::clone(self);
-        let menu_header = Rc::clone(&header);
-        let menu_play = Rc::clone(&play);
-        let context_menu: crate::interactions::ContextMenuOpen =
-            Rc::new(move |target, position| {
-                let playlist = menu_header.borrow().clone();
-                present_smart_playlist_context_menu(
-                    target,
-                    &menu_shell,
-                    playlist,
-                    Some(Rc::clone(&menu_play)),
-                    position,
-                );
-            });
-
-        let showcase = playlist_detail_showcase(
-            self,
-            PlaylistDetailShowcase {
-                seed,
-                initial_width: content_width,
-                cover: cover.clone(),
-                cover_controls,
-                context_menu: Some(context_menu),
-                kind_row: kind_row.upcast(),
-                title: title.clone().upcast(),
-                summary: summary.widget(),
-                actions: actions.upcast(),
-            },
-        );
-        wrapper.append(&library_route_inset(showcase));
-
-        let tracks_stack = gtk::Stack::new();
-        tracks_stack.set_hexpand(true);
-        tracks_stack.set_vexpand(true);
-        tracks_stack.add_named(&tracks_widget, Some("tracks"));
-        tracks_stack.add_named(
-            &library_route_inset(self.placeholder_view("Tracks", msgid("No matching tracks"))),
-            Some("empty"),
-        );
-        tracks_stack.set_visible_child_name(if tracks.source_is_empty() {
-            "empty"
-        } else {
-            "tracks"
-        });
-        wrapper.append(&tracks_stack);
-
-        let route_stack = gtk::Stack::new();
-        route_stack.set_hexpand(true);
-        route_stack.set_vexpand(true);
-        route_stack.add_named(&wrapper, Some("detail"));
-        route_stack.add_named(
-            &self.placeholder_view(msgid("Smart Playlist"), msgid("This isn't available")),
-            Some("missing"),
-        );
-        route_stack.set_visible_child_name("detail");
-
-        let identity = self.mounted_route_read_identity(
-            Route::SmartPlaylistDetail(smart_playlist_id.clone()),
-            &loaded,
-            music_folder_id.clone(),
-        );
-        let apply = {
-            let shell = Rc::clone(self);
-            let route_stack = route_stack.clone();
-            let header = Rc::clone(&header);
-            let title = title.clone();
-            let summary = summary.clone();
-            let cover = cover.clone();
-            let tracks_stack = tracks_stack.clone();
-            let tracks = tracks.clone();
-            Rc::new(
-                move |request: SmartPlaylistDetailReadRequest,
-                      result: Result<Option<PreparedSmartPlaylistDetail>, String>| {
-                    if !shell.mounted_route_read_is_current(&request.identity) {
-                        return;
-                    }
-                    let next = match result {
-                        Ok(next) => next,
-                        Err(error) => {
-                            tracing::warn!(
-                                %error,
-                                "failed to read the mounted Smart Playlist detail"
-                            );
-                            route_stack.set_visible_child_name("missing");
-                            return;
-                        }
-                    };
-                    let Some(next) = next else {
-                        route_stack.set_visible_child_name("missing");
-                        return;
-                    };
-                    if !tracks.replace_prepared(next.tracks) {
-                        return;
-                    }
-                    title.set_text(&smart_playlist_display_name(&next.summary.smart_playlist));
-                    summary.set(next.summary.track_count, next.summary.duration_seconds);
-                    summary.widget().set_visible(true);
-                    cover.replace(
-                        &shell,
-                        &ArtworkBinding::smart_playlist_slots(
-                            &next.summary.smart_playlist,
-                            &next.summary.representative_albums,
-                        ),
-                    );
-                    tracks_stack.set_visible_child_name(if tracks.source_is_empty() {
-                        "empty"
-                    } else {
-                        "tracks"
-                    });
-                    header.replace(next.summary.clone());
-                    route_stack.set_visible_child_name("detail");
-                },
-            )
-        };
-        let load = {
-            let loaded = Arc::clone(&loaded);
-            let smart_playlist_id = smart_playlist_id.clone();
-            let music_folder_id = music_folder_id.clone();
-            Arc::new(move |request: &SmartPlaylistDetailReadRequest| {
-                load_smart_playlist_detail(&loaded, &smart_playlist_id, music_folder_id.as_ref())
-                    .and_then(|detail| {
-                        detail
-                            .map(|detail| {
-                                prepare_track_projection(
-                                    detail.tracks.clone(),
-                                    request.tracks.clone(),
-                                )
-                                .map(|tracks| PreparedSmartPlaylistDetail {
-                                    summary: detail.summary.clone(),
-                                    tracks,
-                                })
-                                .map_err(|error| error.to_string())
-                            })
-                            .transpose()
-                    })
-            })
-        };
-        let read = LatestMountedRouteRead::new_with_request(apply, load, "Smart Playlist detail");
-        {
-            let read = Rc::downgrade(&read);
-            let identity = identity.clone();
-            tracks.connect_search_request(move |tracks| {
-                let Some(read) = read.upgrade() else {
-                    return;
-                };
-                read.request_with_if_running(SmartPlaylistDetailReadRequest {
-                    identity: identity.clone(),
-                    tracks,
-                });
-            });
-        }
-        let resume = {
-            let shell = Rc::clone(self);
-            let tracks = tracks.clone();
-            let read = Rc::clone(&read);
-            let identity = identity.clone();
-            Rc::new(move || {
-                let settings = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(LibraryListKey::SmartPlaylistTracks);
-                tracks.apply_library_list_settings(LibraryListKey::SmartPlaylistTracks, &settings);
-                tracks_toolbar.apply(LibraryListKey::SmartPlaylistTracks, &settings);
-                let request = SmartPlaylistDetailReadRequest {
-                    identity: identity.clone(),
-                    tracks: tracks.projection_request(),
-                };
-                read.request_with_if_running(request);
-            })
-        };
-        let update = {
-            let tracks = tracks.clone();
-            let read = Rc::clone(&read);
-            let identity = identity.clone();
-            Rc::new(move |update: &crate::runtime::SelectedLibraryUpdate| {
-                let replacements = update.change.tracks.as_slice();
-                let request = tracks.projection_request();
-                let replacement_changes_visible_facts = replacements.iter().any(|replacement| {
-                    !replacement.activity_only || request.settings.uses_track_activity()
-                });
-                if update.change.smart_playlists.contains(&smart_playlist_id)
-                    || replacement_changes_visible_facts
-                {
-                    read.request_with(SmartPlaylistDetailReadRequest {
-                        identity: identity.clone(),
-                        tracks: request,
-                    });
-                }
-            })
-        };
-        MountedRoute::new(route_stack.upcast(), resume)
-            .with_item_navigation(tracks.item_navigation())
-            .with_library_update(update)
-    }
-
-    pub(crate) fn playlist_detail_route(
-        self: &Rc<Self>,
-        playlist_id: PlaylistId,
-        detail: Option<PlaylistDetail>,
-        initial_positions: Vec<u32>,
-        loaded: Arc<Library>,
-    ) -> MountedRoute {
-        let settings = self.settings.current.borrow().clone();
-        let Some(detail) = detail else {
-            return MountedRoute::static_widget(
-                self.placeholder_view("Playlist", msgid("This isn't available")),
-            );
-        };
-        let header = Rc::new(RefCell::new(detail.summary.clone()));
-        let applied_playlist_artwork = Rc::new(Cell::new(settings.prefer_server_playlist_covers));
-        let seed = stable_seed(playlist_id.as_str());
-        let content_width = detail_route_inner_width(self, PRIMARY_ROUTE_MARGIN_START);
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 20);
-        wrapper.add_css_class("route-content");
-        wrapper.set_hexpand(true);
-        wrapper.set_halign(gtk::Align::Fill);
-        wrapper.set_width_request(1);
-        wrapper.set_vexpand(true);
-        wrapper.set_margin_top(ROUTE_TOP_MARGIN);
-
-        let cover = self.cover_group_projection_for_artwork(
-            &playlist_artwork(&detail.summary, settings.prefer_server_playlist_covers),
-            playlist_cover_size(content_width),
-            playlist_cover_size(i32::MAX),
-        );
-        cover.widget().add_css_class("playlist-detail-cover");
-        let title = detail_title_label(&detail.summary.playlist.name);
-        let kind_slot = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        kind_slot.append(
-            &self.playlist_detail_kind_row(&detail.summary.genres, Some(playlist_id.clone())),
-        );
-        let summary =
-            PlaylistDetailSummary::new(detail.summary.track_count, detail.summary.duration_seconds);
-        let entries =
-            self.playlist_entries_view(playlist_id.clone(), detail.entries, initial_positions);
-
-        let actions = detail_action_row();
-        actions.set_halign(gtk::Align::Start);
-        let controller = self.products.playback.queue.clone();
-        let play_entries = entries.clone();
-        let play: CollectionPlay = Rc::new(move |placement, shuffled_start| {
-            if let Some(request) = play_entries.source_play_request(placement, shuffled_start) {
-                controller.play_loaded(request);
-            }
-        });
-        let cover_controls = detail_playback_controls(
-            &actions,
-            msgid("Play playlist"),
-            None,
-            false,
-            Rc::clone(&play),
-        );
-
-        let rename = detail_action_button(EDIT_ICON, "Rename");
-        let shell = Rc::clone(self);
-        let rename_header = Rc::clone(&header);
-        let rename_id = playlist_id.clone();
-        rename.connect_clicked(move |_| {
-            shell.rename_playlist_dialog(
-                rename_id.clone(),
-                rename_header.borrow().playlist.name.clone(),
-            );
-        });
-        actions.append(&rename);
-
-        let add_current = detail_action_button(ADD_ICON, "Add current");
-        add_current.set_sensitive(
-            self.selected_playback()
-                .as_deref()
-                .and_then(|player| player.transport.current.as_ref())
-                .is_some(),
-        );
-        let shell = Rc::clone(self);
-        let add_id = playlist_id.clone();
-        add_current.connect_clicked(move |_| {
-            let track_id = shell
-                .selected_playback()
-                .as_deref()
-                .and_then(|player| player.transport.current.as_ref())
-                .map(|entry| entry.track.id.clone());
-            if let Some(track_id) = track_id {
-                if let Some(source) = shell.selected_source_operations() {
-                    source.edit_playlist(PlaylistEdit::AddTracks {
-                        playlist_id: add_id.clone(),
-                        track_ids: vec![track_id],
-                    });
-                }
-            }
-        });
-        actions.append(&add_current);
-
-        let delete = detail_delete_button("Delete");
-        let source = self.selected_source_operations();
-        let delete_shell = Rc::clone(self);
-        let delete_header = Rc::clone(&header);
-        let delete_id = playlist_id.clone();
-        delete.connect_clicked(move |_| {
-            let dialog = adw::AlertDialog::builder()
-                .heading(tr("Delete Playlist"))
-                .body(format!(
-                    "Delete \"{}\"?",
-                    delete_header.borrow().playlist.name
-                ))
-                .build();
-            dialog.add_response("cancel", &tr("Cancel"));
-            dialog.add_response("delete", &tr("Delete"));
-            dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
-            let source = source.clone();
-            let shell = Rc::clone(&delete_shell);
-            let playlist_id = delete_id.clone();
-            dialog.connect_response(None, move |_, response| {
-                if response == "delete"
-                    && let Some(source) = source.as_ref()
-                {
-                    source.edit_playlist(PlaylistEdit::Delete {
-                        playlist_id: playlist_id.clone(),
-                    });
-                    shell.navigate(Route::Playlists);
-                }
-            });
-            delete_shell.present_selected_dialog(&dialog);
-        });
-        actions.append(&delete);
-
-        let menu_shell = Rc::clone(self);
-        let menu_header = Rc::clone(&header);
-        let menu_play = Rc::clone(&play);
-        let context_menu: crate::interactions::ContextMenuOpen =
-            Rc::new(move |target, position| {
-                let playlist = menu_header.borrow().clone();
-                present_playlist_context_menu(
-                    target,
-                    &menu_shell,
-                    playlist,
-                    Some(Rc::clone(&menu_play)),
-                    position,
-                );
-            });
-
-        let showcase = playlist_detail_showcase(
-            self,
-            PlaylistDetailShowcase {
-                seed,
-                initial_width: content_width,
-                cover: cover.clone(),
-                cover_controls,
-                context_menu: Some(context_menu),
-                kind_row: kind_slot.clone().upcast(),
-                title: title.clone().upcast(),
-                summary: summary.widget(),
-                actions: actions.upcast(),
-            },
-        );
-        wrapper.append(&library_route_inset(showcase));
-        wrapper.append(&entries.widget());
-
-        let route_stack = gtk::Stack::new();
-        route_stack.set_hexpand(true);
-        route_stack.set_vexpand(true);
-        route_stack.add_named(&wrapper, Some("content"));
-        route_stack.add_named(
-            &self.placeholder_view("Playlist", msgid("This isn't available")),
-            Some("missing"),
-        );
-        route_stack.set_visible_child_name("content");
-
-        let music_folder_id = self
-            .selected_library()
-            .as_deref()
-            .and_then(|selected| selected.music_folder_id.clone());
-        let identity = self.mounted_route_read_identity(
-            Route::PlaylistDetail(playlist_id.clone()),
-            &loaded,
-            music_folder_id,
-        );
-        let apply =
-            {
-                let shell = Rc::clone(self);
-                let route_stack = route_stack.clone();
-                let header = Rc::clone(&header);
-                let title = title.clone();
-                let summary = summary.clone();
-                let entries = entries.clone();
-                let cover = cover.clone();
-                let kind_slot = kind_slot.clone();
-                let applied_playlist_artwork = Rc::clone(&applied_playlist_artwork);
-                let playlist_id = playlist_id.clone();
-                Rc::new(
-                move |request: PlaylistDetailReadRequest,
-                      result: Result<Option<PreparedPlaylistDetail>, String>| {
-                if !shell.mounted_route_read_is_current(&request.identity) {
-                    return;
-                }
-                let next = match result {
-                    Ok(next) => next,
-                    Err(error) => {
-                        tracing::warn!(%error, "failed to read the mounted Playlist detail");
-                        return;
-                    }
-                };
-                let Some(next) = next else {
-                    route_stack.set_visible_child_name("missing");
-                    return;
-                };
-                if !entries.replace_prepared(next.entries) {
-                    return;
-                }
-                title.set_text(&next.summary.playlist.name);
-                summary.set(next.summary.track_count, next.summary.duration_seconds);
-                let prefer_server = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .prefer_server_playlist_covers;
-                cover.replace(&shell, &playlist_artwork(&next.summary, prefer_server));
-                applied_playlist_artwork.set(prefer_server);
-                while let Some(child) = kind_slot.first_child() {
-                    kind_slot.remove(&child);
-                }
-                kind_slot.append(
-                    &shell
-                        .playlist_detail_kind_row(&next.summary.genres, Some(playlist_id.clone())),
-                );
-                header.replace(next.summary);
-                route_stack.set_visible_child_name("content");
-                },
-            )
-            };
-        let load = {
-            let loaded = Arc::clone(&loaded);
-            let playlist_id = playlist_id.clone();
-            Arc::new(move |request: &PlaylistDetailReadRequest| {
-                load_playlist_detail(&loaded, &playlist_id).and_then(|detail| {
-                    detail
-                        .map(|detail| {
-                            prepare_playlist_entry_projection(
-                                detail.entries,
-                                request.entries.clone(),
-                            )
-                            .map(|entries| PreparedPlaylistDetail {
-                                summary: detail.summary,
-                                entries,
-                            })
-                        })
-                        .transpose()
-                })
-            })
-        };
-        let read = LatestMountedRouteRead::new_with_request(apply, load, "Playlist detail");
-        {
-            let read = Rc::downgrade(&read);
-            let identity = identity.clone();
-            entries.connect_search_request(move |entries| {
-                let Some(read) = read.upgrade() else {
-                    return;
-                };
-                read.request_with_if_running(PlaylistDetailReadRequest {
-                    identity: identity.clone(),
-                    entries,
-                });
-            });
-        }
-        let resume = {
-            let shell = Rc::clone(self);
-            let header = Rc::clone(&header);
-            let applied_playlist_artwork = Rc::clone(&applied_playlist_artwork);
-            let cover = cover.clone();
-            let entries = entries.clone();
-            let read = Rc::clone(&read);
-            let identity = identity.clone();
-            Rc::new(move || {
-                let prefer_server = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .prefer_server_playlist_covers;
-                if applied_playlist_artwork.get() != prefer_server {
-                    cover.replace(&shell, &playlist_artwork(&header.borrow(), prefer_server));
-                    applied_playlist_artwork.set(prefer_server);
-                }
-                let settings = shell
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(LibraryListKey::PlaylistTracks);
-                entries.apply_library_list_settings(LibraryListKey::PlaylistTracks, &settings);
-                read.request_with_if_running(PlaylistDetailReadRequest {
-                    identity: identity.clone(),
-                    entries: entries.projection_request(),
-                });
-            })
-        };
-        let update = {
-            let playlist_id = playlist_id.clone();
-            let read = Rc::clone(&read);
-            let identity = identity.clone();
-            let entries = entries.clone();
-            Rc::new(move |update: &crate::runtime::SelectedLibraryUpdate| {
-                if !update.change.playlists.contains(&playlist_id) {
-                    return;
-                }
-                read.request_with(PlaylistDetailReadRequest {
-                    identity: identity.clone(),
-                    entries: entries.projection_request(),
-                });
-            })
-        };
-        MountedRoute::new(route_stack.upcast(), resume)
-            .with_item_navigation(entries.item_navigation())
-            .with_library_update(update)
-    }
-}
-
-fn playlist_artwork(playlist: &PlaylistSummary, prefer_server: bool) -> Vec<ArtworkBinding> {
-    ArtworkBinding::playlist_slots(
-        &playlist.playlist,
-        &playlist.representative_albums,
-        prefer_server,
-    )
-}
-
-pub(crate) fn load_smart_playlist_detail(
-    loaded: &Arc<Library>,
-    smart_playlist_id: &SmartPlaylistId,
-    music_folder_id: Option<&MusicFolderId>,
-) -> Result<Option<Arc<SmartPlaylistDetail>>, String> {
-    loaded
-        .smart_playlist_detail(smart_playlist_id, music_folder_id)
-        .map_err(|error| error.to_string())
-}
-
-pub(crate) fn load_playlist_detail(
-    loaded: &Arc<Library>,
-    playlist_id: &PlaylistId,
-) -> Result<Option<PlaylistDetail>, String> {
-    loaded
-        .playlist_detail(playlist_id)
-        .map_err(|error| error.to_string())
-}
-
-#[derive(Clone)]
-struct PlaylistDetailSummary {
-    row: gtk::Box,
-    track_count: gtk::Label,
-    track_count_value: Rc<Cell<u32>>,
-    duration: gtk::Label,
-}
-
-impl PlaylistDetailSummary {
-    fn new(track_count: u32, duration_seconds: u32) -> Self {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        row.set_halign(gtk::Align::Start);
-        let (track_count_item, track_count_label) = playlist_detail_summary_item(
-            "rufin-tracks-symbolic",
-            &track_count_text(track_count.into()),
-        );
-        let track_count_value = Rc::new(Cell::new(track_count));
-        let track_count_for_locale = Rc::clone(&track_count_value);
-        bind_label_text_with(&track_count_label, move || {
-            track_count_text(u64::from(track_count_for_locale.get()))
-        });
-        let (duration_item, duration_label) = playlist_detail_summary_item(
-            "rufin-preferences-system-time-symbolic",
-            &format_duration_units(duration_seconds),
-        );
-        row.append(&track_count_item);
-        row.append(&duration_item);
-        Self {
-            row,
-            track_count: track_count_label,
-            track_count_value,
-            duration: duration_label,
-        }
-    }
-
-    fn widget(&self) -> gtk::Widget {
-        self.row.clone().upcast()
-    }
-
-    fn set(&self, track_count: u32, duration_seconds: u32) {
-        self.track_count_value.set(track_count);
-        self.track_count
-            .set_text(&track_count_text(track_count.into()));
-        self.duration
-            .set_text(&format_duration_units(duration_seconds));
-    }
-}
-
-fn playlist_detail_summary_item(icon_name: &str, text: &str) -> (gtk::Box, gtk::Label) {
-    let item = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let icon = gtk::Image::from_icon_name(icon_name);
-    icon.add_css_class("muted");
-    icon.set_pixel_size(14);
-    item.append(&icon);
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.set_xalign(0.0);
-    item.append(&label);
-    (item, label)
+pub(crate) fn playlist_detail_compact_for_width(width: i32) -> bool {
+    width < PLAYLIST_DETAIL_COMPACT_WIDTH
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::format_duration_units;
-    use crate::routes::route_layout::{detail_showcase_cover_only, detail_showcase_cover_size};
-
-    use super::playlist_cover_size;
+    use super::*;
 
     #[test]
-    fn playlist_detail_duration_uses_units() {
-        assert_eq!(format_duration_units(57), "57s");
-        assert_eq!(format_duration_units(4_497), "1h 14m 57s");
+    fn playlist_cover_respects_checkpoint_breakpoints() {
+        assert_eq!(playlist_cover_size(359), PLAYLIST_DETAIL_TINY_COVER_SIZE);
+        assert_eq!(playlist_cover_size(420), PLAYLIST_DETAIL_TINY_COVER_SIZE);
+        assert_eq!(playlist_cover_size(760), PLAYLIST_DETAIL_WIDE_COVER_SIZE);
     }
 
     #[test]
     fn mounted_detail_covers_track_width_without_resize_jumps() {
-        let media_render_size = detail_showcase_cover_size(i32::MAX);
-        let collection_render_size = playlist_cover_size(i32::MAX);
-        let mut previous_media = detail_showcase_cover_size(96);
+        let media_limit = super::super::route_layout::detail_showcase_cover_size(i32::MAX);
+        let collection_limit = playlist_cover_size(i32::MAX);
+        let mut previous_media = super::super::route_layout::detail_showcase_cover_size(96);
         let mut previous_collection = playlist_cover_size(96);
         for width in 97..=900 {
-            let media = detail_showcase_cover_size(width);
+            let media = super::super::route_layout::detail_showcase_cover_size(width);
             let collection = playlist_cover_size(width);
             assert!(media >= previous_media && media - previous_media <= 1);
             assert!(collection >= previous_collection && collection - previous_collection <= 1);
-            assert!(media <= media_render_size);
-            assert!(collection <= collection_render_size);
-            if detail_showcase_cover_only(width) {
+            assert!(media <= media_limit);
+            assert!(collection <= collection_limit);
+            if super::super::route_layout::detail_showcase_cover_only(width) {
                 assert!(media <= width);
                 assert!(collection <= width);
             }

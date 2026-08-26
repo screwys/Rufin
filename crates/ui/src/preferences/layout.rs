@@ -326,9 +326,9 @@ pub(crate) fn discord_link_from_index(index: u32) -> LinkType {
 use std::rc::Rc;
 
 use super::selection_row;
+use crate::settings::HomeBlockKind;
 use crate::shell::Shell;
 use crate::{LeftSidebarMode, RightSidebarMode};
-use ::library::HomeBlockKind;
 use adw::prelude::*;
 use desktop_integration::{DisplayType, LinkType};
 use localization::tr;

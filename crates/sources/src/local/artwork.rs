@@ -38,34 +38,6 @@ pub(super) fn supported_image(path: &Path) -> bool {
         })
 }
 
-/// Select from the one scan-owned image inventory for this actual directory.
-///
-/// This preserves Rufin's released sidecar names and sole-image fallback
-/// without another `read_dir` per Track or a directory-name hierarchy guess.
-pub(super) fn sidecar(images: &[PathBuf]) -> Option<PathBuf> {
-    images
-        .iter()
-        .filter_map(|path| sidecar_rank(path).map(|rank| (rank, path)))
-        .min_by_key(|(rank, _)| *rank)
-        .map(|(_, path)| path.clone())
-        .or_else(|| match images {
-            [path] => Some(path.clone()),
-            _ => None,
-        })
-}
-
-fn sidecar_rank(path: &Path) -> Option<(usize, usize)> {
-    let stem = path.file_stem()?.to_str()?;
-    let extension = path.extension()?.to_str()?;
-    let stem_rank = ["cover", "folder", "front", "album"]
-        .iter()
-        .position(|candidate| stem.eq_ignore_ascii_case(candidate))?;
-    let extension_rank = ["jpg", "jpeg", "png", "webp"]
-        .iter()
-        .position(|candidate| extension.eq_ignore_ascii_case(candidate))?;
-    Some((stem_rank, extension_rank))
-}
-
 pub(super) fn file_reference(path: &Path, revision: String) -> LocalImageRef {
     LocalImageRef::File {
         path: path.to_string_lossy().into_owned(),

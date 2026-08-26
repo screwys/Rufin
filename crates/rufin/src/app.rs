@@ -34,12 +34,20 @@ pub(crate) fn runtime_inputs(
     });
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&stored)));
-    let library = tokio::task::block_in_place(|| {
-        runtime.block_on(library::Database::open(paths::store_file()))
-    })
-    .map_err(string_error)?;
+    let store_path = paths::store_file();
+    let library = Arc::new(tokio::task::block_in_place(|| {
+        match runtime.block_on(library::Database::open(&store_path)) {
+            Ok(database) => Ok(database),
+            Err(error) if error.is_store_path_io() => {
+                warn!(%error, path=%store_path.display(), "could not use the Library Store path; startup will continue with a temporary Store");
+                let directory = tempfile::Builder::new().prefix("rufin-store-").tempdir().map_err(library::LibraryError::Io)?.keep();
+                runtime.block_on(library::Database::open(directory.join("library.sqlite")))
+            }
+            Err(error) => Err(error),
+        }
+    }).map_err(string_error)?);
     let scrobbler = Arc::new(Scrobbler::new(
-        library.clone(),
+        library.as_ref().clone(),
         runtime.clone(),
         startup_scrobbling_settings(&settings, &secrets),
         stored.ui.private_mode,
@@ -61,6 +69,7 @@ pub(crate) fn runtime_inputs(
     };
     let downloads = downloads::Downloads::new(
         paths::downloads_dir(),
+        library.as_ref().clone(),
         runtime.clone(),
         download_events,
         stored.ui.downloads.clone(),
@@ -99,7 +108,7 @@ pub(crate) fn runtime_inputs(
         stored.ui.seekbar_waveform_enabled,
     );
     let lyrics = lyrics::LyricsService::new(
-        library.clone(),
+        library.as_ref().clone(),
         runtime.clone(),
         stored.ui.lyrics.clone(),
         stored.ui.private_mode,
@@ -110,7 +119,6 @@ pub(crate) fn runtime_inputs(
         settings.clone(),
         runtime.clone(),
         playback_events,
-        source.acceptance_sender(),
         artwork.clone(),
         Arc::clone(&waveform),
         Arc::clone(&lyrics),

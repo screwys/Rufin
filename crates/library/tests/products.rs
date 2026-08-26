@@ -1,15 +1,504 @@
 use library::{
-    PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRule,
-    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
+    CalendarActivityPeriod, LocalAccessOrigin, LocalAccessWrite, PlayedFilter, RadioSeed,
+    RandomCriteria, ReadCancellation, SearchRequest, SmartPlaylistActivityPeriod,
+    SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRule, SmartPlaylistRuleField,
+    SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
 };
 
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn calendar_activity_summarizes_each_visible_entity_kind() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for (track, object_id, date) in [
+        (fixture.tracks[0], "track-0", "2025-06-03"),
+        (fixture.tracks[1], "track-1", "2025-06-14"),
+        (fixture.tracks[2], "track-2", "2024-12-31"),
+    ] {
+        sqlx::query(
+            "INSERT INTO listens(source_key,track_key,track_object_id,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped)
+             VALUES(?1,?2,?3,'Track','Artist','Album',CAST(strftime('%s',?4) AS INTEGER),substr(?4,1,7),180000,120000,0)",
+        )
+        .bind(fixture.source)
+        .bind(track)
+        .bind(object_id)
+        .bind(date)
+        .execute(&mut raw)
+        .await
+        .expect("insert calendar listen");
+    }
+    sqlx::query("INSERT INTO activity_baseline(source_key,track_object_id,play_count,skip_count,last_played_at) VALUES(?1,'track-3',4,0,1)")
+        .bind(fixture.source)
+        .execute(&mut raw)
+        .await
+        .expect("insert lifetime baseline");
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    let month = fixture
+        .database
+        .calendar_activity_summary(
+            fixture.source,
+            CalendarActivityPeriod::Month {
+                year: 2025,
+                month: 6,
+            },
+            20,
+            &cancel,
+        )
+        .await
+        .expect("monthly Activity");
+    assert_eq!(month.tracks.len(), 2);
+    assert_eq!(month.albums.len(), 1);
+    assert_eq!(month.artists.len(), 1);
+    assert_eq!(month.genres.len(), 1);
+    let year = fixture
+        .database
+        .calendar_activity_summary(
+            fixture.source,
+            CalendarActivityPeriod::Year(2025),
+            20,
+            &cancel,
+        )
+        .await
+        .expect("yearly Activity");
+    assert_eq!(year.tracks.len(), 2);
+    let lifetime = fixture
+        .database
+        .calendar_activity_summary(
+            fixture.source,
+            CalendarActivityPeriod::Lifetime,
+            20,
+            &cancel,
+        )
+        .await
+        .expect("lifetime Activity");
+    assert_eq!(lifetime.tracks.len(), 4);
+    assert!(lifetime.albums.len() >= 2);
+    assert!(lifetime.artists.len() >= 2);
+    assert_eq!(lifetime.genres.len(), 1);
+}
+
+#[tokio::test]
+async fn downloaded_row_facts_require_download_owned_local_access() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let rows = fixture
+        .database
+        .track_rows(fixture.source, &fixture.tracks[..2], &cancel)
+        .await
+        .expect("initial Track rows");
+    assert!(rows.iter().all(|row| !row.is_downloaded));
+
+    for (index, origin) in [LocalAccessOrigin::Mapping, LocalAccessOrigin::Download]
+        .into_iter()
+        .enumerate()
+    {
+        let track = &rows[index];
+        fixture
+            .database
+            .upsert_local_access(
+                fixture.source,
+                &LocalAccessWrite {
+                    track_object_id: Some(track.object_id.clone()),
+                    origin,
+                    path: format!("/validated/{}.flac", track.object_id),
+                    root: "/validated".to_string(),
+                    relative_path: format!("{}.flac", track.object_id),
+                    size_bytes: 10,
+                    mtime_ns: 1,
+                    device_id: Some(1),
+                    inode: Some(index as i64 + 1),
+                    parser_version: 1,
+                    title: track.title.clone(),
+                    album: track.display_album.clone(),
+                    artist: track.display_artist.clone(),
+                    disc_number: track.disc_number,
+                    track_number: track.track_number,
+                    duration_millis: track.duration_millis,
+                    media_uri: format!("file:///validated/{}.flac", track.object_id),
+                    loudness_analysis_key: track.loudness_analysis_key,
+                },
+            )
+            .await
+            .expect("write accepted Local access provenance");
+    }
+    let rows = fixture
+        .database
+        .track_rows(fixture.source, &fixture.tracks[..2], &cancel)
+        .await
+        .expect("provenance Track rows");
+    assert!(
+        !rows[0].is_downloaded,
+        "configured mapping is not a Download"
+    );
+    assert!(
+        rows[1].is_downloaded,
+        "Download-owned artifact is downloaded"
+    );
+
+    let album = fixture
+        .database
+        .album_rows(fixture.source, &[fixture.albums[0]], None, &cancel)
+        .await
+        .expect("Album download aggregate")
+        .pop()
+        .expect("Album row");
+    assert_eq!(album.track_count, 2);
+    assert_eq!(album.downloaded_count, 1);
+    let artist = fixture
+        .database
+        .artist_rows(fixture.source, &[fixture.artists[0]], false, None, &cancel)
+        .await
+        .expect("Artist download aggregate")
+        .pop()
+        .expect("Artist row");
+    assert_eq!(artist.downloaded_count, 1);
+    let genre = fixture
+        .database
+        .genre_rows(fixture.source, &[fixture.genre], None, &cancel)
+        .await
+        .expect("Genre download aggregate")
+        .pop()
+        .expect("Genre row");
+    assert_eq!(genre.downloaded_count, 1);
+    let mood = fixture
+        .database
+        .mood_rows(fixture.source, &[fixture.mood], None, &cancel)
+        .await
+        .expect("Mood download aggregate")
+        .pop()
+        .expect("Mood row");
+    assert_eq!(mood.downloaded_count, 1);
+}
+
+#[tokio::test]
+async fn artist_play_order_stays_complete_beside_the_favorite_section() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET user_favorite=0 WHERE source_key=?1")
+        .bind(fixture.source)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE tracks SET user_favorite=1 WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let complete = fixture
+        .database
+        .artist_track_order(
+            fixture.source,
+            fixture.artists[0],
+            false,
+            None,
+            "",
+            library::TrackSort::Title,
+            false,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    let favorites = fixture
+        .database
+        .artist_favorite_track_order(
+            fixture.source,
+            fixture.artists[0],
+            false,
+            None,
+            "",
+            library::TrackSort::Title,
+            false,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(favorites, [fixture.tracks[0]]);
+    assert!(complete.len() > favorites.len());
+}
+
+#[tokio::test]
+async fn track_artist_and_album_artist_roles_keep_exact_membership_and_cover_fallback() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    let album_owner = sqlx::query_scalar::<_, library::ArtistKey>(
+        "INSERT INTO artists(source_key,object_id,name,normalized_name,sort_text,artwork_binding,source_favorite)
+         VALUES(?1,'album-owner','Album Owner','album owner','album owner',?2,0)
+         RETURNING artist_key",
+    )
+    .bind(fixture.source)
+    .bind(b"album-artist-art".as_slice())
+    .fetch_one(&mut raw)
+    .await
+    .expect("insert distinct Album Artist");
+    sqlx::query("DELETE FROM album_artists WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,0)")
+        .bind(fixture.albums[0])
+        .bind(album_owner)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE albums SET artwork_binding=?2 WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .bind(b"album-art".as_slice())
+        .execute(&mut raw)
+        .await
+        .unwrap();
+
+    let track_artist = fixture
+        .database
+        .artist_rows(fixture.source, &[fixture.artists[0]], false, None, &cancel)
+        .await
+        .expect("Track Artist row")
+        .pop()
+        .unwrap();
+    let album_artist = fixture
+        .database
+        .artist_rows(fixture.source, &[album_owner], true, None, &cancel)
+        .await
+        .expect("Album Artist row")
+        .pop()
+        .unwrap();
+    assert_ne!(track_artist.artist_key, album_artist.artist_key);
+    assert_eq!((track_artist.album_count, track_artist.track_count), (1, 2));
+    assert_eq!((album_artist.album_count, album_artist.track_count), (1, 2));
+    assert_eq!(
+        track_artist.artwork_binding.as_deref(),
+        Some(b"album-art".as_slice())
+    );
+    assert_eq!(
+        album_artist.artwork_binding.as_deref(),
+        Some(b"album-artist-art".as_slice())
+    );
+
+    let track_artist_tracks = fixture
+        .database
+        .artist_track_order(
+            fixture.source,
+            track_artist.artist_key,
+            false,
+            None,
+            "",
+            library::TrackSort::Title,
+            false,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    let album_artist_tracks = fixture
+        .database
+        .artist_track_order(
+            fixture.source,
+            album_artist.artist_key,
+            true,
+            None,
+            "",
+            library::TrackSort::Title,
+            false,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(track_artist_tracks, album_artist_tracks);
+    assert_eq!(track_artist_tracks.len(), 2);
+    assert!(
+        fixture
+            .database
+            .artist_track_order(
+                fixture.source,
+                track_artist.artist_key,
+                true,
+                None,
+                "",
+                library::TrackSort::Title,
+                false,
+                &cancel,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .database
+            .artist_track_order(
+                fixture.source,
+                album_artist.artist_key,
+                false,
+                None,
+                "",
+                library::TrackSort::Title,
+                false,
+                &cancel,
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    assert_eq!(
+        fixture
+            .database
+            .artist_album_order(
+                fixture.source,
+                track_artist.artist_key,
+                false,
+                None,
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        [fixture.albums[0]]
+    );
+    assert_eq!(
+        fixture
+            .database
+            .artist_album_order(fixture.source, album_artist.artist_key, true, None, &cancel,)
+            .await
+            .unwrap(),
+        [fixture.albums[0]]
+    );
+
+    sqlx::query("UPDATE albums SET artwork_binding=NULL WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let album = fixture
+        .database
+        .album_rows(fixture.source, &[fixture.albums[0]], None, &cancel)
+        .await
+        .expect("Album artwork fallback")
+        .pop()
+        .expect("Album row");
+    assert_eq!(
+        album.artwork_binding.as_deref(),
+        Some(b"album-artist-art".as_slice())
+    );
+}
+
+#[tokio::test]
+async fn download_access_coexists_with_and_precedes_mapping_access() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let track = fixture
+        .database
+        .track_rows(fixture.source, &fixture.tracks[..1], &cancel)
+        .await
+        .expect("Track row")
+        .pop()
+        .expect("fixture Track");
+    let access = |origin, name: &str| LocalAccessWrite {
+        track_object_id: Some(track.object_id.clone()),
+        origin,
+        path: format!("/validated/{name}.flac"),
+        root: "/validated".to_string(),
+        relative_path: format!("{name}.flac"),
+        size_bytes: 10,
+        mtime_ns: 1,
+        device_id: Some(1),
+        inode: Some(if origin == LocalAccessOrigin::Download {
+            2
+        } else {
+            1
+        }),
+        parser_version: 1,
+        title: track.title.clone(),
+        album: track.display_album.clone(),
+        artist: track.display_artist.clone(),
+        disc_number: track.disc_number,
+        track_number: track.track_number,
+        duration_millis: track.duration_millis,
+        media_uri: format!("file:///validated/{name}.flac"),
+        loudness_analysis_key: track.loudness_analysis_key,
+    };
+    let mapping = fixture
+        .database
+        .upsert_local_access(
+            fixture.source,
+            &access(LocalAccessOrigin::Mapping, "mapping"),
+        )
+        .await
+        .expect("mapping access");
+    let download = fixture
+        .database
+        .upsert_local_access(
+            fixture.source,
+            &access(LocalAccessOrigin::Download, "download"),
+        )
+        .await
+        .expect("download access");
+
+    let preferred = fixture
+        .database
+        .resolve_local_access(
+            fixture.source,
+            Some(&track.object_id),
+            &track.title,
+            &track.display_album,
+            &track.display_artist,
+            track.disc_number,
+            track.track_number,
+            track.duration_millis,
+        )
+        .await
+        .expect("preferred access")
+        .expect("download or mapping");
+    assert_eq!(preferred.local_access_file_key, download);
+    assert_eq!(preferred.origin, LocalAccessOrigin::Download);
+
+    assert!(
+        fixture
+            .database
+            .remove_local_access(fixture.source, download)
+            .await
+            .expect("remove Download only")
+    );
+    let fallback = fixture
+        .database
+        .resolve_local_access(
+            fixture.source,
+            Some(&track.object_id),
+            &track.title,
+            &track.display_album,
+            &track.display_artist,
+            track.disc_number,
+            track.track_number,
+            track.duration_millis,
+        )
+        .await
+        .expect("mapping fallback")
+        .expect("mapping remains");
+    assert_eq!(fallback.local_access_file_key, mapping);
+    assert_eq!(fallback.origin, LocalAccessOrigin::Mapping);
+    assert!(
+        !fixture
+            .database
+            .track_rows(fixture.source, &[track.track_key], &cancel)
+            .await
+            .expect("badge after Download deletion")[0]
+            .is_downloaded
+    );
+}
+
+#[tokio::test]
 async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
+    let suggestions = fixture
+        .database
+        .smart_playlist_value_suggestions(fixture.source, None, &cancel)
+        .await
+        .expect("bounded Smart Playlist value suggestions");
+    assert_eq!(suggestions.genres, ["Rock".to_string()]);
+    assert_eq!(suggestions.moods, ["Energetic".to_string()]);
     let never = SmartPlaylistDefinition {
         match_all: vec![SmartPlaylistRule {
             field: SmartPlaylistRuleField::Played,
@@ -27,6 +516,18 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .create_smart_playlist(fixture.source, "Never Played", &never)
         .await
         .expect("create Never Played");
+    let policy_definition = SmartPlaylistDefinition {
+        match_all: SmartPlaylistRuleField::ALL
+            .into_iter()
+            .map(SmartPlaylistRuleField::default_rule)
+            .collect(),
+        ..SmartPlaylistDefinition::default()
+    };
+    let policy = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Policy Defaults", &policy_definition)
+        .await
+        .expect("Library-owned editor defaults pass Library validation");
     assert_eq!(
         fixture
             .database
@@ -56,9 +557,9 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         sqlx::query(
             "INSERT INTO listens(
                  source_key, track_key, track_object_id, track_title,
-                 artist_name, album_title, started_at, duration_millis, listened_millis, skipped
+                 artist_name, album_title, started_at, local_period, duration_millis, listened_millis, skipped
              ) VALUES (?1, ?2, ?3, 'Track', 'Artist', 'Album',
-                       CAST(strftime('%s', ?4) AS INTEGER), 180000, 180000, 0)",
+                       CAST(strftime('%s', ?4) AS INTEGER), substr(?4,1,7), 180000, 180000, 0)",
         )
         .bind(fixture.source)
         .bind(track)
@@ -201,7 +702,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             )
             .await
             .expect("sorted Smart Playlist order"),
-        [smart, second]
+        [smart, second, policy]
     );
     assert_eq!(
         fixture
@@ -216,7 +717,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
             )
             .await
             .expect("duration-sorted Smart Playlist order"),
-        [smart, second]
+        [smart, second, policy]
     );
     let smart_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position,smart_playlist_key")
         .bind(fixture.source).fetch_all(&mut raw).await.expect("production Smart Playlist order plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
@@ -251,6 +752,25 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(search.tracks.len(), 2);
     assert!(!search.tracks[0].artists.is_empty());
     assert!(search.albums.is_empty());
+    let object_ids = search
+        .tracks
+        .iter()
+        .rev()
+        .map(|track| track.object_id.clone())
+        .collect::<Vec<_>>();
+    let resolved = fixture
+        .database
+        .search_rows_by_objects(fixture.source, None, false, &object_ids, &[], &[], &cancel)
+        .await
+        .expect("live Search identity rows");
+    assert_eq!(
+        resolved
+            .tracks
+            .iter()
+            .map(|track| track.object_id.as_str())
+            .collect::<Vec<_>>(),
+        object_ids.iter().map(String::as_str).collect::<Vec<_>>()
+    );
     assert!(
         fixture
             .database
@@ -260,24 +780,50 @@ async fn home_search_and_radio_results_stay_bounded() {
             .len()
             >= 2
     );
-    assert!(
-        fixture
-            .database
-            .home_most_played_tracks(fixture.source, None, &cancel)
-            .await
-            .expect("zero-play Home section")
-            .is_empty()
+    let initial_home = fixture
+        .database
+        .home_page(fixture.source, None, 0, &cancel)
+        .await
+        .expect("initial bounded Home page");
+    assert!(initial_home.most_played.tracks.is_empty());
+    assert_eq!(
+        initial_home
+            .provider_sections
+            .iter()
+            .find(|section| section.section_id == "featured")
+            .expect("provider Home section")
+            .rows
+            .tracks
+            .len(),
+        1
     );
+    let alternate_showcase = fixture
+        .database
+        .home_page(fixture.source, None, 1, &cancel)
+        .await
+        .expect("alternate launch Home page")
+        .showcase
+        .expect("alternate Showcase");
+    assert!(matches!(
+        initial_home.showcase,
+        Some(library::HomeShowcaseRow::Album(_))
+    ));
+    assert!(matches!(
+        alternate_showcase,
+        library::HomeShowcaseRow::Track(_)
+    ));
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
     let newly_added = fixture
         .database
-        .home_newly_added_albums(fixture.source, None, &cancel)
+        .home_page(fixture.source, None, 0, &cancel)
         .await
-        .expect("bounded Home Albums");
+        .expect("bounded Home Albums")
+        .newly_added
+        .albums;
     assert_eq!(newly_added.len(), 2);
-    assert_eq!(newly_added[0].album_key, fixture.albums[0]);
+    assert_eq!(newly_added[0].album.album_key, fixture.albums[0]);
     sqlx::query("UPDATE albums SET release_date=NULL,year=0 WHERE album_key=?1")
         .bind(fixture.albums[1])
         .execute(&mut raw)
@@ -286,29 +832,23 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_recently_released_albums(fixture.source, None, &cancel)
+            .home_page(fixture.source, None, 0, &cancel)
             .await
             .expect("released Albums require a release fact")
+            .recently_released
+            .albums
             .iter()
-            .map(|row| row.album_key)
+            .map(|row| row.album.album_key)
             .collect::<Vec<_>>(),
         [fixture.albums[0]]
     );
     assert_eq!(
         fixture
             .database
-            .home_featured_genres(fixture.source, None, &cancel)
+            .home_page(fixture.source, None, 0, &cancel)
             .await
             .expect("bounded Home Genres")
-            .len(),
-        1
-    );
-    assert_eq!(
-        fixture
-            .database
-            .provider_home_tracks(fixture.source, "featured", None, 24, &cancel)
-            .await
-            .expect("provider Home Tracks")
+            .genres
             .len(),
         1
     );
@@ -317,6 +857,7 @@ async fn home_search_and_radio_results_stay_bounded() {
         .database
         .random_candidates(
             fixture.source,
+            None,
             &RandomCriteria {
                 min_year: Some(2020),
                 max_year: Some(2030),

@@ -204,6 +204,42 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
+    pub(crate) async fn collection_track_object_ids(
+        &self,
+        collection: &crate::SourceCollection,
+        limit: usize,
+    ) -> SourceResult<Vec<String>> {
+        let limit = limit.clamp(1, 500);
+        let album_ids = match collection {
+            crate::SourceCollection::Album(id) => vec![raw_item_id(id).to_string()],
+            crate::SourceCollection::Artist(id) => {
+                let body: ArtistBody = self
+                    .get_json("getArtist", &[("id", raw_item_id(id).to_string())])
+                    .await?;
+                body.artist
+                    .album
+                    .into_iter()
+                    .map(|album| raw_id_string(&album.id))
+                    .collect()
+            }
+        };
+        let mut tracks = Vec::new();
+        for album_id in album_ids {
+            if tracks.len() >= limit {
+                break;
+            }
+            let body: AlbumBody = self.get_json("getAlbum", &[("id", album_id)]).await?;
+            tracks.extend(
+                body.album
+                    .song
+                    .into_iter()
+                    .map(|song| String::from(self.id("track", &raw_id_string(&song.id)))),
+            );
+        }
+        tracks.truncate(limit);
+        Ok(tracks)
+    }
+
     pub(super) async fn read_track(&self, track_id: &str) -> SourceResult<Track> {
         let body: SongBody = self
             .get_json("getSong", &[("id", raw_item_id(track_id).to_string())])
@@ -1195,6 +1231,26 @@ pub(super) struct ScanStatus {
 pub(super) struct AlbumListBody {
     #[serde(default, rename = "albumList2")]
     pub(super) album_list: AlbumList,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct AlbumBody {
+    #[serde(default)]
+    pub(super) album: AlbumDetail,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct AlbumDetail {
+    #[serde(default)]
+    pub(super) song: Vec<SubsonicSong>,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct ArtistBody {
+    #[serde(default)]
+    pub(super) artist: ArtistDetail,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct ArtistDetail {
+    #[serde(default)]
+    pub(super) album: Vec<SubsonicAlbum>,
 }
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct AlbumList {
