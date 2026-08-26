@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-26 05:51+0000\n"
+"PO-Revision-Date: 2026-08-27 00:40+0000\n"
 "Last-Translator: Tsung-Ying Yu <an920107@gmail.com>\n"
 "Language-Team: Chinese (Traditional Han script) <https://hosted.weblate.org/"
 "projects/rufin/app/zh_Hant/>\n"
@@ -712,7 +712,7 @@ msgid "Grid labels"
 msgstr ""
 
 msgid "Grid"
-msgstr ""
+msgstr "網格"
 
 msgid "Help"
 msgstr "幫助"
@@ -1045,7 +1045,7 @@ msgid "Next page"
 msgstr "下一頁"
 
 msgid "Next"
-msgstr ""
+msgstr "下一首"
 
 msgid "No Servers Found"
 msgstr "未找到伺服器"
@@ -1246,13 +1246,13 @@ msgid "Play radio"
 msgstr "播放電台"
 
 msgid "Play random (play later)"
-msgstr "隨機播放（稍候播放）"
+msgstr "任意播放（稍候播放）"
 
 msgid "Play random (play next)"
-msgstr "隨機播放（接續播放）"
+msgstr "任意播放（接續播放）"
 
 msgid "Play random"
-msgstr "隨機播放"
+msgstr "任意播放"
 
 msgid "Play smart playlist"
 msgstr "播放智慧播放清單"
@@ -1343,7 +1343,7 @@ msgid "Previous page"
 msgstr "上一頁"
 
 msgid "Previous"
-msgstr "前一個"
+msgstr "上一首"
 
 msgid "Privacy and Security"
 msgstr "隱私與安全"
@@ -1532,7 +1532,7 @@ msgid "Romaji"
 msgstr "羅馬拼音"
 
 msgid "Rows"
-msgstr ""
+msgstr "列表"
 
 msgid "Rufin data folder"
 msgstr "Rufin 資料資料夾"
@@ -1713,13 +1713,13 @@ msgid "Show tray icon"
 msgstr ""
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "在右側邊欄顯示歌詞與視覺效果"
 
 msgid "Show visualizer in the right panel"
-msgstr ""
+msgstr "在右側邊欄顯示視覺效果"
 
 msgid "Show visualizer"
-msgstr ""
+msgstr "顯示視覺效果"
 
 msgid "Show/hide lyrics"
 msgstr "顯示/隱藏歌詞"
@@ -1731,13 +1731,13 @@ msgid "Showcase"
 msgstr "展示櫃"
 
 msgid "Shuffle off"
-msgstr ""
+msgstr "隨機播放關閉"
 
 msgid "Shuffle on"
-msgstr ""
+msgstr "隨機播放開啟"
 
 msgid "Shuffle"
-msgstr ""
+msgstr "隨機播放"
 
 msgid "Sidebar Items"
 msgstr "側邊欄項目"
@@ -1861,10 +1861,10 @@ msgid "Track"
 msgstr "曲目"
 
 msgid "Tracks from every playlist"
-msgstr ""
+msgstr "所有播放清單的曲目"
 
 msgid "Tracks from your five latest albums"
-msgstr ""
+msgstr "五個最新專輯的曲目"
 
 msgid "Tracks"
 msgstr "曲目"
@@ -1951,7 +1951,7 @@ msgid "Visible"
 msgstr ""
 
 msgid "Visualizer"
-msgstr ""
+msgstr "視覺效果"
 
 msgid "Volume Down"
 msgstr ""
