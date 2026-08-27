@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-22 11:51+0000\n"
+"PO-Revision-Date: 2026-08-27 21:03+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -53,6 +53,9 @@ msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
+"Rufin рассчитает недостающие метаданные EBU R128 для всей библиотеки. Это "
+"может потребовать значительных вычислительных ресурсов, заряда батареи и "
+"пропускной способности сети в течение длительного времени."
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -169,7 +172,7 @@ msgid "Accent color"
 msgstr "Акцентный цвет"
 
 msgid "Activity"
-msgstr ""
+msgstr "Активность"
 
 msgid "Add Rule"
 msgstr "Добавить правило"
@@ -316,10 +319,8 @@ msgstr "Авто-DJ"
 msgid "Automatic updates"
 msgstr "Автоматические обновления"
 
-#, fuzzy
-#| msgid "Automatic updates"
 msgid "Automatic"
-msgstr "Автоматические обновления"
+msgstr "Автоматически"
 
 msgid "BPM"
 msgstr "BPM"
@@ -348,10 +349,8 @@ msgstr "Отмена загрузки"
 msgid "Cancel"
 msgstr "Отмена"
 
-#, fuzzy
-#| msgid "Casting"
 msgid "Casting network"
-msgstr "Трансляция"
+msgstr "Сеть для трансляции"
 
 msgid "Casting"
 msgstr "Трансляция"
@@ -605,10 +604,10 @@ msgid "Duration"
 msgstr "Продолжительность"
 
 msgid "EBU R128 reference level"
-msgstr ""
+msgstr "Эталонный уровень EBU R128"
 
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
 msgid "EP"
 msgstr "EP"
@@ -626,7 +625,7 @@ msgid "Edit"
 msgstr "Редактировать"
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "Включить анализ EBU R128?"
 
 msgid "Enable equalizer"
 msgstr "Включить эквалайзер"
@@ -635,7 +634,7 @@ msgid "Enable private mode"
 msgstr "Включить приватный режим"
 
 msgid "Enable"
-msgstr ""
+msgstr "Активировать"
 
 msgid "Enter API credentials first"
 msgstr "Сначала введите данные для доступа к API"
@@ -1014,20 +1013,14 @@ msgstr "Настроения"
 msgid "More actions"
 msgstr "Другие действия"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Monthly)"
-msgstr "Самые воспроизводимые"
+msgstr "Самые воспроизводимые (За месяц)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Weekly)"
-msgstr "Самые воспроизводимые"
+msgstr "Самые воспроизводимые (За неделю)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Yearly)"
-msgstr "Самые воспроизводимые"
+msgstr "Самые воспроизводимые (За год)"
 
 msgid "Most Played"
 msgstr "Самые воспроизводимые"
@@ -1112,6 +1105,8 @@ msgstr "NetEase"
 
 msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
+"Сеть, используемая для отправки локального и проксированного медиаконтента "
+"на устройства для трансляции"
 
 msgid "Never Played"
 msgstr "Ни разу не воспроизводилось"
@@ -1204,7 +1199,7 @@ msgid "None"
 msgstr "Нет"
 
 msgid "Normalization scope"
-msgstr ""
+msgstr "Область нормализации"
 
 msgid "Not connected"
 msgstr "Не подключено"
@@ -1281,10 +1276,8 @@ msgstr "Оранжевый"
 msgid "Original"
 msgstr "Оригинал"
 
-#, fuzzy
-#| msgid "Open release notes"
 msgid "Other releases"
-msgstr "Открыть примечания к выпуску"
+msgstr "Другие выпуски"
 
 msgid "Overview"
 msgstr "Обзор"
@@ -1674,10 +1667,8 @@ msgstr "Поиск текстов песен"
 msgid "Search current folder"
 msgstr "Поиск в текущей папке"
 
-#, fuzzy
-#| msgid "This isn't available"
 msgid "Search is unavailable"
-msgstr "Это недоступно"
+msgstr "Поиск недоступен"
 
 msgid "Search lyrics"
 msgstr "Поиск текста песни"
@@ -1904,6 +1895,8 @@ msgstr "Отображение статуса"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+"Сохранять рассчитанную громкость в поддерживаемых локальных музыкальных "
+"файлах"
 
 msgid "Stream quality"
 msgstr "Качество потока"
@@ -1924,7 +1917,7 @@ msgid "System"
 msgstr "Система"
 
 msgid "Target loudness"
-msgstr ""
+msgstr "Целевая громкость"
 
 msgid "Teal"
 msgstr "Цвет морской волны"
@@ -1932,10 +1925,8 @@ msgstr "Цвет морской волны"
 msgid "Techno"
 msgstr "Техно"
 
-#, fuzzy
-#| msgid "Slate"
 msgid "Template"
-msgstr "Серый"
+msgstr "Шаблон"
 
 msgid "Text"
 msgstr "Текст"
@@ -2028,7 +2019,7 @@ msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
 msgid "Use Template"
-msgstr ""
+msgstr "Использовать шаблон"
 
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
@@ -2089,7 +2080,7 @@ msgid "Window"
 msgstr "Окно"
 
 msgid "Write EBU R128 tags to files"
-msgstr ""
+msgstr "Записывать теги EBU R128 в файлы"
 
 msgid "Year"
 msgstr "Год"
