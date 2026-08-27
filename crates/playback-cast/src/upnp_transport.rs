@@ -191,7 +191,7 @@ fn parse_action_response(body: &str) -> Result<HashMap<String, String>, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr};
+    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
     use std::sync::mpsc;
     use std::thread;
 
@@ -201,7 +201,19 @@ mod tests {
 
     #[test]
     fn selected_source_address_owns_description_and_soap_requests() {
-        let server = Server::http("0.0.0.0:0").expect("fake renderer");
+        let selected = if_addrs::get_if_addrs()
+            .expect("local interfaces")
+            .into_iter()
+            .find_map(|interface| match interface.addr {
+                if_addrs::IfAddr::V4(address)
+                    if !address.ip.is_loopback() && !address.ip.is_unspecified() =>
+                {
+                    Some(IpAddr::V4(address.ip))
+                }
+                _ => None,
+            })
+            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+        let server = Server::http(SocketAddr::new(selected, 0)).expect("fake renderer");
         let port = server
             .server_addr()
             .to_ip()
@@ -226,10 +238,8 @@ mod tests {
                 ))
                 .expect("SOAP response");
         });
-        let selected = IpAddr::V4(Ipv4Addr::new(127, 0, 0, 2));
-
         let device = UpnpDevice::from_url(
-            &format!("http://127.0.0.1:{port}/device.xml"),
+            &format!("http://{selected}:{port}/device.xml"),
             Some(selected),
         )
         .expect("bound renderer description");
