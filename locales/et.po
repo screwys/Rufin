@@ -154,6 +154,9 @@ msgstr "Rakenduse teave: Rufin"
 msgid "Accent color"
 msgstr "Aktsentvärv"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Lisa reegel"
 
@@ -229,8 +232,14 @@ msgstr "Kõik esitusloendid"
 msgid "All tracks"
 msgstr "Kõik lood"
 
+msgid "All"
+msgstr "Kõik"
+
 msgid "Any genre"
 msgstr "Iga žanr"
+
+msgid "Any"
+msgstr "Ükspuha milline"
 
 msgid "App settings"
 msgstr "Rakenduse seadistused"
@@ -292,6 +301,11 @@ msgstr "Automaatne diskor"
 msgid "Automatic updates"
 msgstr "Automaatsed uuendused"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic"
+msgstr "Automaatsed uuendused"
+
 msgid "BPM"
 msgstr "BPM (lööki minutis)"
 
@@ -318,6 +332,11 @@ msgstr "Katkesta allalaadimine"
 
 msgid "Cancel"
 msgstr "Katkesta"
+
+#, fuzzy
+#| msgid "Casting"
+msgid "Casting network"
+msgstr "Meediumilevi"
 
 msgid "Casting"
 msgstr "Meediumilevi"
@@ -574,6 +593,9 @@ msgstr "EP"
 
 msgid "EPs"
 msgstr "EP-plaadid"
+
+msgid "Edit Smart Playlist"
+msgstr "Muuda nutikat esitusloendit"
 
 msgid "Edit metadata"
 msgstr "Muuda metateavet"
@@ -962,6 +984,21 @@ msgstr "Meeleolud"
 msgid "More actions"
 msgstr "Veel toiminguid"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "Enimesitatud"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "Enimesitatud"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "Enimesitatud"
+
 msgid "Most Played"
 msgstr "Enimesitatud"
 
@@ -1042,6 +1079,9 @@ msgstr "Vajab tähelepanu"
 
 msgid "NetEase"
 msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
 
 msgid "Never Played"
 msgstr "Esitamata"
@@ -1208,8 +1248,10 @@ msgstr "Oranž"
 msgid "Original"
 msgstr "Algne"
 
-msgid "Other"
-msgstr "Muu"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "Vaata versiooniteavet"
 
 msgid "Overview"
 msgstr "Ülevaade"
@@ -1278,9 +1320,6 @@ msgstr "Esita (kohe) juhuslikult"
 
 msgid "Play random"
 msgstr "Esita juhuslikult"
-
-msgid "Play smart playlist"
-msgstr "Kuula nutikat esitusloendit"
 
 msgid "Play track"
 msgstr "Esita lugu"
@@ -1489,9 +1528,6 @@ msgstr "Eemalda esitusloendist"
 msgid "Remove from Queue"
 msgstr "Eemalda esitusjärjekorrast"
 
-msgid "Remove from playlist"
-msgstr "Eemalda esitusloendist"
-
 msgid "Remove prefix"
 msgstr "Eemalda eesliide"
 
@@ -1533,12 +1569,6 @@ msgstr "Taasta vaikimisi väärtus"
 
 msgid "Reset"
 msgstr "Lähtesta"
-
-msgid "Restore Default"
-msgstr "Taasta vaikimisi väärtus"
-
-msgid "Restore"
-msgstr "Taasta"
 
 msgid "Resume"
 msgstr "Jätka"
@@ -1602,6 +1632,14 @@ msgstr "Otsi uuesti"
 
 msgid "Search Lyrics"
 msgstr "Otsi laulusõnu"
+
+msgid "Search current folder"
+msgstr "Otsi sellest kaustas"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search is unavailable"
+msgstr "See pole saadaval"
 
 msgid "Search lyrics"
 msgstr "Otsi laulusõnu"
@@ -1849,6 +1887,11 @@ msgstr "Sinakasroheline"
 msgid "Techno"
 msgstr "Teknomuusika"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Template"
+msgstr "Paekarva"
+
 msgid "Text"
 msgstr "Tekst"
 
@@ -1938,6 +1981,9 @@ msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
 
 msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Kasuta nullist suuremat numbrit"
@@ -2102,6 +2148,21 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
 
+#~ msgid "Other"
+#~ msgstr "Muu"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "Kuula nutikat esitusloendit"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "Eemalda esitusloendist"
+
+#~ msgid "Restore Default"
+#~ msgstr "Taasta vaikimisi väärtus"
+
+#~ msgid "Restore"
+#~ msgstr "Taasta"
+
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2179,12 +2240,6 @@ msgstr[1] "{count} aastat tagasi"
 #~ msgid "Add music to start a queue."
 #~ msgstr "Esitusjärjekorra koostamiseks lisa muusikat."
 
-#~ msgid "All"
-#~ msgstr "Kõik"
-
-#~ msgid "Any"
-#~ msgstr "Ükspuha milline"
-
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr "Puhverdatud kirjed on siin nähtavad pärast sünkroonimise lõppu"
 
@@ -2227,9 +2282,6 @@ msgstr[1] "{count} aastat tagasi"
 #~ msgid "Configure saved music servers and local playback mappings."
 #~ msgstr ""
 #~ "Seadista salvestatud muusikaserverid ja kohaliku taasesituse vastendusi."
-
-#~ msgid "Edit Smart Playlist"
-#~ msgstr "Muuda nutikat esitusloendit"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Sisesta kohalik prefiks."
@@ -2331,9 +2383,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Save to rescan this local library."
 #~ msgstr "Salvesta selle kohaliku muusikakogu uuesti skaneerimiseks."
-
-#~ msgid "Search current folder"
-#~ msgstr "Otsi sellest kaustas"
 
 #~ msgid "Search failed."
 #~ msgstr "Otsimine ei õnnestunud."

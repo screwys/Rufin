@@ -153,6 +153,9 @@ msgstr "Acerca de Rufin"
 msgid "Accent color"
 msgstr "Color de acento"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Añadir Regla"
 
@@ -228,8 +231,14 @@ msgstr "Todas las listas"
 msgid "All tracks"
 msgstr "Todas las pistas"
 
+msgid "All"
+msgstr ""
+
 msgid "Any genre"
 msgstr "Cualquier género"
+
+msgid "Any"
+msgstr ""
 
 msgid "App settings"
 msgstr "Ajustes de la aplicación"
@@ -291,6 +300,9 @@ msgstr ""
 msgid "Automatic updates"
 msgstr ""
 
+msgid "Automatic"
+msgstr ""
+
 msgid "BPM"
 msgstr ""
 
@@ -316,6 +328,9 @@ msgid "Cancel download"
 msgstr ""
 
 msgid "Cancel"
+msgstr ""
+
+msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
@@ -571,6 +586,11 @@ msgstr ""
 
 msgid "EPs"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add to Playlist"
+msgid "Edit Smart Playlist"
+msgstr "Añadir a la lista de reproducción"
 
 msgid "Edit metadata"
 msgstr ""
@@ -955,6 +975,15 @@ msgstr ""
 msgid "More actions"
 msgstr ""
 
+msgid "Most Played (Monthly)"
+msgstr ""
+
+msgid "Most Played (Weekly)"
+msgstr ""
+
+msgid "Most Played (Yearly)"
+msgstr ""
+
 msgid "Most Played"
 msgstr ""
 
@@ -1034,6 +1063,9 @@ msgid "Needs attention"
 msgstr ""
 
 msgid "NetEase"
+msgstr ""
+
+msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
 
 msgid "Never Played"
@@ -1201,7 +1233,7 @@ msgstr ""
 msgid "Original"
 msgstr ""
 
-msgid "Other"
+msgid "Other releases"
 msgstr ""
 
 msgid "Overview"
@@ -1268,9 +1300,6 @@ msgid "Play random (play next)"
 msgstr ""
 
 msgid "Play random"
-msgstr ""
-
-msgid "Play smart playlist"
 msgstr ""
 
 msgid "Play track"
@@ -1480,9 +1509,6 @@ msgstr ""
 msgid "Remove from Queue"
 msgstr ""
 
-msgid "Remove from playlist"
-msgstr ""
-
 msgid "Remove prefix"
 msgstr ""
 
@@ -1523,12 +1549,6 @@ msgid "Reset to defaults"
 msgstr ""
 
 msgid "Reset"
-msgstr ""
-
-msgid "Restore Default"
-msgstr ""
-
-msgid "Restore"
 msgstr ""
 
 msgid "Resume"
@@ -1592,6 +1612,12 @@ msgid "Search Again"
 msgstr ""
 
 msgid "Search Lyrics"
+msgstr ""
+
+msgid "Search current folder"
+msgstr ""
+
+msgid "Search is unavailable"
 msgstr ""
 
 msgid "Search lyrics"
@@ -1840,6 +1866,9 @@ msgstr ""
 msgid "Techno"
 msgstr ""
 
+msgid "Template"
+msgstr ""
+
 msgid "Text"
 msgstr ""
 
@@ -1930,6 +1959,9 @@ msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
+msgstr ""
+
+msgid "Use Template"
 msgstr ""
 
 msgid "Use a number above zero"

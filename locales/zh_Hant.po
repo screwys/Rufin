@@ -26,10 +26,10 @@ msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會
 msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
-msgstr "記錄中的敏感資訊與絕對路徑名稱都會被去除，但仍然建議您再分享記錄前查看確認"
+msgstr ""
+"記錄中的敏感資訊與絕對路徑名稱都會被去除，但仍然建議您再分享記錄前查看確認"
 
-msgid ""
-"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "沒有結果 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
@@ -42,7 +42,6 @@ msgid ""
 "the renderer"
 msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
 
-#, rust-format
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
@@ -87,7 +86,6 @@ msgid ""
 "within each album"
 msgstr ""
 
-#, rust-format
 msgid ""
 "Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
@@ -126,6 +124,9 @@ msgstr "關於 Rufin"
 
 msgid "Accent color"
 msgstr "強調色"
+
+msgid "Activity"
+msgstr ""
 
 msgid "Add Rule"
 msgstr "新增規則"
@@ -202,8 +203,14 @@ msgstr "所有播放清單"
 msgid "All tracks"
 msgstr "所有曲目"
 
+msgid "All"
+msgstr ""
+
 msgid "Any genre"
 msgstr "任何曲風"
+
+msgid "Any"
+msgstr ""
 
 msgid "App settings"
 msgstr "應用程式設定"
@@ -307,7 +314,6 @@ msgstr "變更敏感存儲空間"
 msgid "Change"
 msgstr "變更"
 
-#, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "套用變更到 {count} 個曲目"
@@ -387,7 +393,6 @@ msgstr "緊湊"
 msgid "Connect"
 msgstr "連接"
 
-#, rust-format
 msgid "Connected as {username}"
 msgstr "已以 {username} 的身份連接"
 
@@ -397,7 +402,6 @@ msgstr "已連接"
 msgid "Connecting to music server..."
 msgstr "正在連接到音樂伺服器..."
 
-#, rust-format
 msgid "Connecting to {device}..."
 msgstr "正在連接到 {device}..."
 
@@ -425,7 +429,6 @@ msgstr "無法儲存診斷記錄"
 msgid "Could not update favorites"
 msgstr "無法更新最愛"
 
-#, rust-format
 msgid "Couldn't connect to {service}"
 msgstr "無法連接到 {service}"
 
@@ -554,6 +557,11 @@ msgstr ""
 
 msgid "EPs"
 msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Edit Smart Playlist"
+msgstr "智慧播放清單"
 
 msgid "Edit metadata"
 msgstr "編輯元資料"
@@ -936,6 +944,21 @@ msgstr "氛圍"
 msgid "More actions"
 msgstr "更多操作"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "最常播放"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "最常播放"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "最常播放"
+
 msgid "Most Played"
 msgstr "最常播放"
 
@@ -1185,8 +1208,10 @@ msgstr "橘色"
 msgid "Original"
 msgstr ""
 
-msgid "Other"
-msgstr "其他"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "開啟更新記錄"
 
 msgid "Overview"
 msgstr "總覽"
@@ -1254,9 +1279,6 @@ msgstr "任意播放（接續播放）"
 msgid "Play random"
 msgstr "任意播放"
 
-msgid "Play smart playlist"
-msgstr "播放智慧播放清單"
-
 msgid "Play track"
 msgstr "播放曲目"
 
@@ -1278,7 +1300,6 @@ msgstr "已播放"
 msgid "Playing on this device"
 msgstr "在此裝置上播放"
 
-#, rust-format
 msgid "Playing on {device}"
 msgstr "在 {device} 上播放"
 
@@ -1465,9 +1486,6 @@ msgstr "從播放清單中移除"
 msgid "Remove from Queue"
 msgstr "從佇列中移除"
 
-msgid "Remove from playlist"
-msgstr "從播放清單中移除"
-
 msgid "Remove prefix"
 msgstr "移除前綴"
 
@@ -1509,12 +1527,6 @@ msgstr "重置回預設值"
 
 msgid "Reset"
 msgstr "重置"
-
-msgid "Restore Default"
-msgstr "回復預設值"
-
-msgid "Restore"
-msgstr "復原"
 
 msgid "Resume"
 msgstr "繼續"
@@ -1578,6 +1590,14 @@ msgstr "重新搜尋"
 
 msgid "Search Lyrics"
 msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Search preferences"
+msgid "Search current folder"
+msgstr "搜尋偏好設定"
+
+msgid "Search is unavailable"
+msgstr ""
 
 msgid "Search lyrics"
 msgstr "搜尋歌詞"
@@ -1657,7 +1677,6 @@ msgstr ""
 msgid "Server Settings"
 msgstr ""
 
-#, rust-format
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -1742,7 +1761,6 @@ msgstr "隨機播放"
 msgid "Sidebar Items"
 msgstr "側邊欄項目"
 
-#, rust-format
 msgid "Sidebar item {position}"
 msgstr "側邊欄項目 {position}"
 
@@ -1825,6 +1843,9 @@ msgid "Teal"
 msgstr ""
 
 msgid "Techno"
+msgstr ""
+
+msgid "Template"
 msgstr ""
 
 msgid "Text"
@@ -1916,6 +1937,9 @@ msgstr ""
 
 msgid "Use Rufin data folder"
 msgstr "使用 Rufin 資料資料夾"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr ""
@@ -2037,42 +2061,49 @@ msgstr "今天"
 msgid "yesterday"
 msgstr "昨天"
 
-#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} 張專輯"
 
-#, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] "{count} 天之前"
 
-#, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] "已選擇 {count} 個資料夾"
 
-#, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] "{count} 個月之前"
 
-#, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] "{count} 個結果"
 
-#, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} 首曲目"
 
-#, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] "{count} 週之前"
 
-#, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
+
+#~ msgid "Other"
+#~ msgstr "其他"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "播放智慧播放清單"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "從播放清單中移除"
+
+#~ msgid "Restore Default"
+#~ msgstr "回復預設值"
+
+#~ msgid "Restore"
+#~ msgstr "復原"

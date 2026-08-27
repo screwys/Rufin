@@ -163,6 +163,9 @@ msgstr "О программе Rufin"
 msgid "Accent color"
 msgstr "Акцентный цвет"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Добавить правило"
 
@@ -239,8 +242,14 @@ msgstr "Все плейлисты"
 msgid "All tracks"
 msgstr "Все треки"
 
+msgid "All"
+msgstr "Все"
+
 msgid "Any genre"
 msgstr "Любой жанр"
+
+msgid "Any"
+msgstr "Любой"
 
 msgid "App settings"
 msgstr "Настройки приложения"
@@ -302,6 +311,11 @@ msgstr "Авто-DJ"
 msgid "Automatic updates"
 msgstr "Автоматические обновления"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic"
+msgstr "Автоматические обновления"
+
 msgid "BPM"
 msgstr "BPM"
 
@@ -328,6 +342,11 @@ msgstr "Отмена загрузки"
 
 msgid "Cancel"
 msgstr "Отмена"
+
+#, fuzzy
+#| msgid "Casting"
+msgid "Casting network"
+msgstr "Трансляция"
 
 msgid "Casting"
 msgstr "Трансляция"
@@ -585,6 +604,9 @@ msgstr "EP"
 
 msgid "EPs"
 msgstr "EP-альбомы"
+
+msgid "Edit Smart Playlist"
+msgstr "Редактировать умный плейлист"
 
 msgid "Edit metadata"
 msgstr "Редактировать метаданные"
@@ -975,6 +997,21 @@ msgstr "Настроения"
 msgid "More actions"
 msgstr "Другие действия"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "Самые воспроизводимые"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "Самые воспроизводимые"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "Самые воспроизводимые"
+
 msgid "Most Played"
 msgstr "Самые воспроизводимые"
 
@@ -1055,6 +1092,9 @@ msgstr "Требуется внимание"
 
 msgid "NetEase"
 msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
 
 msgid "Never Played"
 msgstr "Ни разу не воспроизводилось"
@@ -1221,8 +1261,10 @@ msgstr "Оранжевый"
 msgid "Original"
 msgstr "Оригинал"
 
-msgid "Other"
-msgstr "Другие"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "Открыть примечания к выпуску"
 
 msgid "Overview"
 msgstr "Обзор"
@@ -1291,9 +1333,6 @@ msgstr "Воспроизвести в случайном порядке (сле�
 
 msgid "Play random"
 msgstr "Воспроизвести в случайном порядке"
-
-msgid "Play smart playlist"
-msgstr "Воспроизвести умный плейлист"
 
 msgid "Play track"
 msgstr "Воспроизвести трек"
@@ -1504,9 +1543,6 @@ msgstr "Удалить из плейлиста"
 msgid "Remove from Queue"
 msgstr "Удалить из Очереди"
 
-msgid "Remove from playlist"
-msgstr "Удалить из плейлиста"
-
 msgid "Remove prefix"
 msgstr "Удалить префикс"
 
@@ -1548,12 +1584,6 @@ msgstr "Восстановить настройки по умолчанию"
 
 msgid "Reset"
 msgstr "Сбросить"
-
-msgid "Restore Default"
-msgstr "Восстановить настройки по умолчанию"
-
-msgid "Restore"
-msgstr "Восстановить"
 
 msgid "Resume"
 msgstr "Возобновить"
@@ -1617,6 +1647,14 @@ msgstr "Повторить поиск"
 
 msgid "Search Lyrics"
 msgstr "Поиск текстов песен"
+
+msgid "Search current folder"
+msgstr "Поиск в текущей папке"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search is unavailable"
+msgstr "Это недоступно"
 
 msgid "Search lyrics"
 msgstr "Поиск текста песни"
@@ -1865,6 +1903,11 @@ msgstr "Цвет морской волны"
 msgid "Techno"
 msgstr "Техно"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Template"
+msgstr "Серый"
+
 msgid "Text"
 msgstr "Текст"
 
@@ -1954,6 +1997,9 @@ msgstr "Использовать Мгновенный Микс Jellyfin для �
 
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
@@ -2127,6 +2173,21 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
+#~ msgid "Other"
+#~ msgstr "Другие"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "Воспроизвести умный плейлист"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "Удалить из плейлиста"
+
+#~ msgid "Restore Default"
+#~ msgstr "Восстановить настройки по умолчанию"
+
+#~ msgid "Restore"
+#~ msgstr "Восстановить"
+
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2210,12 +2271,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Add to queue"
 #~ msgstr "Добавить в очередь воспроизведения"
-
-#~ msgid "All"
-#~ msgstr "Все"
-
-#~ msgid "Any"
-#~ msgstr "Любой"
 
 #~ msgid "Artist detail will use cached album and track groups"
 #~ msgstr ""
@@ -2334,9 +2389,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Edit Mapping"
 #~ msgstr "Редактировать соответствия"
-
-#~ msgid "Edit Smart Playlist"
-#~ msgstr "Редактировать умный плейлист"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Введите локальный префикс."
@@ -2526,9 +2578,6 @@ msgstr[2] "{count} лет назад"
 #~| msgid "Loading…"
 #~ msgid "Saving…"
 #~ msgstr "Загрузка…"
-
-#~ msgid "Search current folder"
-#~ msgstr "Поиск в текущей папке"
 
 #~ msgid "Search failed."
 #~ msgstr "Поиск не дал результатов."

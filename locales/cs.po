@@ -160,6 +160,9 @@ msgstr "O aplikaci Rufin"
 msgid "Accent color"
 msgstr "Barva zvýraznění"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Přidat pravidlo"
 
@@ -235,8 +238,14 @@ msgstr "Všechny playlisty"
 msgid "All tracks"
 msgstr "Všechny skladby"
 
+msgid "All"
+msgstr ""
+
 msgid "Any genre"
 msgstr "Všechny žánry"
+
+msgid "Any"
+msgstr ""
 
 msgid "App settings"
 msgstr "Nastavení aplikace"
@@ -298,6 +307,11 @@ msgstr "Auto DJ"
 msgid "Automatic updates"
 msgstr "Automatické aktualizace"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic"
+msgstr "Automatické aktualizace"
+
 msgid "BPM"
 msgstr "BPM"
 
@@ -324,6 +338,11 @@ msgstr "Zrušit stahování"
 
 msgid "Cancel"
 msgstr "Zrušit"
+
+#, fuzzy
+#| msgid "Casting"
+msgid "Casting network"
+msgstr "Přenos"
 
 msgid "Casting"
 msgstr "Přenos"
@@ -581,6 +600,11 @@ msgstr "EP"
 
 msgid "EPs"
 msgstr "EP"
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Edit Smart Playlist"
+msgstr "Chytrý Playlist"
 
 msgid "Edit metadata"
 msgstr "Upravit metadata"
@@ -969,6 +993,21 @@ msgstr "Nálady"
 msgid "More actions"
 msgstr "Více akcí"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "Nejčastěji přehrávané"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "Nejčastěji přehrávané"
+
 msgid "Most Played"
 msgstr "Nejčastěji přehrávané"
 
@@ -1049,6 +1088,9 @@ msgstr "Vyžaduje pozornost"
 
 msgid "NetEase"
 msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
 
 msgid "Never Played"
 msgstr "Nikdy nepřehráno"
@@ -1216,8 +1258,10 @@ msgstr "Oranžová"
 msgid "Original"
 msgstr "Originál"
 
-msgid "Other"
-msgstr "Ostatní"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "Otevřít poznámky k verzi"
 
 msgid "Overview"
 msgstr "Přehled"
@@ -1286,9 +1330,6 @@ msgstr "Přehrát náhodně (příště)"
 
 msgid "Play random"
 msgstr "Přehrát náhodně"
-
-msgid "Play smart playlist"
-msgstr "Přehrát chytrý playlist"
 
 msgid "Play track"
 msgstr "Přehrát skladbu"
@@ -1499,9 +1540,6 @@ msgstr "Odebrat z playlistu"
 msgid "Remove from Queue"
 msgstr "Odebrat z fronty"
 
-msgid "Remove from playlist"
-msgstr "Odebrat z playlistu"
-
 msgid "Remove prefix"
 msgstr "Odebrat prefix"
 
@@ -1542,12 +1580,6 @@ msgid "Reset to defaults"
 msgstr "Obnovit výchozí nastavení"
 
 msgid "Reset"
-msgstr "Obnovit"
-
-msgid "Restore Default"
-msgstr "Obnovit výchozí"
-
-msgid "Restore"
 msgstr "Obnovit"
 
 msgid "Resume"
@@ -1612,6 +1644,16 @@ msgstr "Hledat znovu"
 
 msgid "Search Lyrics"
 msgstr "Hledat Texty"
+
+#, fuzzy
+#| msgid "Search preferences"
+msgid "Search current folder"
+msgstr "Možnosti vyhledávání"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search is unavailable"
+msgstr "Toto není dostupné"
 
 msgid "Search lyrics"
 msgstr "Hledat texty"
@@ -1859,6 +1901,11 @@ msgstr "Tyrkysová"
 msgid "Techno"
 msgstr "Techno"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Template"
+msgstr "Šedá"
+
 msgid "Text"
 msgstr "Text"
 
@@ -1948,6 +1995,9 @@ msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
@@ -2118,6 +2168,21 @@ msgid_plural "{count} years ago"
 msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
+
+#~ msgid "Other"
+#~ msgstr "Ostatní"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "Přehrát chytrý playlist"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "Odebrat z playlistu"
+
+#~ msgid "Restore Default"
+#~ msgstr "Obnovit výchozí"
+
+#~ msgid "Restore"
+#~ msgstr "Obnovit"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"

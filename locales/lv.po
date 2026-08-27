@@ -160,6 +160,9 @@ msgstr "Par Rufin"
 msgid "Accent color"
 msgstr "Akcenta krāsa"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Pievienot noteikumu"
 
@@ -235,8 +238,14 @@ msgstr "Visi atskaņošanas saraksti"
 msgid "All tracks"
 msgstr "Visas dziesmas"
 
+msgid "All"
+msgstr "Visi"
+
 msgid "Any genre"
 msgstr "Jebkurš žanrs"
+
+msgid "Any"
+msgstr "Jebkurš"
 
 msgid "App settings"
 msgstr "Lietotnes iestatījumi"
@@ -298,6 +307,11 @@ msgstr "Automātiskais DJ"
 msgid "Automatic updates"
 msgstr "Automātiskie atjauninājumi"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic"
+msgstr "Automātiskie atjauninājumi"
+
 msgid "BPM"
 msgstr "BPM"
 
@@ -324,6 +338,11 @@ msgstr "Atcelt lejupielādi"
 
 msgid "Cancel"
 msgstr "Atcelt"
+
+#, fuzzy
+#| msgid "Casting"
+msgid "Casting network"
+msgstr "Pārraide"
 
 msgid "Casting"
 msgstr "Pārraide"
@@ -581,6 +600,9 @@ msgstr "EP"
 
 msgid "EPs"
 msgstr "EP"
+
+msgid "Edit Smart Playlist"
+msgstr "Rediģēt viedo atskaņošanas sarakstu"
 
 msgid "Edit metadata"
 msgstr "Rediģēt metadatus"
@@ -969,6 +991,21 @@ msgstr "Noskaņas"
 msgid "More actions"
 msgstr "Vēl darbības"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "Visbiežāk atskaņotie"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "Visbiežāk atskaņotie"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "Visbiežāk atskaņotie"
+
 msgid "Most Played"
 msgstr "Visbiežāk atskaņotie"
 
@@ -1049,6 +1086,9 @@ msgstr "Prasās uzmanība"
 
 msgid "NetEase"
 msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
 
 msgid "Never Played"
 msgstr "Nekad neatskaņotie"
@@ -1215,8 +1255,10 @@ msgstr "Oranžs"
 msgid "Original"
 msgstr "Oriģināls"
 
-msgid "Other"
-msgstr "Cits"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "Atvērt izdevuma piezīmes"
 
 msgid "Overview"
 msgstr "Pārskats"
@@ -1285,9 +1327,6 @@ msgstr "Atskaņot nejaušā secībā (atskaņot nākamo)"
 
 msgid "Play random"
 msgstr "Atskaņot nejaušā secībā"
-
-msgid "Play smart playlist"
-msgstr "Atskaņot viedo atskaņošanas sarakstu"
 
 msgid "Play track"
 msgstr "Atskaņot dziesmu"
@@ -1496,9 +1535,6 @@ msgstr "Noņemt no atskaņošanas saraksta"
 msgid "Remove from Queue"
 msgstr "Noņemt no rindas"
 
-msgid "Remove from playlist"
-msgstr "Noņemt no atskaņošanas saraksta"
-
 msgid "Remove prefix"
 msgstr "Noņemt prefiksu"
 
@@ -1540,12 +1576,6 @@ msgstr "Atiestatīt uz noklusējuma iestatījumiem"
 
 msgid "Reset"
 msgstr "Atiestatīt"
-
-msgid "Restore Default"
-msgstr "Atjaunot noklusējuma iestatījumus"
-
-msgid "Restore"
-msgstr "Atjaunot"
 
 msgid "Resume"
 msgstr "Turpināt"
@@ -1609,6 +1639,14 @@ msgstr "Meklēt vēlreiz"
 
 msgid "Search Lyrics"
 msgstr "Meklēt tekstus"
+
+msgid "Search current folder"
+msgstr "Meklēt pašreizējā mapē"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search is unavailable"
+msgstr "Šis nav pieejams"
 
 msgid "Search lyrics"
 msgstr "Meklēt tekstus"
@@ -1856,6 +1894,11 @@ msgstr "Zilganzaļš"
 msgid "Techno"
 msgstr "Tehno"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Template"
+msgstr "Pelēks"
+
 msgid "Text"
 msgstr "Teksts"
 
@@ -1945,6 +1988,9 @@ msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
@@ -2116,6 +2162,21 @@ msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
 
+#~ msgid "Other"
+#~ msgstr "Cits"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "Atskaņot viedo atskaņošanas sarakstu"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "Noņemt no atskaņošanas saraksta"
+
+#~ msgid "Restore Default"
+#~ msgstr "Atjaunot noklusējuma iestatījumus"
+
+#~ msgid "Restore"
+#~ msgstr "Atjaunot"
+
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2192,12 +2253,6 @@ msgstr[2] "pirms {count} gadiem"
 #~ msgid "Add music to start a queue."
 #~ msgstr "Pievienojiet mūziku, lai sāktu rindu."
 
-#~ msgid "All"
-#~ msgstr "Visi"
-
-#~ msgid "Any"
-#~ msgstr "Jebkurš"
-
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr "Kešotie ieraksti parādīsies šeit pēc sinhronizācijas pabeigšanas"
 
@@ -2242,9 +2297,6 @@ msgstr[2] "pirms {count} gadiem"
 #~ msgid "Configure saved music servers and local playback mappings."
 #~ msgstr ""
 #~ "Konfigurēt saglabātos mūzikas serverus un lokālos atskaņošanas kartējumus."
-
-#~ msgid "Edit Smart Playlist"
-#~ msgstr "Rediģēt viedo atskaņošanas sarakstu"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Ievadiet lokālo prefiksu."
@@ -2347,9 +2399,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "Save to rescan this local library."
 #~ msgstr "Saglabājiet, lai pārskenētu šo lokālo bibliotēku."
-
-#~ msgid "Search current folder"
-#~ msgstr "Meklēt pašreizējā mapē"
 
 #~ msgid "Search failed."
 #~ msgstr "Meklēšana neizdevās."

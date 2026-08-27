@@ -157,6 +157,9 @@ msgstr "Über Rufin"
 msgid "Accent color"
 msgstr "Akzentfarbe"
 
+msgid "Activity"
+msgstr ""
+
 msgid "Add Rule"
 msgstr "Regel hinzufügen"
 
@@ -232,8 +235,14 @@ msgstr "Alle Playlists"
 msgid "All tracks"
 msgstr "Alle Titel"
 
+msgid "All"
+msgstr "Alle"
+
 msgid "Any genre"
 msgstr "Beliebiges Genre"
+
+msgid "Any"
+msgstr "Beliebige"
 
 msgid "App settings"
 msgstr "App-Einstellungen"
@@ -295,6 +304,11 @@ msgstr "Auto DJ"
 msgid "Automatic updates"
 msgstr "Automatische Updates"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic"
+msgstr "Automatische Updates"
+
 msgid "BPM"
 msgstr "BPM"
 
@@ -321,6 +335,11 @@ msgstr "Download abbrechen"
 
 msgid "Cancel"
 msgstr "Abbrechen"
+
+#, fuzzy
+#| msgid "Casting"
+msgid "Casting network"
+msgstr "Übertragen"
 
 msgid "Casting"
 msgstr "Übertragen"
@@ -577,6 +596,9 @@ msgstr "EP"
 
 msgid "EPs"
 msgstr "EPs"
+
+msgid "Edit Smart Playlist"
+msgstr "Smart-Playlist bearbeiten"
 
 msgid "Edit metadata"
 msgstr "Metadaten bearbeiten"
@@ -967,6 +989,21 @@ msgstr "Stimmungen"
 msgid "More actions"
 msgstr "Weitere Aktionen"
 
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Monthly)"
+msgstr "Am häufigsten gespielt"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Weekly)"
+msgstr "Am häufigsten gespielt"
+
+#, fuzzy
+#| msgid "Most Played"
+msgid "Most Played (Yearly)"
+msgstr "Am häufigsten gespielt"
+
 msgid "Most Played"
 msgstr "Am häufigsten gespielt"
 
@@ -1047,6 +1084,9 @@ msgstr "Erfordert Aufmerksamkeit"
 
 msgid "NetEase"
 msgstr "NetEase"
+
+msgid "Network used to send local and proxied media to casting devices"
+msgstr ""
 
 msgid "Never Played"
 msgstr "Nie gespielt"
@@ -1215,8 +1255,10 @@ msgstr "Orange"
 msgid "Original"
 msgstr "Original"
 
-msgid "Other"
-msgstr "Sonstige"
+#, fuzzy
+#| msgid "Open release notes"
+msgid "Other releases"
+msgstr "Versionshinweise öffnen"
 
 msgid "Overview"
 msgstr "Übersicht"
@@ -1285,9 +1327,6 @@ msgstr "Zufällig abspielen (als Nächstes abspielen)"
 
 msgid "Play random"
 msgstr "Zufällig abspielen"
-
-msgid "Play smart playlist"
-msgstr "Intelligente Playlist abspielen"
 
 msgid "Play track"
 msgstr "Titel abspielen"
@@ -1497,9 +1536,6 @@ msgstr "Aus Playlist entfernen"
 msgid "Remove from Queue"
 msgstr "Aus Warteschlange entfernen"
 
-msgid "Remove from playlist"
-msgstr "Aus Playlist entfernen"
-
 msgid "Remove prefix"
 msgstr "Präfix entfernen"
 
@@ -1541,12 +1577,6 @@ msgstr "Auf Standardeinstellungen zurücksetzen"
 
 msgid "Reset"
 msgstr "Zurücksetzen"
-
-msgid "Restore Default"
-msgstr "Standardeinstellungen wiederherstellen"
-
-msgid "Restore"
-msgstr "Wiederherstellen"
 
 msgid "Resume"
 msgstr "Fortsetzen"
@@ -1610,6 +1640,14 @@ msgstr "Erneut suchen"
 
 msgid "Search Lyrics"
 msgstr "Songtext-Suche"
+
+msgid "Search current folder"
+msgstr "Aktuellen Ordner durchsuchen"
+
+#, fuzzy
+#| msgid "This isn't available"
+msgid "Search is unavailable"
+msgstr "Dies ist nicht verfügbar"
 
 msgid "Search lyrics"
 msgstr "Songtexte durchsuchen"
@@ -1857,6 +1895,11 @@ msgstr "Türkis"
 msgid "Techno"
 msgstr "Techno"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Template"
+msgstr "Schiefergrau"
+
 msgid "Text"
 msgstr "Text"
 
@@ -1946,6 +1989,9 @@ msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
+
+msgid "Use Template"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
@@ -2109,6 +2155,21 @@ msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
+#~ msgid "Other"
+#~ msgstr "Sonstige"
+
+#~ msgid "Play smart playlist"
+#~ msgstr "Intelligente Playlist abspielen"
+
+#~ msgid "Remove from playlist"
+#~ msgstr "Aus Playlist entfernen"
+
+#~ msgid "Restore Default"
+#~ msgstr "Standardeinstellungen wiederherstellen"
+
+#~ msgid "Restore"
+#~ msgstr "Wiederherstellen"
+
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2178,12 +2239,6 @@ msgstr[1] "vor {count} Jahren"
 #~ msgid "Add music to start a queue."
 #~ msgstr "Musik hinzufügen, um eine Warteschlange zu starten."
 
-#~ msgid "All"
-#~ msgstr "Alle"
-
-#~ msgid "Any"
-#~ msgstr "Beliebige"
-
 #~ msgid "Cached entries will appear here after sync finishes"
 #~ msgstr ""
 #~ "Zwischengespeicherte Einträge erscheinen hier nach der Synchronisierung"
@@ -2232,9 +2287,6 @@ msgstr[1] "vor {count} Jahren"
 #~ msgid "Configure saved music servers and local playback mappings."
 #~ msgstr ""
 #~ "Gespeicherte Musikserver und lokale Wiedergabezuordnungen konfigurieren."
-
-#~ msgid "Edit Smart Playlist"
-#~ msgstr "Smart-Playlist bearbeiten"
 
 #~ msgid "Enter a local prefix."
 #~ msgstr "Lokales Präfix eingeben."
@@ -2334,9 +2386,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "Save to rescan this local library."
 #~ msgstr "Speichern, um diese lokale Mediathek neu einzulesen."
-
-#~ msgid "Search current folder"
-#~ msgstr "Aktuellen Ordner durchsuchen"
 
 #~ msgid "Search failed."
 #~ msgstr "Suche fehlgeschlagen."
