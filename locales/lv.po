@@ -95,6 +95,11 @@ msgstr ""
 "Šīs mapes tiek apvienotas vienā lokālā avotā un parādītas, pārlūkojot mapes"
 
 msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -625,6 +630,9 @@ msgstr "Ieslēgt EBU R128 analīzi?"
 
 msgid "Enable equalizer"
 msgstr "Iespējot ekvalaizeru"
+
+msgid "Enable partial star ratings"
+msgstr ""
 
 msgid "Enable private mode"
 msgstr "Ieslēgt privāto režīmu"
@@ -1787,6 +1795,11 @@ msgstr "Rādīt tekstus"
 
 msgid "Show paused status"
 msgstr "Rādīt pauzes statusu"
+
+#, fuzzy
+#| msgid "Show lyrics in the right panel"
+msgid "Show ratings in the bottom bar"
+msgstr "Rādīt tekstus labajā panelī"
 
 msgid "Show sidebar"
 msgstr "Rādīt sānu paneli"

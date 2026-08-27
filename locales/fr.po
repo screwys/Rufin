@@ -78,6 +78,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -591,6 +596,9 @@ msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
 msgid "Enable equalizer"
+msgstr ""
+
+msgid "Enable partial star ratings"
 msgstr ""
 
 msgid "Enable private mode"
@@ -1743,6 +1751,9 @@ msgid "Show lyrics"
 msgstr ""
 
 msgid "Show paused status"
+msgstr ""
+
+msgid "Show ratings in the bottom bar"
 msgstr ""
 
 msgid "Show sidebar"

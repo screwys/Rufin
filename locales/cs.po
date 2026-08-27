@@ -92,6 +92,11 @@ msgstr ""
 "složek"
 
 msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -628,6 +633,9 @@ msgstr ""
 
 msgid "Enable equalizer"
 msgstr "Zapnout equalizer"
+
+msgid "Enable partial star ratings"
+msgstr ""
 
 msgid "Enable private mode"
 msgstr "Zapnout soukromý režim"
@@ -1803,6 +1811,11 @@ msgstr "Zobrazit texty skladeb"
 
 msgid "Show paused status"
 msgstr "Zobrazit stav pozastaveno"
+
+#, fuzzy
+#| msgid "Show lyrics in the right panel"
+msgid "Show ratings in the bottom bar"
+msgstr "Zobrazit text skladby v pravém panelu"
 
 msgid "Show sidebar"
 msgstr "Zobrazit postranní panel"

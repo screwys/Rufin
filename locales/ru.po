@@ -96,6 +96,11 @@ msgstr ""
 "содержимого папок"
 
 msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -629,6 +634,9 @@ msgstr "Включить анализ EBU R128?"
 
 msgid "Enable equalizer"
 msgstr "Включить эквалайзер"
+
+msgid "Enable partial star ratings"
+msgstr ""
 
 msgid "Enable private mode"
 msgstr "Включить приватный режим"
@@ -1796,6 +1804,11 @@ msgstr "Показать текст песни"
 
 msgid "Show paused status"
 msgstr "Показывать статус \"на паузе\""
+
+#, fuzzy
+#| msgid "Show lyrics in the right panel"
+msgid "Show ratings in the bottom bar"
+msgstr "Показать текст песни в правой панели"
 
 msgid "Show sidebar"
 msgstr "Показать боковую панель"

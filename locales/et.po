@@ -91,6 +91,11 @@ msgstr ""
 "sirvimise vaatest"
 
 msgid ""
+"This is not supported natively by this source, but Rufin can show partial "
+"stars and then round them up for the source"
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -617,6 +622,9 @@ msgstr "Kas lülitad EBU R128 analüüsi sisse?"
 
 msgid "Enable equalizer"
 msgstr "Kasuta ekvalaiserit"
+
+msgid "Enable partial star ratings"
+msgstr ""
 
 msgid "Enable private mode"
 msgstr "Lülita privaatne režiim sisse"
@@ -1779,6 +1787,11 @@ msgstr "Vaata laulusõnu"
 
 msgid "Show paused status"
 msgstr "Näita peatamise olekut"
+
+#, fuzzy
+#| msgid "Show lyrics in the right panel"
+msgid "Show ratings in the bottom bar"
+msgstr "Näita laulusõnu paremal külgribal"
 
 msgid "Show sidebar"
 msgstr "Näita külgriba"
