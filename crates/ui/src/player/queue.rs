@@ -18,6 +18,7 @@ use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
 use crate::routes::route::Route;
 use crate::shell::Shell;
 use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
+use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
 const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
@@ -639,6 +640,9 @@ fn queue_row(
     root.set_halign(gtk::Align::Fill);
     root.set_valign(gtk::Align::Center);
     root.set_focusable(true);
+    if !fullscreen {
+        root.set_margin_end(WINDOW_CHROME_MARGIN_END);
+    }
     if current == Some(&occurrence) {
         root.add_css_class("queue-row-current");
     }

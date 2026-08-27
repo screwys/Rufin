@@ -800,7 +800,9 @@ _build-dmg identity="development":
     while IFS= read -r -d '' bundled_file; do
         if file "$bundled_file" | grep -q 'Mach-O'; then
             prepare_mach_o_for_bundle "$bundled_file"
-            codesign "${signing_args[@]}" "$bundled_file"
+            if [[ "$bundled_file" != "$bundled_rufin_binary" ]]; then
+                codesign "${signing_args[@]}" "$bundled_file"
+            fi
             install_name="$(mach_o_install_name "$bundled_file" || true)"
             external_dependencies="$(mach_o_dependencies "$bundled_file" \
                 | grep -vFx "$install_name" \
@@ -813,14 +815,6 @@ _build-dmg identity="development":
             fi
         fi
     done < <(find "$app_path/Contents" -type f -print0)
-    codesign "${signing_args[@]}" --identifier "$app_id" \
-        "$app_path/Contents/MacOS/rufin"
-    codesign "${signing_args[@]}" --identifier "$app_id.gdk-pixbuf-query-loaders" \
-        "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
-    codesign "${signing_args[@]}" --identifier "$app_id.gst-plugin-scanner" \
-        "$app_path/Contents/MacOS/gst-plugin-scanner"
-    codesign --verify --strict "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
-    codesign --verify --strict "$app_path/Contents/MacOS/gst-plugin-scanner"
     codesign "${signing_args[@]}" --identifier "$app_id" "$app_path"
     codesign --verify --deep --strict "$app_path"
 
