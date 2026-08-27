@@ -107,7 +107,7 @@ impl PlaybackOwner {
         event_drain: Receiver<PlaybackPublication>,
         visualizer_events: EventSender<ui::runtime::VisualizerPublication>,
         visualizer_drain: Receiver<VisualizerPublication>,
-        _artwork: artwork::Artwork,
+        artwork: artwork::Artwork,
         waveform: Arc<WaveformOwner>,
         lyrics: Arc<LyricsService>,
         discord: Arc<desktop_integration::Discord>,
@@ -119,6 +119,11 @@ impl PlaybackOwner {
     {
         let ui = settings.load().ui;
         let (update_sender, update_receiver) = async_channel::bounded(64);
+        let artwork_settings = settings.clone();
+        let cast_artwork = artwork.clone();
+        let cast_artwork_path = move |stream: &playback::PreparedStream| {
+            cached_cast_artwork(&cast_artwork, &artwork_settings, stream.track.as_deref()?)
+        };
         let owner = Arc::new(Self {
             database,
             settings,
@@ -139,7 +144,11 @@ impl PlaybackOwner {
             play_id_prefix: random_identity(),
             next_instance: AtomicU64::new(1),
             start_backend: Box::new(start_backend),
-            cast: playback_cast::CastManager::new(ui.cast_proxy_enabled, ui.cast_network_interface),
+            cast: playback_cast::CastManager::new(
+                ui.cast_proxy_enabled,
+                ui.cast_network_interface,
+                cast_artwork_path,
+            ),
             output: Mutex::new(OutputSelection {
                 selected: playback::PlaybackOutput::Local,
                 prepared: None,
@@ -221,7 +230,11 @@ impl PlaybackOwner {
         let selected_session = Arc::clone(&session);
         let activated = Arc::new(AtomicBool::new(false));
         let output_activated = Arc::clone(&activated);
-        let (playback_output, backend) = self.take_selected_backend()?;
+        let backend_owner = Arc::clone(self);
+        let (playback_output, backend) =
+            tokio::task::spawn_blocking(move || backend_owner.take_selected_backend())
+                .await
+                .map_err(string_error)??;
         let (playback, _) = Playback::start(
             sequence,
             epoch,
@@ -619,6 +632,7 @@ impl PlaybackOwner {
         let database = Arc::clone(&selected.database);
         let source = selected.source.clone();
         let playback = active.playback;
+        let quality = request.quality;
         self.runtime.spawn(async move {
             let loudness = playback::TrackLoudness {
                 track: match media.track_key {
@@ -640,7 +654,7 @@ impl PlaybackOwner {
             };
             let result = prepare_stream(source, request)
                 .await
-                .map(|stream| PreparedStream::new(stream, loudness).with_media(media, None));
+                .map(|stream| prepare_media_stream(stream, loudness, media, quality));
             let _ = tokio::task::spawn_blocking(move || playback.resolve_stream(run, result)).await;
         });
     }
@@ -1073,6 +1087,54 @@ pub(crate) async fn prepare_stream(
     source.stream(request).await.map_err(string_error)
 }
 
+fn prepare_media_stream(
+    stream: playback::ResolvedStream,
+    loudness: playback::TrackLoudness,
+    media: playback::PlaybackMedia,
+    quality: playback::StreamQuality,
+) -> PreparedStream {
+    let content_type = if quality.max_bitrate_kbps().is_some() {
+        Some("audio/mpeg".to_string())
+    } else {
+        media.source_format.as_deref().and_then(audio_mime)
+    };
+    PreparedStream::new(stream, loudness).with_media(media, content_type)
+}
+
+fn cached_cast_artwork(
+    artwork: &artwork::Artwork,
+    settings: &SettingsFile,
+    media: &playback::PlaybackMedia,
+) -> Option<std::path::PathBuf> {
+    let stored = settings.load();
+    let binding = artwork::ArtworkBinding::opaque(media.artwork_binding.as_deref()?);
+    let external = artwork::ExternalPolicy::new(
+        stored.ui.external_metadata_enabled,
+        stored.ui.allows_external_metadata_lookup(),
+        stored.ui.lastfm_api_key,
+    );
+    let source = sources::SourceId::new(&media.source_id);
+    [512, 256, 96].into_iter().find_map(|size| {
+        let request = artwork::ArtworkRequest::new(binding.clone(), size, size)
+            .with_external(external.clone());
+        artwork.cache_only_file(&source, &request)
+    })
+}
+
+fn audio_mime(source_format: &str) -> Option<String> {
+    let mime = match source_format.trim().to_ascii_lowercase().as_str() {
+        "mp3" | "mp2" | "mpeg" => "audio/mpeg",
+        "flac" => "audio/flac",
+        "m4a" | "mp4" => "audio/mp4",
+        "aac" => "audio/aac",
+        "ogg" | "oga" | "opus" => "audio/ogg",
+        "wav" | "wave" => "audio/wav",
+        "webm" => "audio/webm",
+        _ => return None,
+    };
+    Some(mime.to_string())
+}
+
 async fn playable_queue_media(
     mut media: Option<library::QueueMedia>,
 ) -> Option<library::QueueMedia> {
@@ -1214,7 +1276,44 @@ fn string_error(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{external_source_reporting_enabled, preferred_media_uri, prepend_playback_notices};
+    use super::{
+        external_source_reporting_enabled, preferred_media_uri, prepare_media_stream,
+        prepend_playback_notices,
+    };
+
+    fn test_media(source_format: &str) -> playback::PlaybackMedia {
+        playback::PlaybackMedia {
+            source_id: "source".to_string(),
+            track_key: None,
+            track_object_id: "track".to_string(),
+            title: "Track".to_string(),
+            artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            album_display_artist: None,
+            album_key: None,
+            primary_artist_key: None,
+            media_uri: None,
+            artwork_binding: None,
+            duration_millis: 180_000,
+            disc_number: None,
+            track_number: None,
+            year: None,
+            release_date: None,
+            favorite: None,
+            rating: None,
+            is_downloaded: false,
+            source_format: Some(source_format.to_string()),
+            musicbrainz_recording_id: None,
+            musicbrainz_release_track_id: None,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            primary_artist_musicbrainz_id: None,
+            cue_path: None,
+            cue_start_millis: None,
+            cue_end_millis: None,
+            artist_links: Vec::new(),
+        }
+    }
 
     #[test]
     fn private_mode_gates_only_external_source_reporting() {
@@ -1240,6 +1339,30 @@ mod tests {
                 playback::PlaybackNotice::RunStarted(playback::RunId::new(2)),
             ]
         );
+    }
+
+    #[test]
+    fn prepared_original_stream_keeps_cast_format() {
+        let prepared = prepare_media_stream(
+            playback::ResolvedStream::new("https://provider.example/stream?id=track"),
+            playback::TrackLoudness::default(),
+            test_media("flac"),
+            playback::StreamQuality::Original,
+        );
+
+        assert_eq!(prepared.content_type.as_deref(), Some("audio/flac"));
+    }
+
+    #[test]
+    fn provider_transcode_is_published_as_mpeg() {
+        let prepared = prepare_media_stream(
+            playback::ResolvedStream::new("https://provider.example/stream?id=track"),
+            playback::TrackLoudness::default(),
+            test_media("flac"),
+            playback::StreamQuality::MaxBitrateKbps(320),
+        );
+
+        assert_eq!(prepared.content_type.as_deref(), Some("audio/mpeg"));
     }
 
     #[tokio::test]

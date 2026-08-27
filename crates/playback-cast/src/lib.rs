@@ -16,7 +16,7 @@ use playback::{
     BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, RemoteOutput,
     RemoteOutputProtocol,
 };
-use relay::{RelayServer, available_networks};
+use relay::{ArtworkResolver, RelayServer, available_networks};
 use upnp::UpnpController;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
@@ -27,20 +27,29 @@ pub struct CastManager {
     targets: Mutex<HashMap<String, DiscoveredTarget>>,
     proxy_media: Arc<AtomicBool>,
     network_interface: Mutex<Option<String>>,
+    artwork_resolver: ArtworkResolver,
 }
 
 impl Default for CastManager {
     fn default() -> Self {
-        Self::new(false, None)
+        Self::new(false, None, |_| None)
     }
 }
 
 impl CastManager {
-    pub fn new(proxy_media: bool, network_interface: Option<String>) -> Self {
+    pub fn new(
+        proxy_media: bool,
+        network_interface: Option<String>,
+        artwork_resolver: impl Fn(&playback::PreparedStream) -> Option<std::path::PathBuf>
+        + Send
+        + Sync
+        + 'static,
+    ) -> Self {
         Self {
             targets: Mutex::new(HashMap::new()),
             proxy_media: Arc::new(AtomicBool::new(proxy_media)),
             network_interface: Mutex::new(network_interface),
+            artwork_resolver: Arc::new(artwork_resolver),
         }
     }
 
@@ -130,7 +139,12 @@ impl CastManager {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clone();
-        CastPlaybackBackend::new(target, Arc::clone(&self.proxy_media), network_interface)
+        CastPlaybackBackend::new(
+            target,
+            Arc::clone(&self.proxy_media),
+            network_interface,
+            Arc::clone(&self.artwork_resolver),
+        )
     }
 }
 
@@ -145,9 +159,11 @@ impl CastPlaybackBackend {
         target: DiscoveredTarget,
         proxy_media: Arc<AtomicBool>,
         network_interface: Option<String>,
+        artwork_resolver: ArtworkResolver,
     ) -> Result<Self, String> {
         let relay =
-            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?;
+            RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?
+                .with_artwork_resolver(artwork_resolver);
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
                 let controller = UpnpController::new(*device)?;

@@ -14,9 +14,12 @@ use url::Url;
 
 const PREFERRED_RELAY_PORT: u16 = 9_876;
 
+pub(crate) type ArtworkResolver = Arc<dyn Fn(&PreparedStream) -> Option<PathBuf> + Send + Sync>;
+
 #[derive(Clone)]
 struct RelayResource {
     stream: PreparedStream,
+    artwork_path: Option<PathBuf>,
     content_type: String,
     content_length: Option<u64>,
     transcode: bool,
@@ -39,6 +42,7 @@ pub(crate) struct RelayServer {
     target_is_local: bool,
     proxy_media: Arc<AtomicBool>,
     resources: Arc<Mutex<HashMap<String, RelayResource>>>,
+    artwork_resolver: Option<ArtworkResolver>,
     running: Arc<AtomicBool>,
     thread: Option<JoinHandle<()>>,
 }
@@ -79,9 +83,15 @@ impl RelayServer {
             target_is_local: target_is_local(target),
             proxy_media,
             resources,
+            artwork_resolver: None,
             running,
             thread: Some(thread),
         })
+    }
+
+    pub(crate) fn with_artwork_resolver(mut self, resolver: ArtworkResolver) -> Self {
+        self.artwork_resolver = Some(resolver);
+        self
     }
 
     pub(crate) fn publish(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
@@ -89,6 +99,10 @@ impl RelayServer {
     }
 
     fn publish_as(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
+        let artwork_path = stream.artwork_path.as_deref().cloned().or_else(|| {
+            let resolver = self.artwork_resolver.as_ref()?;
+            resolver(stream)
+        });
         let original_content_type = stream
             .content_type
             .clone()
@@ -106,7 +120,7 @@ impl RelayServer {
         };
         let direct = !self.proxy_media.load(Ordering::Acquire)
             && direct_media_uri(stream, transcode, self.target_is_local);
-        let needs_relay_resource = !direct || stream.artwork_path.is_some();
+        let needs_relay_resource = !direct || artwork_path.is_some();
         let token = needs_relay_resource.then(random_token).transpose()?;
         if let Some(token) = &token {
             self.resources
@@ -116,6 +130,7 @@ impl RelayServer {
                     token.clone(),
                     RelayResource {
                         stream: stream.clone(),
+                        artwork_path: artwork_path.clone(),
                         content_type: content_type.clone(),
                         content_length,
                         transcode,
@@ -142,7 +157,7 @@ impl RelayServer {
             "published cast media"
         );
         Ok(PublishedResource {
-            artwork_uri: stream.artwork_path.as_ref().map(|_| {
+            artwork_uri: artwork_path.as_ref().map(|_| {
                 format!(
                     "{}/{}/artwork",
                     self.base_url,
@@ -448,11 +463,10 @@ fn artwork_response(
     resource: RelayResource,
 ) -> Result<ResponseBox, String> {
     let path = resource
-        .stream
         .artwork_path
         .ok_or_else(|| "cast artwork is unavailable".to_string())?;
-    let content_type = artwork_content_type(path.as_ref())?;
-    file_response(method, range, path.as_ref().clone(), content_type)
+    let content_type = artwork_content_type(&path)?;
+    file_response(method, range, path, content_type)
 }
 
 fn file_response(
@@ -781,6 +795,7 @@ fn directly_supported(content_type: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use std::io::Write;
+    use std::sync::atomic::AtomicUsize;
     use std::sync::mpsc;
 
     use super::*;
@@ -875,6 +890,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary directory");
         let path = directory.path().join("track.mp3");
         let artwork_path = directory.path().join("cover.img");
+        let artwork_resolutions = Arc::new(AtomicUsize::new(0));
         let audio = b"0123456789".repeat(4_000);
         File::create(&path)
             .expect("create track")
@@ -885,15 +901,21 @@ mod tests {
             .write_all(b"\x89PNG\r\n\x1a\ncover")
             .expect("write artwork");
         let uri = Url::from_file_path(&path).expect("file URL").to_string();
-        let stream = PreparedStream::from(playback::ResolvedStream::new(uri))
-            .with_artwork_path(Some(artwork_path));
+        let stream = PreparedStream::from(playback::ResolvedStream::new(uri));
+        let resolver_count = Arc::clone(&artwork_resolutions);
         let mut relay = RelayServer::start(
             "127.0.0.1:9".parse().expect("target"),
             Arc::new(AtomicBool::new(false)),
             None,
         )
-        .expect("start relay");
+        .expect("start relay")
+        .with_artwork_resolver(Arc::new(move |_| {
+            resolver_count.fetch_add(1, Ordering::Relaxed);
+            Some(artwork_path.clone())
+        }));
+        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 0);
         let published = relay.publish(&stream).expect("publish stream");
+        assert_eq!(artwork_resolutions.load(Ordering::Relaxed), 1);
         let artwork_uri = published.artwork_uri.expect("artwork URL");
         let first = published.uri;
         let client = reqwest::blocking::Client::new();
