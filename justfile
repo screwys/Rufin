@@ -550,6 +550,8 @@ _build-dmg identity="development":
     brew_prefix="$(brew --prefix)"
     gstreamer_plugins="$(pkg-config --variable=pluginsdir gstreamer-1.0)"
     pixbuf_loaders="$(pkg-config --variable=gdk_pixbuf_moduledir gdk-pixbuf-2.0)"
+    pixbuf_query_loaders="$(pkg-config --variable=gdk_pixbuf_query_loaders gdk-pixbuf-2.0)"
+    test -x "$pixbuf_query_loaders"
     plugin_scanner_dir="$(pkg-config --variable=pluginscannerdir gstreamer-1.0)"
     plugin_scanner="${plugin_scanner_dir}/gst-plugin-scanner"
     libsoup_libdir="$(pkg-config --variable=libdir libsoup-3.0)"
@@ -636,7 +638,7 @@ _build-dmg identity="development":
         cargo build --locked --release -p rufin "${cargo_features[@]}"
     cp "$target_dir/release/rufin" "$app_path/Contents/MacOS/rufin"
     cp -L "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
-    cp -L "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" \
+    cp -L "$pixbuf_query_loaders" \
         "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
     chmod +x "$app_path/Contents/MacOS/"*
     sed \
