@@ -1,7 +1,7 @@
 use std::collections::{BTreeMap, HashMap};
 use std::fs::File;
 use std::io::{Cursor, Read, Seek, SeekFrom};
-use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, UdpSocket};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr, TcpListener, UdpSocket};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -9,6 +9,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use playback::{CastNetwork, PreparedStream};
+use socket2::{Domain, Protocol, SockAddr, Socket, Type};
 use tiny_http::{Header, Method, Request, Response, ResponseBox, Server, StatusCode};
 use url::Url;
 
@@ -67,15 +68,14 @@ impl RelayServer {
         proxy_media: Arc<AtomicBool>,
         network_interface: Option<&str>,
     ) -> Result<Self, String> {
-        let local_ip = local_address_for(target, network_interface)?;
+        let (local_ip, bound_interface) = network_binding_for(target, network_interface)?;
         let bind_ip = if local_ip.is_ipv4() {
             IpAddr::V4(Ipv4Addr::UNSPECIFIED)
         } else {
             IpAddr::V6(Ipv6Addr::UNSPECIFIED)
         };
-        let server = Server::http(SocketAddr::new(bind_ip, PREFERRED_RELAY_PORT))
-            .or_else(|_| Server::http(SocketAddr::new(bind_ip, 0)))
-            .map_err(|error| error.to_string())?;
+        let server = relay_server(bind_ip, PREFERRED_RELAY_PORT, bound_interface)
+            .or_else(|_| relay_server(bind_ip, 0, bound_interface))?;
         let address = server
             .server_addr()
             .to_ip()
@@ -249,6 +249,49 @@ impl RelayServer {
     }
 }
 
+fn relay_server(
+    bind_ip: IpAddr,
+    port: u16,
+    network_interface: Option<&str>,
+) -> Result<Server, String> {
+    let listener = relay_listener(bind_ip, port, network_interface)?;
+    Server::from_listener(listener, None).map_err(|error| error.to_string())
+}
+
+fn relay_listener(
+    bind_ip: IpAddr,
+    port: u16,
+    network_interface: Option<&str>,
+) -> Result<TcpListener, String> {
+    let domain = if bind_ip.is_ipv4() {
+        Domain::IPV4
+    } else {
+        Domain::IPV6
+    };
+    let socket = Socket::new(domain, Type::STREAM, Some(Protocol::TCP))
+        .map_err(|error| error.to_string())?;
+    if let Some(network_interface) = network_interface {
+        bind_relay_interface(&socket, network_interface)?;
+    }
+    socket
+        .bind(&SockAddr::from(SocketAddr::new(bind_ip, port)))
+        .map_err(|error| error.to_string())?;
+    socket.listen(128).map_err(|error| error.to_string())?;
+    Ok(socket.into())
+}
+
+#[cfg(any(target_os = "android", target_os = "linux"))]
+fn bind_relay_interface(socket: &Socket, network_interface: &str) -> Result<(), String> {
+    socket
+        .bind_device(Some(network_interface.as_bytes()))
+        .map_err(|error| error.to_string())
+}
+
+#[cfg(not(any(target_os = "android", target_os = "linux")))]
+fn bind_relay_interface(_socket: &Socket, _network_interface: &str) -> Result<(), String> {
+    Ok(())
+}
+
 fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
     stream
         .end_millis()
@@ -346,10 +389,10 @@ pub(crate) fn network_address(network_interface: &str) -> Result<Option<IpAddr>,
         .or_else(|| addresses.first().copied()))
 }
 
-pub(crate) fn local_address_for(
+fn network_binding_for<'a>(
     target: SocketAddr,
-    network_interface: Option<&str>,
-) -> Result<IpAddr, String> {
+    network_interface: Option<&'a str>,
+) -> Result<(IpAddr, Option<&'a str>), String> {
     if let Some(network_interface) = network_interface {
         let interfaces = local_interface_addresses()?;
         if let Some(address) = selected_interface_address(
@@ -359,14 +402,21 @@ pub(crate) fn local_address_for(
             network_interface,
             target.ip(),
         ) {
-            return Ok(address);
+            return Ok((address, Some(network_interface)));
         }
         tracing::warn!(
             network_interface,
             "selected casting network is unavailable; using automatic routing"
         );
     }
-    automatic_local_address_for(target)
+    automatic_local_address_for(target).map(|address| (address, None))
+}
+
+pub(crate) fn local_address_for(
+    target: SocketAddr,
+    network_interface: Option<&str>,
+) -> Result<IpAddr, String> {
+    network_binding_for(target, network_interface).map(|(address, _)| address)
 }
 
 fn automatic_local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
@@ -1027,6 +1077,32 @@ mod tests {
             ),
             Some("fd00::103".parse().expect("selected IPv6 address"))
         );
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn selected_relay_interface_is_inherited_by_receiver_connections() {
+        let listener = relay_listener(IpAddr::V4(Ipv4Addr::LOCALHOST), 0, Some("lo"))
+            .expect("interface-bound relay listener");
+        let address = listener.local_addr().expect("relay address");
+        let receiver = thread::spawn(move || {
+            std::net::TcpStream::connect(address).expect("receiver connection")
+        });
+        let (accepted, _) = listener.accept().expect("accepted receiver connection");
+
+        assert_eq!(
+            socket2::SockRef::from(&listener)
+                .device()
+                .expect("listener interface"),
+            Some(b"lo".to_vec())
+        );
+        assert_eq!(
+            socket2::SockRef::from(&accepted)
+                .device()
+                .expect("accepted interface"),
+            Some(b"lo".to_vec())
+        );
+        receiver.join().expect("receiver thread");
     }
 
     #[test]
