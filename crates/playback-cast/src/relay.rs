@@ -95,10 +95,21 @@ impl RelayServer {
     }
 
     pub(crate) fn publish(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
-        self.publish_as(stream)
+        self.publish_as(stream, false)
     }
 
-    fn publish_as(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
+    pub(crate) fn publish_transcoded(
+        &self,
+        stream: &PreparedStream,
+    ) -> Result<PublishedResource, String> {
+        self.publish_as(stream, true)
+    }
+
+    fn publish_as(
+        &self,
+        stream: &PreparedStream,
+        force_transcode: bool,
+    ) -> Result<PublishedResource, String> {
         let artwork_path = stream.artwork_path.as_deref().cloned().or_else(|| {
             let resolver = self.artwork_resolver.as_ref()?;
             resolver(stream)
@@ -107,7 +118,9 @@ impl RelayServer {
             .content_type
             .clone()
             .unwrap_or_else(|| content_type_from_uri(stream.uri()));
-        let transcode = stream.window().is_some() || !directly_supported(&original_content_type);
+        let transcode = force_transcode
+            || stream.window().is_some()
+            || !directly_supported(&original_content_type);
         let content_type = if transcode {
             "audio/mpeg".to_string()
         } else {

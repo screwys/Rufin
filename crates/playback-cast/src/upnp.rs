@@ -423,8 +423,27 @@ impl UpnpController {
         let _ = self.restore_startup_output();
         relay.clear();
         self.next_media = None;
-        let media = relay.publish(&stream)?;
-        self.set_uri(&media.uri, &didl_metadata(&stream, &media))?;
+        let mut media = relay.publish(&stream)?;
+        if let Err(original_error) = self.set_uri(&media.uri, &didl_metadata(&stream, &media)) {
+            if !media.seekable || media.content_type.eq_ignore_ascii_case("audio/mpeg") {
+                return Err(original_error);
+            }
+            tracing::debug!(
+                error = %original_error,
+                content_type = %media.content_type,
+                "UPnP renderer rejected original media; retrying as MP3"
+            );
+            relay.remove(&media);
+            media = relay.publish_transcoded(&stream).map_err(|error| {
+                format!("{original_error}; UPnP MP3 fallback could not be published: {error}")
+            })?;
+            if let Err(fallback_error) = self.set_uri(&media.uri, &didl_metadata(&stream, &media)) {
+                relay.remove(&media);
+                return Err(format!(
+                    "{original_error}; UPnP MP3 fallback failed: {fallback_error}"
+                ));
+            }
+        }
         let absolute_position = media.starts_at_millis.saturating_add(position_millis);
         let hold_output = absolute_position > 0
             && media.seekable
@@ -1070,6 +1089,96 @@ mod tests {
             .expect_err("unusable control service");
 
         assert!(error.contains("GetTransportInfo"), "error={error}");
+        renderer.join().expect("renderer thread");
+    }
+
+    #[test]
+    fn rejected_original_media_is_retried_as_mp3() {
+        let server = Server::http("127.0.0.1:0").expect("fake renderer");
+        let address = server.server_addr().to_ip().expect("renderer address");
+        let (sent, received) = mpsc::channel();
+        let renderer = thread::spawn(move || {
+            for index in 0..4 {
+                let mut request = server.recv().expect("renderer request");
+                if index == 0 {
+                    request
+                        .respond(Response::from_string(
+                            r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service></serviceList></device></root>"#,
+                        ))
+                        .expect("device description response");
+                    continue;
+                }
+                let action = request
+                    .headers()
+                    .iter()
+                    .find(|header| header.field.equiv("SOAPAction"))
+                    .map(|header| header.value.as_str().to_string())
+                    .expect("SOAP action");
+                let mut body = String::new();
+                request
+                    .as_reader()
+                    .read_to_string(&mut body)
+                    .expect("SOAP body");
+                sent.send((action.clone(), body.clone()))
+                    .expect("record SOAP request");
+                if index == 1 {
+                    assert!(action.contains("SetAVTransportURI"));
+                    assert!(body.contains("audio/flac"));
+                    request
+                        .respond(Response::from_string("unsupported media").with_status_code(500))
+                        .expect("original media rejection");
+                    continue;
+                }
+                request
+                    .respond(Response::from_string(
+                        r#"<s:Envelope xmlns:s="http://schemas.xmlsoap.org/soap/envelope/"><s:Body><u:Response xmlns:u="urn:schemas-upnp-org:service:AVTransport:1"></u:Response></s:Body></s:Envelope>"#,
+                    ))
+                    .expect("renderer response");
+            }
+        });
+        let runtime = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .expect("runtime");
+        let device = runtime
+            .block_on(Device::from_url(
+                format!("http://{address}/device.xml")
+                    .parse()
+                    .expect("device URL"),
+            ))
+            .expect("device description");
+        let directory = tempfile::tempdir().expect("track directory");
+        let path = directory.path().join("track.flac");
+        File::create(&path)
+            .expect("create track")
+            .write_all(b"track")
+            .expect("write track");
+        let stream = PreparedStream::from(playback::ResolvedStream::new(
+            Url::from_file_path(path).expect("track URL").to_string(),
+        ))
+        .with_media(test_track(), Some("audio/flac".to_string()));
+        let relay =
+            RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
+        let mut controller = UpnpController::new(device).expect("controller");
+
+        let started = controller
+            .start(RunId::new(1), stream, None, 0, &relay)
+            .expect("MP3 fallback playback");
+
+        assert!(started.iter().any(|event| matches!(
+            event,
+            BackendEvent::Seekable {
+                run,
+                seekable: false,
+            } if *run == RunId::new(1)
+        )));
+        let actions = received.try_iter().collect::<Vec<_>>();
+        assert_eq!(actions.len(), 3);
+        assert!(actions[0].0.contains("SetAVTransportURI"));
+        assert!(actions[0].1.contains("audio/flac"));
+        assert!(actions[1].0.contains("SetAVTransportURI"));
+        assert!(actions[1].1.contains("audio/mpeg"));
+        assert!(actions[2].0.contains("#Play"));
         renderer.join().expect("renderer thread");
     }
 
