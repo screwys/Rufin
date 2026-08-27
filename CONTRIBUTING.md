@@ -4,7 +4,7 @@ Thank you for your interest in contributing to Rufin!
 
 Contributions are welcome for:
 
-- Documentation: typos, rephrases, additions, screenshots (should follow [Flathub guidelines](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines)) and more
+- Documentation: additions, screenshots (should follow [Flathub guidelines](https://docs.flathub.org/docs/for-app-authors/metainfo-guidelines/quality-guidelines)) and more
 - Packaging: editing current methods or adding new ones; `xtask` crate should be checked
 - Bug fixes: if you want to patch a bug, please clearly explain how to reproduce it in your PR
 - New features: You can open an issue/discussion beforehand unless you want to make it a surprise!
@@ -120,11 +120,13 @@ Do not change strings without a strong motivation, since this means more work fo
 
 ### Pull Requests
 
+Although I do not hate surprises, it is preferable that a prior conversation was done before the PR, or it closes an issue. You can open such an issue yourself as well, which would likely save a lot of time for the both sides if we reach an agreement on the scope. If the change is straightforward enough that a direct PR saves more time, this can be skipped. 
+
 Please keep your pull requests scoped. If it affects 2 unrelated areas, it is better to split PRs. We have a PR-centric workflow and usually most PRs have an issue they adress. Hence it might be to your benefit to use `git blame` and see if the code you are changing was adressing an issue, which helps to prevent a regression. 
 
-Try to attach screenshots or examples if appliciable. Talk about the motivation and what you tested, what you did not test and if you are unsure this affects something else. This greatly speeds up the review process by reducing the number of questions.
+Try to attach screenshots or examples if applicable. Talk about the motivation and what you tested, what you did not test and if you are unsure whether this affects something else. This greatly speeds up the review process by reducing the number of questions.
 
-## LLM Policy
+### LLM Policy
 
 In general, respect humans. Conversation must be done between humans, I absolutely do not like reading any issue/comment and such written by an LLM. There is no requirement for perfect English, I would prefer reading broken English over verbose hallucinated text. If your English is not at the level you can describe the issue, you can use [a direct translation tool](https://libretranslate.com/) or at least tell your LLM to directly translate what you want to say, instead of sending an overly verbose wall of text.
 
