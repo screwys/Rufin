@@ -819,7 +819,7 @@ _build-dmg identity="development":
         "$app_path/Contents/MacOS/gst-plugin-scanner"
     codesign --verify --strict "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
     codesign --verify --strict "$app_path/Contents/MacOS/gst-plugin-scanner"
-    codesign "${signing_args[@]}" --deep --identifier "$app_id" "$app_path"
+    codesign "${signing_args[@]}" --identifier "$app_id" "$app_path"
     codesign --verify --deep --strict "$app_path"
 
     mkdir -p "$dmg_root"
