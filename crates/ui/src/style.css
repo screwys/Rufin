@@ -1280,7 +1280,8 @@ row.entry.password:focus-within {
   font-size: 12px;
 }
 
-.player-timestamp {
+.player-timestamp,
+.queue-year {
   font-feature-settings: "tnum";
 }
 

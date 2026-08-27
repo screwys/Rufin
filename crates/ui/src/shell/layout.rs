@@ -559,7 +559,7 @@ impl Shell {
         if fullscreen.root.is_sensitive() != visible {
             fullscreen.root.set_sensitive(visible);
         }
-        set_widget_visible(&fullscreen.root, true);
+        set_widget_visible(&fullscreen.root, visible);
     }
 
     pub(crate) fn layout_width(&self) -> i32 {

@@ -1,8 +1,8 @@
 use super::audio::{SharedLoudnessTags, apply_shared_loudness, audio_output_is_available};
 use super::pipeline::{AboutToFinishAction, PlayerPipeline, SourceClock};
 #[cfg(test)]
-use super::waveform::visualizer_pipeline_is_live;
-use super::waveform::{VisualizerAnalyzer, VisualizerTap};
+use super::visualizer::visualizer_pipeline_is_live;
+use super::visualizer::{VisualizerAnalyzer, VisualizerTap};
 use super::*;
 use std::collections::HashMap;
 use std::sync::mpsc::{SyncSender, sync_channel};

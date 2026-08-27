@@ -83,7 +83,6 @@ impl LyricsPane {
         root.set_vexpand(true);
         root.set_margin_start(8);
         root.set_margin_end(0);
-        root.set_margin_bottom(8);
 
         let clear_auto_search_button = gtk::Button::from_icon_name("rufin-process-stop-symbolic");
         clear_auto_search_button.add_css_class("icon-button");

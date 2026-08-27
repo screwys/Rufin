@@ -22,6 +22,8 @@ use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
 const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
+const QUEUE_OVERLAY_SCROLLBAR_WIDTH: i32 = 9;
+const QUEUE_SIDEBAR_END_INSET: i32 = WINDOW_CHROME_MARGIN_END + QUEUE_OVERLAY_SCROLLBAR_WIDTH;
 const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
 const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
@@ -641,7 +643,7 @@ fn queue_row(
     root.set_valign(gtk::Align::Center);
     root.set_focusable(true);
     if !fullscreen {
-        root.set_margin_end(WINDOW_CHROME_MARGIN_END);
+        root.set_margin_end(QUEUE_SIDEBAR_END_INSET);
     }
     if current == Some(&occurrence) {
         root.add_css_class("queue-row-current");
@@ -741,6 +743,7 @@ fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
     content.append(&labels);
     let year = gtk::Label::new(row.year.map(|year| year.to_string()).as_deref());
     year.add_css_class("muted");
+    year.add_css_class("queue-year");
     year.set_xalign(1.0);
     year.set_width_chars(4);
     year.set_halign(gtk::Align::End);
@@ -949,6 +952,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     if !fullscreen {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("queue-header");
+        header.set_margin_end(QUEUE_SIDEBAR_END_INSET);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_width_request(50);
         header.append(&spacer);
@@ -959,7 +963,10 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
         header.append(&title);
         let year = gtk::Label::new(Some(&tr("Year").to_uppercase()));
         year.add_css_class("muted");
+        year.add_css_class("queue-year");
+        year.set_xalign(1.0);
         year.set_width_chars(4);
+        year.set_halign(gtk::Align::End);
         header.append(&year);
         return header.upcast();
     }

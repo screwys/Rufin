@@ -14,7 +14,7 @@ use crate::player::right_panel::RightPanelWidgets;
 use crate::player::state::PlaybackState;
 use crate::player::{
     BOTTOM_PLAYER_HEIGHT, PlayerDesktopWidgets, apply_sidebar_media_visibility,
-    build_bottom_player, build_fullscreen_player, build_right_panel,
+    build_bottom_player, build_fullscreen_player, build_right_panel, build_visualizer,
     connect_fullscreen_player_controls, connect_player_controls, connect_queue_lyrics_overlay,
     connect_queue_panel_controls, default_audio_output_options, warm_audio_output_cache,
 };
@@ -259,8 +259,9 @@ pub fn build(
     let main_area = main_area_parts.root;
     let route_host = main_area_parts.route_host;
 
+    let visualizer = build_visualizer();
     let queue_window_controls = window_controls.end_width_reservation();
-    let right_panel_parts = build_right_panel(&queue_window_controls);
+    let right_panel_parts = build_right_panel(&queue_window_controls, &visualizer.sidebar_area);
     let right_panel = right_panel_parts.root;
     let queue_panel = right_panel_parts.queue_panel;
     let queue_search = right_panel_parts.queue_search;
@@ -269,8 +270,6 @@ pub fn build(
     let lyrics_surface = right_panel_parts.lyrics_surface;
     let lyrics_resize_handle = right_panel_parts.lyrics_resize_handle;
     let lyrics_host = right_panel_parts.lyrics_host;
-    let visualizer_area = right_panel_parts.visualizer_area;
-    let visualizer_levels = right_panel_parts.visualizer_levels;
 
     let content_chrome = build_content_chrome(&main_area, &right_panel);
     let right_split = content_chrome.right_split;
@@ -297,7 +296,7 @@ pub fn build(
     let fullscreen_player = build_fullscreen_player(
         &fullscreen_hero_window_controls,
         &fullscreen_inline_window_controls,
-        Rc::clone(&visualizer_levels),
+        &visualizer.fullscreen_area,
     );
     let player_controls = build_bottom_player();
 
@@ -479,12 +478,12 @@ pub fn build(
         lyrics_surface,
         lyrics_resize_handle,
         lyrics_host,
-        visualizer_area,
         visualizer_visible: Cell::new(settings.visualizer_panel_visible),
     };
     let player_view = PlayerDesktopWidgets {
         fullscreen_player,
         player_controls,
+        visualizer,
     };
 
     let shell = Rc::new(Shell {

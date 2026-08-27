@@ -1,6 +1,6 @@
 use super::audio::{AudioGraph, SharedLoudnessTags};
 use super::engine::{PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish};
-use super::waveform::VisualizerTap;
+use super::visualizer::VisualizerTap;
 use super::*;
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

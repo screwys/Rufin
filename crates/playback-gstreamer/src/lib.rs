@@ -18,6 +18,7 @@ mod engine;
 mod loudness;
 mod pipeline;
 mod transcode;
+mod visualizer;
 mod waveform;
 
 pub use audio::available_audio_outputs;

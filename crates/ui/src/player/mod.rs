@@ -11,6 +11,7 @@ pub(crate) mod queue;
 mod random_play;
 pub(crate) mod right_panel;
 pub(crate) mod state;
+mod visualizer;
 
 pub(crate) use bottom::{
     BOTTOM_PLAYER_HEIGHT, NOW_PLAYING_RAIL_WIDTH, PlayerControls, build_bottom_player,
@@ -40,8 +41,10 @@ pub(crate) use random_play::play_saved_random;
 pub(crate) use right_panel::{
     apply_sidebar_media_visibility, build_right_panel, connect_queue_lyrics_overlay,
 };
+pub(crate) use visualizer::{VisualizerParts, build_visualizer};
 
 pub(crate) struct PlayerDesktopWidgets {
     pub(crate) fullscreen_player: FullscreenPlayerParts,
     pub(crate) player_controls: PlayerControls,
+    pub(crate) visualizer: VisualizerParts,
 }
