@@ -381,7 +381,11 @@ pub(crate) fn verify_interface_resources() -> Result<(), String> {
     register_resources()?;
     for relative_path in [
         "scalable/apps/io.github.screwys.Rufin.svg",
-        "scalable/actions/rufin-play-symbolic.svg",
+        "scalable/actions/rufin-go-last-symbolic.svg",
+        "scalable/actions/rufin-mail-forward-symbolic.svg",
+        "scalable/actions/rufin-media-playback-start-symbolic.svg",
+        "scalable/actions/rufin-media-skip-backward-symbolic.svg",
+        "scalable/actions/rufin-media-skip-forward-symbolic.svg",
         "scalable/actions/rufin-open-menu-symbolic.svg",
         "scalable/actions/rufin-x-office-calendar-symbolic.svg",
         "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",

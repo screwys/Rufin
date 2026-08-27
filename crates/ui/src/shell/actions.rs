@@ -17,9 +17,9 @@ use localization::{TRANSLATOR_CREDITS, tr};
 
 use super::{Shell, layout, navigation};
 
-pub(crate) const PLAY_ICON: &str = "rufin-play-symbolic";
-pub(crate) const PLAY_NEXT_ICON: &str = "rufin-play-next-symbolic";
-pub(crate) const PLAY_LATER_ICON: &str = "rufin-play-later-symbolic";
+pub(crate) const PLAY_ICON: &str = "rufin-media-playback-start-symbolic";
+pub(crate) const PLAY_NEXT_ICON: &str = "rufin-mail-forward-symbolic";
+pub(crate) const PLAY_LATER_ICON: &str = "rufin-go-last-symbolic";
 pub(crate) const EDIT_ICON: &str = "rufin-edit-symbolic";
 pub(crate) const ADD_ICON: &str = "rufin-list-add-symbolic";
 pub(crate) const REMOVE_ICON: &str = "rufin-list-remove-symbolic";
@@ -1072,11 +1072,7 @@ pub(crate) enum ActionButtonVariant {
 pub(crate) const COVER_SIDE_ACTION_SIZE: i32 = 34;
 pub(crate) const COVER_PRIMARY_ACTION_SIZE: i32 = 54;
 
-pub(crate) fn configure_action_button(
-    button: &gtk::Button,
-    variant: ActionButtonVariant,
-    icon_name: Option<&str>,
-) {
+pub(crate) fn configure_action_button(button: &gtk::Button, variant: ActionButtonVariant) {
     let is_cover = matches!(
         variant,
         ActionButtonVariant::CoverSideTransport
@@ -1092,37 +1088,28 @@ pub(crate) fn configure_action_button(
         button.add_css_class("detail-showcase-action-button");
     }
 
-    let nudge_icon = match variant {
+    match variant {
         ActionButtonVariant::CoverSideTransport => {
             button.add_css_class("cover-side-button");
             pin_action_button(button, COVER_SIDE_ACTION_SIZE);
-            true
         }
         ActionButtonVariant::CoverPrimaryTransport => {
             button.add_css_class("cover-play-button");
             pin_action_button(button, COVER_PRIMARY_ACTION_SIZE);
-            true
         }
         ActionButtonVariant::CoverCornerMenu => {
             button.add_css_class("cover-menu-button");
             pin_action_button(button, COVER_SIDE_ACTION_SIZE);
-            false
         }
         ActionButtonVariant::CoverCornerFavorite => {
             button.add_css_class("cover-favorite-button");
             pin_action_button(button, COVER_SIDE_ACTION_SIZE);
-            false
         }
-        ActionButtonVariant::DetailAction => true,
+        ActionButtonVariant::DetailAction => {}
         ActionButtonVariant::DetailPrimary => {
             button.add_css_class("detail-showcase-play-button");
-            true
         }
-        ActionButtonVariant::DetailFavorite => false,
-    };
-
-    if let (true, Some(icon_name)) = (nudge_icon, icon_name) {
-        nudge_transport_action_icon(button, icon_name);
+        ActionButtonVariant::DetailFavorite => {}
     }
     let face_class = if is_cover {
         "cover-hover-face"
@@ -1136,22 +1123,6 @@ fn pin_action_button(button: &gtk::Button, size: i32) {
     button.set_size_request(size, size);
     button.set_halign(gtk::Align::Center);
     button.set_valign(gtk::Align::Center);
-}
-
-fn nudge_transport_action_icon(button: &gtk::Button, icon_name: &str) {
-    let start_margin = if icon_name == PLAY_ICON {
-        4
-    } else if icon_name == PLAY_NEXT_ICON || icon_name == PLAY_LATER_ICON {
-        2
-    } else {
-        return;
-    };
-    let Some(child) = button.child() else {
-        return;
-    };
-    if let Ok(image) = child.downcast::<gtk::Image>() {
-        image.set_margin_start(start_margin);
-    }
 }
 
 fn wrap_button_child_in_action_layers(button: &gtk::Button, face_class: &str) {

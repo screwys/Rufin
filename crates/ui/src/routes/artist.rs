@@ -1043,7 +1043,7 @@ fn artist_detail_header_restored(
         Rc::clone(&play),
     );
     let favorite = favorite_icon_button("Favorite");
-    configure_action_button(&favorite, ActionButtonVariant::DetailFavorite, None);
+    configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
     set_favorite_button_active(&favorite, artist.favorite);
     actions.append(&favorite);
     let hover_favorite = controls

@@ -286,6 +286,14 @@ fn manage_server_content(
         Err(error) => content.append(&source_settings_error(&error)),
     }
 
+    if let Some(half_stars) = super::half_stars_row(shell, &server) {
+        let library = adw::PreferencesGroup::builder()
+            .title(tr("Library"))
+            .build();
+        library.add(&half_stars);
+        content.append(&library);
+    }
+
     let saved_folder = access.as_ref().map(|access| access.root_path.clone());
     let saved_local_prefix = access
         .as_ref()

@@ -186,6 +186,8 @@ pub struct Settings {
     #[serde(default)]
     pub seekbar_waveform_enabled: bool,
     #[serde(default)]
+    pub show_bottom_bar_rating: bool,
+    #[serde(default)]
     pub tray_enabled: bool,
     #[serde(default, alias = "exit_to_tray")]
     pub keep_running_after_close: bool,
@@ -252,6 +254,7 @@ impl Default for Settings {
             show_downloaded_badges: true,
             downloads: Vec::new(),
             seekbar_waveform_enabled: false,
+            show_bottom_bar_rating: false,
             tray_enabled: false,
             keep_running_after_close: false,
             start_minimized: false,

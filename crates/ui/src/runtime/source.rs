@@ -32,6 +32,7 @@ pub struct SourceSummary {
     pub kind: String,
     pub name: String,
     pub transcoded_download_bitrate_limit_kbps: Option<u32>,
+    pub half_stars_enabled: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -230,13 +231,13 @@ pub trait SourcePort: Send + Sync {
     fn discover_servers(&self);
     fn configure_source(&self, input: SourceSetup);
     fn update_source(&self, input: SourceSettingsChange);
+    fn set_half_stars(&self, source_id: SourceId, enabled: bool);
     fn select_source(&self, source_id: SourceId);
     fn change_secret_storage(&self, mode: SecretStorageMode) -> Receiver<Result<(), String>>;
     fn add_local_folder(&self, path: PathBuf);
     fn replace_local_folder(&self, current: String, replacement: PathBuf);
     fn remove_local_folder(&self, path: String);
     fn refresh_source(&self, source_id: SourceId);
-    fn check_for_source_changes(&self);
     fn save_local_access(&self, input: SourceLocalAccess) -> Receiver<Result<(), String>>;
     fn clear_local_access(&self, source_id: SourceId);
     fn forget_source(&self, source_id: SourceId);

@@ -1280,6 +1280,16 @@ fn layout_group(shell: &Rc<Shell>) -> adw::PreferencesGroup {
     });
     group.add(&visualizer_panel_row);
 
+    let bottom_bar_rating_row = adw::SwitchRow::builder()
+        .title(tr("Show ratings in the bottom bar"))
+        .active(settings.show_bottom_bar_rating)
+        .build();
+    let bottom_bar_rating_shell = Rc::clone(shell);
+    bottom_bar_rating_row.connect_active_notify(move |row| {
+        bottom_bar_rating_shell.set_show_bottom_bar_rating(row.is_active());
+    });
+    group.add(&bottom_bar_rating_row);
+
     let narrow_row = adw::SwitchRow::builder()
         .title(tr("Use different layout below a threshold width"))
         .active(settings.layout.narrow_enabled)

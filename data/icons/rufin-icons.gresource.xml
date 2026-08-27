@@ -7,15 +7,16 @@
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png</file>
+    <file>hicolor/scalable/actions/rufin-go-last-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-mail-forward-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-media-skip-backward-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-media-skip-forward-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-audio-radio-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-edit-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-filled-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-outline-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-list-drag-handle-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-more-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-play-later-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-play-next-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-play-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-album-artists-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-albums-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-artists-symbolic.svg</file>

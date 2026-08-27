@@ -541,7 +541,7 @@ pub(crate) struct CoverHoverControls {
 impl CoverHoverControls {
     pub(super) fn add_context_button(&mut self) -> gtk::Button {
         let menu = icon_button_without_tooltip(MORE_ICON, "More actions");
-        configure_action_button(&menu, ActionButtonVariant::CoverCornerMenu, None);
+        configure_action_button(&menu, ActionButtonVariant::CoverCornerMenu);
         menu.set_halign(gtk::Align::Start);
         menu.set_valign(gtk::Align::End);
         menu.set_margin_start(COVER_CORNER_HORIZONTAL_INSET);
@@ -638,7 +638,7 @@ pub(super) fn cover_hover_controls_with_favorite(
 ) -> (CoverHoverControls, gtk::Button) {
     let mut controls = cover_play_hover_controls(size, play_label);
     let favorite = favorite_icon_button("Favorite");
-    configure_action_button(&favorite, ActionButtonVariant::CoverCornerFavorite, None);
+    configure_action_button(&favorite, ActionButtonVariant::CoverCornerFavorite);
     favorite.set_halign(gtk::Align::End);
     favorite.set_valign(gtk::Align::Start);
     favorite.set_margin_top(COVER_CORNER_VERTICAL_INSET);
@@ -664,27 +664,15 @@ pub(super) fn cover_play_hover_controls(size: i32, play_label: &str) -> CoverHov
     shade.set_visible(false);
 
     let play_next = icon_button(PLAY_NEXT_ICON, "Play Next");
-    configure_action_button(
-        &play_next,
-        ActionButtonVariant::CoverSideTransport,
-        Some(PLAY_NEXT_ICON),
-    );
+    configure_action_button(&play_next, ActionButtonVariant::CoverSideTransport);
     play_next.set_visible(true);
 
     let play = icon_button(PLAY_ICON, play_label);
-    configure_action_button(
-        &play,
-        ActionButtonVariant::CoverPrimaryTransport,
-        Some(PLAY_ICON),
-    );
+    configure_action_button(&play, ActionButtonVariant::CoverPrimaryTransport);
     play.set_visible(true);
 
     let play_last = icon_button(PLAY_LATER_ICON, "Play Later");
-    configure_action_button(
-        &play_last,
-        ActionButtonVariant::CoverSideTransport,
-        Some(PLAY_LATER_ICON),
-    );
+    configure_action_button(&play_last, ActionButtonVariant::CoverSideTransport);
     play_last.set_visible(true);
 
     let transport = gtk::Box::new(gtk::Orientation::Horizontal, COVER_TRANSPORT_REGULAR_GAP);

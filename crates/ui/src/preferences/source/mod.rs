@@ -48,6 +48,28 @@ pub(crate) fn configured_source_icon_name(source: &SourceSummary) -> &'static st
     login::source_kind_icon_name(&source.kind).unwrap_or("rufin-network-server-symbolic")
 }
 
+pub(crate) fn half_stars_row(
+    shell: &Rc<crate::shell::Shell>,
+    source: &SourceSummary,
+) -> Option<adw::SwitchRow> {
+    if !matches!(source.kind.as_str(), "navidrome" | "subsonic" | "local") {
+        return None;
+    }
+    let row = adw::SwitchRow::builder()
+        .title(tr("Enable partial star ratings"))
+        .subtitle(tr(
+            "This is not supported natively by this source, but Rufin can show partial stars and then round them up for the source",
+        ))
+        .active(source.half_stars_enabled)
+        .build();
+    let source_handle = shell.products.source.clone();
+    let source_id = source.id.clone();
+    row.connect_active_notify(move |row| {
+        source_handle.set_half_stars(source_id.clone(), row.is_active());
+    });
+    Some(row)
+}
+
 pub(crate) fn folder_selected_text(count: u64) -> String {
     let label = count.to_string();
     trn_with(

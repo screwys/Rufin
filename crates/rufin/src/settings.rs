@@ -52,6 +52,8 @@ pub(crate) struct ConfiguredSource {
     pub(crate) music_folder_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub(crate) local_access: Option<SavedLocalAccess>,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub(crate) enable_half_stars: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]

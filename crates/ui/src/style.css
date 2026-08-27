@@ -1613,7 +1613,7 @@ button.download-queue-pause image {
   min-width: 54px;
   min-height: 54px;
   padding: 0;
-  -gtk-icon-size: 24px;
+  -gtk-icon-size: 20px;
 }
 
 .icon-button.cover-side-button {

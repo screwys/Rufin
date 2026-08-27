@@ -53,75 +53,46 @@ fn set_icon_source(area: &gtk::DrawingArea, context: &gtk::cairo::Context) {
 }
 
 fn drawing_icon_button(label: &str, icon: gtk::DrawingArea) -> gtk::Button {
+    widget_icon_button(label, &icon)
+}
+
+fn widget_icon_button(label: &str, icon: &impl IsA<gtk::Widget>) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("icon-button");
     button.add_css_class("flat");
     button.add_css_class("circular");
     button.set_tooltip_text(Some(&tr(label)));
-    button.set_child(Some(&icon));
+    button.set_child(Some(icon));
     button
 }
 
 pub(super) fn skip_icon_button(forward: bool, label: &str) -> gtk::Button {
-    let icon = gtk::DrawingArea::new();
-    icon.set_content_width(TRANSPORT_ICON_SIZE);
-    icon.set_content_height(TRANSPORT_ICON_SIZE);
+    let icon = gtk::Image::from_icon_name(if forward {
+        "rufin-media-skip-forward-symbolic"
+    } else {
+        "rufin-media-skip-backward-symbolic"
+    });
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
-    icon.set_draw_func(move |area, context, width, height| {
-        set_icon_source(area, context);
-        let width = f64::from(width);
-        let height = f64::from(height);
-        let center_y = height / 2.0;
-        let top = center_y - height * 0.28;
-        let bottom = center_y + height * 0.28;
-        let bar_width = (width * 0.12).clamp(2.1, 2.8);
-        let _ = context.save();
-        if !forward {
-            context.translate(width, 0.0);
-            context.scale(-1.0, 1.0);
-        }
-        context.move_to(width * 0.30, top);
-        context.line_to(width * 0.30, bottom);
-        context.line_to(width * 0.70, center_y);
-        context.close_path();
-        let _ = context.fill();
-        context.rectangle(width * 0.76, top, bar_width, bottom - top);
-        let _ = context.fill();
-        let _ = context.restore();
-    });
-    drawing_icon_button(label, icon)
+    widget_icon_button(label, &icon)
 }
 
-pub(super) fn play_icon_button(label: &str) -> (gtk::Button, gtk::DrawingArea, Rc<Cell<bool>>) {
-    let playing = Rc::new(Cell::new(false));
-    let icon = gtk::DrawingArea::new();
-    icon.set_content_width(TRANSPORT_ICON_SIZE);
-    icon.set_content_height(TRANSPORT_ICON_SIZE);
+pub(super) fn play_icon_button(label: &str) -> (gtk::Button, gtk::Image) {
+    let icon = gtk::Image::from_icon_name("rufin-media-playback-start-symbolic");
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
-    let icon_playing = Rc::clone(&playing);
-    icon.set_draw_func(move |area, context, width, height| {
-        set_icon_source(area, context);
-        let width = f64::from(width);
-        let height = f64::from(height);
-        if icon_playing.get() {
-            let bar_width = width * 0.15;
-            let bar_height = height * 0.48;
-            let y = (height - bar_height) / 2.0;
-            context.rectangle(width * 0.34, y, bar_width, bar_height);
-            context.rectangle(width * 0.56, y, bar_width, bar_height);
-            let _ = context.fill();
-        } else {
-            context.move_to(width * 0.38, height * 0.28);
-            context.line_to(width * 0.38, height * 0.72);
-            context.line_to(width * 0.72, height * 0.50);
-            context.close_path();
-            let _ = context.fill();
-        }
-    });
-    let button = drawing_icon_button(label, icon.clone());
-    (button, icon, playing)
+    icon.set_margin_start(4);
+    let button = widget_icon_button(label, &icon);
+    (button, icon)
+}
+
+pub(super) fn set_play_icon(icon: &gtk::Image, playing: bool) {
+    icon.set_margin_start(if playing { 0 } else { 4 });
+    icon.set_icon_name(Some(if playing {
+        "rufin-media-playback-pause-symbolic"
+    } else {
+        "rufin-media-playback-start-symbolic"
+    }));
 }
 
 pub(super) fn shuffle_icon_button(label: &str) -> gtk::Button {

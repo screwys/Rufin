@@ -351,6 +351,7 @@ fn present_track_menu(
                 "rating",
                 &context_rating_row(
                     track.rating.and_then(|value| u8::try_from(value).ok()),
+                    shell.half_stars_enabled(),
                     surface.popover(),
                     move |rating| shell.set_rating(FavoriteTarget::Track(key), rating),
                 ),
@@ -501,6 +502,7 @@ pub(crate) fn present_album_context_menu(
             "rating",
             &context_rating_row(
                 album.rating.and_then(|value| u8::try_from(value).ok()),
+                shell.half_stars_enabled(),
                 surface.popover(),
                 move |rating| shell.set_rating(FavoriteTarget::Album(album_key), rating),
             ),
@@ -614,6 +616,7 @@ pub(crate) fn present_artist_context_menu(
             "rating",
             &context_rating_row(
                 artist.rating.and_then(|value| u8::try_from(value).ok()),
+                shell.half_stars_enabled(),
                 surface.popover(),
                 move |rating| shell.set_rating(FavoriteTarget::Artist(artist_key), rating),
             ),

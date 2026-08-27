@@ -367,6 +367,21 @@ impl Shell {
         self.update_bottom_player();
     }
 
+    pub(super) fn set_show_bottom_bar_rating(self: &Rc<Self>, enabled: bool) {
+        if self
+            .update_app_settings("bottom bar rating setting", |settings| {
+                if settings.show_bottom_bar_rating == enabled {
+                    return false;
+                }
+                settings.show_bottom_bar_rating = enabled;
+                true
+            })
+            .is_some()
+        {
+            self.update_bottom_player();
+        }
+    }
+
     pub(super) fn set_language_preference(self: &Rc<Self>, language: String) -> bool {
         let Some(settings) = self.update_app_settings("language setting", |settings| {
             if settings.language == language {

@@ -266,6 +266,7 @@ mod tests {
             kind: "test".to_string(),
             name: id.to_string(),
             transcoded_download_bitrate_limit_kbps: None,
+            half_stars_enabled: false,
         }
     }
 
@@ -320,6 +321,7 @@ mod tests {
             kind: "local".to_string(),
             name: "Local".to_string(),
             transcoded_download_bitrate_limit_kbps: None,
+            half_stars_enabled: false,
         };
 
         assert_eq!(source_menu_label(&local), "Local");

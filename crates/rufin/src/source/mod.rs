@@ -1220,6 +1220,7 @@ impl SourcePort for SourceOwner {
                     credential_ref,
                     music_folder_id: None,
                     local_access: None,
+                    enable_half_stars: false,
                 };
                 let commit_owner = owner.clone();
                 let committed = configured.clone();
@@ -1260,6 +1261,31 @@ impl SourcePort for SourceOwner {
             {
                 owner.shared.warn_nonfatal(&error);
             }
+        });
+    }
+
+    fn set_half_stars(&self, source_id: SourceId, enabled: bool) {
+        self.spawn_serialized(move |owner| async move {
+            if let Err(error) = owner.shared.settings.update(|stored| {
+                let configured = stored
+                    .sources
+                    .configured
+                    .iter_mut()
+                    .find(|configured| configured.configuration.source_id == source_id)
+                    .ok_or_else(|| "the configured source no longer exists".to_string())?;
+                configured.enable_half_stars = enabled;
+                Ok(())
+            }) {
+                owner.shared.warn_nonfatal(&error);
+                return;
+            }
+            owner
+                .shared
+                .send(SourceEvent::Configured(configured_sources(
+                    &owner.shared.settings.load(),
+                    owner.shared.selected().as_deref(),
+                )))
+                .await;
         });
     }
 
@@ -1370,13 +1396,6 @@ impl SourcePort for SourceOwner {
                     .manual_refresh_selected(&selected, "source-preferences", acquisition)
                     .await;
             }
-        });
-    }
-
-    fn check_for_source_changes(&self) {
-        let owner = self.clone();
-        self.shared.runtime.spawn(async move {
-            owner.check_remote_freshness().await;
         });
     }
 
@@ -2465,6 +2484,10 @@ fn configured_source(
         .ok_or_else(|| "the configured source no longer exists".to_string())
 }
 
+fn half_stars_enabled(configured: &ConfiguredSource) -> bool {
+    configured.configuration.kind == "jellyfin" || configured.enable_half_stars
+}
+
 async fn acquire_required_catalog(
     source: &Source,
     database: &Database,
@@ -2532,6 +2555,7 @@ fn configured_sources(
             transcoded_download_bitrate_limit_kbps: configured
                 .configuration
                 .transcoded_download_bitrate_limit_kbps(),
+            half_stars_enabled: half_stars_enabled(configured),
         })
         .collect::<Vec<_>>();
     let local_folders = stored
@@ -2655,6 +2679,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 name: configuration.name.clone(),
                 transcoded_download_bitrate_limit_kbps: configuration
                     .transcoded_download_bitrate_limit_kbps(),
+                half_stars_enabled: configuration.kind == "jellyfin",
             },
             credentials: CredentialPreset {
                 source_name: credentials.server_name,

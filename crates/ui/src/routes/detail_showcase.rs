@@ -373,7 +373,7 @@ fn summary_value_is_visible(text: &str) -> bool {
 
 pub(crate) fn detail_action_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = icon_button(icon_name, label);
-    configure_action_button(&button, ActionButtonVariant::DetailAction, Some(icon_name));
+    configure_action_button(&button, ActionButtonVariant::DetailAction);
     button
 }
 
@@ -385,17 +385,13 @@ pub(crate) fn detail_delete_button(label: &str) -> gtk::Button {
     button.set_valign(gtk::Align::Center);
     button.set_tooltip_text(Some(&tr(label)));
     button.set_child(Some(&gtk::Image::from_icon_name(DELETE_ICON)));
-    configure_action_button(
-        &button,
-        ActionButtonVariant::DetailAction,
-        Some(DELETE_ICON),
-    );
+    configure_action_button(&button, ActionButtonVariant::DetailAction);
     button
 }
 
 pub(crate) fn detail_primary_action_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = icon_button(icon_name, label);
-    configure_action_button(&button, ActionButtonVariant::DetailPrimary, Some(icon_name));
+    configure_action_button(&button, ActionButtonVariant::DetailPrimary);
     button
 }
 

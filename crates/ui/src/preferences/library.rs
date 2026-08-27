@@ -15,7 +15,7 @@ use super::{
     quality_selection_row,
     source::{
         configured_source_display_name, configured_source_icon_name,
-        configured_source_kind_display_name,
+        configured_source_kind_display_name, half_stars_row,
     },
 };
 use crate::runtime::source::{SourceLocalAccessSummary, SourceSummary};
@@ -100,6 +100,11 @@ fn library_sources_page(
         .build();
 
     let configured = shell.source.configured.borrow().clone();
+    let local_source = configured
+        .sources
+        .iter()
+        .find(|source| source.kind == "local")
+        .cloned();
     let remote_sources = configured
         .sources
         .iter()
@@ -374,6 +379,12 @@ fn library_sources_page(
             "These folders are combined into the Local source and shown through folder browsing",
         ))
         .build();
+    if let Some(half_stars) = local_source
+        .as_ref()
+        .and_then(|source| half_stars_row(shell, source))
+    {
+        local_group.add(&half_stars);
+    }
     if configured.local_folders.is_empty() {
         let row = adw::ActionRow::builder()
             .title(tr("No local folders configured"))
@@ -435,11 +446,7 @@ fn library_sources_page(
     });
     action_buttons.append(&add_local);
     let resync_local = row_action_button("Resync Library", "rufin-view-refresh-symbolic");
-    let local_source_id = configured
-        .sources
-        .iter()
-        .find(|source| source.kind == "local")
-        .map(|source| source.id.clone());
+    let local_source_id = local_source.map(|source| source.id);
     resync_local.set_sensitive(!configured.local_folders.is_empty() && local_source_id.is_some());
     let source = shell.products.source.clone();
     let resync_dialog = dialog.downgrade();

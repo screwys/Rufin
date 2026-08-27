@@ -520,14 +520,12 @@ pub fn build(
 
     shell.connect_operation_feedback();
     {
-        let source = Arc::clone(&shell.products.source);
         let release_updates = Arc::clone(&shell.products.release_updates);
         let was_active = Cell::new(shell.chrome.window.is_active());
         shell.chrome.window.connect_is_active_notify(move |window| {
             let active = window.is_active();
             let previous = was_active.replace(active);
             if active && !previous {
-                source.check_for_source_changes();
                 release_updates.check();
             }
         });

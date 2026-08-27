@@ -196,6 +196,7 @@ fn apply_configured_sources(
     };
     *shell.source.configured.borrow_mut() = configured;
     finish_source_assignment(shell, previous, next);
+    shell.update_bottom_player();
 }
 
 fn current_source_presentation(shell: &Shell) -> SourcePresentation {
