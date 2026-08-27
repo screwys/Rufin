@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-25 03:51+0000\n"
+"PO-Revision-Date: 2026-08-27 21:03+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -52,6 +52,8 @@ msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
+"Rufin arvutab terve muusikakogu jaoks puuduvad EBU R128 metaandmed. See võib "
+"pikka aega märkimisväärselt koormata protsessorit, akut ja võrgu ribalaiust."
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -160,7 +162,7 @@ msgid "Accent color"
 msgstr "Aktsentvärv"
 
 msgid "Activity"
-msgstr ""
+msgstr "Tegevus"
 
 msgid "Add Rule"
 msgstr "Lisa reegel"
@@ -306,10 +308,8 @@ msgstr "Automaatne diskor"
 msgid "Automatic updates"
 msgstr "Automaatsed uuendused"
 
-#, fuzzy
-#| msgid "Automatic updates"
 msgid "Automatic"
-msgstr "Automaatsed uuendused"
+msgstr "Automaatne"
 
 msgid "BPM"
 msgstr "BPM (lööki minutis)"
@@ -338,10 +338,8 @@ msgstr "Katkesta allalaadimine"
 msgid "Cancel"
 msgstr "Katkesta"
 
-#, fuzzy
-#| msgid "Casting"
 msgid "Casting network"
-msgstr "Meediumilevi"
+msgstr "Meediumilevivõrk"
 
 msgid "Casting"
 msgstr "Meediumilevi"
@@ -594,10 +592,10 @@ msgid "Duration"
 msgstr "Kestus"
 
 msgid "EBU R128 reference level"
-msgstr ""
+msgstr "EBU R128 viide"
 
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
 msgid "EP"
 msgstr "EP"
@@ -615,7 +613,7 @@ msgid "Edit"
 msgstr "Muuda"
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "Kas lülitad EBU R128 analüüsi sisse?"
 
 msgid "Enable equalizer"
 msgstr "Kasuta ekvalaiserit"
@@ -624,7 +622,7 @@ msgid "Enable private mode"
 msgstr "Lülita privaatne režiim sisse"
 
 msgid "Enable"
-msgstr ""
+msgstr "Lülita sisse"
 
 msgid "Enter API credentials first"
 msgstr "Esmalt sisesta API tuvastusandmed"
@@ -1001,20 +999,14 @@ msgstr "Meeleolud"
 msgid "More actions"
 msgstr "Veel toiminguid"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Monthly)"
-msgstr "Enimesitatud"
+msgstr "Enimesitatud (igakuiselt)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Weekly)"
-msgstr "Enimesitatud"
+msgstr "Enimesitatud (iganädalaselt)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Yearly)"
-msgstr "Enimesitatud"
+msgstr "Enimesitatud (igaastaselt)"
 
 msgid "Most Played"
 msgstr "Enimesitatud"
@@ -1099,6 +1091,8 @@ msgstr "NetEase"
 
 msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
+"Võrk, mida kasutatakse kohaliku ja proksitud meediumi edastamiseks "
+"meediumileviseadmetele"
 
 msgid "Never Played"
 msgstr "Esitamata"
@@ -1191,7 +1185,7 @@ msgid "None"
 msgstr "Määramata"
 
 msgid "Normalization scope"
-msgstr ""
+msgstr "Normaliseerimise ulatus"
 
 msgid "Not connected"
 msgstr "Pole ühendatud"
@@ -1268,10 +1262,8 @@ msgstr "Oranž"
 msgid "Original"
 msgstr "Algne"
 
-#, fuzzy
-#| msgid "Open release notes"
 msgid "Other releases"
-msgstr "Vaata versiooniteavet"
+msgstr "Muud versioonid"
 
 msgid "Overview"
 msgstr "Ülevaade"
@@ -1659,10 +1651,8 @@ msgstr "Otsi laulusõnu"
 msgid "Search current folder"
 msgstr "Otsi sellest kaustas"
 
-#, fuzzy
-#| msgid "This isn't available"
 msgid "Search is unavailable"
-msgstr "See pole saadaval"
+msgstr "Otsing pole saadaval"
 
 msgid "Search lyrics"
 msgstr "Otsi laulusõnu"
@@ -1888,6 +1878,7 @@ msgstr "Oleku kuvamine"
 
 msgid "Store calculated loudness in supported Local music files"
 msgstr ""
+"Salvesta arvutatud valjus toetatud muusikafailidesse kohalikus muusikakogus"
 
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
@@ -1908,7 +1899,7 @@ msgid "System"
 msgstr "Süsteem"
 
 msgid "Target loudness"
-msgstr ""
+msgstr "Sihtvaljus"
 
 msgid "Teal"
 msgstr "Sinakasroheline"
@@ -1916,10 +1907,8 @@ msgstr "Sinakasroheline"
 msgid "Techno"
 msgstr "Teknomuusika"
 
-#, fuzzy
-#| msgid "Slate"
 msgid "Template"
-msgstr "Paekarva"
+msgstr "Mall"
 
 msgid "Text"
 msgstr "Tekst"
@@ -2012,7 +2001,7 @@ msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
 
 msgid "Use Template"
-msgstr ""
+msgstr "Kasuta malli"
 
 msgid "Use a number above zero"
 msgstr "Kasuta nullist suuremat numbrit"
@@ -2072,7 +2061,7 @@ msgid "Window"
 msgstr "Aken"
 
 msgid "Write EBU R128 tags to files"
-msgstr ""
+msgstr "Kirjuta EBU R128 sildid failidesse"
 
 msgid "Year"
 msgstr "Aasta"
