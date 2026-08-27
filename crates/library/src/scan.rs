@@ -768,7 +768,10 @@ impl Scan {
                    ON directory.source_key=?1 AND directory.path=seed.path
                       AND directory.kind='directory'
                  JOIN local_files file
-                   ON file.source_key=?1 AND file.path LIKE directory.path||'/%'",
+                   ON file.source_key=?1 AND (
+                       file.path LIKE directory.path||char(47)||'%'
+                       OR file.path LIKE directory.path||char(92)||'%'
+                   )",
             )
             .bind(source),
         )

@@ -225,5 +225,10 @@ impl Database {
 }
 
 fn directory_prefix(path: &Path) -> String {
-    format!("{}/", path.to_string_lossy().trim_end_matches('/'))
+    let mut prefix = path
+        .to_string_lossy()
+        .trim_end_matches(['/', '\\'])
+        .to_string();
+    prefix.push(std::path::MAIN_SEPARATOR);
+    prefix
 }

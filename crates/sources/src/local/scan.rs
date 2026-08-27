@@ -254,10 +254,12 @@ async fn stage_component_path_page(
             .then_some(path.as_path())
             .or_else(|| path.parent())
         {
-            target.insert(format!(
-                "{}/",
-                directory.to_string_lossy().trim_end_matches('/')
-            ));
+            let mut prefix = directory
+                .to_string_lossy()
+                .trim_end_matches(['/', '\\'])
+                .to_string();
+            prefix.push(std::path::MAIN_SEPARATOR);
+            target.insert(prefix);
         }
     }
     scan.begin_batch().await?;
