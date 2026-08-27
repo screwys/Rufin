@@ -174,25 +174,18 @@ language: Rust
 severity: error
 message: A controller parented by a cover overlay must capture that overlay weakly.
 rule:
-  all:
-    - pattern: |
-        {
-          $$$BEFORE
-          let $CAPTURE = $OVERLAY.clone();
-          $$$MIDDLE
-          $MOTION.connect_leave(move |$$$PARAMS| {
-            $$$BODY
-            $CAPTURE.$METHOD($$$ARGS);
-            $$$AFTER
-          });
-          $$$REST
-        }
-    - inside:
-        pattern: |
-          fn connect_hover(&self, $OVERLAY: &gtk::Overlay) {
-            $$$FUNCTION_BODY
-          }
-        stopBy: end
+  pattern: |
+    fn connect_hover(&self, $OVERLAY: &gtk::Overlay) {
+      $$$BEFORE
+      let $CAPTURE = $OVERLAY.clone();
+      $$$MIDDLE
+      $MOTION.connect_leave(move |$$$PARAMS| {
+        $$$BODY
+        $CAPTURE.$METHOD($$$ARGS);
+        $$$AFTER
+      });
+      $$$REST
+    }
 ---
 id: track-search-callback-must-not-own-track-projection
 language: Rust
