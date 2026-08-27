@@ -166,7 +166,7 @@ impl CastPlaybackBackend {
                 .with_artwork_resolver(artwork_resolver);
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
-                let controller = UpnpController::new(*device)?;
+                let mut controller = UpnpController::new(*device)?;
                 controller.verify_connection()?;
                 Controller::Upnp(Box::new(controller))
             }

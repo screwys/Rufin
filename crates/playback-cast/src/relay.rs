@@ -16,6 +16,13 @@ const PREFERRED_RELAY_PORT: u16 = 9_876;
 
 pub(crate) type ArtworkResolver = Arc<dyn Fn(&PreparedStream) -> Option<PathBuf> + Send + Sync>;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum RelayRepresentation {
+    Automatic,
+    Source,
+    Mp3,
+}
+
 #[derive(Clone)]
 struct RelayResource {
     stream: PreparedStream,
@@ -30,11 +37,18 @@ pub(crate) struct PublishedResource {
     pub(crate) uri: String,
     pub(crate) content_type: String,
     pub(crate) content_length: Option<u64>,
-    pub(crate) starts_at_millis: u64,
-    pub(crate) ends_at_millis: Option<u64>,
+    pub(crate) logical_offset_millis: u64,
+    pub(crate) resource_duration_millis: Option<u64>,
     pub(crate) seekable: bool,
     pub(crate) artwork_uri: Option<String>,
     pub(crate) relay_token: Option<String>,
+}
+
+impl PublishedResource {
+    pub(crate) fn logical_position_millis(&self, renderer_position_millis: u64) -> u64 {
+        self.logical_offset_millis
+            .saturating_add(renderer_position_millis)
+    }
 }
 
 pub(crate) struct RelayServer {
@@ -95,19 +109,47 @@ impl RelayServer {
     }
 
     pub(crate) fn publish(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
-        self.publish_as(stream)
+        self.publish_at(stream, RelayRepresentation::Automatic, 0)
     }
 
-    fn publish_as(&self, stream: &PreparedStream) -> Result<PublishedResource, String> {
+    pub(crate) fn publish_as(
+        &self,
+        stream: &PreparedStream,
+        representation: RelayRepresentation,
+    ) -> Result<PublishedResource, String> {
+        self.publish_at(stream, representation, 0)
+    }
+
+    pub(crate) fn publish_at(
+        &self,
+        stream: &PreparedStream,
+        representation: RelayRepresentation,
+        logical_offset_millis: u64,
+    ) -> Result<PublishedResource, String> {
         let artwork_path = stream.artwork_path.as_deref().cloned().or_else(|| {
             let resolver = self.artwork_resolver.as_ref()?;
             resolver(stream)
         });
-        let original_content_type = stream
-            .content_type
-            .clone()
-            .unwrap_or_else(|| content_type_from_uri(stream.uri()));
-        let transcode = stream.window().is_some() || !directly_supported(&original_content_type);
+        let original_content_type = source_content_type(stream);
+        let transcode = representation == RelayRepresentation::Mp3
+            || stream.window().is_some()
+            || (representation == RelayRepresentation::Automatic
+                && !directly_supported(&original_content_type));
+        let logical_duration_millis = stream_duration_millis(stream);
+        let (stream, logical_offset_millis) = if transcode && logical_offset_millis > 0 {
+            let duration = logical_duration_millis.ok_or_else(|| {
+                "cast transcode cannot restore a position without a track duration".to_string()
+            })?;
+            if logical_offset_millis >= duration {
+                return Err("cast position is outside the track duration".to_string());
+            }
+            (
+                clipped_stream(stream, logical_offset_millis, duration),
+                logical_offset_millis,
+            )
+        } else {
+            (stream.clone(), 0)
+        };
         let content_type = if transcode {
             "audio/mpeg".to_string()
         } else {
@@ -116,10 +158,10 @@ impl RelayServer {
         let content_length = if transcode {
             None
         } else {
-            stream_content_length(stream)
+            stream_content_length(&stream)
         };
         let direct = !self.proxy_media.load(Ordering::Acquire)
-            && direct_media_uri(stream, transcode, self.target_is_local);
+            && direct_media_uri(&stream, transcode, self.target_is_local);
         let needs_relay_resource = !direct || artwork_path.is_some();
         let token = needs_relay_resource.then(random_token).transpose()?;
         if let Some(token) = &token {
@@ -141,9 +183,10 @@ impl RelayServer {
             stream.uri().to_string()
         } else {
             format!(
-                "{}/{}",
+                "{}/{}/media.{}",
                 self.base_url,
-                token.as_deref().expect("relay token")
+                token.as_deref().expect("relay token"),
+                content_extension(&content_type),
             )
         };
         tracing::debug!(
@@ -154,8 +197,11 @@ impl RelayServer {
             %content_type,
             content_length,
             transcode,
+            logical_offset_millis,
             "published cast media"
         );
+        let resource_duration_millis =
+            logical_duration_millis.map(|duration| duration.saturating_sub(logical_offset_millis));
         Ok(PublishedResource {
             artwork_uri: artwork_path.as_ref().map(|_| {
                 format!(
@@ -167,14 +213,8 @@ impl RelayServer {
             uri,
             content_type,
             content_length,
-            starts_at_millis: if transcode { 0 } else { stream.start_millis() },
-            ends_at_millis: if transcode {
-                stream
-                    .end_millis()
-                    .map(|end| end.saturating_sub(stream.start_millis()))
-            } else {
-                stream.end_millis()
-            },
+            logical_offset_millis,
+            resource_duration_millis,
             seekable: !transcode,
             relay_token: token,
         })
@@ -207,6 +247,34 @@ impl RelayServer {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
     }
+}
+
+fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
+    stream
+        .end_millis()
+        .map(|end| end.saturating_sub(stream.start_millis()))
+        .or_else(|| {
+            stream
+                .track
+                .as_ref()
+                .and_then(|track| u64::try_from(track.duration_millis).ok())
+        })
+}
+
+fn clipped_stream(
+    stream: &PreparedStream,
+    logical_offset_millis: u64,
+    duration_millis: u64,
+) -> PreparedStream {
+    let source_start_millis = stream.start_millis().saturating_add(logical_offset_millis);
+    let source_end_millis = stream.start_millis().saturating_add(duration_millis);
+    let mut clipped = stream.clone();
+    clipped.stream = Box::new(
+        (*stream.stream)
+            .clone()
+            .with_window(source_start_millis, source_end_millis),
+    );
+    clipped
 }
 
 fn direct_media_uri(stream: &PreparedStream, transcode: bool, target_is_local: bool) -> bool {
@@ -764,6 +832,36 @@ fn content_type_from_uri(uri: &str) -> String {
     .to_string()
 }
 
+pub(crate) fn source_content_type(stream: &PreparedStream) -> String {
+    stream
+        .content_type
+        .clone()
+        .unwrap_or_else(|| content_type_from_uri(stream.uri()))
+}
+
+fn content_extension(content_type: &str) -> &'static str {
+    match normalize_content_type(content_type)
+        .to_ascii_lowercase()
+        .as_str()
+    {
+        "audio/mpeg" | "audio/mp3" => "mp3",
+        "audio/flac" | "audio/x-flac" => "flac",
+        "audio/mp4" | "audio/aac" | "audio/alac" => "m4a",
+        "audio/ogg" | "audio/opus" => "ogg",
+        "audio/wav" | "audio/x-wav" => "wav",
+        "audio/webm" => "webm",
+        _ => "bin",
+    }
+}
+
+fn normalize_content_type(content_type: &str) -> &str {
+    content_type
+        .split(';')
+        .next()
+        .unwrap_or(content_type)
+        .trim()
+}
+
 fn transport_scheme(uri: &str) -> &str {
     uri.split_once(':')
         .map(|(scheme, _)| scheme)
@@ -839,6 +937,60 @@ mod tests {
     }
 
     #[test]
+    fn transcoded_representation_begins_at_the_saved_logical_position() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let path = directory.path().join("album.flac");
+        File::create(&path)
+            .expect("create album")
+            .write_all(b"flac")
+            .expect("write album");
+        let stream = PreparedStream::from(
+            playback::ResolvedStream::new(
+                Url::from_file_path(&path).expect("album URL").to_string(),
+            )
+            .with_window(10_000, 100_000),
+        );
+        let mut relay = RelayServer::start(
+            "127.0.0.1:9".parse().expect("target"),
+            Arc::new(AtomicBool::new(false)),
+            None,
+        )
+        .expect("relay");
+
+        let mut negotiated_source = PreparedStream::from(playback::ResolvedStream::new(
+            Url::from_file_path(&path).expect("source URL").to_string(),
+        ));
+        negotiated_source.content_type = Some("audio/alac".to_string());
+        let source = relay
+            .publish_as(&negotiated_source, RelayRepresentation::Source)
+            .expect("publish negotiated source representation");
+        assert_eq!(source.content_type, "audio/alac");
+        assert!(source.seekable);
+        assert!(source.uri.ends_with("/media.m4a"));
+
+        let published = relay
+            .publish_at(&stream, RelayRepresentation::Mp3, 42_000)
+            .expect("publish clipped MP3 representation");
+
+        assert_eq!(published.content_type, "audio/mpeg");
+        assert!(!published.seekable);
+        assert!(published.uri.ends_with("/media.mp3"));
+        assert_eq!(published.logical_offset_millis, 42_000);
+        assert_eq!(published.resource_duration_millis, Some(48_000));
+        assert_eq!(published.logical_position_millis(5_000), 47_000);
+        let resource = relay
+            .resources
+            .lock()
+            .expect("relay resources")
+            .get(published.relay_token.as_ref().expect("relay token"))
+            .cloned()
+            .expect("published resource");
+        assert_eq!(resource.stream.start_millis(), 52_000);
+        assert_eq!(resource.stream.end_millis(), Some(100_000));
+        relay.shutdown();
+    }
+
+    #[test]
     fn selected_casting_network_owns_the_advertised_address() {
         let interfaces = [
             ("docker0", "172.17.0.1".parse().expect("Docker address")),
@@ -879,8 +1031,8 @@ mod tests {
         let published = relay.publish(&stream).expect("publish CUE window");
 
         assert_eq!(published.content_type, "audio/mpeg");
-        assert_eq!(published.starts_at_millis, 0);
-        assert_eq!(published.ends_at_millis, Some(88_732));
+        assert_eq!(published.logical_offset_millis, 0);
+        assert_eq!(published.resource_duration_millis, Some(88_732));
         assert!(!published.seekable);
         relay.shutdown();
     }

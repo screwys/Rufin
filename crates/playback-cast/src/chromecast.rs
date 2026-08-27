@@ -362,18 +362,26 @@ impl GoogleCastController {
                 let Some(run) = self.current_run() else {
                     return Ok(());
                 };
-                let millis = (seconds.max(0.0) * 1_000.0).round() as u64;
+                let renderer_millis = (seconds.max(0.0) * 1_000.0).round() as u64;
                 if self
                     .current
                     .as_ref()
-                    .and_then(|current| current.published.ends_at_millis)
-                    .is_some_and(|end| millis >= end)
+                    .and_then(|current| current.published.resource_duration_millis)
+                    .is_some_and(|duration| renderer_millis >= duration)
                 {
                     let _ = self.device.stop_playback();
                     self.finish_current(relay);
                     update.push(BackendEvent::Ended { run });
                 } else {
-                    update.push(BackendEvent::Position { run, millis });
+                    let logical_position = self
+                        .current
+                        .as_ref()
+                        .map(|current| current.published.logical_position_millis(renderer_millis))
+                        .unwrap_or(renderer_millis);
+                    update.push(BackendEvent::Position {
+                        run,
+                        millis: logical_position,
+                    });
                 }
             }
             SdkEvent::Duration(seconds) => {
