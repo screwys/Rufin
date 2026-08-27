@@ -49,6 +49,11 @@ msgstr ""
 "pärit meedium läbi selle seadme"
 
 msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
 msgid_plural ""
@@ -588,6 +593,12 @@ msgstr "Järjekorra muutmiseks lohista"
 msgid "Duration"
 msgstr "Kestus"
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr "EP"
 
@@ -603,11 +614,17 @@ msgstr "Muuda metateavet"
 msgid "Edit"
 msgstr "Muuda"
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Kasuta ekvalaiserit"
 
 msgid "Enable private mode"
 msgstr "Lülita privaatne režiim sisse"
+
+msgid "Enable"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Esmalt sisesta API tuvastusandmed"
@@ -1173,6 +1190,9 @@ msgstr "Ei"
 msgid "None"
 msgstr "Määramata"
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr "Pole ühendatud"
 
@@ -1558,6 +1578,9 @@ msgstr "Korda üht lugu"
 msgid "Repeat"
 msgstr "Korda"
 
+msgid "ReplayGain"
+msgstr "Esitusvaljuse tundlikkus"
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr "Eeldab, et kasutusel on OpenSubsonic songLyrics v2"
 
@@ -1863,6 +1886,9 @@ msgstr "Käivita minimeerituna"
 msgid "Status display"
 msgstr "Oleku kuvamine"
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
 
@@ -1880,6 +1906,9 @@ msgstr "Süsteemi vaikeseadistus"
 
 msgid "System"
 msgstr "Süsteem"
+
+msgid "Target loudness"
+msgstr ""
 
 msgid "Teal"
 msgstr "Sinakasroheline"
@@ -2041,6 +2070,9 @@ msgstr "Helilainega kerimisriba"
 
 msgid "Window"
 msgstr "Aken"
+
+msgid "Write EBU R128 tags to files"
+msgstr ""
 
 msgid "Year"
 msgstr "Aasta"
@@ -2204,9 +2236,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekundites"
-
-#~ msgid "ReplayGain"
-#~ msgstr "Esitusvaljuse tundlikkus"
 
 #~ msgid "Default"
 #~ msgstr "Vaikimisi"

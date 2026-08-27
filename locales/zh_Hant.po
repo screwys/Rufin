@@ -43,6 +43,11 @@ msgid ""
 msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
 
 msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
 msgid_plural ""
@@ -552,6 +557,12 @@ msgstr "拖曳以重新排序"
 msgid "Duration"
 msgstr "時長"
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr ""
 
@@ -569,11 +580,17 @@ msgstr "編輯元資料"
 msgid "Edit"
 msgstr "編輯"
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "啟用等化器"
 
 msgid "Enable private mode"
 msgstr "啟用無痕模式"
+
+msgid "Enable"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "先輸入 API 憑證"
@@ -1133,6 +1150,9 @@ msgstr "不"
 msgid "None"
 msgstr "無"
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr "未連接"
 
@@ -1516,6 +1536,9 @@ msgstr "重複播放單曲"
 msgid "Repeat"
 msgstr "重複播放"
 
+msgid "ReplayGain"
+msgstr ""
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr ""
 
@@ -1821,6 +1844,9 @@ msgstr ""
 msgid "Status display"
 msgstr ""
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr "串流品質"
 
@@ -1838,6 +1864,9 @@ msgstr "系統預設值"
 
 msgid "System"
 msgstr "系統"
+
+msgid "Target loudness"
+msgstr ""
 
 msgid "Teal"
 msgstr ""
@@ -1994,6 +2023,9 @@ msgstr ""
 
 msgid "Window"
 msgstr "視窗"
+
+msgid "Write EBU R128 tags to files"
+msgstr ""
 
 msgid "Year"
 msgstr "年份"

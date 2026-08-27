@@ -49,6 +49,11 @@ msgstr ""
 "s rendererem"
 
 msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
 msgid_plural ""
@@ -595,6 +600,12 @@ msgstr "Přetažením změňte pořadí"
 msgid "Duration"
 msgstr "Délka"
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr "EP"
 
@@ -612,11 +623,17 @@ msgstr "Upravit metadata"
 msgid "Edit"
 msgstr "Upravit"
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Zapnout equalizer"
 
 msgid "Enable private mode"
 msgstr "Zapnout soukromý režim"
+
+msgid "Enable"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Nejprve zadejte přihlašovací údaje k API"
@@ -1183,6 +1200,9 @@ msgstr "Ne"
 msgid "None"
 msgstr "Žádné"
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr "Není připojeno"
 
@@ -1570,6 +1590,9 @@ msgstr "Opakovat jednou"
 msgid "Repeat"
 msgstr "Opakovat"
 
+msgid "ReplayGain"
+msgstr ""
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr "Vyžaduje OpenSubsonic songLyrics v2"
 
@@ -1877,6 +1900,9 @@ msgstr "Spustit v minimalizovaném režimu"
 msgid "Status display"
 msgstr "Zobrazení stavu"
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr "Kvalita streamu"
 
@@ -1894,6 +1920,9 @@ msgstr "Výchozí nastavení systému"
 
 msgid "System"
 msgstr "Systém"
+
+msgid "Target loudness"
+msgstr ""
 
 msgid "Teal"
 msgstr "Tyrkysová"
@@ -2054,6 +2083,9 @@ msgstr "Indikátor průběhu ve formě vlnové křivky"
 
 msgid "Window"
 msgstr "Okno"
+
+msgid "Write EBU R128 tags to files"
+msgstr ""
 
 msgid "Year"
 msgstr "Rok"

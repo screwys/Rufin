@@ -49,6 +49,11 @@ msgstr ""
 "weiterzugeben"
 
 msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
 msgid_plural ""
@@ -591,6 +596,12 @@ msgstr "Zum Sortieren ziehen"
 msgid "Duration"
 msgstr "Dauer"
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr "EP"
 
@@ -606,11 +617,17 @@ msgstr "Metadaten bearbeiten"
 msgid "Edit"
 msgstr "Bearbeiten"
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Equalizer einschalten"
 
 msgid "Enable private mode"
 msgstr "Privaten Modus aktivieren"
+
+msgid "Enable"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Geben Sie zuerst die API-Zugangsdaten ein"
@@ -1180,6 +1197,9 @@ msgstr "Nein"
 msgid "None"
 msgstr "Keines"
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
@@ -1566,6 +1586,9 @@ msgstr "Titel wiederholen"
 msgid "Repeat"
 msgstr "Wiederholen"
 
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr "Erfordert OpenSubsonic songLyrics v2"
 
@@ -1871,6 +1894,9 @@ msgstr "Minimiert starten"
 msgid "Status display"
 msgstr "Statusanzeige"
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
 
@@ -1888,6 +1914,9 @@ msgstr "Standardeinstellungen"
 
 msgid "System"
 msgstr "System"
+
+msgid "Target loudness"
+msgstr ""
 
 msgid "Teal"
 msgstr "Türkis"
@@ -2049,6 +2078,9 @@ msgstr "Wellenform-Fortschrittsbalken"
 msgid "Window"
 msgstr "Fenster"
 
+msgid "Write EBU R128 tags to files"
+msgstr ""
+
 msgid "Year"
 msgstr "Jahr"
 
@@ -2208,9 +2240,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekunden"
-
-#~ msgid "ReplayGain"
-#~ msgstr "ReplayGain"
 
 #~ msgid "Default"
 #~ msgstr "Standard"

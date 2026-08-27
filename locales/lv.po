@@ -50,6 +50,11 @@ msgstr ""
 "atskaņotāja URL adresēm"
 
 msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 "{unmatched} unmatched of {total} track"
 msgid_plural ""
@@ -595,6 +600,12 @@ msgstr "Pārvelciet, lai mainītu secību"
 msgid "Duration"
 msgstr "Ilgums"
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr "EP"
 
@@ -610,11 +621,17 @@ msgstr "Rediģēt metadatus"
 msgid "Edit"
 msgstr "Rediģēt"
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Iespējot ekvalaizeru"
 
 msgid "Enable private mode"
 msgstr "Ieslēgt privāto režīmu"
+
+msgid "Enable"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Vispirms ievadiet API autentifikācijas datus"
@@ -1180,6 +1197,9 @@ msgstr "Nē"
 msgid "None"
 msgstr "Nav"
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr "Nav savienots"
 
@@ -1565,6 +1585,9 @@ msgstr "Atkārtot vienu"
 msgid "Repeat"
 msgstr "Atkārtot"
 
+msgid "ReplayGain"
+msgstr "ReplayGain"
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr "Nepieciešams OpenSubsonic dziesmu tekstu atbalsts, versija v2"
 
@@ -1870,6 +1893,9 @@ msgstr "Sākt minimizētu"
 msgid "Status display"
 msgstr "Statuss"
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr "Straumes kvalitāte"
 
@@ -1887,6 +1913,9 @@ msgstr "Sistēmas noklusējums"
 
 msgid "System"
 msgstr "Sistēma"
+
+msgid "Target loudness"
+msgstr ""
 
 msgid "Teal"
 msgstr "Zilganzaļš"
@@ -2047,6 +2076,9 @@ msgstr "Viļņa formas meklēšanas josla"
 
 msgid "Window"
 msgstr "Logs"
+
+msgid "Write EBU R128 tags to files"
+msgstr ""
 
 msgid "Year"
 msgstr "Gads"
@@ -2217,9 +2249,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "Seconds"
 #~ msgstr "Sekundes"
-
-#~ msgid "ReplayGain"
-#~ msgstr "ReplayGain"
 
 #~ msgid "Default"
 #~ msgstr "Noklusējums"
