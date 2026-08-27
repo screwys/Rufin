@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-22 11:51+0000\n"
+"PO-Revision-Date: 2026-08-27 21:03+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Latvian <https://hosted.weblate.org/projects/rufin/app/lv/>\n"
 "Language: lv\n"
@@ -53,6 +53,9 @@ msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
+"Rufin aprēķinās trūkstošos EBU R128 metadatus visai mūzikas bibliotēkai. Tas "
+"var ievērojami noslogot procesoru, patērēt akumulatora enerģiju un izmantot "
+"lielu daudzumu tīkla resursu ilgā laika periodā."
 
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -166,7 +169,7 @@ msgid "Accent color"
 msgstr "Akcenta krāsa"
 
 msgid "Activity"
-msgstr ""
+msgstr "Aktivitāte"
 
 msgid "Add Rule"
 msgstr "Pievienot noteikumu"
@@ -312,10 +315,8 @@ msgstr "Automātiskais DJ"
 msgid "Automatic updates"
 msgstr "Automātiskie atjauninājumi"
 
-#, fuzzy
-#| msgid "Automatic updates"
 msgid "Automatic"
-msgstr "Automātiskie atjauninājumi"
+msgstr "Automātisks"
 
 msgid "BPM"
 msgstr "BPM"
@@ -344,10 +345,8 @@ msgstr "Atcelt lejupielādi"
 msgid "Cancel"
 msgstr "Atcelt"
 
-#, fuzzy
-#| msgid "Casting"
 msgid "Casting network"
-msgstr "Pārraide"
+msgstr "Pārraides tīkls"
 
 msgid "Casting"
 msgstr "Pārraide"
@@ -601,10 +600,10 @@ msgid "Duration"
 msgstr "Ilgums"
 
 msgid "EBU R128 reference level"
-msgstr ""
+msgstr "EBU R128 references līmenis"
 
 msgid "EBU R128"
-msgstr ""
+msgstr "EBU R128"
 
 msgid "EP"
 msgstr "EP"
@@ -622,7 +621,7 @@ msgid "Edit"
 msgstr "Rediģēt"
 
 msgid "Enable EBU R128 Analysis?"
-msgstr ""
+msgstr "Ieslēgt EBU R128 analīzi?"
 
 msgid "Enable equalizer"
 msgstr "Iespējot ekvalaizeru"
@@ -631,7 +630,7 @@ msgid "Enable private mode"
 msgstr "Ieslēgt privāto režīmu"
 
 msgid "Enable"
-msgstr ""
+msgstr "Ieslēgt"
 
 msgid "Enter API credentials first"
 msgstr "Vispirms ievadiet API autentifikācijas datus"
@@ -1008,20 +1007,14 @@ msgstr "Noskaņas"
 msgid "More actions"
 msgstr "Vēl darbības"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Monthly)"
-msgstr "Visbiežāk atskaņotie"
+msgstr "Visbiežāk atskaņotie (mēneša laikā)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Weekly)"
-msgstr "Visbiežāk atskaņotie"
+msgstr "Visbiežāk atskaņotie (nedēļas laikā)"
 
-#, fuzzy
-#| msgid "Most Played"
 msgid "Most Played (Yearly)"
-msgstr "Visbiežāk atskaņotie"
+msgstr "Visbiežāk atskaņotie (gada laikā)"
 
 msgid "Most Played"
 msgstr "Visbiežāk atskaņotie"
@@ -1106,6 +1099,8 @@ msgstr "NetEase"
 
 msgid "Network used to send local and proxied media to casting devices"
 msgstr ""
+"Tīkls, ko izmanto, lai pārraidītu lokālus un starpniekservera failus uz "
+"pārraides ierīcēm"
 
 msgid "Never Played"
 msgstr "Nekad neatskaņotie"
@@ -1198,7 +1193,7 @@ msgid "None"
 msgstr "Nav"
 
 msgid "Normalization scope"
-msgstr ""
+msgstr "Normalizācijas apjoms"
 
 msgid "Not connected"
 msgstr "Nav savienots"
@@ -1275,10 +1270,8 @@ msgstr "Oranžs"
 msgid "Original"
 msgstr "Oriģināls"
 
-#, fuzzy
-#| msgid "Open release notes"
 msgid "Other releases"
-msgstr "Atvērt izdevuma piezīmes"
+msgstr "Citi izdevumi"
 
 msgid "Overview"
 msgstr "Pārskats"
@@ -1666,10 +1659,8 @@ msgstr "Meklēt tekstus"
 msgid "Search current folder"
 msgstr "Meklēt pašreizējā mapē"
 
-#, fuzzy
-#| msgid "This isn't available"
 msgid "Search is unavailable"
-msgstr "Šis nav pieejams"
+msgstr "Meklēšana nav pieejama"
 
 msgid "Search lyrics"
 msgstr "Meklēt tekstus"
@@ -1894,7 +1885,7 @@ msgid "Status display"
 msgstr "Statuss"
 
 msgid "Store calculated loudness in supported Local music files"
-msgstr ""
+msgstr "Saglabāt aprēķināto skaļumu atbalstītajos lokālajos mūzikas failos"
 
 msgid "Stream quality"
 msgstr "Straumes kvalitāte"
@@ -1915,7 +1906,7 @@ msgid "System"
 msgstr "Sistēma"
 
 msgid "Target loudness"
-msgstr ""
+msgstr "Vēlamais skaļums"
 
 msgid "Teal"
 msgstr "Zilganzaļš"
@@ -1923,10 +1914,8 @@ msgstr "Zilganzaļš"
 msgid "Techno"
 msgstr "Tehno"
 
-#, fuzzy
-#| msgid "Slate"
 msgid "Template"
-msgstr "Pelēks"
+msgstr "Veidne"
 
 msgid "Text"
 msgstr "Teksts"
@@ -2019,7 +2008,7 @@ msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
 
 msgid "Use Template"
-msgstr ""
+msgstr "Izmantot veidni"
 
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
@@ -2078,7 +2067,7 @@ msgid "Window"
 msgstr "Logs"
 
 msgid "Write EBU R128 tags to files"
-msgstr ""
+msgstr "Ierakstīt EBU R128 tagus failos"
 
 msgid "Year"
 msgstr "Gads"
