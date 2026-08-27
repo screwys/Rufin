@@ -1227,13 +1227,25 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
 }
 
 async fn stage_loudness(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
-    if let Some(lufs) = track.track_r128_lufs {
-        scan.write_track_source_loudness(&track.id, Some(lufs), None)
-            .await?;
+    if track.track_r128_lufs.is_some() || track.replay_gain_track_db.is_some() {
+        scan.write_track_source_loudness(
+            &track.id,
+            track.track_r128_lufs,
+            None,
+            track.replay_gain_track_db,
+            track.replay_gain_track_peak,
+        )
+        .await?;
     }
-    if let Some(lufs) = track.album_r128_lufs {
-        scan.write_album_source_loudness(&track.album_id, Some(lufs), None)
-            .await?;
+    if track.album_r128_lufs.is_some() || track.replay_gain_album_db.is_some() {
+        scan.write_album_source_loudness(
+            &track.album_id,
+            track.album_r128_lufs,
+            None,
+            track.replay_gain_album_db,
+            track.replay_gain_album_peak,
+        )
+        .await?;
     }
     Ok(())
 }

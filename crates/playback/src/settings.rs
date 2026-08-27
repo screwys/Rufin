@@ -1,7 +1,9 @@
 use serde::{Deserialize, Serialize};
 
 pub const EQUALIZER_BAND_COUNT: usize = 10;
-pub const LOUDNESS_NORMALIZATION_TARGET_LUFS: f64 = -18.0;
+pub const DEFAULT_EBU_R128_TARGET_LUFS: f64 = -23.0;
+pub const MIN_EBU_R128_TARGET_LUFS: f64 = -48.0;
+pub const MAX_EBU_R128_TARGET_LUFS: f64 = 0.0;
 pub const MIN_CROSSFADE_SECONDS: u8 = 1;
 pub const MAX_CROSSFADE_SECONDS: u8 = 30;
 pub const MIN_PLAYBACK_RATE: f64 = 0.5;
@@ -37,10 +39,17 @@ pub enum PlaybackTransitionMode {
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum LoudnessNormalizationMode {
-    #[default]
+pub enum LoudnessNormalization {
     Off,
+    #[default]
+    ReplayGain,
+    EbuR128,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum LoudnessNormalizationScope {
     Track,
+    #[default]
     Album,
 }
 
@@ -110,7 +119,10 @@ pub struct PlaybackSettings {
     pub crossfade_seconds: u8,
     pub skip_same_album_crossfade: bool,
     pub audio_fade_on_status_change: bool,
-    pub loudness_normalization: LoudnessNormalizationMode,
+    pub loudness_normalization: LoudnessNormalization,
+    pub loudness_normalization_scope: LoudnessNormalizationScope,
+    pub ebu_r128_target_lufs: f64,
+    pub write_ebu_r128_tags: bool,
     pub stream_quality: StreamQuality,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub audio_output: Option<String>,
@@ -133,9 +145,15 @@ struct SavedPlaybackSettings {
     #[serde(default = "default_true")]
     audio_fade_on_status_change: bool,
     #[serde(default)]
-    loudness_normalization: Option<LoudnessNormalizationMode>,
+    loudness_normalization: Option<String>,
+    #[serde(default)]
+    loudness_normalization_scope: Option<LoudnessNormalizationScope>,
+    #[serde(default)]
+    ebu_r128_target_lufs: Option<f64>,
+    #[serde(default)]
+    write_ebu_r128_tags: bool,
     #[serde(default, rename = "replay_gain")]
-    _legacy_replay_gain: Option<LoudnessNormalizationMode>,
+    legacy_replay_gain: Option<LoudnessNormalizationScope>,
     #[serde(default)]
     stream_quality: StreamQuality,
     #[serde(default)]
@@ -168,12 +186,22 @@ impl<'de> Deserialize<'de> for PlaybackSettings {
                 VolumeScale::Perceptual,
             ),
         };
+        let (loudness_normalization, loudness_normalization_scope) = restore_loudness_settings(
+            saved.loudness_normalization.as_deref(),
+            saved.loudness_normalization_scope,
+            saved.legacy_replay_gain,
+        );
         Ok(Self {
             transition_mode: saved.transition_mode,
             crossfade_seconds: saved.crossfade_seconds,
             skip_same_album_crossfade: saved.skip_same_album_crossfade,
             audio_fade_on_status_change: saved.audio_fade_on_status_change,
-            loudness_normalization: saved.loudness_normalization.unwrap_or_default(),
+            loudness_normalization,
+            loudness_normalization_scope,
+            ebu_r128_target_lufs: saved
+                .ebu_r128_target_lufs
+                .unwrap_or(DEFAULT_EBU_R128_TARGET_LUFS),
+            write_ebu_r128_tags: saved.write_ebu_r128_tags,
             stream_quality: saved.stream_quality,
             audio_output: saved.audio_output,
             equalizer: saved.equalizer,
@@ -193,7 +221,10 @@ impl Default for PlaybackSettings {
             crossfade_seconds: default_crossfade_seconds(),
             skip_same_album_crossfade: false,
             audio_fade_on_status_change: true,
-            loudness_normalization: LoudnessNormalizationMode::Off,
+            loudness_normalization: LoudnessNormalization::ReplayGain,
+            loudness_normalization_scope: LoudnessNormalizationScope::Album,
+            ebu_r128_target_lufs: DEFAULT_EBU_R128_TARGET_LUFS,
+            write_ebu_r128_tags: false,
             stream_quality: StreamQuality::Original,
             audio_output: None,
             equalizer: EqualizerSettings::default(),
@@ -221,6 +252,7 @@ impl PlaybackSettings {
             .crossfade_seconds
             .clamp(MIN_CROSSFADE_SECONDS, MAX_CROSSFADE_SECONDS);
         self.playback_rate = sanitize_playback_rate(self.playback_rate);
+        self.ebu_r128_target_lufs = sanitize_ebu_r128_target(self.ebu_r128_target_lufs);
         self.volume = sanitize_volume(self.volume);
         if self.audio_output.as_deref().is_some_and(|output| {
             output.trim().is_empty()
@@ -239,6 +271,45 @@ impl PlaybackSettings {
             self.audio_output = None;
         }
         self.equalizer.sanitize();
+    }
+}
+
+fn restore_loudness_settings(
+    saved: Option<&str>,
+    scope: Option<LoudnessNormalizationScope>,
+    legacy_replay_gain: Option<LoudnessNormalizationScope>,
+) -> (LoudnessNormalization, LoudnessNormalizationScope) {
+    match saved {
+        Some("Off") => (
+            LoudnessNormalization::Off,
+            scope.or(legacy_replay_gain).unwrap_or_default(),
+        ),
+        Some("Track") => (
+            LoudnessNormalization::EbuR128,
+            LoudnessNormalizationScope::Track,
+        ),
+        Some("Album") => (
+            LoudnessNormalization::EbuR128,
+            LoudnessNormalizationScope::Album,
+        ),
+        Some("EbuR128") => (LoudnessNormalization::EbuR128, scope.unwrap_or_default()),
+        Some("ReplayGain") => (
+            LoudnessNormalization::ReplayGain,
+            scope.or(legacy_replay_gain).unwrap_or_default(),
+        ),
+        _ if legacy_replay_gain.is_some() => (
+            LoudnessNormalization::ReplayGain,
+            legacy_replay_gain.unwrap_or_default(),
+        ),
+        _ => (LoudnessNormalization::ReplayGain, scope.unwrap_or_default()),
+    }
+}
+
+fn sanitize_ebu_r128_target(target: f64) -> f64 {
+    if target.is_finite() {
+        target.clamp(MIN_EBU_R128_TARGET_LUFS, MAX_EBU_R128_TARGET_LUFS)
+    } else {
+        DEFAULT_EBU_R128_TARGET_LUFS
     }
 }
 
@@ -395,47 +466,85 @@ mod tests {
     }
 
     #[test]
-    fn loudness_normalization_is_opt_in() {
+    fn replay_gain_is_the_default_without_enabling_analysis() {
         assert_eq!(
-            LoudnessNormalizationMode::default(),
-            LoudnessNormalizationMode::Off
+            LoudnessNormalization::default(),
+            LoudnessNormalization::ReplayGain
         );
         assert_eq!(
             PlaybackSettings::default().loudness_normalization,
-            LoudnessNormalizationMode::Off
+            LoudnessNormalization::ReplayGain
         );
 
         let restored = serde_json::from_str::<PlaybackSettings>("{}")
             .expect("restore playback settings without loudness normalization");
         assert_eq!(
             restored.loudness_normalization,
-            LoudnessNormalizationMode::Off
+            LoudnessNormalization::ReplayGain
         );
+        assert_eq!(
+            restored.loudness_normalization_scope,
+            LoudnessNormalizationScope::Album
+        );
+        assert_eq!(restored.ebu_r128_target_lufs, DEFAULT_EBU_R128_TARGET_LUFS);
     }
 
     #[test]
-    fn legacy_replay_gain_does_not_opt_in_to_analysis() {
+    fn legacy_replay_gain_restores_replay_gain_scope() {
         let restored = serde_json::from_str::<PlaybackSettings>(r#"{"replay_gain":"Track"}"#)
             .expect("restore legacy ReplayGain setting");
         assert_eq!(
             restored.loudness_normalization,
-            LoudnessNormalizationMode::Off
+            LoudnessNormalization::ReplayGain
+        );
+        assert_eq!(
+            restored.loudness_normalization_scope,
+            LoudnessNormalizationScope::Track
         );
 
         let saved = serde_json::to_value(restored).expect("serialize loudness normalization");
-        assert_eq!(saved["loudness_normalization"], "Off");
+        assert_eq!(saved["loudness_normalization"], "ReplayGain");
         assert!(saved.get("replay_gain").is_none());
     }
 
     #[test]
-    fn explicit_loudness_normalization_setting_is_preserved() {
+    fn legacy_ebu_loudness_scope_migrates_to_the_ebu_mode() {
         let restored =
             serde_json::from_str::<PlaybackSettings>(r#"{"loudness_normalization":"Album"}"#)
                 .expect("restore loudness normalization setting");
         assert_eq!(
             restored.loudness_normalization,
-            LoudnessNormalizationMode::Album
+            LoudnessNormalization::EbuR128
         );
+        assert_eq!(
+            restored.loudness_normalization_scope,
+            LoudnessNormalizationScope::Album
+        );
+    }
+
+    #[test]
+    fn explicit_ebu_settings_round_trip() {
+        let settings = PlaybackSettings {
+            loudness_normalization: LoudnessNormalization::EbuR128,
+            loudness_normalization_scope: LoudnessNormalizationScope::Track,
+            ebu_r128_target_lufs: -21.0,
+            write_ebu_r128_tags: true,
+            ..PlaybackSettings::default()
+        };
+        let restored = serde_json::from_value::<PlaybackSettings>(
+            serde_json::to_value(settings).expect("serialize EBU settings"),
+        )
+        .expect("restore EBU settings");
+        assert_eq!(
+            restored.loudness_normalization,
+            LoudnessNormalization::EbuR128
+        );
+        assert_eq!(
+            restored.loudness_normalization_scope,
+            LoudnessNormalizationScope::Track
+        );
+        assert_eq!(restored.ebu_r128_target_lufs, -21.0);
+        assert!(restored.write_ebu_r128_tags);
     }
 
     #[test]

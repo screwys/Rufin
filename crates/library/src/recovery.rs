@@ -1,6 +1,6 @@
-//! Migrates the last released Store into the current schema and salvages readable
-//! families from older or damaged released Stores. Unreleased development schemas
-//! receive no compatibility path.
+//! Migrates the last legacy Store into the current schema and salvages readable
+//! families from older or damaged legacy Stores. Unknown newer schemas receive
+//! no compatibility path.
 
 use std::ffi::OsString;
 use std::fs;
@@ -43,7 +43,7 @@ const SCHEMA_40_TABLES: &[&str] = &[
     "user_ratings",
 ];
 
-/// What was preserved while replacing a released Store.
+/// What was preserved while replacing a legacy Store.
 #[derive(Debug)]
 pub(crate) struct RecoveryReport {
     pub preserved_store: PathBuf,
@@ -52,20 +52,20 @@ pub(crate) struct RecoveryReport {
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum ReleasedCopyMode {
+enum LegacyCopyMode {
     Migration,
     Repair,
 }
 
 pub(crate) async fn is_migratable_schema_40(path: &Path) -> LibraryResult<bool> {
-    released_store_matches(path, true).await
+    legacy_store_matches(path, true).await
 }
 
-pub(crate) async fn is_repairable_released(path: &Path) -> LibraryResult<bool> {
-    released_store_matches(path, false).await
+pub(crate) async fn is_repairable_legacy(path: &Path) -> LibraryResult<bool> {
+    legacy_store_matches(path, false).await
 }
 
-async fn released_store_matches(path: &Path, exact_schema_40: bool) -> LibraryResult<bool> {
+async fn legacy_store_matches(path: &Path, exact_schema_40: bool) -> LibraryResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
@@ -86,13 +86,13 @@ async fn released_store_matches(path: &Path, exact_schema_40: bool) -> LibraryRe
     let expected_version = if exact_schema_40 {
         user_version == schema::LAST_LEGACY_SCHEMA_VERSION
     } else {
-        user_version < schema::RELEASED_SCHEMA_VERSION
+        user_version <= schema::LAST_LEGACY_SCHEMA_VERSION
     };
-    if !schema::is_released(application_id, user_version) || !expected_version {
+    if !schema::is_legacy_schema(application_id, user_version) || !expected_version {
         connection.close().await?;
         return Ok(false);
     }
-    let released_schema = if exact_schema_40 {
+    let legacy_schema = if exact_schema_40 {
         let intact = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
             .fetch_one(&mut connection)
             .await
@@ -114,7 +114,7 @@ async fn released_store_matches(path: &Path, exact_schema_40: bool) -> LibraryRe
         .is_some()
     };
     connection.close().await?;
-    Ok(released_schema)
+    Ok(legacy_schema)
 }
 
 pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryReport> {
@@ -133,11 +133,11 @@ pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryRepo
     let migration = async {
         let mut destination = db::open_writer(&pending_store).await?;
         schema::initialize(&mut destination).await?;
-        copy_released(
+        copy_legacy(
             &mut destination,
             path,
             &mut report,
-            ReleasedCopyMode::Migration,
+            LegacyCopyMode::Migration,
         )
         .await?;
         schema::validate(&mut destination).await?;
@@ -153,16 +153,16 @@ pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryRepo
     Ok(report)
 }
 
-pub(crate) async fn repair_released(path: &Path) -> LibraryResult<RecoveryReport> {
-    if !is_repairable_released(path).await? {
+pub(crate) async fn repair_legacy(path: &Path) -> LibraryResult<RecoveryReport> {
+    if !is_repairable_legacy(path).await? {
         return Err(LibraryError::InvalidRequest(
-            "only a recognizable released Rufin Store can be repaired".to_string(),
+            "only a recognizable legacy Rufin Store can be repaired".to_string(),
         ));
     }
-    replace_released(path).await
+    replace_legacy(path).await
 }
 
-async fn replace_released(path: &Path) -> LibraryResult<RecoveryReport> {
+async fn replace_legacy(path: &Path) -> LibraryResult<RecoveryReport> {
     let preserved_store = unique_sibling(path, "recovered")?;
     fs::rename(path, &preserved_store)?;
     preserve_sidecar(path, &preserved_store, "-wal")?;
@@ -184,15 +184,15 @@ async fn replace_released(path: &Path) -> LibraryResult<RecoveryReport> {
             .map(|value| value == "ok")
             .unwrap_or(false);
         if intact && user_version < schema::LAST_LEGACY_SCHEMA_VERSION {
-            schema::upgrade_legacy_released(&mut source).await?;
+            schema::upgrade_legacy_schema(&mut source).await?;
         }
         source.close().await?;
         let preserved_store = report.preserved_store.clone();
-        copy_released(
+        copy_legacy(
             &mut destination,
             &preserved_store,
             &mut report,
-            ReleasedCopyMode::Repair,
+            LegacyCopyMode::Repair,
         )
         .await?;
         schema::validate(&mut destination).await?;
@@ -227,14 +227,14 @@ pub(crate) fn is_store_content_failure(error: &LibraryError) -> bool {
     }
 }
 
-async fn copy_released(
+async fn copy_legacy(
     destination: &mut SqliteConnection,
-    released_path: &Path,
+    legacy_path: &Path,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
-    sqlx::query("ATTACH DATABASE ?1 AS released")
-        .bind(released_path.to_string_lossy().as_ref())
+    sqlx::query("ATTACH DATABASE ?1 AS legacy")
+        .bind(legacy_path.to_string_lossy().as_ref())
         .execute(&mut *destination)
         .await?;
     let mut transaction = destination.begin().await?;
@@ -251,11 +251,11 @@ async fn copy_released(
                 library.freshness_marker,
                 COALESCE(library.content_digest, library.input_digest),
                 zeroblob(32), 1
-         FROM released.source_libraries AS library
+         FROM legacy.source_libraries AS library
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id = (
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id = library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -288,13 +288,13 @@ async fn copy_released(
                   END
                 END,
                 album.favorite, album.user_rating, NULL
-         FROM released.albums AS album
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.albums AS album
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id = library.source_id
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id = (
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id = library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -344,8 +344,8 @@ async fn copy_released(
                   END
                 END,
                 track.favorite, track.user_rating, NULL
-         FROM released.tracks AS track
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.tracks AS track
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id = library.source_id
          LEFT JOIN albums AS album
            ON album.source_key = source.source_key
@@ -353,7 +353,7 @@ async fn copy_released(
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id = (
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id = library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -364,7 +364,7 @@ async fn copy_released(
         report,
         mode,
         "Track first-seen facts",
-        "UPDATE tracks SET first_seen_at=(SELECT import.first_seen_at FROM released.local_imports import JOIN sources source ON source.object_id=import.source_id WHERE source.source_key=tracks.source_key AND import.track_id=tracks.object_id) WHERE first_seen_at IS NULL",
+        "UPDATE tracks SET first_seen_at=(SELECT import.first_seen_at FROM legacy.local_imports import JOIN sources source ON source.object_id=import.source_id WHERE source.source_key=tracks.source_key AND import.track_id=tracks.object_id) WHERE first_seen_at IS NULL",
     )
     .await?;
     copy_family(
@@ -387,7 +387,7 @@ async fn copy_released(
          SELECT source.source_key,
                 CASE json_extract(section.value,'$.kind')
                   WHEN 'MostPlayed' THEN 'most-played' WHEN 'NewlyAdded' THEN 'newly-added'
-                  WHEN 'RecentlyPlayed' THEN 'recently-played' WHEN 'RecentlyReleased' THEN 'recently-released' END,
+                  WHEN 'RecentlyPlayed' THEN 'recently-played' WHEN 'RecentlyLegacy' THEN 'recently-legacy' END,
                 CAST(item.key AS INTEGER),json_extract(item.value,'$.kind'),
                 CASE json_extract(item.value,'$.kind')
                   WHEN 'track' THEN track.track_key WHEN 'album' THEN album.album_key END,
@@ -398,7 +398,7 @@ async fn copy_released(
                 CASE json_extract(item.value,'$.kind')
                   WHEN 'track' THEN COALESCE(track.artwork_binding,track_album.artwork_binding)
                   WHEN 'album' THEN album.artwork_binding END
-         FROM released.source_libraries library
+         FROM legacy.source_libraries library
          JOIN sources source ON source.object_id=library.source_id
          JOIN json_each(json_extract(library.home_json,'$.sections')) section
          JOIN json_each(json_extract(section.value,'$.items')) item
@@ -406,21 +406,21 @@ async fn copy_released(
          LEFT JOIN albums track_album ON track_album.album_key=track.album_key
          LEFT JOIN albums album ON album.source_key=source.source_key AND json_extract(item.value,'$.kind')='album' AND album.object_id=json_extract(item.value,'$.id')
          WHERE library.home_json IS NOT NULL AND library.accepted_at IS NOT NULL
-           AND library.library_id=(SELECT max(current.library_id) FROM released.source_libraries current WHERE current.source_id=library.source_id AND current.accepted_at IS NOT NULL)
+           AND library.library_id=(SELECT max(current.library_id) FROM legacy.source_libraries current WHERE current.source_id=library.source_id AND current.accepted_at IS NOT NULL)
            AND (track.track_key IS NOT NULL OR album.album_key IS NOT NULL)",
     ).await?;
     salvage_album_release(&mut transaction, report, mode).await?;
     salvage_user_facts(&mut transaction, report, mode).await?;
-    if mode == ReleasedCopyMode::Repair {
+    if mode == LegacyCopyMode::Repair {
         salvage_queue(&mut transaction, report, mode).await?;
     }
     salvage_local(&mut transaction, report, mode).await?;
     initialize_recovered_loudness_keys(&mut transaction).await?;
-    if mode == ReleasedCopyMode::Migration {
+    if mode == LegacyCopyMode::Migration {
         validate_migration_copy(&mut transaction).await?;
     }
     transaction.commit().await?;
-    sqlx::raw_sql("DETACH DATABASE released; PRAGMA optimize;")
+    sqlx::raw_sql("DETACH DATABASE legacy; PRAGMA optimize;")
         .execute(&mut *destination)
         .await?;
     Ok(())
@@ -430,11 +430,11 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
     for (family, expected_sql, actual_sql) in [
         (
             "sources",
-            "SELECT count(*) FROM released.source_libraries AS library
+            "SELECT count(*) FROM legacy.source_libraries AS library
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT max(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -442,12 +442,12 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
         ),
         (
             "Albums",
-            "SELECT count(*) FROM released.albums AS item
-             JOIN released.source_libraries AS library USING (library_id)
+            "SELECT count(*) FROM legacy.albums AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT max(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -455,12 +455,12 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
         ),
         (
             "Tracks",
-            "SELECT count(*) FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+            "SELECT count(*) FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT max(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -469,16 +469,16 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
         (
             "Playlist entries",
             "SELECT
-                 (SELECT count(*) FROM released.source_playlist_entries AS entry
-                  JOIN released.source_libraries AS library USING (library_id)
+                 (SELECT count(*) FROM legacy.source_playlist_entries AS entry
+                  JOIN legacy.source_libraries AS library USING (library_id)
                   WHERE library.accepted_at IS NOT NULL
                     AND library.library_id=(
                         SELECT max(current.library_id)
-                        FROM released.source_libraries AS current
+                        FROM legacy.source_libraries AS current
                         WHERE current.source_id=library.source_id
                           AND current.accepted_at IS NOT NULL
                     ))
-                 + (SELECT count(*) FROM released.local_playlist_entries)",
+                 + (SELECT count(*) FROM legacy.local_playlist_entries)",
             "SELECT count(*) FROM playlist_entries",
         ),
     ] {
@@ -509,18 +509,18 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
 async fn salvage_album_release(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     copy_family(transaction, report, mode, "Album release lookup",
-        "UPDATE albums SET release_lookup_identity=(SELECT info.exact_identity_key FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id) WHERE EXISTS (SELECT 1 FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id);
-         DELETE FROM album_release_types WHERE EXISTS (SELECT 1 FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id WHERE info.lookup_state='found' AND album.album_key=album_release_types.album_key);
-         INSERT INTO album_release_types(album_key,release_type,position) SELECT album.album_key,value.value,value.key FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id JOIN json_each(info.release_types_json) value WHERE info.lookup_state='found'").await
+        "UPDATE albums SET release_lookup_identity=(SELECT info.exact_identity_key FROM legacy.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id) WHERE EXISTS (SELECT 1 FROM legacy.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id);
+         DELETE FROM album_release_types WHERE EXISTS (SELECT 1 FROM legacy.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id WHERE info.lookup_state='found' AND album.album_key=album_release_types.album_key);
+         INSERT INTO album_release_types(album_key,release_type,position) SELECT album.album_key,value.value,value.key FROM legacy.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id JOIN json_each(info.release_types_json) value WHERE info.lookup_state='found'").await
 }
 
 async fn salvage_relationships(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
@@ -530,14 +530,14 @@ async fn salvage_relationships(
                     json_extract(mood.value, '$.name'),
                     lower(json_extract(mood.value, '$.name')),
                     lower(json_extract(mood.value, '$.name'))
-             FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN json_each(item.relations_json, '$.moods') AS mood
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -546,8 +546,8 @@ async fn salvage_relationships(
             "album artists",
             "INSERT INTO album_artists(album_key, artist_key, position)
              SELECT album.album_key, artist.artist_key, relation.key
-             FROM released.albums AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.albums AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN albums AS album
                ON album.source_key=source.source_key AND album.object_id=item.album_id
@@ -558,7 +558,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -567,8 +567,8 @@ async fn salvage_relationships(
             "track artists",
             "INSERT INTO track_artists(track_key, artist_key, position)
              SELECT track.track_key, artist.artist_key, relation.key
-             FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id
@@ -579,7 +579,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -588,8 +588,8 @@ async fn salvage_relationships(
             "album genres",
             "INSERT INTO album_genres(album_key, genre_key, position)
              SELECT album.album_key, genre.genre_key, relation.key
-             FROM released.albums AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.albums AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN albums AS album
                ON album.source_key=source.source_key AND album.object_id=item.album_id
@@ -600,7 +600,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -609,8 +609,8 @@ async fn salvage_relationships(
             "track genres",
             "INSERT INTO track_genres(track_key, genre_key, position)
              SELECT track.track_key, genre.genre_key, relation.key
-             FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id
@@ -621,7 +621,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -630,8 +630,8 @@ async fn salvage_relationships(
             "track moods",
             "INSERT INTO track_moods(track_key, mood_key, position)
              SELECT track.track_key, mood.mood_key, relation.key
-             FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id
@@ -642,7 +642,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -651,8 +651,8 @@ async fn salvage_relationships(
             "track folders",
             "INSERT INTO track_folders(track_key, folder_key, position)
              SELECT track.track_key, folder.folder_key, relation.key
-             FROM released.tracks AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.tracks AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id
@@ -662,7 +662,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -671,8 +671,8 @@ async fn salvage_relationships(
             "album release types",
             "INSERT INTO album_release_types(album_key, release_type, position)
              SELECT album.album_key, relation.value, relation.key
-             FROM released.albums AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.albums AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id
              JOIN albums AS album
                ON album.source_key=source.source_key AND album.object_id=item.album_id
@@ -680,7 +680,7 @@ async fn salvage_relationships(
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id=(
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id=library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -694,7 +694,7 @@ async fn salvage_relationships(
 async fn salvage_named_entities(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
@@ -717,13 +717,13 @@ async fn salvage_named_entities(
                       END
                     END,
                     item.favorite, item.user_rating
-             FROM released.artists AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.artists AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id = library.source_id
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id = (
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id = library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -738,13 +738,13 @@ async fn salvage_named_entities(
                     CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
                         CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                     END
-             FROM released.genres AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.genres AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id = library.source_id
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id = (
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id = library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -759,13 +759,13 @@ async fn salvage_named_entities(
                     CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
                         CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                     END
-             FROM released.music_folders AS item
-             JOIN released.source_libraries AS library USING (library_id)
+             FROM legacy.music_folders AS item
+             JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id = library.source_id
              WHERE library.accepted_at IS NOT NULL
                AND library.library_id = (
                    SELECT MAX(current.library_id)
-                   FROM released.source_libraries AS current
+                   FROM legacy.source_libraries AS current
                    WHERE current.source_id = library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
@@ -779,7 +779,7 @@ async fn salvage_named_entities(
 async fn salvage_playlists(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     copy_family(
         transaction,
@@ -794,13 +794,13 @@ async fn salvage_playlists(
                 CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
                     CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
                 END
-         FROM released.source_playlists AS item
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.source_playlists AS item
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id = library.source_id
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id = (
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id = library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -816,8 +816,8 @@ async fn salvage_playlists(
          )
          SELECT playlist.playlist_key, entry.occurrence_id, track.track_key,
                 entry.track_id, entry.position
-         FROM released.source_playlist_entries AS entry
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.source_playlist_entries AS entry
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id = library.source_id
          JOIN playlists AS playlist
            ON playlist.source_key = source.source_key
@@ -829,7 +829,7 @@ async fn salvage_playlists(
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id = (
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id = library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -845,7 +845,7 @@ async fn salvage_playlists(
          )
          SELECT source.source_key, 'user', item.playlist_id, item.name,
                 lower(item.name), lower(item.name)
-         FROM released.local_playlists AS item
+         FROM legacy.local_playlists AS item
          JOIN sources AS source ON source.object_id=item.source_id",
     )
     .await?;
@@ -859,7 +859,7 @@ async fn salvage_playlists(
          )
          SELECT playlist.playlist_key, entry.occurrence_id, track.track_key,
                 entry.track_id, entry.position
-         FROM released.local_playlist_entries AS entry
+         FROM legacy.local_playlist_entries AS entry
          JOIN sources AS source ON source.object_id=entry.source_id
          JOIN playlists AS playlist
            ON playlist.source_key=source.source_key
@@ -876,14 +876,14 @@ async fn salvage_playlists(
 async fn salvage_user_facts(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
             "favorite overrides",
             "UPDATE tracks SET user_favorite = 1
              WHERE EXISTS (
-                 SELECT 1 FROM released.local_favorites AS favorite
+                 SELECT 1 FROM legacy.local_favorites AS favorite
                  JOIN sources AS source ON source.object_id = favorite.source_id
                  WHERE favorite.item_kind = 'track'
                    AND favorite.item_id = tracks.object_id
@@ -891,7 +891,7 @@ async fn salvage_user_facts(
              );
              UPDATE albums SET user_favorite = 1
              WHERE EXISTS (
-                 SELECT 1 FROM released.local_favorites AS favorite
+                 SELECT 1 FROM legacy.local_favorites AS favorite
                  JOIN sources AS source ON source.object_id = favorite.source_id
                  WHERE favorite.item_kind = 'album'
                    AND favorite.item_id = albums.object_id
@@ -899,7 +899,7 @@ async fn salvage_user_facts(
              );
              UPDATE artists SET user_favorite = 1
              WHERE EXISTS (
-                 SELECT 1 FROM released.local_favorites AS favorite
+                 SELECT 1 FROM legacy.local_favorites AS favorite
                  JOIN sources AS source ON source.object_id = favorite.source_id
                  WHERE favorite.item_kind = 'artist'
                    AND favorite.item_id = artists.object_id
@@ -909,39 +909,39 @@ async fn salvage_user_facts(
         (
             "rating overrides",
             "UPDATE tracks SET user_rating = (
-                 SELECT rating * 10 FROM released.user_ratings AS rating
+                 SELECT rating * 10 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'track'
                    AND rating.item_id = tracks.object_id
                    AND source.source_key = tracks.source_key
              ) WHERE EXISTS (
-                 SELECT 1 FROM released.user_ratings AS rating
+                 SELECT 1 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'track'
                    AND rating.item_id = tracks.object_id
                    AND source.source_key = tracks.source_key
              );
              UPDATE albums SET user_rating = (
-                 SELECT rating * 10 FROM released.user_ratings AS rating
+                 SELECT rating * 10 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'album'
                    AND rating.item_id = albums.object_id
                    AND source.source_key = albums.source_key
              ) WHERE EXISTS (
-                 SELECT 1 FROM released.user_ratings AS rating
+                 SELECT 1 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'album'
                    AND rating.item_id = albums.object_id
                    AND source.source_key = albums.source_key
              );
              UPDATE artists SET user_rating = (
-                 SELECT rating * 10 FROM released.user_ratings AS rating
+                 SELECT rating * 10 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'artist'
                    AND rating.item_id = artists.object_id
                    AND source.source_key = artists.source_key
              ) WHERE EXISTS (
-                 SELECT 1 FROM released.user_ratings AS rating
+                 SELECT 1 FROM legacy.user_ratings AS rating
                  JOIN sources AS source ON source.object_id = rating.source_id
                  WHERE rating.item_kind = 'artist'
                    AND rating.item_id = artists.object_id
@@ -958,7 +958,7 @@ async fn salvage_user_facts(
                     COALESCE(track.track_key, album.album_key, artist.artist_key),
                     pending.favorite, pending.previous_favorite,
                     pending.attempts, pending.next_attempt_at
-             FROM released.pending_favorites AS pending
+             FROM legacy.pending_favorites AS pending
              JOIN sources AS source ON source.object_id=pending.source_id
              LEFT JOIN tracks AS track
                ON pending.item_kind='track' AND track.source_key=source.source_key
@@ -978,7 +978,7 @@ async fn salvage_user_facts(
              )
              SELECT source.source_key, item.smart_playlist_id, item.name,
                     lower(item.name), item.definition_json, item.position
-             FROM released.smart_playlists AS item
+             FROM legacy.smart_playlists AS item
              JOIN sources AS source ON source.object_id = item.source_id",
         ),
         (
@@ -990,7 +990,7 @@ async fn salvage_user_facts(
              SELECT source.source_key, item.scope,
                     CASE item.scope WHEN 'track' THEN track.track_key ELSE album.album_key END,
                     item.analysis_key, item.integrated_lufs, item.true_peak
-             FROM released.loudness_measurements AS item
+             FROM legacy.loudness_measurements AS item
              JOIN sources AS source ON source.object_id = item.source_id
              LEFT JOIN tracks AS track
                ON item.scope = 'track' AND track.source_key = source.source_key
@@ -1009,7 +1009,7 @@ async fn salvage_user_facts(
              SELECT source.source_key, item.period, item.item_kind,
                     item.item_id, item.play_count,
                     COALESCE(item.skip_count, 0), item.last_played_at
-             FROM released.listening_aggregates AS item
+             FROM legacy.listening_aggregates AS item
              JOIN sources AS source ON source.object_id=item.source_id
              WHERE item.period='lifetime'
                 OR (length(item.period)=7 AND substr(item.period,5,1)='-')",
@@ -1023,7 +1023,7 @@ async fn salvage_user_facts(
              SELECT item.play_id, source.source_key, track.track_key, item.track_id,
                     item.track_title, item.artist_name, COALESCE(item.album_title, ''),
                     item.played_at, strftime('%Y-%m',item.played_at,'unixepoch'), COALESCE(track.duration_millis, 0), 0, 0
-             FROM released.recent_plays AS item
+             FROM legacy.recent_plays AS item
              JOIN sources AS source ON source.object_id=item.source_id
              LEFT JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id",
@@ -1037,7 +1037,7 @@ async fn salvage_user_facts(
              SELECT source.source_key, track.track_key,
                     item.origin, item.role, item.language, item.script,
                     item.input_digest, item.payload, item.cached_at
-             FROM released.lyrics_cache AS item
+             FROM legacy.lyrics_cache AS item
              JOIN sources AS source ON source.object_id=item.source_id
              JOIN tracks AS track
                ON track.source_key=source.source_key AND track.object_id=item.track_id",
@@ -1051,7 +1051,7 @@ async fn salvage_user_facts(
 async fn salvage_queue(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     copy_family(
         transaction,
@@ -1125,7 +1125,7 @@ async fn salvage_queue(
                         THEN CAST(json_object(
                             'File', json_object(
                                 'path', json_extract(fallback.value, '$.local_artwork'),
-                                'revision', 'released'
+                                'revision', 'legacy'
                             )
                         ) AS BLOB)
                     ELSE NULL
@@ -1145,7 +1145,7 @@ async fn salvage_queue(
                 json_extract(fallback.value, '$.cue.cue_path'),
                 json_extract(fallback.value, '$.cue.start_millis'),
                 json_extract(fallback.value, '$.cue.end_millis')
-         FROM released.playback_queues AS queue
+         FROM legacy.playback_queues AS queue
          JOIN sources AS source ON source.object_id=queue.source_id
          JOIN json_each(queue.rows_json, '$.occurrences') AS occurrence
          LEFT JOIN tracks AS track
@@ -1172,8 +1172,8 @@ async fn salvage_queue(
                       ON occurrence.key=traversal.key
                     WHERE traversal.value<>json_extract(occurrence.value, '$.id')
                 ) THEN 1 ELSE 0 END
-         FROM released.playback_queues AS queue
-         JOIN released.playback_state AS state
+         FROM legacy.playback_queues AS queue
+         JOIN legacy.playback_state AS state
            ON state.source_id=queue.source_id AND state.revision=queue.revision
          JOIN sources AS source ON source.object_id=queue.source_id
          LEFT JOIN queue_occurrences AS occurrence
@@ -1187,7 +1187,7 @@ async fn salvage_queue(
 async fn salvage_local(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
 ) -> LibraryResult<()> {
     copy_family(
         transaction,
@@ -1201,13 +1201,13 @@ async fn salvage_local(
          SELECT source.source_key, item.path, item.root, item.relative_path,
                 item.kind, item.size_bytes, item.mtime_ns, item.device_id,
                 item.inode, item.parse_version, item.state
-         FROM released.local_files AS item
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.local_files AS item
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id=library.source_id
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id=(
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id=library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -1222,8 +1222,8 @@ async fn salvage_local(
              local_file_key, dependency_path, position
          )
          SELECT file.local_file_key, dependency.value, dependency.key
-         FROM released.local_files AS item
-         JOIN released.source_libraries AS library USING (library_id)
+         FROM legacy.local_files AS item
+         JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id=library.source_id
          JOIN local_files AS file
            ON file.source_key=source.source_key AND file.path=item.path
@@ -1231,7 +1231,7 @@ async fn salvage_local(
          WHERE library.accepted_at IS NOT NULL
            AND library.library_id=(
                SELECT MAX(current.library_id)
-               FROM released.source_libraries AS current
+               FROM legacy.source_libraries AS current
                WHERE current.source_id=library.source_id
                  AND current.accepted_at IS NOT NULL
            )",
@@ -1256,7 +1256,7 @@ async fn salvage_local(
                 item.duration_seconds * 1000,
                 CASE WHEN substr(item.path,1,7)='file://' THEN item.path
                      ELSE 'file://' || item.path END
-         FROM released.local_access_files AS item
+         FROM legacy.local_access_files AS item
          JOIN sources AS source ON source.object_id=item.source_id",
     )
     .await?;
@@ -1273,13 +1273,13 @@ async fn salvage_local(
                 COALESCE(item.album_title, ''), item.started_at,
                 strftime('%Y-%m',item.started_at,'unixepoch'),
                 item.duration_millis, item.duration_millis, 0
-         FROM released.pending_scrobbles AS item;
+         FROM legacy.pending_scrobbles AS item;
          INSERT INTO listen_outbox(
              listen_key, service, account_id, attempts, next_attempt_at, last_error
          )
          SELECT listen.listen_key, item.service, item.account_id, item.attempts,
                 item.next_attempt_at, item.last_error
-         FROM released.pending_scrobbles AS item
+         FROM legacy.pending_scrobbles AS item
          JOIN listens AS listen ON listen.external_id=item.play_id",
     )
     .await?;
@@ -1289,7 +1289,7 @@ async fn salvage_local(
 async fn copy_family(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
-    mode: ReleasedCopyMode,
+    mode: LegacyCopyMode,
     family: &'static str,
     sql: &'static str,
 ) -> LibraryResult<()> {
@@ -1305,8 +1305,8 @@ async fn copy_family(
             Ok(())
         }
         Err(error) => match mode {
-            ReleasedCopyMode::Migration => Err(error.into()),
-            ReleasedCopyMode::Repair => {
+            LegacyCopyMode::Migration => Err(error.into()),
+            LegacyCopyMode::Repair => {
                 report.unreadable_families.push(family);
                 Ok(())
             }

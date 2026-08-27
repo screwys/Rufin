@@ -19,7 +19,7 @@
 ## 🎵 Playback
 
 - True gapless playback and configurable equal-power crossfade mode 
-- Built-in EBU R128 loudness normalization, including true-peak measurement and ReplayGain tag support
+- ReplayGain/EBU R128 analysis and true-peak measurement
 - 10-band equalizer with presets, perceptual/linear volume scale preference and fade on play/pause
 - Auto DJ that keeps the queue filled; server recommendations when available with a smart local fallback 
 - Random play with filters for track count, year range, genre and played/unplayed status
@@ -37,10 +37,11 @@
 - Combine multiple local folders in a single listening session
 - Download tracks manually or through automatic rules, then keep using the same remote library while offline
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
-- Metadata editing for supported servers and local formats, with bulk editing and `Identify` available with auto-fill
+- Metadata editing for supported servers and local formats; bulk editing and `Identify` available with auto-fill
 - Automatic metadata, artwork and lyrics caching
 - Easy rating support, with an option to enable visual-only partial stars for OpenSubsonic
-- Browsing large libraries feels normal, routes are not paginated 
+- Virtualized, smooth to scroll pages
+- EBU R128 tag writing option for local folders
 
 ## 🌍️ Discovery
 

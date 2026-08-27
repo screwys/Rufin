@@ -25,8 +25,7 @@ pub(crate) mod source;
 use crate::player::casting_network_dropdown;
 use general::{appearance_page, playback_page, scrobbling_page};
 pub(crate) use general::{
-    loudness_normalization_from_index, loudness_normalization_index, transition_from_index,
-    transition_index, volume_scale_from_index, volume_scale_index,
+    transition_from_index, transition_index, volume_scale_from_index, volume_scale_index,
 };
 use layout::{
     discord_display_from_index, discord_display_index, discord_link_from_index, discord_link_index,
@@ -79,6 +78,17 @@ where
         on_selected,
     ));
     row
+}
+
+pub(crate) fn controlled_selection_row(
+    title: &str,
+    option_titles: &[String],
+    selected: u32,
+) -> (adw::ActionRow, Vec<gtk::ToggleButton>) {
+    let row = adw::ActionRow::builder().title(title).build();
+    let (buttons, controls) = selection_buttons_unconnected(option_titles, option_titles, selected);
+    row.add_suffix(&buttons);
+    (row, controls)
 }
 
 fn quality_selection_row<F>(
@@ -140,13 +150,32 @@ fn selection_buttons<F>(
 where
     F: Fn(u32) + 'static,
 {
+    let (buttons, controls) =
+        selection_buttons_unconnected(accessible_titles, display_titles, selected);
+    let on_selected = Rc::new(on_selected);
+    for (index, button) in controls.iter().enumerate() {
+        let on_selected = Rc::clone(&on_selected);
+        button.connect_toggled(move |button| {
+            if button.is_active() {
+                on_selected(index as u32);
+            }
+        });
+    }
+    buttons
+}
+
+fn selection_buttons_unconnected(
+    accessible_titles: &[String],
+    display_titles: &[String],
+    selected: u32,
+) -> (gtk::Box, Vec<gtk::ToggleButton>) {
     debug_assert_eq!(accessible_titles.len(), display_titles.len());
     let buttons = gtk::Box::new(gtk::Orientation::Horizontal, 0);
     buttons.add_css_class("linked");
     buttons.add_css_class("preference-selection-buttons");
     buttons.set_valign(gtk::Align::Center);
-    let on_selected = Rc::new(on_selected);
     let mut first_button: Option<gtk::ToggleButton> = None;
+    let mut controls = Vec::with_capacity(accessible_titles.len());
 
     for (index, (accessible_title, display_title)) in
         accessible_titles.iter().zip(display_titles).enumerate()
@@ -161,16 +190,11 @@ where
             first_button = Some(button.clone());
         }
         button.set_active(index as u32 == selected);
-        let on_selected = Rc::clone(&on_selected);
-        button.connect_toggled(move |button| {
-            if button.is_active() {
-                on_selected(index as u32);
-            }
-        });
         buttons.append(&button);
+        controls.push(button);
     }
 
-    buttons
+    (buttons, controls)
 }
 
 fn quality_accessible_title(quality: StreamQuality) -> String {

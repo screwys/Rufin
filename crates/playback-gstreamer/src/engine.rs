@@ -3154,7 +3154,7 @@ fn streams_are_adjacent_windows(current: &ResolvedStream, next: &ResolvedStream)
 }
 
 fn adjacent_window_can_reuse_pipeline(settings: &BackendAudioSettings) -> bool {
-    settings.loudness_normalization == LoudnessNormalizationMode::Off
+    settings.loudness_normalization == LoudnessNormalization::Off
 }
 
 fn crossfade_start_remaining_millis(crossfade_millis: u64, playback_rate: f64) -> u64 {
@@ -3346,12 +3346,14 @@ mod tests {
     #[test]
     fn normalized_cue_tracks_use_fresh_gain_state() {
         let mut settings = BackendAudioSettings::default();
+        settings.loudness_normalization = LoudnessNormalization::Off;
         assert!(adjacent_window_can_reuse_pipeline(&settings));
 
-        settings.loudness_normalization = LoudnessNormalizationMode::Track;
+        settings.loudness_normalization = LoudnessNormalization::ReplayGain;
+        settings.loudness_normalization_scope = LoudnessNormalizationScope::Track;
         assert!(!adjacent_window_can_reuse_pipeline(&settings));
 
-        settings.loudness_normalization = LoudnessNormalizationMode::Album;
+        settings.loudness_normalization_scope = LoudnessNormalizationScope::Album;
         assert!(!adjacent_window_can_reuse_pipeline(&settings));
     }
 

@@ -21,6 +21,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         analysis_key: work.expected_analysis_key,
         integrated_lufs: Some(-14.0),
         true_peak: Some(0.8),
+        replay_gain_db: None,
+        replay_gain_peak: None,
     };
     assert!(
         fixture
@@ -29,6 +31,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .await
             .expect("write analyzed loudness")
     );
+    let tag_page = fixture
+        .database
+        .r128_tag_write_page(fixture.source, None, 64, &cancel)
+        .await
+        .expect("read Rufin-owned R128 tag page");
+    assert_eq!(tag_page.len(), 1);
+    assert_eq!(tag_page[0].track_key, work.track_key);
+    assert_eq!(tag_page[0].track_lufs, -14.0);
     assert!(
         !fixture
             .database
@@ -38,7 +48,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 &LoudnessMeasurement {
                     analysis_key: [2; 32],
                     integrated_lufs: Some(-8.0),
-                    true_peak: Some(1.0)
+                    true_peak: Some(1.0),
+                    replay_gain_db: None,
+                    replay_gain_peak: None,
                 }
             )
             .await
@@ -48,6 +60,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         analysis_key: work.expected_analysis_key,
         integrated_lufs: Some(-11.0),
         true_peak: None,
+        replay_gain_db: None,
+        replay_gain_peak: None,
     };
     assert!(
         fixture
@@ -55,6 +69,14 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             .write_track_source_loudness(fixture.source, work.track_key, &source_fact)
             .await
             .expect("accepted source gain wins")
+    );
+    assert!(
+        fixture
+            .database
+            .r128_tag_write_page(fixture.source, None, 64, &cancel)
+            .await
+            .expect("source R128 tag is not Rufin-owned")
+            .is_empty()
     );
     assert_eq!(
         fixture
@@ -120,7 +142,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 &LoudnessMeasurement {
                     analysis_key: work.expected_analysis_key,
                     integrated_lufs: Some(-9.0),
-                    true_peak: Some(0.7)
+                    true_peak: Some(0.7),
+                    replay_gain_db: None,
+                    replay_gain_peak: None,
                 }
             )
             .await
@@ -135,7 +159,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 &LoudnessMeasurement {
                     analysis_key: changed.expected_analysis_key,
                     integrated_lufs: Some(-9.0),
-                    true_peak: Some(0.7)
+                    true_peak: Some(0.7),
+                    replay_gain_db: None,
+                    replay_gain_peak: None,
                 }
             )
             .await
@@ -145,6 +171,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         analysis_key: changed.expected_analysis_key,
         integrated_lufs: Some(-10.0),
         true_peak: None,
+        replay_gain_db: None,
+        replay_gain_peak: None,
     };
     assert!(
         fixture
@@ -173,6 +201,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         analysis_key: album.expected_analysis_key,
         integrated_lufs: Some(-13.0),
         true_peak: Some(0.85),
+        replay_gain_db: None,
+        replay_gain_peak: None,
     };
     assert!(
         fixture
@@ -282,13 +312,13 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .await
         .expect("stage Track");
     }
-    scan.write_track_source_loudness("track-1", Some(-15.0), None)
+    scan.write_track_source_loudness("track-1", Some(-15.0), None, None, None)
         .await
         .expect("stage Track R128 fact");
-    scan.write_track_source_loudness("track-2", Some(-16.0), Some(0.75))
+    scan.write_track_source_loudness("track-2", Some(-16.0), Some(0.75), Some(-4.5), Some(0.9))
         .await
         .expect("stage current Track R128 fact");
-    scan.write_album_source_loudness("album-b", Some(-13.0), None)
+    scan.write_album_source_loudness("album-b", Some(-13.0), None, None, None)
         .await
         .expect("stage Album R128 fact");
     assert!(matches!(
@@ -321,6 +351,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .unwrap();
     assert_eq!(staged_track.integrated_lufs, Some(-16.0));
     assert_eq!(staged_track.true_peak, Some(0.75));
+    assert_eq!(staged_track.replay_gain_db, Some(-4.5));
+    assert_eq!(staged_track.replay_gain_peak, Some(0.9));
     assert_eq!(
         fixture
             .database
@@ -348,7 +380,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 &LoudnessMeasurement {
                     analysis_key: changed_album.expected_analysis_key,
                     integrated_lufs: Some(-12.5),
-                    true_peak: Some(0.82)
+                    true_peak: Some(0.82),
+                    replay_gain_db: None,
+                    replay_gain_peak: None,
                 }
             )
             .await
@@ -810,6 +844,8 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
                 analysis_key: [1; 32],
                 integrated_lufs: Some(-12.0),
                 true_peak: Some(0.8),
+                replay_gain_db: None,
+                replay_gain_peak: None,
             },
         )
         .await

@@ -25,7 +25,7 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
             .fetch_one(&mut reader)
             .await
             .expect("read final schema version"),
-        41
+        42
     );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
@@ -60,6 +60,7 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
             "playlists",
             "queue_occurrences",
             "queue_state",
+            "replay_gain_measurements",
             "smart_playlists",
             "sources",
             "track_artists",
@@ -72,13 +73,82 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
 }
 
 #[tokio::test]
-async fn schema_40_store_migrates_to_released_schema_41() {
+async fn schema_41_migrates_in_place_to_schema_42() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
-    create_released_store(&path).await;
+    let database = Database::open(&path).await.expect("create current Store");
+    drop(database);
+
+    let mut schema_41 = connection(&path, false).await;
+    sqlx::raw_sql(
+        "INSERT INTO sources(
+             source_key,object_id,display_name,normalized_name,
+             catalog_digest,artwork_digest
+         ) VALUES(1,'source','Source','source',zeroblob(32),zeroblob(32));
+         INSERT INTO tracks(
+             track_key,source_key,object_id,title,normalized_search,
+             display_album,display_artist,sort_text,duration_millis
+         ) VALUES(1,1,'track','Track','track','Album','Artist','track',180000);
+         INSERT INTO loudness_measurements(
+             source_key,entity_kind,entity_key,analysis_key,
+             integrated_lufs,true_peak,origin
+         ) VALUES(1,'track',1,zeroblob(32),-18.0,0.9,'analysis');
+         DROP TABLE replay_gain_measurements;
+         PRAGMA user_version=41;",
+    )
+    .execute(&mut schema_41)
+    .await
+    .expect("create schema-41 fixture");
+    schema_41.close().await.expect("close schema-41 fixture");
+
+    let _database = Database::open(&path)
+        .await
+        .expect("migrate schema 41 in place");
+    let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read migrated version"),
+        42
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, f64>(
+            "SELECT integrated_lufs FROM loudness_measurements WHERE entity_kind='track'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read preserved R128 measurement"),
+        -18.0
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='replay_gain_measurements'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read ReplayGain table"),
+        1
+    );
+    assert_eq!(
+        std::fs::read_dir(directory.path())
+            .expect("read Store directory")
+            .filter_map(Result::ok)
+            .filter(|entry| entry.file_name().to_string_lossy().contains("recovered"))
+            .count(),
+        0,
+        "an ordinary schema migration must not replace the Store"
+    );
+}
+
+#[tokio::test]
+async fn schema_40_store_recovers_into_current_schema() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    create_legacy_store(&path).await;
     let database = Database::open(&path)
         .await
-        .expect("migrate and open released Store");
+        .expect("migrate and open legacy Store");
     assert!(
         std::fs::read_dir(directory.path())
             .expect("read Store directory")
@@ -87,7 +157,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("library.sqlite3.schema-40-")),
-        "migration preserves the schema-40 Store beside schema 41"
+        "migration preserves the schema-40 Store beside the current Store"
     );
     let mut reader = connection(&path, false).await;
     assert_eq!(
@@ -95,19 +165,19 @@ async fn schema_40_store_migrates_to_released_schema_41() {
             .fetch_one(&mut reader)
             .await
             .expect("read recovered schema version"),
-        41
+        42
     );
     assert_eq!(
         sqlx::query_as::<_, (String, i64)>("SELECT object_id, catalog_revision FROM sources",)
             .fetch_one(&mut reader)
             .await
             .expect("read recovered source"),
-        ("released-source".to_string(), 1)
+        ("legacy-source".to_string(), 1)
     );
     assert_eq!(
         sqlx::query_as::<_, (i64, i64)>(
             "SELECT user_favorite, user_rating FROM tracks
-             WHERE object_id='released-track'",
+             WHERE object_id='legacy-track'",
         )
         .fetch_one(&mut reader)
         .await
@@ -116,7 +186,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT first_seen_at FROM tracks WHERE object_id='released-track'"
+            "SELECT first_seen_at FROM tracks WHERE object_id='legacy-track'"
         )
         .fetch_one(&mut reader)
         .await
@@ -170,7 +240,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
     );
     assert_eq!(
         sqlx::query_as::<_, (Option<String>, Option<String>)>(
-            "SELECT media_uri,source_path FROM tracks WHERE object_id='released-track'",
+            "SELECT media_uri,source_path FROM tracks WHERE object_id='legacy-track'",
         )
         .fetch_one(&mut reader)
         .await
@@ -178,7 +248,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
         (None, Some("/music/track.flac".to_string()))
     );
     assert_eq!(
-        sqlx::query_as::<_, (String, String, i64)>("SELECT period,item_kind,play_count FROM activity_baseline WHERE source_key=(SELECT source_key FROM sources WHERE object_id='released-source') ORDER BY period")
+        sqlx::query_as::<_, (String, String, i64)>("SELECT period,item_kind,play_count FROM activity_baseline WHERE source_key=(SELECT source_key FROM sources WHERE object_id='legacy-source') ORDER BY period")
             .fetch_all(&mut reader).await.expect("read recovered Activity periods"),
         [("2025-06".to_string(), "track".to_string(), 3), ("lifetime".to_string(), "track".to_string(), 4)]
     );
@@ -230,7 +300,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
             "SELECT date_added, source_format, comment, bpm,
                     musicbrainz_recording_id, musicbrainz_release_track_id,
                     cue_path, cue_start_millis, cue_end_millis, normalized_search
-             FROM tracks WHERE object_id='released-track'",
+             FROM tracks WHERE object_id='legacy-track'",
         )
         .fetch_one(&mut reader)
         .await
@@ -238,14 +308,14 @@ async fn schema_40_store_migrates_to_released_schema_41() {
         (
             "2024-01-02".to_string(),
             "FLAC".to_string(),
-            "Released comment".to_string(),
+            "Legacy comment".to_string(),
             120,
             "recording-id".to_string(),
             "release-track-id".to_string(),
             "/music/album.cue".to_string(),
             1000,
             181000,
-            "released track released album released artist released comment".to_string(),
+            "legacy track legacy album legacy artist legacy comment".to_string(),
         )
     );
     assert_eq!(
@@ -267,7 +337,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
         )
     );
     let genre_binding = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT artwork_binding FROM genres WHERE object_id='released-genre'",
+        "SELECT artwork_binding FROM genres WHERE object_id='legacy-genre'",
     )
     .fetch_one(&mut reader)
     .await
@@ -355,15 +425,15 @@ async fn schema_40_store_migrates_to_released_schema_41() {
         .expect("read recovered loudness without peak"),
         (-14.0, None)
     );
-    assert_eq!(sqlx::query_as::<_,(i64,i64,Option<i64>)>("SELECT play_count,skip_count,last_played_at FROM activity_baseline WHERE track_object_id='released-track'").fetch_one(&mut reader).await.expect("read recovered Activity baseline"),(4,2,Some(90)));
+    assert_eq!(sqlx::query_as::<_,(i64,i64,Option<i64>)>("SELECT play_count,skip_count,last_played_at FROM activity_baseline WHERE track_object_id='legacy-track'").fetch_one(&mut reader).await.expect("read recovered Activity baseline"),(4,2,Some(90)));
     assert_eq!(
         sqlx::query_as::<_, (String, i64)>(
-            "SELECT track_title,started_at FROM listens WHERE external_id='released-play'"
+            "SELECT track_title,started_at FROM listens WHERE external_id='legacy-play'"
         )
         .fetch_one(&mut reader)
         .await
         .expect("read recovered listen"),
-        ("Released Track".to_string(), 95)
+        ("Legacy Track".to_string(), 95)
     );
     assert_eq!(
         sqlx::query_as::<_, (String, String, String, String)>(
@@ -373,8 +443,8 @@ async fn schema_40_store_migrates_to_released_schema_41() {
         .await
         .expect("read recovered Local access"),
         (
-            "released track".to_string(),
-            "released album".to_string(),
+            "legacy track".to_string(),
+            "legacy album".to_string(),
             "file:///music/track.flac".to_string(),
             "mapping".to_string()
         )
@@ -382,7 +452,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
     drop(database);
     let devel_path = directory.path().join("devel.sqlite3");
     let mut devel = connection(&devel_path, true).await;
-    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=42; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unreleased schema-42 Store");
+    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=43; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unsupported schema-43 Store");
     devel.close().await.expect("close Devel Store");
     let _database = Database::open(&devel_path)
         .await
@@ -393,7 +463,7 @@ async fn schema_40_store_migrates_to_released_schema_41() {
             .fetch_one(&mut rebuilt)
             .await
             .expect("read rebuilt final schema version"),
-        41
+        42
     );
     assert!(
         devel_path.exists(),
@@ -415,13 +485,13 @@ async fn schema_40_store_migrates_to_released_schema_41() {
 async fn failed_schema_40_migration_restores_the_original_store() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
-    create_released_store(&path).await;
-    let mut released = connection(&path, false).await;
-    sqlx::query("UPDATE tracks SET duration_seconds=-1 WHERE track_id='released-track'")
-        .execute(&mut released)
+    create_legacy_store(&path).await;
+    let mut legacy = connection(&path, false).await;
+    sqlx::query("UPDATE tracks SET duration_seconds=-1 WHERE track_id='legacy-track'")
+        .execute(&mut legacy)
         .await
         .expect("make one schema-40 value invalid for schema 41");
-    released.close().await.expect("close schema-40 fixture");
+    legacy.close().await.expect("close schema-40 fixture");
 
     assert!(
         Database::open(&path).await.is_err(),
@@ -438,7 +508,7 @@ async fn failed_schema_40_migration_restores_the_original_store() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT duration_seconds FROM tracks WHERE track_id='released-track'"
+            "SELECT duration_seconds FROM tracks WHERE track_id='legacy-track'"
         )
         .fetch_one(&mut restored)
         .await
@@ -457,20 +527,20 @@ async fn failed_schema_40_migration_restores_the_original_store() {
 }
 
 #[tokio::test]
-async fn recognizable_released_store_salvages_readable_families_independently() {
+async fn recognizable_legacy_store_salvages_readable_families_independently() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
-    create_released_store(&path).await;
-    let mut released = connection(&path, false).await;
+    create_legacy_store(&path).await;
+    let mut legacy = connection(&path, false).await;
     sqlx::query("DROP TABLE genres")
-        .execute(&mut released)
+        .execute(&mut legacy)
         .await
-        .expect("remove one released family");
-    released.close().await.expect("close partial Store");
+        .expect("remove one legacy family");
+    legacy.close().await.expect("close partial Store");
 
     let database = Database::open(&path)
         .await
-        .expect("salvage recognizable partial released Store");
+        .expect("salvage recognizable partial legacy Store");
     let mut reader = connection(&path, false).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")
@@ -509,7 +579,7 @@ async fn not_a_database_is_preserved_and_rebuilt_automatically() {
     );
 }
 
-async fn create_released_store(path: &Path) {
+async fn create_legacy_store(path: &Path) {
     let mut connection = connection(path, true).await;
     sqlx::raw_sql(
         "PRAGMA application_id=1381320270;
@@ -656,109 +726,109 @@ async fn create_released_store(path: &Path) {
              release_types_json TEXT,is_compilation INTEGER
          ) STRICT;
          INSERT INTO source_libraries VALUES(
-             1, 'released-source', zeroblob(32), zeroblob(32), X'01', zeroblob(32),
-             '{\"kind\":\"Source\",\"sections\":[{\"kind\":\"MostPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"released-track\"}]}]}', 1
+             1, 'legacy-source', zeroblob(32), zeroblob(32), X'01', zeroblob(32),
+             '{\"kind\":\"Source\",\"sections\":[{\"kind\":\"MostPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]}]}', 1
          );
          INSERT INTO albums VALUES(
-             1, 'released-album', 'Released Album', 'Released Artist',
+             1, 'legacy-album', 'Legacy Album', 'Legacy Artist',
              2024, '2024-01-01', '2024-01-02', 'release-id', 'release-group-id',
              NULL, NULL, 'file', '/music/cover.jpg', NULL, 'album-rev',
              0, NULL, '[\"Album\"]',
-             '{\"album_artists\":[{\"id\":\"released-artist\",\"name\":\"Released Artist\"}],\"genres\":[{\"id\":\"released-genre\",\"name\":\"Released Genre\"}]}', 1
+             '{\"album_artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"}]}', 1
          );
          INSERT INTO tracks VALUES(
-             1, 'released-track', 'released-album', 'Released Track',
-             'Released Album', 'Released Artist', 180, 1, 1, 2024,
+             1, 'legacy-track', 'legacy-album', 'Legacy Track',
+             'Legacy Album', 'Legacy Artist', 180, 1, 1, 2024,
              '2024-01-01', '2024-01-02', '/music/track.flac', 'FLAC',
-             'Released comment', 120, 'recording-id', 'release-track-id',
+             'Legacy comment', 120, 'recording-id', 'release-track-id',
              '/music/album.cue', 1000, 181000, NULL, NULL,
              'embedded', '/music/track.flac', 2, 'track-rev', 0, NULL,
-             '{\"artists\":[{\"id\":\"released-artist\",\"name\":\"Released Artist\"}],\"genres\":[{\"id\":\"released-genre\",\"name\":\"Released Genre\"}],\"moods\":[{\"id\":\"released-mood\",\"name\":\"Released Mood\"}],\"music_folders\":[\"released-folder\"]}'
+             '{\"artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"}],\"moods\":[{\"id\":\"legacy-mood\",\"name\":\"Legacy Mood\"}],\"music_folders\":[\"legacy-folder\"]}'
          );
          INSERT INTO artists VALUES(
-             1, 'released-artist', 'Released Artist', 'artist-id', NULL, NULL,
+             1, 'legacy-artist', 'Legacy Artist', 'artist-id', NULL, NULL,
              'file', '/music/artist.jpg', NULL, 'artist-rev', 0, NULL
          );
          INSERT INTO genres VALUES(
-             1, 'released-genre', 'Released Genre', 'genre-image', 'genre-tag'
+             1, 'legacy-genre', 'Legacy Genre', 'genre-image', 'genre-tag'
          );
          INSERT INTO music_folders VALUES(
-             1, 'released-folder', 'Released Folder', NULL, NULL
+             1, 'legacy-folder', 'Legacy Folder', NULL, NULL
          );
          INSERT INTO source_playlists VALUES(
              1, 'source-list', 'Source List', NULL, NULL
          );
          INSERT INTO source_playlist_entries VALUES(
-             1, 'source-list', 0, 'source-occurrence', 'released-track'
+             1, 'source-list', 0, 'source-occurrence', 'legacy-track'
          );
          INSERT INTO local_favorites VALUES(
-             'released-source', 'track', 'released-track'
+             'legacy-source', 'track', 'legacy-track'
          );
          INSERT INTO user_ratings VALUES(
-             'released-source', 'track', 'released-track', 8
+             'legacy-source', 'track', 'legacy-track', 8
          );
          INSERT INTO pending_favorites VALUES(
-             'released-source', 'track', 'released-track', 1, 0, 2, 200
+             'legacy-source', 'track', 'legacy-track', 1, 0, 2, 200
          );
          INSERT INTO local_playlists VALUES(
-             'released-source', 'user-list', 'User List'
+             'legacy-source', 'user-list', 'User List'
          );
          INSERT INTO local_playlist_entries VALUES(
-             'released-source', 'user-list', 0, 'user-occurrence-one', 'released-track'
+             'legacy-source', 'user-list', 0, 'user-occurrence-one', 'legacy-track'
          );
          INSERT INTO local_playlist_entries VALUES(
-             'released-source', 'user-list', 1, 'user-occurrence-two', 'released-track'
+             'legacy-source', 'user-list', 1, 'user-occurrence-two', 'legacy-track'
          );
          INSERT INTO smart_playlists VALUES(
-             'released-source', 'smart-list', 'Smart List', NULL,
+             'legacy-source', 'smart-list', 'Smart List', NULL,
              '{\"match_all\":[],\"match_any\":[],\"sort_field\":\"Title\",\"descending\":false}', 0
          );
          INSERT INTO local_imports VALUES(
-             'released-source', 'released-track', 50
+             'legacy-source', 'legacy-track', 50
          );
          INSERT INTO playback_queues VALUES(
-             'released-source', 1,
-             '{\"occurrences\":[{\"id\":\"occ-context\",\"track_id\":\"released-track\",\"provenance\":{\"Context\":{\"context_id\":\"route-album\",\"source_rank\":7}}},{\"id\":\"occ-auto\",\"track_id\":\"released-track\",\"provenance\":\"AutoDj\"}],\"fallback_tracks\":[{\"id\":\"released-track\",\"title\":\"Released Track\",\"artist\":\"Released Artist\",\"album\":\"Released Album\",\"album_id\":\"released-album\",\"primary_artist_id\":\"released-artist\",\"local_artwork\":\"/music/local-cover.jpg\",\"year\":2024,\"duration_seconds\":180,\"favorite\":true,\"track_number\":1,\"disc_number\":1,\"source_format\":\"FLAC\",\"source_path\":\"/music/track.flac\",\"musicbrainz_recording_id\":\"recording-id\",\"cue\":{\"cue_path\":\"/music/album.cue\",\"start_millis\":1000,\"end_millis\":181000}}]}',
+             'legacy-source', 1,
+             '{\"occurrences\":[{\"id\":\"occ-context\",\"track_id\":\"legacy-track\",\"provenance\":{\"Context\":{\"context_id\":\"route-album\",\"source_rank\":7}}},{\"id\":\"occ-auto\",\"track_id\":\"legacy-track\",\"provenance\":\"AutoDj\"}],\"fallback_tracks\":[{\"id\":\"legacy-track\",\"title\":\"Legacy Track\",\"artist\":\"Legacy Artist\",\"album\":\"Legacy Album\",\"album_id\":\"legacy-album\",\"primary_artist_id\":\"legacy-artist\",\"local_artwork\":\"/music/local-cover.jpg\",\"year\":2024,\"duration_seconds\":180,\"favorite\":true,\"track_number\":1,\"disc_number\":1,\"source_format\":\"FLAC\",\"source_path\":\"/music/track.flac\",\"musicbrainz_recording_id\":\"recording-id\",\"cue\":{\"cue_path\":\"/music/album.cue\",\"start_millis\":1000,\"end_millis\":181000}}]}',
              '[\"occ-auto\",\"occ-context\"]'
          );
-         INSERT INTO playback_state VALUES('released-source', 1, 'occ-context', 1200);
+         INSERT INTO playback_state VALUES('legacy-source', 1, 'occ-context', 1200);
          INSERT INTO local_files VALUES(
              1, '/music/track.flac', '/music', 'track.flac', 'media', 100,
              10, 1, 2, 1, 'accepted', '[\"/music/image.jpg\"]'
          );
          INSERT INTO local_access_files VALUES(
-             'released-source', '/music/track.flac', '/music', 'track.flac',
-             100, 10, 1, 2, 1, 'Released Track', 'Released Album',
-             'Released Artist', 1, 1, 180
+             'legacy-source', '/music/track.flac', '/music', 'track.flac',
+             100, 10, 1, 2, 1, 'Legacy Track', 'Legacy Album',
+             'Legacy Artist', 1, 1, 180
          );
          INSERT INTO pending_scrobbles VALUES(
              'lastfm', 'account', 'pending-play', 'Pending Track',
              'Pending Artist', NULL, 180000, 100, 0, 200, NULL
          );
          INSERT INTO lyrics_cache VALUES(
-             'released-source', 'released-track', 'Lyrics', 'en', 'Latn',
-             'source', 1, zeroblob(32), 'Released lyrics', 100
+             'legacy-source', 'legacy-track', 'Lyrics', 'en', 'Latn',
+             'source', 1, zeroblob(32), 'Legacy lyrics', 100
          );
          INSERT INTO loudness_measurements VALUES(
-             'released-source','track','released-track',zeroblob(32),-14.0,NULL
+             'legacy-source','track','legacy-track',zeroblob(32),-14.0,NULL
          );
          INSERT INTO listening_aggregates VALUES(
-             'released-source','released-track','lifetime','track',4,2,90
+             'legacy-source','legacy-track','lifetime','track',4,2,90
          );
          INSERT INTO listening_aggregates VALUES(
-             'released-source','released-track','2025-06','track',3,0,NULL
+             'legacy-source','legacy-track','2025-06','track',3,0,NULL
          );
          INSERT INTO recent_plays VALUES(
-             'released-play','released-source','released-track','Released Track',
-             'Released Artist','Released Album',95
+             'legacy-play','legacy-source','legacy-track','Legacy Track',
+             'Legacy Artist','Legacy Album',95
          );
          INSERT INTO album_release_info VALUES(
-             'released-source','released-album','release-group:release-group-id',
+             'legacy-source','legacy-album','release-group:release-group-id',
              'found','[\"Remix\"]',NULL
          );",
     )
     .execute(&mut connection)
     .await
-    .expect("create released Store fixture");
-    connection.close().await.expect("close released fixture");
+    .expect("create legacy Store fixture");
+    connection.close().await.expect("close legacy fixture");
 }

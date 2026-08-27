@@ -125,6 +125,28 @@ pub(super) async fn stage_track(
         *hash.finalize().as_bytes(),
     )
     .await?;
+    if track.replay_gain_track_db.is_some() {
+        scan.write_track_source_loudness(
+            &track.id,
+            None,
+            None,
+            track.replay_gain_track_db,
+            track.replay_gain_track_peak,
+        )
+        .await?;
+    }
+    if let Some(album_id) = track.album_id.as_deref()
+        && track.replay_gain_album_db.is_some()
+    {
+        scan.write_album_source_loudness(
+            album_id,
+            None,
+            None,
+            track.replay_gain_album_db,
+            track.replay_gain_album_peak,
+        )
+        .await?;
+    }
     for artist in &track.relations.artists {
         stage_artist_credit(scan, artist).await?;
     }
@@ -479,6 +501,10 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         comment: song.comment.filter(|value| !value.trim().is_empty()),
         skip_count: None,
         bpm: song.bpm.and_then(bpm_from_u32),
+        replay_gain_track_db: finite(song.replay_gain.track_gain),
+        replay_gain_track_peak: positive_finite(song.replay_gain.track_peak),
+        replay_gain_album_db: finite(song.replay_gain.album_gain),
+        replay_gain_album_peak: positive_finite(song.replay_gain.album_peak),
         relations: TrackRelations {
             artists: artist_credits,
             album_artists: album_artist_credits,
@@ -487,6 +513,14 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
             music_folders: Vec::new(),
         },
     }
+}
+
+fn finite(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite())
+}
+
+fn positive_finite(value: Option<f64>) -> Option<f64> {
+    value.filter(|value| value.is_finite() && *value >= 0.0)
 }
 
 pub(super) fn source_format_from_song(

@@ -40,6 +40,11 @@ msgid ""
 "the renderer"
 msgstr ""
 
+msgid ""
+"Rufin will calculate the missing EBU R128 metadata for the whole library. "
+"This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
 #, rust-format
 msgid ""
 "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
@@ -557,6 +562,12 @@ msgstr ""
 msgid "Duration"
 msgstr ""
 
+msgid "EBU R128 reference level"
+msgstr ""
+
+msgid "EBU R128"
+msgstr ""
+
 msgid "EP"
 msgstr ""
 
@@ -572,10 +583,16 @@ msgstr ""
 msgid "Edit"
 msgstr ""
 
+msgid "Enable EBU R128 Analysis?"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr ""
 
 msgid "Enable private mode"
+msgstr ""
+
+msgid "Enable"
 msgstr ""
 
 msgid "Enter API credentials first"
@@ -1130,6 +1147,9 @@ msgstr ""
 msgid "None"
 msgstr ""
 
+msgid "Normalization scope"
+msgstr ""
+
 msgid "Not connected"
 msgstr ""
 
@@ -1512,6 +1532,9 @@ msgstr ""
 msgid "Repeat"
 msgstr ""
 
+msgid "ReplayGain"
+msgstr ""
+
 msgid "Requires OpenSubsonic songLyrics v2"
 msgstr ""
 
@@ -1817,6 +1840,9 @@ msgstr ""
 msgid "Status display"
 msgstr ""
 
+msgid "Store calculated loudness in supported Local music files"
+msgstr ""
+
 msgid "Stream quality"
 msgstr ""
 
@@ -1833,6 +1859,9 @@ msgid "System default"
 msgstr ""
 
 msgid "System"
+msgstr ""
+
+msgid "Target loudness"
 msgstr ""
 
 msgid "Teal"
@@ -1989,6 +2018,9 @@ msgid "Waveform seekbar"
 msgstr ""
 
 msgid "Window"
+msgstr ""
+
+msgid "Write EBU R128 tags to files"
 msgstr ""
 
 msgid "Year"

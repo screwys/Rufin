@@ -1,5 +1,6 @@
 use crate::{
-    EqualizerSettings, LoudnessNormalizationMode, PlaybackSettings, StreamQuality, VolumeScale,
+    EqualizerSettings, LoudnessNormalization, LoudnessNormalizationScope, PlaybackSettings,
+    StreamQuality, VolumeScale,
 };
 use library::LoudnessMeasurement;
 use serde::{Deserialize, Serialize};
@@ -152,8 +153,8 @@ fn redact_sensitive_uri(uri: &str) -> String {
 
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TrackLoudness {
-    pub track: Option<LoudnessMeasurement>,
-    pub album: Option<LoudnessMeasurement>,
+    pub track: Option<Box<LoudnessMeasurement>>,
+    pub album: Option<Box<LoudnessMeasurement>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -263,7 +264,9 @@ impl PreparedNext {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct BackendAudioSettings {
-    pub loudness_normalization: LoudnessNormalizationMode,
+    pub loudness_normalization: LoudnessNormalization,
+    pub loudness_normalization_scope: LoudnessNormalizationScope,
+    pub ebu_r128_target_lufs: f64,
     pub audio_output: Option<String>,
     pub equalizer: EqualizerSettings,
     pub preserve_pitch: bool,
@@ -290,6 +293,8 @@ impl From<PlaybackSettings> for BackendAudioSettings {
         settings.sanitize();
         Self {
             loudness_normalization: settings.loudness_normalization,
+            loudness_normalization_scope: settings.loudness_normalization_scope,
+            ebu_r128_target_lufs: settings.ebu_r128_target_lufs,
             audio_output: settings.audio_output,
             equalizer: settings.equalizer,
             preserve_pitch: settings.preserve_pitch,

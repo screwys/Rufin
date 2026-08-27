@@ -438,6 +438,14 @@ pub(super) struct NavidromeTrack {
     participants: NavidromeParticipants,
     #[serde(default)]
     tags: NavidromeTags,
+    #[serde(default)]
+    rg_track_gain: Option<f64>,
+    #[serde(default)]
+    rg_track_peak: Option<f64>,
+    #[serde(default)]
+    rg_album_gain: Option<f64>,
+    #[serde(default)]
+    rg_album_peak: Option<f64>,
 }
 
 #[derive(Clone, Deserialize)]
@@ -590,6 +598,14 @@ fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track
         comment: clean_optional(track.comment),
         skip_count: None,
         bpm: positive_u16(track.bpm),
+        replay_gain_track_db: track.rg_track_gain.filter(|value| value.is_finite()),
+        replay_gain_track_peak: track
+            .rg_track_peak
+            .filter(|value| value.is_finite() && *value >= 0.0),
+        replay_gain_album_db: track.rg_album_gain.filter(|value| value.is_finite()),
+        replay_gain_album_peak: track
+            .rg_album_peak
+            .filter(|value| value.is_finite() && *value >= 0.0),
         relations: TrackRelations {
             artists,
             album_artists,
@@ -754,6 +770,23 @@ mod tests {
             Some("/Artist/Album/Track.flac")
         );
         assert_eq!(server_path(None, "Track.flac"), None);
+    }
+
+    #[test]
+    fn navidrome_track_reads_replay_gain_columns() {
+        let track = serde_json::from_value::<NavidromeTrack>(serde_json::json!({
+            "id": "track-one",
+            "rgTrackGain": -4.25,
+            "rgTrackPeak": 0.91,
+            "rgAlbumGain": -3.5,
+            "rgAlbumPeak": 0.95
+        }))
+        .expect("Navidrome track");
+
+        assert_eq!(track.rg_track_gain, Some(-4.25));
+        assert_eq!(track.rg_track_peak, Some(0.91));
+        assert_eq!(track.rg_album_gain, Some(-3.5));
+        assert_eq!(track.rg_album_peak, Some(0.95));
     }
 
     #[test]

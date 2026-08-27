@@ -152,6 +152,37 @@ pub(crate) fn write_rating(
     commit_batch(vec![prepared])
 }
 
+pub(crate) fn write_r128(
+    path: &Path,
+    source_format: Option<&str>,
+    track_lufs: Option<f64>,
+    album_lufs: Option<f64>,
+) -> Result<(), SourceMetadataError> {
+    let writer = source_format
+        .and_then(MetadataWriter::for_source_format)
+        .or_else(|| MetadataWriter::for_path(path))
+        .ok_or(SourceMetadataError::Unavailable)?;
+    if track_lufs.is_some() && !writer.metadata_key_is_writable(ItemKey::R128TrackGain)
+        || album_lufs.is_some() && !writer.metadata_key_is_writable(ItemKey::R128AlbumGain)
+    {
+        return Err(SourceMetadataError::Unavailable);
+    }
+    let prepared = prepare_file(path, source_format, |tag, _| {
+        if let Some(lufs) = track_lufs {
+            set_text(tag, ItemKey::R128TrackGain, Some(&r128_gain_text(lufs)));
+        }
+        if let Some(lufs) = album_lufs {
+            set_text(tag, ItemKey::R128AlbumGain, Some(&r128_gain_text(lufs)));
+        }
+    })?;
+    commit_batch(vec![prepared])
+}
+
+fn r128_gain_text(integrated_lufs: f64) -> String {
+    let gain = ((-23.0 - integrated_lufs) * 256.0).round();
+    (gain.clamp(f64::from(i16::MIN), f64::from(i16::MAX)) as i16).to_string()
+}
+
 pub(crate) fn write_album_batch(
     targets: &[(PathBuf, Option<String>)],
     expected_revision: &str,
@@ -437,6 +468,13 @@ mod tests {
                 musicbrainz_artist_id: true,
             },
         }
+    }
+
+    #[test]
+    fn r128_gain_uses_signed_q7_8_at_the_minus_23_lufs_reference() {
+        assert_eq!(r128_gain_text(-23.0), "0");
+        assert_eq!(r128_gain_text(-21.0), "-512");
+        assert_eq!(r128_gain_text(-25.5), "640");
     }
 
     #[test]

@@ -32,7 +32,9 @@ pub(crate) use outputs::{
     audio_output_dropdown, casting_network_dropdown, default_audio_output_options,
     select_next_audio_output, select_previous_audio_output, warm_audio_output_cache,
 };
-pub(crate) use playback_settings::{crossfade_duration_row, playback_rate_row, preserve_pitch_row};
+pub(crate) use playback_settings::{
+    crossfade_duration_row, install_sliding_value_bubble, playback_rate_row, preserve_pitch_row,
+};
 pub(crate) use queue::connect_queue_panel_controls;
 pub(crate) use random_play::play_saved_random;
 pub(crate) use right_panel::{

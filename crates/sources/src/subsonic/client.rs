@@ -1530,6 +1530,19 @@ pub(super) struct SubsonicSong {
     pub(super) starred: Option<serde_json::Value>,
     #[serde(default, rename = "musicBrainzId")]
     pub(super) musicbrainz_recording_id: Option<String>,
+    #[serde(default, rename = "replayGain")]
+    pub(super) replay_gain: SubsonicReplayGain,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct SubsonicReplayGain {
+    #[serde(default, rename = "trackGain")]
+    pub(super) track_gain: Option<f64>,
+    #[serde(default, rename = "albumGain")]
+    pub(super) album_gain: Option<f64>,
+    #[serde(default, rename = "trackPeak")]
+    pub(super) track_peak: Option<f64>,
+    #[serde(default, rename = "albumPeak")]
+    pub(super) album_peak: Option<f64>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct SubsonicArtist {
@@ -1631,7 +1644,7 @@ impl Visitor<'_> for SubsonicIdVisitor {
 
 #[cfg(test)]
 mod tests {
-    use super::{SubsonicCredential, redacted_subsonic_url};
+    use super::{SubsonicCredential, SubsonicSong, redacted_subsonic_url};
     use crate::subsonic::{
         SubsonicAuthentication, SubsonicFlavor, SubsonicSource, SubsonicSourceConfig,
     };
@@ -1653,6 +1666,25 @@ mod tests {
 
         let credential = SubsonicCredential::from_api_key("secret-key").expect("API key");
         assert!(!format!("{credential:?}").contains("secret-key"));
+    }
+
+    #[test]
+    fn opensubsonic_song_reads_replay_gain() {
+        let song = serde_json::from_value::<SubsonicSong>(serde_json::json!({
+            "id": "track-one",
+            "replayGain": {
+                "trackGain": -4.25,
+                "albumGain": -3.5,
+                "trackPeak": 0.91,
+                "albumPeak": 0.95
+            }
+        }))
+        .expect("OpenSubsonic song");
+
+        assert_eq!(song.replay_gain.track_gain, Some(-4.25));
+        assert_eq!(song.replay_gain.album_gain, Some(-3.5));
+        assert_eq!(song.replay_gain.track_peak, Some(0.91));
+        assert_eq!(song.replay_gain.album_peak, Some(0.95));
     }
 
     #[tokio::test]

@@ -487,14 +487,19 @@ impl Scan {
         track_object_id: &str,
         integrated_lufs: Option<f64>,
         true_peak: Option<f64>,
+        replay_gain_db: Option<f64>,
+        replay_gain_peak: Option<f64>,
     ) -> LibraryResult<()> {
         self.write_source_loudness(
             "UPDATE temp.scan_tracks
-             SET source_integrated_lufs=?2, source_true_peak=?3
+             SET source_integrated_lufs=?2, source_true_peak=?3,
+                 source_replay_gain_db=?4, source_replay_gain_peak=?5
              WHERE object_id=?1",
             track_object_id,
             integrated_lufs,
             true_peak,
+            replay_gain_db,
+            replay_gain_peak,
         )
         .await
     }
@@ -504,14 +509,19 @@ impl Scan {
         album_object_id: &str,
         integrated_lufs: Option<f64>,
         true_peak: Option<f64>,
+        replay_gain_db: Option<f64>,
+        replay_gain_peak: Option<f64>,
     ) -> LibraryResult<()> {
         self.write_source_loudness(
             "UPDATE temp.scan_albums
-             SET source_integrated_lufs=?2, source_true_peak=?3
+             SET source_integrated_lufs=?2, source_true_peak=?3,
+                 source_replay_gain_db=?4, source_replay_gain_peak=?5
              WHERE object_id=?1",
             album_object_id,
             integrated_lufs,
             true_peak,
+            replay_gain_db,
+            replay_gain_peak,
         )
         .await
     }
@@ -1578,11 +1588,15 @@ impl Scan {
         object_id: &str,
         integrated_lufs: Option<f64>,
         true_peak: Option<f64>,
+        replay_gain_db: Option<f64>,
+        replay_gain_peak: Option<f64>,
     ) -> LibraryResult<()> {
         self.require_id("loudness entity", object_id)?;
-        if integrated_lufs.is_none()
+        if (integrated_lufs.is_none() && replay_gain_db.is_none())
             || integrated_lufs.is_some_and(|value| !value.is_finite())
             || true_peak.is_some_and(|value| !value.is_finite() || value < 0.0)
+            || replay_gain_db.is_some_and(|value| !value.is_finite())
+            || replay_gain_peak.is_some_and(|value| !value.is_finite() || value < 0.0)
         {
             self.failed = true;
             return Err(LibraryError::InvalidScan(
@@ -1594,6 +1608,8 @@ impl Scan {
                 .bind(object_id)
                 .bind(integrated_lufs)
                 .bind(true_peak)
+                .bind(replay_gain_db)
+                .bind(replay_gain_peak)
         };
         let result = if let Some(writer) = self.batch_writer.as_mut() {
             let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
@@ -1845,7 +1861,8 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              rating INTEGER, first_seen_at INTEGER,
              source_loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000',
              loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000',
-             source_integrated_lufs REAL, source_true_peak REAL
+             source_integrated_lufs REAL, source_true_peak REAL,
+             source_replay_gain_db REAL, source_replay_gain_peak REAL
          ) STRICT;
          CREATE TEMP TABLE scan_tracks(
              object_id TEXT PRIMARY KEY, album_object_id TEXT,
@@ -1862,7 +1879,8 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              baseline_play_count INTEGER, baseline_skip_count INTEGER,
              baseline_last_played INTEGER,
              source_loudness_analysis_key BLOB NOT NULL,
-             source_integrated_lufs REAL, source_true_peak REAL
+             source_integrated_lufs REAL, source_true_peak REAL,
+             source_replay_gain_db REAL, source_replay_gain_peak REAL
          ) STRICT;
          CREATE INDEX scan_tracks_album_loudness_idx ON scan_tracks(
              album_object_id, disc_number, track_number, sort_text, object_id
@@ -2689,6 +2707,27 @@ async fn publish_source_loudness(
         album_delete,
         "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,'track',track.track_key,track.loudness_analysis_key,staged.source_integrated_lufs,staged.source_true_peak,'source' FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'",
         "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,'album',album.album_key,album.loudness_analysis_key,staged.source_integrated_lufs,staged.source_true_peak,'source' FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'",
+    ] {
+        sqlx::query(sql)
+            .bind(source_key)
+            .execute(&mut **transaction)
+            .await?;
+    }
+    let replay_track_delete = if full {
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='track' AND NOT EXISTS (SELECT 1 FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL AND track.track_key=replay_gain_measurements.entity_key)"
+    } else {
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='track' AND entity_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
+    };
+    let replay_album_delete = if full {
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album' AND NOT EXISTS (SELECT 1 FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL AND album.album_key=replay_gain_measurements.entity_key)"
+    } else {
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album' AND entity_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
+    };
+    for sql in [
+        replay_track_delete,
+        replay_album_delete,
+        "INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db,peak) SELECT ?1,'track',track.track_key,track.loudness_analysis_key,staged.source_replay_gain_db,staged.source_replay_gain_peak FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,gain_db=excluded.gain_db,peak=excluded.peak",
+        "INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db,peak) SELECT ?1,'album',album.album_key,album.loudness_analysis_key,staged.source_replay_gain_db,staged.source_replay_gain_peak FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,gain_db=excluded.gain_db,peak=excluded.peak",
     ] {
         sqlx::query(sql)
             .bind(source_key)

@@ -130,6 +130,16 @@ pub(super) async fn stage_track(
         key,
     )
     .await?;
+    if track.replay_gain_track_db.is_some() {
+        scan.write_track_source_loudness(&track.id, None, None, track.replay_gain_track_db, None)
+            .await?;
+    }
+    if let Some(album_id) = track.album_id.as_deref()
+        && track.replay_gain_album_db.is_some()
+    {
+        scan.write_album_source_loudness(album_id, None, None, track.replay_gain_album_db, None)
+            .await?;
+    }
     for artist in &track.relations.artists {
         stage_artist_credit(scan, artist).await?;
     }
@@ -281,7 +291,7 @@ pub(super) struct Album {
     pub relations: AlbumRelations,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub(super) struct Track {
     pub id: String,
     pub album_id: Option<String>,
@@ -309,6 +319,8 @@ pub(super) struct Track {
     pub comment: Option<String>,
     pub skip_count: Option<u32>,
     pub bpm: Option<u16>,
+    pub replay_gain_track_db: Option<f64>,
+    pub replay_gain_album_db: Option<f64>,
     pub relations: TrackRelations,
 }
 
@@ -343,9 +355,9 @@ pub(super) struct Playlist {
 }
 
 pub(super) const ALBUM_FIELDS: &str = "Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
-pub(super) const TRACK_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags";
+pub(super) const TRACK_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
 pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ChildCount";
-pub(super) const MIXED_ITEM_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount";
+pub(super) const MIXED_ITEM_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
 #[derive(Clone, Debug, Deserialize)]
 #[serde(rename_all = "PascalCase")]
@@ -388,6 +400,8 @@ pub(super) struct JellyfinItem {
     parent_backdrop_item_id: Option<String>,
     parent_backdrop_image_tags: Option<Vec<String>>,
     pub(super) playlist_item_id: Option<String>,
+    normalization_gain: Option<f64>,
+    album_normalization_gain: Option<f64>,
 }
 
 #[derive(Clone, Debug, Deserialize)]
@@ -506,6 +520,10 @@ pub(super) fn track_from_item(item: JellyfinItem) -> Track {
         comment: item.overview.filter(|value| !value.trim().is_empty()),
         skip_count: None,
         bpm: None,
+        replay_gain_track_db: item.normalization_gain.filter(|value| value.is_finite()),
+        replay_gain_album_db: item
+            .album_normalization_gain
+            .filter(|value| value.is_finite()),
         relations: TrackRelations {
             artists: artist_credits,
             album_artists: album_artist_credits,
@@ -731,4 +749,22 @@ fn first_image_tag(tags: Option<&[String]>) -> Option<String> {
         .map(|tag| tag.trim())
         .find(|tag| !tag.is_empty())
         .map(ToString::to_string)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn jellyfin_item_reads_normalization_gains() {
+        let item = serde_json::from_value::<JellyfinItem>(serde_json::json!({
+            "Id": "track-one",
+            "NormalizationGain": -4.25,
+            "AlbumNormalizationGain": -3.5
+        }))
+        .expect("Jellyfin item");
+
+        assert_eq!(item.normalization_gain, Some(-4.25));
+        assert_eq!(item.album_normalization_gain, Some(-3.5));
+    }
 }

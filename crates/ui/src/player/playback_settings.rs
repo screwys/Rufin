@@ -11,8 +11,8 @@ use playback::{
 };
 
 use crate::preferences::{
-    loudness_normalization_from_index, loudness_normalization_index, selection_row,
-    transition_from_index, transition_index, volume_scale_from_index, volume_scale_index,
+    selection_row, transition_from_index, transition_index, volume_scale_from_index,
+    volume_scale_index,
 };
 use crate::shell::Shell;
 
@@ -96,19 +96,6 @@ fn playback_settings_popover(shell: &Rc<Shell>) -> gtk::Popover {
     output_row.set_sensitive(local_output);
     settings_group.add(&output_row);
 
-    let loudness_shell = Rc::clone(shell);
-    let loudness_row = selection_row(
-        &tr("Loudness normalization"),
-        &[tr("Off"), tr("Track"), tr("Album")],
-        loudness_normalization_index(playback.loudness_normalization),
-        move |selected| {
-            let mode = loudness_normalization_from_index(selected);
-            loudness_shell
-                .update_playback_settings(|settings| settings.loudness_normalization = mode);
-        },
-    );
-    loudness_row.set_sensitive(local_output);
-    settings_group.add(&loudness_row);
     let volume_scale_shell = Rc::clone(shell);
     let volume_scale_row = selection_row(
         &tr("Volume scale"),
@@ -253,7 +240,7 @@ pub(crate) fn preserve_pitch_row(shell: &Rc<Shell>, active: bool) -> adw::Switch
     row
 }
 
-fn install_sliding_value_bubble(
+pub(crate) fn install_sliding_value_bubble(
     scale: &gtk::Scale,
     format_value: impl Fn(f64) -> String + 'static,
 ) {

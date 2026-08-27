@@ -319,8 +319,11 @@ impl PlaybackOwner {
         let selected = Arc::clone(&active.selected);
         *self.active.lock().unwrap_or_else(|p| p.into_inner()) = Some(active);
         prepared.activated.store(true, Ordering::Release);
+        let playback = self.settings.load().ui.playback;
         self.loudness.settings_changed(
-            self.settings.load().ui.playback.loudness_normalization,
+            playback.loudness_normalization,
+            playback.loudness_normalization_scope,
+            playback.write_ebu_r128_tags,
             Some(selected),
         );
         self.publish_selected_products(&projection);
@@ -640,7 +643,8 @@ impl PlaybackOwner {
                         .track_loudness(selected.source_key, key, &ReadCancellation::new())
                         .await
                         .ok()
-                        .flatten(),
+                        .flatten()
+                        .map(Box::new),
                     None => None,
                 },
                 album: match media.album_key {
@@ -648,7 +652,8 @@ impl PlaybackOwner {
                         .album_loudness(selected.source_key, key, &ReadCancellation::new())
                         .await
                         .ok()
-                        .flatten(),
+                        .flatten()
+                        .map(Box::new),
                     None => None,
                 },
             };
@@ -667,6 +672,12 @@ impl PlaybackOwner {
         );
     }
     pub(crate) fn playback_settings_changed(&self, settings: playback::PlaybackSettings) {
+        self.loudness.settings_changed(
+            settings.loudness_normalization,
+            settings.loudness_normalization_scope,
+            settings.write_ebu_r128_tags,
+            self.active().map(|active| active.selected),
+        );
         self.send(SessionCommand::UpdateSettings(settings));
     }
     pub(crate) fn cast_proxy_setting_changed(&self, enabled: bool) {
@@ -700,8 +711,11 @@ impl PlaybackOwner {
     }
     pub(crate) fn catalog_changed(&self) {
         if let Some(active) = self.active() {
+            let playback = self.settings.load().ui.playback;
             self.loudness.library_changed(
-                self.settings.load().ui.playback.loudness_normalization,
+                playback.loudness_normalization,
+                playback.loudness_normalization_scope,
+                playback.write_ebu_r128_tags,
                 Some(active.selected),
             );
         }

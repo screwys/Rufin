@@ -48,7 +48,9 @@ pub use local::{
     LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind, LocalFileRow,
     LocalFileState, LocalFileWrite, MappingTrackRow,
 };
-pub use loudness::{AlbumLoudnessTrack, AlbumLoudnessWork, LoudnessMeasurement, TrackLoudnessWork};
+pub use loudness::{
+    AlbumLoudnessTrack, AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork,
+};
 pub use lyrics::LyricsCacheRow;
 pub use playlists::{
     PlaylistEntryOrder, PlaylistEntryRow, PlaylistEntrySort, PlaylistGenreLink, PlaylistRow,

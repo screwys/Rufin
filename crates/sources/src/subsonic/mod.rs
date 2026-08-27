@@ -82,7 +82,7 @@ struct Album {
     musicbrainz_release_group_id: Option<String>,
     relations: AlbumRelations,
 }
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 struct Track {
     id: TrackId,
     album_id: Option<AlbumId>,
@@ -109,6 +109,10 @@ struct Track {
     comment: Option<String>,
     skip_count: Option<u32>,
     bpm: Option<u16>,
+    replay_gain_track_db: Option<f64>,
+    replay_gain_track_peak: Option<f64>,
+    replay_gain_album_db: Option<f64>,
+    replay_gain_album_peak: Option<f64>,
     relations: TrackRelations,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]

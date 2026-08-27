@@ -1474,6 +1474,8 @@ impl PlaybackSession {
             || settings.muted != self.settings.muted;
         let audio_configuration_changed = settings.loudness_normalization
             != self.settings.loudness_normalization
+            || settings.loudness_normalization_scope != self.settings.loudness_normalization_scope
+            || settings.ebu_r128_target_lufs != self.settings.ebu_r128_target_lufs
             || settings.audio_output != self.settings.audio_output
             || settings.equalizer != self.settings.equalizer
             || settings.preserve_pitch != self.settings.preserve_pitch

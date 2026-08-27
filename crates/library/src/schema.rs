@@ -1,5 +1,4 @@
-//! Owns the fresh Library schema and the released migration chain.
-//! No second production schema or intermediate-development compatibility lives elsewhere.
+//! Owns the fresh Library schema, current-format migrations, and the old-format migration chain.
 
 use std::collections::BTreeSet;
 
@@ -8,10 +7,10 @@ use sqlx::{Connection, Sqlite, SqliteConnection, Transaction};
 use crate::{LibraryError, LibraryResult};
 
 pub(crate) const APPLICATION_ID: i64 = 1_381_320_270;
-pub(crate) const SCHEMA_VERSION: i64 = 41;
-pub(crate) const RELEASED_SCHEMA_VERSION: i64 = 41;
+pub(crate) const SCHEMA_VERSION: i64 = 42;
 pub(crate) const LAST_LEGACY_SCHEMA_VERSION: i64 = 40;
-const FIRST_RELEASED_SCHEMA_VERSION: i64 = 32;
+const FIRST_LEGACY_SCHEMA_VERSION: i64 = 32;
+const FIRST_CURRENT_FORMAT_SCHEMA_VERSION: i64 = 41;
 const MUSIC_FOLDER_ARTWORK_SCHEMA_VERSION: i64 = 33;
 const FILESYSTEM_IDENTITY_SCHEMA_VERSION: i64 = 34;
 const RECENT_PLAYS_SCHEMA_VERSION: i64 = 35;
@@ -19,50 +18,53 @@ const PENDING_FAVORITES_SCHEMA_VERSION: i64 = 36;
 const LOUDNESS_MEASUREMENTS_SCHEMA_VERSION: i64 = 37;
 const MEDIA_STATE_SCHEMA_VERSION: i64 = 38;
 const USER_RATINGS_SCHEMA_VERSION: i64 = 39;
+const CATALOG_OWNERS_SCHEMA_VERSION: i64 = 41;
+const REPLAY_GAIN_SCHEMA_VERSION: i64 = 42;
 
-struct ReleasedMigration {
+struct SchemaMigration {
     from_version: i64,
     to_version: i64,
 }
 
-const RELEASED_MIGRATIONS: &[ReleasedMigration] = &[
-    ReleasedMigration {
-        from_version: FIRST_RELEASED_SCHEMA_VERSION,
+const LEGACY_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from_version: FIRST_LEGACY_SCHEMA_VERSION,
         to_version: MUSIC_FOLDER_ARTWORK_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: MUSIC_FOLDER_ARTWORK_SCHEMA_VERSION,
         to_version: FILESYSTEM_IDENTITY_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: FILESYSTEM_IDENTITY_SCHEMA_VERSION,
         to_version: RECENT_PLAYS_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: RECENT_PLAYS_SCHEMA_VERSION,
         to_version: PENDING_FAVORITES_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: PENDING_FAVORITES_SCHEMA_VERSION,
         to_version: LOUDNESS_MEASUREMENTS_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: LOUDNESS_MEASUREMENTS_SCHEMA_VERSION,
         to_version: MEDIA_STATE_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: MEDIA_STATE_SCHEMA_VERSION,
         to_version: USER_RATINGS_SCHEMA_VERSION,
     },
-    ReleasedMigration {
+    SchemaMigration {
         from_version: USER_RATINGS_SCHEMA_VERSION,
         to_version: LAST_LEGACY_SCHEMA_VERSION,
     },
-    ReleasedMigration {
-        from_version: LAST_LEGACY_SCHEMA_VERSION,
-        to_version: RELEASED_SCHEMA_VERSION,
-    },
 ];
+
+const CURRENT_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
+    from_version: CATALOG_OWNERS_SCHEMA_VERSION,
+    to_version: REPLAY_GAIN_SCHEMA_VERSION,
+}];
 
 pub(crate) const TABLES: &[&str] = &[
     "sources",
@@ -90,6 +92,7 @@ pub(crate) const TABLES: &[&str] = &[
     "queue_state",
     "queue_occurrences",
     "loudness_measurements",
+    "replay_gain_measurements",
     "lyrics_cache",
     "local_files",
     "local_file_dependencies",
@@ -99,7 +102,7 @@ pub(crate) const TABLES: &[&str] = &[
 const FRESH_SCHEMA: &str = r###"
 BEGIN IMMEDIATE;
 PRAGMA application_id = 1381320270;
-PRAGMA user_version = 41;
+PRAGMA user_version = 42;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -549,6 +552,16 @@ CREATE TABLE loudness_measurements (
     PRIMARY KEY (source_key, entity_kind, entity_key)
 ) STRICT;
 
+CREATE TABLE replay_gain_measurements (
+    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+    entity_kind TEXT NOT NULL CHECK (entity_kind IN ('track', 'album')),
+    entity_key INTEGER NOT NULL,
+    analysis_key BLOB NOT NULL CHECK (length(analysis_key) = 32),
+    gain_db REAL NOT NULL,
+    peak REAL CHECK (peak IS NULL OR peak >= 0),
+    PRIMARY KEY (source_key, entity_kind, entity_key)
+) STRICT;
+
 CREATE TABLE lyrics_cache (
     source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
     track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
@@ -647,6 +660,10 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
         sqlx::raw_sql(FRESH_SCHEMA)
             .execute(&mut *connection)
             .await?;
+    } else if application_id == APPLICATION_ID
+        && (FIRST_CURRENT_FORMAT_SCHEMA_VERSION..SCHEMA_VERSION).contains(&user_version)
+    {
+        upgrade_current_format(connection, user_version).await?;
     } else if application_id != APPLICATION_ID || user_version != SCHEMA_VERSION {
         return Err(LibraryError::UnsupportedStore {
             application_id,
@@ -654,6 +671,62 @@ pub(crate) async fn initialize(connection: &mut SqliteConnection) -> LibraryResu
         });
     }
     validate(connection).await
+}
+
+async fn upgrade_current_format(
+    connection: &mut SqliteConnection,
+    mut user_version: i64,
+) -> LibraryResult<()> {
+    while user_version < SCHEMA_VERSION {
+        let migration = CURRENT_MIGRATIONS
+            .iter()
+            .find(|migration| migration.from_version == user_version)
+            .ok_or_else(|| {
+                LibraryError::InvalidStore(format!(
+                    "schema migration chain is incomplete at version {user_version}"
+                ))
+            })?;
+        match user_version {
+            CATALOG_OWNERS_SCHEMA_VERSION => migrate_schema_41(connection).await?,
+            _ => {
+                return Err(LibraryError::InvalidStore(format!(
+                    "schema migration is not implemented for version {user_version}"
+                )));
+            }
+        }
+        user_version = pragma(connection, "user_version").await?;
+        if user_version != migration.to_version {
+            return Err(LibraryError::InvalidStore(format!(
+                "schema migration from {} produced version {user_version} instead of {}",
+                migration.from_version, migration.to_version
+            )));
+        }
+    }
+    Ok(())
+}
+
+async fn migrate_schema_41(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    sqlx::raw_sql(
+        r###"BEGIN IMMEDIATE;
+
+CREATE TABLE replay_gain_measurements (
+    source_key INTEGER NOT NULL REFERENCES sources ON DELETE CASCADE,
+    entity_kind TEXT NOT NULL CHECK (entity_kind IN ('track', 'album')),
+    entity_key INTEGER NOT NULL,
+    analysis_key BLOB NOT NULL CHECK (length(analysis_key) = 32),
+    gain_db REAL NOT NULL,
+    peak REAL CHECK (peak IS NULL OR peak >= 0),
+    PRIMARY KEY (source_key, entity_kind, entity_key)
+) STRICT;
+
+PRAGMA user_version = 42;
+
+COMMIT;
+"###,
+    )
+    .execute(connection)
+    .await?;
+    Ok(())
 }
 
 pub(crate) async fn validate(connection: &mut SqliteConnection) -> LibraryResult<()> {
@@ -697,9 +770,9 @@ pub(crate) async fn validate(connection: &mut SqliteConnection) -> LibraryResult
     Ok(())
 }
 
-pub(crate) fn is_released(application_id: i64, user_version: i64) -> bool {
+pub(crate) fn is_legacy_schema(application_id: i64, user_version: i64) -> bool {
     application_id == APPLICATION_ID
-        && (FIRST_RELEASED_SCHEMA_VERSION..=RELEASED_SCHEMA_VERSION).contains(&user_version)
+        && (FIRST_LEGACY_SCHEMA_VERSION..=LAST_LEGACY_SCHEMA_VERSION).contains(&user_version)
 }
 
 const MIGRATE_SCHEMA_32: &str = r###"
@@ -1103,12 +1176,12 @@ PRAGMA user_version = 39;
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
-struct ReleasedSmartPlaylistDefinition {
+struct LegacySmartPlaylistDefinition {
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    match_all: Vec<ReleasedSmartPlaylistRule>,
+    match_all: Vec<LegacySmartPlaylistRule>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    match_any: Vec<ReleasedSmartPlaylistRule>,
-    sort_field: ReleasedSmartPlaylistSortField,
+    match_any: Vec<LegacySmartPlaylistRule>,
+    sort_field: LegacySmartPlaylistSortField,
     descending: bool,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     limit: Option<usize>,
@@ -1116,15 +1189,15 @@ struct ReleasedSmartPlaylistDefinition {
 
 #[derive(serde::Deserialize, serde::Serialize)]
 #[serde(deny_unknown_fields)]
-struct ReleasedSmartPlaylistRule {
-    field: ReleasedSmartPlaylistRuleField,
-    operator: ReleasedSmartPlaylistRuleOperator,
+struct LegacySmartPlaylistRule {
+    field: LegacySmartPlaylistRuleField,
+    operator: LegacySmartPlaylistRuleOperator,
     #[serde(default, skip_serializing_if = "Option::is_none")]
-    value: Option<ReleasedSmartPlaylistRuleValue>,
+    value: Option<LegacySmartPlaylistRuleValue>,
 }
 
 #[derive(serde::Deserialize, serde::Serialize, PartialEq)]
-enum ReleasedSmartPlaylistRuleField {
+enum LegacySmartPlaylistRuleField {
     Title,
     Artist,
     Album,
@@ -1143,7 +1216,7 @@ enum ReleasedSmartPlaylistRuleField {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-enum ReleasedSmartPlaylistRuleOperator {
+enum LegacySmartPlaylistRuleOperator {
     Contains,
     NotContains,
     Equals,
@@ -1160,7 +1233,7 @@ enum ReleasedSmartPlaylistRuleOperator {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-enum ReleasedSmartPlaylistRuleValue {
+enum LegacySmartPlaylistRuleValue {
     Text(String),
     Number(i64),
     NumberRange { min: i64, max: i64 },
@@ -1170,7 +1243,7 @@ enum ReleasedSmartPlaylistRuleValue {
 }
 
 #[derive(serde::Deserialize, serde::Serialize)]
-enum ReleasedSmartPlaylistSortField {
+enum LegacySmartPlaylistSortField {
     Title,
     Artist,
     Album,
@@ -1212,16 +1285,16 @@ async fn migrate_schema_39(connection: &mut SqliteConnection) -> LibraryResult<(
         let Some((source_id, playlist_id, json)) = definition else {
             break;
         };
-        let mut definition: ReleasedSmartPlaylistDefinition = serde_json::from_str(&json)?;
+        let mut definition: LegacySmartPlaylistDefinition = serde_json::from_str(&json)?;
         for rule in definition
             .match_all
             .iter_mut()
             .chain(definition.match_any.iter_mut())
-            .filter(|rule| rule.field == ReleasedSmartPlaylistRuleField::Rating)
+            .filter(|rule| rule.field == LegacySmartPlaylistRuleField::Rating)
         {
             match rule.value.as_mut() {
-                Some(ReleasedSmartPlaylistRuleValue::Number(value)) => *value *= 2,
-                Some(ReleasedSmartPlaylistRuleValue::NumberRange { min, max }) => {
+                Some(LegacySmartPlaylistRuleValue::Number(value)) => *value *= 2,
+                Some(LegacySmartPlaylistRuleValue::NumberRange { min, max }) => {
                     *min *= 2;
                     *max *= 2;
                 }
@@ -1302,13 +1375,11 @@ async fn backfill_recent_plays(connection: &mut Transaction<'_, Sqlite>) -> Libr
     Ok(())
 }
 
-pub(crate) async fn upgrade_legacy_released(
-    connection: &mut SqliteConnection,
-) -> LibraryResult<()> {
+pub(crate) async fn upgrade_legacy_schema(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let application_id = pragma(connection, "application_id").await?;
     let mut user_version = pragma(connection, "user_version").await?;
     if application_id != APPLICATION_ID
-        || !(FIRST_RELEASED_SCHEMA_VERSION..=LAST_LEGACY_SCHEMA_VERSION).contains(&user_version)
+        || !(FIRST_LEGACY_SCHEMA_VERSION..=LAST_LEGACY_SCHEMA_VERSION).contains(&user_version)
     {
         return Err(LibraryError::UnsupportedStore {
             application_id,
@@ -1316,12 +1387,12 @@ pub(crate) async fn upgrade_legacy_released(
         });
     }
     while user_version < LAST_LEGACY_SCHEMA_VERSION {
-        let migration = RELEASED_MIGRATIONS
+        let migration = LEGACY_MIGRATIONS
             .iter()
             .find(|migration| migration.from_version == user_version)
             .ok_or_else(|| {
                 LibraryError::InvalidStore(format!(
-                    "released migration chain is incomplete at schema {user_version}"
+                    "legacy migration chain is incomplete at schema {user_version}"
                 ))
             })?;
         match user_version {
@@ -1335,14 +1406,14 @@ pub(crate) async fn upgrade_legacy_released(
             39 => migrate_schema_39(connection).await?,
             _ => {
                 return Err(LibraryError::InvalidStore(format!(
-                    "released migration chain is incomplete at schema {user_version}"
+                    "legacy migration chain is incomplete at schema {user_version}"
                 )));
             }
         }
         user_version = pragma(connection, "user_version").await?;
         if user_version != migration.to_version {
             return Err(LibraryError::InvalidStore(format!(
-                "released schema {} migration produced schema {user_version} instead of {}",
+                "legacy schema {} migration produced schema {user_version} instead of {}",
                 migration.from_version, migration.to_version
             )));
         }
@@ -1372,21 +1443,32 @@ mod tests {
     use super::*;
 
     #[test]
-    fn released_migration_registry_is_contiguous() {
-        let mut version = FIRST_RELEASED_SCHEMA_VERSION;
-        for migration in RELEASED_MIGRATIONS {
+    fn legacy_migration_registry_is_contiguous() {
+        let mut version = FIRST_LEGACY_SCHEMA_VERSION;
+        for migration in LEGACY_MIGRATIONS {
             assert_eq!(migration.from_version, version);
             assert_eq!(migration.to_version, version + 1);
             version = migration.to_version;
         }
-        assert_eq!(version, RELEASED_SCHEMA_VERSION);
+        assert_eq!(version, LAST_LEGACY_SCHEMA_VERSION);
+    }
+
+    #[test]
+    fn current_migration_registry_reaches_the_fresh_schema() {
+        let mut version = FIRST_CURRENT_FORMAT_SCHEMA_VERSION;
+        for migration in CURRENT_MIGRATIONS {
+            assert_eq!(migration.from_version, version);
+            assert_eq!(migration.to_version, version + 1);
+            version = migration.to_version;
+        }
+        assert_eq!(version, SCHEMA_VERSION);
     }
 
     #[tokio::test]
-    async fn released_schema_39_rating_meaning_reaches_schema_40() {
+    async fn legacy_schema_39_rating_meaning_reaches_schema_40() {
         let mut connection = SqliteConnection::connect("sqlite::memory:")
             .await
-            .expect("open released fixture");
+            .expect("open legacy fixture");
         sqlx::raw_sql(
                 "PRAGMA application_id=1381320270;
                  PRAGMA user_version=39;
@@ -1404,9 +1486,9 @@ mod tests {
             .execute(&mut connection)
             .await
             .expect("create schema 39 fixture");
-        upgrade_legacy_released(&mut connection)
+        upgrade_legacy_schema(&mut connection)
             .await
-            .expect("run released migration");
+            .expect("run legacy migration");
         assert_eq!(
             pragma(&mut connection, "user_version")
                 .await
@@ -1424,10 +1506,10 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn released_schema_37_splits_queue_without_a_rust_queue_snapshot() {
+    async fn legacy_schema_37_splits_queue_without_a_rust_queue_snapshot() {
         let mut connection = SqliteConnection::connect("sqlite::memory:")
             .await
-            .expect("open released queue fixture");
+            .expect("open legacy queue fixture");
         sqlx::raw_sql(
                 "CREATE TABLE playback_queues(
                      source_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,

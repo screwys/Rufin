@@ -47,6 +47,10 @@ pub(super) struct ScannedTrack {
     pub(super) musicbrainz_release_group_id: Option<String>,
     pub(super) track_r128_lufs: Option<f64>,
     pub(super) album_r128_lufs: Option<f64>,
+    pub(super) replay_gain_track_db: Option<f64>,
+    pub(super) replay_gain_track_peak: Option<f64>,
+    pub(super) replay_gain_album_db: Option<f64>,
+    pub(super) replay_gain_album_peak: Option<f64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -105,6 +109,10 @@ struct AudioMetadata {
     user_rating: Option<u8>,
     track_r128_lufs: Option<f64>,
     album_r128_lufs: Option<f64>,
+    replay_gain_track_db: Option<f64>,
+    replay_gain_track_peak: Option<f64>,
+    replay_gain_album_db: Option<f64>,
+    replay_gain_album_peak: Option<f64>,
 }
 
 #[derive(Default)]
@@ -276,6 +284,10 @@ fn audio_metadata_from_lofty(
             .map(|rating| (rating.rating() as u8) * 2),
         track_r128_lufs: r128_integrated_lufs(tag, ItemKey::R128TrackGain),
         album_r128_lufs: r128_integrated_lufs(tag, ItemKey::R128AlbumGain),
+        replay_gain_track_db: replay_gain_db(tag, ItemKey::ReplayGainTrackGain),
+        replay_gain_track_peak: replay_gain_peak(tag, ItemKey::ReplayGainTrackPeak),
+        replay_gain_album_db: replay_gain_db(tag, ItemKey::ReplayGainAlbumGain),
+        replay_gain_album_peak: replay_gain_peak(tag, ItemKey::ReplayGainAlbumPeak),
     }
 }
 
@@ -303,6 +315,23 @@ fn r128_integrated_lufs(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
     let gain_q8 = tag?.get_string(key)?.trim().parse::<i32>().ok()?;
     let integrated_lufs = -23.0 - f64::from(gain_q8) / 256.0;
     integrated_lufs.is_finite().then_some(integrated_lufs)
+}
+
+fn replay_gain_db(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
+    let value = tag?.get_string(key)?.trim();
+    let value = value
+        .strip_suffix("dB")
+        .or_else(|| value.strip_suffix("db"))
+        .unwrap_or(value)
+        .trim()
+        .parse::<f64>()
+        .ok()?;
+    value.is_finite().then_some(value)
+}
+
+fn replay_gain_peak(tag: Option<&Tag>, key: ItemKey) -> Option<f64> {
+    let value = tag?.get_string(key)?.trim().parse::<f64>().ok()?;
+    (value.is_finite() && value >= 0.0).then_some(value)
 }
 
 fn audio_metadata_from_discoverer(
@@ -398,6 +427,10 @@ fn audio_metadata_from_discoverer(
         user_rating: None,
         track_r128_lufs: None,
         album_r128_lufs: None,
+        replay_gain_track_db: None,
+        replay_gain_track_peak: None,
+        replay_gain_album_db: None,
+        replay_gain_album_peak: None,
     }
 }
 
@@ -423,6 +456,10 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         user_rating,
         track_r128_lufs,
         album_r128_lufs,
+        replay_gain_track_db,
+        replay_gain_track_peak,
+        replay_gain_album_db,
+        replay_gain_album_peak,
     } = metadata;
     let BasicAudioMetadata {
         title,
@@ -493,6 +530,10 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         musicbrainz_release_group_id,
         track_r128_lufs,
         album_r128_lufs,
+        replay_gain_track_db,
+        replay_gain_track_peak,
+        replay_gain_album_db,
+        replay_gain_album_peak,
     }
 }
 
@@ -763,4 +804,32 @@ fn clean_mbid(value: &str) -> Option<String> {
             .bytes()
             .all(|byte| byte.is_ascii_alphanumeric() || byte == b'-'))
     .then(|| value.to_string())
+}
+
+#[cfg(test)]
+mod tests {
+    use lofty::tag::TagType;
+
+    use super::*;
+
+    #[test]
+    fn local_loudness_parses_replay_gain_and_r128_independently() {
+        let mut tag = Tag::new(TagType::VorbisComments);
+        tag.insert_text(ItemKey::ReplayGainTrackGain, "-4.25 dB".to_string());
+        tag.insert_text(ItemKey::ReplayGainTrackPeak, "0.91".to_string());
+        tag.insert_text(ItemKey::R128TrackGain, "-512".to_string());
+
+        assert_eq!(
+            replay_gain_db(Some(&tag), ItemKey::ReplayGainTrackGain),
+            Some(-4.25)
+        );
+        assert_eq!(
+            replay_gain_peak(Some(&tag), ItemKey::ReplayGainTrackPeak),
+            Some(0.91)
+        );
+        assert_eq!(
+            r128_integrated_lufs(Some(&tag), ItemKey::R128TrackGain),
+            Some(-21.0)
+        );
+    }
 }

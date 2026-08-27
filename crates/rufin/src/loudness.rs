@@ -6,7 +6,10 @@ use std::sync::{Arc, Mutex};
 use library::{
     AlbumLoudnessTrack, LoudnessMeasurement, ReadCancellation, SourceKey, TrackLoudnessWork,
 };
-use playback::{LoudnessNormalizationMode, SourceSessionEpoch, StreamQuality, StreamRequest};
+use playback::{
+    LoudnessNormalization, LoudnessNormalizationScope, SourceSessionEpoch, StreamQuality,
+    StreamRequest,
+};
 use playback_gstreamer::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
 use tracing::{info, warn};
 
@@ -20,6 +23,8 @@ struct ActiveAnalysis {
     cancelled: Arc<AtomicBool>,
     task: Option<tokio::task::AbortHandle>,
     restart: bool,
+    scope: LoudnessNormalizationScope,
+    write_tags: bool,
 }
 
 impl ActiveAnalysis {
@@ -65,10 +70,12 @@ impl LoudnessAnalysisOwner {
 
     pub(crate) fn settings_changed(
         self: &Arc<Self>,
-        mode: LoudnessNormalizationMode,
+        normalization: LoudnessNormalization,
+        scope: LoudnessNormalizationScope,
+        write_tags: bool,
         selected: Option<Arc<ActiveSource>>,
     ) {
-        if mode == LoudnessNormalizationMode::Off {
+        if normalization != LoudnessNormalization::EbuR128 {
             self.cancel();
             return;
         }
@@ -93,10 +100,12 @@ impl LoudnessAnalysisOwner {
         let cancelled = Arc::new(AtomicBool::new(false));
         {
             let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-            if active
-                .as_ref()
-                .is_some_and(|current| current.source_key == source_key && current.epoch == epoch)
-            {
+            if active.as_ref().is_some_and(|current| {
+                current.source_key == source_key
+                    && current.epoch == epoch
+                    && current.scope == scope
+                    && current.write_tags == write_tags
+            }) {
                 return;
             }
             if let Some(previous) = active.take() {
@@ -109,6 +118,8 @@ impl LoudnessAnalysisOwner {
                 cancelled: Arc::clone(&cancelled),
                 task: None,
                 restart: false,
+                scope,
+                write_tags,
             });
         }
         let owner = Arc::downgrade(self);
@@ -116,9 +127,10 @@ impl LoudnessAnalysisOwner {
         let task_cancelled = Arc::clone(&cancelled);
         let task = self.runtime.spawn(async move {
             info!(%source_key, "analyzing missing loudness data");
-            let failed = analyze_selected(weak, mode, Arc::clone(&task_cancelled)).await;
+            let failed =
+                analyze_selected(weak, scope, write_tags, Arc::clone(&task_cancelled)).await;
             if let Some(owner) = owner.upgrade() {
-                owner.finish(&task_cancelled, mode, failed);
+                owner.finish(&task_cancelled, normalization, scope, write_tags, failed);
             }
         });
         let abort = task.abort_handle();
@@ -135,7 +147,9 @@ impl LoudnessAnalysisOwner {
 
     pub(crate) fn library_changed(
         self: &Arc<Self>,
-        mode: LoudnessNormalizationMode,
+        normalization: LoudnessNormalization,
+        scope: LoudnessNormalizationScope,
+        write_tags: bool,
         selected: Option<Arc<ActiveSource>>,
     ) {
         let Some(selected) = selected else {
@@ -159,7 +173,7 @@ impl LoudnessAnalysisOwner {
         }
         drop(active);
         drop(state);
-        self.settings_changed(mode, Some(selected));
+        self.settings_changed(normalization, scope, write_tags, Some(selected));
     }
 
     pub(crate) fn cancel(&self) {
@@ -171,7 +185,9 @@ impl LoudnessAnalysisOwner {
     fn finish(
         self: &Arc<Self>,
         cancelled: &Arc<AtomicBool>,
-        mode: LoudnessNormalizationMode,
+        normalization: LoudnessNormalization,
+        scope: LoudnessNormalizationScope,
+        write_tags: bool,
         failed: bool,
     ) {
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
@@ -194,21 +210,35 @@ impl LoudnessAnalysisOwner {
         }
         drop(active);
         if !failed && let Some(selected) = restart {
-            self.settings_changed(mode, Some(selected));
+            self.settings_changed(normalization, scope, write_tags, Some(selected));
         }
     }
 }
 
 async fn analyze_selected(
     selected: WeakActiveSource,
-    mode: LoudnessNormalizationMode,
+    scope: LoudnessNormalizationScope,
+    write_tags: bool,
     cancelled: Arc<AtomicBool>,
 ) -> bool {
+    if write_tags {
+        let Some(state) = current(&selected, &cancelled) else {
+            return false;
+        };
+        if state.configuration.kind == sources::LOCAL_SOURCE_ID
+            && let Some(source) = state.source.as_ref()
+            && let Err(error) = source
+                .backfill_local_r128_tags(&state.database, state.source_key)
+                .await
+        {
+            warn!(%error, "could not write stored EBU R128 tags");
+        }
+    }
     loop {
         let Some(state) = current(&selected, &cancelled) else {
             return false;
         };
-        if mode == LoudnessNormalizationMode::Album {
+        if scope == LoudnessNormalizationScope::Album {
             match state
                 .database
                 .next_missing_album_loudness(state.source_key, &ReadCancellation::new())
@@ -216,9 +246,33 @@ async fn analyze_selected(
             {
                 Ok(Some(work)) => {
                     let mut analyses = Vec::with_capacity(work.tracks.len());
+                    let mut track_tags = Vec::with_capacity(work.tracks.len());
                     for track in &work.tracks {
                         match analyze_album_track(&state, track, &cancelled).await {
-                            Ok(analysis) => analyses.push(analysis),
+                            Ok(analysis) => {
+                                let value = analysis.measurement();
+                                let measurement = LoudnessMeasurement {
+                                    analysis_key: track.expected_analysis_key,
+                                    integrated_lufs: value.integrated_lufs,
+                                    true_peak: value.true_peak,
+                                    replay_gain_db: None,
+                                    replay_gain_peak: None,
+                                };
+                                if let Err(error) = state
+                                    .database
+                                    .write_track_analyzed_loudness(
+                                        state.source_key,
+                                        track.track_key,
+                                        &measurement,
+                                    )
+                                    .await
+                                {
+                                    warn!(%error, "could not store Track loudness");
+                                    return true;
+                                }
+                                track_tags.push((track.track_key, value.integrated_lufs));
+                                analyses.push(analysis);
+                            }
                             Err(error) => {
                                 warn!(%error, track_key=%track.track_key, "could not analyze Track loudness");
                                 analyses.clear();
@@ -233,6 +287,8 @@ async fn analyze_selected(
                                     analysis_key: work.expected_analysis_key,
                                     integrated_lufs: value.integrated_lufs,
                                     true_peak: value.true_peak,
+                                    replay_gain_db: None,
+                                    replay_gain_peak: None,
                                 };
                                 if let Err(error) = state
                                     .database
@@ -245,6 +301,19 @@ async fn analyze_selected(
                                 {
                                     warn!(%error, "could not store Album loudness");
                                     return true;
+                                }
+                                if write_tags {
+                                    let measurements = track_tags
+                                        .iter()
+                                        .map(|(track, track_lufs)| {
+                                            (*track, *track_lufs, value.integrated_lufs)
+                                        })
+                                        .collect::<Vec<_>>();
+                                    if let Err(error) =
+                                        write_local_tags(&state, &measurements).await
+                                    {
+                                        warn!(%error, "could not write EBU R128 tags");
+                                    }
                                 }
                             }
                             Err(error) => warn!(%error, "could not combine Album loudness"),
@@ -270,6 +339,8 @@ async fn analyze_selected(
                         analysis_key: work.expected_analysis_key,
                         integrated_lufs: value.integrated_lufs,
                         true_peak: value.true_peak,
+                        replay_gain_db: None,
+                        replay_gain_peak: None,
                     };
                     if let Err(error) = state
                         .database
@@ -282,6 +353,12 @@ async fn analyze_selected(
                     {
                         warn!(%error, "could not store Track loudness");
                         return true;
+                    }
+                    if write_tags {
+                        let measurements = [(work.track_key, value.integrated_lufs, None)];
+                        if let Err(error) = write_local_tags(&state, &measurements).await {
+                            warn!(%error, "could not write EBU R128 tags");
+                        }
                     }
                 }
                 Err(error) => {
@@ -296,6 +373,23 @@ async fn analyze_selected(
             }
         }
     }
+}
+
+async fn write_local_tags(
+    state: &SelectedSourceState,
+    measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
+) -> Result<(), String> {
+    if state.configuration.kind != sources::LOCAL_SOURCE_ID {
+        return Ok(());
+    }
+    let source = state
+        .source
+        .as_ref()
+        .ok_or_else(|| "source is unavailable".to_string())?;
+    source
+        .write_local_r128_tags(&state.database, state.source_key, measurements)
+        .await
+        .map_err(|error| error.to_string())
 }
 
 async fn analyze_track(

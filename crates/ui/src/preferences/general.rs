@@ -5,14 +5,16 @@ use std::{
 
 use super::{
     INTEGRATIONS_ICON_NAME, LASTFM_API_CREATE_URL, LISTENBRAINZ_TOKEN_URL,
-    context_menu::context_menus_expander, layout::populate_home_block_rows, layout_group,
-    quality_selection_row, selection_row, sidebar_items_expander,
+    context_menu::context_menus_expander, controlled_selection_row,
+    layout::populate_home_block_rows, layout_group, quality_selection_row, selection_row,
+    sidebar_items_expander,
 };
 use crate::player::{
     audio_output_dropdown, build_equalizer_preset_row, connect_equalizer_scale_commit,
     crossfade_duration_row, equalizer_band_title, equalizer_default_preset_bands,
     equalizer_preset_bands, equalizer_preset_name_at, equalizer_preset_position,
-    equalizer_selected_preset, install_equalizer_scroll, playback_rate_row, preserve_pitch_row,
+    equalizer_selected_preset, install_equalizer_scroll, install_sliding_value_bubble,
+    playback_rate_row, preserve_pitch_row,
 };
 use crate::runtime::{ScrobblingConnection, ScrobblingConnectionEvent};
 use crate::shell::Shell;
@@ -21,8 +23,9 @@ use adw::prelude::*;
 use localization::{tr, tr_with};
 use playback::StreamQuality;
 use playback::{
-    EQUALIZER_BAND_COUNT, LoudnessNormalizationMode, MAX_AUTO_DJ_REFILL_THRESHOLD,
-    MIN_AUTO_DJ_REFILL_THRESHOLD, PlaybackTransitionMode, VolumeScale,
+    EQUALIZER_BAND_COUNT, LoudnessNormalization, LoudnessNormalizationScope,
+    MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_THRESHOLD,
+    MIN_EBU_R128_TARGET_LUFS, PlaybackTransitionMode, VolumeScale,
 };
 
 pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
@@ -377,6 +380,18 @@ pub(crate) fn inline_link_markup(before: &str, url: &str, label: &str, after: &s
     let after = gtk::glib::markup_escape_text(after);
     format!("{before} <a href=\"{url}\">{label}</a>{after}")
 }
+
+fn selected_source_is_local(shell: &Shell) -> bool {
+    let configured = shell.source.configured.borrow();
+    let Some(selected) = configured.selected_source_id.as_ref() else {
+        return false;
+    };
+    configured
+        .sources
+        .iter()
+        .find(|source| &source.id == selected)
+        .is_some_and(|source| source.kind == sources::LOCAL_SOURCE_ID)
+}
 async fn connect_scrobbling(
     shell: &Rc<Shell>,
     request: ScrobblingConnection,
@@ -503,21 +518,152 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     page.add(&transition_group);
 
     let audio_group = adw::PreferencesGroup::builder().title(tr("Audio")).build();
-    let loudness_normalization_shell = Rc::clone(shell);
-    let loudness_normalization_row = selection_row(
-        &tr("Loudness normalization"),
-        &[tr("Off"), tr("Track"), tr("Album")],
-        loudness_normalization_index(settings.loudness_normalization),
+    let loudness_scope_shell = Rc::clone(shell);
+    let loudness_scope_row = selection_row(
+        &tr("Normalization scope"),
+        &[tr("Track"), tr("Album")],
+        loudness_scope_index(settings.loudness_normalization_scope),
         move |selected| {
-            loudness_normalization_shell.update_playback_settings(|settings| {
-                settings.loudness_normalization = loudness_normalization_from_index(selected);
+            loudness_scope_shell.update_playback_settings(|settings| {
+                settings.loudness_normalization_scope = loudness_scope_from_index(selected);
             });
         },
     );
-    loudness_normalization_row.set_subtitle(&tr(
+    loudness_scope_row.set_subtitle(&tr(
         "Track evens out every song, while Album preserves the intended differences within each album",
     ));
+
+    let ebu_target_row = adw::ActionRow::builder()
+        .title(tr("Target loudness"))
+        .subtitle(tr("EBU R128 reference level"))
+        .build();
+    let ebu_target = gtk::Scale::with_range(
+        gtk::Orientation::Horizontal,
+        MIN_EBU_R128_TARGET_LUFS,
+        MAX_EBU_R128_TARGET_LUFS,
+        1.0,
+    );
+    ebu_target.add_css_class("playback-setting-scale");
+    ebu_target.set_width_request(240);
+    ebu_target.set_valign(gtk::Align::Center);
+    install_sliding_value_bubble(&ebu_target, |value| format!("{value:.0} LUFS"));
+    for mark in [-48.0, -36.0, -30.0, -23.0, -18.0, -12.0, 0.0] {
+        let label = format!("{mark:.0}");
+        ebu_target.add_mark(mark, gtk::PositionType::Bottom, Some(&label));
+    }
+    ebu_target.set_value(settings.ebu_r128_target_lufs);
+    let target_shell = Rc::clone(shell);
+    ebu_target.connect_value_changed(move |scale| {
+        target_shell.update_playback_settings(|settings| {
+            settings.ebu_r128_target_lufs = scale.value().round();
+        });
+    });
+    ebu_target_row.add_suffix(&ebu_target);
+    ebu_target_row.set_activatable_widget(Some(&ebu_target));
+
+    let write_ebu_tags_row = adw::SwitchRow::builder()
+        .title(tr("Write EBU R128 tags to files"))
+        .subtitle(tr(
+            "Store calculated loudness in supported Local music files",
+        ))
+        .active(settings.write_ebu_r128_tags)
+        .build();
+    let write_tags_shell = Rc::clone(shell);
+    write_ebu_tags_row.connect_active_notify(move |row| {
+        write_tags_shell.update_playback_settings(|settings| {
+            settings.write_ebu_r128_tags = row.is_active();
+        });
+    });
+
+    let mode_titles = [tr("Off"), tr("ReplayGain"), tr("EBU R128")];
+    let (loudness_normalization_row, mode_buttons) = controlled_selection_row(
+        &tr("Loudness normalization"),
+        &mode_titles,
+        loudness_normalization_index(settings.loudness_normalization),
+    );
+    let mode_buttons = Rc::new(mode_buttons);
+    let mode_guard = Rc::new(Cell::new(false));
+    for (index, button) in mode_buttons.iter().enumerate() {
+        let shell = Rc::clone(shell);
+        let buttons = Rc::clone(&mode_buttons);
+        let guard = Rc::clone(&mode_guard);
+        let scope = loudness_scope_row.clone();
+        let target = ebu_target_row.clone();
+        let write = write_ebu_tags_row.clone();
+        button.connect_toggled(move |button| {
+            if !button.is_active() || guard.get() {
+                return;
+            }
+            let next = loudness_normalization_from_index(index as u32);
+            let previous = shell
+                .settings
+                .current
+                .borrow()
+                .playback
+                .loudness_normalization;
+            let apply = |mode| {
+                shell.update_playback_settings(|settings| {
+                    settings.loudness_normalization = mode;
+                });
+                scope.set_visible(mode != LoudnessNormalization::Off);
+                let ebu = mode == LoudnessNormalization::EbuR128;
+                target.set_visible(ebu);
+                write.set_visible(ebu && selected_source_is_local(&shell));
+            };
+            if next != LoudnessNormalization::EbuR128
+                || previous == LoudnessNormalization::EbuR128
+            {
+                apply(next);
+                return;
+            }
+            guard.set(true);
+            buttons[loudness_normalization_index(previous) as usize].set_active(true);
+            guard.set(false);
+            let confirm = adw::AlertDialog::builder()
+                .heading(tr("Enable EBU R128 Analysis?"))
+                .body(tr("Rufin will calculate the missing EBU R128 metadata for the whole library. This can use significant CPU, battery, and network bandwidth for a long time."))
+                .build();
+            confirm.add_response("cancel", &tr("Cancel"));
+            confirm.add_response("enable", &tr("Enable"));
+            confirm.set_default_response(Some("cancel"));
+            confirm.set_close_response("cancel");
+            let shell = Rc::clone(&shell);
+            let buttons = Rc::clone(&buttons);
+            let guard = Rc::clone(&guard);
+            let scope = scope.clone();
+            let target = target.clone();
+            let write = write.clone();
+            let window = shell.chrome.window.clone();
+            confirm.choose(
+                Some(&window),
+                None::<&gtk::gio::Cancellable>,
+                move |response| {
+                    if response.as_str() != "enable" {
+                        return;
+                    }
+                    shell.update_playback_settings(|settings| {
+                        settings.loudness_normalization = LoudnessNormalization::EbuR128;
+                    });
+                    scope.set_visible(true);
+                    target.set_visible(true);
+                    write.set_visible(selected_source_is_local(&shell));
+                    guard.set(true);
+                    buttons[loudness_normalization_index(LoudnessNormalization::EbuR128) as usize]
+                        .set_active(true);
+                    guard.set(false);
+                },
+            );
+        });
+    }
+    let mode_enabled = settings.loudness_normalization != LoudnessNormalization::Off;
+    let ebu_enabled = settings.loudness_normalization == LoudnessNormalization::EbuR128;
+    loudness_scope_row.set_visible(mode_enabled);
+    ebu_target_row.set_visible(ebu_enabled);
+    write_ebu_tags_row.set_visible(ebu_enabled && selected_source_is_local(shell));
     audio_group.add(&loudness_normalization_row);
+    audio_group.add(&loudness_scope_row);
+    audio_group.add(&ebu_target_row);
+    audio_group.add(&write_ebu_tags_row);
 
     let volume_scale_shell = Rc::clone(shell);
     let volume_scale_row = selection_row(
@@ -838,18 +984,30 @@ pub(crate) fn transition_from_index(index: u32) -> PlaybackTransitionMode {
         _ => PlaybackTransitionMode::Gapless,
     }
 }
-pub(crate) fn loudness_normalization_index(mode: LoudnessNormalizationMode) -> u32 {
+pub(crate) fn loudness_normalization_index(mode: LoudnessNormalization) -> u32 {
     match mode {
-        LoudnessNormalizationMode::Off => 0,
-        LoudnessNormalizationMode::Track => 1,
-        LoudnessNormalizationMode::Album => 2,
+        LoudnessNormalization::Off => 0,
+        LoudnessNormalization::ReplayGain => 1,
+        LoudnessNormalization::EbuR128 => 2,
     }
 }
-pub(crate) fn loudness_normalization_from_index(index: u32) -> LoudnessNormalizationMode {
+pub(crate) fn loudness_normalization_from_index(index: u32) -> LoudnessNormalization {
     match index {
-        1 => LoudnessNormalizationMode::Track,
-        2 => LoudnessNormalizationMode::Album,
-        _ => LoudnessNormalizationMode::Off,
+        1 => LoudnessNormalization::ReplayGain,
+        2 => LoudnessNormalization::EbuR128,
+        _ => LoudnessNormalization::Off,
+    }
+}
+pub(crate) fn loudness_scope_index(scope: LoudnessNormalizationScope) -> u32 {
+    match scope {
+        LoudnessNormalizationScope::Track => 0,
+        LoudnessNormalizationScope::Album => 1,
+    }
+}
+pub(crate) fn loudness_scope_from_index(index: u32) -> LoudnessNormalizationScope {
+    match index {
+        0 => LoudnessNormalizationScope::Track,
+        _ => LoudnessNormalizationScope::Album,
     }
 }
 pub(crate) fn volume_scale_index(scale: VolumeScale) -> u32 {

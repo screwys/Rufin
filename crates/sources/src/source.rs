@@ -1,6 +1,7 @@
 //! Connects configured providers to Library's concrete Scan and point operations.
 //! Provider acquisition remains here; accepted catalog identity and queries remain in Library.
 
+use std::collections::HashMap;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
@@ -1101,6 +1102,91 @@ impl Source {
             .await
             .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))?;
         Ok(())
+    }
+
+    pub async fn write_local_r128_tags(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
+    ) -> Result<(), crate::SourceMetadataError> {
+        let Implementation::Local(local) = &self.implementation else {
+            return Err(crate::SourceMetadataError::Unavailable);
+        };
+        if measurements.is_empty() {
+            return Ok(());
+        }
+        let keys = measurements
+            .iter()
+            .map(|(track, _, _)| *track)
+            .collect::<Vec<_>>();
+        let measurements = measurements
+            .iter()
+            .map(|(track, track_lufs, album_lufs)| (*track, (*track_lufs, *album_lufs)))
+            .collect::<HashMap<_, _>>();
+        let rows = database
+            .track_rows(source, &keys, &library::ReadCancellation::new())
+            .await
+            .map_err(metadata_database_error)?;
+        let mut written = Vec::new();
+        for row in rows {
+            let Some((track_lufs, album_lufs)) = measurements.get(&row.track_key) else {
+                continue;
+            };
+            let Some((path, format)) = self
+                .metadata_track_path(database, source, &row)
+                .await
+                .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+            else {
+                continue;
+            };
+            match crate::local::metadata::write_r128(
+                &path,
+                format.as_deref(),
+                *track_lufs,
+                *album_lufs,
+            ) {
+                Ok(()) => written.push(path),
+                Err(crate::SourceMetadataError::Unavailable) => {}
+                Err(error) => return Err(error),
+            }
+        }
+        if !written.is_empty() {
+            local
+                .publish_metadata_paths(database, self.source_id.as_str(), &written, None, None)
+                .await
+                .map_err(|error| {
+                    crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
+                })?;
+        }
+        Ok(())
+    }
+
+    pub async fn backfill_local_r128_tags(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+    ) -> Result<(), crate::SourceMetadataError> {
+        if !matches!(&self.implementation, Implementation::Local(_)) {
+            return Err(crate::SourceMetadataError::Unavailable);
+        }
+        let mut after = None;
+        loop {
+            let page = database
+                .r128_tag_write_page(source, after, 64, &library::ReadCancellation::new())
+                .await
+                .map_err(metadata_database_error)?;
+            if page.is_empty() {
+                return Ok(());
+            }
+            after = page.last().map(|item| item.track_key);
+            let measurements = page
+                .into_iter()
+                .map(|item| (item.track_key, Some(item.track_lufs), item.album_lufs))
+                .collect::<Vec<_>>();
+            self.write_local_r128_tags(database, source, &measurements)
+                .await?;
+        }
     }
 
     async fn read_local_album_metadata(

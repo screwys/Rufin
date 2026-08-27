@@ -88,8 +88,8 @@ impl Database {
         }
         if matches!(recovery::is_migratable_schema_40(&path).await, Ok(true)) {
             recovery::migrate_schema_40(&path).await?;
-        } else if matches!(recovery::is_repairable_released(&path).await, Ok(true)) {
-            recovery::repair_released(&path).await?;
+        } else if matches!(recovery::is_repairable_legacy(&path).await, Ok(true)) {
+            recovery::repair_legacy(&path).await?;
         } else {
             recovery::rebuild_unusable(&path).await?;
         }
