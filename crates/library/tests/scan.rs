@@ -1,10 +1,106 @@
 use std::path::Path;
 
-use library::{Database, Freshness, ReadCancellation, Scan, ScanOutcome};
+use library::{
+    Database, Freshness, LocalFileKind, LocalFileState, LocalFileWrite, ReadCancellation, Scan,
+    ScanOutcome,
+};
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 use sqlx::{Connection, FromRow};
 
 const PRIVATE_TRACK_COUNT: usize = 100_000;
+
+#[tokio::test]
+async fn local_component_paths_page_beyond_one_batch() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    let ScanOutcome::Changed(publication) =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
+    else {
+        panic!("catalog must publish");
+    };
+    let mut observations = Vec::with_capacity(131);
+    observations.push((
+        LocalFileWrite {
+            path: "/music".to_string(),
+            root: "/music".to_string(),
+            relative_path: String::new(),
+            kind: LocalFileKind::Directory,
+            size_bytes: None,
+            mtime_ns: 1,
+            device_id: None,
+            inode: None,
+            parse_version: None,
+            state: LocalFileState::Observed,
+        },
+        Vec::new(),
+    ));
+    observations.extend((0..130).map(|index| {
+        (
+            LocalFileWrite {
+                path: format!("/music/track-{index:03}.flac"),
+                root: "/music".to_string(),
+                relative_path: format!("track-{index:03}.flac"),
+                kind: LocalFileKind::Media,
+                size_bytes: Some(100),
+                mtime_ns: 1,
+                device_id: None,
+                inode: None,
+                parse_version: Some(1),
+                state: LocalFileState::Accepted,
+            },
+            Vec::new(),
+        )
+    }));
+    let mut observations_scan = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Local observation scan");
+    for page in observations.chunks(128) {
+        observations_scan.begin_batch().await.expect("begin batch");
+        observations_scan
+            .write_local_files(page)
+            .await
+            .expect("write Local observations");
+        observations_scan
+            .finish_batch()
+            .await
+            .expect("finish batch");
+    }
+    observations_scan
+        .finish()
+        .await
+        .expect("publish Local observations");
+
+    let mut component = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin component scan");
+    component
+        .begin_batch()
+        .await
+        .expect("begin component batch");
+    component
+        .write_local_component_paths(&["/music".to_string()])
+        .await
+        .expect("seed component");
+    component
+        .expand_local_component(publication.source)
+        .await
+        .expect("expand component");
+    component
+        .finish_batch()
+        .await
+        .expect("finish component batch");
+    let first = component
+        .local_component_path_page(None, 128)
+        .await
+        .expect("first component page");
+    let second = component
+        .local_component_path_page(first.last().map(String::as_str), 128)
+        .await
+        .expect("second component page");
+    assert_eq!((first.len(), second.len()), (128, 3));
+    component.finish().await.expect("finish component scan");
+}
 
 async fn connection(path: &Path) -> SqliteConnection {
     SqliteConnection::connect_with(
