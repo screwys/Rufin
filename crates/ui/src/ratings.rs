@@ -66,13 +66,6 @@ impl RatingControl {
         &self.root
     }
 
-    pub(crate) fn set_rating(&self, rating: Option<u8>) {
-        self.value.set(rating.unwrap_or(0));
-        if self.preview.get().is_none() {
-            set_rating_icons(&self.stars, self.value.get());
-        }
-    }
-
     pub(crate) fn connect_commit(&self, commit: impl Fn(Option<u8>) + 'static) {
         let start = Rc::new(Cell::new(0.0));
         let drag = gtk::GestureDrag::new();
@@ -174,33 +167,9 @@ pub(crate) fn context_rating_row(
 }
 
 impl crate::shell::Shell {
-    pub(crate) fn rating_available(&self, item: &FavoriteTarget) -> bool {
-        let configured = self.source.configured.borrow();
-        let Some(_source) = configured
-            .sources
-            .iter()
-            .find(|source| configured.selected_source_id.as_ref() == Some(&source.id))
-        else {
-            return false;
-        };
-        let _ = item;
-        true
-    }
-
     pub(crate) fn set_rating(&self, item: FavoriteTarget, rating: Option<u8>) {
         if let Some(source) = self.selected_source_operations() {
             source.set_rating(item, rating);
-        }
-    }
-
-    pub(crate) fn set_current_track_rating(&self, rating: Option<u8>) {
-        if let Some(track_id) = self
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.transport.current.as_ref())
-            .and_then(|entry| entry.track.track_key)
-        {
-            self.set_rating(FavoriteTarget::Track(track_id), rating);
         }
     }
 }

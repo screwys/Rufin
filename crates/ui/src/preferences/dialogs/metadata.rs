@@ -32,6 +32,10 @@ pub(crate) enum MetadataItemId {
 }
 
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "the metadata dialog owns one draft and keeps its concrete editor value inline"
+)]
 enum MetadataDraft {
     Track(TrackMetadata),
     Album(AlbumMetadata),

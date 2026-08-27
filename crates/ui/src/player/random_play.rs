@@ -44,8 +44,9 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let runtime = selected.runtime.clone();
     let task = runtime.spawn(async move {
         let order = database
-            .genre_order(source, folder, GenreSort::Title, false, &cancellation)
-            .await?;
+            .genre_route_page(source, folder, "", GenreSort::Title, false, &cancellation)
+            .await?
+            .0;
         let mut genres = Vec::with_capacity(order.len());
         for keys in order.chunks(128) {
             genres.extend(

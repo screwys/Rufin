@@ -305,7 +305,8 @@ async fn analyze_track(
 ) -> Result<playback_gstreamer::AnalyzedLoudness, String> {
     analyze_uri(
         state,
-        &work.media_uri,
+        &work.track_object_id,
+        work.media_uri.as_deref(),
         work.cue_start_millis,
         work.cue_end_millis,
         cancelled,
@@ -321,7 +322,8 @@ async fn analyze_album_track(
 ) -> Result<LoudnessAnalysis, String> {
     analyze_uri(
         state,
-        &work.media_uri,
+        &work.track_object_id,
+        work.media_uri.as_deref(),
         work.cue_start_millis,
         work.cue_end_millis,
         cancelled,
@@ -331,15 +333,13 @@ async fn analyze_album_track(
 
 async fn analyze_uri(
     state: &SelectedSourceState,
-    uri: &str,
+    track_object_id: &str,
+    media_uri: Option<&str>,
     start: Option<i64>,
     end: Option<i64>,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
-    let mut request = StreamRequest::new(uri, StreamQuality::Original);
-    request.media_uri = Some(uri.to_string());
-    request.cue_start_millis = start.and_then(|value| u64::try_from(value).ok());
-    request.cue_end_millis = end.and_then(|value| u64::try_from(value).ok());
+    let request = analysis_stream_request(track_object_id, media_uri, start, end);
     let stream = prepare_stream(state.source.clone(), request).await?;
     let cancelled = Arc::clone(cancelled);
     tokio::task::spawn_blocking(move || {
@@ -347,6 +347,19 @@ async fn analyze_uri(
     })
     .await
     .map_err(|_| "loudness analysis worker stopped".to_string())?
+}
+
+fn analysis_stream_request(
+    track_object_id: &str,
+    media_uri: Option<&str>,
+    start: Option<i64>,
+    end: Option<i64>,
+) -> StreamRequest {
+    let mut request = StreamRequest::new(track_object_id, StreamQuality::Original);
+    request.media_uri = media_uri.map(str::to_owned);
+    request.cue_start_millis = start.and_then(|value| u64::try_from(value).ok());
+    request.cue_end_millis = end.and_then(|value| u64::try_from(value).ok());
+    request
 }
 
 fn current(
@@ -361,9 +374,28 @@ fn current(
 
 #[cfg(test)]
 mod tests {
-    use super::AnalysisFailureBlock;
+    use super::{AnalysisFailureBlock, analysis_stream_request};
     use library::SourceKey;
     use playback::SourceSessionEpoch;
+
+    #[test]
+    fn provider_loudness_request_keeps_remote_identity_without_fabricating_a_uri() {
+        let request = analysis_stream_request("provider-track", None, Some(1_000), Some(2_000));
+
+        assert_eq!(request.track_object_id, "provider-track");
+        assert_eq!(request.media_uri, None);
+        assert_eq!(request.cue_start_millis, Some(1_000));
+        assert_eq!(request.cue_end_millis, Some(2_000));
+    }
+
+    #[test]
+    fn local_loudness_request_prefers_the_resolved_access_uri() {
+        let request =
+            analysis_stream_request("provider-track", Some("file:///download.flac"), None, None);
+
+        assert_eq!(request.track_object_id, "provider-track");
+        assert_eq!(request.media_uri.as_deref(), Some("file:///download.flac"));
+    }
 
     #[test]
     fn one_failed_analysis_blocks_immediate_restart_until_library_change() {

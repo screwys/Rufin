@@ -5,7 +5,6 @@ use sqlx::FromRow;
 
 use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackKey};
 
-const LYRICS_EVICTION_LIMIT: usize = 256;
 const LYRICS_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -78,26 +77,6 @@ impl Database {
     }
 
     #[allow(clippy::too_many_arguments)]
-    pub async fn lyrics_cache(
-        &self,
-        source: SourceKey,
-        track: TrackKey,
-        authority: &str,
-        role: &str,
-        language: &str,
-        script: &str,
-        cache_input_digest: [u8; 32],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<LyricsCacheRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, LyricsScalar>("SELECT authority,role,language,script,cache_input_digest,lyrics,updated_at FROM lyrics_cache WHERE source_key=?1 AND track_key=?2 AND authority=?3 AND role=?4 AND language=?5 AND script=?6 AND cache_input_digest=?7")
-            .bind(source).bind(track).bind(authority).bind(role).bind(language).bind(script)
-            .bind(cache_input_digest.as_slice()).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        result?.map(TryInto::try_into).transpose()
-    }
-
-    #[allow(clippy::too_many_arguments)]
     pub async fn write_lyrics_cache(
         &self,
         source: SourceKey,
@@ -144,18 +123,6 @@ impl Database {
             .execute(connection).await?.rows_affected()==1)
     }
 
-    pub async fn remove_stale_track_lyrics(
-        &self,
-        source: SourceKey,
-        track: TrackKey,
-        cache_input_digest: [u8; 32],
-    ) -> LibraryResult<u64> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query("DELETE FROM lyrics_cache WHERE source_key=?1 AND track_key=?2 AND cache_input_digest<>?3")
-            .bind(source).bind(track).bind(cache_input_digest.as_slice()).execute(connection).await?.rows_affected())
-    }
-
     pub async fn remove_track_lyrics_by_authority(
         &self,
         source: SourceKey,
@@ -173,18 +140,5 @@ impl Database {
         .execute(connection)
         .await?
         .rows_affected())
-    }
-
-    pub async fn evict_lyrics_cache(
-        &self,
-        source: SourceKey,
-        before_updated_at: i64,
-        limit: usize,
-    ) -> LibraryResult<u64> {
-        let limit = limit.clamp(1, LYRICS_EVICTION_LIMIT) as i64;
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query("DELETE FROM lyrics_cache WHERE rowid IN (SELECT rowid FROM lyrics_cache WHERE source_key=?1 AND updated_at<?2 ORDER BY updated_at,rowid LIMIT ?3)")
-            .bind(source).bind(before_updated_at).bind(limit).execute(connection).await?.rows_affected())
     }
 }

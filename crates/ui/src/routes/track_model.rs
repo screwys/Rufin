@@ -7,11 +7,9 @@ use playback::{LoadedPlayRequest, PlaybackMedia, QueuePlacement, SourceSessionEp
 
 use crate::LibraryListSettings;
 
-use super::sparse_model::{SparseItem, SparseObjectModel, SparseRouteModel};
+use super::sparse_model::{SparseObjectModel, SparseRouteModel};
 
 const TRACK_OVERSCAN: usize = 64;
-
-pub(crate) type TrackListItem = SparseItem<TrackKey, TrackRow>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TrackProjectionRequest {
@@ -22,6 +20,7 @@ pub(crate) struct TrackProjectionRequest {
 #[derive(Clone)]
 pub(crate) struct PreparedTrackProjection {
     pub(crate) order: Vec<TrackKey>,
+    pub(crate) first_rows: Vec<TrackRow>,
     pub(crate) request: TrackProjectionRequest,
 }
 
@@ -44,6 +43,7 @@ impl TrackCollectionModel {
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
         order: Vec<TrackKey>,
+        first_rows: Vec<TrackRow>,
         settings: LibraryListSettings,
     ) -> Self {
         let rows_database = Arc::clone(&database);
@@ -58,10 +58,12 @@ impl TrackCollectionModel {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
+        let sparse = SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load);
+        sparse.seed_matching(first_rows, |row| row.track_key);
         Self(Rc::new(TrackModelState {
             source_key,
             source_session_epoch,
-            sparse: SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load),
+            sparse,
             database,
             runtime: runtime.clone(),
             request: RefCell::new(TrackProjectionRequest {
@@ -73,6 +75,10 @@ impl TrackCollectionModel {
 
     pub(crate) fn list_model(&self) -> SparseObjectModel {
         self.0.sparse.list_model()
+    }
+
+    pub(crate) fn sparse_model(&self) -> Rc<SparseRouteModel<TrackKey, TrackRow>> {
+        Rc::clone(&self.0.sparse)
     }
 
     pub(crate) fn source_is_empty(&self) -> bool {
@@ -114,8 +120,9 @@ impl TrackCollectionModel {
         if *self.0.request.borrow() != prepared.request {
             return false;
         }
-        self.0.sparse.replace_order(prepared.order);
-        true
+        self.0
+            .sparse
+            .replace_prepared(prepared.order, prepared.first_rows, |row| row.track_key)
     }
 
     pub(crate) fn ready(&self, position: u32) -> Option<Arc<TrackRow>> {
@@ -198,15 +205,6 @@ impl TrackCollectionModel {
         )
     }
 
-    pub(crate) fn position(&self, track_key: &TrackKey) -> Option<u32> {
-        self.0
-            .sparse
-            .order()
-            .iter()
-            .position(|key| key == track_key)
-            .and_then(|position| u32::try_from(position).ok())
-    }
-
     pub(crate) fn position_for_current(
         &self,
         track_key: &TrackKey,
@@ -215,8 +213,12 @@ impl TrackCollectionModel {
         let order = self.0.sparse.order();
         source_rank
             .filter(|position| order.get(*position) == Some(track_key))
-            .or_else(|| order.iter().position(|key| key == track_key))
             .and_then(|position| u32::try_from(position).ok())
+            .or_else(|| {
+                self.0
+                    .sparse
+                    .ready_position(|row| row.track_key == *track_key)
+            })
     }
 
     pub(crate) fn selection_position_after_point_change(
@@ -226,19 +228,9 @@ impl TrackCollectionModel {
     ) -> Option<u32> {
         Some(selected_position)
     }
-
-    pub(crate) fn played_at(&self, position: u32) -> Option<i64> {
-        self.ready(position).and_then(|track| track.last_played)
-    }
-
-    pub(crate) fn played_at_text(&self, position: u32) -> String {
-        self.played_at(position)
-            .map(history_played_at_text)
-            .unwrap_or_default()
-    }
 }
 
-fn history_played_at_text(played_at: i64) -> String {
+pub(crate) fn history_played_at_text(played_at: i64) -> String {
     gtk::glib::DateTime::from_unix_local(played_at)
         .and_then(|date| date.format("%Y-%m-%d %H:%M"))
         .map(String::from)

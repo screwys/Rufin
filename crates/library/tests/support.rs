@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use library::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    Scan, ScanOutcome, SourceKey, TrackKey,
+    QueueCompactOccurrence, QueueRepeatMode, Scan, ScanOutcome, SourceKey, TrackKey,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -18,6 +18,40 @@ pub struct Fixture {
     pub genre: GenreKey,
     pub mood: MoodKey,
     pub folder: FolderKey,
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn persist_queue(
+    database: &Database,
+    source: SourceKey,
+    occurrences: &[QueueCompactOccurrence],
+    current: Option<&str>,
+    prepared: Option<&str>,
+    progress_millis: i64,
+    repeat_mode: QueueRepeatMode,
+    shuffled: bool,
+) {
+    database
+        .persist_compact_queue(
+            source,
+            occurrences.len(),
+            |offset, limit| {
+                let page = occurrences
+                    .iter()
+                    .skip(offset)
+                    .take(limit)
+                    .cloned()
+                    .collect();
+                async move { Ok(page) }
+            },
+            current,
+            prepared,
+            progress_millis,
+            repeat_mode,
+            shuffled,
+        )
+        .await
+        .expect("persist compact Queue");
 }
 
 pub async fn fixture() -> Fixture {
@@ -141,37 +175,20 @@ pub async fn fixture() -> Fixture {
         )
         .await
         .expect("stage Track");
-        scan.write_track_artist(&id, artist, 0)
+        scan.write_track_relations(&[(&id, artist)], &[(&id, "genre")], &[(&id, "mood")])
             .await
-            .expect("stage Track Artist");
-        scan.write_track_genre(&id, "genre", 0)
-            .await
-            .expect("stage Track Genre");
-        scan.write_track_mood(&id, "mood", 0)
-            .await
-            .expect("stage Track Mood");
-        scan.write_track_folder(&id, "folder", 0)
+            .expect("stage Track relations");
+        scan.write_track_folders(&[library::ScanLink::new(&id, "folder", 0)])
             .await
             .expect("stage Track Folder");
     }
-    scan.write_album_artist("album-a", "artist-a", 0)
-        .await
-        .expect("stage Album Artist");
-    scan.write_album_artist("album-b", "artist-b", 0)
-        .await
-        .expect("stage Album Artist");
-    scan.write_album_genre("album-a", "genre", 0)
-        .await
-        .expect("stage Album Genre");
-    scan.write_album_genre("album-b", "genre", 0)
-        .await
-        .expect("stage Album Genre");
-    scan.write_album_release_type("album-a", "Album", 0)
-        .await
-        .expect("stage Album release type");
-    scan.write_album_release_type("album-b", "EP", 0)
-        .await
-        .expect("stage Album release type");
+    scan.write_album_relations(
+        &[("album-a", "artist-a"), ("album-b", "artist-b")],
+        &[("album-a", "genre"), ("album-b", "genre")],
+        &[("album-a", "Album"), ("album-b", "EP")],
+    )
+    .await
+    .expect("stage Album relations");
     scan.write_home_entry(&HomeEntryInput {
         section_id: "featured".to_string(),
         position: 0,

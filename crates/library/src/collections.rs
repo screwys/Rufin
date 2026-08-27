@@ -8,11 +8,12 @@ use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumDetailRouteKey, AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError,
-    LibraryResult, MoodKey, ReadCancellation, SourceKey, TrackKey, TrackRow, TrackSort,
-    tracks::load_track_rows,
+    LibraryResult, MoodKey, ReadCancellation, SourceKey, TrackKey, TrackRoutePage, TrackRow,
+    TrackSort, tracks::load_track_rows,
 };
 
 const COLLECTION_ROW_LIMIT: usize = 128;
+const COLLECTION_ROUTE_PAGE_LIMIT: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlbumSort {
@@ -193,13 +194,6 @@ struct AlbumGenreRelation {
     album_key: AlbumKey,
     genre_key: GenreKey,
     name: String,
-}
-
-#[derive(FromRow)]
-struct AlbumActivityRow {
-    album_key: AlbumKey,
-    play_count: i64,
-    last_played: Option<i64>,
 }
 
 #[derive(FromRow)]
@@ -391,6 +385,14 @@ pub struct ArtistMetadataWrite {
     pub musicbrainz_artist_id: Option<String>,
 }
 
+fn push_artist_role_scope(
+    query: &mut QueryBuilder<Sqlite>,
+    album_artist: bool,
+    folder: Option<FolderKey>,
+) {
+    query.push(" AND ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists role WHERE role.artist_key=artist.artist_key)) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists role WHERE role.artist_key=artist.artist_key))) AND (").push_bind(folder).push(" IS NULL OR ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists role JOIN track_folders scope USING(track_key) WHERE role.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push(")) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists role JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE role.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push("))))");
+}
+
 impl Database {
     pub async fn album_release_classifications(
         &self,
@@ -566,24 +568,60 @@ impl Database {
         Ok(Some(album))
     }
 
-    pub async fn album_order(
+    pub async fn album_route_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
         favorites_only: bool,
+        filter: &str,
         sort: AlbumSort,
         descending: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumKey>> {
+    ) -> LibraryResult<(Vec<AlbumKey>, Vec<AlbumRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        if !filter.is_empty() {
+            let order = sqlx::query_scalar::<_, AlbumKey>(
+                "SELECT album.album_key FROM albums album
+                 WHERE album.source_key=?1 AND (instr(album.normalized_title || ' ' || lower(album.display_artist), ?2)>0 OR CAST(album.year AS TEXT)=?2 OR EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,?2)>0) OR EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,?2)>0))
+                   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?3))
+                   AND (?4=0 OR COALESCE(album.user_favorite,album.source_favorite)=1)
+                 ORDER BY sort_text, album_key",
+            )
+            .bind(source)
+            .bind(filter)
+            .bind(folder)
+            .bind(favorites_only)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let first_rows = load_album_rows(
+                &mut transaction,
+                source,
+                &order[..order.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
+            Database::clear_progress(&mut connection).await?;
+            return Ok((order, first_rows));
+        }
         if sort == AlbumSort::Title {
             let result = sqlx::query_scalar::<_, AlbumKey>(if descending {
                 "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE(album.user_favorite,album.source_favorite)=1) ORDER BY album.sort_text DESC,album.album_key"
             } else {
                 "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE(album.user_favorite,album.source_favorite)=1) ORDER BY album.sort_text,album.album_key"
-            }).bind(source).bind(folder).bind(favorites_only).fetch_all(&mut *connection).await;
+            }).bind(source).bind(folder).bind(favorites_only).fetch_all(&mut *transaction).await?;
+            let first_rows = load_album_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         if matches!(
             sort,
@@ -640,10 +678,18 @@ impl Database {
             let result = query
                 .build_query_scalar::<AlbumKey>()
                 .persistent(false)
-                .fetch_all(&mut *connection)
-                .await;
+                .fetch_all(&mut *transaction)
+                .await?;
+            let first_rows = load_album_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         if matches!(sort, AlbumSort::TrackCount | AlbumSort::Duration) {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -662,10 +708,18 @@ impl Database {
             let result = query
                 .build_query_scalar::<AlbumKey>()
                 .persistent(false)
-                .fetch_all(&mut *connection)
-                .await;
+                .fetch_all(&mut *transaction)
+                .await?;
+            let first_rows = load_album_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         let result = sqlx::query_scalar::<_, AlbumKey>(
             "WITH listens_by_track AS (
@@ -721,10 +775,18 @@ impl Database {
         .bind(descending)
         .bind(folder)
         .bind(favorites_only)
-        .fetch_all(&mut *connection)
-        .await;
+        .fetch_all(&mut *transaction)
+        .await?;
+        let first_rows = load_album_rows(
+            &mut transaction,
+            source,
+            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+            folder,
+        )
+        .await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok((result, first_rows))
     }
 
     pub async fn album_detail_route_order(
@@ -827,35 +889,82 @@ impl Database {
         Ok(rows?)
     }
 
-    pub async fn artist_order(
+    pub async fn artist_route_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
         album_artists_only: bool,
         favorites_only: bool,
+        filter: &str,
         sort: ArtistSort,
         descending: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<ArtistKey>> {
+    ) -> LibraryResult<(Vec<ArtistKey>, Vec<ArtistRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        if !filter.is_empty() {
+            let result = sqlx::query_scalar::<_, ArtistKey>(
+                "SELECT artist.artist_key FROM artists artist
+                 WHERE artist.source_key=?1 AND instr(artist.normalized_name, ?2)>0
+                   AND ((?4=0 AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.artist_key=artist.artist_key)) OR (?4=1 AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key)))
+                   AND (?3 IS NULL OR (?4=0 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?3)) OR (?4=1 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?3)))
+                   AND (?5=0 OR COALESCE(artist.user_favorite,artist.source_favorite)=1)
+                 ORDER BY sort_text, artist_key",
+            )
+            .bind(source)
+            .bind(filter)
+            .bind(folder)
+            .bind(album_artists_only)
+            .bind(favorites_only)
+            .fetch_all(&mut *transaction)
+            .await?;
+            let first_rows = load_artist_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                album_artists_only,
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
+            Database::clear_progress(&mut connection).await?;
+            return Ok((result, first_rows));
+        }
         if sort == ArtistSort::Title {
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT artist.artist_key FROM artists artist WHERE artist.source_key=",
             );
-            query.push_bind(source).push(" AND (").push_bind(!album_artists_only).push(" OR EXISTS (SELECT 1 FROM album_artists relation WHERE relation.artist_key=artist.artist_key)) AND (").push_bind(!favorites_only).push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) AND (").push_bind(folder).push(" IS NULL OR ((").push_bind(!album_artists_only).push(" AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push(")) OR (").push_bind(album_artists_only).push(" AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=").push_bind(folder).push(")))) ORDER BY artist.sort_text ").push(if descending { "DESC" } else { "ASC" }).push(",artist.artist_key");
+            query.push_bind(source);
+            push_artist_role_scope(&mut query, album_artists_only, folder);
+            query.push(" AND (").push_bind(!favorites_only).push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) ORDER BY artist.sort_text ").push(if descending { "DESC" } else { "ASC" }).push(",artist.artist_key");
             let result = query
                 .build_query_scalar::<ArtistKey>()
                 .persistent(false)
-                .fetch_all(&mut *connection)
-                .await;
+                .fetch_all(&mut *transaction)
+                .await?;
+            let first_rows = load_artist_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                album_artists_only,
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         if matches!(sort, ArtistSort::Rating | ArtistSort::Favorite) {
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT artist.artist_key FROM artists artist WHERE artist.source_key=",
             );
-            query.push_bind(source).push(" AND (").push_bind(!album_artists_only).push(" OR EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key)) AND (").push_bind(!favorites_only).push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE scope.folder_key=").push_bind(folder).push(" AND ((").push_bind(!album_artists_only).push(" AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.track_key=track.track_key AND credit.artist_key=artist.artist_key)) OR (").push_bind(album_artists_only).push(" AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.album_key=track.album_key AND credit.artist_key=artist.artist_key)))) ORDER BY ");
+            query.push_bind(source);
+            push_artist_role_scope(&mut query, album_artists_only, folder);
+            query
+                .push(" AND (")
+                .push_bind(!favorites_only)
+                .push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) ORDER BY ");
             query
                 .push(match (sort, descending) {
                     (ArtistSort::Rating, false) => {
@@ -876,16 +985,27 @@ impl Database {
             let result = query
                 .build_query_scalar::<ArtistKey>()
                 .persistent(false)
-                .fetch_all(&mut *connection)
-                .await;
+                .fetch_all(&mut *transaction)
+                .await?;
+            let first_rows = load_artist_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                album_artists_only,
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         if matches!(sort, ArtistSort::AlbumCount | ArtistSort::TrackCount) {
             let mut query = QueryBuilder::<Sqlite>::new(
                 "SELECT artist.artist_key FROM artists artist LEFT JOIN tracks track ON track.source_key=artist.source_key AND ((",
             );
-            query.push_bind(!album_artists_only).push(" AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.track_key=track.track_key AND credit.artist_key=artist.artist_key)) OR (").push_bind(album_artists_only).push(" AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.album_key=track.album_key AND credit.artist_key=artist.artist_key))) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE artist.source_key=").push_bind(source).push(" AND (").push_bind(!favorites_only).push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) GROUP BY artist.artist_key HAVING ").push_bind(!album_artists_only).push(" OR EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key) ORDER BY ");
+            query.push_bind(!album_artists_only).push(" AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.track_key=track.track_key AND credit.artist_key=artist.artist_key)) OR (").push_bind(album_artists_only).push(" AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.album_key=track.album_key AND credit.artist_key=artist.artist_key))) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE artist.source_key=").push_bind(source);
+            push_artist_role_scope(&mut query, album_artists_only, folder);
+            query.push(" AND (").push_bind(!favorites_only).push(" OR COALESCE(artist.user_favorite,artist.source_favorite)=1) GROUP BY artist.artist_key ORDER BY ");
             query
                 .push(match (sort, descending) {
                     (ArtistSort::AlbumCount, false) => "count(DISTINCT track.album_key) ASC",
@@ -898,10 +1018,19 @@ impl Database {
             let result = query
                 .build_query_scalar::<ArtistKey>()
                 .persistent(false)
-                .fetch_all(&mut *connection)
-                .await;
+                .fetch_all(&mut *transaction)
+                .await?;
+            let first_rows = load_artist_rows(
+                &mut transaction,
+                source,
+                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                album_artists_only,
+                folder,
+            )
+            .await?;
+            transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
+            return Ok((result, first_rows));
         }
         let result=sqlx::query_scalar::<_,ArtistKey>(
             "WITH listen AS (SELECT track_key,count(*) plays,max(started_at) last_played
@@ -925,7 +1054,8 @@ impl Database {
               WHERE artist.source_key=?1
                 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4))
                 AND (?5=0 OR COALESCE(artist.user_favorite,artist.source_favorite)=1)
-                AND (?6=0 OR EXISTS (SELECT 1 FROM album_artists album_credit WHERE album_credit.artist_key=artist.artist_key))
+                AND ((?6=0 AND EXISTS (SELECT 1 FROM track_artists role WHERE role.artist_key=artist.artist_key))
+                     OR (?6=1 AND EXISTS (SELECT 1 FROM album_artists role WHERE role.artist_key=artist.artist_key)))
               GROUP BY artist.artist_key)
              SELECT artist_key FROM rows ORDER BY
               CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
@@ -942,88 +1072,90 @@ impl Database {
               CASE WHEN ?2=5 AND ?3=1 THEN rating END DESC NULLS LAST,
               CASE WHEN ?2=6 AND ?3=0 THEN favorite END ASC,
               CASE WHEN ?2=6 AND ?3=1 THEN favorite END DESC,sort_text,artist_key")
-            .bind(source).bind(sort.code()).bind(descending).bind(folder).bind(favorites_only).bind(album_artists_only).fetch_all(&mut *connection).await;
+            .bind(source).bind(sort.code()).bind(descending).bind(folder).bind(favorites_only).bind(album_artists_only).fetch_all(&mut *transaction).await?;
+        let first_rows = load_artist_rows(
+            &mut transaction,
+            source,
+            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+            album_artists_only,
+            folder,
+        )
+        .await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok((result, first_rows))
     }
 
-    pub async fn genre_order(
+    pub async fn genre_route_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
+        filter: &str,
         sort: GenreSort,
         descending: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<GenreKey>> {
+    ) -> LibraryResult<(Vec<GenreKey>, Vec<GenreRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        if sort == GenreSort::Title {
-            let result=sqlx::query_scalar::<_,GenreKey>(if descending {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_genres credit JOIN track_folders scope USING(track_key) WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?2)) ORDER BY genre.sort_text DESC,genre.genre_key"} else {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_genres credit JOIN track_folders scope USING(track_key) WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?2)) ORDER BY genre.sort_text,genre.genre_key"}).bind(source).bind(folder).fetch_all(&mut *connection).await;
-            Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
-        }
-        let result=sqlx::query_scalar::<_,GenreKey>(
-            "WITH rows AS (SELECT genre.genre_key,genre.sort_text,
-               count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count
-              FROM genres genre LEFT JOIN track_genres credit USING(genre_key)
-              LEFT JOIN tracks track USING(track_key) WHERE genre.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY genre.genre_key)
-             SELECT genre_key FROM rows ORDER BY
-              CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
-              CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,
-              CASE WHEN ?2=1 AND ?3=0 THEN album_count END ASC,
-              CASE WHEN ?2=1 AND ?3=1 THEN album_count END DESC,
-              CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,
-              CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,sort_text,genre_key")
-            .bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *connection).await;
+        let mut transaction = connection.begin().await?;
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        let result = if !filter.is_empty() {
+            sqlx::query_scalar::<_, GenreKey>(
+                "SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND instr(genre.normalized_name,?2)>0 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?3))) ORDER BY genre.sort_text,genre.genre_key",
+            )
+            .bind(source)
+            .bind(filter)
+            .bind(folder)
+            .fetch_all(&mut *transaction)
+            .await?
+        } else if sort == GenreSort::Title {
+            sqlx::query_scalar::<_, GenreKey>(if descending {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2))) ORDER BY genre.sort_text DESC,genre.genre_key"} else {"SELECT genre.genre_key FROM genres genre WHERE genre.source_key=?1 AND EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key=genre.genre_key AND (?2 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=credit.track_key AND scope.folder_key=?2))) ORDER BY genre.sort_text,genre.genre_key"}).bind(source).bind(folder).fetch_all(&mut *transaction).await?
+        } else {
+            sqlx::query_scalar::<_,GenreKey>(
+                "WITH rows AS (SELECT genre.genre_key,genre.sort_text,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count FROM genres genre JOIN track_genres credit USING(genre_key) JOIN tracks track USING(track_key) WHERE genre.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY genre.genre_key) SELECT genre_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN album_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN album_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,sort_text,genre_key")
+                .bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *transaction).await?
+        };
+        let first_rows = load_genre_rows(
+            &mut transaction,
+            source,
+            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+            folder,
+        )
+        .await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok((result, first_rows))
     }
 
-    pub async fn mood_order(
+    pub async fn mood_route_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
+        filter: &str,
         sort: MoodSort,
         descending: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<MoodKey>> {
+    ) -> LibraryResult<(Vec<MoodKey>, Vec<MoodRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        if sort == MoodSort::Title {
-            let result=sqlx::query_scalar::<_,MoodKey>(if descending {"SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?2)) ORDER BY mood.sort_text DESC,mood.mood_key"} else {"SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?2)) ORDER BY mood.sort_text,mood.mood_key"}).bind(source).bind(folder).fetch_all(&mut *connection).await;
-            Database::clear_progress(&mut connection).await?;
-            return Ok(result?);
-        }
-        let result=sqlx::query_scalar::<_,MoodKey>(
-            "WITH rows AS (SELECT mood.mood_key,mood.sort_text,
-               count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration
-              FROM moods mood LEFT JOIN track_moods credit USING(mood_key)
-              LEFT JOIN tracks track USING(track_key) WHERE mood.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY mood.mood_key)
-             SELECT mood_key FROM rows ORDER BY
-              CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
-              CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,
-              CASE WHEN ?2=1 AND ?3=0 THEN track_count END ASC,
-              CASE WHEN ?2=1 AND ?3=1 THEN track_count END DESC,
-              CASE WHEN ?2=2 AND ?3=0 THEN duration END ASC,
-              CASE WHEN ?2=2 AND ?3=1 THEN duration END DESC,sort_text,mood_key")
-            .bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-    pub async fn folder_order(
-        &self,
-        source: SourceKey,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<FolderKey>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, FolderKey>(
-            "SELECT folder_key FROM folders WHERE source_key=?1 ORDER BY sort_text, folder_key",
+        let mut transaction = connection.begin().await?;
+        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+        let result = if !filter.is_empty() {
+            sqlx::query_scalar::<_, MoodKey>("SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND instr(mood.normalized_name,?2)>0 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?3)) ORDER BY mood.sort_text,mood.mood_key").bind(source).bind(filter).bind(folder).fetch_all(&mut *transaction).await?
+        } else if sort == MoodSort::Title {
+            sqlx::query_scalar::<_,MoodKey>(if descending {"SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?2)) ORDER BY mood.sort_text DESC,mood.mood_key"} else {"SELECT mood.mood_key FROM moods mood WHERE mood.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?2)) ORDER BY mood.sort_text,mood.mood_key"}).bind(source).bind(folder).fetch_all(&mut *transaction).await?
+        } else {
+            sqlx::query_scalar::<_,MoodKey>("WITH rows AS (SELECT mood.mood_key,mood.sort_text,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration FROM moods mood LEFT JOIN track_moods credit USING(mood_key) LEFT JOIN tracks track USING(track_key) WHERE mood.source_key=?1 AND (?4 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY mood.mood_key) SELECT mood_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN track_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN duration END ASC,CASE WHEN ?2=2 AND ?3=1 THEN duration END DESC,sort_text,mood_key").bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *transaction).await?
+        };
+        let first_rows = load_mood_rows(
+            &mut transaction,
+            source,
+            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+            folder,
         )
-        .bind(source)
-        .fetch_all(&mut *connection)
-        .await;
+        .await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok((result, first_rows))
     }
-
     pub async fn folder_key_by_object(
         &self,
         source: SourceKey,
@@ -1062,6 +1194,36 @@ impl Database {
         Ok(result?)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn album_track_route_page(
+        &self,
+        source: SourceKey,
+        album: AlbumKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<TrackRoutePage> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let mut query = collection_track_query(source, sort);
+        query.push(" AND track.album_key=").push_bind(album);
+        let order = finish_collection_track_order(
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            &mut transaction,
+        )
+        .await?;
+        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(page)
+    }
+
     pub async fn artist_track_order(
         &self,
         source: SourceKey,
@@ -1083,7 +1245,8 @@ impl Database {
         Ok(result?)
     }
 
-    pub async fn artist_favorite_track_order(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn artist_track_route_page(
         &self,
         source: SourceKey,
         artist: ArtistKey,
@@ -1092,16 +1255,26 @@ impl Database {
         filter: &str,
         sort: TrackSort,
         descending: bool,
+        favorites_only: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
+    ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
         let mut query = collection_track_query(source, sort);
-        query.push(" AND ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists relation WHERE relation.track_key=track.track_key AND relation.artist_key=").push_bind(artist).push(")) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists relation WHERE relation.album_key=track.album_key AND relation.artist_key=").push_bind(artist).push("))) AND COALESCE(track.user_favorite,track.source_favorite)=1");
-        let result =
-            finish_collection_track_order(query, folder, filter, sort, descending, &mut connection)
-                .await;
+        query.push(" AND ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists relation WHERE relation.track_key=track.track_key AND relation.artist_key=").push_bind(artist).push(")) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists relation WHERE relation.album_key=track.album_key AND relation.artist_key=").push_bind(artist).push("))) AND (").push_bind(!favorites_only).push(" OR COALESCE(track.user_favorite,track.source_favorite)=1)");
+        let order = finish_collection_track_order(
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            &mut transaction,
+        )
+        .await?;
+        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok(page)
     }
 
     pub async fn genre_track_order(
@@ -1124,6 +1297,36 @@ impl Database {
         Ok(result?)
     }
 
+    #[allow(clippy::too_many_arguments)]
+    pub async fn genre_track_route_page(
+        &self,
+        source: SourceKey,
+        genre: GenreKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<TrackRoutePage> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let mut query = collection_track_query(source, sort);
+        query.push(" AND EXISTS (SELECT 1 FROM track_genres relation WHERE relation.track_key=track.track_key AND relation.genre_key=").push_bind(genre).push(")");
+        let order = finish_collection_track_order(
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            &mut transaction,
+        )
+        .await?;
+        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(page)
+    }
+
     pub async fn mood_track_order(
         &self,
         source: SourceKey,
@@ -1144,37 +1347,34 @@ impl Database {
         Ok(result?)
     }
 
-    pub async fn artist_album_order(
+    #[allow(clippy::too_many_arguments)]
+    pub async fn mood_track_route_page(
         &self,
         source: SourceKey,
-        artist: ArtistKey,
-        album_artist: bool,
+        mood: MoodKey,
         folder: Option<FolderKey>,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumKey>> {
+    ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, AlbumKey>(
-            "SELECT DISTINCT album.album_key
-             FROM albums AS album
-             WHERE album.source_key=?1 AND (
-                 (?3=1 AND EXISTS (
-                     SELECT 1 FROM album_artists AS credit
-                     WHERE credit.album_key=album.album_key AND credit.artist_key=?2
-                 )) OR (?3=0 AND EXISTS (
-                     SELECT 1 FROM tracks AS track
-                     JOIN track_artists AS credit USING(track_key)
-                     WHERE track.album_key=album.album_key AND credit.artist_key=?2
-                 ))
-             ) AND (?4 IS NULL OR EXISTS (SELECT 1 FROM tracks scope_track JOIN track_folders scope USING(track_key) WHERE scope_track.album_key=album.album_key AND scope.folder_key=?4)) ORDER BY album.sort_text, album.album_key",
+        let mut transaction = connection.begin().await?;
+        let mut query = collection_track_query(source, sort);
+        query.push(" AND EXISTS (SELECT 1 FROM track_moods relation WHERE relation.track_key=track.track_key AND relation.mood_key=").push_bind(mood).push(")");
+        let order = finish_collection_track_order(
+            query,
+            folder,
+            filter,
+            sort,
+            descending,
+            &mut transaction,
         )
-        .bind(source)
-        .bind(artist)
-        .bind(album_artist)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
+        .await?;
+        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok(page)
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1294,48 +1494,11 @@ impl Database {
             return Ok(Vec::new());
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(genre_key, position) AS (");
-        query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
-            row.push_bind(*key).push_bind(position as i64);
-        });
-        query.push(
-            ") SELECT genre.genre_key, genre.source_key, genre.object_id, genre.name,
-                      genre.artwork_binding,
-                      count(DISTINCT track.album_key) AS album_count,
-                      count(DISTINCT track.track_key) AS track_count,
-                      COALESCE(sum(track.duration_millis), 0) AS duration_millis,
-                      count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN track.track_key END) AS downloaded_count
-               FROM requested JOIN genres AS genre USING(genre_key)
-               LEFT JOIN track_genres AS relation USING(genre_key)
-               LEFT JOIN tracks AS track USING(track_key)
-               WHERE genre.source_key=",
-        );
-        query
-            .push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push("))")
-            .push(" GROUP BY genre.genre_key ORDER BY requested.position");
-        let result = query
-            .build_query_as::<GenreRow>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await;
+        let mut transaction = connection.begin().await?;
+        let result = load_genre_rows(&mut transaction, source, keys, folder).await;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        let mut result = result?;
-        for row in &mut result {
-            row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
-                "SELECT album.artwork_binding FROM track_genres relation
-                 JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
-                 WHERE relation.genre_key=?1 AND track.source_key=?2
-                   AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-                   AND album.artwork_binding IS NOT NULL
-                 GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 4",
-            )
-            .bind(row.genre_key)
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *connection)
-            .await?;
-        }
-        Ok(result)
+        result
     }
 
     pub async fn mood_rows(
@@ -1352,46 +1515,11 @@ impl Database {
             return Ok(Vec::new());
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(mood_key, position) AS (");
-        query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
-            row.push_bind(*key).push_bind(position as i64);
-        });
-        query.push(
-            ") SELECT mood.mood_key, mood.source_key, mood.name,
-                      count(DISTINCT track.track_key) AS track_count,
-                      COALESCE(sum(track.duration_millis), 0) AS duration_millis,
-                      count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN track.track_key END) AS downloaded_count
-               FROM requested JOIN moods AS mood USING(mood_key)
-               LEFT JOIN track_moods AS relation USING(mood_key)
-               LEFT JOIN tracks AS track USING(track_key)
-               WHERE mood.source_key=",
-        );
-        query
-            .push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push("))")
-            .push(" GROUP BY mood.mood_key ORDER BY requested.position");
-        let result = query
-            .build_query_as::<MoodRow>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await;
+        let mut transaction = connection.begin().await?;
+        let result = load_mood_rows(&mut transaction, source, keys, folder).await;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        let mut result = result?;
-        for row in &mut result {
-            row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
-                "SELECT album.artwork_binding FROM track_moods relation
-                 JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
-                 WHERE relation.mood_key=?1 AND track.source_key=?2
-                   AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
-                   AND album.artwork_binding IS NOT NULL
-                 GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 4",
-            )
-            .bind(row.mood_key)
-            .bind(source)
-            .bind(folder)
-            .fetch_all(&mut *connection)
-            .await?;
-        }
-        Ok(result)
+        result
     }
 
     pub async fn folder_rows(
@@ -1512,63 +1640,6 @@ impl Database {
             genres,
             release_types,
         }))
-    }
-
-    pub async fn album_details(
-        &self,
-        source: SourceKey,
-        keys: &[AlbumKey],
-        folder: Option<FolderKey>,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumDetail>> {
-        if keys.len() > COLLECTION_ROW_LIMIT {
-            return Err(row_limit("Album detail"));
-        }
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let albums = load_album_rows(&mut transaction, source, keys, folder).await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new("SELECT album_key,track_key FROM tracks WHERE source_key=");
-        query.push_bind(source).push(" AND album_key IN (");
-        let mut separated = query.separated(",");
-        for key in keys {
-            separated.push_bind(*key);
-        }
-        separated.push_unseparated(") AND (");
-        query
-            .push_bind(folder)
-            .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=tracks.track_key AND scope.folder_key=")
-            .push_bind(folder)
-            .push(") ) ORDER BY album_key,disc_number,track_number,sort_text,track_key");
-        let track_rows = query
-            .build_query_as::<(AlbumKey, TrackKey)>()
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let mut tracks = BTreeMap::<AlbumKey, Vec<TrackKey>>::new();
-        for (album, track) in track_rows {
-            tracks.entry(album).or_default().push(track);
-        }
-        let details = albums
-            .into_iter()
-            .map(|album| AlbumDetail {
-                track_order: tracks.remove(&album.album_key).unwrap_or_default(),
-                artists: album
-                    .album_artists
-                    .iter()
-                    .map(|artist| artist.artist_key)
-                    .collect(),
-                genres: album.genres.iter().map(|genre| genre.genre_key).collect(),
-                release_types: album.release_types.clone(),
-                album,
-            })
-            .collect();
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(details)
     }
 
     pub async fn album_detail_route_rows(
@@ -1850,7 +1921,9 @@ pub(crate) async fn load_artist_rows(
            FROM requested JOIN artists AS artist USING(artist_key)
            WHERE artist.source_key=",
         );
-    query.push_bind(source).push(" ORDER BY requested.position");
+    query.push_bind(source);
+    push_artist_role_scope(&mut query, album_artist, folder);
+    query.push(" ORDER BY requested.position");
     let mut result = query
         .build_query_as::<ArtistRow>()
         .persistent(false)
@@ -1913,6 +1986,20 @@ async fn finish_collection_track_order(
         .await?)
 }
 
+async fn finish_track_route_page(
+    transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    source: SourceKey,
+    order: Vec<TrackKey>,
+) -> LibraryResult<TrackRoutePage> {
+    let first_rows = load_track_rows(
+        transaction,
+        source,
+        &order[..order.len().min(COLLECTION_ROW_LIMIT)],
+    )
+    .await?;
+    Ok(TrackRoutePage { order, first_rows })
+}
+
 async fn artist_facts_rows(
     connection: &mut SqliteConnection,
     source: SourceKey,
@@ -1945,35 +2032,12 @@ pub(crate) async fn load_album_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT album.album_key,album.source_key,album.object_id,album.title,album.display_artist,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.release_lookup_identity,COALESCE(album.artwork_binding,(SELECT artist.artwork_binding FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND artist.source_key=album.source_key AND artist.artwork_binding IS NOT NULL ORDER BY credit.position LIMIT 1)) artwork_binding,COALESCE(album.user_favorite,album.source_favorite) favorite,COALESCE(album.user_rating,album.source_rating)/10 rating,COALESCE((SELECT sum(baseline.play_count) FROM activity_baseline baseline JOIN tracks item ON item.source_key=baseline.source_key AND item.object_id=baseline.track_object_id AND baseline.period='lifetime' AND baseline.item_kind='track' WHERE item.album_key=album.album_key),0)+(SELECT count(*) FROM listens listen JOIN tracks item USING(track_key) WHERE item.album_key=album.album_key) play_count,(SELECT max(played_at) FROM (SELECT baseline.last_played_at played_at FROM activity_baseline baseline JOIN tracks item ON item.source_key=baseline.source_key AND item.object_id=baseline.track_object_id AND baseline.period='lifetime' AND baseline.item_kind='track' WHERE item.album_key=album.album_key UNION ALL SELECT listen.started_at FROM listens listen JOIN tracks item USING(track_key) WHERE item.album_key=album.album_key)) last_played,count(track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN 1 END) downloaded_count FROM requested JOIN albums album USING(album_key) LEFT JOIN tracks track USING(album_key) WHERE album.source_key=");
-    query.push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) GROUP BY album.album_key ORDER BY requested.position");
-    let mut scalars = query
+    query.push("),scoped_tracks AS (SELECT track.* FROM requested JOIN tracks track USING(album_key) WHERE track.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push("))),track_facts AS (SELECT track.album_key,count(track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN 1 END) downloaded_count,COALESCE(sum(COALESCE(baseline.play_count,0)),0) baseline_plays,max(baseline.last_played_at) baseline_last_played FROM scoped_tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' GROUP BY track.album_key),listen_facts AS (SELECT track.album_key,count(*) listen_plays,max(listen.started_at) listen_last_played FROM listens listen JOIN scoped_tracks track USING(track_key) WHERE listen.source_key=").push_bind(source).push(" GROUP BY track.album_key) SELECT album.album_key,album.source_key,album.object_id,album.title,album.display_artist,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.release_lookup_identity,COALESCE(album.artwork_binding,(SELECT artist.artwork_binding FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND artist.source_key=album.source_key AND artist.artwork_binding IS NOT NULL ORDER BY credit.position LIMIT 1)) artwork_binding,COALESCE(album.user_favorite,album.source_favorite) favorite,COALESCE(album.user_rating,album.source_rating)/10 rating,COALESCE(track_facts.baseline_plays,0)+COALESCE(listen_facts.listen_plays,0) play_count,CASE WHEN track_facts.baseline_last_played IS NULL THEN listen_facts.listen_last_played WHEN listen_facts.listen_last_played IS NULL THEN track_facts.baseline_last_played ELSE max(track_facts.baseline_last_played,listen_facts.listen_last_played) END last_played,COALESCE(track_facts.track_count,0) track_count,COALESCE(track_facts.duration_millis,0) duration_millis,COALESCE(track_facts.downloaded_count,0) downloaded_count FROM requested JOIN albums album USING(album_key) LEFT JOIN track_facts USING(album_key) LEFT JOIN listen_facts USING(album_key) WHERE album.source_key=").push_bind(source).push(" ORDER BY requested.position");
+    let scalars = query
         .build_query_as::<AlbumScalar>()
         .persistent(false)
         .fetch_all(&mut *connection)
         .await?;
-    if let Some(folder) = folder {
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(album_key) AS (");
-        query.push_values(keys, |mut row, key| {
-            row.push_bind(*key);
-        });
-        query.push(") SELECT requested.album_key,COALESCE((SELECT sum(baseline.play_count) FROM activity_baseline baseline JOIN tracks track ON track.source_key=baseline.source_key AND track.object_id=baseline.track_object_id AND baseline.period='lifetime' AND baseline.item_kind='track' JOIN track_folders scope USING(track_key) WHERE track.album_key=requested.album_key AND scope.folder_key=").push_bind(folder).push("),0)+(SELECT count(*) FROM listens listen JOIN tracks track USING(track_key) JOIN track_folders scope USING(track_key) WHERE track.album_key=requested.album_key AND scope.folder_key=").push_bind(folder).push(") play_count,(SELECT max(played_at) FROM (SELECT baseline.last_played_at played_at FROM activity_baseline baseline JOIN tracks track ON track.source_key=baseline.source_key AND track.object_id=baseline.track_object_id AND baseline.period='lifetime' AND baseline.item_kind='track' JOIN track_folders scope USING(track_key) WHERE track.album_key=requested.album_key AND scope.folder_key=").push_bind(folder).push(" UNION ALL SELECT listen.started_at FROM listens listen JOIN tracks track USING(track_key) JOIN track_folders scope USING(track_key) WHERE track.album_key=requested.album_key AND scope.folder_key=").push_bind(folder).push(")) last_played FROM requested");
-        let activity = query
-            .build_query_as::<AlbumActivityRow>()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await?;
-        let activity = activity
-            .into_iter()
-            .map(|row| (row.album_key, (row.play_count, row.last_played)))
-            .collect::<BTreeMap<_, _>>();
-        for scalar in &mut scalars {
-            if let Some((play_count, last_played)) = activity.get(&scalar.album_key) {
-                scalar.play_count = *play_count;
-                scalar.last_played = *last_played;
-            }
-        }
-    }
     let mut album_artists = BTreeMap::<AlbumKey, Vec<AlbumArtistLink>>::new();
     let mut query = QueryBuilder::<Sqlite>::new("WITH requested(album_key,position) AS (");
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
@@ -2059,6 +2123,64 @@ pub(crate) async fn load_album_rows(
             genres: genres.get(&key).cloned().unwrap_or_default(),
             release_types: release_types.get(&key).cloned().unwrap_or_default(),
         });
+    }
+    Ok(rows)
+}
+
+async fn load_genre_rows(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    keys: &[GenreKey],
+    folder: Option<FolderKey>,
+) -> LibraryResult<Vec<GenreRow>> {
+    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(genre_key, position) AS (");
+    query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
+        row.push_bind(*key).push_bind(position as i64);
+    });
+    query.push(") SELECT genre.genre_key,genre.source_key,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track USING(track_key) WHERE genre.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) GROUP BY genre.genre_key ORDER BY requested.position");
+    let mut rows = query
+        .build_query_as::<GenreRow>()
+        .persistent(false)
+        .fetch_all(&mut *connection)
+        .await?;
+    for row in &mut rows {
+        row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT album.artwork_binding FROM track_genres relation JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE relation.genre_key=?1 AND track.source_key=?2 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3)) AND album.artwork_binding IS NOT NULL GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 1",
+        )
+        .bind(row.genre_key)
+        .bind(source)
+        .bind(folder)
+        .fetch_all(&mut *connection)
+        .await?;
+    }
+    Ok(rows)
+}
+
+async fn load_mood_rows(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    keys: &[MoodKey],
+    folder: Option<FolderKey>,
+) -> LibraryResult<Vec<MoodRow>> {
+    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(mood_key, position) AS (");
+    query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
+        row.push_bind(*key).push_bind(position as i64);
+    });
+    query.push(") SELECT mood.mood_key,mood.source_key,mood.name,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN moods mood USING(mood_key) LEFT JOIN track_moods relation USING(mood_key) LEFT JOIN tracks track USING(track_key) WHERE mood.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) GROUP BY mood.mood_key ORDER BY requested.position");
+    let mut rows = query
+        .build_query_as::<MoodRow>()
+        .persistent(false)
+        .fetch_all(&mut *connection)
+        .await?;
+    for row in &mut rows {
+        row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT album.artwork_binding FROM track_moods relation JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE relation.mood_key=?1 AND track.source_key=?2 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3)) AND album.artwork_binding IS NOT NULL GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 4",
+        )
+        .bind(row.mood_key)
+        .bind(source)
+        .bind(folder)
+        .fetch_all(&mut *connection)
+        .await?;
     }
     Ok(rows)
 }

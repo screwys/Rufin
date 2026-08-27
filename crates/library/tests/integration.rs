@@ -1,5 +1,6 @@
 mod activity;
 mod entities;
+mod laws;
 mod playlists;
 mod products;
 mod queue;

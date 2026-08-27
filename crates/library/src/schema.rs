@@ -9,7 +9,8 @@ use crate::{LibraryError, LibraryResult};
 
 pub(crate) const APPLICATION_ID: i64 = 1_381_320_270;
 pub(crate) const SCHEMA_VERSION: i64 = 41;
-pub(crate) const RELEASED_SCHEMA_VERSION: i64 = 40;
+pub(crate) const RELEASED_SCHEMA_VERSION: i64 = 41;
+pub(crate) const LAST_LEGACY_SCHEMA_VERSION: i64 = 40;
 const FIRST_RELEASED_SCHEMA_VERSION: i64 = 32;
 const MUSIC_FOLDER_ARTWORK_SCHEMA_VERSION: i64 = 33;
 const FILESYSTEM_IDENTITY_SCHEMA_VERSION: i64 = 34;
@@ -55,6 +56,10 @@ const RELEASED_MIGRATIONS: &[ReleasedMigration] = &[
     },
     ReleasedMigration {
         from_version: USER_RATINGS_SCHEMA_VERSION,
+        to_version: LAST_LEGACY_SCHEMA_VERSION,
+    },
+    ReleasedMigration {
+        from_version: LAST_LEGACY_SCHEMA_VERSION,
         to_version: RELEASED_SCHEMA_VERSION,
     },
 ];
@@ -1297,18 +1302,20 @@ async fn backfill_recent_plays(connection: &mut Transaction<'_, Sqlite>) -> Libr
     Ok(())
 }
 
-pub(crate) async fn upgrade_released(connection: &mut SqliteConnection) -> LibraryResult<()> {
+pub(crate) async fn upgrade_legacy_released(
+    connection: &mut SqliteConnection,
+) -> LibraryResult<()> {
     let application_id = pragma(connection, "application_id").await?;
     let mut user_version = pragma(connection, "user_version").await?;
     if application_id != APPLICATION_ID
-        || !(FIRST_RELEASED_SCHEMA_VERSION..=RELEASED_SCHEMA_VERSION).contains(&user_version)
+        || !(FIRST_RELEASED_SCHEMA_VERSION..=LAST_LEGACY_SCHEMA_VERSION).contains(&user_version)
     {
         return Err(LibraryError::UnsupportedStore {
             application_id,
             user_version,
         });
     }
-    while user_version < RELEASED_SCHEMA_VERSION {
+    while user_version < LAST_LEGACY_SCHEMA_VERSION {
         let migration = RELEASED_MIGRATIONS
             .iter()
             .find(|migration| migration.from_version == user_version)
@@ -1397,14 +1404,14 @@ mod tests {
             .execute(&mut connection)
             .await
             .expect("create schema 39 fixture");
-        upgrade_released(&mut connection)
+        upgrade_legacy_released(&mut connection)
             .await
             .expect("run released migration");
         assert_eq!(
             pragma(&mut connection, "user_version")
                 .await
                 .expect("read migrated version"),
-            RELEASED_SCHEMA_VERSION
+            LAST_LEGACY_SCHEMA_VERSION
         );
         let definition: serde_json::Value = serde_json::from_str(
             &sqlx::query_scalar::<_, String>("SELECT definition_json FROM smart_playlists")

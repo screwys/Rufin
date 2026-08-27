@@ -59,6 +59,10 @@ fn next_home_variation(current: i64) -> i64 {
 }
 
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Home sections are hard-bounded and keep final rows inline"
+)]
 enum HomeItem {
     Track(HomeTrackRow),
     Album(HomeAlbumRow),
@@ -136,7 +140,7 @@ struct HomeSectionView {
 
 #[derive(Clone)]
 struct HomeRouteProjection {
-    shell: Rc<Shell>,
+    shell: std::rc::Weak<Shell>,
     home: Rc<RefCell<HomePage>>,
     slots: Rc<std::collections::HashMap<HomeBlockKind, gtk::Box>>,
     sections: Rc<RefCell<std::collections::HashMap<HomeSectionKind, HomeSectionView>>>,
@@ -149,6 +153,9 @@ struct HomeRouteProjection {
 
 impl HomeRouteProjection {
     fn apply(&self, home: HomePage) {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
         let previous = self.home.replace(home.clone());
         if previous.showcase != home.showcase
             && let Some(slot) = self.slots.get(&HomeBlockKind::Showcase)
@@ -157,7 +164,7 @@ impl HomeRouteProjection {
                 slot.remove(&child);
             }
             if let Some(showcase) = home.showcase.as_ref() {
-                slot.append(&self.shell.home_showcase(showcase));
+                slot.append(&shell.home_showcase(showcase));
             }
         }
         for (block, kind, rows) in [
@@ -197,9 +204,7 @@ impl HomeRouteProjection {
             } else if !items.is_empty()
                 && let Some(slot) = self.slots.get(&block)
             {
-                let view = self
-                    .shell
-                    .home_section_view(&tr(block.title()), items, Some(kind));
+                let view = shell.home_section_view(&tr(block.title()), items, Some(kind));
                 slot.append(&view.root);
                 self.sections.borrow_mut().insert(kind, view);
             }
@@ -210,7 +215,7 @@ impl HomeRouteProjection {
             while let Some(child) = slot.first_child() {
                 slot.remove(&child);
             }
-            if let Some(genres) = self.shell.home_genres(&home.genres) {
+            if let Some(genres) = shell.home_genres(&home.genres) {
                 slot.append(&genres);
             }
         }
@@ -233,7 +238,7 @@ impl HomeRouteProjection {
                     .get(&provider.section_id)
                     .cloned()
                     .unwrap_or_else(|| {
-                        let view = self.shell.home_section_view(&title, Vec::new(), None);
+                        let view = shell.home_section_view(&title, Vec::new(), None);
                         self.provider_slot.append(&view.root);
                         self.provider_sections
                             .borrow_mut()
@@ -275,14 +280,20 @@ impl HomeRouteProjection {
     }
 
     fn reconcile_block_settings(&self) {
-        let blocks = self.shell.settings.current.borrow().home_blocks.clone();
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let blocks = shell.settings.current.borrow().home_blocks.clone();
         if *self.applied_blocks.borrow() != blocks {
             self.apply_block_settings();
         }
     }
 
     fn apply_block_settings(&self) {
-        let blocks = self.shell.settings.current.borrow().home_blocks.clone();
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        let blocks = shell.settings.current.borrow().home_blocks.clone();
         let mut previous = None::<gtk::Widget>;
         for block in &blocks {
             let Some(slot) = self.slots.get(block) else {
@@ -381,7 +392,7 @@ impl Shell {
         scroller.set_child(Some(&inset_content));
 
         let projection = HomeRouteProjection {
-            shell: Rc::clone(self),
+            shell: Rc::downgrade(self),
             home: Rc::new(RefCell::new(HomePage::default())),
             slots: Rc::new(slots),
             sections: Rc::new(RefCell::new(std::collections::HashMap::new())),
@@ -737,12 +748,7 @@ fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
                 ),
                 _ => DetailLinks::text(&track_field(track, field)),
             });
-            let cell = TrackGridCell::new_with_field_value(
-                Rc::clone(shell),
-                &HOME_TRACK_GRID_FIELDS,
-                play,
-                field,
-            );
+            let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field);
             cell.bind(0, track);
             cell.widget()
         }
@@ -752,7 +758,7 @@ fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
             if item.artwork_binding.is_some() {
                 album.artwork_binding = item.artwork_binding;
             }
-            let cell = AlbumGridCell::new(Rc::clone(shell), &HOME_ALBUM_GRID_FIELDS, None);
+            let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
             cell.bind(0, album);
             cell.widget()
         }

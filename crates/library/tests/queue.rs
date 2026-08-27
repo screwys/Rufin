@@ -3,7 +3,7 @@ use library::{
     SmartPlaylistDefinition,
 };
 
-use super::support::{connection, fixture};
+use super::support::{connection, fixture, persist_queue};
 
 #[tokio::test]
 async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
@@ -47,6 +47,12 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
         .execute(&mut setup)
         .await
         .expect("persist selected Album binding");
+    sqlx::query("UPDATE tracks SET artwork_binding=?2 WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .bind(b"stale-track-art".as_slice())
+        .execute(&mut setup)
+        .await
+        .expect("persist stale Track binding");
     sqlx::query("INSERT INTO queue_occurrences(source_key,object_id,position,traversal_position,provenance_kind,provenance_context_id,provenance_source_rank,track_key,track_object_id,fallback_primary_artist_object_id) VALUES (?1,'first',0,1,'context','album-route',2,?2,'track-0','stale-artist'),(?1,'duplicate',1,2,'manual',NULL,NULL,?2,'track-0',NULL)")
         .bind(fixture.source)
         .bind(fixture.tracks[0])
@@ -71,10 +77,7 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
         .await
         .expect("restore Queue");
     assert_eq!(restored.occurrences.len(), 3);
-    assert_eq!(
-        restored.occurrences[0].occurrence_key,
-        restored.state.current
-    );
+    assert_eq!(restored.current_occurrence.as_deref(), Some("offline"));
     assert_eq!(restored.current.as_ref().unwrap().title, "Offline");
     assert_eq!(
         restored
@@ -175,34 +178,6 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
     assert_eq!(page[0].primary_artist_key, Some(fixture.artists[0]));
     assert_ne!(page[0].occurrence_key, page[1].occurrence_key);
     assert_eq!(page[2].source_format.as_deref(), Some("FLAC"));
-    let traversal = [
-        page[1].occurrence_key,
-        page[2].occurrence_key,
-        page[0].occurrence_key,
-    ];
-    fixture
-        .database
-        .persist_queue_traversal(fixture.source, &traversal)
-        .await
-        .expect("persist traversal only");
-    let traversal_restore = fixture
-        .database
-        .restore_queue(fixture.source)
-        .await
-        .expect("restore traversal-only update");
-    assert_eq!(
-        traversal_restore
-            .occurrences
-            .iter()
-            .filter_map(|occurrence| occurrence.occurrence_key)
-            .collect::<Vec<_>>(),
-        traversal
-    );
-    assert_eq!(traversal_restore.state.current, restored.state.current);
-    assert_eq!(
-        traversal_restore.state.prepared_next,
-        restored.state.prepared_next
-    );
     let canonical_after = fixture
         .database
         .queue_page(fixture.source, None, "", 256, &cancel)
@@ -241,7 +216,6 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
         .rev()
         .enumerate()
         .map(|(position, row)| QueueCompactOccurrence {
-            occurrence_key: Some(row.occurrence_key),
             object_id: row.object_id.clone(),
             track_key: row.track_key,
             canonical_position: position as i64,
@@ -249,19 +223,17 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
             provenance: row.provenance.clone(),
         })
         .collect::<Vec<_>>();
-    fixture
-        .database
-        .persist_compact_queue(
-            fixture.source,
-            &compact,
-            Some("offline"),
-            Some("duplicate"),
-            1_750,
-            QueueRepeatMode::All,
-            true,
-        )
-        .await
-        .expect("persist compact Queue");
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &compact,
+        Some("offline"),
+        Some("duplicate"),
+        1_750,
+        QueueRepeatMode::All,
+        true,
+    )
+    .await;
     let compact_restore = fixture
         .database
         .restore_queue(fixture.source)
@@ -289,37 +261,6 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
             .collect::<Vec<_>>(),
         ["offline", "duplicate", "first"]
     );
-    assert!(
-        fixture
-            .database
-            .move_queue_occurrence(fixture.source, page[1].occurrence_key, 0, 0)
-            .await
-            .expect("move Queue occurrence")
-    );
-    let moved = fixture
-        .database
-        .queue_page(fixture.source, None, "", 10, &cancel)
-        .await
-        .expect("moved Queue page");
-    assert_eq!(moved[0].object_id, "duplicate");
-    assert!(
-        fixture
-            .database
-            .remove_queue_occurrence(fixture.source, moved[1].occurrence_key)
-            .await
-            .expect("remove Queue occurrence")
-    );
-    assert_eq!(
-        fixture
-            .database
-            .restore_queue(fixture.source)
-            .await
-            .expect("restore edited Queue")
-            .occurrences
-            .len(),
-        2
-    );
-
     let mut raw = connection(&fixture.path).await;
     let canonical_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT queue_occurrence_key FROM queue_occurrences WHERE source_key=?1 AND position>?2 ORDER BY position LIMIT 256")
         .bind(fixture.source).bind(-1_i64).fetch_all(&mut raw).await.expect("Queue page plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
@@ -339,7 +280,6 @@ async fn queue_restores_exact_orders_duplicates_state_and_offline_media() {
 async fn compact_queue_reuses_object_identity_before_the_persisted_key_is_known() {
     let fixture = fixture().await;
     let occurrence = QueueCompactOccurrence {
-        occurrence_key: None,
         object_id: "new-live-occurrence".to_string(),
         track_key: Some(fixture.tracks[0]),
         canonical_position: 0,
@@ -348,19 +288,17 @@ async fn compact_queue_reuses_object_identity_before_the_persisted_key_is_known(
     };
 
     for _ in 0..2 {
-        fixture
-            .database
-            .persist_compact_queue(
-                fixture.source,
-                std::slice::from_ref(&occurrence),
-                Some(&occurrence.object_id),
-                None,
-                0,
-                QueueRepeatMode::None,
-                false,
-            )
-            .await
-            .expect("persist the same live occurrence");
+        persist_queue(
+            &fixture.database,
+            fixture.source,
+            std::slice::from_ref(&occurrence),
+            Some(&occurrence.object_id),
+            None,
+            0,
+            QueueRepeatMode::None,
+            false,
+        )
+        .await;
     }
 
     let mut raw = connection(&fixture.path).await;
@@ -374,6 +312,46 @@ async fn compact_queue_reuses_object_identity_before_the_persisted_key_is_known(
         .await
         .expect("count persisted occurrence"),
         1
+    );
+}
+
+#[tokio::test]
+async fn compact_queue_persistence_pages_duplicate_occurrences_without_losing_order() {
+    let fixture = fixture().await;
+    let occurrences = (0..260)
+        .map(|position| QueueCompactOccurrence {
+            object_id: format!("paged-{position}"),
+            track_key: Some(fixture.tracks[position % fixture.tracks.len()]),
+            canonical_position: position as i64,
+            traversal_position: (259 - position) as i64,
+            provenance: library::QueueProvenance::Manual,
+        })
+        .collect::<Vec<_>>();
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &occurrences,
+        Some("paged-129"),
+        Some("paged-128"),
+        23_000,
+        QueueRepeatMode::All,
+        true,
+    )
+    .await;
+
+    let restored = fixture
+        .database
+        .restore_queue(fixture.source)
+        .await
+        .expect("restore paged Queue");
+    assert_eq!(restored.occurrences.len(), 260);
+    assert_eq!(restored.occurrences[0].object_id, "paged-259");
+    assert_eq!(restored.occurrences[259].object_id, "paged-0");
+    assert_eq!(restored.progress_millis, 23_000);
+    assert_eq!(restored.current_occurrence.as_deref(), Some("paged-129"));
+    assert_eq!(
+        restored.prepared_next_occurrence.as_deref(),
+        Some("paged-128")
     );
 }
 
@@ -408,7 +386,6 @@ async fn occurrence_media_and_progress_follow_the_requested_transition() {
         .take(3)
         .enumerate()
         .map(|(position, track)| QueueCompactOccurrence {
-            occurrence_key: None,
             object_id: format!("transition-{position}"),
             track_key: Some(*track),
             canonical_position: position as i64,
@@ -416,19 +393,17 @@ async fn occurrence_media_and_progress_follow_the_requested_transition() {
             provenance: library::QueueProvenance::Manual,
         })
         .collect::<Vec<_>>();
-    fixture
-        .database
-        .persist_compact_queue(
-            fixture.source,
-            occurrences.iter().cloned(),
-            Some("transition-0"),
-            Some("transition-1"),
-            0,
-            QueueRepeatMode::None,
-            false,
-        )
-        .await
-        .expect("persist transition Queue");
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &occurrences,
+        Some("transition-0"),
+        Some("transition-1"),
+        0,
+        QueueRepeatMode::None,
+        false,
+    )
+    .await;
 
     for (position, occurrence) in occurrences.iter().enumerate() {
         let media = fixture
@@ -469,8 +444,11 @@ async fn occurrence_media_and_progress_follow_the_requested_transition() {
             .restore_queue(fixture.source)
             .await
             .expect("restore progress");
-        assert_eq!(restored.state.current, Some(media.occurrence_key));
-        assert_eq!(restored.state.progress_millis, (position as i64 + 1) * 1000);
+        assert_eq!(
+            restored.current_occurrence.as_deref(),
+            Some(occurrence.object_id.as_str())
+        );
+        assert_eq!(restored.progress_millis, (position as i64 + 1) * 1000);
     }
 }
 
@@ -523,7 +501,6 @@ async fn album_playlist_and_smart_playlist_materialize_exact_queue_media() {
             .iter()
             .enumerate()
             .map(|(position, track)| QueueCompactOccurrence {
-                occurrence_key: None,
                 object_id: format!("{name}-{position}"),
                 track_key: Some(*track),
                 canonical_position: position as i64,
@@ -534,19 +511,17 @@ async fn album_playlist_and_smart_playlist_materialize_exact_queue_media() {
                 },
             })
             .collect::<Vec<_>>();
-        fixture
-            .database
-            .persist_compact_queue(
-                fixture.source,
-                occurrences.iter().cloned(),
-                Some(&occurrences[0].object_id),
-                occurrences.get(1).map(|entry| entry.object_id.as_str()),
-                0,
-                QueueRepeatMode::None,
-                false,
-            )
-            .await
-            .expect("persist collection Queue");
+        persist_queue(
+            &fixture.database,
+            fixture.source,
+            &occurrences,
+            Some(&occurrences[0].object_id),
+            occurrences.get(1).map(|entry| entry.object_id.as_str()),
+            0,
+            QueueRepeatMode::None,
+            false,
+        )
+        .await;
         for (position, occurrence) in occurrences.iter().enumerate() {
             let media = fixture
                 .database

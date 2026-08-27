@@ -11,13 +11,12 @@ use crate::layout::{
     width_allocation_owner,
 };
 use crate::localization::{
-    bind_drop_down_options, bind_widget_tooltip, bind_widget_tooltip_with, localized_label,
+    bind_drop_down_options_with, bind_widget_tooltip, bind_widget_tooltip_with, localized_label,
 };
 use crate::player::{select_next_audio_output, select_previous_audio_output};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::shell::Shell;
 use crate::shell::actions::{ADD_ICON, MORE_ICON, sort_order_icon, toggle_mute_shortcut};
-use crate::shell::route::{MountedRoute, MountedRouteItemNavigation, MountedRouteResume};
 use crate::{
     LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, available_sort_fields,
 };
@@ -64,15 +63,6 @@ impl LibraryPageShell {
     pub(crate) fn widget(&self) -> gtk::Widget {
         self.widget.clone()
     }
-
-    pub(crate) fn mounted_route(
-        &self,
-        resume: MountedRouteResume,
-        item_navigation: MountedRouteItemNavigation,
-    ) -> MountedRoute {
-        MountedRoute::new(self.widget(), resume).with_item_navigation(item_navigation)
-    }
-
     pub(crate) fn apply_library_list_settings(
         &self,
         key: LibraryListKey,
@@ -80,11 +70,10 @@ impl LibraryPageShell {
     ) {
         self.toolbar.apply(key, settings);
     }
-
     pub(crate) fn set_empty(&self, empty: bool) {
         self.source_empty.set(empty);
         self.contents.set_visible_child_name(library_page_child(
-            self.source_empty.get(),
+            empty,
             self.search.text().as_str(),
             (self.has_visible_results)(),
         ));
@@ -93,7 +82,7 @@ impl LibraryPageShell {
 
 #[derive(Clone)]
 pub(crate) struct LibraryToolbarProjection {
-    key: LibraryListKey,
+    state: Rc<RefCell<LibraryToolbarState>>,
     widget: gtk::Widget,
     controls: gtk::Box,
     sort_dropdown: gtk::DropDown,
@@ -101,6 +90,11 @@ pub(crate) struct LibraryToolbarProjection {
     layout: gtk::Button,
     layout_mode: Rc<Cell<LibraryLayout>>,
     syncing: Rc<Cell<bool>>,
+}
+
+#[derive(Clone, Copy)]
+struct LibraryToolbarState {
+    key: LibraryListKey,
     include_detail: bool,
     sort_fields: &'static [LibraryField],
 }
@@ -126,19 +120,21 @@ impl LibraryToolbarProjection {
     }
 
     pub(crate) fn apply(&self, key: LibraryListKey, settings: &LibraryListSettings) {
-        if key != self.key {
+        let state = *self.state.borrow();
+        if key != state.key {
             return;
         }
         self.syncing.set(true);
         self.sort_dropdown.set_selected(
-            self.sort_fields
+            state
+                .sort_fields
                 .iter()
                 .position(|field| *field == settings.sort_key)
                 .unwrap_or(0) as u32,
         );
         self.direction
             .set_icon_name(sort_order_icon(settings.descending));
-        let layout = toolbar_layout(settings.layout, self.include_detail);
+        let layout = toolbar_layout(settings.layout, state.include_detail);
         self.layout.set_icon_name(layout_icon(layout));
         self.layout_mode.set(layout);
         self.syncing.set(false);
@@ -150,63 +146,53 @@ impl Shell {
         self: &Rc<Self>,
         options: LibraryPageShellOptions,
     ) -> LibraryPageShell {
-        let LibraryPageShellOptions {
-            key,
-            empty,
-            empty_body,
-            search,
-            has_visible_results,
-            content,
-        } = options;
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, ROUTE_TOP_MARGIN);
         wrapper.add_css_class("route-content");
         wrapper.set_margin_top(ROUTE_TOP_MARGIN);
         wrapper.set_margin_bottom(LIBRARY_ROUTE_BOTTOM_MARGIN);
         wrapper.set_hexpand(true);
         wrapper.set_vexpand(true);
-        let toolbar = self.library_toolbar_projection(key, search.clone());
+        let toolbar = self.library_toolbar_projection(options.key, options.search.clone());
         wrapper.append(&library_route_inset(toolbar.widget()));
-        self.set_route_search(Some(search.clone()));
-
-        let stack = gtk::Stack::new();
-        stack.set_hexpand(true);
-        stack.set_vexpand(true);
-        stack.add_named(
-            &library_route_inset(self.route_empty_view(empty_body)),
+        self.set_route_search(Some(options.search.clone()));
+        let contents = gtk::Stack::new();
+        contents.set_hexpand(true);
+        contents.set_vexpand(true);
+        contents.add_named(
+            &library_route_inset(self.route_empty_view(options.empty_body)),
             Some("empty"),
         );
-        stack.add_named(
+        contents.add_named(
             &library_route_inset(self.route_empty_view(msgid(r"No results ¯\_(°╭╮°)_/¯"))),
             Some("search-empty"),
         );
-        stack.add_named(&content, Some("content"));
-        stack.set_visible_child_name(library_page_child(
-            empty,
-            search.text().as_str(),
-            has_visible_results(),
+        contents.add_named(&options.content, Some("content"));
+        contents.set_visible_child_name(library_page_child(
+            options.empty,
+            options.search.text().as_str(),
+            (options.has_visible_results)(),
         ));
-        wrapper.append(&stack);
-
-        let source_empty = Rc::new(Cell::new(empty));
-        let search_contents = weak_target_callback(&stack, {
-            let source_empty = Rc::clone(&source_empty);
-            let has_visible_results = Rc::clone(&has_visible_results);
-            move |contents, query: glib::GString| {
-                contents.set_visible_child_name(library_page_child(
-                    source_empty.get(),
-                    query.as_str(),
-                    has_visible_results(),
-                ));
-            }
+        wrapper.append(&contents);
+        let source_empty = Rc::new(Cell::new(options.empty));
+        let weak_contents = contents.downgrade();
+        let search_empty = Rc::clone(&source_empty);
+        let search_visible = Rc::clone(&options.has_visible_results);
+        options.search.connect_search_changed(move |search| {
+            let Some(contents) = weak_contents.upgrade() else {
+                return;
+            };
+            contents.set_visible_child_name(library_page_child(
+                search_empty.get(),
+                search.text().as_str(),
+                search_visible(),
+            ));
         });
-        search.connect_search_changed(move |search| search_contents(search.text()));
-
         LibraryPageShell {
             widget: wrapper.upcast(),
-            contents: stack,
+            contents,
             toolbar,
-            search: search.clone(),
-            has_visible_results,
+            search: options.search,
+            has_visible_results: options.has_visible_results,
             source_empty,
         }
     }
@@ -404,42 +390,52 @@ impl Shell {
             gtk::Orientation::Horizontal,
             LIBRARY_TOOLBAR_CONTROL_SPACING,
         );
-        let command_button = match key {
-            LibraryListKey::Playlists => {
-                let create = gtk::Button::new();
-                set_library_command_button_content(&create, false, ADD_ICON, "New Playlist");
-                bind_widget_tooltip(&create, "New Playlist");
-                let shell = Rc::clone(self);
-                create.connect_clicked(move |_| shell.new_playlist_dialog());
-                controls.append(&create);
-                Some(create)
-            }
-            LibraryListKey::SmartPlaylists => {
-                let create = gtk::Button::new();
-                set_library_command_button_content(&create, false, ADD_ICON, "New Playlist");
-                bind_widget_tooltip(&create, "New Playlist");
-                let shell = Rc::clone(self);
-                create.connect_clicked(move |_| shell.new_smart_playlist_dialog());
-                controls.append(&create);
-                Some(create)
-            }
-            _ => None,
-        };
+        let toolbar_state = Rc::new(RefCell::new(LibraryToolbarState {
+            key,
+            include_detail,
+            sort_fields,
+        }));
+        let command_button = gtk::Button::new();
+        set_library_command_button_content(&command_button, false, ADD_ICON, "New Playlist");
+        bind_widget_tooltip(&command_button, "New Playlist");
+        command_button.set_visible(matches!(
+            key,
+            LibraryListKey::Playlists | LibraryListKey::SmartPlaylists
+        ));
+        {
+            let shell = Rc::clone(self);
+            let state = Rc::clone(&toolbar_state);
+            command_button.connect_clicked(move |_| match state.borrow().key {
+                LibraryListKey::Playlists => shell.new_playlist_dialog(),
+                LibraryListKey::SmartPlaylists => shell.new_smart_playlist_dialog(),
+                _ => {}
+            });
+        }
+        controls.append(&command_button);
 
         let settings = self.settings.current.borrow().library_list(key);
-        let sort_messages = sort_fields
-            .iter()
-            .map(|field| library_sort_title(key, *field))
-            .collect::<Vec<_>>();
         let sort_options = gtk::StringList::new(&[]);
         let sort_dropdown = gtk::DropDown::new(Some(sort_options), None::<gtk::Expression>);
         let preferred_sort_width = Rc::new(Cell::new(LIBRARY_TOOLBAR_SORT_MIN_WIDTH));
         let preferred_sort_width_for_locale = Rc::clone(&preferred_sort_width);
-        bind_drop_down_options(&sort_dropdown, sort_messages, move |labels| {
-            let width = library_toolbar_sort_width_for_labels(labels.iter().map(String::as_str));
-            preferred_sort_width_for_locale.set(width);
-            width
-        });
+        let locale_toolbar_state = Rc::clone(&toolbar_state);
+        bind_drop_down_options_with(
+            &sort_dropdown,
+            move || {
+                let state = locale_toolbar_state.borrow();
+                state
+                    .sort_fields
+                    .iter()
+                    .map(|field| library_sort_title(state.key, *field))
+                    .collect()
+            },
+            move |labels| {
+                let width =
+                    library_toolbar_sort_width_for_labels(labels.iter().map(String::as_str));
+                preferred_sort_width_for_locale.set(width);
+                width
+            },
+        );
         configure_sort_dropdown_factory(&sort_dropdown);
         sort_dropdown.set_sensitive(sort_fields.len() > 1);
         sort_dropdown.set_hexpand(false);
@@ -454,15 +450,20 @@ impl Shell {
         {
             let shell = Rc::clone(self);
             let syncing = Rc::clone(&syncing);
+            let state = Rc::clone(&toolbar_state);
             sort_dropdown.connect_selected_notify(move |dropdown| {
                 if syncing.get() {
                     return;
                 }
-                let sort_key = sort_fields
+                let state = *state.borrow();
+                let sort_key = state
+                    .sort_fields
                     .get(dropdown.selected() as usize)
                     .copied()
                     .unwrap_or(LibraryField::Title);
-                shell.update_library_list_settings(key, |settings| settings.sort_key = sort_key);
+                shell.update_library_list_settings(state.key, |settings| {
+                    settings.sort_key = sort_key
+                });
             });
         }
         controls.append(&sort_dropdown);
@@ -472,12 +473,13 @@ impl Shell {
         {
             let shell = Rc::clone(self);
             let syncing = Rc::clone(&syncing);
+            let state = Rc::clone(&toolbar_state);
             direction.connect_clicked(move |direction| {
                 if syncing.get() {
                     return;
                 }
                 let mut descending = false;
-                shell.update_library_list_settings(key, |settings| {
+                shell.update_library_list_settings(state.borrow().key, |settings| {
                     settings.descending = !settings.descending;
                     descending = settings.descending;
                 });
@@ -502,13 +504,15 @@ impl Shell {
             let shell = Rc::clone(self);
             let syncing = Rc::clone(&syncing);
             let layout_mode = Rc::clone(&layout_mode);
+            let state = Rc::clone(&toolbar_state);
             layout.connect_clicked(move |_| {
                 if syncing.get() {
                     return;
                 }
-                shell.update_library_list_settings(key, |settings| {
-                    settings.layout = if include_detail {
-                        next_layout(key, settings.layout)
+                let state = *state.borrow();
+                shell.update_library_list_settings(state.key, |settings| {
+                    settings.layout = if state.include_detail {
+                        next_layout(state.key, settings.layout)
                     } else {
                         next_row_grid_layout(settings.layout)
                     };
@@ -522,30 +526,31 @@ impl Shell {
         configure_library_toolbar_icon_button(&configure, "Customize display");
         {
             let shell = Rc::clone(self);
+            let state = Rc::clone(&toolbar_state);
             configure.connect_clicked(move |_| {
-                shell.present_library_config_dialog_with_detail(key, include_detail);
+                let state = *state.borrow();
+                shell.present_library_config_dialog_with_detail(state.key, state.include_detail);
             });
         }
         controls.append(&configure);
         toolbar.append(&self.window_controls_end_area(&controls, LIBRARY_TOOLBAR_CONTROL_SPACING));
         let command_compact = Cell::new(false);
-        if let Some(command_button) = command_button.as_ref() {
-            apply_library_command_button_layout(&command_button, &command_compact, 1);
-        }
+        apply_library_command_button_layout(&command_button, &command_compact, 1);
         let applied_sort_width = Cell::new(sort_dropdown.width_request());
         let sort_dropdown_for_width = sort_dropdown.clone();
+        let command_button_for_width = command_button.clone();
+        let preferred_sort_width_for_allocation = Rc::clone(&preferred_sort_width);
         let owner = width_allocation_owner(&toolbar, move |width| {
-            if let Some(command_button) = command_button.as_ref() {
-                apply_library_command_button_layout(&command_button, &command_compact, width);
-            }
-            let sort_width = responsive_toolbar_sort_width(width, preferred_sort_width.get());
+            apply_library_command_button_layout(&command_button_for_width, &command_compact, width);
+            let sort_width =
+                responsive_toolbar_sort_width(width, preferred_sort_width_for_allocation.get());
             if applied_sort_width.replace(sort_width) != sort_width {
                 sort_dropdown_for_width.set_width_request(sort_width);
             }
         });
         let widget = owner.upcast();
         LibraryToolbarProjection {
-            key,
+            state: toolbar_state,
             widget,
             controls,
             sort_dropdown,
@@ -553,8 +558,6 @@ impl Shell {
             layout,
             layout_mode,
             syncing,
-            include_detail,
-            sort_fields,
         }
     }
     pub(crate) fn window_controls_end_area(

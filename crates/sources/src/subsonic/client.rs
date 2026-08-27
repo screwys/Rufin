@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
-use crate::source::RemotePlaylistSource;
 use serde::{
     Deserialize, Serialize,
     de::{self, DeserializeOwned, IntoDeserializer, Visitor},
@@ -84,18 +83,8 @@ impl SubsonicSource {
                         name: folder.name,
                     });
                 } else {
-                    let track = track_from_dto(self, child);
-                    page.tracks.push(crate::LiveSearchTrack {
-                        object_id: track.id,
-                        title: track.title,
-                        artist: track.artist,
-                        album: track.album,
-                        artwork_binding: track
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    });
+                    page.tracks
+                        .push(String::from(self.id("track", &raw_id_string(&child.id))));
                 }
             }
         } else {
@@ -371,8 +360,12 @@ impl SubsonicSource {
     }
 }
 
-impl RemotePlaylistSource for SubsonicSource {
-    async fn create_playlist(&self, name: &str, track_ids: &[String]) -> SourceResult<PlaylistId> {
+impl SubsonicSource {
+    pub(crate) async fn create_playlist(
+        &self,
+        name: &str,
+        track_ids: &[String],
+    ) -> SourceResult<PlaylistId> {
         let mut extra = vec![("name", name.trim().to_string())];
         extra.extend(
             track_ids
@@ -384,7 +377,7 @@ impl RemotePlaylistSource for SubsonicSource {
             self.id("playlist", &raw_id_string(&body.playlist.id)),
         ))
     }
-    async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
+    pub(crate) async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
         self.get_unit(
             "updatePlaylist",
             &[
@@ -394,14 +387,14 @@ impl RemotePlaylistSource for SubsonicSource {
         )
         .await
     }
-    async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
+    pub(crate) async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         self.get_unit(
             "deletePlaylist",
             &[("id", raw_item_id(playlist_id).to_string())],
         )
         .await
     }
-    async fn add_playlist_tracks(
+    pub(crate) async fn add_playlist_tracks(
         &self,
         playlist_id: &str,
         track_ids: &[String],
@@ -414,7 +407,7 @@ impl RemotePlaylistSource for SubsonicSource {
         );
         self.get_unit("updatePlaylist", &extra).await
     }
-    async fn remove_playlist_entries(
+    pub(crate) async fn remove_playlist_entries(
         &self,
         playlist_id: &str,
         entry_ids: &[String],
@@ -433,7 +426,7 @@ impl RemotePlaylistSource for SubsonicSource {
         }
         self.get_unit("updatePlaylist", &extra).await
     }
-    async fn move_playlist_entry(
+    pub(crate) async fn move_playlist_entry(
         &self,
         playlist_id: &str,
         entry_id: &str,
@@ -1633,5 +1626,75 @@ impl Visitor<'_> for SubsonicIdVisitor {
         E: de::Error,
     {
         Ok(SubsonicId(value.to_string()))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{SubsonicCredential, redacted_subsonic_url};
+    use crate::subsonic::{
+        SubsonicAuthentication, SubsonicFlavor, SubsonicSource, SubsonicSourceConfig,
+    };
+    use reqwest::Url;
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn subsonic_urls_and_credentials_never_expose_authentication_values() {
+        let url = Url::parse(
+            "https://music.example/rest/stream?apiKey=secret-key&p=password&s=salt&t=token&id=track-one",
+        )
+        .expect("Subsonic URL");
+        let redacted = redacted_subsonic_url(&url);
+        for secret in ["secret-key", "password", "salt", "token"] {
+            assert!(!redacted.contains(secret));
+        }
+        assert!(redacted.contains("id=track-one"));
+
+        let credential = SubsonicCredential::from_api_key("secret-key").expect("API key");
+        assert!(!format!("{credential:?}").contains("secret-key"));
+    }
+
+    #[tokio::test]
+    async fn opensubsonic_recommendations_use_provider_similar_songs() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/getSimilarSongs.view"))
+            .and(query_param("id", "artist-one"))
+            .and(query_param("count", "25"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": {
+                    "status": "ok",
+                    "version": "1.16.1",
+                    "similarSongs": {"song": [{"id": "track-two", "title": "Two"}]}
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let credential = SubsonicCredential::from_password("password").serialize();
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::Password,
+            },
+            credential,
+        )
+        .expect("OpenSubsonic source");
+
+        assert_eq!(
+            source
+                .generated_track_object_ids(
+                    &crate::SourceRadioSeed::Artist("subsonic:artist:artist-one".to_string()),
+                    25,
+                )
+                .await
+                .expect("OpenSubsonic recommendations"),
+            ["subsonic:track:track-two"]
+        );
     }
 }

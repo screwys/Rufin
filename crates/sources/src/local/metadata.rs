@@ -524,6 +524,60 @@ mod tests {
         }
     }
 
+    #[test]
+    fn local_metadata_rejects_a_concurrent_file_change_without_overwriting_it() {
+        let directory = tempfile::tempdir().expect("metadata directory");
+        let path = directory.path().join("track.wav");
+        fs::write(&path, silent_wav()).expect("write WAV");
+        let stale = revision(&path).expect("file revision");
+        let mut concurrent = silent_wav();
+        concurrent.extend_from_slice(b"concurrent-change");
+        fs::write(&path, &concurrent).expect("change WAV");
+
+        let result = write_track(
+            &path,
+            Some("wav"),
+            &stale,
+            &track_edit(TrackMetadataValues {
+                title: "Should not replace".to_string(),
+                ..TrackMetadataValues::default()
+            }),
+        );
+
+        assert!(matches!(result, Err(SourceMetadataError::Conflict)));
+        assert_eq!(
+            fs::read(&path).expect("unchanged concurrent file"),
+            concurrent
+        );
+    }
+
+    #[test]
+    #[cfg(any(target_os = "linux", target_os = "macos", target_os = "windows"))]
+    fn aggregate_commit_failure_restores_every_replaced_file() {
+        let directory = tempfile::tempdir().expect("metadata directory");
+        let first = directory.path().join("first.wav");
+        let second = directory.path().join("second.wav");
+        fs::write(&first, silent_wav()).expect("first WAV");
+        let mut second_bytes = silent_wav();
+        second_bytes.extend_from_slice(b"second");
+        fs::write(&second, &second_bytes).expect("second WAV");
+        let first_bytes = fs::read(&first).expect("first original");
+        let second_original = directory.path().join("second.original");
+        let prepared = [&first, &second]
+            .into_iter()
+            .map(|path| prepare_file(path, Some("wav"), |_, _| {}))
+            .collect::<Result<Vec<_>, _>>()
+            .expect("prepared metadata files");
+        fs::rename(&second, &second_original).expect("make second replacement fail");
+
+        assert!(commit_batch(prepared).is_err());
+        assert_eq!(fs::read(&first).expect("restored first"), first_bytes);
+        assert_eq!(
+            fs::read(&second_original).expect("untouched second"),
+            second_bytes
+        );
+    }
+
     fn silent_wav() -> Vec<u8> {
         let data_len = 16_000_u32;
         let mut bytes = Vec::with_capacity(44 + data_len as usize);

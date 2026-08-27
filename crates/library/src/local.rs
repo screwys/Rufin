@@ -56,6 +56,7 @@ pub struct LocalFileRow {
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
     pub dependencies: Vec<String>,
+    pub track_object_id: Option<String>,
 }
 
 #[derive(Clone, Debug, FromRow)]
@@ -71,12 +72,6 @@ struct LocalFileScalar {
     inode: Option<i64>,
     parse_version: Option<i64>,
     state: String,
-}
-
-#[derive(FromRow)]
-struct LocalDependency {
-    local_file_key: LocalFileKey,
-    dependency_path: String,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -236,15 +231,17 @@ impl Database {
         &self,
         source: SourceKey,
         after: Option<TrackKey>,
+        source_path: Option<&str>,
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<MappingTrackRow>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let rows = sqlx::query_as::<_, MappingTrackRow>(
             "SELECT track_key,object_id,source_path,title,display_album album,display_artist artist,disc_number,track_number,duration_millis
-             FROM tracks WHERE source_key=?1 AND track_key>?2 AND source_path IS NOT NULL
-             ORDER BY track_key LIMIT ?3",
-        ).bind(source).bind(after.map_or(0, TrackKey::raw)).bind(limit.clamp(1,128) as i64)
+             FROM tracks WHERE source_key=?1 AND source_path IS NOT NULL
+               AND ((?3 IS NULL AND track_key>?2) OR source_path=?3)
+             ORDER BY track_key LIMIT ?4",
+        ).bind(source).bind(after.map_or(0, TrackKey::raw)).bind(source_path).bind(limit.clamp(1,128) as i64)
         .fetch_all(&mut *connection).await;
         Database::clear_progress(&mut connection).await?;
         Ok(rows?)
@@ -268,202 +265,6 @@ impl Database {
         Ok(result?)
     }
 
-    pub async fn local_directory_page(
-        &self,
-        source: SourceKey,
-        after: Option<&str>,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<LocalFileRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        let scalars = sqlx::query_as::<_, LocalFileScalar>(
-            "SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state
-             FROM local_files WHERE source_key=?1 AND kind='directory' AND path>?2
-             ORDER BY path LIMIT ?3",
-        )
-        .bind(source)
-        .bind(after.unwrap_or(""))
-        .bind(limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64)
-        .fetch_all(&mut *transaction)
-        .await?;
-        let rows = load_local_file_rows(&mut transaction, scalars).await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows)
-    }
-
-    /// Returns the bounded persisted Local component touched by exact watcher paths.
-    /// Direct observations, CUE owners of changed dependencies, and directory siblings of
-    /// changed artwork are resolved from the accepted observation ledger without walking roots.
-    pub async fn local_component_file_page(
-        &self,
-        source: SourceKey,
-        paths: &[String],
-        image_directories: &[String],
-        after: Option<LocalFileKey>,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<LocalFileRow>> {
-        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local watcher batch exceeds 128 paths".to_string(),
-            ));
-        }
-        if paths.is_empty() && image_directories.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut transaction = connection.begin().await?;
-        if image_directories.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local artwork directory batch exceeds 128 paths".to_string(),
-            ));
-        }
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
-        if paths.is_empty() {
-            query.push("SELECT NULL,NULL WHERE 0");
-        } else {
-            query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
-                row.push_bind(path).push_bind(position as i64);
-            });
-        }
-        query.push("), artwork_directory(prefix) AS (");
-        if image_directories.is_empty() {
-            query.push("SELECT NULL WHERE 0");
-        } else {
-            query.push_values(image_directories, |mut row, directory| {
-                row.push_bind(directory);
-            });
-        }
-        query.push(") SELECT DISTINCT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.parse_version,file.state FROM local_files file WHERE file.source_key=")
-            .push_bind(source)
-            .push(" AND file.local_file_key>")
-            .push_bind(after.map_or(0, LocalFileKey::raw))
-            .push(" AND (EXISTS(SELECT 1 FROM requested WHERE requested.path=file.path) OR EXISTS(SELECT 1 FROM local_file_dependencies dependency JOIN requested ON requested.path=dependency.dependency_path WHERE dependency.local_file_key=file.local_file_key) OR EXISTS(SELECT 1 FROM artwork_directory WHERE file.path>=artwork_directory.prefix AND file.path<artwork_directory.prefix||char(1114111))) ORDER BY file.local_file_key LIMIT ")
-            .push_bind(limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64);
-        let scalars = query
-            .build_query_as::<LocalFileScalar>()
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        let rows = load_local_file_rows(&mut transaction, scalars).await?;
-        transaction.commit().await?;
-        Database::clear_progress(&mut connection).await?;
-        Ok(rows)
-    }
-
-    pub async fn local_track_objects_for_paths(
-        &self,
-        source: SourceKey,
-        paths: &[String],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local component batch exceeds 128 paths".to_string(),
-            ));
-        }
-        if paths.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
-        query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
-            row.push_bind(path).push_bind(position as i64);
-        });
-        query.push(") SELECT DISTINCT track.object_id FROM requested JOIN tracks track ON track.source_key=")
-            .push_bind(source)
-            .push(" AND (track.media_uri='file://'||requested.path OR track.cue_path=requested.path) ORDER BY track.object_id");
-        let result = query
-            .build_query_scalar()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn local_accepted_paths(
-        &self,
-        source: SourceKey,
-        paths: &[String],
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<String>> {
-        if paths.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local accepted-path batch exceeds 128 files".to_string(),
-            ));
-        }
-        if paths.is_empty() {
-            return Ok(Vec::new());
-        }
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(path,position) AS (");
-        query.push_values(paths.iter().enumerate(), |mut row, (position, path)| {
-            row.push_bind(path).push_bind(position as i64);
-        });
-        query.push(") SELECT requested.path FROM requested WHERE EXISTS (SELECT 1 FROM tracks track WHERE track.source_key=")
-            .push_bind(source)
-            .push(" AND (track.media_uri=('file://'||requested.path) OR track.cue_path=requested.path)) ORDER BY requested.position");
-        let result = query
-            .build_query_scalar()
-            .persistent(false)
-            .fetch_all(&mut *connection)
-            .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn upsert_local_file(
-        &self,
-        source: SourceKey,
-        file: &LocalFileWrite,
-        dependencies: &[String],
-    ) -> LibraryResult<LocalFileKey> {
-        let mut keys = self
-            .upsert_local_files(source, &[(file.clone(), dependencies.to_vec())])
-            .await?;
-        Ok(keys.remove(0))
-    }
-
-    pub async fn upsert_local_files(
-        &self,
-        source: SourceKey,
-        files: &[(LocalFileWrite, Vec<String>)],
-    ) -> LibraryResult<Vec<LocalFileKey>> {
-        if files.len() > LOCAL_FILE_PAGE_LIMIT {
-            return Err(LibraryError::InvalidRequest(
-                "Local observation batch exceeds 128 files".to_string(),
-            ));
-        }
-        for (file, dependencies) in files {
-            validate_local_file(file, dependencies)?;
-        }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let mut transaction = connection.begin().await?;
-        let mut keys = Vec::with_capacity(files.len());
-        for (file, dependencies) in files {
-            let key = sqlx::query_scalar::<_, LocalFileKey>("INSERT INTO local_files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11) ON CONFLICT(source_key,path) DO UPDATE SET root=excluded.root,relative_path=excluded.relative_path,kind=excluded.kind,size_bytes=excluded.size_bytes,mtime_ns=excluded.mtime_ns,device_id=excluded.device_id,inode=excluded.inode,parse_version=excluded.parse_version,state=excluded.state RETURNING local_file_key")
-                .bind(source).bind(&file.path).bind(&file.root).bind(&file.relative_path)
-                .bind(file.kind.as_str()).bind(file.size_bytes).bind(file.mtime_ns)
-                .bind(file.device_id).bind(file.inode).bind(file.parse_version)
-                .bind(file.state.as_str()).fetch_one(&mut *transaction).await?;
-            sqlx::query("DELETE FROM local_file_dependencies WHERE local_file_key=?1")
-                .bind(key)
-                .execute(&mut *transaction)
-                .await?;
-            for (position, dependency) in dependencies.iter().enumerate() {
-                sqlx::query("INSERT INTO local_file_dependencies(local_file_key,dependency_path,position) VALUES (?1,?2,?3)")
-                    .bind(key).bind(dependency).bind(position as i64).execute(&mut *transaction).await?;
-            }
-            keys.push(key);
-        }
-        transaction.commit().await?;
-        Ok(keys)
-    }
-
     pub async fn local_file_page(
         &self,
         source: SourceKey,
@@ -477,80 +278,42 @@ impl Database {
         let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
             .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
             .fetch_all(&mut *transaction).await?;
-        let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
-        if !scalars.is_empty() {
-            let mut query =
-                QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,position) AS (");
-            query.push_values(scalars.iter().enumerate(), |mut row, (position, file)| {
-                row.push_bind(file.local_file_key)
-                    .push_bind(position as i64);
-            });
-            query.push(") SELECT dependency.local_file_key,dependency.dependency_path FROM requested JOIN local_file_dependencies dependency USING(local_file_key) ORDER BY requested.position,dependency.position");
-            for dependency in query
-                .build_query_as::<LocalDependency>()
-                .persistent(false)
-                .fetch_all(&mut *transaction)
-                .await?
-            {
-                dependencies
-                    .entry(dependency.local_file_key)
-                    .or_default()
-                    .push(dependency.dependency_path);
-            }
-        }
-        let mut rows = Vec::with_capacity(scalars.len());
-        for scalar in scalars {
-            rows.push(LocalFileRow {
-                local_file_key: scalar.local_file_key,
-                path: scalar.path,
-                root: scalar.root,
-                relative_path: scalar.relative_path,
-                kind: LocalFileKind::parse(&scalar.kind)?,
-                size_bytes: scalar.size_bytes,
-                mtime_ns: scalar.mtime_ns,
-                device_id: scalar.device_id,
-                inode: scalar.inode,
-                parse_version: scalar.parse_version,
-                state: LocalFileState::parse(&scalar.state)?,
-                dependencies: dependencies
-                    .remove(&scalar.local_file_key)
-                    .unwrap_or_default(),
-            });
-        }
+        let rows = load_local_file_rows(&mut transaction, scalars).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(rows)
     }
 
-    pub async fn local_file_identities(
+    pub async fn local_file_reuse_candidates(
         &self,
         source: SourceKey,
-        identities: &[(i64, i64)],
+        observations: &[LocalFileWrite],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<LocalFileRow>> {
-        if identities.len() > LOCAL_FILE_PAGE_LIMIT {
+        if observations.len() > LOCAL_FILE_PAGE_LIMIT {
             return Err(LibraryError::InvalidRequest(
-                "Local identity batch exceeds 128 files".to_string(),
+                "Local reuse batch exceeds 128 files".to_string(),
             ));
         }
-        if identities.is_empty() {
+        if observations.is_empty() {
             return Ok(Vec::new());
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(device_id,inode,position) AS (");
+            QueryBuilder::<Sqlite>::new("WITH requested(path,device_id,inode,position) AS (");
         query.push_values(
-            identities.iter().enumerate(),
-            |mut row, (position, identity)| {
-                row.push_bind(identity.0)
-                    .push_bind(identity.1)
+            observations.iter().enumerate(),
+            |mut row, (position, observation)| {
+                row.push_bind(&observation.path)
+                    .push_bind(observation.device_id)
+                    .push_bind(observation.inode)
                     .push_bind(position as i64);
             },
         );
         query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
             .push_bind(source)
-            .push(" AND file.device_id=requested.device_id AND file.inode=requested.inode ORDER BY requested.position,file.local_file_key");
+            .push(" AND (file.path=requested.path OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
         let scalars = query
             .build_query_as::<LocalFileScalar>()
             .persistent(false)
@@ -560,58 +323,6 @@ impl Database {
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(rows)
-    }
-
-    pub async fn remove_local_file(
-        &self,
-        source: SourceKey,
-        key: LocalFileKey,
-    ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(
-            sqlx::query("DELETE FROM local_files WHERE source_key=?1 AND local_file_key=?2")
-                .bind(source)
-                .bind(key)
-                .execute(connection)
-                .await?
-                .rows_affected()
-                == 1,
-        )
-    }
-
-    pub async fn local_file_identity(
-        &self,
-        source: SourceKey,
-        device_id: i64,
-        inode: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<LocalFileRow>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let scalar = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state FROM local_files WHERE source_key=?1 AND device_id=?2 AND inode=?3 ORDER BY local_file_key LIMIT 1")
-            .bind(source).bind(device_id).bind(inode).fetch_optional(&mut *connection).await?;
-        let result = if let Some(scalar) = scalar {
-            let dependencies = sqlx::query_scalar("SELECT dependency_path FROM local_file_dependencies WHERE local_file_key=?1 ORDER BY position")
-                .bind(scalar.local_file_key).fetch_all(&mut *connection).await?;
-            Some(LocalFileRow {
-                local_file_key: scalar.local_file_key,
-                path: scalar.path,
-                root: scalar.root,
-                relative_path: scalar.relative_path,
-                kind: LocalFileKind::parse(&scalar.kind)?,
-                size_bytes: scalar.size_bytes,
-                mtime_ns: scalar.mtime_ns,
-                device_id: scalar.device_id,
-                inode: scalar.inode,
-                parse_version: scalar.parse_version,
-                state: LocalFileState::parse(&scalar.state)?,
-                dependencies,
-            })
-        } else {
-            None
-        };
-        Database::clear_progress(&mut connection).await?;
-        Ok(result)
     }
 
     pub async fn upsert_local_access(
@@ -726,6 +437,7 @@ async fn load_local_file_rows(
     scalars: Vec<LocalFileScalar>,
 ) -> LibraryResult<Vec<LocalFileRow>> {
     let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
+    let mut track_objects = BTreeMap::<LocalFileKey, String>::new();
     if !scalars.is_empty() {
         let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,position) AS (");
         query.push_values(scalars.iter().enumerate(), |mut row, (position, file)| {
@@ -733,16 +445,26 @@ async fn load_local_file_rows(
                 .push_bind(position as i64);
         });
         query.push(") SELECT dependency.local_file_key,dependency.dependency_path FROM requested JOIN local_file_dependencies dependency USING(local_file_key) ORDER BY requested.position,dependency.position");
-        for dependency in query
-            .build_query_as::<LocalDependency>()
+        for (file, dependency) in query
+            .build_query_as::<(LocalFileKey, String)>()
             .persistent(false)
             .fetch_all(&mut **transaction)
             .await?
         {
-            dependencies
-                .entry(dependency.local_file_key)
-                .or_default()
-                .push(dependency.dependency_path);
+            dependencies.entry(file).or_default().push(dependency);
+        }
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,path) AS (");
+        query.push_values(&scalars, |mut row, file| {
+            row.push_bind(file.local_file_key).push_bind(&file.path);
+        });
+        query.push(") SELECT requested.local_file_key,min(track.object_id) FROM requested JOIN tracks track ON track.media_uri='file://'||requested.path OR track.cue_path=requested.path GROUP BY requested.local_file_key");
+        for (file, object_id) in query
+            .build_query_as::<(LocalFileKey, String)>()
+            .persistent(false)
+            .fetch_all(&mut **transaction)
+            .await?
+        {
+            track_objects.insert(file, object_id);
         }
     }
     scalars
@@ -763,22 +485,10 @@ async fn load_local_file_rows(
                 dependencies: dependencies
                     .remove(&scalar.local_file_key)
                     .unwrap_or_default(),
+                track_object_id: track_objects.remove(&scalar.local_file_key),
             })
         })
         .collect()
-}
-
-fn validate_local_file(file: &LocalFileWrite, dependencies: &[String]) -> LibraryResult<()> {
-    if file.path.is_empty()
-        || file.root.is_empty()
-        || file.size_bytes.is_some_and(|value| value < 0)
-        || dependencies.iter().any(String::is_empty)
-    {
-        return Err(LibraryError::InvalidRequest(
-            "invalid Local file observation".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 fn validate_local_access(access: &LocalAccessWrite) -> LibraryResult<()> {

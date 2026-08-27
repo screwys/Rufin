@@ -14,8 +14,7 @@ pub(crate) struct ArtworkTile {
     request_key: Rc<RefCell<Option<artwork::ArtworkRequestIdentity>>>,
     artwork_request: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
     generation: Rc<Cell<u64>>,
-    binding_active: Rc<Cell<bool>>,
-    lifecycle_hooks_installed: Rc<Cell<bool>>,
+    request_cleanup_installed: Rc<Cell<bool>>,
 }
 
 #[derive(Clone)]
@@ -28,8 +27,7 @@ pub(crate) struct ArtworkTileWeak {
     request_key: Rc<RefCell<Option<artwork::ArtworkRequestIdentity>>>,
     artwork_request: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
     generation: Rc<Cell<u64>>,
-    binding_active: Rc<Cell<bool>>,
-    lifecycle_hooks_installed: Rc<Cell<bool>>,
+    request_cleanup_installed: Rc<Cell<bool>>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -85,8 +83,7 @@ impl ArtworkTile {
         let request_key = Rc::new(RefCell::new(None::<artwork::ArtworkRequestIdentity>));
         let artwork_request = Rc::new(RefCell::new(None));
         let generation = Rc::new(Cell::new(0));
-        let binding_active = Rc::new(Cell::new(false));
-        let lifecycle_hooks_installed = Rc::new(Cell::new(false));
+        let request_cleanup_installed = Rc::new(Cell::new(false));
 
         Self {
             area,
@@ -97,17 +94,12 @@ impl ArtworkTile {
             request_key,
             artwork_request,
             generation,
-            binding_active,
-            lifecycle_hooks_installed,
+            request_cleanup_installed,
         }
     }
 
     pub(crate) fn widget(&self) -> gtk::Widget {
         self.area.clone().upcast()
-    }
-
-    pub(super) fn identity(&self) -> usize {
-        self.area.as_ptr() as usize
     }
 
     pub(crate) fn downgrade(&self) -> ArtworkTileWeak {
@@ -120,32 +112,19 @@ impl ArtworkTile {
             request_key: Rc::clone(&self.request_key),
             artwork_request: Rc::clone(&self.artwork_request),
             generation: Rc::clone(&self.generation),
-            binding_active: Rc::clone(&self.binding_active),
-            lifecycle_hooks_installed: Rc::clone(&self.lifecycle_hooks_installed),
+            request_cleanup_installed: Rc::clone(&self.request_cleanup_installed),
         }
     }
 
-    pub(super) fn install_lifecycle_hooks_once<M, C>(&self, mapped: M, cleanup: C)
-    where
-        M: Fn(usize) + 'static,
-        C: FnOnce(usize) + 'static,
-    {
-        if self.lifecycle_hooks_installed.replace(true) {
+    pub(super) fn install_request_cleanup_once(&self) {
+        if self.request_cleanup_installed.replace(true) {
             return;
         }
 
-        let identity = self.identity();
-        self.area.connect_map(move |_| mapped(identity));
         let artwork_request = Rc::clone(&self.artwork_request);
-        let binding_active = Rc::clone(&self.binding_active);
-        let cleanup = RefCell::new(Some(cleanup));
         self.area.connect_destroy(move |_| {
-            binding_active.set(false);
             if let Some(request) = artwork_request.borrow_mut().take() {
                 request.abort();
-            }
-            if let Some(cleanup) = cleanup.borrow_mut().take() {
-                cleanup(identity);
             }
         });
     }
@@ -178,7 +157,14 @@ impl ArtworkTile {
         self.known_missing.set(terminal_missing);
 
         let has_texture = self.image.paintable().is_some();
-        self.sync_presentation(has_texture, true);
+        if has_texture || terminal_missing {
+            self.sync_presentation(has_texture, true);
+        } else {
+            self.image.set_visible(false);
+            self.area.remove_css_class("cover-fallback");
+            self.area.add_css_class("cover-pending");
+            self.area.set_opacity(1.0);
+        }
         self.area.queue_draw();
 
         ArtworkBindOutcome {
@@ -216,17 +202,11 @@ impl ArtworkTile {
     }
 
     pub(super) fn bind_pending(&self) -> u64 {
-        self.binding_active.set(false);
         self.bind_image_state(None, false)
     }
 
     pub(super) fn bind_missing(&self) -> u64 {
-        self.binding_active.set(false);
         self.bind_image_state(None, true)
-    }
-
-    pub(super) fn mark_artwork_bound(&self) {
-        self.binding_active.set(true);
     }
 
     fn bind_image_state(&self, texture: Option<gtk::gdk::Texture>, known_missing: bool) -> u64 {
@@ -256,7 +236,6 @@ impl ArtworkTile {
     }
 
     pub(super) fn clear_image(&self) {
-        self.binding_active.set(false);
         self.advance_generation();
         self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
         self.known_missing.set(false);
@@ -290,6 +269,7 @@ impl ArtworkTile {
     }
 
     fn sync_presentation(&self, has_texture: bool, bound: bool) {
+        self.area.remove_css_class("cover-pending");
         self.image.set_visible(has_texture);
         if bound && !has_texture {
             self.area.add_css_class("cover-fallback");
@@ -311,13 +291,8 @@ impl ArtworkTileWeak {
             request_key: Rc::clone(&self.request_key),
             artwork_request: Rc::clone(&self.artwork_request),
             generation: Rc::clone(&self.generation),
-            binding_active: Rc::clone(&self.binding_active),
-            lifecycle_hooks_installed: Rc::clone(&self.lifecycle_hooks_installed),
+            request_cleanup_installed: Rc::clone(&self.request_cleanup_installed),
         })
-    }
-
-    pub(super) fn is_bound(&self) -> bool {
-        self.area.upgrade().is_some() && self.binding_active.get()
     }
 }
 

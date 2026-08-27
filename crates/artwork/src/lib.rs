@@ -6,6 +6,7 @@
 
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use sources::{ImageBytes, Source, SourceId, SourceImageRequest, SourceResult};
 use thiserror::Error;
@@ -167,9 +168,10 @@ impl Drop for PendingArtwork {
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub struct ArtworkPreparation {
+pub(crate) struct ArtworkPreparation {
     pub total: usize,
     pub ready: usize,
+    pub cached: usize,
     pub missing: usize,
     pub failed: usize,
 }
@@ -201,7 +203,6 @@ pub struct ArtworkBindingIdentity {
 pub struct PreparedArtwork {
     pub identity: ArtworkBindingIdentity,
     pub ready: Option<Arc<DecodedImage>>,
-    pub preview: Option<Arc<DecodedImage>>,
     source: SourceImages,
     request: ArtworkRequest,
 }
@@ -216,6 +217,10 @@ pub enum ArtworkError {
     FetchSetup(String),
     #[error("artwork preparation was cancelled")]
     Cancelled,
+    #[error("artwork library operation failed: {0}")]
+    Library(#[from] library::LibraryError),
+    #[error("artwork source operation failed: {0}")]
+    Source(#[from] sources::SourceError),
 }
 
 #[derive(Clone)]
@@ -223,7 +228,7 @@ pub struct Artwork {
     pipeline: Arc<pipeline::Pipeline>,
 }
 
-pub struct SourceManifest {
+struct SourceManifest {
     pipeline: Arc<pipeline::Pipeline>,
     source_id: SourceId,
     revision: u64,
@@ -245,7 +250,7 @@ impl SourceManifest {
 }
 
 impl Artwork {
-    pub fn begin_source_manifest(
+    fn begin_source_manifest(
         &self,
         source_id: SourceId,
         revision: u64,
@@ -267,12 +272,10 @@ impl Artwork {
     }
 
     pub fn prepare(&self, source: SourceImages, request: ArtworkRequest) -> PreparedArtwork {
-        let (identity, ready, preview) =
-            self.pipeline.binding_identity_and_images(&source, &request);
+        let (identity, ready) = self.pipeline.binding_identity_and_image(&source, &request);
         PreparedArtwork {
             identity,
             ready,
-            preview,
             source,
             request,
         }
@@ -282,19 +285,7 @@ impl Artwork {
         self.pipeline.request(prepared.source, prepared.request)
     }
 
-    /// Caches candidate source-owned images without publishing a manifest.
-    pub fn prefetch_source_artwork(
-        &self,
-        source: SourceImages,
-        artwork: Arc<[Vec<u8>]>,
-        progress: &(dyn Fn(usize, usize) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<ArtworkPreparation, ArtworkError> {
-        self.pipeline
-            .prefetch_source_artwork(source, artwork, progress, cancelled)
-    }
-
-    pub fn source_preparation_complete(
+    fn source_preparation_complete(
         &self,
         source_id: &SourceId,
         revision: u64,
@@ -303,35 +294,85 @@ impl Artwork {
             .source_preparation_complete(source_id, revision)
     }
 
-    pub fn source_preparation_key(&self, artwork: &[Vec<u8>]) -> u64 {
-        let mut identities = artwork
-            .iter()
-            .map(|artwork| {
-                ArtworkBinding::opaque(artwork)
-                    .stable_identity()
-                    .to_string()
-            })
-            .collect::<Vec<_>>();
-        identities.sort_unstable();
-        let mut digest = md5::Context::new();
-        for identity in identities {
-            digest.consume(identity.len().to_le_bytes());
-            digest.consume(identity.as_bytes());
-        }
-        u64::from_le_bytes(digest.finalize().0[..8].try_into().expect("MD5 prefix"))
-    }
-
-    /// Caches and reconciles the accepted source-owned artwork manifest.
-    pub fn prepare_source_artwork(
+    pub async fn prepare_database_source(
         &self,
+        database: &library::Database,
+        source_key: library::SourceKey,
         source: SourceImages,
-        revision: u64,
-        artwork: Arc<[Vec<u8>]>,
-        progress: &(dyn Fn(usize, usize) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<ArtworkPreparation, ArtworkError> {
-        self.pipeline
-            .prepare_source_artwork(source, revision, artwork, progress, cancelled)
+        accepted_digest: [u8; 32],
+        progress: &(dyn Fn(u64, usize) + Send + Sync),
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<Option<u64>, ArtworkError> {
+        let accepted_revision = digest_revision(&accepted_digest);
+        if self.source_preparation_complete(&source.source_id, accepted_revision)? {
+            return Ok(None);
+        }
+        let mut completed = 0_usize;
+        let mut visible_progress = false;
+        if let Some(provider) = source.source.as_ref() {
+            let mut after = None;
+            loop {
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(ArtworkError::Cancelled);
+                }
+                let page = provider
+                    .prepare_local_artwork_page(database, source_key, after)
+                    .await?;
+                completed = completed.saturating_add(page.completed);
+                if page.completed > 0 {
+                    visible_progress = true;
+                    progress(accepted_revision, completed);
+                }
+                after = page.next_album;
+                if after.is_none() {
+                    break;
+                }
+            }
+        }
+        let revision = digest_revision(&database.finalize_artwork_digest(source_key).await?);
+        if self.source_preparation_complete(&source.source_id, revision)? {
+            return Ok(Some(revision));
+        }
+        let manifest = self.begin_source_manifest(source.source_id.clone(), revision)?;
+        let mut after_binding = None;
+        loop {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(ArtworkError::Cancelled);
+            }
+            let page = database
+                .artwork_preparation_page(
+                    source_key,
+                    after_binding.as_deref(),
+                    128,
+                    &library::ReadCancellation::new(),
+                )
+                .await?;
+            if page.is_empty() {
+                break;
+            }
+            after_binding = page.last().cloned();
+            manifest.record_page(&page)?;
+            let pipeline = Arc::clone(&self.pipeline);
+            let images = source.clone();
+            let bindings: Arc<[Vec<u8>]> = page.into();
+            let page_cancelled = Arc::clone(&cancelled);
+            let summary = tokio::task::spawn_blocking(move || {
+                pipeline.prefetch_source_artwork(images, bindings, &|_, _| {}, &move || {
+                    page_cancelled.load(Ordering::Acquire)
+                })
+            })
+            .await
+            .map_err(|error| ArtworkError::Decode(error.to_string()))??;
+            completed = completed.saturating_add(summary.total);
+            if summary.total > summary.cached.saturating_add(summary.missing) {
+                visible_progress = true;
+            }
+            if visible_progress {
+                progress(revision, completed);
+            }
+        }
+        manifest.finish()?;
+        Ok(Some(revision))
     }
 
     pub fn cache_only_file(
@@ -348,5 +389,89 @@ impl Artwork {
 
     pub fn invalidate_source(&self, source_id: &SourceId) -> Result<(), ArtworkError> {
         self.pipeline.invalidate_source(source_id)
+    }
+}
+
+fn digest_revision(digest: &[u8; 32]) -> u64 {
+    u64::from_le_bytes(digest[..8].try_into().expect("digest prefix"))
+}
+
+#[cfg(test)]
+mod preparation_tests {
+    use super::*;
+    use std::sync::atomic::AtomicUsize;
+
+    #[tokio::test]
+    async fn completed_database_source_emits_no_preparation_progress() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let scan = library::Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        let publication = match scan.finish().await.unwrap() {
+            library::ScanOutcome::Changed(publication)
+            | library::ScanOutcome::ArtworkChanged(publication)
+            | library::ScanOutcome::Identical(publication) => publication,
+            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
+        };
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let source = SourceId::new("source");
+        artwork
+            .begin_source_manifest(source.clone(), digest_revision(&publication.artwork_digest))
+            .unwrap()
+            .finish()
+            .unwrap();
+        let progress = AtomicUsize::new(0);
+        let result = artwork
+            .prepare_database_source(
+                &database,
+                publication.source,
+                SourceImages::cache_only(source),
+                publication.artwork_digest,
+                &|_, _| {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert_eq!(result, None);
+        assert_eq!(progress.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test]
+    async fn manifest_reconciliation_without_fetch_work_stays_silent() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let scan = library::Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        let publication = match scan.finish().await.unwrap() {
+            library::ScanOutcome::Changed(publication)
+            | library::ScanOutcome::ArtworkChanged(publication)
+            | library::ScanOutcome::Identical(publication) => publication,
+            outcome => panic!("unexpected Scan outcome: {outcome:?}"),
+        };
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let progress = AtomicUsize::new(0);
+        let result = artwork
+            .prepare_database_source(
+                &database,
+                publication.source,
+                SourceImages::cache_only(SourceId::new("source")),
+                publication.artwork_digest,
+                &|_, _| {
+                    progress.fetch_add(1, Ordering::Relaxed);
+                },
+                Arc::new(AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        assert!(result.is_some());
+        assert_eq!(progress.load(Ordering::Relaxed), 0);
     }
 }

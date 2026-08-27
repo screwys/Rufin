@@ -89,12 +89,27 @@ pub struct PlaybackPublication {
     pub projection: PlaybackProjection,
 }
 
+pub struct VisualizerPublication {
+    pub source_key: SourceKey,
+    pub source_session_epoch: SourceSessionEpoch,
+    pub run: playback::RunId,
+    pub levels: Vec<f64>,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct CatalogPublication {
     pub source_key: SourceKey,
     pub source_session_epoch: SourceSessionEpoch,
-    pub catalog_revision: u64,
     pub favorite: Option<FavoriteSettlement>,
+    pub change: CatalogChange,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum CatalogChange {
+    Broad,
+    Home,
+    Playlists,
+    Album(library::AlbumKey),
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

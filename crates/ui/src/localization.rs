@@ -102,16 +102,16 @@ pub(crate) fn localized_column(
     column
 }
 
-pub(crate) fn bind_drop_down_options(
+pub(crate) fn bind_drop_down_options_with(
     drop_down: &gtk::DropDown,
-    messages: Vec<&'static str>,
+    messages: impl Fn() -> Vec<&'static str> + 'static,
     width: impl Fn(&[String]) -> i32 + 'static,
 ) {
     bind_object_locale(drop_down, move |object| {
         let drop_down = object
             .downcast_ref::<gtk::DropDown>()
             .expect("drop-down locale binding kept on a drop-down");
-        let translated = messages
+        let translated = messages()
             .iter()
             .map(|message| tr(message))
             .collect::<Vec<_>>();

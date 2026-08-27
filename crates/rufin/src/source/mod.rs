@@ -1,6 +1,5 @@
 //! The configured sources and the one selected Database-backed source session.
 
-use std::fs;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -20,7 +19,7 @@ use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, ArtistMetadata, ArtistMetadataEdit,
     ArtistMetadataValues, CredentialHostInput, CredentialSettingsInput, JellyfinSettingsInput,
-    JellyfinSetupInput, LiveFolderPage, LiveSearchResults, LocalFolderHostInput, LocalLiveChange,
+    JellyfinSetupInput, LiveFolderPage, LiveSearchResults, LocalFolderHostInput, SelectedFeed,
     Source, SourceConfiguration, SourceEntityKind, SourceError, SourceId, SourceMetadataError,
     SourceReadProgress, SourceReadStage, SourceSettingsInput, SourceSetupInput,
     SubsonicAuthentication, SubsonicFlavor, TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
@@ -34,8 +33,8 @@ use ui::runtime::source::{
     SourceSettingsChange, SourceSetup, SourceSummary,
 };
 use ui::runtime::{
-    CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent, SourceNotice,
-    SourceNoticeKind,
+    CatalogChange, CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent,
+    SourceNotice, SourceNoticeKind,
 };
 
 use crate::playback::PlaybackOwner;
@@ -52,7 +51,7 @@ pub(crate) struct SelectedSourceState {
     pub(crate) configuration: SourceConfiguration,
     pub(crate) source: Option<Arc<Source>>,
     pub(crate) source_key: SourceKey,
-    pub(crate) catalog_revision: u64,
+    pub(crate) artwork_digest: [u8; 32],
     pub(crate) source_session_epoch: SourceSessionEpoch,
     pub(crate) database: Arc<Database>,
     pub(crate) runtime: tokio::runtime::Handle,
@@ -149,6 +148,20 @@ impl ActiveSource {
             work(SourceOwner { shared }, selected).await;
         });
     }
+
+    fn playlist_change<F, Work>(&self, change: F)
+    where
+        F: FnOnce(Arc<Source>, Arc<SelectedSourceState>) -> Work + Send + 'static,
+        Work: Future<Output = Result<(bool, Option<ScanOutcome>), SourceError>> + Send + 'static,
+    {
+        self.spawn_selected(move |owner, selected| async move {
+            let result = match selected.source.as_ref().cloned() {
+                Some(source) => change(source, Arc::clone(&selected)).await,
+                None => Err(SourceError::InvalidRequest("Source is unavailable")),
+            };
+            owner.accept_playlist_result(&selected, result).await;
+        });
+    }
 }
 
 #[derive(Clone)]
@@ -173,15 +186,11 @@ struct SelectedSlot {
     current: Arc<SelectedSourceState>,
 }
 
-struct ActiveObserver {
-    cancelled: Arc<AtomicBool>,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ArtworkPreparationKey {
     source: SourceKey,
     epoch: SourceSessionEpoch,
-    revision: u64,
+    digest: [u8; 32],
 }
 
 struct ActiveArtworkPreparation {
@@ -240,6 +249,14 @@ impl ArtworkPreparationOwner {
         true
     }
 
+    fn fail(&mut self, key: ArtworkPreparationKey, token: u64) -> bool {
+        if !self.is_current(key, token) {
+            return false;
+        }
+        self.active.take();
+        true
+    }
+
     fn cancel_active(&mut self) {
         if let Some(active) = self.active.take() {
             active.cancelled.store(true, Ordering::Release);
@@ -260,7 +277,8 @@ struct Shared {
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
     selected: Mutex<Option<SelectedSlot>>,
-    observer: Mutex<Option<ActiveObserver>>,
+    observer: Mutex<Option<Arc<SelectedFeed>>>,
+    acquisition: Mutex<Weak<AtomicBool>>,
     artwork_preparation: Mutex<ArtworkPreparationOwner>,
     lane: tokio::sync::Mutex<()>,
     playback: Mutex<Weak<PlaybackOwner>>,
@@ -323,7 +341,54 @@ impl Shared {
             .unwrap_or_else(|p| p.into_inner())
             .take()
         {
-            observer.cancelled.store(true, Ordering::Release);
+            observer.cancel();
+        }
+    }
+
+    fn begin_acquisition(&self) -> Arc<AtomicBool> {
+        self.cancel_acquisition();
+        let cancelled = Arc::new(AtomicBool::new(false));
+        *self
+            .acquisition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Arc::downgrade(&cancelled);
+        cancelled
+    }
+
+    fn try_begin_acquisition(&self) -> Option<Arc<AtomicBool>> {
+        let mut active = self
+            .acquisition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if active
+            .upgrade()
+            .is_some_and(|cancelled| !cancelled.load(Ordering::Acquire))
+        {
+            return None;
+        }
+        let cancelled = Arc::new(AtomicBool::new(false));
+        *active = Arc::downgrade(&cancelled);
+        Some(cancelled)
+    }
+
+    fn acquisition_is_current(&self, cancelled: &Arc<AtomicBool>) -> bool {
+        !cancelled.load(Ordering::Acquire)
+            && self
+                .acquisition
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .upgrade()
+                .is_some_and(|active| Arc::ptr_eq(&active, cancelled))
+    }
+
+    fn cancel_acquisition(&self) {
+        if let Some(cancelled) = self
+            .acquisition
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .upgrade()
+        {
+            cancelled.store(true, Ordering::Release);
         }
     }
 }
@@ -360,6 +425,7 @@ impl SourceOwner {
             outputs,
             selected: Mutex::new(None),
             observer: Mutex::new(None),
+            acquisition: Mutex::new(Weak::new()),
             artwork_preparation: Mutex::new(ArtworkPreparationOwner::default()),
             lane: tokio::sync::Mutex::new(()),
             playback: Mutex::new(Weak::new()),
@@ -401,8 +467,6 @@ impl SourceOwner {
         Ok(())
     }
 
-    pub(crate) fn album_release_settings_changed(&self, _enabled: bool) {}
-
     fn spawn_serialized<F, Work>(&self, work: F)
     where
         F: FnOnce(SourceOwner) -> Work + Send + 'static,
@@ -420,7 +484,14 @@ impl SourceOwner {
         self.shared.send(SourceEvent::Operation(operation)).await;
     }
 
-    async fn select_now(&self, source_id: SourceId) -> Result<(), String> {
+    async fn select_now(
+        &self,
+        source_id: SourceId,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
         let credential = configured
             .credential_ref
@@ -449,44 +520,66 @@ impl SourceOwner {
                 source: cached.source,
                 catalog_revision: u64::try_from(cached.catalog_revision)
                     .map_err(|_| "cached catalog revision is invalid".to_string())?,
+                artwork_digest: cached
+                    .artwork_digest
+                    .try_into()
+                    .map_err(|_| "cached artwork digest is invalid".to_string())?,
             }
         } else {
             let source = source.as_ref().ok_or_else(source_access_unavailable)?;
-            let cancelled = Arc::new(AtomicBool::new(false));
-            match source
-                .manual_refresh(
-                    &self.shared.database,
-                    &configured.configuration.name,
-                    &|_| {},
-                    cancelled,
-                )
-                .await
-                .map_err(string_error)?
-            {
-                ScanOutcome::Changed(publication)
-                | ScanOutcome::ArtworkChanged(publication)
-                | ScanOutcome::Identical(publication) => publication,
-                ScanOutcome::Stale | ScanOutcome::Failed => {
-                    return Err("the source catalog could not be published".to_string());
-                }
-            }
+            let events = self.shared.outputs.events.clone();
+            let target = source_id.clone();
+            let progress = move |value: SourceReadProgress| {
+                let _ = events.try_send(SourceEvent::Operation(SourceOperation::Switching {
+                    target: target.clone(),
+                    progress: source_progress(value),
+                }));
+            };
+            acquire_required_catalog(
+                source,
+                &self.shared.database,
+                &configured.configuration.name,
+                &progress,
+                Arc::clone(&cancelled),
+            )
+            .await?
         };
-        self.install_selected(configured, source, publication, cached_start)
-            .await
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        self.install_selected(
+            configured,
+            source,
+            publication,
+            cached_start,
+            cancelled,
+            || Ok(()),
+        )
+        .await
     }
 
-    async fn install_selected(
+    async fn install_selected<Commit>(
         &self,
         configured: ConfiguredSource,
         source: Option<Arc<Source>>,
         publication: library::Publication,
         catch_up: bool,
-    ) -> Result<(), String> {
+        acquisition: Arc<AtomicBool>,
+        commit: Commit,
+    ) -> Result<(), String>
+    where
+        Commit: FnOnce() -> Result<(), String>,
+    {
+        self.shared
+            .database
+            .ensure_default_smart_playlists(publication.source)
+            .await
+            .map_err(string_error)?;
         let cancellation = ReadCancellation::new();
         let folder_order = self
             .shared
             .database
-            .folder_order(publication.source, &cancellation)
+            .folder_child_order(publication.source, None, &cancellation)
             .await
             .map_err(string_error)?;
         let folders: Arc<[FolderRow]> = self
@@ -522,7 +615,7 @@ impl SourceOwner {
             configuration: configured.configuration.clone(),
             source,
             source_key: publication.source,
-            catalog_revision: publication.catalog_revision,
+            artwork_digest: publication.artwork_digest,
             source_session_epoch: SourceSessionEpoch::new(
                 self.shared.next_epoch.fetch_add(1, Ordering::AcqRel),
             ),
@@ -540,7 +633,11 @@ impl SourceOwner {
         let prepared = playback
             .prepare_selected(Arc::clone(&session), Arc::clone(&selected))
             .await?;
-        self.release_selected().await;
+        if !self.shared.acquisition_is_current(&acquisition) {
+            return Ok(());
+        }
+        commit()?;
+        self.release_selected(false).await;
         let cutover = playback.stop_for_source_switch();
         self.shared
             .downloads
@@ -559,7 +656,6 @@ impl SourceOwner {
             session: Arc::clone(&session),
             current: Arc::clone(&selected),
         });
-        self.start_observer(Arc::clone(&session), Arc::clone(&selected), catch_up);
         let projection = playback.install_prepared(prepared, cutover);
         self.shared.settings.update(|stored| {
             stored.sources.selected_source_id = Some(selected.source_id().clone());
@@ -574,10 +670,14 @@ impl SourceOwner {
             })
             .await;
         self.publish_operation(SourceOperation::Idle).await;
+        self.start_observer(session, selected, catch_up);
         Ok(())
     }
 
-    async fn release_selected(&self) {
+    async fn release_selected(&self, cancel_acquisition: bool) {
+        if cancel_acquisition {
+            self.shared.cancel_acquisition();
+        }
         self.shared.cancel_observer();
         self.shared
             .artwork_preparation
@@ -609,56 +709,67 @@ impl SourceOwner {
         let Some(source) = selected.source.clone() else {
             return;
         };
-        let cancelled = Arc::new(AtomicBool::new(false));
+        let Some(observer) = source.start_selected_feed(
+            &self.shared.runtime,
+            Arc::clone(&selected.database),
+            selected.source_key,
+        ) else {
+            return;
+        };
         self.shared
             .observer
             .lock()
             .unwrap_or_else(|p| p.into_inner())
-            .replace(ActiveObserver {
-                cancelled: Arc::clone(&cancelled),
-            });
-        if selected.configuration.is_local() {
+            .replace(Arc::clone(&observer));
+        let consumer = self.clone();
+        let consumer_session = Arc::clone(&session);
+        let consumer_observer = Arc::clone(&observer);
+        self.shared.runtime.spawn(async move {
+            consumer
+                .consume_selected_feed(consumer_session, consumer_observer)
+                .await;
+        });
+        if catch_up && selected.configuration.is_local() {
             let owner = self.clone();
-            let runtime = self.shared.runtime.clone();
-            let watcher_session = Arc::clone(&session);
-            let catch_up_session = Arc::clone(&session);
-            let _ = std::thread::Builder::new()
-                .name("rufin-local-watcher".to_string())
-                .spawn(move || {
-                    let mut ready = |recovered: bool| {
-                        if recovered {
-                            let owner = owner.clone();
-                            let session = Arc::clone(&watcher_session);
-                            runtime.spawn(async move {
-                                owner
-                                    .handle_local_change(session, LocalLiveChange::Rescan)
-                                    .await;
-                            });
-                        }
-                        !cancelled.load(Ordering::Acquire)
-                    };
-                    let mut changed = |change| {
-                        let owner = owner.clone();
-                        let session = Arc::clone(&watcher_session);
-                        runtime.spawn(async move {
-                            owner.handle_local_change(session, change).await;
-                        });
-                        !cancelled.load(Ordering::Acquire)
-                    };
-                    let _ = source.listen_local_changes(&mut ready, &mut changed, &|| {
-                        cancelled.load(Ordering::Acquire)
-                    });
-                });
-            if catch_up {
-                let owner = self.clone();
-                self.shared.runtime.spawn(async move {
-                    owner.catch_up_local(catch_up_session).await;
-                });
-            }
+            let cancelled = observer.cancellation();
+            self.shared.runtime.spawn(async move {
+                owner.catch_up_local(session, cancelled).await;
+            });
         }
     }
 
-    async fn catch_up_local(&self, session: Arc<ActiveSource>) {
+    async fn consume_selected_feed(&self, session: Arc<ActiveSource>, observer: Arc<SelectedFeed>) {
+        while observer.wait_for_change().await {
+            let _lane = self.shared.lane.lock().await;
+            let Some(selected) = session.resolve() else {
+                return;
+            };
+            match observer.apply_pending().await {
+                Ok(Some(outcome)) => {
+                    self.accept_scan(&selected, outcome, CatalogChange::Broad)
+                        .await;
+                    continue;
+                }
+                Ok(None) => {}
+                Err(error) => {
+                    warn!(%error, "bounded selected-source change failed; reacquiring after feed boundary loss");
+                }
+            }
+            observer.cancel();
+            let acquisition = self.shared.begin_acquisition();
+            self.manual_refresh_selected(&selected, "selected-feed-gap", Arc::clone(&acquisition))
+                .await;
+            if !self.shared.acquisition_is_current(&acquisition) {
+                return;
+            }
+            if let Some(selected) = session.resolve() {
+                self.start_observer(Arc::clone(&session), selected, false);
+            }
+            return;
+        }
+    }
+
+    async fn catch_up_local(&self, session: Arc<ActiveSource>, cancelled: Arc<AtomicBool>) {
         let _lane = self.shared.lane.lock().await;
         let Some(selected) = session.resolve() else {
             return;
@@ -666,118 +777,43 @@ impl SourceOwner {
         let Some(source) = selected.source.as_ref() else {
             return;
         };
-        let mut after = None;
-        loop {
-            let page = match selected
-                .database
-                .local_directory_page(
-                    selected.source_key,
-                    after.as_deref(),
-                    128,
-                    &ReadCancellation::new(),
-                )
-                .await
-            {
-                Ok(page) => page,
-                Err(error) => {
-                    warn!(%error, "could not read Local startup directories");
-                    return;
-                }
-            };
-            if page.is_empty() {
-                break;
-            }
-            after = page.last().map(|directory| directory.path.clone());
-            for directory in page {
-                let path = PathBuf::from(&directory.path);
-                let current_mtime = fs::metadata(&path)
-                    .ok()
-                    .and_then(|metadata| metadata.modified().ok())
-                    .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
-                    .and_then(|duration| i64::try_from(duration.as_nanos()).ok());
-                if current_mtime == Some(directory.mtime_ns) {
-                    continue;
-                }
-                match source
-                    .apply_local_change(
-                        &selected.database,
-                        selected.source_key,
-                        LocalLiveChange::Paths(vec![path]),
-                    )
-                    .await
-                {
-                    Ok(Some(outcome)) => self.accept_scan(&selected, outcome).await,
-                    Ok(None) => {}
-                    Err(error) => warn!(%error, "Local startup catch-up failed"),
-                }
-            }
-        }
-    }
-
-    async fn handle_local_change(&self, session: Arc<ActiveSource>, change: LocalLiveChange) {
-        let _lane = self.shared.lane.lock().await;
-        let Some(selected) = session.resolve() else {
-            return;
-        };
-        let outcome = match change {
-            LocalLiveChange::Paths(_) => {
-                selected
-                    .source
-                    .as_ref()
-                    .expect("active Local source")
-                    .apply_local_change(&selected.database, selected.source_key, change)
+        self.publish_operation(SourceOperation::Refreshing {
+            source_id: selected.source_id().clone(),
+            progress: SourceProgress {
+                stage: SourceProgressStage::Files,
+                completed: 0,
+                total: None,
+            },
+        })
+        .await;
+        let progress = refreshing_progress(
+            self.shared.outputs.events.clone(),
+            selected.source_id().clone(),
+        );
+        match source
+            .catch_up_local(
+                &selected.database,
+                selected.source_key,
+                &progress,
+                cancelled,
+            )
+            .await
+        {
+            Ok(outcome) => {
+                self.accept_scan(&selected, outcome, CatalogChange::Broad)
                     .await
             }
-            LocalLiveChange::Rescan => selected
-                .source
-                .as_ref()
-                .expect("active Local source")
-                .rescan_local(
-                    &selected.database,
-                    &selected.configuration.name,
-                    &|_| {},
-                    Arc::new(AtomicBool::new(false)),
-                )
-                .await
-                .map(Some),
-        };
-        match outcome {
-            Ok(Some(outcome)) => self.accept_scan(&selected, outcome).await,
-            Ok(None) => {
-                if let Some(source) = selected.source.as_ref() {
-                    if let Ok(outcome) = source
-                        .rescan_local(
-                            &selected.database,
-                            &selected.configuration.name,
-                            &|_| {},
-                            Arc::new(AtomicBool::new(false)),
-                        )
-                        .await
-                    {
-                        self.accept_scan(&selected, outcome).await;
-                    }
-                }
-            }
-            Err(error) => {
-                warn!(%error, "bounded Local change failed; rebuilding after watcher boundary loss");
-                if let Some(source) = selected.source.as_ref() {
-                    if let Ok(outcome) = source
-                        .rescan_local(
-                            &selected.database,
-                            &selected.configuration.name,
-                            &|_| {},
-                            Arc::new(AtomicBool::new(false)),
-                        )
-                        .await
-                    {
-                        self.accept_scan(&selected, outcome).await;
-                    }
-                }
-            }
+            Err(error) => warn!(%error, "Local startup catch-up failed"),
         }
+        self.publish_operation(SourceOperation::Idle).await;
     }
 
-    async fn manual_refresh_selected(&self, selected: &SelectedSourceState, trigger: &'static str) {
+    async fn manual_refresh_selected(
+        &self,
+        selected: &SelectedSourceState,
+        trigger: &'static str,
+        acquisition: Arc<AtomicBool>,
+    ) {
         info!(trigger, source_key = %selected.source_key, "starting explicit source acquisition");
         let Some(source) = selected.source.as_ref() else {
             self.shared.warn_nonfatal(&source_access_unavailable());
@@ -788,77 +824,202 @@ impl SourceOwner {
             progress: initial_progress(),
         })
         .await;
-        let events = self.shared.outputs.events.clone();
-        let source_id = selected.source_id().clone();
-        let progress = move |value: SourceReadProgress| {
-            let _ = events.try_send(SourceEvent::Operation(SourceOperation::Refreshing {
-                source_id: source_id.clone(),
-                progress: source_progress(value),
-            }));
-        };
-        match source
+        let progress = refreshing_progress(
+            self.shared.outputs.events.clone(),
+            selected.source_id().clone(),
+        );
+        let outcome = source
             .manual_refresh(
                 &selected.database,
                 &selected.configuration.name,
                 &progress,
-                Arc::new(AtomicBool::new(false)),
+                Arc::clone(&acquisition),
             )
-            .await
-        {
-            Ok(outcome) => self.accept_scan(selected, outcome).await,
+            .await;
+        match outcome {
+            Ok(outcome) => {
+                self.accept_scan(selected, outcome, CatalogChange::Broad)
+                    .await
+            }
+            Err(SourceError::Cancelled) => {}
             Err(error) => self.shared.warn_nonfatal(&error.to_string()),
         }
-        self.publish_operation(SourceOperation::Idle).await;
+        if self.shared.acquisition_is_current(&acquisition) {
+            self.publish_operation(SourceOperation::Idle).await;
+        }
     }
 
-    async fn accept_scan(&self, selected: &SelectedSourceState, outcome: ScanOutcome) {
-        match outcome {
-            ScanOutcome::Changed(publication) => {
-                if let Some(slot) = self
-                    .shared
-                    .selected
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .as_mut()
-                    && slot.current.source_session_epoch == selected.source_session_epoch
-                {
-                    let mut replacement = (*slot.current).clone();
-                    replacement.catalog_revision = publication.catalog_revision;
-                    slot.current = Arc::new(replacement);
-                }
-                self.shared
-                    .downloads
-                    .library_changed(selected.source_id().clone());
-                if let Ok(playback) = self.shared.playback() {
-                    playback.catalog_changed();
-                }
-                self.shared
-                    .send(SourceEvent::CatalogPublished(CatalogPublication {
-                        source_key: publication.source,
-                        source_session_epoch: selected.source_session_epoch,
-                        catalog_revision: publication.catalog_revision,
-                        favorite: None,
-                    }))
-                    .await;
+    async fn install_connected_edit(
+        &self,
+        configured: ConfiguredSource,
+        connected: Box<sources::ConnectedSource>,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let (configuration, source, credential) = (*connected).into_parts();
+        let source = Arc::new(source);
+        self.publish_operation(SourceOperation::Refreshing {
+            source_id: configuration.source_id.clone(),
+            progress: initial_progress(),
+        })
+        .await;
+        let progress = refreshing_progress(
+            self.shared.outputs.events.clone(),
+            configuration.source_id.clone(),
+        );
+        let result = async {
+            let publication = acquire_required_catalog(
+                &source,
+                &self.shared.database,
+                &configuration.name,
+                &progress,
+                Arc::clone(&cancelled),
+            )
+            .await?;
+            if !self.shared.acquisition_is_current(&cancelled) {
+                return Ok(());
             }
-            ScanOutcome::ArtworkChanged(publication) => {
-                if let Some(session) = self.shared.selected_session() {
-                    self.start_artwork_preparation(session);
-                } else {
-                    self.shared
-                        .send(SourceEvent::ArtworkPreparation {
-                            source_key: publication.source,
-                            revision: publication.catalog_revision,
-                            progress: None,
-                        })
-                        .await;
-                }
+            let mut replacement = configured;
+            replacement.configuration = configuration;
+            let selected = self.shared.selected().is_some_and(|selected| {
+                selected.source_id() == &replacement.configuration.source_id
+            });
+            if selected {
+                let committed = replacement.clone();
+                self.install_selected(
+                    replacement,
+                    Some(source),
+                    publication,
+                    false,
+                    cancelled,
+                    move || self.persist_connected_source(&committed, credential),
+                )
+                .await?;
+            } else {
+                self.persist_connected_source(&replacement, credential)?;
+                self.publish_operation(SourceOperation::Idle).await;
             }
-            ScanOutcome::Identical(_) | ScanOutcome::Stale | ScanOutcome::Failed => {}
+            Ok(())
+        }
+        .await;
+        if result.is_err() {
+            self.publish_operation(SourceOperation::Idle).await;
+        }
+        result
+    }
+
+    fn persist_connected_source(
+        &self,
+        configured: &ConfiguredSource,
+        credential: Option<String>,
+    ) -> Result<(), String> {
+        if let (Some(reference), Some(secret)) = (&configured.credential_ref, credential) {
+            save_provider_secret(&self.shared.secrets, reference, secret)?;
+        }
+        self.shared.settings.update(|stored| {
+            stored
+                .sources
+                .configured
+                .retain(|item| item.configuration.source_id != configured.configuration.source_id);
+            stored.sources.configured.push(configured.clone());
+            Ok(())
+        })
+    }
+
+    async fn edit_configured_source(
+        &self,
+        source_id: SourceId,
+        input: SourceSettingsInput,
+        cancelled: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
+        let credential = configured
+            .credential_ref
+            .as_ref()
+            .map(|reference| load_provider_secret(&self.shared.secrets, reference))
+            .transpose()?
+            .flatten();
+        let edit = Source::edit(
+            configured.configuration.clone(),
+            credential,
+            input,
+            Some(self.shared.settings.load().jellyfin_device_id),
+        )
+        .await
+        .map_err(string_error)?;
+        if cancelled.load(Ordering::Acquire) {
+            return Ok(());
+        }
+        match edit {
+            sources::SourceEditResult::Unchanged => Ok(()),
+            sources::SourceEditResult::ConfigurationOnly(configuration) => {
+                self.shared.settings.update(|stored| {
+                    if let Some(item) = stored
+                        .sources
+                        .configured
+                        .iter_mut()
+                        .find(|item| item.configuration.source_id == source_id)
+                    {
+                        item.configuration = configuration;
+                    }
+                    Ok(())
+                })
+            }
+            sources::SourceEditResult::Connected(connected) => {
+                self.install_connected_edit(configured, connected, cancelled)
+                    .await
+            }
+        }
+    }
+
+    async fn accept_scan(
+        &self,
+        selected: &SelectedSourceState,
+        outcome: ScanOutcome,
+        change: CatalogChange,
+    ) {
+        let (publication, catalog_changed) = match outcome {
+            ScanOutcome::Changed(publication) => (publication, true),
+            ScanOutcome::ArtworkChanged(publication) => (publication, false),
+            ScanOutcome::Identical(_) | ScanOutcome::Stale | ScanOutcome::Failed => return,
+        };
+        if let Some(slot) = self
+            .shared
+            .selected
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .as_mut()
+            && slot.current.source_session_epoch == selected.source_session_epoch
+        {
+            let mut replacement = (*slot.current).clone();
+            replacement.artwork_digest = publication.artwork_digest;
+            slot.current = Arc::new(replacement);
+        }
+        if catalog_changed {
+            self.shared
+                .downloads
+                .library_changed(selected.source_id().clone());
+            if let Ok(playback) = self.shared.playback() {
+                playback.catalog_changed();
+            }
+            self.shared
+                .send(SourceEvent::CatalogPublished(CatalogPublication {
+                    source_key: publication.source,
+                    source_session_epoch: selected.source_session_epoch,
+                    favorite: None,
+                    change,
+                }))
+                .await;
+        }
+        if let Some(session) = self.shared.selected_session() {
+            self.start_artwork_preparation(session);
         }
     }
 
     async fn check_remote_freshness(&self) {
+        let _lane = self.shared.lane.lock().await;
         let Some(selected) = self.shared.selected() else {
             return;
         };
@@ -868,39 +1029,101 @@ impl SourceOwner {
         let Some(source) = selected.source.as_ref() else {
             return;
         };
-        if let Ok(outcome) = source
+        let Some(acquisition) = self.shared.try_begin_acquisition() else {
+            return;
+        };
+        let progressed = Arc::new(AtomicBool::new(false));
+        let progress_started = Arc::clone(&progressed);
+        let publish = refreshing_progress(
+            self.shared.outputs.events.clone(),
+            selected.source_id().clone(),
+        );
+        let progress = move |value: SourceReadProgress| {
+            progress_started.store(true, Ordering::Release);
+            publish(value);
+        };
+        if let Ok(Some(outcome)) = source
             .refresh_if_needed(
                 &selected.database,
                 &selected.configuration.name,
-                &|_| {},
-                Arc::new(AtomicBool::new(false)),
+                &progress,
+                Arc::clone(&acquisition),
             )
             .await
         {
-            self.accept_scan(&selected, outcome).await;
+            self.accept_scan(&selected, outcome, CatalogChange::Broad)
+                .await;
         }
+        if progressed.load(Ordering::Acquire) {
+            self.publish_operation(SourceOperation::Idle).await;
+        }
+    }
+
+    async fn accept_playlist_result(
+        &self,
+        selected: &SelectedSourceState,
+        result: Result<(bool, Option<ScanOutcome>), SourceError>,
+    ) {
+        match result {
+            Ok((true, Some(outcome))) => {
+                self.accept_scan(selected, outcome, CatalogChange::Playlists)
+                    .await
+            }
+            Ok((true, None)) => {
+                self.publish_catalog(selected, None, CatalogChange::Playlists)
+                    .await
+            }
+            Ok((false, _)) => {}
+            Err(error) => self.shared.warn_nonfatal(&error.to_string()),
+        }
+    }
+
+    async fn publish_mapping_count(
+        &self,
+        selected: &SelectedSourceState,
+        mapped_count: usize,
+    ) -> Result<(), String> {
+        let current = {
+            let mut slots = self
+                .shared
+                .selected
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            let Some(slot) = slots
+                .as_mut()
+                .filter(|slot| slot.current.source_session_epoch == selected.source_session_epoch)
+            else {
+                return Ok(());
+            };
+            let mut replacement = (*slot.current).clone();
+            replacement.mapped_count = mapped_count;
+            slot.current = Arc::new(replacement);
+            Arc::clone(&slot.current)
+        };
+        self.shared
+            .playback()?
+            .stream_inputs_changed(current.source_key, current.source_session_epoch)?;
+        self.shared
+            .send(SourceEvent::Configured(configured_sources(
+                &self.shared.settings.load(),
+                Some(&current),
+            )))
+            .await;
+        Ok(())
     }
 
     async fn publish_catalog(
         &self,
         selected: &SelectedSourceState,
         favorite: Option<FavoriteSettlement>,
+        change: CatalogChange,
     ) {
-        let cached = selected
-            .database
-            .cached_source(selected.source_id().as_str(), &ReadCancellation::new())
-            .await
-            .ok()
-            .flatten();
-        let revision = cached
-            .and_then(|cached| u64::try_from(cached.catalog_revision).ok())
-            .unwrap_or(selected.catalog_revision);
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
                 source_key: selected.source_key,
                 source_session_epoch: selected.source_session_epoch,
-                catalog_revision: revision,
                 favorite,
+                change,
             }))
             .await;
     }
@@ -956,7 +1179,11 @@ impl SourcePort for SourceOwner {
     }
 
     fn configure_source(&self, input: SourceSetup) {
+        let cancelled = self.shared.begin_acquisition();
         self.spawn_serialized(move |owner| async move {
+            if cancelled.load(Ordering::Acquire) {
+                return;
+            }
             owner
                 .publish_operation(SourceOperation::Adding {
                     progress: initial_progress(),
@@ -967,44 +1194,50 @@ impl SourcePort for SourceOwner {
                 let connected = Source::connect(input).await.map_err(string_error)?;
                 let (configuration, source, credential) = connected.into_parts();
                 let source = Arc::new(source);
-                let outcome = source
-                    .manual_refresh(
-                        &owner.shared.database,
-                        &configuration.name,
-                        &|_| {},
-                        Arc::new(AtomicBool::new(false)),
-                    )
-                    .await
-                    .map_err(string_error)?;
-                let publication = scan_publication(outcome)?;
+                let events = owner.shared.outputs.events.clone();
+                let progress = move |value: SourceReadProgress| {
+                    let _ = events.try_send(SourceEvent::Operation(SourceOperation::Adding {
+                        progress: source_progress(value),
+                    }));
+                };
+                let publication = acquire_required_catalog(
+                    &source,
+                    &owner.shared.database,
+                    &configuration.name,
+                    &progress,
+                    Arc::clone(&cancelled),
+                )
+                .await?;
+                if !owner.shared.acquisition_is_current(&cancelled) {
+                    return Ok(());
+                }
                 let credential_ref = credential
                     .as_ref()
                     .map(|_| fresh_credential_ref())
                     .transpose()?;
-                if let (Some(reference), Some(secret)) = (&credential_ref, credential) {
-                    save_provider_secret(&owner.shared.secrets, reference, secret)?;
-                }
                 let configured = ConfiguredSource {
                     configuration: configuration.clone(),
                     credential_ref,
                     music_folder_id: None,
                     local_access: None,
                 };
-                owner.shared.settings.update(|stored| {
-                    stored
-                        .sources
-                        .configured
-                        .retain(|item| item.configuration.source_id != configuration.source_id);
-                    stored.sources.configured.push(configured.clone());
-                    stored.sources.selected_source_id = Some(configuration.source_id.clone());
-                    Ok(())
-                })?;
+                let commit_owner = owner.clone();
+                let committed = configured.clone();
                 owner
-                    .install_selected(configured, Some(source), publication, false)
+                    .install_selected(
+                        configured,
+                        Some(source),
+                        publication,
+                        false,
+                        Arc::clone(&cancelled),
+                        move || commit_owner.persist_connected_source(&committed, credential),
+                    )
                     .await
             }
             .await;
-            if let Err(error) = result {
+            if let Err(error) = result
+                && owner.shared.acquisition_is_current(&cancelled)
+            {
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: None,
@@ -1017,105 +1250,36 @@ impl SourcePort for SourceOwner {
     }
 
     fn update_source(&self, input: SourceSettingsChange) {
+        let cancelled = self.shared.begin_acquisition();
         let source_id = source_settings_id(&input).clone();
         let input = source_settings_input(input);
         self.spawn_serialized(move |owner| async move {
-            let configured =
-                match configured_source(&owner.shared.settings.load().sources, &source_id) {
-                    Ok(configured) => configured,
-                    Err(error) => return owner.shared.warn_nonfatal(&error),
-                };
-            let credential = configured
-                .credential_ref
-                .as_ref()
-                .map(|reference| load_provider_secret(&owner.shared.secrets, reference))
-                .transpose()
-                .ok()
-                .flatten()
-                .flatten();
-            match Source::edit(
-                configured.configuration.clone(),
-                credential,
-                input,
-                Some(owner.shared.settings.load().jellyfin_device_id),
-            )
-            .await
+            if let Err(error) = owner
+                .edit_configured_source(source_id, input, cancelled)
+                .await
             {
-                Ok(sources::SourceEditResult::Unchanged) => {}
-                Ok(sources::SourceEditResult::ConfigurationOnly(configuration)) => {
-                    let _ = owner.shared.settings.update(|stored| {
-                        if let Some(item) = stored
-                            .sources
-                            .configured
-                            .iter_mut()
-                            .find(|item| item.configuration.source_id == source_id)
-                        {
-                            item.configuration = configuration;
-                        }
-                        Ok(())
-                    });
-                }
-                Ok(sources::SourceEditResult::Connected(connected)) => {
-                    let (configuration, source, credential) = connected.into_parts();
-                    let source = Arc::new(source);
-                    let outcome = match source
-                        .manual_refresh(
-                            &owner.shared.database,
-                            &configuration.name,
-                            &|_| {},
-                            Arc::new(AtomicBool::new(false)),
-                        )
-                        .await
-                    {
-                        Ok(outcome) => outcome,
-                        Err(error) => return owner.shared.warn_nonfatal(&error.to_string()),
-                    };
-                    let publication = match scan_publication(outcome) {
-                        Ok(value) => value,
-                        Err(error) => return owner.shared.warn_nonfatal(&error),
-                    };
-                    if let (Some(reference), Some(secret)) =
-                        (&configured.credential_ref, credential)
-                    {
-                        let _ = save_provider_secret(&owner.shared.secrets, reference, secret);
-                    }
-                    let mut replacement = configured.clone();
-                    replacement.configuration = configuration;
-                    let _ = owner.shared.settings.update(|stored| {
-                        if let Some(item) = stored
-                            .sources
-                            .configured
-                            .iter_mut()
-                            .find(|item| item.configuration.source_id == source_id)
-                        {
-                            *item = replacement.clone();
-                        }
-                        Ok(())
-                    });
-                    if owner
-                        .shared
-                        .selected()
-                        .is_some_and(|selected| selected.source_id() == &source_id)
-                    {
-                        let _ = owner
-                            .install_selected(replacement, Some(source), publication, false)
-                            .await;
-                    }
-                }
-                Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
+                owner.shared.warn_nonfatal(&error);
             }
         });
     }
 
     fn select_source(&self, source_id: SourceId) {
+        let cancelled = self.shared.begin_acquisition();
         self.spawn_serialized(move |owner| async move {
+            if cancelled.load(Ordering::Acquire) {
+                return;
+            }
             owner
                 .publish_operation(SourceOperation::Switching {
                     target: source_id.clone(),
                     progress: initial_progress(),
                 })
                 .await;
-            if let Err(error) = owner.select_now(source_id.clone()).await {
+            if let Err(error) = owner
+                .select_now(source_id.clone(), Arc::clone(&cancelled))
+                .await
+                && !cancelled.load(Ordering::Acquire)
+            {
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: Some(source_id),
@@ -1191,15 +1355,19 @@ impl SourcePort for SourceOwner {
     }
 
     fn refresh_source(&self, source_id: SourceId) {
+        let acquisition = self.shared.begin_acquisition();
         let owner = self.clone();
         self.spawn_serialized(move |_| async move {
+            if acquisition.load(Ordering::Acquire) {
+                return;
+            }
             if let Some(selected) = owner
                 .shared
                 .selected()
                 .filter(|selected| selected.source_id() == &source_id)
             {
                 owner
-                    .manual_refresh_selected(&selected, "source-preferences")
+                    .manual_refresh_selected(&selected, "source-preferences", acquisition)
                     .await;
             }
         });
@@ -1214,7 +1382,9 @@ impl SourcePort for SourceOwner {
 
     fn save_local_access(&self, input: SourceLocalAccess) -> Receiver<Result<(), String>> {
         let (sender, receiver) = async_channel::bounded(1);
-        self.spawn_serialized(move |owner| async move {
+        let cancelled = self.shared.begin_acquisition();
+        let owner = self.clone();
+        self.shared.runtime.spawn(async move {
             let result = async {
                 let selected = owner
                     .shared
@@ -1232,6 +1402,8 @@ impl SourcePort for SourceOwner {
                         &input.root_path,
                         input.server_prefix.as_deref(),
                         input.local_prefix.as_deref(),
+                        input.sample_source_path.as_deref(),
+                        Arc::clone(&cancelled),
                     )
                     .await
                     .map_err(string_error)?;
@@ -1254,32 +1426,42 @@ impl SourcePort for SourceOwner {
                     .mapping_access_count(selected.source_key, &ReadCancellation::new())
                     .await
                     .map_err(string_error)?;
-                if let Some(slot) = owner
-                    .shared
-                    .selected
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .as_mut()
-                {
-                    let mut replacement = (*slot.current).clone();
-                    replacement.mapped_count = mapped_count;
-                    slot.current = Arc::new(replacement);
-                }
-                owner
-                    .shared
-                    .playback()?
-                    .stream_inputs_changed(selected.source_key, selected.source_session_epoch)?;
-                owner
-                    .shared
-                    .send(SourceEvent::Configured(configured_sources(
-                        &owner.shared.settings.load(),
-                        owner.shared.selected().as_deref(),
-                    )))
-                    .await;
+                owner.publish_mapping_count(&selected, mapped_count).await?;
                 Ok(())
             }
             .await;
+            let succeeded = result.is_ok();
             let _ = sender.send(result).await;
+            if !succeeded || cancelled.load(Ordering::Acquire) {
+                return;
+            }
+            let Some(selected) = owner.shared.selected().filter(|selected| {
+                selected.source_id() == &input.source_id && !cancelled.load(Ordering::Acquire)
+            }) else {
+                return;
+            };
+            let Some(source) = selected.source.as_ref() else {
+                return;
+            };
+            match source
+                .complete_local_mapping(
+                    &selected.database,
+                    selected.source_key,
+                    &input.root_path,
+                    input.server_prefix.as_deref(),
+                    input.local_prefix.as_deref(),
+                    Arc::clone(&cancelled),
+                )
+                .await
+            {
+                Ok(mapped_count) if !cancelled.load(Ordering::Acquire) => {
+                    if let Err(error) = owner.publish_mapping_count(&selected, mapped_count).await {
+                        warn!(%error, "could not publish completed Local mapping");
+                    }
+                }
+                Ok(_) | Err(SourceError::Cancelled) => {}
+                Err(error) => warn!(%error, "background Local mapping did not complete"),
+            }
         });
         receiver
     }
@@ -1346,7 +1528,7 @@ impl SourcePort for SourceOwner {
                 .selected()
                 .is_some_and(|selected| selected.source_id() == &source_id)
             {
-                owner.release_selected().await;
+                owner.release_selected(true).await;
             }
             if let Some(cached) = owner
                 .shared
@@ -1415,12 +1597,21 @@ impl SelectedSourcePort for ActiveSource {
     }
 
     fn refresh_library(&self, trigger: ui::runtime::LibraryRefreshTrigger) {
+        let Some(shared) = self.shared.upgrade() else {
+            return;
+        };
+        let acquisition = shared.begin_acquisition();
         self.spawn_selected(move |owner, selected| async move {
+            if acquisition.load(Ordering::Acquire) {
+                return;
+            }
             let label = match trigger {
                 ui::runtime::LibraryRefreshTrigger::GlobalAction => "global-action",
                 ui::runtime::LibraryRefreshTrigger::NewlyAdded => "home-newly-added",
             };
-            owner.manual_refresh_selected(&selected, label).await;
+            owner
+                .manual_refresh_selected(&selected, label, acquisition)
+                .await;
         });
     }
 
@@ -1470,7 +1661,9 @@ impl SelectedSourcePort for ActiveSource {
                         }
                     }
                 }
-                owner.publish_catalog(&selected, None).await;
+                owner
+                    .publish_catalog(&selected, None, CatalogChange::Home)
+                    .await;
             });
         }
     }
@@ -1547,26 +1740,10 @@ impl SelectedSourcePort for ActiveSource {
                     .queue_remote_favorite(selected.source_key, target, favorite, unix_seconds())
                     .await
             } else {
-                match target {
-                    FavoriteTarget::Track(key) => {
-                        selected
-                            .database
-                            .set_track_favorite(selected.source_key, key, favorite)
-                            .await
-                    }
-                    FavoriteTarget::Album(key) => {
-                        selected
-                            .database
-                            .set_album_favorite(selected.source_key, key, favorite)
-                            .await
-                    }
-                    FavoriteTarget::Artist(key) => {
-                        selected
-                            .database
-                            .set_artist_favorite(selected.source_key, key, favorite)
-                            .await
-                    }
-                }
+                selected
+                    .database
+                    .set_favorite(selected.source_key, target, favorite)
+                    .await
             }
             .unwrap_or(false);
             if changed {
@@ -1578,6 +1755,7 @@ impl SelectedSourcePort for ActiveSource {
                             requested: favorite,
                             effective: favorite,
                         }),
+                        CatalogChange::Broad,
                     )
                     .await;
                 if remote {
@@ -1589,29 +1767,15 @@ impl SelectedSourcePort for ActiveSource {
 
     fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
         self.spawn_selected(move |owner, selected| async move {
-            let changed = match target {
-                FavoriteTarget::Track(key) => {
-                    selected
-                        .database
-                        .set_track_rating(selected.source_key, key, rating)
-                        .await
-                }
-                FavoriteTarget::Album(key) => {
-                    selected
-                        .database
-                        .set_album_rating(selected.source_key, key, rating)
-                        .await
-                }
-                FavoriteTarget::Artist(key) => {
-                    selected
-                        .database
-                        .set_artist_rating(selected.source_key, key, rating)
-                        .await
-                }
-            }
-            .unwrap_or(false);
+            let changed = selected
+                .database
+                .set_rating(selected.source_key, target, rating)
+                .await
+                .unwrap_or(false);
             if changed {
-                owner.publish_catalog(&selected, None).await;
+                owner
+                    .publish_catalog(&selected, None, CatalogChange::Broad)
+                    .await;
                 if let Some(source) = selected.source.as_ref() {
                     match target {
                         FavoriteTarget::Track(key) if selected.configuration.is_local() => {
@@ -1642,32 +1806,26 @@ impl SelectedSourcePort for ActiveSource {
     }
 
     fn create_playlist(&self, name: String, tracks: Vec<TrackKey>) {
-        db_command(self, move |selected| async move {
-            selected
-                .database
-                .create_playlist(selected.source_key, &name, &tracks)
+        self.playlist_change(move |source, selected| async move {
+            source
+                .create_playlist(&selected.database, selected.source_key, &name, &tracks)
                 .await
-                .map(|_| ())
         });
     }
 
     fn rename_playlist(&self, playlist: PlaylistKey, name: String) {
-        db_command(self, move |selected| async move {
-            selected
-                .database
-                .rename_playlist(selected.source_key, playlist, &name)
+        self.playlist_change(move |source, selected| async move {
+            source
+                .rename_playlist(&selected.database, selected.source_key, playlist, &name)
                 .await
-                .map(|_| ())
         });
     }
 
     fn delete_playlist(&self, playlist: PlaylistKey) {
-        db_command(self, move |selected| async move {
-            selected
-                .database
-                .delete_playlist(selected.source_key, playlist)
+        self.playlist_change(move |source, selected| async move {
+            source
+                .delete_playlist(&selected.database, selected.source_key, playlist)
                 .await
-                .map(|_| ())
         });
     }
 
@@ -1678,38 +1836,44 @@ impl SelectedSourcePort for ActiveSource {
         skip_duplicates: bool,
     ) -> usize {
         let count = tracks.len();
-        db_command(self, move |selected| async move {
-            selected
-                .database
+        self.playlist_change(move |source, selected| async move {
+            source
                 .add_playlist_tracks(
+                    &selected.database,
                     selected.source_key,
                     playlist,
                     &tracks,
-                    skip_duplicates || !selected.configuration.playlist_tracks_can_repeat(),
+                    skip_duplicates,
                 )
                 .await
-                .map(|_| ())
         });
         count
     }
 
     fn remove_playlist_entries(&self, playlist: PlaylistKey, entries: Vec<PlaylistEntryKey>) {
-        db_command(self, move |selected| async move {
-            selected
-                .database
-                .remove_playlist_entries(selected.source_key, playlist, &entries)
+        self.playlist_change(move |source, selected| async move {
+            source
+                .remove_playlist_entries(
+                    &selected.database,
+                    selected.source_key,
+                    playlist,
+                    &entries,
+                )
                 .await
-                .map(|_| ())
         });
     }
 
     fn move_playlist_entry(&self, playlist: PlaylistKey, entry: PlaylistEntryKey, position: usize) {
-        db_command(self, move |selected| async move {
-            selected
-                .database
-                .move_playlist_entry(selected.source_key, playlist, entry, position)
+        self.playlist_change(move |source, selected| async move {
+            source
+                .move_playlist_entry(
+                    &selected.database,
+                    selected.source_key,
+                    playlist,
+                    entry,
+                    position,
+                )
                 .await
-                .map(|_| ())
         });
     }
 
@@ -1854,45 +2018,6 @@ impl SelectedSourcePort for ActiveSource {
         });
     }
 
-    fn track_metadata_available(&self, track: TrackKey) -> Receiver<Result<bool, String>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or_else(source_access_unavailable)?;
-            source
-                .track_metadata_available(&selected.database, selected.source_key, track)
-                .await
-                .map_err(string_error)
-        })
-    }
-
-    fn album_metadata_available(&self, album: AlbumKey) -> Receiver<Result<bool, String>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or_else(source_access_unavailable)?;
-            source
-                .album_metadata_available(&selected.database, selected.source_key, album)
-                .await
-                .map_err(string_error)
-        })
-    }
-
-    fn artist_metadata_available(&self, artist: ArtistKey) -> Receiver<Result<bool, String>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or_else(source_access_unavailable)?;
-            source
-                .artist_metadata_available(&selected.database, selected.source_key, artist)
-                .await
-                .map_err(string_error)
-        })
-    }
-
     fn track_metadata(
         &self,
         track: TrackKey,
@@ -1938,33 +2063,6 @@ impl SelectedSourcePort for ActiveSource {
         })
     }
 
-    fn write_track_metadata(
-        &self,
-        track: TrackKey,
-        edit: TrackMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            let metadata = source
-                .read_track_metadata(&selected.database, selected.source_key, track)
-                .await?;
-            source
-                .write_track_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    track,
-                    metadata.revision.as_deref().unwrap_or_default(),
-                    None,
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
     fn write_reviewed_track_metadata(
         &self,
         track: TrackKey,
@@ -1991,33 +2089,6 @@ impl SelectedSourcePort for ActiveSource {
         })
     }
 
-    fn write_album_metadata(
-        &self,
-        album: AlbumKey,
-        edit: AlbumMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            let metadata = source
-                .read_album_metadata(&selected.database, selected.source_key, album)
-                .await?;
-            source
-                .write_album_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    album,
-                    metadata.revision.as_deref().unwrap_or_default(),
-                    None,
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
     fn write_reviewed_album_metadata(
         &self,
         album: AlbumKey,
@@ -2037,33 +2108,6 @@ impl SelectedSourcePort for ActiveSource {
                     album,
                     revision.as_deref().unwrap_or_default(),
                     application_token.as_deref(),
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
-    fn write_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        edit: ArtistMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            let metadata = source
-                .read_artist_metadata(&selected.database, selected.source_key, artist)
-                .await?;
-            source
-                .write_artist_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    artist,
-                    metadata.revision.as_deref().unwrap_or_default(),
-                    None,
                     edit,
                 )
                 .await
@@ -2192,15 +2236,32 @@ impl SelectedSourcePort for ActiveSource {
                 .map(|identified| identified.map(|values| (values, None)))
         })
     }
-
-    fn source_key(&self) -> SourceKey {
-        self.resolve()
-            .map(|selected| selected.source_key)
-            .unwrap_or(SourceKey::from_raw(0))
-    }
 }
 
 impl SourceOwner {
+    async fn fail_artwork_preparation(
+        &self,
+        key: ArtworkPreparationKey,
+        token: u64,
+        revision: u64,
+    ) {
+        if self
+            .shared
+            .artwork_preparation
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .fail(key, token)
+        {
+            self.shared
+                .send(SourceEvent::ArtworkPreparation {
+                    source_key: key.source,
+                    revision,
+                    progress: None,
+                })
+                .await;
+        }
+    }
+
     fn start_artwork_preparation(&self, session: Arc<ActiveSource>) {
         let Some(selected) = session.resolve() else {
             return;
@@ -2208,7 +2269,7 @@ impl SourceOwner {
         let key = ArtworkPreparationKey {
             source: selected.source_key,
             epoch: selected.source_session_epoch,
-            revision: selected.catalog_revision,
+            digest: selected.artwork_digest,
         };
         let Some((token, cancelled)) = self
             .shared
@@ -2221,143 +2282,51 @@ impl SourceOwner {
         };
         let owner = self.clone();
         let task = self.shared.runtime.spawn(async move {
-            if let Some(source) = selected.source.as_ref() {
-                let mut after = None;
-                loop {
-                    match source
-                        .prepare_local_artwork_page(&selected.database, selected.source_key, after)
-                        .await
-                    {
-                        Ok(progress) => {
-                            after = progress.next_album;
-                            if after.is_none() {
-                                break;
-                            }
-                        }
-                        Err(error) => {
-                            warn!(%error, "could not select Local Album artwork");
-                            break;
-                        }
-                    }
-                }
-            }
-            let digest = match selected
-                .database
-                .finalize_artwork_digest(selected.source_key)
-                .await
-            {
-                Ok(digest) => digest,
-                Err(error) => {
-                    warn!(%error, "could not finalize artwork digest");
-                    return;
-                }
-            };
-            let revision = u64::from_le_bytes(digest[..8].try_into().expect("digest prefix"));
-            if owner
-                .shared
-                .artwork
-                .source_preparation_complete(selected.source_id(), revision)
-                .unwrap_or(false)
-            {
-                owner
-                    .shared
-                    .artwork_preparation
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .complete(key, token);
-                return;
-            }
-            if cancelled.load(Ordering::Acquire) {
-                return;
-            }
-            owner
-                .shared
-                .send(SourceEvent::ArtworkPreparation {
-                    source_key: selected.source_key,
-                    revision,
-                    progress: Some(artwork_preparation_progress(0)),
-                })
-                .await;
+            let initial_revision = artwork_digest_revision(&selected.artwork_digest);
             let images = selected.source.as_ref().map_or_else(
                 || artwork::SourceImages::cache_only(selected.source_id().clone()),
                 |source| artwork::SourceImages::new(Arc::clone(source)),
             );
-            let manifest = match owner
+            let current_revision = Arc::new(AtomicU64::new(initial_revision));
+            let progress_revision = Arc::clone(&current_revision);
+            let progress_owner = owner.clone();
+            let events = owner.shared.outputs.events.clone();
+            let progress = move |revision, completed| {
+                progress_revision.store(revision, Ordering::Release);
+                if !artwork_preparation_is_current(&owner, key, token) {
+                    return;
+                }
+                let _ = events.try_send(SourceEvent::ArtworkPreparation {
+                    source_key: key.source,
+                    revision,
+                    progress: Some(artwork_preparation_progress(completed)),
+                });
+            };
+            let result = progress_owner
                 .shared
                 .artwork
-                .begin_source_manifest(selected.source_id().clone(), revision)
-            {
-                Ok(manifest) => manifest,
+                .prepare_database_source(
+                    &selected.database,
+                    selected.source_key,
+                    images,
+                    selected.artwork_digest,
+                    &progress,
+                    Arc::clone(&cancelled),
+                )
+                .await;
+            let revision = current_revision.load(Ordering::Acquire);
+            let completed = match result {
+                Ok(completed) => completed,
+                Err(artwork::ArtworkError::Cancelled) => return,
                 Err(error) => {
-                    warn!(%error, "could not begin artwork manifest");
+                    warn!(%error, "could not prepare selected source artwork");
+                    progress_owner
+                        .fail_artwork_preparation(key, token, revision)
+                        .await;
                     return;
                 }
             };
-            let mut after_binding = None;
-            let mut completed = 0_usize;
-            loop {
-                if !artwork_preparation_is_current(&owner, key, token) {
-                    return;
-                }
-                let page = match selected
-                    .database
-                    .artwork_preparation_page(
-                        selected.source_key,
-                        after_binding.as_deref(),
-                        128,
-                        &ReadCancellation::new(),
-                    )
-                    .await
-                {
-                    Ok(page) => page,
-                    Err(error) => {
-                        warn!(%error, "could not page accepted artwork");
-                        break;
-                    }
-                };
-                if page.bindings.is_empty() {
-                    break;
-                }
-                after_binding = page.bindings.last().cloned();
-                if let Err(error) = manifest.record_page(&page.bindings) {
-                    warn!(%error, "could not record artwork manifest page");
-                    return;
-                }
-                let artwork = owner.shared.artwork.clone();
-                let source_images = images.clone();
-                let bindings: Arc<[Vec<u8>]> = page.bindings.into();
-                let page_cancelled = Arc::clone(&cancelled);
-                let prepared = tokio::task::spawn_blocking(move || {
-                    artwork.prefetch_source_artwork(
-                        source_images,
-                        bindings,
-                        &|_, _| {},
-                        &move || page_cancelled.load(Ordering::Acquire),
-                    )
-                })
-                .await
-                .unwrap_or_else(|_| Err(artwork::ArtworkError::Cancelled));
-                match prepared {
-                    Ok(summary) => completed = completed.saturating_add(summary.total),
-                    Err(error) => warn!(%error, "could not prepare accepted artwork page"),
-                }
-                if !artwork_preparation_is_current(&owner, key, token) {
-                    return;
-                }
-                owner
-                    .shared
-                    .send(SourceEvent::ArtworkPreparation {
-                        source_key: selected.source_key,
-                        revision,
-                        progress: Some(artwork_preparation_progress(completed)),
-                    })
-                    .await;
-            }
-            if let Err(error) = manifest.finish() {
-                warn!(%error, "could not finish artwork manifest");
-                return;
-            }
-            if !owner
+            if !progress_owner
                 .shared
                 .artwork_preparation
                 .lock()
@@ -2366,14 +2335,16 @@ impl SourceOwner {
             {
                 return;
             }
-            owner
-                .shared
-                .send(SourceEvent::ArtworkPreparation {
-                    source_key: selected.source_key,
-                    revision,
-                    progress: None,
-                })
-                .await;
+            if completed.is_some() {
+                progress_owner
+                    .shared
+                    .send(SourceEvent::ArtworkPreparation {
+                        source_key: selected.source_key,
+                        revision,
+                        progress: None,
+                    })
+                    .await;
+            }
         });
         self.shared
             .artwork_preparation
@@ -2425,6 +2396,7 @@ impl SourceOwner {
                             requested: favorite,
                             effective: previous,
                         }),
+                        CatalogChange::Broad,
                     )
                     .await;
                     self.shared
@@ -2481,19 +2453,6 @@ fn source_error_is_temporary(error: &SourceError) -> bool {
         )
 }
 
-fn db_command<F, Work>(active: &ActiveSource, work: F)
-where
-    F: FnOnce(Arc<SelectedSourceState>) -> Work + Send + 'static,
-    Work: Future<Output = library::LibraryResult<()>> + Send + 'static,
-{
-    active.spawn_selected(move |owner, selected| async move {
-        match work(Arc::clone(&selected)).await {
-            Ok(()) => owner.publish_catalog(&selected, None).await,
-            Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
-        }
-    });
-}
-
 fn configured_source(
     settings: &crate::settings::SourceSettings,
     source_id: &SourceId,
@@ -2506,8 +2465,18 @@ fn configured_source(
         .ok_or_else(|| "the configured source no longer exists".to_string())
 }
 
-fn scan_publication(outcome: ScanOutcome) -> Result<library::Publication, String> {
-    match outcome {
+async fn acquire_required_catalog(
+    source: &Source,
+    database: &Database,
+    display_name: &str,
+    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    cancelled: Arc<AtomicBool>,
+) -> Result<library::Publication, String> {
+    match source
+        .manual_refresh(database, display_name, progress, cancelled)
+        .await
+        .map_err(string_error)?
+    {
         ScanOutcome::Changed(publication)
         | ScanOutcome::ArtworkChanged(publication)
         | ScanOutcome::Identical(publication) => Ok(publication),
@@ -2537,51 +2506,13 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     }
     let input = SourceSettingsInput::Local { roots };
     let source_id = local.configuration.source_id;
+    let cancelled = owner.shared.begin_acquisition();
     owner.spawn_serialized(move |owner| async move {
-        let configured = match configured_source(&owner.shared.settings.load().sources, &source_id)
+        if let Err(error) = owner
+            .edit_configured_source(source_id, input, cancelled)
+            .await
         {
-            Ok(configured) => configured,
-            Err(error) => return owner.shared.warn_nonfatal(&error),
-        };
-        match Source::edit(configured.configuration.clone(), None, input, None).await {
-            Ok(sources::SourceEditResult::Connected(connected)) => {
-                let (configuration, source, _) = connected.into_parts();
-                let source = Arc::new(source);
-                let outcome = match source
-                    .manual_refresh(
-                        &owner.shared.database,
-                        &configuration.name,
-                        &|_| {},
-                        Arc::new(AtomicBool::new(false)),
-                    )
-                    .await
-                {
-                    Ok(outcome) => outcome,
-                    Err(error) => return owner.shared.warn_nonfatal(&error.to_string()),
-                };
-                let publication = match scan_publication(outcome) {
-                    Ok(publication) => publication,
-                    Err(error) => return owner.shared.warn_nonfatal(&error),
-                };
-                let mut replacement = configured;
-                replacement.configuration = configuration;
-                let _ = owner.shared.settings.update(|stored| {
-                    if let Some(item) = stored
-                        .sources
-                        .configured
-                        .iter_mut()
-                        .find(|item| item.configuration.source_id == source_id)
-                    {
-                        *item = replacement.clone();
-                    }
-                    Ok(())
-                });
-                let _ = owner
-                    .install_selected(replacement, Some(source), publication, false)
-                    .await;
-            }
-            Ok(_) => {}
-            Err(error) => owner.shared.warn_nonfatal(&error.to_string()),
+            owner.shared.warn_nonfatal(&error);
         }
     });
 }
@@ -2625,6 +2556,7 @@ fn configured_sources(
                     root_path: access.root_path.clone(),
                     server_prefix: access.server_prefix.clone(),
                     local_prefix: access.local_prefix.clone(),
+                    sample_source_path: None,
                 });
             SourceLocalAccessSummary {
                 source_id: configured.configuration.source_id.clone(),
@@ -2860,12 +2792,28 @@ fn source_progress(progress: SourceReadProgress) -> SourceProgress {
     }
 }
 
+fn refreshing_progress(
+    events: Sender<SourceEvent>,
+    source_id: SourceId,
+) -> impl Fn(SourceReadProgress) + Send + Sync {
+    move |value| {
+        let _ = events.try_send(SourceEvent::Operation(SourceOperation::Refreshing {
+            source_id: source_id.clone(),
+            progress: source_progress(value),
+        }));
+    }
+}
+
 fn artwork_preparation_progress(completed: usize) -> SourceProgress {
     SourceProgress {
         stage: SourceProgressStage::Artwork,
         completed,
         total: None,
     }
+}
+
+fn artwork_digest_revision(digest: &[u8; 32]) -> u64 {
+    u64::from_le_bytes(digest[..8].try_into().expect("digest prefix"))
 }
 
 fn artwork_preparation_is_current(
@@ -2909,10 +2857,12 @@ mod artwork_preparation_tests {
     use super::*;
 
     fn key(revision: u64) -> ArtworkPreparationKey {
+        let mut digest = [0; 32];
+        digest[..8].copy_from_slice(&revision.to_le_bytes());
         ArtworkPreparationKey {
             source: SourceKey::from_raw(1),
             epoch: SourceSessionEpoch::new(1),
-            revision,
+            digest,
         }
     }
 
@@ -2947,6 +2897,14 @@ mod artwork_preparation_tests {
         owner.cancel_active();
         assert!(cancelled.load(Ordering::Acquire));
         assert!(owner.active.is_none());
+    }
+
+    #[test]
+    fn failed_artwork_revision_is_retryable() {
+        let mut owner = ArtworkPreparationOwner::default();
+        let (token, _) = owner.admit(key(1)).expect("active revision");
+        assert!(owner.fail(key(1), token));
+        assert!(owner.admit(key(1)).is_some());
     }
 
     #[test]

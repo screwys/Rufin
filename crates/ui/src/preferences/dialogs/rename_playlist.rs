@@ -1,11 +1,9 @@
 use std::rc::Rc;
 
 use crate::shell::Shell;
-use ::library::{PlaylistKey, SmartPlaylistRow};
+use ::library::PlaylistKey;
 use adw::prelude::*;
 use localization::tr;
-
-use super::SmartPlaylistChange;
 
 impl Shell {
     pub(crate) fn rename_playlist_dialog(
@@ -18,25 +16,6 @@ impl Shell {
         };
         self.rename_playlist_dialog_inner(current_name, move |name| {
             source.rename_playlist(playlist_id, name);
-        });
-    }
-
-    pub(crate) fn rename_smart_playlist_dialog(self: &Rc<Self>, playlist: SmartPlaylistRow) {
-        if self.selected_library().is_none() {
-            return;
-        }
-        let playlist_id = playlist.smart_playlist_key;
-        let definition = playlist.definition.clone();
-        let shell = Rc::clone(self);
-        self.rename_playlist_dialog_inner(playlist.name, move |name| {
-            shell.publish_smart_playlist_change(
-                SmartPlaylistChange::Update {
-                    key: playlist_id,
-                    name,
-                    definition: definition.clone(),
-                },
-                None,
-            );
         });
     }
 

@@ -42,6 +42,7 @@
                 ./data/japanese-readings.LICENSE
                 ./data/io.github.screwys.Rufin.desktop
                 ./data/io.github.screwys.Rufin.metainfo.xml
+                ./locales
               ];
             };
 
@@ -185,7 +186,7 @@
             # Generated Linux development dependencies end.
 
             GIO_EXTRA_MODULES = "${pkgs.glib-networking}/lib/gio/modules";
-            RUFIN_LOCALEDIR = "crates/localization/locales";
+            RUFIN_LOCALEDIR = "locales";
           };
         in
         {
@@ -199,7 +200,7 @@
               flatpak
               flatpak-builder
             ];
-            RUFIN_LOCALEDIR = "crates/localization/locales";
+            RUFIN_LOCALEDIR = "locales";
           };
         }
       );

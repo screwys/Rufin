@@ -157,21 +157,17 @@ impl LoadedPlayRequest {
             return None;
         }
         let origin = self.origin;
+        let context_id = match &origin {
+            QueueOrigin::Context(context_id) => Some(Arc::<str>::from(context_id.as_str())),
+            QueueOrigin::Manual | QueueOrigin::Random | QueueOrigin::Radio => None,
+        };
         let items = self
             .order
             .into_iter()
             .copied()
             .enumerate()
             .map(|(source_rank, track_key)| {
-                let provenance = match &origin {
-                    QueueOrigin::Context(context_id) => Provenance::Context {
-                        context_id: context_id.clone(),
-                        source_rank,
-                    },
-                    QueueOrigin::Manual => Provenance::Manual,
-                    QueueOrigin::Random => Provenance::Random,
-                    QueueOrigin::Radio => Provenance::Radio,
-                };
+                let provenance = compact_provenance(&origin, context_id.as_ref(), source_rank);
                 BatchItem::new(track_key, provenance)
             })
             .collect();
@@ -180,6 +176,24 @@ impl LoadedPlayRequest {
             placement,
             self.anchor,
         ))
+    }
+}
+
+fn compact_provenance(
+    origin: &QueueOrigin,
+    context_id: Option<&Arc<str>>,
+    source_rank: usize,
+) -> Provenance {
+    match origin {
+        QueueOrigin::Context(_) => Provenance::Context {
+            context_id: Arc::clone(
+                context_id.expect("Context Queue origin has one shared identity"),
+            ),
+            source_rank,
+        },
+        QueueOrigin::Manual => Provenance::Manual,
+        QueueOrigin::Random => Provenance::Random,
+        QueueOrigin::Radio => Provenance::Radio,
     }
 }
 
@@ -263,6 +277,34 @@ pub trait TransportCommandPort: Send + Sync {
     fn discover_remote_outputs(&self) -> Result<Vec<RemoteOutput>, String>;
     fn select_playback_output(&self, output: PlaybackOutput) -> Result<(), String>;
     fn shutdown(&self);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{QueueOrigin, compact_provenance};
+    use crate::Provenance;
+    use std::sync::Arc;
+
+    #[test]
+    fn collection_occurrences_share_one_context_identity() {
+        let origin = QueueOrigin::Context("genre:4".to_string());
+        let context = Arc::<str>::from("genre:4");
+        let first = compact_provenance(&origin, Some(&context), 0);
+        let second = compact_provenance(&origin, Some(&context), 1);
+        let (
+            Provenance::Context {
+                context_id: first, ..
+            },
+            Provenance::Context {
+                context_id: second, ..
+            },
+        ) = (first, second)
+        else {
+            panic!("Context Queue entries keep Context provenance");
+        };
+
+        assert!(Arc::ptr_eq(&first, &second));
+    }
 }
 
 pub type TransportHandle = Arc<dyn TransportCommandPort>;

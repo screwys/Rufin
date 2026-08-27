@@ -18,7 +18,6 @@ use playback::{
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 use tracing::instrument;
 
 mod client;
@@ -265,13 +264,8 @@ pub struct JellyfinSource {
     authorization: header::HeaderValue,
     use_instant_mix: bool,
     trust_invalid_cert: bool,
-    metadata_editing: AtomicBool,
 }
 impl JellyfinSource {
-    pub(super) fn metadata_editing_available(&self) -> bool {
-        self.metadata_editing.load(Ordering::Acquire)
-    }
-
     fn open(
         config: JellyfinSourceConfig,
         access_token: String,
@@ -291,7 +285,6 @@ impl JellyfinSource {
             authorization,
             use_instant_mix: config.use_instant_mix,
             trust_invalid_cert: client_config.trust_invalid_cert,
-            metadata_editing: AtomicBool::new(false),
         })
     }
 
@@ -335,7 +328,6 @@ impl JellyfinSource {
             response.user.id
         ));
         let canonical_base_url = base_url.as_str().trim_end_matches('/').to_string();
-        let metadata_editing = response.user.policy.is_administrator;
         let user_id = response.user.id;
         let username = response.user.name;
         let credential = response.access_token;
@@ -363,7 +355,6 @@ impl JellyfinSource {
             authorization,
             use_instant_mix: input.use_instant_mix,
             trust_invalid_cert: config.trust_invalid_cert,
-            metadata_editing: AtomicBool::new(metadata_editing),
         };
         Ok(AuthenticatedJellyfin {
             configuration,

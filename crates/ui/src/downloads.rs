@@ -211,7 +211,6 @@ impl Shell {
                 return;
             };
             let bindings = page
-                .bindings
                 .iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect::<Vec<_>>();
@@ -354,7 +353,7 @@ fn operation_feedback_subtitle(kind: &OperationFeedbackKind, count: &str) -> Str
             format!("{} · {count}", tr("Download queued"))
         }
         OperationFeedbackKind::PlaylistAdded { destination } => {
-            format!("{} · {destination}", tr("Added to Playlist"))
+            format!("{} {destination} · {count}", tr("Added to"))
         }
     }
 }

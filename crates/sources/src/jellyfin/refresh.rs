@@ -163,6 +163,7 @@ impl JellyfinSource {
         url.query_pairs_mut().append_pair("UserId", &self.user_id);
         let ancestors = self.get_json::<Vec<JellyfinItem>>(url).await?;
         scan.begin_batch().await?;
+        let mut folders = Vec::new();
         for (position, folder) in ancestors
             .into_iter()
             .filter(|item| {
@@ -186,13 +187,18 @@ impl JellyfinSource {
                 artwork.as_deref(),
             )
             .await?;
-            scan.write_track_folder(
-                &jellyfin_id("track", raw_track_id),
-                &folder_id,
-                position as i64,
-            )
-            .await?;
+            folders.push((folder_id, position as i64));
         }
+        let track_id = jellyfin_id("track", raw_track_id);
+        scan.write_track_folders(
+            &folders
+                .iter()
+                .map(|(folder_id, position)| {
+                    library::ScanLink::new(&track_id, folder_id, *position)
+                })
+                .collect::<Vec<_>>(),
+        )
+        .await?;
         scan.finish_batch().await?;
         Ok(())
     }
@@ -371,14 +377,18 @@ impl JellyfinSource {
             let count = page.items.len();
             let finished = pages.advance(count, page.total_record_count)?;
             scan.begin_batch().await?;
-            for item in page.items {
-                scan.write_track_folder(
-                    &jellyfin_id("track", &item.id),
-                    folder_id,
-                    folder_position,
-                )
-                .await?;
-            }
+            let track_ids = page
+                .items
+                .into_iter()
+                .map(|item| jellyfin_id("track", &item.id))
+                .collect::<Vec<_>>();
+            scan.write_track_folders(
+                &track_ids
+                    .iter()
+                    .map(|track_id| library::ScanLink::new(track_id, folder_id, folder_position))
+                    .collect::<Vec<_>>(),
+            )
+            .await?;
             scan.finish_batch().await?;
             if finished {
                 return Ok(());
@@ -537,6 +547,21 @@ impl PageState {
         } else {
             Ok(count < COLLECTION_PAGE_SIZE)
         }
+    }
+}
+
+#[cfg(test)]
+mod paging_tests {
+    use super::PageState;
+
+    #[test]
+    fn playlist_pages_continue_when_the_reported_total_grows() {
+        let mut pages = PageState::default();
+        assert!(!pages.advance(1, Some(2)).expect("first page"));
+        assert_eq!(pages.offset(), 1);
+        assert!(!pages.advance(1, Some(3)).expect("grown total"));
+        assert_eq!(pages.offset(), 2);
+        assert!(pages.advance(1, Some(3)).expect("final page"));
     }
 }
 

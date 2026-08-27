@@ -4,8 +4,8 @@
 use sqlx::{Connection, QueryBuilder, Sqlite, SqliteConnection};
 
 use crate::{
-    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Database, FolderKey, GenreKey, LibraryResult,
-    MoodKey, PlaylistKey, ReadCancellation, SourceKey, TrackKey, TrackRow,
+    AlbumKey, AlbumRow, ArtistKey, ArtistRow, Database, FolderKey, LibraryResult, ReadCancellation,
+    SourceKey, TrackKey, TrackRow,
     collections::{load_album_rows, load_artist_rows},
     tracks::load_track_rows,
 };
@@ -194,153 +194,6 @@ impl Database {
             artists,
         })
     }
-
-    pub async fn track_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, TrackKey>(
-            "SELECT track_key FROM tracks
-             WHERE source_key=?1 AND (instr(normalized_search, ?2)>0 OR CAST(year AS TEXT)=?2)
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=tracks.track_key AND scope.folder_key=?3))
-             ORDER BY sort_text, track_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn album_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<AlbumKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, AlbumKey>(
-            "SELECT album.album_key FROM albums album
-             WHERE album.source_key=?1 AND (instr(album.normalized_title || ' ' || lower(album.display_artist), ?2)>0 OR CAST(album.year AS TEXT)=?2 OR EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,?2)>0) OR EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,?2)>0))
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?3))
-             ORDER BY sort_text, album_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn artist_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        album_artists: bool,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<ArtistKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, ArtistKey>(
-            "SELECT artist.artist_key FROM artists artist
-             WHERE artist.source_key=?1 AND instr(artist.normalized_name, ?2)>0
-               AND ((?4=0 AND EXISTS (SELECT 1 FROM track_artists credit WHERE credit.artist_key=artist.artist_key)) OR (?4=1 AND EXISTS (SELECT 1 FROM album_artists credit WHERE credit.artist_key=artist.artist_key)))
-               AND (?3 IS NULL OR (?4=0 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?3)) OR (?4=1 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?3)))
-             ORDER BY sort_text, artist_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .bind(album_artists)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn genre_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<GenreKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, GenreKey>(
-            "SELECT genre.genre_key FROM genres genre
-             WHERE genre.source_key=?1 AND instr(genre.normalized_name, ?2)>0
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_genres credit JOIN track_folders scope USING(track_key) WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?3))
-             ORDER BY sort_text, genre_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn mood_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<MoodKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, MoodKey>(
-            "SELECT mood.mood_key FROM moods mood
-             WHERE mood.source_key=?1 AND instr(mood.normalized_name, ?2)>0
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_moods credit JOIN track_folders scope USING(track_key) WHERE credit.mood_key=mood.mood_key AND scope.folder_key=?3))
-             ORDER BY sort_text, mood_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn playlist_filter_order(
-        &self,
-        source: SourceKey,
-        folder: Option<FolderKey>,
-        query: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<PlaylistKey>> {
-        let query = normalized_filter(query);
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, PlaylistKey>(
-            "SELECT playlist.playlist_key FROM playlists playlist
-             WHERE playlist.source_key=?1 AND instr(playlist.normalized_name, ?2)>0
-               AND (?3 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?3))
-             ORDER BY sort_text, playlist_key",
-        )
-        .bind(source)
-        .bind(query)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
 }
 
 async fn object_track_keys(
@@ -423,13 +276,4 @@ fn object_key_query(
         .push(table)
         .push(" entity ON entity.object_id=requested.object_id WHERE entity.source_key=");
     query
-}
-
-fn normalized_filter(query: &str) -> String {
-    query
-        .trim()
-        .to_lowercase()
-        .chars()
-        .take(SEARCH_TEXT_LIMIT)
-        .collect()
 }

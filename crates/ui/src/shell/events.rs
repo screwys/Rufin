@@ -20,8 +20,8 @@ use crate::runtime::source::{
     SourceProgress,
 };
 use crate::runtime::{
-    CatalogPublication, ProductReceivers, SourceEvent, SourceNotice, SourceNoticeKind,
-    WaveformProjection,
+    CatalogChange, CatalogPublication, ProductReceivers, SourceEvent, SourceNotice,
+    SourceNoticeKind, WaveformProjection,
 };
 
 use super::Shell;
@@ -34,6 +34,7 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
         source_discovery,
         downloads,
         playback,
+        visualizer,
         waveform,
         lyrics,
         release_updates,
@@ -64,6 +65,27 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     glib::spawn_future_local(async move {
         while let Ok(publication) = playback.recv().await {
             apply_playback_publication(&event_shell, publication);
+        }
+    });
+
+    let event_shell = Rc::clone(shell);
+    glib::spawn_future_local(async move {
+        while let Ok(frame) = visualizer.recv().await {
+            let matches = event_shell
+                .selected_library()
+                .as_deref()
+                .is_some_and(|selected| {
+                    selected.source_key == frame.source_key
+                        && selected.source_session_epoch == frame.source_session_epoch
+                })
+                && event_shell
+                    .selected_playback()
+                    .as_deref()
+                    .and_then(|player| player.transport.current.as_ref())
+                    .is_some_and(|current| current.id.run == Some(frame.run));
+            if matches {
+                event_shell.apply_visualizer_levels(frame.levels);
+            }
         }
     });
 
@@ -275,9 +297,6 @@ fn finish_source_assignment(
         }
     }
 
-    if session_changed && !source_changed {
-        shell.refresh_artwork_bindings();
-    }
     if rebuild_sidebar {
         shell.rebuild_sidebar_navigation();
     }
@@ -348,12 +367,42 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         shell.apply_favorite_settlement_to_mounted_route(favorite);
         return;
     }
-    refresh_context_playlist_picker(shell);
-    super::navigation::refresh_sidebar_pins(shell);
-    if shell.navigation.routes.borrow().current() == &Route::Home {
-        shell.refresh_mounted_home();
-    } else {
-        shell.refresh_mounted_catalog();
+    let current = shell.navigation.routes.borrow().current().clone();
+    match publication.change {
+        CatalogChange::Broad => {
+            refresh_context_playlist_picker(shell);
+            super::navigation::refresh_sidebar_pins(shell);
+            if current == Route::Home {
+                shell.refresh_mounted_home();
+            } else {
+                shell.refresh_mounted_catalog();
+            }
+        }
+        CatalogChange::Home => {
+            if current == Route::Home {
+                shell.refresh_mounted_home();
+            }
+        }
+        CatalogChange::Playlists => {
+            refresh_context_playlist_picker(shell);
+            super::navigation::refresh_sidebar_pins(shell);
+            if matches!(current, Route::Playlists | Route::PlaylistDetail(_)) {
+                shell.refresh_mounted_catalog();
+            }
+        }
+        CatalogChange::Album(album) => {
+            if current == Route::AlbumDetail(album)
+                || matches!(
+                    current,
+                    Route::ArtistDetail(_)
+                        | Route::AlbumArtistDetail(_)
+                        | Route::ArtistDiscography(_)
+                        | Route::AlbumArtistDiscography(_)
+                )
+            {
+                shell.refresh_mounted_catalog();
+            }
+        }
     }
 }
 
@@ -571,7 +620,6 @@ fn apply_source_artwork_preparation(
         }
         None if shell.source.artwork_preparation_revision.get() == Some(revision) => {
             shell.source.artwork_preparation_revision.set(None);
-            shell.refresh_artwork_bindings();
             finish_source_refresh_feedback(shell, None, Duration::from_millis(1_200));
         }
         None => {}
@@ -727,9 +775,6 @@ fn finish_playback_projection(
     let mut notification_started_run = None;
     for notice in notices {
         match notice {
-            playback::PlaybackNotice::Visualizer { levels, .. } => {
-                shell.apply_visualizer_levels(levels);
-            }
             playback::PlaybackNotice::PositionDiscontinuity(discontinuity) => {
                 media_controls_discontinuity = Some(discontinuity);
             }

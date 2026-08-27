@@ -149,7 +149,7 @@ pub(crate) fn linux_payload(source: &Path) -> Result<Vec<PayloadFile>> {
         compile_locale: false,
     }));
 
-    let mut po_files = fs::read_dir(source.join("crates/localization/locales"))?
+    let mut po_files = fs::read_dir(source.join("locales"))?
         .flatten()
         .map(|entry| entry.path())
         .filter(|path| path.extension().and_then(|value| value.to_str()) == Some("po"))

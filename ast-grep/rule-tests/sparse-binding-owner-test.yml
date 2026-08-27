@@ -1,0 +1,15 @@
+id: sparse-ready-handlers-must-not-append
+valid:
+  - |
+      impl SparseObjectItem {
+          fn connect_ready(&self, owner: usize, handler: Rc<dyn Fn()>) {
+              self.handlers.borrow_mut().insert(owner, handler);
+          }
+      }
+invalid:
+  - |
+      impl SparseObjectItem {
+          fn connect_ready(&self, handler: Rc<dyn Fn()>) {
+              self.handlers.borrow_mut().push(handler);
+          }
+      }

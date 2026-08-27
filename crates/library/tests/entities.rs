@@ -83,101 +83,108 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .is_err(),
         "Track row bound was not enforced"
     );
-    let detail = fixture
-        .database
-        .track_detail(fixture.source, title[0], &cancel)
-        .await
-        .expect("Track detail")
-        .expect("existing Track");
-    assert_eq!(detail.artists.len(), 1);
-    assert_eq!(detail.genres, [fixture.genre]);
-    assert_eq!(detail.moods, [fixture.mood]);
-    assert_eq!(detail.folders, [fixture.folder]);
-
     assert_eq!(
         fixture
             .database
-            .album_order(
+            .album_route_page(
                 fixture.source,
                 None,
                 false,
+                "",
                 AlbumSort::Title,
                 false,
                 &cancel
             )
             .await
-            .expect("Album order"),
+            .expect("Album order")
+            .0,
         fixture.albums
     );
     assert_eq!(
         fixture
             .database
-            .album_order(
+            .album_route_page(
                 fixture.source,
                 None,
                 false,
+                "",
                 AlbumSort::DateAdded,
                 true,
                 &cancel
             )
             .await
-            .expect("sorted Album order"),
+            .expect("sorted Album order")
+            .0,
         fixture.albums
     );
     assert_eq!(
         fixture
             .database
-            .artist_order(
+            .artist_route_page(
                 fixture.source,
                 None,
                 true,
                 false,
+                "",
                 ArtistSort::Title,
                 false,
                 &cancel
             )
             .await
-            .expect("Album Artist order"),
+            .expect("Album Artist order")
+            .0,
         fixture.artists
     );
     assert_eq!(
         fixture
             .database
-            .artist_order(
+            .artist_route_page(
                 fixture.source,
                 None,
                 false,
                 false,
+                "",
                 ArtistSort::Title,
                 false,
                 &cancel
             )
             .await
-            .expect("sorted Artist order"),
+            .expect("sorted Artist order")
+            .0,
         fixture.artists
     );
     assert_eq!(
         fixture
             .database
-            .genre_order(fixture.source, None, GenreSort::Title, false, &cancel)
+            .genre_route_page(fixture.source, None, "", GenreSort::Title, false, &cancel,)
             .await
-            .expect("Genre order"),
+            .expect("Genre order")
+            .0,
         [fixture.genre]
     );
     assert_eq!(
         fixture
             .database
-            .genre_order(fixture.source, None, GenreSort::TrackCount, true, &cancel)
+            .genre_route_page(
+                fixture.source,
+                None,
+                "",
+                GenreSort::TrackCount,
+                true,
+                &cancel,
+            )
             .await
-            .expect("sorted Genre order"),
+            .expect("sorted Genre order")
+            .0,
         [fixture.genre]
     );
     assert_eq!(
         fixture
             .database
-            .mood_order(fixture.source, None, MoodSort::Duration, true, &cancel)
+            .mood_route_page(fixture.source, None, "", MoodSort::Duration, true, &cancel,)
             .await
-            .expect("sorted Mood order"),
+            .expect("sorted Mood order")
+            .0,
         [fixture.mood]
     );
     let album_rows = fixture
@@ -375,14 +382,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .track_count,
         2
     );
-    assert_eq!(
+    assert!(
         fixture
             .database
             .artist_rows(fixture.source, &[fixture.artists[0]], false, None, &cancel)
             .await
-            .expect("direct Artist row")[0]
-            .track_count,
-        0
+            .expect("role-mismatched direct Artist row")
+            .is_empty()
     );
     assert_eq!(
         fixture
@@ -475,17 +481,37 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert!(
         fixture
             .database
-            .artist_filter_order(fixture.source, None, false, "artist a", &cancel)
+            .artist_route_page(
+                fixture.source,
+                None,
+                false,
+                false,
+                "artist a",
+                ArtistSort::Title,
+                false,
+                &cancel,
+            )
             .await
             .expect("direct Artist filter")
+            .0
             .is_empty()
     );
     assert_eq!(
         fixture
             .database
-            .artist_filter_order(fixture.source, None, true, "artist a", &cancel)
+            .artist_route_page(
+                fixture.source,
+                None,
+                true,
+                false,
+                "artist a",
+                ArtistSort::Title,
+                false,
+                &cancel,
+            )
             .await
-            .expect("Album Artist filter"),
+            .expect("Album Artist filter")
+            .0,
         [fixture.artists[0]]
     );
     assert_eq!(
@@ -538,16 +564,18 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert!(
         fixture
             .database
-            .album_order(
+            .album_route_page(
                 fixture.source,
                 Some(empty_folder),
                 false,
+                "",
                 AlbumSort::Title,
                 false,
                 &cancel
             )
             .await
             .expect("empty Folder scope")
+            .0
             .is_empty()
     );
 }
@@ -632,40 +660,85 @@ async fn metadata_point_writes_return_concrete_current_rows() {
     );
     let filtered = fixture
         .database
-        .track_filter_order(fixture.source, None, "changed", &cancel)
+        .track_route_page(
+            fixture.source,
+            None,
+            false,
+            "changed",
+            library::TrackSort::Title,
+            false,
+            &cancel,
+        )
         .await
-        .expect("filter edited Track");
+        .expect("filter edited Track")
+        .order;
     assert_eq!(filtered, [track]);
     assert_eq!(
         fixture
             .database
-            .track_filter_order(fixture.source, None, "2025", &cancel)
+            .track_route_page(
+                fixture.source,
+                None,
+                false,
+                "2025",
+                library::TrackSort::Title,
+                false,
+                &cancel,
+            )
             .await
-            .expect("Track Year filter"),
+            .expect("Track Year filter")
+            .order,
         [fixture.tracks[0]]
     );
     assert_eq!(
         fixture
             .database
-            .album_filter_order(fixture.source, None, "rock", &cancel)
+            .album_route_page(
+                fixture.source,
+                None,
+                false,
+                "rock",
+                AlbumSort::Title,
+                false,
+                &cancel,
+            )
             .await
-            .expect("Album Genre filter"),
+            .expect("Album Genre filter")
+            .0,
         [fixture.albums[1], fixture.albums[0]]
     );
     assert_eq!(
         fixture
             .database
-            .album_filter_order(fixture.source, None, "artist b", &cancel)
+            .album_route_page(
+                fixture.source,
+                None,
+                false,
+                "artist b",
+                AlbumSort::Title,
+                false,
+                &cancel,
+            )
             .await
-            .expect("Album Artist filter"),
+            .expect("Album Artist filter")
+            .0,
         [fixture.albums[1]]
     );
     assert_eq!(
         fixture
             .database
-            .album_filter_order(fixture.source, None, "2024", &cancel)
+            .album_route_page(
+                fixture.source,
+                None,
+                false,
+                "2024",
+                AlbumSort::Title,
+                false,
+                &cancel,
+            )
             .await
-            .expect("Album Year filter"),
+            .expect("Album Year filter")
+            .0,
         [fixture.albums[1]]
     );
 

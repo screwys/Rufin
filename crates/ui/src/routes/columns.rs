@@ -26,10 +26,11 @@ use super::detail_links::{
 use super::factory_cells::FactoryCells;
 use super::library_fields::{
     album_field, artist_field, column_width, item_at_from_item, opaque_artwork,
-    play_count_column_width, playlist_field, smart_playlist_display_name, smart_playlist_field,
-    track_artwork_at_from_item, track_field,
+    play_count_column_width, playlist_artwork, playlist_field, smart_playlist_display_name,
+    smart_playlist_field, track_artwork_at_from_item, track_field,
 };
 use super::route::Route;
+use super::sparse_model::connect_sparse_bind;
 use super::table_links::track_link_column;
 
 pub(crate) const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}\u{a0}#";
@@ -37,6 +38,34 @@ pub(crate) const ALBUM_DETAIL_DURATION_COLUMN_WIDTH: i32 = 48;
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
     track_count > 0 && downloaded_count == track_count
+}
+
+fn set_cover_placeholder(shell: &Rc<Shell>, cover: &ArtworkTile, placeholder: bool) {
+    if placeholder {
+        shell.clear_artwork_tile(cover);
+        cover
+            .widget()
+            .add_css_class("collection-grid-cover-skeleton");
+        cover.widget().set_opacity(1.0);
+    } else {
+        cover
+            .widget()
+            .remove_css_class("collection-grid-cover-skeleton");
+    }
+    cover.widget().set_sensitive(!placeholder);
+}
+
+fn clear_merged_artwork(shell: &Rc<Shell>, cover: &ArtworkTile) {
+    shell.clear_artwork_tile(cover);
+    cover
+        .widget()
+        .remove_css_class("collection-grid-cover-skeleton");
+}
+
+fn set_placeholder_favorite(button: &gtk::Button, favorite: Option<bool>) {
+    set_favorite_button_active(button, favorite.unwrap_or(false));
+    button.set_visible(favorite.is_some());
+    button.set_sensitive(favorite.is_some());
 }
 
 pub(crate) fn album_column(
@@ -109,19 +138,10 @@ pub(crate) fn playlist_column(shell: &Rc<Shell>, field: LibraryField) -> gtk::Co
                         .current
                         .borrow()
                         .prefer_server_playlist_covers;
-                    let binding = if prefer_server_cover {
-                        playlist
-                            .artwork_binding
-                            .as_deref()
-                            .or_else(|| playlist.representative_artwork.first().map(Vec::as_slice))
-                    } else {
-                        playlist
-                            .representative_artwork
-                            .first()
-                            .map(Vec::as_slice)
-                            .or(playlist.artwork_binding.as_deref())
-                    };
-                    opaque_artwork(binding)
+                    playlist_artwork(playlist, prefer_server_cover)
+                        .into_iter()
+                        .next()
+                        .unwrap_or_default()
                 },
             )
         }
@@ -164,14 +184,16 @@ where
         item.set_child(Some(&row));
     });
     let bind_shell = Rc::clone(shell);
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(playlist) = item_at_from_item::<PlaylistRow>(item) else {
+        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
             return;
         };
-        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
+        let Some(playlist) = item_at_from_item::<PlaylistRow>(item) else {
+            label.set_text("");
+            downloaded.set_visible(false);
             return;
         };
         label.set_text(&(value)(&playlist));
@@ -255,14 +277,16 @@ where
         item.set_child(Some(&row));
     });
     let bind_shell = Rc::clone(shell);
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(playlist) = item_at_from_item::<SmartPlaylistRow>(item) else {
+        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
             return;
         };
-        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
+        let Some(playlist) = item_at_from_item::<SmartPlaylistRow>(item) else {
+            label.set_text("");
+            downloaded.set_visible(false);
             return;
         };
         label.set_text(&(value)(&playlist));
@@ -434,7 +458,7 @@ where
             item.set_child(Some(&label));
         }
     });
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -444,21 +468,26 @@ where
         else {
             return;
         };
-        let Some(boxed) = item
-            .item()
-            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-        else {
+        let Some(data) = item_at_from_item::<T>(item) else {
+            label.set_text("");
             return;
         };
-        let data = boxed.borrow::<T>();
         label.set_text(&(value)(&data));
+    });
+    factory.connect_unbind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        {
+            label.set_text("");
+        }
     });
     let column = localized_column(title, &factory);
     column.set_fixed_width(width);
     column
-}
-pub(crate) fn row_index_column() -> gtk::ColumnViewColumn {
-    row_index_column_with_width(column_width(LibraryField::RowIndex))
 }
 pub(crate) fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
@@ -475,7 +504,7 @@ pub(crate) fn row_index_column_with_width(width: i32) -> gtk::ColumnViewColumn {
             item.set_child(Some(&label));
         }
     });
-    factory.connect_bind(|_, item| {
+    connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -503,7 +532,7 @@ pub(crate) fn mapped_row_index_column<T: Clone + 'static>(width: i32) -> gtk::Co
             item.set_child(Some(&label));
         }
     });
-    factory.connect_bind(|_, item| {
+    connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -513,10 +542,22 @@ pub(crate) fn mapped_row_index_column<T: Clone + 'static>(width: i32) -> gtk::Co
         else {
             return;
         };
-        let text = item_at_from_item::<T>(item)
-            .map(|_| (item.position() + 1).to_string())
+        let ready = item_at_from_item::<T>(item).is_some();
+        let text = ready
+            .then(|| (item.position() + 1).to_string())
             .unwrap_or_default();
         label.set_text(&text);
+    });
+    factory.connect_unbind(|_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        if let Some(label) = item
+            .child()
+            .and_then(|child| child.downcast::<gtk::Label>().ok())
+        {
+            label.set_text("");
+        }
     });
     let column = gtk::ColumnViewColumn::new(Some(ROW_INDEX_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(width);
@@ -546,7 +587,7 @@ where
         }
     });
     let bind_playing = playing.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -556,7 +597,8 @@ where
         else {
             return;
         };
-        if item_at_from_item::<T>(item).as_ref().is_some_and(&is_ready) {
+        let ready = item_at_from_item::<T>(item).as_ref().is_some_and(&is_ready);
+        if ready {
             set_track_row_index_text(&cell, &(item.position() + 1).to_string());
             bind_playing.bind(cell.upcast_ref(), item.position());
         } else {
@@ -780,16 +822,19 @@ pub(crate) fn album_image_column(
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
+            set_cover_placeholder(&bind_shell, &cell.cover, true);
+            *cell.current_album.borrow_mut() = None;
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
         bind_shell.bind_artwork_tile(
             &cell.cover,
             opaque_artwork(album.artwork_binding.as_deref()),
@@ -805,7 +850,7 @@ pub(crate) fn album_image_column(
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = unbind_cells.get(item)
         {
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            set_cover_placeholder(&unbind_shell, &cell.cover, true);
             *cell.current_album.borrow_mut() = None;
         }
     });
@@ -875,14 +920,17 @@ where
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
+        let Some(cell) = bind_cells.get(item) else {
             return;
         };
-        let Some(cell) = bind_cells.get(item) else {
+        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
+            cell.label.set_text("");
+            cell.downloaded.set_visible(false);
+            *cell.current_album.borrow_mut() = None;
             return;
         };
         cell.label.set_text(&(value)(&album));
@@ -986,16 +1034,23 @@ pub(crate) fn album_merged_column(
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(album) = item_at_from_item::<AlbumRow>(item) else {
+            cell.title.set_text("");
+            cell.downloaded.set_visible(false);
+            cell.subtitle_links.clear();
+            cell.subtitle.set_visible(false);
+            clear_merged_artwork(&bind_shell, &cell.cover);
+            *cell.current_album.borrow_mut() = None;
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
         bind_shell.bind_artwork_tile(
             &cell.cover,
             opaque_artwork(album.artwork_binding.as_deref()),
@@ -1023,7 +1078,7 @@ pub(crate) fn album_merged_column(
             cell.downloaded.set_visible(false);
             cell.subtitle_links.clear();
             cell.subtitle.set_visible(false);
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            clear_merged_artwork(&unbind_shell, &cell.cover);
             *cell.current_album.borrow_mut() = None;
         }
     });
@@ -1112,20 +1167,18 @@ where
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(boxed) = item
-            .item()
-            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-        else {
-            return;
-        };
-        let data = boxed.borrow::<T>();
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(data) = item_at_from_item::<T>(item) else {
+            set_cover_placeholder(&bind_shell, &cell.cover, true);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
         bind_shell.bind_artwork_tile(&cell.cover, candidates(&data), 48, THUMB_COVER_SIZE);
     });
     let unbind_shell = Rc::clone(&shell);
@@ -1134,7 +1187,7 @@ where
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = unbind_cells.get(item)
         {
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            set_cover_placeholder(&unbind_shell, &cell.cover, true);
         }
     });
     let teardown_cells = cells.clone();
@@ -1167,16 +1220,18 @@ pub(crate) fn artist_image_column(shell: &Rc<Shell>, album_artist: bool) -> gtk:
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(artist) = item_at_from_item::<ArtistRow>(item) else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(artist) = item_at_from_item::<ArtistRow>(item) else {
+            set_cover_placeholder(&bind_shell, &cell.cover, true);
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
         bind_shell.bind_artwork_tile(
             &cell.cover,
             opaque_artwork(artist.artwork_binding.as_deref()),
@@ -1190,7 +1245,7 @@ pub(crate) fn artist_image_column(shell: &Rc<Shell>, album_artist: bool) -> gtk:
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = unbind_cells.get(item)
         {
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            set_cover_placeholder(&unbind_shell, &cell.cover, true);
         }
     });
     let teardown_cells = cells.clone();
@@ -1239,14 +1294,16 @@ where
     });
 
     let bind_shell = Rc::clone(&shell);
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(artist) = item_at_from_item::<ArtistRow>(item) else {
+        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
             return;
         };
-        let Some((label, downloaded)) = list_item_title_and_downloaded(item) else {
+        let Some(artist) = item_at_from_item::<ArtistRow>(item) else {
+            label.set_text("");
+            downloaded.set_visible(false);
             return;
         };
         label.set_text(&(value)(&artist));
@@ -1344,19 +1401,22 @@ pub(crate) fn track_image_column(
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(track) = item_at_from_item::<TrackRow>(item) else {
-            return;
-        };
-        let Some(artwork) = track_artwork_at_from_item(item) else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(track) = item_at_from_item::<TrackRow>(item) else {
+            *cell.current_track.borrow_mut() = None;
+            set_cover_placeholder(&bind_shell, &cell.cover, true);
+            return;
+        };
+        let Some(artwork) = track_artwork_at_from_item(item) else {
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
         bind_shell.bind_artwork_tile(&cell.cover, artwork, 48, THUMB_COVER_SIZE);
         *cell.current_track.borrow_mut() = Some(track);
     });
@@ -1368,7 +1428,7 @@ pub(crate) fn track_image_column(
             && let Some(cell) = unbind_cells.get(item)
         {
             *cell.current_track.borrow_mut() = None;
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            set_cover_placeholder(&unbind_shell, &cell.cover, true);
         }
     });
 
@@ -1424,7 +1484,6 @@ where
         };
         let current_track = Rc::new(RefCell::new(None::<TrackRow>));
         let label = gtk::Label::new(None);
-        label.add_css_class("track-skeleton");
         if setup_playing.is_some() {
             label.add_css_class("track-list-title");
         }
@@ -1457,17 +1516,24 @@ where
     let bind_shell = Rc::clone(&shell);
     let bind_playing = playing.clone();
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(track) = item_at_from_item::<TrackRow>(item) else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
-        cell.label.remove_css_class("track-skeleton");
+        let Some(track) = item_at_from_item::<TrackRow>(item) else {
+            cell.label.set_text("");
+            if let Some(badge) = cell.downloaded.as_ref() {
+                badge.set_visible(false);
+            }
+            if let Some(playing) = bind_playing.as_ref() {
+                playing.unbind(cell.label.upcast_ref());
+            }
+            *cell.current_track.borrow_mut() = None;
+            return;
+        };
         cell.label.set_text(&(value)(item.position(), &track));
         if let Some(downloaded) = cell.downloaded.as_ref() {
             bind_shell.bind_download_badge(downloaded, track.is_downloaded);
@@ -1484,7 +1550,6 @@ where
             && let Some(cell) = unbind_cells.get(item)
         {
             cell.label.set_text("");
-            cell.label.add_css_class("track-skeleton");
             if let Some(downloaded) = cell.downloaded.as_ref() {
                 downloaded.set_visible(false);
             }
@@ -1610,18 +1675,26 @@ where
     let bind_shell = Rc::clone(&shell);
     let bind_playing = playing.clone();
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(value) = item_at_from_item::<T>(item) else {
-            return;
-        };
-        let track = item_track(&value);
-        let artwork = artwork_value(&value);
         let Some(cell) = bind_cells.get(item) else {
             return;
         };
+        let Some(value) = item_at_from_item::<T>(item) else {
+            cell.title.set_text("");
+            cell.downloaded.set_visible(false);
+            bind_playing.unbind(cell.title.upcast_ref());
+            cell.subtitle_links.clear();
+            cell.subtitle.set_visible(false);
+            clear_merged_artwork(&bind_shell, &cell.cover);
+            *cell.current_track.borrow_mut() = None;
+            return;
+        };
+        set_cover_placeholder(&bind_shell, &cell.cover, false);
+        let track = item_track(&value);
+        let artwork = artwork_value(&value);
         bind_shell.bind_artwork_tile(&cell.cover, artwork, 48, THUMB_COVER_SIZE);
         cell.title.set_text(&title_value(&value));
         let subtitle = subtitle_value(&value);
@@ -1650,7 +1723,7 @@ where
             playing.unbind(cell.title.upcast_ref());
             cell.subtitle_links.clear();
             cell.subtitle.set_visible(false);
-            unbind_shell.clear_artwork_tile(&cell.cover);
+            clear_merged_artwork(&unbind_shell, &cell.cover);
             *cell.current_track.borrow_mut() = None;
         }
     });
@@ -1666,6 +1739,15 @@ where
     column.set_fixed_width(width);
     column
 }
+fn favorite_cell_button(item: &gtk::ListItem) -> Option<gtk::Button> {
+    let child = item.child()?;
+    child
+        .clone()
+        .downcast::<gtk::Button>()
+        .ok()
+        .or_else(|| child.first_child()?.downcast::<gtk::Button>().ok())
+}
+
 pub(crate) fn album_favorite_column(
     shell: &Rc<Shell>,
     playback_context: Option<String>,
@@ -1678,6 +1760,7 @@ pub(crate) fn album_favorite_column(
             return;
         };
         let button = favorite_icon_button("Favorite album");
+        set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
             Rc::new(move || {
@@ -1705,34 +1788,34 @@ pub(crate) fn album_favorite_column(
                 Some(button),
             );
         });
-        item.set_child(Some(&button));
+        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        wrapper.add_css_class("favorite-skeleton-cell");
+        wrapper.set_hexpand(true);
+        wrapper.set_halign(gtk::Align::Fill);
+        wrapper.append(&button);
+        item.set_child(Some(&wrapper));
     });
 
-    factory.connect_bind(|_, item| {
+    connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
         let Some(album) = item_at_from_item::<AlbumRow>(item) else {
+            set_placeholder_favorite(&button, None);
             return;
         };
-        let Some(button) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Button>().ok())
-        else {
-            return;
-        };
-        set_favorite_button_active(&button, album.favorite);
+        set_placeholder_favorite(&button, Some(album.favorite));
     });
 
     factory.connect_unbind(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        if let Some(button) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Button>().ok())
-        {
-            set_favorite_button_active(&button, false);
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, None);
         }
     });
     let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
@@ -1751,6 +1834,7 @@ pub(crate) fn artist_favorite_column(
             return;
         };
         let button = favorite_icon_button("Favorite artist");
+        set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
             Rc::new(move || {
@@ -1778,34 +1862,34 @@ pub(crate) fn artist_favorite_column(
                 Some(button),
             );
         });
-        item.set_child(Some(&button));
+        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        wrapper.add_css_class("favorite-skeleton-cell");
+        wrapper.set_hexpand(true);
+        wrapper.set_halign(gtk::Align::Fill);
+        wrapper.append(&button);
+        item.set_child(Some(&wrapper));
     });
 
-    factory.connect_bind(|_, item| {
+    connect_sparse_bind(&factory, |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
+        let Some(button) = favorite_cell_button(item) else {
+            return;
+        };
         let Some(artist) = item_at_from_item::<ArtistRow>(item) else {
+            set_placeholder_favorite(&button, None);
             return;
         };
-        let Some(button) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Button>().ok())
-        else {
-            return;
-        };
-        set_favorite_button_active(&button, artist.favorite);
+        set_placeholder_favorite(&button, Some(artist.favorite));
     });
 
     factory.connect_unbind(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        if let Some(button) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Button>().ok())
-        {
-            set_favorite_button_active(&button, false);
+        if let Some(button) = favorite_cell_button(item) {
+            set_placeholder_favorite(&button, None);
         }
     });
     let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
@@ -1836,6 +1920,7 @@ where
         };
         let current_track = Rc::new(RefCell::new(None::<TrackRow>));
         let button = favorite_icon_button("Favorite track");
+        set_placeholder_favorite(&button, None);
         install_track_cell_context_menu(&button, &setup_shell, Rc::clone(&current_track));
         let favorite_key_track = Rc::clone(&current_track);
         setup_shell.register_dynamic_favorite_button(
@@ -1860,7 +1945,12 @@ where
                 Some(button),
             );
         });
-        item.set_child(Some(&button));
+        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+        wrapper.add_css_class("favorite-skeleton-cell");
+        wrapper.set_hexpand(true);
+        wrapper.set_halign(gtk::Align::Fill);
+        wrapper.append(&button);
+        item.set_child(Some(&wrapper));
         setup_cells.insert(
             item,
             LibraryTrackFavoriteCell {
@@ -1872,22 +1962,23 @@ where
 
     let bind_shell = Rc::clone(&shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(value) = item_at_from_item::<T>(item) else {
+        let Some(cell) = bind_cells.get(item) else {
             return;
         };
-        let Some(cell) = bind_cells.get(item) else {
+        let Some(value) = item_at_from_item::<T>(item) else {
+            set_placeholder_favorite(&cell.button, None);
+            *cell.current_track.borrow_mut() = None;
             return;
         };
         let track = track_value(&value);
         let favorite = track.as_ref().is_some_and(|track| {
             bind_shell.projected_track_favorite(&track.track_key, track.favorite)
         });
-        set_favorite_button_active(&cell.button, favorite);
-        cell.button.set_sensitive(track.is_some());
+        set_placeholder_favorite(&cell.button, track.as_ref().map(|_| favorite));
         *cell.current_track.borrow_mut() = track;
     });
 
@@ -1896,8 +1987,7 @@ where
         if let Some(item) = item.downcast_ref::<gtk::ListItem>()
             && let Some(cell) = unbind_cells.get(item)
         {
-            cell.button.set_sensitive(false);
-            set_favorite_button_active(&cell.button, false);
+            set_placeholder_favorite(&cell.button, None);
             *cell.current_track.borrow_mut() = None;
         }
     });

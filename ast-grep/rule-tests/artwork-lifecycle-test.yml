@@ -1,0 +1,31 @@
+id: artwork-preparation-must-not-refresh-live-bindings
+valid:
+  - |
+      fn apply_source_artwork_preparation(shell: &Shell, progress: Option<Progress>) {
+          if progress.is_none() {
+              shell.finish_progress();
+          }
+      }
+invalid:
+  - |
+      fn apply_source_artwork_preparation(shell: &Shell, progress: Option<Progress>) {
+          if progress.is_none() {
+              shell.refresh_artwork_bindings();
+          }
+      }
+---
+id: artwork-tile-must-not-admit-on-map
+valid:
+  - |
+      impl ArtworkTile {
+          fn install_cleanup(&self) {
+              self.area.connect_destroy(|_| {});
+          }
+      }
+invalid:
+  - |
+      impl ArtworkTile {
+          fn install_admission(&self) {
+              self.area.connect_map(|_| start_artwork());
+          }
+      }

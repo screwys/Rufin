@@ -3,7 +3,7 @@
 use std::sync::Arc;
 
 use ::scrobbling::Scrobbler;
-use async_channel::unbounded;
+use async_channel::{bounded, unbounded};
 use playback::{PlaybackBackend, PlaybackHandles};
 use playback_gstreamer::GStreamerPlaybackBackend;
 use secrets::SwitchableSecretStore;
@@ -54,7 +54,8 @@ pub(crate) fn runtime_inputs(
     )?);
 
     let (source_events, source_receiver) = unbounded();
-    let (playback_events, playback_receiver) = unbounded();
+    let (playback_events, playback_receiver) = bounded(1);
+    let (visualizer_events, visualizer_receiver) = bounded(1);
     let (download_events, download_receiver) = unbounded();
     let (discovery_events, discovery_receiver) = unbounded();
     let (waveform_events, waveform_receiver) = unbounded();
@@ -119,6 +120,9 @@ pub(crate) fn runtime_inputs(
         settings.clone(),
         runtime.clone(),
         playback_events,
+        playback_receiver.clone(),
+        visualizer_events,
+        visualizer_receiver.clone(),
         artwork.clone(),
         Arc::clone(&waveform),
         Arc::clone(&lyrics),
@@ -142,7 +146,6 @@ pub(crate) fn runtime_inputs(
 
     let settings_playback = Arc::clone(&playback);
     let settings_lyrics = Arc::clone(&lyrics);
-    let settings_source = Arc::clone(&source);
     let settings_downloads = downloads.clone();
     let settings_scrobbling = Arc::clone(&scrobbling);
     let settings_handle = SettingsUiPort::new(settings, move |previous, current| {
@@ -179,12 +182,6 @@ pub(crate) fn runtime_inputs(
         {
             settings_lyrics.settings_changed(current.ui.lyrics.clone(), current.ui.private_mode);
         }
-        if previous.ui.allows_external_metadata_lookup()
-            != current.ui.allows_external_metadata_lookup()
-        {
-            settings_source
-                .album_release_settings_changed(current.ui.allows_external_metadata_lookup());
-        }
         if previous.ui.downloads != current.ui.downloads {
             settings_downloads.settings_changed(current.ui.downloads.clone());
         }
@@ -217,6 +214,7 @@ pub(crate) fn runtime_inputs(
             source_discovery: discovery_receiver,
             downloads: download_receiver,
             playback: playback_receiver,
+            visualizer: visualizer_receiver,
             waveform: waveform_receiver,
             lyrics: lyrics_receiver,
             release_updates: release_update_receiver,

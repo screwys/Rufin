@@ -33,20 +33,30 @@ pub(super) async fn stage_album(
     } else {
         &album.relations.album_artists
     };
-    for (position, artist) in effective_album_artists.iter().enumerate() {
+    for artist in effective_album_artists {
         stage_artist_credit(scan, artist).await?;
-        scan.write_album_artist(&album.id, &artist.id, position as i64)
-            .await?;
     }
-    for (position, genre) in album.relations.genres.iter().enumerate() {
+    for genre in &album.relations.genres {
         stage_genre_credit(scan, genre).await?;
-        scan.write_album_genre(&album.id, &genre.id, position as i64)
-            .await?;
     }
-    for (position, value) in album.release_types.iter().enumerate() {
-        scan.write_album_release_type(&album.id, value, position as i64)
-            .await?;
-    }
+    scan.write_album_relations(
+        &effective_album_artists
+            .iter()
+            .map(|artist| (album.id.as_str(), artist.id.as_str()))
+            .collect::<Vec<_>>(),
+        &album
+            .relations
+            .genres
+            .iter()
+            .map(|genre| (album.id.as_str(), genre.id.as_str()))
+            .collect::<Vec<_>>(),
+        &album
+            .release_types
+            .iter()
+            .map(|value| (album.id.as_str(), value.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -55,8 +65,10 @@ pub(super) async fn stage_track(
     track: Track,
 ) -> library::LibraryResult<()> {
     let artwork = track
-        .image_ref
-        .as_ref()
+        .album_id
+        .is_none()
+        .then_some(track.image_ref.as_ref())
+        .flatten()
         .map(serde_json::to_vec)
         .transpose()?;
     let mut hash = blake3::Hasher::new();
@@ -64,7 +76,7 @@ pub(super) async fn stage_track(
     hash.update(track.id.as_bytes());
     hash.update(track.source_path.as_deref().unwrap_or_default().as_bytes());
     hash.update(
-        track
+        &track
             .source_format
             .as_deref()
             .unwrap_or_default()
@@ -113,20 +125,16 @@ pub(super) async fn stage_track(
         *hash.finalize().as_bytes(),
     )
     .await?;
-    for (position, artist) in track.relations.artists.iter().enumerate() {
+    for artist in &track.relations.artists {
         stage_artist_credit(scan, artist).await?;
-        scan.write_track_artist(&track.id, &artist.id, position as i64)
-            .await?;
     }
     for artist in &track.relations.album_artists {
         stage_artist_credit(scan, artist).await?;
     }
-    for (position, genre) in track.relations.genres.iter().enumerate() {
+    for genre in &track.relations.genres {
         stage_genre_credit(scan, genre).await?;
-        scan.write_track_genre(&track.id, &genre.id, position as i64)
-            .await?;
     }
-    for (position, mood) in track.relations.moods.iter().enumerate() {
+    for mood in &track.relations.moods {
         scan.write_mood(
             &mood.id,
             &mood.name,
@@ -134,9 +142,28 @@ pub(super) async fn stage_track(
             &mood.name.to_lowercase(),
         )
         .await?;
-        scan.write_track_mood(&track.id, &mood.id, position as i64)
-            .await?;
     }
+    scan.write_track_relations(
+        &track
+            .relations
+            .artists
+            .iter()
+            .map(|artist| (track.id.as_str(), artist.id.as_str()))
+            .collect::<Vec<_>>(),
+        &track
+            .relations
+            .genres
+            .iter()
+            .map(|genre| (track.id.as_str(), genre.id.as_str()))
+            .collect::<Vec<_>>(),
+        &track
+            .relations
+            .moods
+            .iter()
+            .map(|mood| (track.id.as_str(), mood.id.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -427,7 +454,6 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         title: song.title.unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
         album: song.album.unwrap_or_else(|| "Unknown Album".to_string()),
-        album_artwork: None,
         year: u16_from_option(song.year),
         release_date: None,
         date_added: normalized_date(song.created),

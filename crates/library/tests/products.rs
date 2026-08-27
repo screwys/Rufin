@@ -1,8 +1,8 @@
 use library::{
-    CalendarActivityPeriod, LocalAccessOrigin, LocalAccessWrite, PlayedFilter, RadioSeed,
-    RandomCriteria, ReadCancellation, SearchRequest, SmartPlaylistActivityPeriod,
-    SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRule, SmartPlaylistRuleField,
-    SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
+    ArtistSort, CalendarActivityPeriod, GenreSort, LocalAccessOrigin, LocalAccessWrite,
+    PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRule,
+    SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
 };
 
 use super::support::{connection, fixture};
@@ -173,6 +173,66 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
 }
 
 #[tokio::test]
+async fn genre_rows_prepare_only_one_representative_cover() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for (index, album) in fixture.albums.iter().copied().enumerate() {
+        sqlx::query("UPDATE albums SET artwork_binding=?2 WHERE album_key=?1")
+            .bind(album)
+            .bind(vec![index as u8 + 1])
+            .execute(&mut raw)
+            .await
+            .expect("set Album artwork");
+    }
+    drop(raw);
+
+    let row = fixture
+        .database
+        .genre_rows(
+            fixture.source,
+            &[fixture.genre],
+            None,
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("read Genre row")
+        .pop()
+        .expect("Genre row");
+
+    assert_eq!(row.representative_artwork.len(), 1);
+}
+
+#[tokio::test]
+async fn genre_routes_reject_an_artwork_only_identity_without_track_membership() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    let orphan = sqlx::query_scalar::<_, library::GenreKey>(
+        "INSERT INTO genres(source_key,object_id,name,normalized_name,sort_text,artwork_binding) VALUES(?1,'orphan-genre','Orphan Genre','orphan genre','orphan genre',x'01') RETURNING genre_key",
+    )
+    .bind(fixture.source)
+    .fetch_one(&mut raw)
+    .await
+    .expect("insert artwork-only Genre");
+    drop(raw);
+
+    for sort in [GenreSort::Title, GenreSort::TrackCount] {
+        let (order, _) = fixture
+            .database
+            .genre_route_page(
+                fixture.source,
+                None,
+                "",
+                sort,
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("Genre route");
+        assert!(!order.contains(&orphan));
+    }
+}
+
+#[tokio::test]
 async fn artist_play_order_stays_complete_beside_the_favorite_section() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
@@ -203,7 +263,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
         .unwrap();
     let favorites = fixture
         .database
-        .artist_favorite_track_order(
+        .artist_track_route_page(
             fixture.source,
             fixture.artists[0],
             false,
@@ -211,10 +271,12 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
             "",
             library::TrackSort::Title,
             false,
+            true,
             &cancel,
         )
         .await
-        .unwrap();
+        .unwrap()
+        .order;
     assert_eq!(favorites, [fixture.tracks[0]]);
     assert!(complete.len() > favorites.len());
 }
@@ -346,11 +408,14 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_cover_fal
     assert_eq!(
         fixture
             .database
-            .artist_album_order(
+            .artist_album_projection_order(
                 fixture.source,
                 track_artist.artist_key,
                 false,
                 None,
+                "",
+                library::AlbumSort::Title,
+                false,
                 &cancel,
             )
             .await
@@ -360,7 +425,16 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_cover_fal
     assert_eq!(
         fixture
             .database
-            .artist_album_order(fixture.source, album_artist.artist_key, true, None, &cancel,)
+            .artist_album_projection_order(
+                fixture.source,
+                album_artist.artist_key,
+                true,
+                None,
+                "",
+                library::AlbumSort::Title,
+                false,
+                &cancel,
+            )
             .await
             .unwrap(),
         [fixture.albums[0]]
@@ -381,6 +455,193 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_cover_fal
     assert_eq!(
         album.artwork_binding.as_deref(),
         Some(b"album-artist-art".as_slice())
+    );
+}
+
+#[tokio::test]
+async fn artist_orders_and_rows_require_the_requested_credit_role() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    let mut role_artists = Vec::new();
+    for (object_id, name, rating) in [
+        ("role-track", "Performer One", 30),
+        ("role-album", "Release Owner", 40),
+        ("role-both", "Dual Credit", 50),
+    ] {
+        role_artists.push(
+            sqlx::query_scalar::<_, library::ArtistKey>(
+                "INSERT INTO artists(source_key,object_id,name,normalized_name,sort_text,source_favorite,source_rating)
+                 VALUES(?1,?2,?3,lower(?3),lower(?3),1,?4) RETURNING artist_key",
+            )
+            .bind(fixture.source)
+            .bind(object_id)
+            .bind(name)
+            .bind(rating)
+            .fetch_one(&mut raw)
+            .await
+            .expect("insert role fixture Artist"),
+        );
+    }
+    let [track_only, album_only, both] = role_artists.as_slice() else {
+        unreachable!()
+    };
+    let (track_only, album_only, both) = (*track_only, *album_only, *both);
+    sqlx::query(
+        "INSERT INTO track_artists(track_key,artist_key,position) VALUES(?1,?2,1),(?1,?3,2)",
+    )
+    .bind(fixture.tracks[0])
+    .bind(track_only)
+    .bind(both)
+    .execute(&mut raw)
+    .await
+    .expect("insert Track Artist roles");
+    sqlx::query(
+        "INSERT INTO album_artists(album_key,artist_key,position) VALUES(?1,?2,1),(?1,?3,2)",
+    )
+    .bind(fixture.albums[0])
+    .bind(album_only)
+    .bind(both)
+    .execute(&mut raw)
+    .await
+    .expect("insert Album Artist roles");
+    drop(raw);
+
+    for sort in [
+        ArtistSort::Title,
+        ArtistSort::AlbumCount,
+        ArtistSort::TrackCount,
+        ArtistSort::LastPlayed,
+        ArtistSort::PlayCount,
+        ArtistSort::Rating,
+        ArtistSort::Favorite,
+    ] {
+        for folder in [None, Some(fixture.folder)] {
+            for favorites_only in [false, true] {
+                for descending in [false, true] {
+                    let track_artists = fixture
+                        .database
+                        .artist_route_page(
+                            fixture.source,
+                            folder,
+                            false,
+                            favorites_only,
+                            "",
+                            sort,
+                            descending,
+                            &cancel,
+                        )
+                        .await
+                        .expect("Track Artist order")
+                        .0;
+                    assert!(track_artists.contains(&track_only), "{sort:?}");
+                    assert!(track_artists.contains(&both), "{sort:?}");
+                    assert!(!track_artists.contains(&album_only), "{sort:?}");
+
+                    let album_artists = fixture
+                        .database
+                        .artist_route_page(
+                            fixture.source,
+                            folder,
+                            true,
+                            favorites_only,
+                            "",
+                            sort,
+                            descending,
+                            &cancel,
+                        )
+                        .await
+                        .expect("Album Artist order")
+                        .0;
+                    assert!(album_artists.contains(&album_only), "{sort:?}");
+                    assert!(album_artists.contains(&both), "{sort:?}");
+                    assert!(!album_artists.contains(&track_only), "{sort:?}");
+                }
+            }
+        }
+    }
+
+    let track_row = fixture
+        .database
+        .artist_rows(fixture.source, &[track_only], false, None, &cancel)
+        .await
+        .expect("Track Artist row")
+        .pop()
+        .expect("role-matched Track Artist");
+    assert_eq!((track_row.album_count, track_row.track_count), (1, 1));
+    let album_row = fixture
+        .database
+        .artist_rows(fixture.source, &[album_only], true, None, &cancel)
+        .await
+        .expect("Album Artist row")
+        .pop()
+        .expect("role-matched Album Artist");
+    assert_eq!((album_row.album_count, album_row.track_count), (1, 2));
+    assert!(
+        fixture
+            .database
+            .artist_rows(fixture.source, &[album_only], false, None, &cancel)
+            .await
+            .expect("mismatched Track Artist row")
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .database
+            .artist_rows(fixture.source, &[track_only], true, None, &cancel)
+            .await
+            .expect("mismatched Album Artist row")
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .database
+            .artist_detail(fixture.source, album_only, false, None, &cancel)
+            .await
+            .expect("mismatched Artist detail")
+            .is_none()
+    );
+    assert!(
+        fixture
+            .database
+            .artist_detail(fixture.source, track_only, true, None, &cancel)
+            .await
+            .expect("mismatched Album Artist detail")
+            .is_none()
+    );
+    assert_eq!(
+        fixture
+            .database
+            .artist_track_order(
+                fixture.source,
+                track_only,
+                false,
+                None,
+                "",
+                library::TrackSort::Title,
+                false,
+                &cancel,
+            )
+            .await
+            .expect("Track Artist Tracks"),
+        [fixture.tracks[0]]
+    );
+    assert_eq!(
+        fixture
+            .database
+            .artist_album_projection_order(
+                fixture.source,
+                album_only,
+                true,
+                None,
+                "",
+                library::AlbumSort::Title,
+                false,
+                &cancel,
+            )
+            .await
+            .expect("Album Artist Albums"),
+        [fixture.albums[0]]
     );
 }
 
@@ -486,6 +747,55 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
             .expect("badge after Download deletion")[0]
             .is_downloaded
     );
+}
+
+#[tokio::test]
+async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
+    let fixture = fixture().await;
+    assert!(
+        fixture
+            .database
+            .ensure_default_smart_playlists(fixture.source)
+            .await
+            .expect("install default Smart Playlists")
+    );
+    assert!(
+        !fixture
+            .database
+            .ensure_default_smart_playlists(fixture.source)
+            .await
+            .expect("default Smart Playlists are idempotent")
+    );
+    let cancellation = ReadCancellation::new();
+    let (order, rows) = fixture
+        .database
+        .smart_playlist_route_page(
+            fixture.source,
+            None,
+            SmartPlaylistListSort::Position,
+            false,
+            0,
+            &cancellation,
+        )
+        .await
+        .expect("read default Smart Playlists");
+    assert_eq!(order.len(), 3);
+    assert_eq!(
+        rows.iter()
+            .map(|row| (row.object_id.as_str(), row.name.as_str()))
+            .collect::<Vec<_>>(),
+        [
+            ("builtin:most_played", "Most Played"),
+            ("builtin:never_played", "Never Played"),
+            ("builtin:most_skipped", "Most Skipped"),
+        ]
+    );
+    assert_eq!(rows[0].definition.sort_field, SmartPlaylistSort::PlayCount);
+    assert_eq!(
+        rows[1].definition.match_all[0].field,
+        SmartPlaylistRuleField::Played
+    );
+    assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
 }
 
 #[tokio::test]
@@ -692,7 +1002,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     assert_eq!(
         fixture
             .database
-            .smart_playlist_order(
+            .smart_playlist_route_page(
                 fixture.source,
                 None,
                 SmartPlaylistListSort::TrackCount,
@@ -701,13 +1011,14 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 &cancel,
             )
             .await
-            .expect("sorted Smart Playlist order"),
+            .expect("sorted Smart Playlist order")
+            .0,
         [smart, second, policy]
     );
     assert_eq!(
         fixture
             .database
-            .smart_playlist_order(
+            .smart_playlist_route_page(
                 fixture.source,
                 None,
                 SmartPlaylistListSort::Duration,
@@ -716,7 +1027,8 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 &cancel,
             )
             .await
-            .expect("duration-sorted Smart Playlist order"),
+            .expect("duration-sorted Smart Playlist order")
+            .0,
         [smart, second, policy]
     );
     let smart_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position,smart_playlist_key")
@@ -774,9 +1086,18 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert!(
         fixture
             .database
-            .track_filter_order(fixture.source, None, "artist a", &cancel)
+            .track_route_page(
+                fixture.source,
+                None,
+                false,
+                "artist a",
+                library::TrackSort::Title,
+                false,
+                &cancel,
+            )
             .await
             .expect("complete Track filter")
+            .order
             .len()
             >= 2
     );

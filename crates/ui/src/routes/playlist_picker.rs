@@ -8,6 +8,7 @@ use downloads::DownloadSubject;
 use localization::tr;
 
 use super::collections::PlaybackTarget;
+use super::library_fields::playlist_artwork;
 
 #[derive(Clone)]
 pub(crate) struct PlaylistTrackSource {
@@ -283,21 +284,7 @@ fn replace_picker_rows(
         row.set_margin_bottom(4);
         let check = gtk::CheckButton::new();
         row.append(&check);
-        let artwork = if prefer_server {
-            playlist
-                .artwork_binding
-                .iter()
-                .chain(&playlist.representative_artwork)
-                .map(|binding| artwork::ArtworkBinding::opaque(binding))
-                .collect::<Vec<_>>()
-        } else {
-            playlist
-                .representative_artwork
-                .iter()
-                .chain(&playlist.artwork_binding)
-                .map(|binding| artwork::ArtworkBinding::opaque(binding))
-                .collect::<Vec<_>>()
-        };
+        let artwork = playlist_artwork(&playlist, prefer_server);
         let cover = shell
             .cover_group_projection_for_artwork(
                 &artwork,
@@ -382,6 +369,7 @@ async fn load_playlist_rows(
             selected.music_folder_key,
             library::PlaylistSort::Title,
             false,
+            "",
             &cancellation,
         )
         .await

@@ -7,9 +7,7 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_channel::Receiver;
-use library::{
-    AlbumKey, ArtistKey, FavoriteTarget, PlaylistEntryKey, PlaylistKey, SourceKey, TrackKey,
-};
+use library::{AlbumKey, ArtistKey, FavoriteTarget, PlaylistEntryKey, PlaylistKey, TrackKey};
 use secrets::SecretStorageMode;
 use sources::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, ArtistMetadata, ArtistMetadataEdit,
@@ -47,6 +45,7 @@ pub struct SourceLocalAccess {
     pub root_path: PathBuf,
     pub server_prefix: Option<String>,
     pub local_prefix: Option<String>,
+    pub sample_source_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -277,9 +276,6 @@ pub trait SelectedSourcePort: Send + Sync {
         target: LiveSearchCollectionTarget,
         placement: playback::QueuePlacement,
     );
-    fn track_metadata_available(&self, track: TrackKey) -> Receiver<Result<bool, String>>;
-    fn album_metadata_available(&self, album: AlbumKey) -> Receiver<Result<bool, String>>;
-    fn artist_metadata_available(&self, artist: ArtistKey) -> Receiver<Result<bool, String>>;
     fn track_metadata(
         &self,
         track: TrackKey,
@@ -292,11 +288,6 @@ pub trait SelectedSourcePort: Send + Sync {
         &self,
         artist: ArtistKey,
     ) -> Receiver<Result<ArtistMetadata, SourceMetadataError>>;
-    fn write_track_metadata(
-        &self,
-        track: TrackKey,
-        edit: TrackMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
     fn write_reviewed_track_metadata(
         &self,
         track: TrackKey,
@@ -304,22 +295,12 @@ pub trait SelectedSourcePort: Send + Sync {
         application_token: Option<String>,
         edit: TrackMetadataEdit,
     ) -> Receiver<Result<(), SourceMetadataError>>;
-    fn write_album_metadata(
-        &self,
-        album: AlbumKey,
-        edit: AlbumMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
     fn write_reviewed_album_metadata(
         &self,
         album: AlbumKey,
         revision: Option<String>,
         application_token: Option<String>,
         edit: AlbumMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
-    fn write_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        edit: ArtistMetadataEdit,
     ) -> Receiver<Result<(), SourceMetadataError>>;
     fn write_reviewed_artist_metadata(
         &self,
@@ -343,7 +324,6 @@ pub trait SelectedSourcePort: Send + Sync {
         artist: ArtistKey,
         values: ArtistMetadataValues,
     ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>>;
-    fn source_key(&self) -> SourceKey;
 }
 
 pub type SourceHandle = Arc<dyn SourcePort>;

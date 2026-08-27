@@ -6,6 +6,9 @@
 //! preparation reads one selected Library's accepted baselines; only Library
 //! can accept and persist the resulting replacement.
 
+#[cfg(test)]
+extern crate self as sources;
+
 mod config;
 mod operations;
 mod policy;
@@ -15,6 +18,14 @@ mod jellyfin;
 mod local;
 mod remote_http;
 mod subsonic;
+
+#[cfg(test)]
+mod local_change_integration_tests {
+    include!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/tests/local_changes.rs"
+    ));
+}
 
 pub use config::{
     CredentialHostInput, CredentialHostPreset, CredentialSettingsInput, EditableSource,

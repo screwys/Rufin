@@ -2,8 +2,9 @@
 //! Canonical Queue rows and media facts remain in Library SQLite.
 
 use std::fmt;
+use std::sync::Arc;
 
-use library::{QueueOccurrenceKey, SourceKey, TrackKey};
+use library::{SourceKey, TrackKey};
 use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
@@ -50,7 +51,7 @@ pub enum RepeatMode {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Provenance {
     Context {
-        context_id: String,
+        context_id: Arc<str>,
         source_rank: usize,
     },
     Manual,
@@ -62,7 +63,6 @@ pub enum Provenance {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct SequenceEntry {
-    pub occurrence_key: Option<QueueOccurrenceKey>,
     pub occurrence: OccurrenceId,
     pub track_key: Option<TrackKey>,
     pub canonical_position: usize,
@@ -109,7 +109,6 @@ impl Batch {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct BatchChange {
-    pub expected_revision: u64,
     pub rows_changed: bool,
     pub traversal_changed: bool,
 }
@@ -135,12 +134,8 @@ pub enum SequenceError {
     InvalidAnchor,
     #[error("the playback traversal is not an exact occurrence permutation")]
     InvalidTraversal,
-    #[error("the playback checkpoint contains duplicate occurrences")]
-    DuplicateOccurrence,
     #[error("the selected playback occurrence is missing")]
     MissingSelectedOccurrence,
-    #[error("persisted Queue keys do not match the current playback revision")]
-    InvalidPersistedKeys,
 }
 
 #[derive(Clone, Debug)]
@@ -179,10 +174,6 @@ impl Sequence {
         revision: u64,
         progress_millis: u64,
     ) -> Result<Self, SequenceError> {
-        let mut seen = std::collections::BTreeSet::new();
-        if entries.iter().any(|entry| !seen.insert(&entry.occurrence)) {
-            return Err(SequenceError::DuplicateOccurrence);
-        }
         let selected_index = selected
             .as_ref()
             .map(|selected| {
@@ -215,26 +206,8 @@ impl Sequence {
         self.source_key
     }
 
-    pub fn accept_persisted_keys(
-        &mut self,
-        revision: u64,
-        keys: &[QueueOccurrenceKey],
-    ) -> Result<(), SequenceError> {
-        if self.revision != revision || self.entries.len() != keys.len() {
-            return Err(SequenceError::InvalidPersistedKeys);
-        }
-        for (entry, key) in self.entries.iter_mut().zip(keys) {
-            entry.occurrence_key = Some(*key);
-        }
-        Ok(())
-    }
-
     pub fn entries(&self) -> &[SequenceEntry] {
         &self.entries
-    }
-
-    pub(crate) fn persistence_entries(&self) -> Vec<SequenceEntry> {
-        self.entries.clone()
     }
 
     pub fn selected(&self) -> Option<&SequenceEntry> {
@@ -266,7 +239,7 @@ impl Sequence {
     ) -> Option<usize> {
         self.entries.iter().position(|entry| {
             entry.track_key == Some(track_key)
-                && matches!(&entry.provenance, Provenance::Context { context_id: current, source_rank: rank } if current == context_id && *rank == source_rank)
+                && matches!(&entry.provenance, Provenance::Context { context_id: current, source_rank: rank } if current.as_ref() == context_id && *rank == source_rank)
         })
     }
 
@@ -344,7 +317,6 @@ impl Sequence {
         {
             return Err(SequenceError::InvalidAnchor);
         }
-        let expected_revision = self.revision;
         let previous = self.selected().map(|entry| entry.occurrence.clone());
         let random_start = batch.random_start;
         let shuffle_seed = batch.shuffle_seed;
@@ -368,14 +340,13 @@ impl Sequence {
             .into_iter()
             .enumerate()
             .map(|(offset, item)| SequenceEntry {
-                occurrence_key: None,
                 occurrence: self.next_occurrence(),
                 track_key: Some(item.track_key),
                 canonical_position: canonical_start + offset,
                 provenance: item.provenance,
             })
             .collect::<Vec<_>>();
-        let selected_occurrence = match placement {
+        let mut selected_occurrence = match placement {
             Placement::Replace { anchor_index } => {
                 let selected = inserted[anchor_index].occurrence.clone();
                 *&mut self.entries = inserted;
@@ -393,7 +364,10 @@ impl Sequence {
                 previous
             }
         };
-        if random_start || self.shuffle_enabled {
+        if random_start {
+            self.shuffle(shuffle_seed, None);
+            selected_occurrence = self.entries.first().map(|entry| entry.occurrence.clone());
+        } else if self.shuffle_enabled {
             self.shuffle(shuffle_seed, selected_occurrence.as_ref());
         }
         self.selected_index = selected_occurrence
@@ -402,7 +376,6 @@ impl Sequence {
         self.progress_millis = 0;
         self.bump_revision();
         Ok(BatchChange {
-            expected_revision,
             rows_changed: true,
             traversal_changed: self.shuffle_enabled || random_start,
         })
@@ -742,46 +715,76 @@ mod tests {
     }
 
     #[test]
+    fn random_start_selects_the_first_shuffled_occurrence() {
+        let mut sequence = Sequence::new(source(1));
+        sequence
+            .apply_batch(
+                Batch::new(vec![manual(1), manual(2), manual(3), manual(4)])
+                    .with_shuffle_intent(2, true),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("random-start collection");
+
+        assert_eq!(sequence.selected_index(), Some(0));
+        assert_ne!(
+            sequence.selected().and_then(|entry| entry.track_key),
+            Some(track(1))
+        );
+        let mut canonical = sequence
+            .entries()
+            .iter()
+            .map(|entry| (entry.canonical_position, entry.track_key))
+            .collect::<Vec<_>>();
+        canonical.sort_by_key(|(position, _)| *position);
+        assert_eq!(
+            canonical
+                .into_iter()
+                .map(|(_, track)| track)
+                .collect::<Vec<_>>(),
+            [
+                Some(track(1)),
+                Some(track(2)),
+                Some(track(3)),
+                Some(track(4))
+            ]
+        );
+    }
+
+    #[test]
     fn auto_dj_history_trimming_preserves_other_provenance() {
         let source = source(1);
         let entries = vec![
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "one".into(),
                 track_key: Some(track(1)),
                 canonical_position: 0,
                 provenance: Provenance::Manual,
             },
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "two".into(),
                 track_key: Some(track(2)),
                 canonical_position: 1,
                 provenance: Provenance::AutoDj,
             },
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "three".into(),
                 track_key: Some(track(3)),
                 canonical_position: 2,
                 provenance: Provenance::Radio,
             },
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "four".into(),
                 track_key: Some(track(4)),
                 canonical_position: 3,
                 provenance: Provenance::AutoDj,
             },
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "five".into(),
                 track_key: Some(track(5)),
                 canonical_position: 4,
                 provenance: Provenance::AutoDj,
             },
             SequenceEntry {
-                occurrence_key: None,
                 occurrence: "current".into(),
                 track_key: Some(track(6)),
                 canonical_position: 5,

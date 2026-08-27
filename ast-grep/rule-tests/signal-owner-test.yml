@@ -1,0 +1,38 @@
+id: no-strong-clone-in-owned-signal
+valid:
+  - |
+      fn connect(tracks: Rc<Projection>) {
+          let projection = Rc::downgrade(&tracks);
+          tracks.connect_search_request(move |request| {
+              if let Some(projection) = projection.upgrade() {
+                  projection.request(request);
+              }
+          });
+      }
+  - |
+      fn connect(tracks: Rc<Projection>) {
+          let projection = tracks.clone();
+          let resume = move || projection.request_current();
+      }
+invalid:
+  - |
+      fn connect(tracks: Rc<Projection>) {
+          let projection = tracks.clone();
+          tracks.connect_search_request(move |request| {
+              projection.request(request);
+          });
+      }
+  - |
+      fn connect(entries: Rc<Projection>) {
+          let apply = Rc::clone(&entries);
+          entries.connect_search_changed(move |_| {
+              apply.refresh();
+          });
+      }
+  - |
+      fn connect(tracks: Rc<Projection>) {
+          let projection = tracks.clone();
+          tracks.connect_search_request(move |request| {
+              request_order(request, projection.clone());
+          });
+      }

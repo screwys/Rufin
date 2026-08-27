@@ -31,6 +31,11 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
         .expect("initial Playlist order");
     assert_eq!(initial.len(), 3);
     assert_eq!(
+        initial.tracks,
+        [fixture.tracks[0], fixture.tracks[0], fixture.tracks[1]]
+    );
+    assert_eq!(initial.track_positions, [0, 1, 2]);
+    assert_eq!(
         fixture
             .database
             .playlist_entry_order(
@@ -89,6 +94,7 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
                 None,
                 PlaylistSort::TrackCount,
                 true,
+                "",
                 &cancel
             )
             .await
@@ -135,6 +141,7 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
                 Some(scoped_folder),
                 PlaylistSort::TrackCount,
                 true,
+                "",
                 &cancel
             )
             .await
@@ -169,7 +176,6 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
         .expect("Playlist entry rows");
     assert_eq!(rows[0].track_key, rows[1].track_key);
     assert_ne!(rows[0].playlist_entry_key, rows[1].playlist_entry_key);
-    assert_ne!(rows[0].object_id, rows[1].object_id);
     assert_eq!(
         rows[0].track.as_ref().expect("final Track row").track_key,
         rows[0].track_key.unwrap()
@@ -281,20 +287,155 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
 }
 
 #[tokio::test]
+async fn playlist_cover_samples_first_four_occurrences_without_deduplication() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    let first = vec![1_u8, 2, 3];
+    let second = vec![4_u8, 5, 6];
+    for (album, binding) in [
+        (fixture.albums[0], first.clone()),
+        (fixture.albums[1], second.clone()),
+    ] {
+        sqlx::query("UPDATE albums SET artwork_binding=?2 WHERE album_key=?1")
+            .bind(album)
+            .bind(binding)
+            .execute(&mut raw)
+            .await
+            .expect("set Album artwork");
+    }
+    drop(raw);
+
+    let playlist = fixture
+        .database
+        .create_playlist(
+            fixture.source,
+            "Positional covers",
+            &[
+                fixture.tracks[0],
+                fixture.tracks[0],
+                fixture.tracks[2],
+                fixture.tracks[1],
+                fixture.tracks[3],
+            ],
+        )
+        .await
+        .expect("create Playlist")
+        .expect("all Tracks exist");
+    let row = fixture
+        .database
+        .playlist_rows(fixture.source, &[playlist], None, &ReadCancellation::new())
+        .await
+        .expect("read Playlist cover samples")
+        .pop()
+        .expect("Playlist row");
+
+    assert_eq!(
+        row.representative_artwork,
+        [first.clone(), first.clone(), second, first]
+    );
+}
+
+#[tokio::test]
+async fn source_playlist_payload_queries_are_bounded_and_preserve_requested_order() {
+    let fixture = fixture().await;
+    let playlist = fixture
+        .database
+        .create_playlist(fixture.source, "Provider list", &[fixture.tracks[0]])
+        .await
+        .expect("seed source Playlist")
+        .unwrap();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query(
+        "UPDATE playlists SET ownership='source',object_id='provider:playlist' WHERE playlist_key=?1",
+    )
+    .bind(playlist)
+    .execute(&mut raw)
+    .await
+    .expect("make Playlist source-owned");
+    drop(raw);
+
+    assert_eq!(
+        fixture
+            .database
+            .source_playlist_object_id(fixture.source, playlist, &ReadCancellation::new())
+            .await
+            .expect("source Playlist identity")
+            .as_deref(),
+        Some("provider:playlist")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .source_playlist_track_object_ids(
+                fixture.source,
+                Some(playlist),
+                &[fixture.tracks[0], fixture.tracks[1], fixture.tracks[1]],
+                true,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("source Playlist Track payload"),
+        ["track-1", "track-1"]
+    );
+    let entry = fixture
+        .database
+        .playlist_entry_order(
+            fixture.source,
+            playlist,
+            None,
+            PlaylistEntrySort::Position,
+            false,
+            "",
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("source Playlist entries")[0];
+    let entry_object = fixture
+        .database
+        .source_playlist_entry_object_ids(
+            fixture.source,
+            playlist,
+            &[entry],
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("source Playlist entry payload");
+    assert_eq!(entry_object.len(), 1);
+    assert!(entry_object[0].starts_with("rufin:entry:"));
+    let selected = vec![fixture.tracks[2]; 300];
+    let mut resolved = 0;
+    for page in selected.chunks(256) {
+        resolved += fixture
+            .database
+            .source_playlist_track_object_ids(
+                fixture.source,
+                None,
+                page,
+                false,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("paged source Playlist payload")
+            .len();
+    }
+    assert_eq!(resolved, 300);
+}
+
+#[tokio::test]
 async fn rating_favorite_and_delivery_writes_keep_accepted_semantics() {
     let fixture = fixture().await;
     let track = fixture.tracks[0];
     assert!(
         fixture
             .database
-            .set_track_rating(fixture.source, track, Some(8))
+            .set_rating(fixture.source, FavoriteTarget::Track(track), Some(8))
             .await
             .expect("set Track Rating")
     );
     assert!(
         fixture
             .database
-            .set_track_rating(fixture.source, track, Some(0))
+            .set_rating(fixture.source, FavoriteTarget::Track(track), Some(0))
             .await
             .expect("clear Rating explicitly")
     );
@@ -311,7 +452,7 @@ async fn rating_favorite_and_delivery_writes_keep_accepted_semantics() {
     assert!(
         fixture
             .database
-            .set_track_rating(fixture.source, track, None)
+            .set_rating(fixture.source, FavoriteTarget::Track(track), None)
             .await
             .expect("inherit source Rating")
     );
@@ -327,14 +468,14 @@ async fn rating_favorite_and_delivery_writes_keep_accepted_semantics() {
     assert!(
         fixture
             .database
-            .set_track_rating(fixture.source, track, Some(8))
+            .set_rating(fixture.source, FavoriteTarget::Track(track), Some(8))
             .await
             .expect("set Rating again")
     );
     assert!(
         fixture
             .database
-            .set_track_favorite(fixture.source, track, true)
+            .set_favorite(fixture.source, FavoriteTarget::Track(track), true)
             .await
             .expect("set Track Favorite")
     );
@@ -355,14 +496,6 @@ async fn rating_favorite_and_delivery_writes_keep_accepted_semantics() {
             .await
             .expect("queue remote Favorite")
     );
-    let due = fixture
-        .database
-        .due_remote_favorites(fixture.source, 100, 10)
-        .await
-        .expect("read due Favorites");
-    assert_eq!(due.len(), 1);
-    assert_eq!(due[0].target, target);
-    assert!(!due[0].favorite);
     assert!(
         fixture
             .database

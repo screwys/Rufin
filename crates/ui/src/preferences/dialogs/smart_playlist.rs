@@ -96,7 +96,7 @@ impl Shell {
                 selected.source_key == source && selected.source_session_epoch == epoch
             });
             if result.is_ok() && still_current {
-                shell.render_current_route();
+                shell.refresh_mounted_catalog();
                 crate::routes::playlist_picker::refresh_context_playlist_picker(&shell);
                 crate::shell::navigation::refresh_sidebar_pins(&shell);
             }
@@ -141,10 +141,7 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
             msgid("Most Played (Yearly)"),
             SmartPlaylistActivityPeriod::Yearly,
         ),
-        most_played(
-            msgid("Most Played (Lifetime)"),
-            SmartPlaylistActivityPeriod::Lifetime,
-        ),
+        most_played(msgid("Most Played"), SmartPlaylistActivityPeriod::Lifetime),
         SmartPlaylistTemplate {
             name: msgid("Never Played"),
             definition: SmartPlaylistDefinition {

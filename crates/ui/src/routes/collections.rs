@@ -11,11 +11,11 @@ use ::library::{
 use adw::prelude::*;
 use gtk::{gio, glib};
 
-use crate::layout::{configure_fill_width_clip, width_allocation_owner};
+use crate::layout::{allocation_owner, configure_fill_width_clip, width_allocation_owner};
 use crate::preferences::dialogs::SmartPlaylistChange;
 use crate::shell::Shell;
 use crate::shell::route::{MountedRouteItemNavigation, item_navigation_entry_position};
-use crate::{LibraryColumnWidth, LibraryField, LibraryLayout, LibraryListKey};
+use crate::{LibraryField, LibraryLayout, LibraryListKey};
 use localization::tr;
 use playback::{LoadedPlayRequest, QueuePlacement};
 use tracing::warn;
@@ -28,8 +28,8 @@ use super::columns::{
 };
 use super::detail_links::{DetailLinks, track_album_artist_links, track_artist_links};
 use super::grid_cells::{
-    AlbumGridCell, ArtistGridCell, CollectionGridProjection, PlaylistGridCell,
-    SmartPlaylistGridCell, TrackGridCell, collection_grid,
+    AlbumGridCell, ArtistGridCell, CollectionGridProjection, TrackGridCell,
+    collection_grid_with_demand,
 };
 use super::library_fields::{
     COLLECTION_GRID_CARD_GAP, clear_list_item_child, column_width, compact_header_column_width,
@@ -38,9 +38,10 @@ use super::library_fields::{
 use super::route::Route;
 use super::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
 use super::route_shell::restore_single_click_activation_on_primary_press;
+use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::{
-    ColumnViewWidthFit, column_view_initial_width, connect_column_width_save,
-    install_column_view_width_fit, route_column_view_initial_width,
+    ColumnViewWidthFit, column_view_initial_width, install_column_view_width_fit,
+    route_column_view_initial_width,
 };
 use super::track_model::TrackCollectionModel;
 use crate::runtime::SelectedLibrary;
@@ -49,6 +50,7 @@ use downloads::DownloadSubject;
 pub(super) const SMART_PLAYLIST_REORDER_WIDTH: i32 = 30;
 pub(super) const LIBRARY_TABLE_HEADER_HEIGHT: i32 = 92;
 const LIBRARY_TABLE_ROW_HEIGHT: i32 = 58;
+
 // GtkColumnView allocates a 30px header and 64px for each current track row.
 
 pub(crate) type CollectionPlay = Rc<dyn Fn(QueuePlacement, bool)>;
@@ -303,6 +305,7 @@ impl PlaybackTarget {
 
 struct TrackTablePlayingStateInner {
     model: TrackCollectionModel,
+    handler_model: super::sparse_model::SparseObjectModel,
     model_handler: RefCell<Option<glib::SignalHandlerId>>,
     track_id: RefCell<Option<TrackKey>>,
     position: Cell<u32>,
@@ -407,8 +410,9 @@ impl LibraryPresentationProjection {
     }
 
     fn attach_scroller(&self, scroller: &gtk::ScrolledWindow) {
-        if let Self::AlbumDetail(detail) = self {
-            detail.attach_scroller(scroller);
+        match self {
+            Self::AlbumDetail(detail) => detail.attach_scroller(scroller),
+            Self::Row(_) | Self::Grid(_) => {}
         }
     }
 
@@ -450,7 +454,10 @@ impl LibraryCollectionProjection {
         root.set_vexpand(true);
         let presentation = build(settings.layout);
         presentation.apply_fields(&settings);
-        root.append(&presentation.widget());
+        let widget = presentation.widget();
+        if widget.parent().is_none() {
+            root.append(&widget);
+        }
         Self {
             host: Rc::new(RefCell::new(LibraryCollectionHost::Embedded(root))),
             settings: Rc::new(RefCell::new(settings)),
@@ -509,14 +516,27 @@ impl LibraryCollectionProjection {
         active.set_margin_end(margin_end);
         scroller.set_child(Some(&active));
         self.presentation.borrow().attach_scroller(scroller);
+        let allocation_only = matches!(
+            &*self.presentation.borrow(),
+            LibraryPresentationProjection::AlbumDetail(_)
+        );
         let presentation = Rc::clone(&self.presentation);
         let resize_scroller = scroller.clone();
-        let width_owner = width_allocation_owner(scroller, move |width| {
-            presentation
-                .borrow()
-                .fit_scroller_allocation(&resize_scroller, width);
-        })
-        .upcast::<gtk::Widget>();
+        let width_owner = if allocation_only {
+            allocation_owner(scroller, move |width, _| {
+                presentation
+                    .borrow()
+                    .fit_scroller_allocation(&resize_scroller, width);
+            })
+            .upcast::<gtk::Widget>()
+        } else {
+            width_allocation_owner(scroller, move |width| {
+                presentation
+                    .borrow()
+                    .fit_scroller_allocation(&resize_scroller, width);
+            })
+            .upcast::<gtk::Widget>()
+        };
         self.host.replace(LibraryCollectionHost::Scrolled {
             scroller: scroller.clone(),
             margin_start,
@@ -533,25 +553,42 @@ impl LibraryCollectionProjection {
             presentation.apply_fields(settings);
             let widget = presentation.widget();
             let host = self.host.borrow().clone();
-            match host {
-                LibraryCollectionHost::Embedded(root) => {
-                    while let Some(child) = root.first_child() {
-                        root.remove(&child);
+            if widget.parent().is_some() {
+                match host {
+                    LibraryCollectionHost::Embedded(root) => {
+                        while let Some(child) = root.first_child() {
+                            root.remove(&child);
+                        }
                     }
-                    widget.set_margin_start(0);
-                    widget.set_margin_end(0);
-                    root.append(&widget);
+                    LibraryCollectionHost::Scrolled { scroller, .. } => {
+                        scroller.set_child(None::<&gtk::Widget>);
+                        let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
+                        root.set_hexpand(true);
+                        root.set_vexpand(true);
+                        self.host.replace(LibraryCollectionHost::Embedded(root));
+                    }
                 }
-                LibraryCollectionHost::Scrolled {
-                    scroller,
-                    margin_start,
-                    margin_end,
-                    ..
-                } => {
-                    widget.set_margin_start(margin_start);
-                    widget.set_margin_end(margin_end);
-                    scroller.set_child(Some(&widget));
-                    presentation.attach_scroller(&scroller);
+            } else {
+                match host {
+                    LibraryCollectionHost::Embedded(root) => {
+                        while let Some(child) = root.first_child() {
+                            root.remove(&child);
+                        }
+                        widget.set_margin_start(0);
+                        widget.set_margin_end(0);
+                        root.append(&widget);
+                    }
+                    LibraryCollectionHost::Scrolled {
+                        scroller,
+                        margin_start,
+                        margin_end,
+                        ..
+                    } => {
+                        widget.set_margin_start(margin_start);
+                        widget.set_margin_end(margin_end);
+                        scroller.set_child(Some(&widget));
+                        presentation.attach_scroller(&scroller);
+                    }
                 }
             }
             self.presentation.replace(presentation);
@@ -571,17 +608,29 @@ fn collection_presentation_needs_rebuild(
             && current.layout == LibraryLayout::Detail)
 }
 
+fn matching_context_rank(
+    context: Option<&crate::shell::route::RouteCurrentTrackContext>,
+    base: &str,
+    visible: &str,
+) -> Option<usize> {
+    context
+        .filter(|context| context.context_id == base || context.context_id == visible)
+        .map(|context| context.source_rank)
+}
+
 impl TrackTablePlayingState {
     pub(crate) fn new(model: &TrackCollectionModel, indicator: TrackRowPlayingIndicator) -> Self {
+        let handler_model = model.list_model();
         let inner = Rc::new(TrackTablePlayingStateInner {
             model: model.clone(),
+            handler_model: handler_model.clone(),
             model_handler: RefCell::new(None),
             track_id: RefCell::new(None),
             position: Cell::new(gtk::INVALID_LIST_POSITION),
             indicator,
         });
         let weak_inner = Rc::downgrade(&inner);
-        let handler = model.list_model().connect_items_changed(move |_, _, _, _| {
+        let handler = handler_model.connect_items_changed(move |_, _, _, _| {
             let Some(inner) = weak_inner.upgrade() else {
                 return;
             };
@@ -592,7 +641,6 @@ impl TrackTablePlayingState {
                     inner
                         .model
                         .selection_position_after_point_change(track_id, inner.position.get())
-                        .or_else(|| inner.model.position(track_id))
                 })
                 .unwrap_or(gtk::INVALID_LIST_POSITION);
             inner.position.set(position);
@@ -615,7 +663,7 @@ impl TrackTablePlayingState {
     fn set_track_id(&self, track_id: &TrackKey, position: Option<u32>) {
         *self.inner.track_id.borrow_mut() = Some(track_id.clone());
         let position = position
-            .or_else(|| self.inner.model.position(track_id))
+            .or_else(|| self.inner.model.position_for_current(track_id, None))
             .unwrap_or(gtk::INVALID_LIST_POSITION);
         self.set_position(position);
     }
@@ -640,7 +688,7 @@ impl TrackTablePlayingState {
 impl Drop for TrackTablePlayingStateInner {
     fn drop(&mut self) {
         if let Some(handler) = self.model_handler.take() {
-            self.model.list_model().disconnect(handler);
+            self.handler_model.disconnect(handler);
         }
     }
 }
@@ -683,74 +731,27 @@ pub(crate) fn album_collection_projection(
                 ))
             }
             LibraryLayout::Grid | LibraryLayout::Detail => {
-                LibraryPresentationProjection::Grid(album_grid(&shell, models.albums(), key))
+                LibraryPresentationProjection::Grid(album_grid(&shell, &models, key))
             }
         }),
     )
 }
 
-pub(crate) fn artist_collection_projection<M>(
+pub(crate) fn artist_collection_projection(
     shell: &Rc<Shell>,
-    model: M,
+    sparse: Rc<super::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
     key: LibraryListKey,
-) -> LibraryCollectionProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
+) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(key);
     let shell = Rc::clone(shell);
     LibraryCollectionProjection::new(
         settings,
         Rc::new(move |layout| match layout {
             LibraryLayout::Row => {
-                LibraryPresentationProjection::Row(artist_table(&shell, model.clone(), key))
+                LibraryPresentationProjection::Row(artist_table(&shell, sparse.list_model(), key))
             }
             LibraryLayout::Grid | LibraryLayout::Detail => {
-                LibraryPresentationProjection::Grid(artist_grid(&shell, model.clone(), key))
-            }
-        }),
-    )
-}
-pub(crate) fn playlist_collection_projection<M>(
-    shell: &Rc<Shell>,
-    model: M,
-) -> LibraryCollectionProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let key = LibraryListKey::Playlists;
-    let settings = shell.settings.current.borrow().library_list(key);
-    let shell = Rc::clone(shell);
-    LibraryCollectionProjection::new(
-        settings,
-        Rc::new(move |layout| match layout {
-            LibraryLayout::Row => {
-                LibraryPresentationProjection::Row(playlist_table(&shell, model.clone()))
-            }
-            LibraryLayout::Grid | LibraryLayout::Detail => {
-                LibraryPresentationProjection::Grid(playlist_grid(&shell, model.clone()))
-            }
-        }),
-    )
-}
-pub(crate) fn smart_playlist_collection_projection<M>(
-    shell: &Rc<Shell>,
-    model: M,
-) -> LibraryCollectionProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let key = LibraryListKey::SmartPlaylists;
-    let settings = shell.settings.current.borrow().library_list(key);
-    let shell = Rc::clone(shell);
-    LibraryCollectionProjection::new(
-        settings,
-        Rc::new(move |layout| match layout {
-            LibraryLayout::Row => {
-                LibraryPresentationProjection::Row(smart_playlist_table(&shell, model.clone()))
-            }
-            LibraryLayout::Grid | LibraryLayout::Detail => {
-                LibraryPresentationProjection::Grid(smart_playlist_grid(&shell, model.clone()))
+                LibraryPresentationProjection::Grid(artist_grid(&shell, &sparse, key))
             }
         }),
     )
@@ -809,97 +810,54 @@ pub(crate) struct TrackTableOptions {
     pub(crate) content_inset: i32,
 }
 
-pub(crate) fn album_grid<M>(
+pub(crate) fn album_grid(
     shell: &Rc<Shell>,
-    model: M,
+    models: &AlbumCollectionModels,
     key: LibraryListKey,
-) -> CollectionGridProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
+) -> CollectionGridProjection {
     let settings = shell.settings.current.borrow().library_list(key);
     let fields = settings.grid_fields;
+    let sparse = models
+        .album_rows()
+        .expect("Album grid has an Album row sparse model");
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    collection_grid(
-        model,
+    let demand = Rc::clone(&sparse);
+    collection_grid_with_demand(
+        sparse.list_model(),
         &fields,
-        move |fields| AlbumGridCell::new(Rc::clone(&cell_shell), fields, None),
+        move |fields| AlbumGridCell::new(&cell_shell, fields, None),
         move |_, album: AlbumRow| activate_shell.navigate(Route::AlbumDetail(album.album_key)),
+        move |position| demand.demand_positions([position as usize]),
     )
 }
 
-pub(crate) fn artist_grid<M>(
+pub(crate) fn artist_grid(
     shell: &Rc<Shell>,
-    model: M,
+    sparse: &Rc<super::sparse_model::SparseRouteModel<ArtistKey, ArtistRow>>,
     key: LibraryListKey,
-) -> CollectionGridProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
+) -> CollectionGridProjection {
     let fields = shell
         .settings
         .current
         .borrow()
         .library_list(key)
         .grid_fields;
+    let album_artist = key == LibraryListKey::AlbumArtists;
     let cell_shell = Rc::clone(shell);
     let activate_shell = Rc::clone(shell);
-    let album_artist = key == LibraryListKey::AlbumArtists;
-    collection_grid(
-        model,
+    let demand = Rc::clone(sparse);
+    collection_grid_with_demand(
+        sparse.list_model(),
         &fields,
-        move |fields| ArtistGridCell::new(Rc::clone(&cell_shell), fields, album_artist),
+        move |fields| ArtistGridCell::new(&cell_shell, fields, album_artist),
         move |_, artist: ArtistRow| {
             activate_shell.navigate(super::artist::artist_detail_route(
                 artist.artist_key,
                 album_artist,
-            ))
-        },
-    )
-}
-pub(crate) fn playlist_grid<M>(shell: &Rc<Shell>, model: M) -> CollectionGridProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::Playlists)
-        .grid_fields;
-    let cell_shell = Rc::clone(shell);
-    let activate_shell = Rc::clone(shell);
-    collection_grid(
-        model,
-        &fields,
-        move |fields| PlaylistGridCell::new(Rc::clone(&cell_shell), fields),
-        move |_, playlist: PlaylistRow| {
-            activate_shell.navigate(Route::PlaylistDetail(playlist.playlist_key.clone()))
-        },
-    )
-}
-pub(crate) fn smart_playlist_grid<M>(shell: &Rc<Shell>, model: M) -> CollectionGridProjection
-where
-    M: IsA<gio::ListModel> + Clone + 'static,
-{
-    let fields = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::SmartPlaylists)
-        .grid_fields;
-    let cell_shell = Rc::clone(shell);
-    let activate_shell = Rc::clone(shell);
-    collection_grid(
-        model,
-        &fields,
-        move |fields| SmartPlaylistGridCell::new(Rc::clone(&cell_shell), fields),
-        move |_, playlist: SmartPlaylistRow| {
-            activate_shell.navigate(Route::SmartPlaylistDetail(
-                playlist.smart_playlist_key.clone(),
             ));
         },
+        move |position| demand.demand_positions([position as usize]),
     )
 }
 pub(crate) fn track_grid(
@@ -914,41 +872,29 @@ pub(crate) fn track_grid(
         .borrow()
         .library_list(key)
         .grid_fields;
-    let cell_shell = Rc::clone(shell);
-    let cell_play_from_collection = Rc::clone(&play_from_collection);
-    let cell_model = model.clone();
-    collection_grid(
-        model.list_model(),
-        &fields,
-        move |fields| {
-            let value_model = cell_model.clone();
-            TrackGridCell::new_with_field_value(
-                Rc::clone(&cell_shell),
-                fields,
-                Rc::clone(&cell_play_from_collection),
-                Rc::new(move |position, track, field| {
-                    let value =
-                        if key == LibraryListKey::History && field == LibraryField::LastPlayed {
-                            value_model.played_at_text(position)
-                        } else {
-                            super::library_fields::track_field(track, field)
-                        };
-                    if matches!(field, LibraryField::Artist | LibraryField::AlbumArtist) {
-                        track_grid_field_links(track, field)
-                    } else {
-                        DetailLinks::route(
-                            &value,
-                            (field == LibraryField::Album)
-                                .then_some(track.album_key.map(Route::AlbumDetail))
-                                .flatten(),
-                        )
-                    }
-                }),
+    let sparse = model.sparse_model();
+    let field = Rc::new(move |_: u32, track: &TrackRow, field| {
+        if key == LibraryListKey::History && field == LibraryField::LastPlayed {
+            DetailLinks::text(
+                &track
+                    .last_played
+                    .map(super::track_model::history_played_at_text)
+                    .unwrap_or_default(),
             )
-        },
-        move |position, _: TrackRow| {
-            play_from_collection(position);
-        },
+        } else {
+            track_grid_field_links(track, field)
+        }
+    });
+    let cell_shell = Rc::clone(shell);
+    let cell_play = Rc::clone(&play_from_collection);
+    let activate = Rc::clone(&play_from_collection);
+    let demand = Rc::clone(&sparse);
+    collection_grid_with_demand(
+        sparse.list_model(),
+        &fields,
+        move |fields| TrackGridCell::new(&cell_shell, fields, Rc::clone(&cell_play), field.clone()),
+        move |position, _: TrackRow| activate(position),
+        move |position| demand.demand_positions([position as usize]),
     )
 }
 pub(crate) fn album_table<M>(
@@ -1090,8 +1036,8 @@ pub(super) fn collection_column_width(field: LibraryField) -> i32 {
 }
 
 pub(super) fn dynamic_collection_table<T, M>(
-    shell: &Rc<Shell>,
-    key: LibraryListKey,
+    _shell: &Rc<Shell>,
+    _key: LibraryListKey,
     model: M,
     fields: &[LibraryField],
     fixed_columns: Vec<(gtk::ColumnViewColumn, i32)>,
@@ -1106,27 +1052,10 @@ where
     T: Clone + 'static,
     M: IsA<gio::ListModel> + Clone + 'static,
 {
-    let default_width_for_field = Rc::new(width_for_field) as Rc<dyn Fn(LibraryField) -> i32>;
-    let width_shell = Rc::downgrade(shell);
-    let saved_width_for_field = Rc::clone(&default_width_for_field);
-    let width_for_field = Rc::new(move |field| {
-        let default = saved_width_for_field(field);
-        width_shell
-            .upgrade()
-            .and_then(|shell| {
-                shell
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(key)
-                    .row_column_width(field)
-            })
-            .unwrap_or(default)
-    }) as Rc<dyn Fn(LibraryField) -> i32>;
+    let width_for_field = Rc::new(width_for_field) as Rc<dyn Fn(LibraryField) -> i32>;
     let column_width_for_field = Rc::clone(&width_for_field);
     let column_for_field = Rc::new(move |field| {
         let column = column_for_field(field);
-        column.set_resizable(field != LibraryField::RowIndex);
         let width = column_width_for_field(field);
         (column, width)
     }) as Rc<dyn Fn(LibraryField) -> (gtk::ColumnViewColumn, i32)>;
@@ -1141,14 +1070,6 @@ where
         selection,
     );
     let fields = Rc::new(RefCell::new(fields.to_vec()));
-    install_library_column_width_persistence(
-        shell,
-        key,
-        &table,
-        &width_fit,
-        Rc::clone(&fields),
-        fixed_columns.len(),
-    );
     CollectionTableProjection {
         table,
         navigation,
@@ -1158,31 +1079,6 @@ where
         fields,
         width_fit,
     }
-}
-
-fn install_library_column_width_persistence(
-    shell: &Rc<Shell>,
-    key: LibraryListKey,
-    table: &gtk::ColumnView,
-    width_fit: &ColumnViewWidthFit,
-    fields: Rc<RefCell<Vec<LibraryField>>>,
-    fixed_column_count: usize,
-) {
-    let shell = Rc::downgrade(shell);
-    connect_column_width_save(table, width_fit, move |widths| {
-        let Some(shell) = shell.upgrade() else {
-            return;
-        };
-        let widths = fields
-            .borrow()
-            .iter()
-            .copied()
-            .zip(widths.into_iter().skip(fixed_column_count))
-            .filter(|(field, _)| *field != LibraryField::RowIndex)
-            .map(|(field, width)| LibraryColumnWidth { field, width })
-            .collect();
-        shell.save_library_column_widths(key, widths);
-    });
 }
 
 fn collection_table_with_width<T, M>(
@@ -1209,8 +1105,15 @@ where
     });
     let table = gtk::ColumnView::new(Some(selection.clone()));
     table.add_css_class("track-table");
+    table.set_single_click_activate(single_click_activate);
+    let row_factory = gtk::SignalListItemFactory::new();
+    row_factory.connect_setup(|_, row| {
+        if let Some(row) = row.downcast_ref::<gtk::ColumnViewRow>() {
+            row.set_activatable(true);
+        }
+    });
+    table.set_row_factory(Some(&row_factory));
     if single_click_activate {
-        table.set_single_click_activate(true);
         restore_single_click_activation_on_primary_press(&table, |table| {
             table.set_single_click_activate(true);
         });
@@ -1264,7 +1167,7 @@ where
 pub(crate) fn smart_playlist_reorder_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
     let factory = gtk::SignalListItemFactory::new();
     let shell = Rc::clone(shell);
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1306,11 +1209,11 @@ pub(crate) fn track_table(
         let current = current.filter(|current| source_id.as_ref() == Some(&current.source_id));
         let position = current.and_then(|current| {
             let expected_context_id = selection_model.visible_context_id(&selection_context_base);
-            let source_rank = current
-                .context
-                .as_ref()
-                .filter(|context| context.context_id == expected_context_id)
-                .map(|context| context.source_rank);
+            let source_rank = matching_context_rank(
+                current.context.as_ref(),
+                &selection_context_base,
+                &expected_context_id,
+            );
             selection_model.position_for_current(&current.track_id, source_rank)
         });
         current_playing_state
@@ -1331,7 +1234,7 @@ pub(crate) fn track_table(
     let queue = shell.products.playback.queue.clone();
     let play_model = model.clone();
     let context_id = options.context_id;
-    let activate = Box::new(move |position, _: super::track_model::TrackListItem| {
+    let activate = Box::new(move |position, _: TrackRow| {
         if let Some(request) = play_model.play_request(
             position as usize,
             playback::QueuePlacement::Now,
@@ -1343,7 +1246,6 @@ pub(crate) fn track_table(
     });
     let column_shell = Rc::clone(shell);
     let column_playing_indicator = playing_indicator;
-    let column_model = model.clone();
     let table = dynamic_collection_table(
         shell,
         key,
@@ -1352,14 +1254,18 @@ pub(crate) fn track_table(
         Vec::new(),
         move |field| {
             if key == LibraryListKey::History && field == LibraryField::LastPlayed {
-                let value_model = column_model.clone();
                 track_position_text_column(
                     &column_shell,
                     field.title(),
                     track_column_fit_width(key, field),
                     0.0,
                     None,
-                    move |position, _| value_model.played_at_text(position),
+                    move |_, track| {
+                        track
+                            .last_played
+                            .map(super::track_model::history_played_at_text)
+                            .unwrap_or_default()
+                    },
                 )
             } else {
                 track_column_for_key(&column_shell, key, field, &column_playing_indicator)
@@ -1494,6 +1400,25 @@ mod layout_policy_tests {
         let target = PlaybackTarget::Album(AlbumKey::from_raw(1)).in_context("artist:1|releases");
 
         assert_eq!(target.context_id(), "artist:1|releases");
+    }
+
+    #[test]
+    fn playing_selection_accepts_base_and_decorated_route_contexts() {
+        let base = "album:7";
+        let visible = "album:7|query=|sort=Position|descending=false";
+        for context_id in [base, visible] {
+            assert_eq!(
+                matching_context_rank(
+                    Some(&crate::shell::route::RouteCurrentTrackContext {
+                        context_id: context_id.to_string(),
+                        source_rank: 3,
+                    }),
+                    base,
+                    visible,
+                ),
+                Some(3)
+            );
+        }
     }
 
     #[test]

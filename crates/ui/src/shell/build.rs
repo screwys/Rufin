@@ -1,5 +1,4 @@
 use std::cell::{Cell, RefCell};
-use std::collections::HashMap;
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -167,8 +166,6 @@ pub fn build(
     let desktop = DesktopState::new(app, products.playback.transport.clone());
     let artwork = ArtworkState {
         startup_prime: Default::default(),
-        live_bindings: RefCell::new(HashMap::new()),
-        route_interaction: Rc::new(Default::default()),
         textures: RefCell::new(Default::default()),
     };
     let (window_width, window_height) =
@@ -522,7 +519,6 @@ pub fn build(
     });
 
     shell.connect_operation_feedback();
-    shell.connect_artwork_scale_refresh();
     {
         let source = Arc::clone(&shell.products.source);
         let release_updates = Arc::clone(&shell.products.release_updates);

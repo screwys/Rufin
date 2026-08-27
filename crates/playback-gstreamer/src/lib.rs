@@ -46,7 +46,7 @@ pub fn verify_audio_file(path: &Path) -> Result<(), String> {
         audio_output: Some("fakesink".to_string()),
         ..BackendAudioSettings::default()
     };
-    let audio_graph = audio::AudioGraph::new(&settings)?;
+    let audio_graph = audio::AudioGraph::new(&settings, DEFAULT_PLAYBACK_RATE)?;
     let decoded_audio_buffers = Arc::new(AtomicUsize::new(0));
     let decoded_audio_buffers_for_probe = Arc::clone(&decoded_audio_buffers);
     audio_graph

@@ -10,7 +10,7 @@ type BuildResult<T> = Result<T, Box<dyn Error>>;
 
 fn main() -> BuildResult<()> {
     let manifest_dir = cargo_env_path("CARGO_MANIFEST_DIR")?;
-    let translation_dir = manifest_dir.join("locales");
+    let translation_dir = manifest_dir.join("../../locales");
 
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={}", translation_dir.display());

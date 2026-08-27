@@ -20,7 +20,8 @@ use crate::ratings::context_rating_row;
 use crate::settings::ContextMenuItem;
 use crate::shell::Shell;
 use crate::shell::actions::{
-    ADD_ICON, DELETE_ICON, EDIT_ICON, PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON, TRASH_ICON,
+    ADD_ICON, DELETE_ICON, EDIT_ICON, PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON, REMOVE_ICON,
+    TRASH_ICON,
 };
 use localization::msgid;
 
@@ -269,12 +270,14 @@ fn present_track_menu(
                 FAVORITE_ADD_ICON
             },
         );
-        surface.append_configurable_action(
-            ContextMenuItem::EditMetadata,
-            msgid("Edit metadata"),
-            "edit-metadata",
-            EDIT_ICON,
-        );
+        if track.media.cue_path.is_none() {
+            surface.append_configurable_action(
+                ContextMenuItem::EditMetadata,
+                msgid("Edit metadata"),
+                "edit-metadata",
+                EDIT_ICON,
+            );
+        }
     }
     let artist_names = track
         .artists
@@ -318,10 +321,12 @@ fn present_track_menu(
         surface.add_action("favorite", move || {
             shell_favorite.set_favorite_with_feedback(FavoriteTarget::Track(key), !favorite, None);
         });
-        let metadata_shell = Rc::clone(shell);
-        surface.add_action("edit-metadata", move || {
-            present_metadata_dialog(&metadata_shell, MetadataItemId::Track(key));
-        });
+        if track.media.cue_path.is_none() {
+            let metadata_shell = Rc::clone(shell);
+            surface.add_action("edit-metadata", move || {
+                present_metadata_dialog(&metadata_shell, MetadataItemId::Track(key));
+            });
+        }
         let artists = &track.artists;
         let album_artist = track.artists_are_album_artists;
         for (index, artist) in artists.iter().enumerate() {
@@ -762,7 +767,6 @@ pub(crate) fn present_smart_playlist_context_menu(
             playlist_id: playlist.object_id.clone(),
         }),
     );
-    surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
     surface.append_fixed_action(msgid("Edit"), "edit-definition", EDIT_ICON);
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let playback = PlaybackTarget::SmartPlaylist(playlist.smart_playlist_key);
@@ -773,11 +777,6 @@ pub(crate) fn present_smart_playlist_context_menu(
         playlist.track_count > 0 && playlist.downloaded_count == playlist.track_count,
     );
     install_loaded_actions(&surface, shell, playback, true, play);
-    let rename_shell = Rc::clone(shell);
-    let rename_row = playlist.clone();
-    surface.add_action("rename", move || {
-        rename_shell.rename_smart_playlist_dialog(rename_row.clone());
-    });
     let edit_shell = Rc::clone(shell);
     let edit_row = playlist.clone();
     surface.add_action("edit-definition", move || {
@@ -864,7 +863,7 @@ fn install_sidebar_pin_action(
             msgid("Add to Pins")
         },
         "pin",
-        if pinned { TRASH_ICON } else { ADD_ICON },
+        if pinned { REMOVE_ICON } else { ADD_ICON },
     );
     let shell = Rc::clone(shell);
     surface.add_action("pin", move || shell.set_sidebar_pin(pin.clone(), !pinned));

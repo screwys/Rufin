@@ -30,6 +30,7 @@ pub(crate) struct GroupedDetailData {
     pub(super) context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
     pub(super) selected: crate::runtime::SelectedLibrary,
     pub(super) tracks: Vec<library::TrackKey>,
+    pub(super) first_rows: Vec<library::TrackRow>,
     pub(super) play_order: Option<Vec<library::TrackKey>>,
     pub(super) table_context: &'static str,
     pub(super) playback_context: String,
@@ -71,6 +72,7 @@ impl Shell {
             context_menu,
             selected,
             tracks,
+            first_rows,
             play_order,
             table_context,
             playback_context,
@@ -94,12 +96,14 @@ impl Shell {
         let track_projection = self.searchable_track_collection(
             &selected,
             tracks,
+            first_rows,
             key,
             SearchableTrackOptions {
                 on_visible_count_changed: None,
                 context_id: playback_context.clone(),
                 content_inset: PRIMARY_ROUTE_HORIZONTAL_INSET,
                 fixed_layout: None,
+                search: None,
             },
         );
         let controller = self.products.playback.queue.clone();

@@ -1087,6 +1087,7 @@ pub(crate) fn configure_action_button(
     if is_cover {
         button.add_css_class("cover-hover-button");
         button.add_css_class("cover-hover-animated");
+        button.set_focus_on_click(false);
     } else {
         button.add_css_class("detail-showcase-action-button");
     }

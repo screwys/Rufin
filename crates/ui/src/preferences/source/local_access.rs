@@ -58,6 +58,7 @@ struct LocalAccessEditor {
     folder: Rc<RefCell<Option<PathBuf>>>,
     server_prefix: glib::WeakRef<adw::EntryRow>,
     local_prefix: Option<glib::WeakRef<adw::EntryRow>>,
+    sample_source_path: Option<String>,
     operation: RefCell<LocalAccessOperation>,
     on_success: Rc<dyn Fn()>,
 }
@@ -69,6 +70,7 @@ impl LocalAccessEditor {
         folder: Option<PathBuf>,
         server_prefix: &adw::EntryRow,
         local_prefix: Option<&adw::EntryRow>,
+        sample_source_path: Option<String>,
         on_success: Rc<dyn Fn()>,
     ) -> Rc<Self> {
         Rc::new(Self {
@@ -77,6 +79,7 @@ impl LocalAccessEditor {
             folder: Rc::new(RefCell::new(folder)),
             server_prefix: server_prefix.downgrade(),
             local_prefix: local_prefix.map(|row| row.downgrade()),
+            sample_source_path,
             operation: RefCell::new(LocalAccessOperation::Editing),
             on_success,
         })
@@ -153,7 +156,11 @@ impl LocalAccessEditor {
     }
 
     fn save(self: &Rc<Self>, update: Rc<dyn Fn()>) {
-        let Some(input) = source_local_access(self.source_id.clone(), &self.draft()) else {
+        let Some(input) = source_local_access(
+            self.source_id.clone(),
+            &self.draft(),
+            self.sample_source_path.clone(),
+        ) else {
             return;
         };
         let receiver = self.source.save_local_access(input);
@@ -415,6 +422,7 @@ fn manage_server_content(
         saved_folder,
         &server_prefix,
         Some(&local_prefix),
+        sample_source_path.clone(),
         Rc::new(move || close_manage_server(&exit_for_save)),
     );
     let update_state: Rc<dyn Fn()> = Rc::new({
@@ -614,6 +622,7 @@ pub(crate) fn metadata_local_access_recovery_form(
         folder,
         &server_prefix,
         None,
+        Some(source_path.to_string()),
         on_success,
     );
     let update: Rc<dyn Fn()> = Rc::new({
@@ -994,12 +1003,17 @@ fn project_local_access_path(value: &str, mapping: &LocalAccessMapping) -> Optio
     }
 }
 
-fn source_local_access(source_id: SourceId, draft: &LocalAccessDraft) -> Option<SourceLocalAccess> {
+fn source_local_access(
+    source_id: SourceId,
+    draft: &LocalAccessDraft,
+    sample_source_path: Option<String>,
+) -> Option<SourceLocalAccess> {
     Some(SourceLocalAccess {
         source_id,
         root_path: draft.folder.clone()?,
         server_prefix: normalized_prefix(&draft.server_prefix),
         local_prefix: normalized_prefix(&draft.local_prefix),
+        sample_source_path,
     })
 }
 
@@ -1403,6 +1417,7 @@ mod tests {
                 server_prefix: " /music ".to_string(),
                 local_prefix: String::new(),
             },
+            None,
         )
         .expect("complete local access mapping");
 

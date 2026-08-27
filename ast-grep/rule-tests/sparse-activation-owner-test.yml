@@ -1,0 +1,11 @@
+id: track-activation-must-use-ready-row
+valid:
+  - |
+      fn track_table() {
+          let activate = Box::new(move |position, _: TrackRow| play(position));
+      }
+invalid:
+  - |
+      fn track_table() {
+          let activate = Box::new(move |position, _: TrackListItem| play(position));
+      }

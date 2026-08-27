@@ -2728,10 +2728,14 @@ impl GstEngine {
 
     fn set_playback_rate(&mut self, rate: f64) -> Result<(), String> {
         let rate = sanitize_playback_rate(rate);
-        let (active, crossfading) = {
+        let (active, crossfading, settings) = {
             let mut shared = lock_recover(&self.shared);
             shared.playback_rate = rate;
-            (shared.active, shared.crossfade.is_some())
+            (
+                shared.active,
+                shared.crossfade.is_some(),
+                shared.settings.clone(),
+            )
         };
         let handoff_in_progress = self.pending_handoff.is_some();
         let reprepare = self
@@ -2756,9 +2760,11 @@ impl GstEngine {
                     incoming_phase,
                     Some(IncomingPhase::Seeking | IncomingPhase::Ready)
                 );
-            let seek_started = self
-                .pipeline_for_slot_mut(slot)
-                .set_playback_rate(rate, seek_current_position)?;
+            let seek_started = self.pipeline_for_slot_mut(slot).set_playback_rate(
+                rate,
+                seek_current_position,
+                &settings,
+            )?;
             if seek_started
                 && let Some(incoming) = self
                     .incoming

@@ -1,5 +1,6 @@
-//! Repairs a released Store by rebuilding the current schema and salvaging approved facts.
-//! Unreleased development schemas receive no compatibility path.
+//! Migrates the last released Store into the current schema and salvages readable
+//! families from older or damaged released Stores. Unreleased development schemas
+//! receive no compatibility path.
 
 use std::ffi::OsString;
 use std::fs;
@@ -14,15 +15,57 @@ use crate::{
 
 static RECOVERY_NUMBER: AtomicU64 = AtomicU64::new(0);
 
-/// What was preserved and recovered while reopening an unusable Store.
+const SCHEMA_40_TABLES: &[&str] = &[
+    "album_release_info",
+    "albums",
+    "artists",
+    "genres",
+    "listening_aggregates",
+    "local_access_files",
+    "local_favorites",
+    "local_files",
+    "local_imports",
+    "local_playlist_entries",
+    "local_playlists",
+    "loudness_measurements",
+    "lyrics_cache",
+    "music_folders",
+    "pending_favorites",
+    "pending_scrobbles",
+    "playback_queues",
+    "playback_state",
+    "recent_plays",
+    "smart_playlists",
+    "source_libraries",
+    "source_playlist_entries",
+    "source_playlists",
+    "tracks",
+    "user_ratings",
+];
+
+/// What was preserved while replacing a released Store.
 #[derive(Debug)]
-pub struct RecoveryReport {
+pub(crate) struct RecoveryReport {
     pub preserved_store: PathBuf,
     pub recovered_rows: usize,
     pub unreadable_families: Vec<&'static str>,
 }
 
-pub(crate) async fn is_intact_released(path: &Path) -> LibraryResult<bool> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum ReleasedCopyMode {
+    Migration,
+    Repair,
+}
+
+pub(crate) async fn is_migratable_schema_40(path: &Path) -> LibraryResult<bool> {
+    released_store_matches(path, true).await
+}
+
+pub(crate) async fn is_repairable_released(path: &Path) -> LibraryResult<bool> {
+    released_store_matches(path, false).await
+}
+
+async fn released_store_matches(path: &Path, exact_schema_40: bool) -> LibraryResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
@@ -40,53 +83,124 @@ pub(crate) async fn is_intact_released(path: &Path) -> LibraryResult<bool> {
     let user_version = schema::pragma(&mut connection, "user_version")
         .await
         .unwrap_or_default();
-    if !schema::is_released(application_id, user_version) {
+    let expected_version = if exact_schema_40 {
+        user_version == schema::LAST_LEGACY_SCHEMA_VERSION
+    } else {
+        user_version < schema::RELEASED_SCHEMA_VERSION
+    };
+    if !schema::is_released(application_id, user_version) || !expected_version {
         connection.close().await?;
         return Ok(false);
     }
-    let intact = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
-        .fetch_one(&mut connection)
-        .await
-        .map(|value| value == "ok")
-        .unwrap_or(false);
-    let released_schema = sqlx::query_scalar::<_, i64>(
-        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='source_libraries'",
-    )
-    .fetch_optional(&mut connection)
-    .await?
-    .is_some();
+    let released_schema = if exact_schema_40 {
+        let intact = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
+            .fetch_one(&mut connection)
+            .await
+            .is_ok_and(|value| value == "ok");
+        let tables = sqlx::query_scalar::<_, String>(
+            "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
+        )
+        .fetch_all(&mut connection)
+        .await?
+        .into_iter()
+        .collect::<std::collections::BTreeSet<_>>();
+        intact && SCHEMA_40_TABLES.iter().all(|table| tables.contains(*table))
+    } else {
+        sqlx::query_scalar::<_, i64>(
+            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='source_libraries'",
+        )
+        .fetch_optional(&mut connection)
+        .await?
+        .is_some()
+    };
     connection.close().await?;
-    Ok(intact && released_schema)
+    Ok(released_schema)
+}
+
+pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryReport> {
+    if !is_migratable_schema_40(path).await? {
+        return Err(LibraryError::InvalidRequest(
+            "only a recognizable schema-40 Rufin Store can be migrated".to_string(),
+        ));
+    }
+    let pending_store = unique_sibling(path, "schema-41-pending")?;
+    let preserved_store = unique_sibling(path, "schema-40")?;
+    let mut report = RecoveryReport {
+        preserved_store: preserved_store.clone(),
+        recovered_rows: 0,
+        unreadable_families: Vec::new(),
+    };
+    let migration = async {
+        let mut destination = db::open_writer(&pending_store).await?;
+        schema::initialize(&mut destination).await?;
+        copy_released(
+            &mut destination,
+            path,
+            &mut report,
+            ReleasedCopyMode::Migration,
+        )
+        .await?;
+        schema::validate(&mut destination).await?;
+        destination.close().await?;
+        Ok::<(), LibraryError>(())
+    }
+    .await;
+    if let Err(error) = migration {
+        remove_store_family(&pending_store)?;
+        return Err(error);
+    }
+    install_migrated_store(path, &pending_store, &preserved_store)?;
+    Ok(report)
 }
 
 pub(crate) async fn repair_released(path: &Path) -> LibraryResult<RecoveryReport> {
-    if !is_intact_released(path).await? {
+    if !is_repairable_released(path).await? {
         return Err(LibraryError::InvalidRequest(
-            "only an intact released Rufin Store can be repaired".to_string(),
+            "only a recognizable released Rufin Store can be repaired".to_string(),
         ));
     }
+    replace_released(path).await
+}
+
+async fn replace_released(path: &Path) -> LibraryResult<RecoveryReport> {
     let preserved_store = unique_sibling(path, "recovered")?;
     fs::rename(path, &preserved_store)?;
     preserve_sidecar(path, &preserved_store, "-wal")?;
     preserve_sidecar(path, &preserved_store, "-shm")?;
 
     let mut report = RecoveryReport {
-        preserved_store,
+        preserved_store: preserved_store.clone(),
         recovered_rows: 0,
         unreadable_families: Vec::new(),
     };
-    let mut destination = db::open_writer(path).await?;
-    schema::initialize(&mut destination).await?;
-    let mut source = db::open_writer(&report.preserved_store).await?;
-    let user_version = schema::pragma(&mut source, "user_version").await?;
-    if user_version < schema::RELEASED_SCHEMA_VERSION {
-        schema::upgrade_released(&mut source).await?;
+    let result = async {
+        let mut destination = db::open_writer(path).await?;
+        schema::initialize(&mut destination).await?;
+        let mut source = db::open_writer(&report.preserved_store).await?;
+        let user_version = schema::pragma(&mut source, "user_version").await?;
+        let intact = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
+            .fetch_one(&mut source)
+            .await
+            .map(|value| value == "ok")
+            .unwrap_or(false);
+        if intact && user_version < schema::LAST_LEGACY_SCHEMA_VERSION {
+            schema::upgrade_legacy_released(&mut source).await?;
+        }
+        source.close().await?;
+        let preserved_store = report.preserved_store.clone();
+        copy_released(
+            &mut destination,
+            &preserved_store,
+            &mut report,
+            ReleasedCopyMode::Repair,
+        )
+        .await?;
+        schema::validate(&mut destination).await?;
+        destination.close().await?;
+        Ok(report)
     }
-    source.close().await?;
-    let preserved_store = report.preserved_store.clone();
-    salvage_released(&mut destination, &preserved_store, &mut report).await?;
-    destination.close().await?;
-    Ok(report)
+    .await;
+    result
 }
 
 pub(crate) async fn rebuild_unusable(path: &Path) -> LibraryResult<()> {
@@ -113,19 +227,21 @@ pub(crate) fn is_store_content_failure(error: &LibraryError) -> bool {
     }
 }
 
-async fn salvage_released(
+async fn copy_released(
     destination: &mut SqliteConnection,
     released_path: &Path,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
     sqlx::query("ATTACH DATABASE ?1 AS released")
         .bind(released_path.to_string_lossy().as_ref())
         .execute(&mut *destination)
         .await?;
     let mut transaction = destination.begin().await?;
-    salvage_family(
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "sources",
         "INSERT INTO sources(
              object_id, display_name, normalized_name, freshness,
@@ -145,9 +261,10 @@ async fn salvage_released(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "albums",
         "INSERT INTO albums(
              source_key, object_id, title, normalized_title, display_artist,
@@ -160,8 +277,15 @@ async fn salvage_released(
                 album.release_date, album.date_added,
                 album.musicbrainz_release_id, album.musicbrainz_release_group_id,
                 album.is_compilation,
-                CASE WHEN album.image_item_id IS NULL THEN NULL ELSE
+                CASE album.local_artwork_kind
+                  WHEN 'file' THEN CAST(json_object('File',json_object(
+                    'path',album.local_artwork_path,'revision',album.local_artwork_revision)) AS BLOB)
+                  WHEN 'embedded' THEN CAST(json_object('Embedded',json_object(
+                    'path',album.local_artwork_path,'picture_index',album.local_artwork_picture_index,
+                    'revision',album.local_artwork_revision)) AS BLOB)
+                  ELSE CASE WHEN album.image_item_id IS NULL THEN NULL ELSE
                     CAST(json_object('item_id', album.image_item_id, 'tag', album.image_tag) AS BLOB)
+                  END
                 END,
                 album.favorite, album.user_rating, NULL
          FROM released.albums AS album
@@ -176,9 +300,10 @@ async fn salvage_released(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "tracks",
         "INSERT INTO tracks(
              source_key, object_id, album_key, title, normalized_search,
@@ -208,8 +333,15 @@ async fn salvage_released(
                 track.comment, track.bpm, track.musicbrainz_recording_id,
                 track.musicbrainz_release_track_id, track.cue_path,
                 track.cue_start_millis, track.cue_end_millis,
-                CASE WHEN track.image_item_id IS NULL THEN NULL ELSE
+                CASE track.local_artwork_kind
+                  WHEN 'file' THEN CAST(json_object('File',json_object(
+                    'path',track.local_artwork_path,'revision',track.local_artwork_revision)) AS BLOB)
+                  WHEN 'embedded' THEN CAST(json_object('Embedded',json_object(
+                    'path',track.local_artwork_path,'picture_index',track.local_artwork_picture_index,
+                    'revision',track.local_artwork_revision)) AS BLOB)
+                  ELSE CASE WHEN track.image_item_id IS NULL THEN NULL ELSE
                     CAST(json_object('item_id', track.image_item_id, 'tag', track.image_tag) AS BLOB)
+                  END
                 END,
                 track.favorite, track.user_rating, NULL
          FROM released.tracks AS track
@@ -227,26 +359,29 @@ async fn salvage_released(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "Track first-seen facts",
         "UPDATE tracks SET first_seen_at=(SELECT import.first_seen_at FROM released.local_imports import JOIN sources source ON source.object_id=import.source_id WHERE source.source_key=tracks.source_key AND import.track_id=tracks.object_id) WHERE first_seen_at IS NULL",
     )
     .await?;
-    salvage_family(
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "Album first-seen facts",
         "UPDATE albums SET first_seen_at=(SELECT min(track.first_seen_at) FROM tracks track WHERE track.album_key=albums.album_key) WHERE first_seen_at IS NULL",
     )
     .await?;
-    salvage_named_entities(&mut transaction, report).await?;
-    salvage_relationships(&mut transaction, report).await?;
-    salvage_playlists(&mut transaction, report).await?;
-    salvage_family(
+    salvage_named_entities(&mut transaction, report, mode).await?;
+    salvage_relationships(&mut transaction, report, mode).await?;
+    salvage_playlists(&mut transaction, report, mode).await?;
+    copy_family(
         &mut transaction,
         report,
+        mode,
         "cached Home",
         "INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,artwork_binding)
          SELECT source.source_key,
@@ -274,11 +409,16 @@ async fn salvage_released(
            AND library.library_id=(SELECT max(current.library_id) FROM released.source_libraries current WHERE current.source_id=library.source_id AND current.accepted_at IS NOT NULL)
            AND (track.track_key IS NOT NULL OR album.album_key IS NOT NULL)",
     ).await?;
-    salvage_album_release(&mut transaction, report).await?;
-    salvage_user_facts(&mut transaction, report).await?;
-    salvage_queue(&mut transaction, report).await?;
-    salvage_local(&mut transaction, report).await?;
+    salvage_album_release(&mut transaction, report, mode).await?;
+    salvage_user_facts(&mut transaction, report, mode).await?;
+    if mode == ReleasedCopyMode::Repair {
+        salvage_queue(&mut transaction, report, mode).await?;
+    }
+    salvage_local(&mut transaction, report, mode).await?;
     initialize_recovered_loudness_keys(&mut transaction).await?;
+    if mode == ReleasedCopyMode::Migration {
+        validate_migration_copy(&mut transaction).await?;
+    }
     transaction.commit().await?;
     sqlx::raw_sql("DETACH DATABASE released; PRAGMA optimize;")
         .execute(&mut *destination)
@@ -286,11 +426,92 @@ async fn salvage_released(
     Ok(())
 }
 
+async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> LibraryResult<()> {
+    for (family, expected_sql, actual_sql) in [
+        (
+            "sources",
+            "SELECT count(*) FROM released.source_libraries AS library
+             WHERE library.accepted_at IS NOT NULL
+               AND library.library_id=(
+                   SELECT max(current.library_id)
+                   FROM released.source_libraries AS current
+                   WHERE current.source_id=library.source_id
+                     AND current.accepted_at IS NOT NULL
+               )",
+            "SELECT count(*) FROM sources",
+        ),
+        (
+            "Albums",
+            "SELECT count(*) FROM released.albums AS item
+             JOIN released.source_libraries AS library USING (library_id)
+             WHERE library.accepted_at IS NOT NULL
+               AND library.library_id=(
+                   SELECT max(current.library_id)
+                   FROM released.source_libraries AS current
+                   WHERE current.source_id=library.source_id
+                     AND current.accepted_at IS NOT NULL
+               )",
+            "SELECT count(*) FROM albums",
+        ),
+        (
+            "Tracks",
+            "SELECT count(*) FROM released.tracks AS item
+             JOIN released.source_libraries AS library USING (library_id)
+             WHERE library.accepted_at IS NOT NULL
+               AND library.library_id=(
+                   SELECT max(current.library_id)
+                   FROM released.source_libraries AS current
+                   WHERE current.source_id=library.source_id
+                     AND current.accepted_at IS NOT NULL
+               )",
+            "SELECT count(*) FROM tracks",
+        ),
+        (
+            "Playlist entries",
+            "SELECT
+                 (SELECT count(*) FROM released.source_playlist_entries AS entry
+                  JOIN released.source_libraries AS library USING (library_id)
+                  WHERE library.accepted_at IS NOT NULL
+                    AND library.library_id=(
+                        SELECT max(current.library_id)
+                        FROM released.source_libraries AS current
+                        WHERE current.source_id=library.source_id
+                          AND current.accepted_at IS NOT NULL
+                    ))
+                 + (SELECT count(*) FROM released.local_playlist_entries)",
+            "SELECT count(*) FROM playlist_entries",
+        ),
+    ] {
+        let expected = sqlx::query_scalar::<_, i64>(expected_sql)
+            .fetch_one(&mut **transaction)
+            .await?;
+        let actual = sqlx::query_scalar::<_, i64>(actual_sql)
+            .fetch_one(&mut **transaction)
+            .await?;
+        if actual != expected {
+            return Err(LibraryError::InvalidStore(format!(
+                "schema-40 migration changed {family} count from {expected} to {actual}"
+            )));
+        }
+    }
+    let foreign_key_failure = sqlx::query("PRAGMA foreign_key_check")
+        .fetch_optional(&mut **transaction)
+        .await?
+        .is_some();
+    if foreign_key_failure {
+        return Err(LibraryError::InvalidStore(
+            "schema-40 migration failed foreign-key validation".to_string(),
+        ));
+    }
+    Ok(())
+}
+
 async fn salvage_album_release(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
-    salvage_family(transaction,report,"Album release lookup",
+    copy_family(transaction, report, mode, "Album release lookup",
         "UPDATE albums SET release_lookup_identity=(SELECT info.exact_identity_key FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id) WHERE EXISTS (SELECT 1 FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id WHERE source.source_key=albums.source_key AND info.album_id=albums.object_id);
          DELETE FROM album_release_types WHERE EXISTS (SELECT 1 FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id WHERE info.lookup_state='found' AND album.album_key=album_release_types.album_key);
          INSERT INTO album_release_types(album_key,release_type,position) SELECT album.album_key,value.value,value.key FROM released.album_release_info info JOIN sources source ON source.object_id=info.source_id JOIN albums album ON album.source_key=source.source_key AND album.object_id=info.album_id JOIN json_each(info.release_types_json) value WHERE info.lookup_state='found'").await
@@ -299,6 +520,7 @@ async fn salvage_album_release(
 async fn salvage_relationships(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
@@ -464,7 +686,7 @@ async fn salvage_relationships(
                )",
         ),
     ] {
-        salvage_family(transaction, report, family, sql).await?;
+        copy_family(transaction, report, mode, family, sql).await?;
     }
     Ok(())
 }
@@ -472,6 +694,7 @@ async fn salvage_relationships(
 async fn salvage_named_entities(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
@@ -483,8 +706,15 @@ async fn salvage_named_entities(
              )
              SELECT source.source_key, item.artist_id, item.name,
                     lower(item.name), lower(item.name), item.musicbrainz_artist_id,
-                    CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
+                    CASE item.local_artwork_kind
+                      WHEN 'file' THEN CAST(json_object('File',json_object(
+                        'path',item.local_artwork_path,'revision',item.local_artwork_revision)) AS BLOB)
+                      WHEN 'embedded' THEN CAST(json_object('Embedded',json_object(
+                        'path',item.local_artwork_path,'picture_index',item.local_artwork_picture_index,
+                        'revision',item.local_artwork_revision)) AS BLOB)
+                      ELSE CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
                         CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
+                      END
                     END,
                     item.favorite, item.user_rating
              FROM released.artists AS item
@@ -541,7 +771,7 @@ async fn salvage_named_entities(
                )",
         ),
     ] {
-        salvage_family(transaction, report, family, sql).await?;
+        copy_family(transaction, report, mode, family, sql).await?;
     }
     Ok(())
 }
@@ -549,10 +779,12 @@ async fn salvage_named_entities(
 async fn salvage_playlists(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "playlists",
         "INSERT INTO playlists(
              source_key, ownership, object_id, name, normalized_name, sort_text, artwork_binding
@@ -574,9 +806,10 @@ async fn salvage_playlists(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "playlist entries",
         "INSERT INTO playlist_entries(
              playlist_key, object_id, track_key, track_object_id, position
@@ -602,9 +835,10 @@ async fn salvage_playlists(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "user playlists",
         "INSERT INTO playlists(
              source_key, ownership, object_id, name, normalized_name, sort_text
@@ -615,9 +849,10 @@ async fn salvage_playlists(
          JOIN sources AS source ON source.object_id=item.source_id",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "user playlist entries",
         "INSERT INTO playlist_entries(
              playlist_key, object_id, track_key, track_object_id, position
@@ -641,6 +876,7 @@ async fn salvage_playlists(
 async fn salvage_user_facts(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
     for (family, sql) in [
         (
@@ -807,7 +1043,7 @@ async fn salvage_user_facts(
                ON track.source_key=source.source_key AND track.object_id=item.track_id",
         ),
     ] {
-        salvage_family(transaction, report, family, sql).await?;
+        copy_family(transaction, report, mode, family, sql).await?;
     }
     Ok(())
 }
@@ -815,10 +1051,12 @@ async fn salvage_user_facts(
 async fn salvage_queue(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "queue occurrences",
         "INSERT INTO queue_occurrences(
              source_key, object_id, position, traversal_position,
@@ -837,11 +1075,14 @@ async fn salvage_queue(
          SELECT source.source_key,
                 json_extract(occurrence.value, '$.id'),
                 occurrence.key,
-                (
-                    SELECT traversal.key
-                    FROM json_each(queue.traversal_json) AS traversal
-                    WHERE traversal.value=json_extract(occurrence.value, '$.id')
-                ),
+                CASE
+                    WHEN json_array_length(queue.traversal_json)=0 THEN occurrence.key
+                    ELSE (
+                        SELECT traversal.key
+                        FROM json_each(queue.traversal_json) AS traversal
+                        WHERE traversal.value=json_extract(occurrence.value, '$.id')
+                    )
+                END,
                 CASE
                     WHEN json_type(occurrence.value, '$.provenance.Context') = 'object'
                         THEN 'context'
@@ -914,9 +1155,10 @@ async fn salvage_queue(
            ON json_extract(fallback.value, '$.id')=json_extract(occurrence.value, '$.track_id')",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "queue state",
         "INSERT INTO queue_state(
              source_key, current_occurrence_key, progress_millis, repeat_mode, shuffled
@@ -945,10 +1187,12 @@ async fn salvage_queue(
 async fn salvage_local(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
 ) -> LibraryResult<()> {
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "Local files",
         "INSERT INTO local_files(
              source_key, path, root, relative_path, kind, size_bytes,
@@ -969,9 +1213,10 @@ async fn salvage_local(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "Local file dependencies",
         "INSERT INTO local_file_dependencies(
              local_file_key, dependency_path, position
@@ -992,9 +1237,10 @@ async fn salvage_local(
            )",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "Local access files",
         "INSERT INTO local_access_files(
              source_key, origin, path, root, relative_path, size_bytes, mtime_ns,
@@ -1014,9 +1260,10 @@ async fn salvage_local(
          JOIN sources AS source ON source.object_id=item.source_id",
     )
     .await?;
-    salvage_family(
+    copy_family(
         transaction,
         report,
+        mode,
         "listen outbox",
         "INSERT OR IGNORE INTO listens(
              external_id, source_key, track_object_id, track_title,
@@ -1039,9 +1286,10 @@ async fn salvage_local(
     Ok(())
 }
 
-async fn salvage_family(
+async fn copy_family(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
+    mode: ReleasedCopyMode,
     family: &'static str,
     sql: &'static str,
 ) -> LibraryResult<()> {
@@ -1056,11 +1304,76 @@ async fn salvage_family(
             report.recovered_rows += usize::try_from(after - before).unwrap_or_default();
             Ok(())
         }
-        Err(_) => {
-            report.unreadable_families.push(family);
-            Ok(())
-        }
+        Err(error) => match mode {
+            ReleasedCopyMode::Migration => Err(error.into()),
+            ReleasedCopyMode::Repair => {
+                report.unreadable_families.push(family);
+                Ok(())
+            }
+        },
     }
+}
+
+fn restore_preserved_store(path: &Path, preserved: &Path) -> std::io::Result<()> {
+    remove_store_file(path)?;
+    remove_store_sidecar(path, "-wal")?;
+    remove_store_sidecar(path, "-shm")?;
+    fs::rename(preserved, path)?;
+    restore_sidecar(path, preserved, "-wal")?;
+    restore_sidecar(path, preserved, "-shm")?;
+    Ok(())
+}
+
+fn install_migrated_store(path: &Path, pending: &Path, preserved: &Path) -> std::io::Result<()> {
+    let install = (|| {
+        fs::rename(path, preserved)?;
+        preserve_sidecar(path, preserved, "-wal")?;
+        preserve_sidecar(path, preserved, "-shm")?;
+        fs::rename(pending, path)?;
+        preserve_sidecar(pending, path, "-wal")?;
+        preserve_sidecar(pending, path, "-shm")?;
+        Ok(())
+    })();
+    if let Err(error) = install {
+        remove_store_family(path)?;
+        if preserved.exists() {
+            restore_preserved_store(path, preserved)?;
+        }
+        return Err(error);
+    }
+    Ok(())
+}
+
+fn remove_store_family(path: &Path) -> std::io::Result<()> {
+    remove_store_file(path)?;
+    remove_store_sidecar(path, "-wal")?;
+    remove_store_sidecar(path, "-shm")?;
+    Ok(())
+}
+
+fn remove_store_file(path: &Path) -> std::io::Result<()> {
+    if path.exists() {
+        fs::remove_file(path)?;
+    }
+    Ok(())
+}
+
+fn remove_store_sidecar(path: &Path, suffix: &str) -> std::io::Result<()> {
+    let mut sidecar = OsString::from(path.as_os_str());
+    sidecar.push(suffix);
+    remove_store_file(&PathBuf::from(sidecar))
+}
+
+fn restore_sidecar(path: &Path, preserved: &Path, suffix: &str) -> std::io::Result<()> {
+    let mut preserved_sidecar = OsString::from(preserved.as_os_str());
+    preserved_sidecar.push(suffix);
+    let preserved_sidecar = PathBuf::from(preserved_sidecar);
+    if preserved_sidecar.exists() {
+        let mut original_sidecar = OsString::from(path.as_os_str());
+        original_sidecar.push(suffix);
+        fs::rename(preserved_sidecar, PathBuf::from(original_sidecar))?;
+    }
+    Ok(())
 }
 
 fn preserve_sidecar(path: &Path, preserved: &Path, suffix: &str) -> std::io::Result<()> {

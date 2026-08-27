@@ -23,7 +23,6 @@ const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
 const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
 const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
-const QUEUE_DRAG_HANDLE_WIDTH: i32 = 16;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
 const QUEUE_FULLSCREEN_TITLE_COLUMN_WIDTH: i32 = 320;
 const QUEUE_FULLSCREEN_ALBUM_COLUMN_WIDTH: i32 = 260;
@@ -299,12 +298,46 @@ impl Shell {
             let Some(rows) = rows else {
                 return;
             };
+            let preserve_scroll = shell
+                .selected_queue()
+                .as_deref()
+                .is_some_and(|queue| queue_order_rearranged(&queue.rows.borrow(), &rows));
+            let sidebar_scroll = queue_panel_scroller(&shell.right_panel.queue_panel)
+                .map(|scroller| (scroller.clone(), scroller.vadjustment().value()));
+            let fullscreen_scroll =
+                queue_panel_scroller(&shell.player_view.fullscreen_player.queue_panel)
+                    .map(|scroller| (scroller.clone(), scroller.vadjustment().value()));
             if shell
                 .selected_queue()
                 .as_deref()
                 .is_some_and(|queue| queue.accept(generation, rows))
             {
                 shell.render_queue_panel();
+                if preserve_scroll {
+                    for (scroller, value) in
+                        [sidebar_scroll, fullscreen_scroll].into_iter().flatten()
+                    {
+                        restore_queue_scroll_later(&scroller, value);
+                    }
+                } else {
+                    let current_row = shell.selected_queue().and_then(|queue| {
+                        let current = queue.current.borrow().clone()?;
+                        queue
+                            .rows
+                            .borrow()
+                            .iter()
+                            .position(|row| row.object_id == current.as_str())
+                    });
+                    for scroller in [
+                        queue_panel_scroller(&shell.right_panel.queue_panel),
+                        queue_panel_scroller(&shell.player_view.fullscreen_player.queue_panel),
+                    ]
+                    .into_iter()
+                    .flatten()
+                    {
+                        reveal_queue_current_row_later(&scroller, current_row);
+                    }
+                }
             }
         });
     }
@@ -495,6 +528,15 @@ fn reveal_queue_current_row_later(scroller: &gtk::ScrolledWindow, current_row: O
     });
 }
 
+fn restore_queue_scroll_later(scroller: &gtk::ScrolledWindow, value: f64) {
+    let scroller = scroller.clone();
+    glib::idle_add_local_once(move || {
+        let adjustment = scroller.vadjustment();
+        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        adjustment.set_value(value.clamp(adjustment.lower(), maximum));
+    });
+}
+
 fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) -> bool {
     let Some(current_row) = current_row else {
         return false;
@@ -560,6 +602,28 @@ fn changed_queue_positions(previous: &[QueuePageRow], next: &[QueuePageRow]) -> 
         .collect()
 }
 
+fn queue_order_rearranged(previous: &[QueuePageRow], next: &[QueuePageRow]) -> bool {
+    if previous.len() != next.len()
+        || previous
+            .iter()
+            .zip(next)
+            .all(|(left, right)| left.object_id == right.object_id)
+    {
+        return false;
+    }
+    let mut previous = previous
+        .iter()
+        .map(|row| row.object_id.as_str())
+        .collect::<Vec<_>>();
+    let mut next = next
+        .iter()
+        .map(|row| row.object_id.as_str())
+        .collect::<Vec<_>>();
+    previous.sort_unstable();
+    next.sort_unstable();
+    previous == next
+}
+
 fn queue_row(
     shell: &Rc<Shell>,
     row: &QueuePageRow,
@@ -584,13 +648,21 @@ fn queue_row(
     ))]);
 
     let content: gtk::Widget = if fullscreen {
-        fullscreen_queue_content(shell, row, &occurrence, reorderable)
+        fullscreen_queue_content(shell, row)
     } else {
-        sidebar_queue_content(shell, row, &occurrence, reorderable)
+        sidebar_queue_content(shell, row)
     };
     root.append(&content);
 
     if reorderable {
+        let source = gtk::DragSource::builder()
+            .actions(gtk::gdk::DragAction::MOVE)
+            .build();
+        let object_id = occurrence.to_string();
+        source.connect_prepare(move |_, _, _| {
+            Some(gtk::gdk::ContentProvider::for_value(&object_id.to_value()))
+        });
+        root.add_controller(source);
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         let queue = shell.products.playback.queue.clone();
         let target_index = usize::try_from(row.position).unwrap_or_default();
@@ -634,15 +706,9 @@ fn queue_row(
     root.upcast()
 }
 
-fn sidebar_queue_content(
-    shell: &Rc<Shell>,
-    row: &QueuePageRow,
-    occurrence: &OccurrenceId,
-    reorderable: bool,
-) -> gtk::Widget {
+fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     content.set_hexpand(true);
-    content.append(&queue_drag_handle(occurrence, reorderable));
     let cover = ArtworkTile::new(50);
     shell.bind_artwork_tile(
         &cover,
@@ -678,20 +744,8 @@ fn sidebar_queue_content(
     content.upcast()
 }
 
-fn fullscreen_queue_content(
-    shell: &Rc<Shell>,
-    row: &QueuePageRow,
-    occurrence: &OccurrenceId,
-    reorderable: bool,
-) -> gtk::Widget {
+fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
     let columns = fullscreen_queue_row_box();
-    if reorderable {
-        columns.append(&queue_drag_handle(occurrence, true));
-    } else {
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_width_request(QUEUE_DRAG_HANDLE_WIDTH);
-        columns.append(&spacer);
-    }
     let cover = ArtworkTile::new(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
     shell.bind_artwork_tile(
         &cover,
@@ -765,27 +819,6 @@ fn fullscreen_queue_content(
             year: year.upcast(),
         },
     )
-}
-
-fn queue_drag_handle(occurrence: &OccurrenceId, reorderable: bool) -> gtk::Widget {
-    let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-    drag.add_css_class("dim-label");
-    drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-    drag.set_width_request(QUEUE_DRAG_HANDLE_WIDTH);
-    drag.set_halign(gtk::Align::Center);
-    drag.set_visible(reorderable);
-    if !reorderable {
-        return drag.upcast();
-    }
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
-        .build();
-    let object_id = occurrence.to_string();
-    source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&object_id.to_value()))
-    });
-    drag.add_controller(source);
-    drag.upcast()
 }
 
 fn queue_link_label(text: &str) -> gtk::Label {
@@ -865,9 +898,8 @@ fn fullscreen_queue_column_widths(available_width: i32) -> QueueFullscreenColumn
 }
 
 fn fullscreen_queue_fixed_width(show_album: bool, show_year: bool) -> i32 {
-    let columns = 5 + i32::from(show_album) + i32::from(show_year);
+    let columns = 4 + i32::from(show_album) + i32::from(show_year);
     QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING
-        + QUEUE_DRAG_HANDLE_WIDTH
         + QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH
         + QUEUE_DURATION_COLUMN_WIDTH
         + QUEUE_FAVORITE_COLUMN_WIDTH
@@ -914,7 +946,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("queue-header");
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_width_request(QUEUE_DRAG_HANDLE_WIDTH + 50);
+        spacer.set_width_request(50);
         header.append(&spacer);
         let title = gtk::Label::new(Some(&tr("Title").to_uppercase()));
         title.add_css_class("muted");
@@ -930,7 +962,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     let header = fullscreen_queue_row_box();
     header.add_css_class("queue-header");
     let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_width_request(QUEUE_DRAG_HANDLE_WIDTH + QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
+    spacer.set_width_request(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
     let title = gtk::Label::new(Some(&tr("Title").to_uppercase()));
     title.add_css_class("muted");
     title.set_xalign(0.0);
@@ -1042,35 +1074,42 @@ mod tests {
             position: 0,
             traversal_position: 0,
             provenance: library::QueueProvenance::Manual,
-            track_key: None,
-            track_object_id: format!("track-{id}"),
-            title: title.to_string(),
-            artist: String::new(),
-            album: String::new(),
-            album_display_artist: None,
-            album_key: None,
-            album_object_id: None,
-            primary_artist_key: None,
-            primary_artist_object_id: None,
-            primary_artist_musicbrainz_id: None,
-            media_uri: None,
-            artwork_binding: None,
-            duration_millis: None,
-            disc_number: None,
-            track_number: None,
-            year: None,
-            release_date: None,
-            favorite: None,
+            media: library::QueueMedia {
+                source_id: String::new(),
+                track_key: None,
+                track_object_id: format!("track-{id}"),
+                title: title.to_string(),
+                artist: String::new(),
+                album: String::new(),
+                album_display_artist: None,
+                album_key: None,
+                album_object_id: None,
+                primary_artist_key: None,
+                primary_artist_object_id: None,
+                primary_artist_musicbrainz_id: None,
+                download_media_uri: None,
+                mapping_media_uri: None,
+                source_media_uri: None,
+                media_uri: None,
+                artwork_binding: None,
+                duration_millis: None,
+                disc_number: None,
+                track_number: None,
+                year: None,
+                release_date: None,
+                favorite: None,
+                source_format: None,
+                musicbrainz_recording_id: None,
+                musicbrainz_release_track_id: None,
+                musicbrainz_album_id: None,
+                musicbrainz_release_group_id: None,
+                cue_path: None,
+                cue_start_millis: None,
+                cue_end_millis: None,
+                artist_links: Vec::new(),
+            },
             rating: None,
             is_downloaded: false,
-            source_format: None,
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            cue_path: None,
-            cue_start_millis: None,
-            cue_end_millis: None,
         }
     }
 

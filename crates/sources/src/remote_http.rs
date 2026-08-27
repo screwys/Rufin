@@ -69,6 +69,24 @@ pub async fn json<T: DeserializeOwned>(
     deserialize_json(&bytes, &checked.request)
 }
 
+pub async fn json_with_header<T: DeserializeOwned>(
+    request: reqwest::RequestBuilder,
+    policy: RemoteHttpPolicy,
+    limit: BodyLimit,
+    response_header: &header::HeaderName,
+) -> SourceResult<(T, Option<String>)> {
+    let checked = checked_response(request, policy).await?;
+    let value = checked
+        .response
+        .headers()
+        .get(response_header)
+        .and_then(|value| value.to_str().ok())
+        .map(str::to_string);
+    let bytes =
+        response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    Ok((deserialize_json(&bytes, &checked.request)?, value))
+}
+
 fn deserialize_json<T: DeserializeOwned>(
     bytes: &[u8],
     request: &RequestMetadata,
@@ -114,6 +132,18 @@ pub async fn bytes(
         .map(str::to_string);
     let bytes =
         response_bytes_bounded(checked.response, policy, limit, Some(&checked.request)).await?;
+    let declared_image = content_type.as_deref().is_none_or(|value| {
+        let value = value.split(';').next().unwrap_or(value).trim();
+        value.starts_with("image/") || value.eq_ignore_ascii_case("application/octet-stream")
+    });
+    let first = bytes
+        .iter()
+        .copied()
+        .find(|byte| !byte.is_ascii_whitespace());
+    if bytes.is_empty() || !declared_image || matches!(first, Some(b'{') | Some(b'[') | Some(b'<'))
+    {
+        return Err(SourceError::NotFound);
+    }
     Ok(ImageBytes {
         bytes,
         content_type,
@@ -468,6 +498,15 @@ mod tests {
             .respond_with(ResponseTemplate::new(200).set_body_bytes(vec![0_u8; 4]))
             .mount(&server)
             .await;
+        Mock::given(method("GET"))
+            .and(path("/not-image"))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("content-type", "application/json")
+                    .set_body_string("{\"error\":\"missing cover\"}"),
+            )
+            .mount(&server)
+            .await;
 
         let client = Client::new();
         let image = bytes(
@@ -484,10 +523,21 @@ mod tests {
         )
         .await
         .expect_err("oversized body");
+        let not_image = bytes(
+            client.get(format!("{}/not-image", server.uri())),
+            POLICY,
+            BodyLimit {
+                max_bytes: 1_024,
+                context: "test image response",
+            },
+        )
+        .await
+        .expect_err("non-image success body");
 
         assert_eq!(image.bytes, vec![1, 2, 3]);
         assert_eq!(image.content_type.as_deref(), Some("image/jpeg"));
         assert!(large.to_string().contains("test response exceeded"));
+        assert!(matches!(not_image, SourceError::NotFound));
     }
 
     #[tokio::test]

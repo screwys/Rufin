@@ -13,24 +13,28 @@ use crate::interactions::install_context_menu_openers;
 use crate::{LibraryListKey, shell::Shell, shell::route::MountedRoute};
 
 use super::route::{FolderPathItem, Route};
+use super::sparse_model::connect_sparse_bind;
 
-#[derive(Clone)]
-struct FolderLink {
-    object_id: String,
-    name: String,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(super) struct FolderLink {
+    pub(super) object_id: String,
+    pub(super) name: String,
 }
 
 #[derive(Clone)]
 enum FolderTrackSource {
-    LivePage(Arc<[TrackKey]>),
+    Live(Arc<[TrackKey]>),
     CachedFolder(Option<FolderKey>),
 }
 
 type FolderResume = Rc<dyn Fn()>;
 
 const FOLDER_TREE_MIN_WIDTH: i32 = 132;
+const FOLDER_TREE_MAX_WIDTH: i32 = 480;
 const FOLDER_TREE_HIDE_WIDTH: i32 = 550;
 const FOLDER_TABLE_MIN_WIDTH: i32 = 240;
+const FOLDER_SPLIT_SEPARATOR_WIDTH: i32 = 17;
+const FOLDER_TREE_WIDTH: i32 = 260;
 
 fn folder_tree_visible(width: i32) -> bool {
     width >= FOLDER_TREE_HIDE_WIDTH
@@ -42,8 +46,19 @@ fn folder_tree_position(width: i32, preferred: i32) -> i32 {
     }
     preferred.clamp(
         FOLDER_TREE_MIN_WIDTH,
-        (width - FOLDER_TABLE_MIN_WIDTH).max(FOLDER_TREE_MIN_WIDTH),
+        width
+            .saturating_sub(FOLDER_SPLIT_SEPARATOR_WIDTH)
+            .saturating_sub(FOLDER_TABLE_MIN_WIDTH)
+            .clamp(FOLDER_TREE_MIN_WIDTH, FOLDER_TREE_MAX_WIDTH),
     )
+}
+
+fn folder_tree_width(width: i32) -> i32 {
+    if width < 760 {
+        (width / 3).clamp(FOLDER_TREE_MIN_WIDTH, FOLDER_TREE_WIDTH)
+    } else {
+        FOLDER_TREE_WIDTH
+    }
 }
 
 impl Shell {
@@ -58,6 +73,7 @@ impl Shell {
         wrapper.set_margin_top(super::route_layout::ROUTE_TOP_MARGIN);
         wrapper.set_margin_bottom(28);
         wrapper.set_hexpand(true);
+        wrapper.set_halign(gtk::Align::Fill);
         wrapper.set_width_request(1);
         wrapper.set_vexpand(true);
         if !path.is_empty() {
@@ -77,25 +93,31 @@ impl Shell {
         stack.set_hexpand(true);
         stack.set_vexpand(true);
         stack.add_named(
-            &self.placeholder_view(msgid("Folders"), msgid("Loading folders...")),
+            &super::collections::library_route_inset(
+                self.route_empty_view(msgid("Loading folders...")),
+            ),
             Some("loading"),
         );
         stack.set_visible_child_name("loading");
         wrapper.append(&stack);
         let resume_slot = Rc::new(RefCell::new(None::<FolderResume>));
-        if selected.artwork.source_id.as_str() == sources::LOCAL_LIBRARY_SOURCE_ID {
-            load_cached_folder(self, selected, path, &search, &stack, &resume_slot);
-            let resume = Rc::new(move || {
-                if let Some(resume) = resume_slot.borrow().as_ref() {
-                    resume();
-                }
+        let live =
+            (selected.artwork.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID).then(|| {
+                selected.operations.folder(
+                    path.last().map(|item| item.id.clone()),
+                    selected.music_folder_object_id.clone(),
+                )
             });
-            return MountedRoute::new(wrapper.upcast(), resume);
-        }
-        let receiver = selected.operations.folder(
-            path.last().map(|item| item.id.clone()),
-            selected.music_folder_object_id.clone(),
-        );
+        let settings = self
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::Tracks);
+        let selected_for_load = selected.clone();
+        let path_for_load = path.clone();
+        let task = selected.runtime.spawn(async move {
+            prepare_folder(&selected_for_load, &path_for_load, live, &settings).await
+        });
         let shell = Rc::downgrade(self);
         let stack_for_load = stack.clone();
         let selected = selected.clone();
@@ -103,65 +125,24 @@ impl Shell {
         let search_for_load = search.clone();
         gtk::glib::spawn_future_local(async move {
             let Some(shell) = shell.upgrade() else { return };
-            match receiver.recv().await {
-                Ok(Ok(page)) => {
-                    let track_ids = page
-                        .tracks
-                        .iter()
-                        .map(|track| track.object_id.clone())
-                        .collect::<Vec<_>>();
-                    let database = Arc::clone(&selected.database);
-                    let source = selected.source_key;
-                    let task = selected.runtime.spawn(async move {
-                        database
-                            .track_keys_by_objects(source, &track_ids, &ReadCancellation::new())
-                            .await
-                    });
-                    let order = task.await.ok().and_then(Result::ok).unwrap_or_default();
-                    let folders = page
-                        .folders
-                        .into_iter()
-                        .map(|folder| FolderLink {
-                            object_id: folder.object_id,
-                            name: folder.name,
-                        })
-                        .collect();
-                    let (content, resume) = folder_page(
-                        &shell,
-                        &selected,
-                        path,
-                        search_for_load.clone(),
-                        folders,
-                        order.clone(),
-                        FolderTrackSource::LivePage(order.into()),
-                    );
-                    resume_for_load.replace(Some(resume));
-                    stack_for_load.add_named(&content, Some("content"));
-                    stack_for_load.set_visible_child_name("content");
-                }
-                Ok(Err(error)) => {
-                    tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
-                    load_cached_folder(
-                        &shell,
-                        &selected,
-                        path,
-                        &search_for_load,
-                        &stack_for_load,
-                        &resume_for_load,
-                    );
-                }
-                Err(error) => {
-                    tracing::debug!(%error, "live Folder ended; using exact cached Folder");
-                    load_cached_folder(
-                        &shell,
-                        &selected,
-                        path,
-                        &search_for_load,
-                        &stack_for_load,
-                        &resume_for_load,
-                    );
-                }
-            }
+            let Ok(Ok((folders, order, source, first_tracks))) = task.await else {
+                stack_for_load.add_named(&folder_error_view(&shell), Some("error"));
+                stack_for_load.set_visible_child_name("error");
+                return;
+            };
+            let (content, resume) = folder_page(
+                &shell,
+                &selected,
+                path,
+                search_for_load,
+                folders,
+                order,
+                source,
+                first_tracks,
+            );
+            resume_for_load.replace(Some(resume));
+            stack_for_load.add_named(&content, Some("content"));
+            stack_for_load.set_visible_child_name("content");
         });
         let resume = Rc::new(move || {
             if let Some(resume) = resume_slot.borrow().as_ref() {
@@ -172,87 +153,127 @@ impl Shell {
     }
 }
 
-fn load_cached_folder(
-    shell: &Rc<Shell>,
+async fn prepare_folder(
     selected: &crate::runtime::SelectedLibrary,
-    path: Vec<FolderPathItem>,
-    search: &gtk::SearchEntry,
-    stack: &gtk::Stack,
-    resume_slot: &Rc<RefCell<Option<FolderResume>>>,
-) {
-    let database = Arc::clone(&selected.database);
+    path: &[FolderPathItem],
+    live: Option<async_channel::Receiver<Result<sources::LiveFolderPage, String>>>,
+    settings: &crate::LibraryListSettings,
+) -> Result<
+    (
+        Vec<FolderLink>,
+        Vec<TrackKey>,
+        FolderTrackSource,
+        Vec<library::TrackRow>,
+    ),
+    String,
+> {
+    let database = &selected.database;
     let source = selected.source_key;
     let selected_folder = selected.music_folder_key;
     let folder_object_id = path.last().map(|item| item.id.clone());
-    let settings = shell
-        .settings
-        .current
-        .borrow()
-        .library_list(LibraryListKey::Tracks);
-    let task = selected.runtime.spawn(async move {
-        let cancellation = ReadCancellation::new();
-        let exact_folder = if let Some(object_id) = folder_object_id.as_deref() {
-            exact_cached_folder_scope(
-                true,
-                database
-                    .folder_key_by_object(source, object_id, &cancellation)
-                    .await?,
-                selected_folder,
-            )?
-        } else {
-            exact_cached_folder_scope(false, None, selected_folder)?
-        };
-        let folder_order = database
-            .folder_child_order(source, exact_folder, &cancellation)
-            .await?;
-        let folders = database
-            .folder_rows(source, &folder_order, &cancellation)
-            .await?;
-        let order = database
-            .track_route_order(
-                source,
-                exact_folder,
-                false,
-                "",
-                settings.sort_key.track_sort(),
-                settings.descending,
-                &cancellation,
-            )
-            .await?;
-        Ok::<_, library::LibraryError>((exact_folder, folders, order))
-    });
-    let shell = Rc::downgrade(shell);
-    let stack = stack.clone();
-    let selected = selected.clone();
-    let resume_slot = Rc::clone(resume_slot);
-    let search = search.clone();
-    gtk::glib::spawn_future_local(async move {
-        let Some(shell) = shell.upgrade() else { return };
-        let Some((exact_folder, folders, order)) = task.await.ok().and_then(Result::ok) else {
-            stack.add_named(&folder_error_view(&shell, path), Some("error"));
-            stack.set_visible_child_name("error");
-            return;
-        };
-        let folders = folders
-            .into_iter()
-            .map(|folder| FolderLink {
-                object_id: folder.object_id,
-                name: folder.name,
-            })
-            .collect();
-        let (content, resume) = folder_page(
-            &shell,
-            &selected,
-            path,
-            search,
-            folders,
-            order,
-            FolderTrackSource::CachedFolder(exact_folder),
-        );
-        resume_slot.replace(Some(resume));
-        stack.add_named(&content, Some("cached"));
-        stack.set_visible_child_name("cached");
-    });
+    let cancellation = ReadCancellation::new();
+    if let Some(live) = live {
+        match live.recv().await {
+            Ok(Ok(page)) => {
+                let track_ids = page.tracks;
+                let candidates = database
+                    .track_keys_by_objects(source, &track_ids, &cancellation)
+                    .await
+                    .map_err(|error| error.to_string())?;
+                if candidates.len() == track_ids.len() {
+                    let order = database
+                        .live_folder_track_order(
+                            source,
+                            &candidates,
+                            "",
+                            settings.sort_key.track_sort(),
+                            settings.descending,
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    let folders: Vec<FolderLink> = page
+                        .folders
+                        .into_iter()
+                        .map(|folder| FolderLink {
+                            object_id: folder.object_id,
+                            name: folder.name,
+                        })
+                        .collect();
+                    let first_tracks = database
+                        .track_rows(
+                            source,
+                            &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())?;
+                    return Ok((
+                        folders,
+                        order,
+                        FolderTrackSource::Live(candidates.into()),
+                        first_tracks,
+                    ));
+                }
+                tracing::debug!("live Folder is newer than its accepted cache; using fallback");
+            }
+            Ok(Err(error)) => {
+                tracing::debug!(%error, "live Folder unavailable; using exact cached Folder");
+            }
+            Err(error) => {
+                tracing::debug!(%error, "live Folder ended; using exact cached Folder");
+            }
+        }
+    }
+    let exact_folder = exact_cached_folder_scope(
+        folder_object_id.is_some(),
+        match folder_object_id.as_deref() {
+            Some(object_id) => database
+                .folder_key_by_object(source, object_id, &cancellation)
+                .await
+                .map_err(|error| error.to_string())?,
+            None => None,
+        },
+        selected_folder,
+    )
+    .map_err(|error| error.to_string())?;
+    let folder_order = database
+        .folder_child_order(source, exact_folder, &cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
+    let folders: Vec<FolderLink> = database
+        .folder_rows(source, &folder_order, &cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+        .into_iter()
+        .map(|folder| FolderLink {
+            object_id: folder.object_id,
+            name: folder.name,
+        })
+        .collect();
+    let page = database
+        .track_route_page(
+            source,
+            exact_folder,
+            false,
+            "",
+            settings.sort_key.track_sort(),
+            settings.descending,
+            &cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    let first_tracks = page
+        .first_rows
+        .into_iter()
+        .take(64_usize.saturating_sub(folders.len()))
+        .collect();
+    Ok((
+        folders,
+        page.order,
+        FolderTrackSource::CachedFolder(exact_folder),
+        first_tracks,
+    ))
 }
 
 fn exact_cached_folder_scope(
@@ -271,13 +292,11 @@ fn exact_cached_folder_scope(
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-enum FolderRouteKey {
-    Folder(usize),
-    Track(TrackKey),
-}
-
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "folder table rows are supplied through the bounded sparse-model window"
+)]
 enum FolderTableRow {
     Folder(FolderLink),
     Track(library::TrackRow),
@@ -291,69 +310,105 @@ fn folder_page(
     folders: Vec<FolderLink>,
     order: Vec<TrackKey>,
     source: FolderTrackSource,
+    first_tracks: Vec<library::TrackRow>,
 ) -> (gtk::Widget, FolderResume) {
-    const TREE_DEFAULT: i32 = 260;
     search.set_visible(true);
-    let saved_tree_width = shell
-        .settings
-        .current
-        .borrow()
-        .folder_view
-        .tree_width
-        .unwrap_or(TREE_DEFAULT);
+    let route_width = crate::shell::layout::route_content_width(shell);
+    let preferred_tree_width = Rc::new(Cell::new(
+        shell
+            .settings
+            .current
+            .borrow()
+            .folder_view
+            .tree_width
+            .unwrap_or_else(|| folder_tree_width(route_width)),
+    ));
+    let tree_visible = folder_tree_visible(route_width);
+    let tree_width = if tree_visible {
+        folder_tree_position(route_width, preferred_tree_width.get())
+    } else {
+        0
+    };
 
-    let folders = Arc::new(folders);
+    let folder_load = Arc::new(move |keys: Vec<FolderLink>, _: ReadCancellation| {
+        Box::pin(async move {
+            Ok(keys
+                .into_iter()
+                .map(FolderTableRow::Folder)
+                .collect::<Vec<_>>())
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+    });
+    let folder_sparse = super::sparse_model::SparseRouteModel::new(
+        folders,
+        48,
+        selected.runtime.clone(),
+        folder_load,
+    );
+    let folders = folder_sparse.order();
+    folder_sparse.seed(
+        folders
+            .iter()
+            .take(64)
+            .cloned()
+            .map(FolderTableRow::Folder)
+            .collect(),
+    );
     let row_database = Arc::clone(&selected.database);
     let source_key = selected.source_key;
-    let folder_rows = Arc::clone(&folders);
-    let load = Arc::new(
-        move |keys: Vec<FolderRouteKey>, cancellation: ReadCancellation| {
-            let database = Arc::clone(&row_database);
-            let folders = Arc::clone(&folder_rows);
-            Box::pin(async move {
-                let track_keys = keys
-                    .iter()
-                    .filter_map(|key| match key {
-                        FolderRouteKey::Track(key) => Some(*key),
-                        FolderRouteKey::Folder(_) => None,
-                    })
-                    .collect::<Vec<_>>();
-                let mut tracks = database
-                    .track_rows(source_key, &track_keys, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                    .into_iter()
-                    .map(|row| (row.track_key, row))
-                    .collect::<std::collections::BTreeMap<_, _>>();
-                keys.into_iter()
-                    .map(|key| match key {
-                        FolderRouteKey::Folder(index) => folders
-                            .get(index)
-                            .cloned()
-                            .map(FolderTableRow::Folder)
-                            .ok_or_else(|| "Folder row is no longer current".to_string()),
-                        FolderRouteKey::Track(key) => tracks
-                            .remove(&key)
-                            .map(FolderTableRow::Track)
-                            .ok_or_else(|| "Folder Track is no longer current".to_string()),
-                    })
-                    .collect::<Result<Vec<_>, _>>()
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+    let track_load = Arc::new(move |keys: Vec<TrackKey>, cancellation: ReadCancellation| {
+        let database = Arc::clone(&row_database);
+        Box::pin(async move {
+            let rows = database
+                .track_rows(source_key, &keys, &cancellation)
+                .await
+                .map_err(|error| error.to_string())?
+                .into_iter()
+                .map(FolderTableRow::Track)
+                .collect::<Vec<_>>();
+            Ok(rows)
+        }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+    });
+    let initial_empty = folders.is_empty() && order.is_empty();
+    let track_sparse =
+        super::sparse_model::SparseRouteModel::new(order, 48, selected.runtime.clone(), track_load);
+    track_sparse.seed_matching(
+        first_tracks
+            .into_iter()
+            .map(FolderTableRow::Track)
+            .collect(),
+        |row| match row {
+            FolderTableRow::Track(track) => track.track_key,
+            FolderTableRow::Folder(_) => unreachable!(),
         },
     );
-    let initial_empty = folders.is_empty() && order.is_empty();
-    let keys = (0..folders.len())
-        .map(FolderRouteKey::Folder)
-        .chain(order.iter().copied().map(FolderRouteKey::Track))
-        .collect();
-    let sparse =
-        super::sparse_model::SparseRouteModel::new(keys, 48, selected.runtime.clone(), load);
-    let (table, table_width_fit) =
-        folder_table(shell, Rc::clone(&sparse), selected.clone(), path.clone());
+    let sections = gtk::gio::ListStore::new::<super::sparse_model::SparseObjectModel>();
+    sections.append(&folder_sparse.list_model());
+    sections.append(&track_sparse.list_model());
+    let rows = gtk::FlattenListModel::new(Some(sections));
+    let table_initial_width = route_width
+        .saturating_sub(tree_width)
+        .saturating_sub(if tree_visible {
+            FOLDER_SPLIT_SEPARATOR_WIDTH
+        } else {
+            0
+        })
+        .saturating_sub(super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET)
+        .max(1);
+    let (table, table_width_fit) = folder_table(
+        shell,
+        rows,
+        Rc::clone(&folder_sparse),
+        Rc::clone(&track_sparse),
+        selected.clone(),
+        path.clone(),
+        table_initial_width,
+    );
 
     let tree = gtk::ListBox::new();
     tree.add_css_class("folder-tree");
     tree.set_selection_mode(gtk::SelectionMode::None);
+    tree.set_width_request(1);
+    tree.set_hexpand(true);
     tree.append(&folder_tree_navigation_row(
         shell,
         "Folders",
@@ -367,20 +422,26 @@ fn folder_page(
             shell,
             &item.name,
             path.iter().take(index + 1).cloned().collect(),
-            index + 1,
+            1,
             index + 1 == path.len(),
             false,
         ));
     }
     for folder in folders.iter() {
-        tree.append(&folder_tree_row(shell, &path, folder, path.len() + 1));
+        tree.append(&folder_tree_row(
+            shell,
+            &path,
+            folder,
+            path.len().saturating_add(1).min(3),
+        ));
     }
     let tree_scroller = gtk::ScrolledWindow::new();
     tree_scroller.add_css_class("folders-tree-pane");
     tree_scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
     tree_scroller.set_min_content_width(FOLDER_TREE_MIN_WIDTH);
-    tree_scroller.set_width_request(saved_tree_width);
+    tree_scroller.set_hexpand(false);
     tree_scroller.set_vexpand(true);
+    tree_scroller.set_visible(tree_visible);
     tree_scroller.set_child(Some(&tree));
 
     let table_scroller = gtk::ScrolledWindow::new();
@@ -400,12 +461,12 @@ fn folder_page(
     table_stack.set_hexpand(true);
     table_stack.set_vexpand(true);
     table_stack.add_named(&table_view, Some("content"));
-    table_stack.add_named(&folder_empty_view(shell, &path), Some("empty"));
+    table_stack.add_named(&folder_empty_view(shell), Some("empty"));
     table_stack.set_visible_child_name(if initial_empty { "empty" } else { "content" });
 
     let paned = gtk::Paned::new(gtk::Orientation::Horizontal);
     paned.add_css_class("folders-split");
-    paned.set_position(saved_tree_width);
+    paned.set_position(tree_width);
     paned.set_wide_handle(false);
     paned.set_hexpand(true);
     paned.set_vexpand(true);
@@ -415,40 +476,44 @@ fn folder_page(
     paned.set_end_child(Some(&table_stack));
     paned.set_resize_end_child(true);
     paned.set_shrink_end_child(true);
-    let persist_shell = Rc::clone(shell);
+    let applying_tree_width = Rc::new(Cell::new(false));
+    let tree_width_changed = Rc::new(Cell::new(false));
+    let position_tree_scroller = tree_scroller.clone();
+    let position_preferred = Rc::clone(&preferred_tree_width);
+    let position_applying = Rc::clone(&applying_tree_width);
+    let position_changed = Rc::clone(&tree_width_changed);
     paned.connect_position_notify(move |paned| {
-        if !paned.start_child().is_some_and(|child| child.is_visible()) {
+        if position_applying.get() || !position_tree_scroller.is_visible() {
             return;
         }
-        let width = paned.position().max(FOLDER_TREE_MIN_WIDTH);
-        persist_shell.update_app_settings("Folder tree width", move |settings| {
-            if settings.folder_view.tree_width == Some(width) {
-                return false;
-            }
-            settings.folder_view.tree_width = Some(width);
-            true
-        });
+        let position = paned.position();
+        if position >= FOLDER_TREE_MIN_WIDTH && position_preferred.replace(position) != position {
+            position_changed.set(true);
+        }
     });
-    let tree_visibility = tree_scroller.clone();
-    let tree_paned = paned.clone();
-    let visible_tree_width = Rc::new(Cell::new(saved_tree_width));
-    let allocation_tree_width = Rc::clone(&visible_tree_width);
+    connect_folder_tree_width_save(
+        shell,
+        &paned,
+        Rc::clone(&preferred_tree_width),
+        tree_width_changed,
+    );
+
+    let resize_tree_scroller = tree_scroller.clone();
+    let resize_paned = paned.clone();
+    let resize_preferred = Rc::clone(&preferred_tree_width);
+    let resize_applying = Rc::clone(&applying_tree_width);
+    let allocated_width = Cell::new(route_width);
     let paned_owner = crate::layout::width_allocation_owner(&paned, move |width| {
-        let visible = folder_tree_visible(width);
-        if !visible && tree_visibility.is_visible() {
-            allocation_tree_width.set(tree_paned.position().max(FOLDER_TREE_MIN_WIDTH));
+        if width <= 1 || allocated_width.replace(width) == width {
+            return;
         }
-        tree_visibility.set_visible(visible);
-        if visible {
-            let position = if tree_paned.position() <= 0 {
-                allocation_tree_width.get()
-            } else {
-                tree_paned.position()
-            };
-            tree_paned.set_position(folder_tree_position(width, position));
-        } else {
-            tree_paned.set_position(0);
-        }
+        apply_folder_width(
+            &resize_paned,
+            &resize_tree_scroller,
+            width,
+            resize_preferred.get(),
+            &resize_applying,
+        );
     });
 
     let generation = Rc::new(Cell::new(0_u64));
@@ -456,7 +521,8 @@ fn folder_page(
     let request = {
         let settings_shell = Rc::downgrade(shell);
         let selected = selected.clone();
-        let sparse = Rc::clone(&sparse);
+        let folder_sparse = Rc::clone(&folder_sparse);
+        let track_sparse = Rc::clone(&track_sparse);
         let source = source.clone();
         let request_folders = Arc::clone(&folders);
         let generation = Rc::clone(&generation);
@@ -486,9 +552,9 @@ fn folder_page(
             let folders = Arc::clone(&request_folders);
             let task = selected.runtime.spawn(async move {
                 let tracks = match source {
-                    FolderTrackSource::LivePage(candidates) => {
+                    FolderTrackSource::Live(candidates) => {
                         database
-                            .track_subset_order(
+                            .live_folder_track_order(
                                 source_key,
                                 &candidates,
                                 &query,
@@ -498,44 +564,45 @@ fn folder_page(
                             )
                             .await
                     }
-                    FolderTrackSource::CachedFolder(folder) => {
-                        database
-                            .track_route_order(
-                                source_key,
-                                folder,
-                                false,
-                                &query,
-                                settings.sort_key.track_sort(),
-                                settings.descending,
-                                &read_cancellation,
-                            )
-                            .await
-                    }
+                    FolderTrackSource::CachedFolder(folder) => database
+                        .track_route_page(
+                            source_key,
+                            folder,
+                            false,
+                            &query,
+                            settings.sort_key.track_sort(),
+                            settings.descending,
+                            &read_cancellation,
+                        )
+                        .await
+                        .map(|page| page.order),
                 }?;
                 let normalized = query.to_lowercase();
-                let folder_keys = folders
+                let folders = folders
                     .iter()
-                    .enumerate()
-                    .filter(|(_, folder)| {
+                    .filter(|folder| {
                         normalized.is_empty() || folder.name.to_lowercase().contains(&normalized)
                     })
-                    .map(|(index, _)| FolderRouteKey::Folder(index));
-                Ok::<_, library::LibraryError>(
-                    folder_keys
-                        .chain(tracks.into_iter().map(FolderRouteKey::Track))
-                        .collect::<Vec<_>>(),
-                )
+                    .cloned()
+                    .collect::<Vec<_>>();
+                Ok::<_, library::LibraryError>((folders, tracks))
             });
-            let sparse = Rc::clone(&sparse);
+            let folder_sparse = Rc::clone(&folder_sparse);
+            let track_sparse = Rc::clone(&track_sparse);
             let generation = Rc::clone(&generation);
             let cancellation = Rc::clone(&cancellation);
             let stack = request_stack.clone();
             gtk::glib::spawn_future_local(async move {
-                if let Some(keys) = task.await.ok().and_then(Result::ok)
+                if let Some((folders, tracks)) = task.await.ok().and_then(Result::ok)
                     && generation.get() == task_generation
                 {
-                    stack.set_visible_child_name(if keys.is_empty() { "empty" } else { "content" });
-                    sparse.replace_order(keys);
+                    stack.set_visible_child_name(if folders.is_empty() && tracks.is_empty() {
+                        "empty"
+                    } else {
+                        "content"
+                    });
+                    folder_sparse.replace_order(folders);
+                    track_sparse.replace_order(tracks);
                 }
                 if cancellation
                     .borrow()
@@ -555,13 +622,73 @@ fn folder_page(
     (paned_owner.upcast(), resume)
 }
 
+fn apply_folder_width(
+    paned: &gtk::Paned,
+    tree_scroller: &gtk::ScrolledWindow,
+    width: i32,
+    preferred_tree_width: i32,
+    applying: &Cell<bool>,
+) {
+    let tree_visible = folder_tree_visible(width);
+    let tree_width = if tree_visible {
+        folder_tree_position(width, preferred_tree_width)
+    } else {
+        0
+    };
+    applying.set(true);
+    tree_scroller.set_visible(tree_visible);
+    paned.set_position(tree_width);
+    applying.set(false);
+}
+
+fn connect_folder_tree_width_save(
+    shell: &Rc<Shell>,
+    paned: &gtk::Paned,
+    preferred_width: Rc<Cell<i32>>,
+    changed: Rc<Cell<bool>>,
+) {
+    let events = gtk::EventControllerLegacy::new();
+    events.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let shell = Rc::downgrade(shell);
+    events.connect_event(move |_, event| {
+        if matches!(
+            event.event_type(),
+            gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::KeyRelease
+        ) {
+            let shell = shell.clone();
+            let preferred_width = Rc::clone(&preferred_width);
+            let changed = Rc::clone(&changed);
+            gtk::glib::idle_add_local_once(move || {
+                if !changed.replace(false) {
+                    return;
+                }
+                if let Some(shell) = shell.upgrade() {
+                    let width = preferred_width.get();
+                    shell.update_app_settings("Folder tree width", move |settings| {
+                        if settings.folder_view.tree_width == Some(width) {
+                            return false;
+                        }
+                        settings.folder_view.tree_width = Some(width);
+                        true
+                    });
+                }
+            });
+        }
+        gtk::glib::Propagation::Proceed
+    });
+    paned.add_controller(events);
+}
+
 fn folder_table(
     shell: &Rc<Shell>,
-    sparse: Rc<super::sparse_model::SparseRouteModel<FolderRouteKey, FolderTableRow>>,
+    rows: gtk::FlattenListModel,
+    folders: Rc<super::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
+    tracks: Rc<super::sparse_model::SparseRouteModel<TrackKey, FolderTableRow>>,
     selected: crate::runtime::SelectedLibrary,
     path: Vec<FolderPathItem>,
+    initial_width: i32,
 ) -> (gtk::ColumnView, super::table_sizing::ColumnViewWidthFit) {
-    let selection = gtk::SingleSelection::new(Some(sparse.list_model()));
+    let selection = gtk::SingleSelection::new(Some(rows));
     selection.set_autoselect(false);
     selection.set_can_unselect(true);
     let table = gtk::ColumnView::new(Some(selection));
@@ -574,21 +701,21 @@ fn folder_table(
     table.set_halign(gtk::Align::Fill);
     table.set_vexpand(true);
     let folder_settings = shell.settings.current.borrow().folder_view.clone();
-    let name = folder_name_column_restored(shell);
+    let name = folder_name_column_restored(shell, path.clone());
     configure_folder_column(
         shell,
         &name,
         folder_settings.name_column_width.unwrap_or(220),
     );
     table.append_column(&name);
-    let detail = folder_detail_column(shell);
+    let detail = folder_detail_column(shell, path.clone());
     configure_folder_column(
         shell,
         &detail,
         folder_settings.detail_column_width.unwrap_or(200),
     );
     table.append_column(&detail);
-    let duration = folder_duration_column(shell);
+    let duration = folder_duration_column(shell, path.clone());
     configure_folder_column(
         shell,
         &duration,
@@ -602,35 +729,20 @@ fn folder_table(
             (detail.clone(), detail.fixed_width()),
             (duration.clone(), duration.fixed_width()),
         ],
-        super::table_sizing::route_column_view_initial_width(shell),
+        initial_width,
     );
-    let save_shell = Rc::clone(shell);
-    super::table_sizing::connect_column_width_save(&table, &width_fit, move |widths| {
-        let [name, detail, duration] = widths.as_slice() else {
-            return;
-        };
-        let (name, detail, duration) = (*name, *detail, *duration);
-        save_shell.update_app_settings("Folder table column widths", move |settings| {
-            let next = (Some(name), Some(detail), Some(duration));
-            let current = (
-                settings.folder_view.name_column_width,
-                settings.folder_view.detail_column_width,
-                settings.folder_view.duration_column_width,
-            );
-            if current == next {
-                return false;
-            }
-            settings.folder_view.name_column_width = next.0;
-            settings.folder_view.detail_column_width = next.1;
-            settings.folder_view.duration_column_width = next.2;
-            true
-        });
-    });
-
     let activate_shell = Rc::clone(shell);
-    let activate_sparse = Rc::clone(&sparse);
+    let activate_folders = Rc::clone(&folders);
+    let activate_tracks = Rc::clone(&tracks);
     table.connect_activate(move |_, position| {
-        let Some(row) = activate_sparse.ready(position) else {
+        let folder_count = activate_folders.len();
+        let position = position as usize;
+        let row = if position < folder_count {
+            activate_folders.ready(position as u32)
+        } else {
+            activate_tracks.ready((position - folder_count) as u32)
+        };
+        let Some(row) = row else {
             return;
         };
         match row.as_ref() {
@@ -643,22 +755,16 @@ fn folder_table(
                 activate_shell.navigate(Route::Folders { path: next });
             }
             FolderTableRow::Track(track) => {
-                let order = activate_sparse
-                    .order()
-                    .iter()
-                    .filter_map(|key| match key {
-                        FolderRouteKey::Track(key) => Some(*key),
-                        FolderRouteKey::Folder(_) => None,
-                    })
-                    .collect::<Vec<_>>();
-                let Some(anchor) = order.iter().position(|key| *key == track.track_key) else {
+                let anchor = position.saturating_sub(folder_count);
+                let order = activate_tracks.order();
+                if order.get(anchor) != Some(&track.track_key) {
                     return;
-                };
+                }
                 let media = playback::PlaybackMedia::from(track.clone());
                 if let Some(request) = playback::LoadedPlayRequest::context(
                     selected.source_key,
                     selected.source_session_epoch,
-                    order.into(),
+                    order,
                     media,
                     anchor,
                     QueuePlacement::Now,
@@ -673,7 +779,10 @@ fn folder_table(
     (table, width_fit)
 }
 
-fn folder_name_column_restored(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
+fn folder_name_column_restored(
+    shell: &Rc<Shell>,
+    path: Vec<FolderPathItem>,
+) -> gtk::ColumnViewColumn {
     #[derive(Clone)]
     struct Cell {
         icon: gtk::Image,
@@ -691,12 +800,12 @@ fn folder_name_column_restored(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         row.add_css_class("folder-table-row");
         let icon = gtk::Image::from_icon_name("rufin-folders-symbolic");
-        icon.set_pixel_size(28);
         row.append(&icon);
         let cover = crate::shell::cover::ArtworkTile::new(28);
         cover.widget().set_visible(false);
         row.append(&cover.widget());
         let label = gtk::Label::new(None);
+        label.add_css_class("folder-row-label");
         label.set_xalign(0.0);
         label.set_hexpand(true);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
@@ -717,12 +826,13 @@ fn folder_name_column_restored(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
                 );
             }),
         );
+        install_folder_cell_activation(&row, item, &setup_shell, path.clone());
         item.set_child(Some(&row));
         setup_cells.insert(item, Cell { icon, cover, label });
     });
     let bind_shell = Rc::clone(shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -772,8 +882,8 @@ fn folder_name_column_restored(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
     gtk::ColumnViewColumn::new(Some(&tr("Name")), Some(factory))
 }
 
-fn folder_detail_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
-    folder_text_column(shell, "Artist / Album", 18, |row| match row {
+fn folder_detail_column(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
+    folder_text_column(shell, path, msgid("Artist / Album"), 18, |row| match row {
         FolderTableRow::Folder(_) => tr("Folder"),
         FolderTableRow::Track(track) => {
             format!("{} / {}", track.display_artist, track.display_album)
@@ -781,8 +891,8 @@ fn folder_detail_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
     })
 }
 
-fn folder_duration_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
-    folder_text_column(shell, "Duration", 8, |row| match row {
+fn folder_duration_column(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::ColumnViewColumn {
+    folder_text_column(shell, path, "Duration", 8, |row| match row {
         FolderTableRow::Folder(_) => String::new(),
         FolderTableRow::Track(track) => {
             crate::format_duration((track.duration_millis.max(0) / 1_000) as u32)
@@ -792,6 +902,7 @@ fn folder_duration_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
 
 fn folder_text_column(
     shell: &Rc<Shell>,
+    path: Vec<FolderPathItem>,
     title: &str,
     max_width_chars: i32,
     value: impl Fn(FolderTableRow) -> String + 'static,
@@ -825,9 +936,10 @@ fn folder_text_column(
                 );
             }),
         );
+        install_folder_cell_activation(&label, item, &setup_shell, path.clone());
         item.set_child(Some(&label));
     });
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -855,9 +967,39 @@ fn folder_text_column(
     gtk::ColumnViewColumn::new(Some(&tr(title)), Some(factory))
 }
 
+fn install_folder_cell_activation(
+    target: &impl IsA<gtk::Widget>,
+    item: &gtk::ListItem,
+    shell: &Rc<Shell>,
+    path: Vec<FolderPathItem>,
+) {
+    let item = item.downgrade();
+    let shell = Rc::clone(shell);
+    let click = gtk::GestureClick::new();
+    click.set_button(gtk::gdk::BUTTON_PRIMARY);
+    click.connect_released(move |_, presses, _, _| {
+        if presses != 1 {
+            return;
+        }
+        let Some(item) = item.upgrade() else { return };
+        let Some(FolderTableRow::Folder(folder)) =
+            super::library_fields::item_at_from_item::<FolderTableRow>(&item)
+        else {
+            return;
+        };
+        let mut next = path.clone();
+        next.push(FolderPathItem {
+            id: folder.object_id,
+            name: folder.name,
+        });
+        shell.navigate(Route::Folders { path: next });
+    });
+    target.add_controller(click);
+}
+
 fn configure_folder_column(_: &Rc<Shell>, column: &gtk::ColumnViewColumn, width: i32) {
     column.set_fixed_width(width);
-    column.set_resizable(true);
+    column.set_resizable(false);
 }
 
 fn folder_tree_row(
@@ -866,25 +1008,12 @@ fn folder_tree_row(
     folder: &FolderLink,
     depth: usize,
 ) -> gtk::Widget {
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.add_css_class("folder-tree-row");
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.set_margin_start(i32::try_from(depth).unwrap_or(i32::MAX).saturating_mul(12));
-    row.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
-    let label = gtk::Label::new(Some(&folder.name));
-    label.set_xalign(0.0);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    row.append(&label);
-    button.set_child(Some(&row));
     let mut next = path.to_vec();
     next.push(FolderPathItem {
         id: folder.object_id.clone(),
         name: folder.name.clone(),
     });
-    let shell = Rc::clone(shell);
-    button.connect_clicked(move |_| shell.navigate(Route::Folders { path: next.clone() }));
-    button.upcast()
+    folder_tree_navigation_row(shell, &folder.name, next, depth, false, false)
 }
 
 fn folder_tree_navigation_row(
@@ -898,11 +1027,14 @@ fn folder_tree_navigation_row(
     let button = gtk::Button::new();
     button.add_css_class("flat");
     button.add_css_class("folder-tree-row");
+    button.set_hexpand(true);
+    button.set_halign(gtk::Align::Fill);
     if current {
         button.add_css_class("active");
     }
     button.set_sensitive(!current);
     let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    row.set_hexpand(true);
     row.set_margin_start(i32::try_from(depth).unwrap_or(i32::MAX).saturating_mul(12));
     row.append(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
     let text = if localized {
@@ -912,6 +1044,7 @@ fn folder_tree_navigation_row(
     };
     let label = gtk::Label::new(Some(&text));
     label.set_xalign(0.0);
+    label.set_hexpand(true);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     row.append(&label);
     button.set_child(Some(&row));
@@ -924,6 +1057,7 @@ fn folder_breadcrumbs(shell: &Rc<Shell>, path: &[FolderPathItem]) -> gtk::Box {
     let breadcrumbs = gtk::Box::new(gtk::Orientation::Horizontal, 6);
     breadcrumbs.add_css_class("folder-breadcrumbs");
     breadcrumbs.set_hexpand(true);
+    breadcrumbs.set_halign(gtk::Align::Fill);
     breadcrumbs.set_width_request(1);
     breadcrumbs.append(&breadcrumb_button(
         shell,
@@ -956,7 +1090,8 @@ fn breadcrumb_button(
     button.add_css_class("flat");
     button.add_css_class("folder-breadcrumb");
     button.set_width_request(1);
-    button.set_sensitive(!current);
+    button.set_can_target(!current);
+    button.set_focusable(!current);
     let text = if localized {
         tr(label)
     } else {
@@ -965,7 +1100,9 @@ fn breadcrumb_button(
     let label_widget = gtk::Label::new(Some(&text));
     label_widget.set_xalign(0.0);
     label_widget.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    label_widget.set_single_line_mode(true);
     button.set_child(Some(&label_widget));
+    button.set_tooltip_text(Some(&text));
     let shell = Rc::clone(shell);
     button.connect_clicked(move |_| shell.navigate(Route::Folders { path: path.clone() }));
     button
@@ -978,33 +1115,35 @@ fn folder_context_id(path: &[FolderPathItem]) -> String {
     )
 }
 
-fn folder_error_view(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::Widget {
-    let view = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    view.append(&shell.route_empty_view(msgid("Couldn't load this folder")));
-    let retry = gtk::Button::with_label(&tr(msgid("Refresh")));
-    retry.set_halign(gtk::Align::Center);
-    let shell = Rc::clone(shell);
-    retry.connect_clicked(move |_| shell.navigate(Route::Folders { path: path.clone() }));
-    view.append(&retry);
-    view.upcast()
+fn folder_error_view(shell: &Rc<Shell>) -> gtk::Widget {
+    folder_status_view(shell, msgid("Couldn't load this folder"), false)
 }
 
-fn folder_empty_view(shell: &Rc<Shell>, path: &[FolderPathItem]) -> gtk::Widget {
-    let view = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    view.add_css_class("empty-state");
-    view.set_vexpand(true);
-    view.set_hexpand(true);
-    view.set_valign(gtk::Align::Center);
-    view.set_halign(gtk::Align::Center);
-    let empty = gtk::Label::new(Some(&tr(msgid("Nothing in this folder"))));
-    empty.add_css_class("muted");
-    view.append(&empty);
+fn folder_empty_view(shell: &Rc<Shell>) -> gtk::Widget {
+    folder_status_view(shell, msgid("Nothing in this folder"), true)
+}
+
+fn folder_status_view(shell: &Rc<Shell>, message: &'static str, empty: bool) -> gtk::Widget {
+    let view = gtk::Box::new(gtk::Orientation::Vertical, if empty { 12 } else { 8 });
+    if empty {
+        view.add_css_class("empty-state");
+        view.set_vexpand(true);
+        view.set_hexpand(true);
+        view.set_valign(gtk::Align::Center);
+        view.set_halign(gtk::Align::Center);
+        let label = gtk::Label::new(Some(&tr(message)));
+        label.add_css_class("muted");
+        view.append(&label);
+    } else {
+        view.append(&shell.route_empty_view(message));
+    }
     let refresh = gtk::Button::with_label(&tr(msgid("Refresh")));
-    refresh.add_css_class("pill");
+    if empty {
+        refresh.add_css_class("pill");
+    }
     refresh.set_halign(gtk::Align::Center);
     let shell = Rc::clone(shell);
-    let path = path.to_vec();
-    refresh.connect_clicked(move |_| shell.navigate(Route::Folders { path: path.clone() }));
+    refresh.connect_clicked(move |_| shell.replace_current_route_when_ready());
     view.append(&refresh);
     view.upcast()
 }
@@ -1034,6 +1173,7 @@ mod tests {
     fn folder_tree_position_keeps_saved_width_inside_real_bounds() {
         assert_eq!(folder_tree_position(900, 10), FOLDER_TREE_MIN_WIDTH);
         assert_eq!(folder_tree_position(900, 400), 400);
-        assert_eq!(folder_tree_position(600, 900), 360);
+        assert_eq!(folder_tree_position(550, 900), 293);
+        assert_eq!(folder_tree_position(1_500, 900), FOLDER_TREE_MAX_WIDTH);
     }
 }

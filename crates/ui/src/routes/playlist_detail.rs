@@ -8,7 +8,7 @@ use gtk::glib;
 use library::{
     Database, PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow,
 };
-use localization::{msgid, track_count_text};
+use localization::{msgid, tr, track_count_text};
 
 use crate::format_duration_units;
 use crate::localization::localized_label;
@@ -28,6 +28,7 @@ use super::detail_showcase::{
     detail_delete_button, detail_playback_controls, detail_radio_button, detail_title_label,
     playlist_detail_showcase,
 };
+use super::library_fields::playlist_artwork;
 use super::route::Route;
 use super::route_layout::{PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_inner_width};
 
@@ -39,13 +40,15 @@ const PLAYLIST_DETAIL_WIDE_COVER_SIZE: i32 = 208;
 #[derive(Clone)]
 pub(crate) struct PlaylistDetailData {
     pub(crate) summary: PlaylistRow,
-    pub(crate) entries: Vec<library::PlaylistEntryKey>,
+    pub(crate) order: library::PlaylistEntryOrder,
+    pub(crate) first_rows: Vec<library::PlaylistEntryRow>,
 }
 
 #[derive(Clone)]
 pub(crate) struct SmartPlaylistDetailData {
     pub(crate) summary: SmartPlaylistRow,
     pub(crate) tracks: Vec<library::TrackKey>,
+    pub(crate) first_rows: Vec<library::TrackRow>,
 }
 
 #[derive(Clone)]
@@ -61,8 +64,14 @@ enum PlaylistDetailOwner {
 }
 
 enum PlaylistDetailMembership {
-    Saved(Vec<library::PlaylistEntryKey>),
-    Smart(Vec<library::TrackKey>),
+    Saved {
+        order: library::PlaylistEntryOrder,
+        first_rows: Vec<library::PlaylistEntryRow>,
+    },
+    Smart {
+        tracks: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
+    },
 }
 
 impl PlaylistDetailOwner {
@@ -103,21 +112,7 @@ impl PlaylistDetailOwner {
 
     fn artwork(&self, prefer_server: bool) -> Vec<ArtworkBinding> {
         match self {
-            Self::Saved { summary, .. } => {
-                let server = summary.artwork_binding.iter();
-                let representative = summary.representative_artwork.iter();
-                if prefer_server {
-                    server
-                        .chain(representative)
-                        .map(|binding| ArtworkBinding::opaque(binding))
-                        .collect()
-                } else {
-                    representative
-                        .chain(server)
-                        .map(|binding| ArtworkBinding::opaque(binding))
-                        .collect()
-                }
-            }
+            Self::Saved { summary, .. } => playlist_artwork(summary, prefer_server),
             Self::Smart { summary, .. } => summary
                 .artwork_bindings
                 .iter()
@@ -193,7 +188,10 @@ impl Shell {
                 key,
                 summary: detail.summary,
             },
-            PlaylistDetailMembership::Smart(detail.tracks),
+            PlaylistDetailMembership::Smart {
+                tracks: detail.tracks,
+                first_rows: detail.first_rows,
+            },
             selected,
         )
     }
@@ -214,7 +212,10 @@ impl Shell {
                 key,
                 summary: detail.summary,
             },
-            PlaylistDetailMembership::Saved(detail.entries),
+            PlaylistDetailMembership::Saved {
+                order: detail.order,
+                first_rows: detail.first_rows,
+            },
             selected,
         )
     }
@@ -232,23 +233,26 @@ impl Shell {
             PlaylistDetailOwner::Smart { .. } => "smart-playlist-detail",
         };
         let (tracks_widget, item_navigation, apply_membership_settings) = match membership {
-            PlaylistDetailMembership::Saved(entries) => {
+            PlaylistDetailMembership::Saved { order, first_rows } => {
                 let playlist = owner
                     .saved_key()
                     .expect("saved Playlist membership has one Playlist key");
-                let entries = self.playlist_entries_view(&selected, playlist, entries);
+                let entries =
+                    Rc::new(self.playlist_entries_view(&selected, playlist, order, first_rows));
                 let navigation = entries.item_navigation();
                 let widget = entries.widget();
                 let database = Arc::clone(&selected.database);
                 let runtime = selected.runtime.clone();
                 let source = selected.source_key;
                 let folder = selected.music_folder_key;
-                let entries_apply = entries.clone();
                 let request_order: Rc<
-                    dyn Fn(u64, super::playlist_entry_model::PlaylistEntryProjectionRequest),
-                > = Rc::new(move |generation, request| {
+                    dyn Fn(
+                        std::rc::Weak<super::playlist_entries::PlaylistEntriesView>,
+                        u64,
+                        super::playlist_entry_model::PlaylistEntryProjectionRequest,
+                    ),
+                > = Rc::new(move |entries, generation, request| {
                     let database = Arc::clone(&database);
-                    let entries = entries_apply.clone();
                     let cancellation = ReadCancellation::new();
                     let task = runtime.spawn(async move {
                         database
@@ -264,32 +268,36 @@ impl Shell {
                             .await
                     });
                     glib::spawn_future_local(async move {
-                        if let Ok(Ok(order)) = task.await {
+                        if let Ok(Ok(order)) = task.await
+                            && let Some(entries) = entries.upgrade()
+                        {
                             entries.replace_order(generation, order);
                         }
                     });
                 });
                 let search_request = Rc::clone(&request_order);
+                let search_entries = Rc::downgrade(&entries);
                 entries.connect_search_request(move |generation, request| {
-                    search_request(generation, request);
+                    search_request(search_entries.clone(), generation, request);
                 });
-                let apply_entries = entries.clone();
+                let apply_entries = Rc::clone(&entries);
                 let apply_request = Rc::clone(&request_order);
                 let apply = Rc::new(move |settings: &LibraryListSettings| {
                     apply_entries
                         .apply_library_list_settings(LibraryListKey::PlaylistTracks, settings);
                     let (generation, request) = apply_entries.begin_order_request();
-                    apply_request(generation, request);
+                    apply_request(Rc::downgrade(&apply_entries), generation, request);
                 }) as Rc<dyn Fn(&LibraryListSettings)>;
                 (widget, navigation, apply)
             }
-            PlaylistDetailMembership::Smart(tracks) => {
+            PlaylistDetailMembership::Smart { tracks, first_rows } => {
                 let smart = owner
                     .smart_key()
                     .expect("Smart Playlist membership has one Smart Playlist key");
                 let (widget, tracks, toolbar) = self.scrolling_track_projection(
                     &selected,
                     tracks,
+                    first_rows,
                     key,
                     context,
                     owner.context_id(),
@@ -324,6 +332,7 @@ impl Shell {
                         {
                             tracks.replace_prepared(super::track_model::PreparedTrackProjection {
                                 order,
+                                first_rows: Vec::new(),
                                 request,
                             });
                         }
@@ -421,7 +430,7 @@ impl Shell {
                 delete.connect_clicked(move |_| {
                     let name = delete_owner.borrow().name().to_string();
                     let dialog = adw::AlertDialog::builder()
-                        .heading(localization::tr("Delete Playlist"))
+                        .heading(tr("Delete Playlist"))
                         .body(format!("Delete \"{name}\"?"))
                         .build();
                     dialog.add_response("cancel", &localization::tr("Cancel"));
@@ -497,9 +506,12 @@ impl Shell {
         wrapper.append(&tracks_widget);
 
         let resume = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let apply_membership_settings = Rc::clone(&apply_membership_settings);
             Rc::new(move || {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 let settings = shell.settings.current.borrow().library_list(key);
                 apply_membership_settings(&settings);
             })
@@ -640,7 +652,7 @@ pub(crate) async fn load_playlist_detail(
     let Some(summary) = summary else {
         return Ok(None);
     };
-    let entries = database
+    let order = database
         .playlist_entry_order(
             source,
             key,
@@ -652,7 +664,20 @@ pub(crate) async fn load_playlist_detail(
         )
         .await
         .map_err(|error| error.to_string())?;
-    Ok(Some(PlaylistDetailData { summary, entries }))
+    let first_rows = database
+        .playlist_entry_rows(
+            source,
+            &order.entries[..order.entries.len().min(64)],
+            folder,
+            cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(PlaylistDetailData {
+        summary,
+        order,
+        first_rows,
+    }))
 }
 
 pub(crate) async fn load_smart_playlist_detail(
@@ -677,7 +702,15 @@ pub(crate) async fn load_smart_playlist_detail(
         .smart_playlist_track_order(source, key, folder, now, cancellation)
         .await
         .map_err(|error| error.to_string())?;
-    Ok(Some(SmartPlaylistDetailData { summary, tracks }))
+    let first_rows = database
+        .track_rows(source, &tracks[..tracks.len().min(64)], cancellation)
+        .await
+        .map_err(|error| error.to_string())?;
+    Ok(Some(SmartPlaylistDetailData {
+        summary,
+        tracks,
+        first_rows,
+    }))
 }
 
 pub(crate) fn playlist_cover_size(width: i32) -> i32 {
@@ -728,5 +761,27 @@ mod tests {
             previous_media = media;
             previous_collection = collection;
         }
+    }
+
+    #[test]
+    fn provider_playlist_cover_is_not_nested_inside_representative_mosaic() {
+        let owner = PlaylistDetailOwner::Saved {
+            key: PlaylistKey::from_raw(1),
+            summary: PlaylistRow {
+                playlist_key: PlaylistKey::from_raw(1),
+                source_key: library::SourceKey::from_raw(1),
+                object_id: "playlist".to_string(),
+                name: "Playlist".to_string(),
+                artwork_binding: Some(vec![1]),
+                track_count: 4,
+                duration_millis: 1,
+                downloaded_count: 0,
+                representative_artwork: vec![vec![2], vec![3], vec![4], vec![5]],
+                genres: Vec::new(),
+            },
+        };
+
+        assert_eq!(owner.artwork(true).len(), 1);
+        assert_eq!(owner.artwork(false).len(), 4);
     }
 }

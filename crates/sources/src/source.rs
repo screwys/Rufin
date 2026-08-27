@@ -2,17 +2,148 @@
 //! Provider acquisition remains here; accepted catalog identity and queries remain in Library.
 
 use std::path::PathBuf;
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
+use async_channel::{Receiver, Sender};
 use library::{Database, Freshness, Scan, ScanOutcome};
 use playback::{ResolvedStream, SourceReportFact, StreamRequest};
 use serde::{Deserialize, Serialize};
 
+use crate::policy::raw_item_id;
 use crate::{
     ImageBytes, SourceConfiguration, SourceError, SourceId, SourceResult, SourceSettingsInput,
     SourceSetupInput,
 };
+
+const PROVIDER_PLAYLIST_PAGE: usize = 256;
+
+pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
+
+pub struct SelectedFeed {
+    source: Arc<Source>,
+    database: Arc<Database>,
+    source_key: library::SourceKey,
+    pending: Mutex<Option<SelectedFeedChange>>,
+    wake: Sender<()>,
+    cancelled: Arc<AtomicBool>,
+    receiver: Receiver<()>,
+}
+
+enum SelectedFeedChange {
+    Local(LocalLiveChange),
+    Jellyfin(JellyfinLiveChange),
+}
+
+impl SelectedFeed {
+    fn submit(&self, incoming: SelectedFeedChange) -> bool {
+        if self.cancelled.load(Ordering::Acquire) {
+            return false;
+        }
+        let mut pending = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        *pending = Some(match pending.take() {
+            Some(current) => current.merge(incoming),
+            None => incoming,
+        });
+        drop(pending);
+        let _ = self.wake.try_send(());
+        true
+    }
+}
+
+impl SelectedFeedChange {
+    fn merge(self, incoming: Self) -> Self {
+        match (self, incoming) {
+            (Self::Local(current), Self::Local(incoming)) => Self::Local(current.merge(incoming)),
+            (Self::Jellyfin(current), Self::Jellyfin(incoming)) => {
+                Self::Jellyfin(current.merge(incoming))
+            }
+            (_, incoming) => incoming,
+        }
+    }
+}
+
+impl SelectedFeed {
+    pub fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+        let _ = self.wake.try_send(());
+    }
+
+    pub fn cancellation(&self) -> Arc<AtomicBool> {
+        Arc::clone(&self.cancelled)
+    }
+
+    pub async fn wait_for_change(&self) -> bool {
+        loop {
+            if self.receiver.recv().await.is_err() {
+                return false;
+            }
+            if self.cancelled.load(Ordering::Acquire) {
+                return false;
+            }
+            if self
+                .pending
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .is_some()
+            {
+                return true;
+            }
+        }
+    }
+
+    pub async fn apply_pending(&self) -> SourceResult<Option<ScanOutcome>> {
+        if self.cancelled.load(Ordering::Acquire) {
+            return Err(SourceError::Cancelled);
+        }
+        let change = self
+            .pending
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take()
+            .ok_or(SourceError::InvalidRequest(
+                "Selected feed has no pending change",
+            ))?;
+        match (&self.source.implementation, change) {
+            (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan))
+            | (
+                Implementation::Jellyfin(_),
+                SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost),
+            ) => Ok(None),
+            (
+                Implementation::Local(local),
+                SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }),
+            ) => local
+                .publish_paths(
+                    &self.database,
+                    self.source_key,
+                    self.source.source_id.as_str(),
+                    &paths,
+                    rename.as_ref(),
+                )
+                .await
+                .map(Some),
+            (
+                Implementation::Jellyfin(source),
+                SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items { upserts, removals }),
+            ) => source
+                .apply_live_items(
+                    &self.database,
+                    self.source.source_id.as_str(),
+                    upserts,
+                    removals,
+                )
+                .await
+                .map(Some),
+            _ => Err(SourceError::InvalidRequest(
+                "Selected feed change belongs to another source",
+            )),
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceReadStage {
@@ -131,7 +262,7 @@ pub struct LiveFolder {
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LiveFolderPage {
     pub folders: Vec<LiveFolder>,
-    pub tracks: Vec<LiveSearchTrack>,
+    pub tracks: Vec<String>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -161,7 +292,7 @@ pub enum SourceHomeSection {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub enum JellyfinLiveChange {
+pub(crate) enum JellyfinLiveChange {
     Items {
         upserts: Vec<String>,
         removals: Vec<String>,
@@ -169,55 +300,84 @@ pub enum JellyfinLiveChange {
     BoundaryLost,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LocalLiveChange {
-    Paths(Vec<PathBuf>),
-    Rescan,
-}
-
-impl LocalLiveChange {
-    pub(crate) fn merge(&mut self, incoming: Self) -> Result<(), Self> {
-        match (&mut *self, incoming) {
-            (Self::Rescan, _) => Ok(()),
-            (current, Self::Rescan) => {
-                *current = Self::Rescan;
-                Ok(())
-            }
-            (Self::Paths(current), Self::Paths(mut incoming)) => {
-                current.append(&mut incoming);
-                current.sort();
-                current.dedup();
-                Ok(())
+impl JellyfinLiveChange {
+    fn merge(self, incoming: Self) -> Self {
+        match (self, incoming) {
+            (Self::BoundaryLost, _) | (_, Self::BoundaryLost) => Self::BoundaryLost,
+            (
+                Self::Items {
+                    upserts: mut current_upserts,
+                    removals: mut current_removals,
+                },
+                Self::Items { upserts, removals },
+            ) => {
+                current_upserts.extend(upserts);
+                current_upserts.sort();
+                current_upserts.dedup();
+                current_removals.extend(removals);
+                current_removals.sort();
+                current_removals.dedup();
+                if current_upserts.len().saturating_add(current_removals.len()) > LIVE_CHANGE_LIMIT
+                    || current_upserts
+                        .iter()
+                        .any(|id| current_removals.binary_search(id).is_ok())
+                {
+                    Self::BoundaryLost
+                } else {
+                    Self::Items {
+                        upserts: current_upserts,
+                        removals: current_removals,
+                    }
+                }
             }
         }
     }
 }
 
-pub enum RemotePlaylistEdit {
-    Create {
-        name: String,
-        track_object_ids: Vec<String>,
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum LocalLiveChange {
+    Paths {
+        paths: Vec<PathBuf>,
+        rename: Option<(PathBuf, PathBuf)>,
     },
-    Rename {
-        playlist_object_id: String,
-        name: String,
-    },
-    Delete {
-        playlist_object_id: String,
-    },
-    Add {
-        playlist_object_id: String,
-        track_object_ids: Vec<String>,
-    },
-    Remove {
-        playlist_object_id: String,
-        occurrence_ids: Vec<String>,
-    },
-    Move {
-        playlist_object_id: String,
-        occurrence_id: String,
-        position: usize,
-    },
+    Rescan,
+}
+
+impl LocalLiveChange {
+    pub(crate) fn merge(self, incoming: Self) -> Self {
+        match (self, incoming) {
+            (Self::Rescan, _) | (_, Self::Rescan) => Self::Rescan,
+            (
+                Self::Paths {
+                    paths: mut current,
+                    rename: current_rename,
+                },
+                Self::Paths {
+                    paths: incoming,
+                    rename: incoming_rename,
+                },
+            ) => {
+                let rename = match (current_rename, incoming_rename) {
+                    (Some(current), Some(incoming)) if current != incoming => {
+                        return Self::Rescan;
+                    }
+                    (Some(rename), _) | (_, Some(rename)) => Some(rename),
+                    (None, None) => None,
+                };
+                current.extend(incoming);
+                current.sort();
+                current.dedup();
+                if current.len() > LIVE_CHANGE_LIMIT {
+                    Self::Rescan
+                } else {
+                    Self::Paths {
+                        paths: current,
+                        rename,
+                    }
+                }
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -313,28 +473,6 @@ enum Implementation {
     OpenSubsonic(crate::subsonic::SubsonicSource),
 }
 
-pub(crate) trait RemotePlaylistSource {
-    async fn create_playlist(&self, name: &str, track_ids: &[String]) -> SourceResult<String>;
-    async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()>;
-    async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()>;
-    async fn add_playlist_tracks(
-        &self,
-        playlist_id: &str,
-        track_ids: &[String],
-    ) -> SourceResult<()>;
-    async fn remove_playlist_entries(
-        &self,
-        playlist_id: &str,
-        occurrence_ids: &[String],
-    ) -> SourceResult<()>;
-    async fn move_playlist_entry(
-        &self,
-        playlist_id: &str,
-        occurrence_id: &str,
-        new_index: usize,
-    ) -> SourceResult<()>;
-}
-
 pub struct Source {
     source_id: SourceId,
     implementation: Implementation,
@@ -416,9 +554,30 @@ impl Source {
         display_name: &str,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<ScanOutcome> {
-        self.refresh(database, display_name, progress, cancelled, true)
-            .await
+    ) -> SourceResult<Option<ScanOutcome>> {
+        let Some(freshness) = self.freshness().await? else {
+            return Ok(None);
+        };
+        let cancellation = library::ReadCancellation::new();
+        if cancelled.load(Ordering::Relaxed) {
+            cancellation.cancel();
+        }
+        if let Some(publication) =
+            Scan::accept_freshness(database, self.source_id.as_str(), &freshness, &cancellation)
+                .await?
+        {
+            return Ok(Some(ScanOutcome::Identical(publication)));
+        }
+        self.refresh(
+            database,
+            display_name,
+            progress,
+            cancelled,
+            Some(freshness),
+            false,
+        )
+        .await
+        .map(Some)
     }
 
     pub async fn manual_refresh(
@@ -428,8 +587,17 @@ impl Source {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<ScanOutcome> {
-        self.refresh(database, display_name, progress, cancelled, false)
-            .await
+        let freshness = self.freshness().await?;
+        let reuse_local = matches!(&self.implementation, Implementation::Local(_));
+        self.refresh(
+            database,
+            display_name,
+            progress,
+            cancelled,
+            freshness,
+            reuse_local,
+        )
+        .await
     }
 
     async fn refresh(
@@ -438,21 +606,9 @@ impl Source {
         display_name: &str,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
-        accept_freshness: bool,
+        freshness: Option<Freshness>,
+        reuse_local: bool,
     ) -> SourceResult<ScanOutcome> {
-        let freshness = self.freshness().await?;
-        if accept_freshness && let Some(freshness) = freshness.as_ref() {
-            let cancellation = library::ReadCancellation::new();
-            if cancelled.load(Ordering::Relaxed) {
-                cancellation.cancel();
-            }
-            if let Some(publication) =
-                Scan::accept_freshness(database, self.source_id.as_str(), freshness, &cancellation)
-                    .await?
-            {
-                return Ok(ScanOutcome::Identical(publication));
-            }
-        }
         let mut scan = Scan::begin(
             database,
             self.source_id.as_str(),
@@ -465,13 +621,7 @@ impl Source {
         match &self.implementation {
             Implementation::Local(source) => {
                 source
-                    .stage_catalog(
-                        database,
-                        &mut scan,
-                        progress,
-                        &cancelled_fn,
-                        accept_freshness,
-                    )
+                    .stage_catalog(database, &mut scan, progress, &cancelled_fn, reuse_local)
                     .await?
             }
             Implementation::Jellyfin(source) => {
@@ -489,36 +639,23 @@ impl Source {
         Ok(outcome)
     }
 
-    pub async fn rescan_local(
+    pub async fn catch_up_local(
         &self,
         database: &Database,
-        display_name: &str,
+        source: library::SourceKey,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<ScanOutcome> {
-        let Implementation::Local(source) = &self.implementation else {
+        let Implementation::Local(local) = &self.implementation else {
             return Err(SourceError::InvalidRequest(
-                "Local rescan belongs to another source",
+                "Local catch-up belongs to another source",
             ));
         };
-        let mut scan = Scan::begin(
-            database,
-            self.source_id.as_str(),
-            display_name,
-            &display_name.to_lowercase(),
-            None,
-        )
-        .await?;
-        source
-            .stage_catalog(
-                database,
-                &mut scan,
-                progress,
-                &|| cancelled.load(Ordering::Relaxed),
-                true,
-            )
-            .await?;
-        Ok(scan.finish().await?)
+        local
+            .catch_up(database, source, self.source_id.as_str(), progress, &|| {
+                cancelled.load(Ordering::Relaxed)
+            })
+            .await
     }
 
     async fn freshness(&self) -> SourceResult<Option<Freshness>> {
@@ -622,34 +759,33 @@ impl Source {
         let Implementation::Local(local) = &self.implementation else {
             return Ok(());
         };
-        let Some((path, format)) = self.metadata_track_path(database, source, track).await? else {
+        let row = database
+            .track_rows(source, &[track], &library::ReadCancellation::new())
+            .await?
+            .pop()
+            .ok_or(SourceError::NotFound)?;
+        let Some((path, format)) = self.metadata_track_path(database, source, &row).await? else {
             return Err(SourceError::NotFound);
         };
         crate::local::metadata::write_rating(&path, format.as_deref(), rating)
             .map_err(|error| SourceError::Other(error.to_string()))?;
         local
-            .publish_paths(database, source, self.source_id.as_str(), &[path])
+            .publish_paths(database, source, self.source_id.as_str(), &[path], None)
             .await?;
         Ok(())
     }
 
-    fn metadata_account_available(&self) -> bool {
-        match &self.implementation {
-            Implementation::Local(_) => true,
-            Implementation::Jellyfin(source) => source.metadata_editing_available(),
-            Implementation::OpenSubsonic(source) => source.metadata_editing_available(),
+    async fn mapped_metadata_ready(&self) -> bool {
+        let Implementation::OpenSubsonic(source) = &self.implementation else {
+            return false;
+        };
+        if !source.metadata_editing_available() {
+            source.refresh_metadata_editing().await;
         }
+        source.metadata_editing_available()
     }
 
-    pub async fn refresh_metadata_editing(&self) {
-        match &self.implementation {
-            Implementation::Local(_) => {}
-            Implementation::Jellyfin(_) => {}
-            Implementation::OpenSubsonic(source) => source.refresh_metadata_editing().await,
-        }
-    }
-
-    pub async fn refresh_remote_metadata_index(&self) -> SourceResult<()> {
+    async fn refresh_remote_metadata_index(&self) -> SourceResult<()> {
         match &self.implementation {
             Implementation::Local(_) | Implementation::Jellyfin(_) => Ok(()),
             Implementation::OpenSubsonic(source) => {
@@ -659,63 +795,28 @@ impl Source {
         }
     }
 
-    pub async fn track_metadata_available(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        track_key: library::TrackKey,
-    ) -> SourceResult<bool> {
-        if matches!(&self.implementation, Implementation::Jellyfin(_)) {
-            return self
-                .jellyfin_track_metadata_available(database, source, track_key)
-                .await;
-        }
-        let Some((path, format)) = self
-            .metadata_track_path(database, source, track_key)
-            .await?
-        else {
-            return Ok(false);
-        };
-        if matches!(&self.implementation, Implementation::OpenSubsonic(_))
-            && !crate::local::basic_metadata_readable(path.clone())
-        {
-            return Ok(false);
-        }
-        Ok(crate::local::metadata_file_available(
-            &path,
-            format.as_deref(),
-        ))
-    }
-
     pub async fn read_track_metadata(
         &self,
         database: &Database,
         source: library::SourceKey,
         track_key: library::TrackKey,
     ) -> Result<crate::TrackMetadata, crate::SourceMetadataError> {
-        if let Implementation::Jellyfin(jellyfin) = &self.implementation {
-            let cancellation = library::ReadCancellation::new();
-            let track = database
-                .track_rows(source, &[track_key], &cancellation)
-                .await
-                .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
-                .pop()
-                .ok_or(crate::SourceMetadataError::Unavailable)?;
-            return jellyfin.read_track_metadata(track).await;
-        }
-        let (path, format) = self
-            .metadata_track_path(database, source, track_key)
-            .await
-            .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
-            .ok_or(crate::SourceMetadataError::Unavailable)?;
-        let mut metadata = crate::local::read_track_metadata(track_key, &path, format.as_deref())?;
         let cancellation = library::ReadCancellation::new();
         let track = database
             .track_rows(source, &[track_key], &cancellation)
             .await
-            .map_err(metadata_database_error)?
+            .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
             .pop()
             .ok_or(crate::SourceMetadataError::Unavailable)?;
+        if let Implementation::Jellyfin(jellyfin) = &self.implementation {
+            return jellyfin.read_track_metadata(track).await;
+        }
+        let (path, format) = self
+            .metadata_track_path(database, source, &track)
+            .await
+            .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+            .ok_or(crate::SourceMetadataError::Unavailable)?;
+        let mut metadata = crate::local::read_track_metadata(track_key, &path, format.as_deref())?;
         if metadata.values.musicbrainz_recording_id.is_none()
             && track.musicbrainz_recording_id.is_some()
         {
@@ -729,72 +830,6 @@ impl Source {
             metadata.rufin_filled.musicbrainz_release_track_id = true;
         }
         Ok(metadata)
-    }
-
-    async fn jellyfin_track_metadata_available(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        track_key: library::TrackKey,
-    ) -> SourceResult<bool> {
-        let Implementation::Jellyfin(jellyfin) = &self.implementation else {
-            return Ok(false);
-        };
-        let cancellation = library::ReadCancellation::new();
-        let Some(track) = database
-            .track_rows(source, &[track_key], &cancellation)
-            .await?
-            .pop()
-        else {
-            return Ok(false);
-        };
-        Ok(jellyfin.read_track_metadata(track).await.is_ok())
-    }
-
-    pub async fn album_metadata_available(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        album_key: library::AlbumKey,
-    ) -> SourceResult<bool> {
-        let Implementation::Jellyfin(jellyfin) = &self.implementation else {
-            return Ok(self
-                .read_album_metadata(database, source, album_key)
-                .await
-                .is_ok());
-        };
-        let cancellation = library::ReadCancellation::new();
-        let Some(album) = database
-            .album_rows(source, &[album_key], None, &cancellation)
-            .await?
-            .pop()
-        else {
-            return Ok(false);
-        };
-        Ok(jellyfin.read_album_metadata(album).await.is_ok())
-    }
-
-    pub async fn artist_metadata_available(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        artist_key: library::ArtistKey,
-    ) -> SourceResult<bool> {
-        let Implementation::Jellyfin(jellyfin) = &self.implementation else {
-            return Ok(self
-                .read_artist_metadata(database, source, artist_key)
-                .await
-                .is_ok());
-        };
-        let cancellation = library::ReadCancellation::new();
-        let Some(artist) = database
-            .artist_rows(source, &[artist_key], false, None, &cancellation)
-            .await?
-            .pop()
-        else {
-            return Ok(false);
-        };
-        Ok(jellyfin.read_artist_metadata(artist).await.is_ok())
     }
 
     pub async fn read_album_metadata(
@@ -817,7 +852,10 @@ impl Source {
                     .await
             }
             Implementation::OpenSubsonic(_) => {
-                self.read_mapped_album_metadata(database, source, album)
+                if !self.mapped_metadata_ready().await {
+                    return Err(crate::SourceMetadataError::Unavailable);
+                }
+                self.read_local_album_metadata(database, source, album)
                     .await
             }
         }
@@ -843,7 +881,10 @@ impl Source {
                     .await
             }
             Implementation::OpenSubsonic(_) => {
-                self.read_mapped_artist_metadata(database, source, artist)
+                if !self.mapped_metadata_ready().await {
+                    return Err(crate::SourceMetadataError::Unavailable);
+                }
+                self.read_local_artist_metadata(database, source, artist)
                     .await
             }
         }
@@ -1074,19 +1115,6 @@ impl Source {
         album_metadata_from_targets(album, &targets)
     }
 
-    async fn read_mapped_album_metadata(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        album: library::AlbumRow,
-    ) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
-        if !self.metadata_account_available() {
-            return Err(crate::SourceMetadataError::Unavailable);
-        }
-        self.read_local_album_metadata(database, source, album)
-            .await
-    }
-
     async fn read_local_artist_metadata(
         &self,
         database: &Database,
@@ -1099,19 +1127,6 @@ impl Source {
         artist_metadata_from_targets(artist, &targets)
     }
 
-    async fn read_mapped_artist_metadata(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        artist: library::ArtistRow,
-    ) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
-        if !self.metadata_account_available() {
-            return Err(crate::SourceMetadataError::Unavailable);
-        }
-        self.read_local_artist_metadata(database, source, artist)
-            .await
-    }
-
     async fn write_file_track_metadata(
         &self,
         database: &Database,
@@ -1121,7 +1136,7 @@ impl Source {
         edit: &crate::TrackMetadataEdit,
     ) -> Result<(), crate::SourceMetadataError> {
         let (path, format) = self
-            .metadata_track_path(database, source, track.track_key)
+            .metadata_track_path(database, source, track)
             .await
             .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
             .ok_or(crate::SourceMetadataError::Unavailable)?;
@@ -1362,20 +1377,29 @@ impl Source {
             return Err(crate::SourceMetadataError::Unavailable);
         }
         let mut targets = Vec::with_capacity(keys.len());
-        for key in keys {
-            let (path, format) = self
-                .metadata_track_path(database, source, *key)
+        for keys in keys.chunks(128) {
+            let rows = database
+                .track_rows(source, keys, &library::ReadCancellation::new())
                 .await
-                .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
-                .ok_or(crate::SourceMetadataError::Unavailable)?;
-            if !crate::local::metadata_file_available(&path, format.as_deref()) {
+                .map_err(metadata_database_error)?;
+            if rows.len() != keys.len() {
                 return Err(crate::SourceMetadataError::Unavailable);
             }
-            targets.push(MetadataFileTarget {
-                track_key: *key,
-                path,
-                format,
-            });
+            for row in rows {
+                let (path, format) = self
+                    .metadata_track_path(database, source, &row)
+                    .await
+                    .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+                    .ok_or(crate::SourceMetadataError::Unavailable)?;
+                if !crate::local::metadata_file_available(&path, format.as_deref()) {
+                    return Err(crate::SourceMetadataError::Unavailable);
+                }
+                targets.push(MetadataFileTarget {
+                    track_key: row.track_key,
+                    path,
+                    format,
+                });
+            }
         }
         targets.sort_by(|left, right| left.path.cmp(&right.path));
         targets.dedup_by(|left, right| left.path == right.path);
@@ -1386,16 +1410,8 @@ impl Source {
         &self,
         database: &Database,
         source: library::SourceKey,
-        track_key: library::TrackKey,
+        track: &library::TrackRow,
     ) -> SourceResult<Option<(PathBuf, Option<String>)>> {
-        let cancellation = library::ReadCancellation::new();
-        let Some(track) = database
-            .track_rows(source, &[track_key], &cancellation)
-            .await?
-            .pop()
-        else {
-            return Ok(None);
-        };
         if track.cue_path.is_some() {
             return Ok(None);
         }
@@ -1404,7 +1420,7 @@ impl Source {
             .as_deref()
             .and_then(|uri| uri.strip_prefix("file://"))
         {
-            return Ok(Some((PathBuf::from(path), track.source_format)));
+            return Ok(Some((PathBuf::from(path), track.source_format.clone())));
         }
         if matches!(&self.implementation, Implementation::OpenSubsonic(_))
             && let Some(access) = database
@@ -1420,21 +1436,273 @@ impl Source {
                 )
                 .await?
         {
-            return Ok(Some((PathBuf::from(access.path), track.source_format)));
+            return Ok(Some((
+                PathBuf::from(access.path),
+                track.source_format.clone(),
+            )));
         }
         Ok(None)
     }
 
-    pub async fn edit_remote_playlist(
+    pub async fn create_playlist(
         &self,
-        edit: RemotePlaylistEdit,
-    ) -> SourceResult<Option<String>> {
+        database: &Database,
+        source: library::SourceKey,
+        name: &str,
+        tracks: &[library::TrackKey],
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        if matches!(&self.implementation, Implementation::Local(_)) {
+            let changed = database
+                .create_playlist(source, name, tracks)
+                .await?
+                .is_some();
+            return Ok((changed, None));
+        }
+        let mut pages = tracks.chunks(PROVIDER_PLAYLIST_PAGE);
+        let first_ids = match pages.next() {
+            Some(page) => playlist_track_ids(database, source, None, page, false).await?,
+            None => Vec::new(),
+        };
+        let playlist = match &self.implementation {
+            Implementation::Jellyfin(provider) => {
+                provider.create_playlist(name, &first_ids).await?
+            }
+            Implementation::OpenSubsonic(provider) => {
+                provider.create_playlist(name, &first_ids).await?
+            }
+            Implementation::Local(_) => unreachable!(),
+        };
+        for page in pages {
+            let ids = playlist_track_ids(database, source, None, page, false).await?;
+            match &self.implementation {
+                Implementation::Jellyfin(provider) => {
+                    provider.add_playlist_tracks(&playlist, &ids).await?
+                }
+                Implementation::OpenSubsonic(provider) => {
+                    provider.add_playlist_tracks(&playlist, &ids).await?
+                }
+                Implementation::Local(_) => unreachable!(),
+            }
+        }
+        self.accept_playlist_change(database, Some(playlist), None)
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    pub async fn rename_playlist(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+        name: &str,
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        if matches!(self.implementation, Implementation::Local(_)) {
+            return Ok((
+                database.rename_playlist(source, playlist, name).await?,
+                None,
+            ));
+        }
+        let id = source_playlist_id(database, source, playlist).await?;
         match &self.implementation {
+            Implementation::Jellyfin(provider) => provider.rename_playlist(&id, name).await?,
+            Implementation::OpenSubsonic(provider) => provider.rename_playlist(&id, name).await?,
+            Implementation::Local(_) => unreachable!(),
+        }
+        self.accept_playlist_change(database, Some(id), None)
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    pub async fn delete_playlist(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        if matches!(self.implementation, Implementation::Local(_)) {
+            return Ok((database.delete_playlist(source, playlist).await?, None));
+        }
+        let id = source_playlist_id(database, source, playlist).await?;
+        match &self.implementation {
+            Implementation::Jellyfin(provider) => provider.delete_playlist(&id).await?,
+            Implementation::OpenSubsonic(provider) => provider.delete_playlist(&id).await?,
+            Implementation::Local(_) => unreachable!(),
+        }
+        self.accept_playlist_change(database, None, Some(id))
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    pub async fn add_playlist_tracks(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+        tracks: &[library::TrackKey],
+        skip_existing: bool,
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        let skip_existing =
+            skip_existing || matches!(self.implementation, Implementation::Jellyfin(_));
+        if matches!(self.implementation, Implementation::Local(_)) {
+            let changed = database
+                .add_playlist_tracks(source, playlist, tracks, skip_existing)
+                .await?
+                != 0;
+            return Ok((changed, None));
+        }
+        let id = source_playlist_id(database, source, playlist).await?;
+        let mut changed = false;
+        for page in tracks.chunks(PROVIDER_PLAYLIST_PAGE) {
+            let ids =
+                playlist_track_ids(database, source, Some(playlist), page, skip_existing).await?;
+            if ids.is_empty() {
+                continue;
+            }
+            changed = true;
+            match &self.implementation {
+                Implementation::Jellyfin(provider) => {
+                    provider.add_playlist_tracks(&id, &ids).await?
+                }
+                Implementation::OpenSubsonic(provider) => {
+                    provider.add_playlist_tracks(&id, &ids).await?
+                }
+                Implementation::Local(_) => unreachable!(),
+            }
+        }
+        if !changed {
+            return Ok((false, None));
+        }
+        self.accept_playlist_change(database, Some(id), None)
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    pub async fn remove_playlist_entries(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+        entries: &[library::PlaylistEntryKey],
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        if matches!(self.implementation, Implementation::Local(_)) {
+            let changed = database
+                .remove_playlist_entries(source, playlist, entries)
+                .await?
+                != 0;
+            return Ok((changed, None));
+        }
+        let id = source_playlist_id(database, source, playlist).await?;
+        for page in entries.chunks(PROVIDER_PLAYLIST_PAGE) {
+            let occurrences = database
+                .source_playlist_entry_object_ids(
+                    source,
+                    playlist,
+                    page,
+                    &library::ReadCancellation::new(),
+                )
+                .await?;
+            if occurrences.len() != page.len() {
+                return Err(SourceError::InvalidRequest(
+                    "Playlist entry is no longer current",
+                ));
+            }
+            match &self.implementation {
+                Implementation::Jellyfin(provider) => {
+                    provider.remove_playlist_entries(&id, &occurrences).await?
+                }
+                Implementation::OpenSubsonic(provider) => {
+                    provider.remove_playlist_entries(&id, &occurrences).await?
+                }
+                Implementation::Local(_) => unreachable!(),
+            }
+        }
+        self.accept_playlist_change(database, Some(id), None)
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    pub async fn move_playlist_entry(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        playlist: library::PlaylistKey,
+        entry: library::PlaylistEntryKey,
+        position: usize,
+    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+        if matches!(self.implementation, Implementation::Local(_)) {
+            let changed = database
+                .move_playlist_entry(source, playlist, entry, position)
+                .await?;
+            return Ok((changed, None));
+        }
+        let id = source_playlist_id(database, source, playlist).await?;
+        let occurrence = database
+            .source_playlist_entry_object_ids(
+                source,
+                playlist,
+                &[entry],
+                &library::ReadCancellation::new(),
+            )
+            .await?
+            .pop()
+            .ok_or(SourceError::InvalidRequest(
+                "Playlist entry is no longer current",
+            ))?;
+        match &self.implementation {
+            Implementation::Jellyfin(provider) => {
+                provider
+                    .move_playlist_entry(&id, &occurrence, position)
+                    .await?
+            }
+            Implementation::OpenSubsonic(provider) => {
+                provider
+                    .move_playlist_entry(&id, &occurrence, position)
+                    .await?
+            }
+            Implementation::Local(_) => unreachable!(),
+        }
+        self.accept_playlist_change(database, Some(id), None)
+            .await
+            .map(|outcome| (true, Some(outcome)))
+    }
+
+    async fn accept_playlist_change(
+        &self,
+        database: &Database,
+        affected: Option<String>,
+        deleted: Option<String>,
+    ) -> SourceResult<ScanOutcome> {
+        match &self.implementation {
+            Implementation::Jellyfin(source) => {
+                source
+                    .apply_live_items(
+                        database,
+                        self.source_id.as_str(),
+                        affected
+                            .into_iter()
+                            .map(|id| raw_item_id(&id).to_string())
+                            .collect(),
+                        deleted
+                            .into_iter()
+                            .map(|id| raw_item_id(&id).to_string())
+                            .collect(),
+                    )
+                    .await
+            }
+            Implementation::OpenSubsonic(source) => {
+                let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
+                if let Some(playlist) = affected {
+                    source.stage_playlist_snapshot(&mut scan, &playlist).await?;
+                } else if let Some(playlist) = deleted {
+                    scan.begin_batch().await?;
+                    scan.remove_playlist(&playlist).await?;
+                    scan.finish_batch().await?;
+                }
+                Ok(scan.finish().await?)
+            }
             Implementation::Local(_) => Err(SourceError::InvalidRequest(
-                "Local playlists are Library-owned",
+                "Local playlists do not have provider changes",
             )),
-            Implementation::Jellyfin(source) => apply_playlist_edit(source, edit).await,
-            Implementation::OpenSubsonic(source) => apply_playlist_edit(source, edit).await,
         }
     }
 
@@ -1515,39 +1783,108 @@ impl Source {
         }
     }
 
-    pub async fn listen_jellyfin_changes(
-        &self,
-        on_ready: &mut (dyn FnMut() -> bool + Send),
-        on_gap: &mut (dyn FnMut() -> bool + Send),
-        on_change: &mut (dyn FnMut(JellyfinLiveChange) -> bool + Send),
-    ) -> SourceResult<()> {
-        match &self.implementation {
-            Implementation::Jellyfin(source) => {
-                source
-                    .listen_library_changes(on_ready, on_gap, on_change)
-                    .await
-            }
-            _ => Err(SourceError::InvalidRequest(
-                "Jellyfin observer requested for another source",
-            )),
+    pub fn start_selected_feed(
+        self: &Arc<Self>,
+        runtime: &tokio::runtime::Handle,
+        database: Arc<Database>,
+        source_key: library::SourceKey,
+    ) -> Option<Arc<SelectedFeed>> {
+        if matches!(self.implementation, Implementation::OpenSubsonic(_)) {
+            return None;
         }
+        let (wake, receiver) = async_channel::bounded(1);
+        let feed = Arc::new(SelectedFeed {
+            source: Arc::clone(self),
+            database,
+            source_key,
+            pending: Mutex::new(None),
+            wake,
+            cancelled: Arc::new(AtomicBool::new(false)),
+            receiver,
+        });
+        match &self.implementation {
+            Implementation::Local(_) => {
+                let producer = Arc::clone(&feed);
+                let _ = std::thread::Builder::new()
+                    .name("rufin-local-watcher".to_string())
+                    .spawn(move || {
+                        let ready_feed = Arc::clone(&producer);
+                        let mut ready = move |recovered: bool| {
+                            (!recovered
+                                || ready_feed
+                                    .submit(SelectedFeedChange::Local(LocalLiveChange::Rescan)))
+                                && !ready_feed.cancelled.load(Ordering::Acquire)
+                        };
+                        let change_feed = Arc::clone(&producer);
+                        let mut changed =
+                            move |change| change_feed.submit(SelectedFeedChange::Local(change));
+                        let stop_feed = Arc::clone(&producer);
+                        if let Implementation::Local(local) = &producer.source.implementation {
+                            let _ = local.watch(&mut ready, &mut changed, &|| {
+                                stop_feed.cancelled.load(Ordering::Acquire)
+                            });
+                        }
+                    });
+            }
+            Implementation::Jellyfin(_) => {
+                let producer = Arc::clone(&feed);
+                runtime.spawn(async move {
+                    let ready_feed = Arc::clone(&producer);
+                    let mut ready = move || !ready_feed.cancelled.load(Ordering::Acquire);
+                    let gap_feed = Arc::clone(&producer);
+                    let mut gap = move || {
+                        gap_feed.submit(SelectedFeedChange::Jellyfin(
+                            JellyfinLiveChange::BoundaryLost,
+                        ))
+                    };
+                    let change_feed = Arc::clone(&producer);
+                    let mut changed =
+                        move |change| change_feed.submit(SelectedFeedChange::Jellyfin(change));
+                    let result = match &producer.source.implementation {
+                        Implementation::Jellyfin(provider) => {
+                            provider
+                                .listen_library_changes(&mut ready, &mut gap, &mut changed)
+                                .await
+                        }
+                        _ => return,
+                    };
+                    if producer.cancelled.load(Ordering::Acquire) {
+                        return;
+                    }
+                    if let Err(error) = result {
+                        tracing::warn!(%error, "Jellyfin library change feed stopped");
+                    }
+                    producer.submit(SelectedFeedChange::Jellyfin(
+                        JellyfinLiveChange::BoundaryLost,
+                    ));
+                });
+            }
+            Implementation::OpenSubsonic(_) => unreachable!(),
+        }
+        Some(feed)
     }
 
-    pub async fn apply_jellyfin_change(
+    #[cfg(test)]
+    pub(crate) async fn apply_local_change(
         &self,
         database: &Database,
-        change: JellyfinLiveChange,
+        source: library::SourceKey,
+        change: LocalLiveChange,
     ) -> SourceResult<Option<ScanOutcome>> {
         match (&self.implementation, change) {
-            (Implementation::Jellyfin(_), JellyfinLiveChange::BoundaryLost) => Ok(None),
-            (Implementation::Jellyfin(source), JellyfinLiveChange::Items { upserts, removals }) => {
-                source
-                    .apply_live_items(database, self.source_id.as_str(), upserts, removals)
-                    .await
-                    .map(Some)
-            }
+            (Implementation::Local(local), LocalLiveChange::Paths { paths, rename }) => local
+                .publish_paths(
+                    database,
+                    source,
+                    self.source_id.as_str(),
+                    &paths,
+                    rename.as_ref(),
+                )
+                .await
+                .map(Some),
+            (Implementation::Local(_), LocalLiveChange::Rescan) => Ok(None),
             _ => Err(SourceError::InvalidRequest(
-                "Jellyfin change belongs to another source",
+                "Local change belongs to another source",
             )),
         }
     }
@@ -1569,38 +1906,6 @@ impl Source {
         }
     }
 
-    pub fn listen_local_changes(
-        &self,
-        on_ready: &mut dyn FnMut(bool) -> bool,
-        on_change: &mut dyn FnMut(LocalLiveChange) -> bool,
-        should_stop: &dyn Fn() -> bool,
-    ) -> SourceResult<()> {
-        match &self.implementation {
-            Implementation::Local(source) => source.watch(on_ready, on_change, should_stop),
-            _ => Err(SourceError::InvalidRequest(
-                "Local observer requested for another source",
-            )),
-        }
-    }
-
-    pub async fn apply_local_change(
-        &self,
-        database: &Database,
-        source: library::SourceKey,
-        change: LocalLiveChange,
-    ) -> SourceResult<Option<ScanOutcome>> {
-        match (&self.implementation, change) {
-            (Implementation::Local(local), LocalLiveChange::Paths(paths)) => local
-                .publish_paths(database, source, self.source_id.as_str(), &paths)
-                .await
-                .map(Some),
-            (Implementation::Local(_), LocalLiveChange::Rescan) => Ok(None),
-            _ => Err(SourceError::InvalidRequest(
-                "Local change belongs to another source",
-            )),
-        }
-    }
-
     pub async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
         match &self.implementation {
             Implementation::Local(_) => Ok(()),
@@ -1616,103 +1921,180 @@ impl Source {
         root: &std::path::Path,
         server_prefix: Option<&str>,
         local_prefix: Option<&str>,
+        sample_source_path: Option<&str>,
+        cancelled: Arc<AtomicBool>,
     ) -> SourceResult<usize> {
         let root =
             std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
+        if cancelled.load(Ordering::Acquire) {
+            return Err(SourceError::Cancelled);
+        }
+        let sample = database
+            .mapping_track_page(
+                source,
+                None,
+                sample_source_path,
+                1,
+                &library::ReadCancellation::new(),
+            )
+            .await?
+            .pop()
+            .ok_or(SourceError::InvalidRequest(
+                "No representative Track matches this mapping",
+            ))?;
+        let access = mapped_track_access(&root, server_prefix, local_prefix, sample)?.ok_or(
+            SourceError::InvalidRequest("The representative Track does not map to a local file"),
+        )?;
         database.clear_mapping_access(source).await?;
+        database.upsert_local_access(source, &access).await?;
+        Ok(1)
+    }
+
+    pub async fn complete_local_mapping(
+        &self,
+        database: &Database,
+        source: library::SourceKey,
+        root: &std::path::Path,
+        server_prefix: Option<&str>,
+        local_prefix: Option<&str>,
+        cancelled: Arc<AtomicBool>,
+    ) -> SourceResult<usize> {
+        let root =
+            std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
         let mut after = None;
         let mut accepted = 0;
         loop {
+            if cancelled.load(Ordering::Acquire) {
+                return Err(SourceError::Cancelled);
+            }
             let tracks = database
-                .mapping_track_page(source, after, 128, &library::ReadCancellation::new())
+                .mapping_track_page(source, after, None, 128, &library::ReadCancellation::new())
                 .await?;
             if tracks.is_empty() {
                 break;
             }
             after = tracks.last().map(|track| track.track_key);
             for track in tracks {
-                let relative = match server_prefix {
-                    Some(prefix) => track
-                        .source_path
-                        .strip_prefix(prefix)
-                        .map(|value| value.trim_start_matches(['/', '\\'])),
-                    None => Some(track.source_path.trim_start_matches(['/', '\\'])),
-                };
-                let Some(relative) = relative else { continue };
-                let mut path = root.clone();
-                if let Some(prefix) = local_prefix.filter(|prefix| !prefix.trim().is_empty()) {
-                    path.push(prefix);
+                if cancelled.load(Ordering::Acquire) {
+                    return Err(SourceError::Cancelled);
                 }
-                path.push(relative.replace('\\', "/"));
-                let Ok(path) = std::fs::canonicalize(path) else {
-                    continue;
-                };
-                if !path.starts_with(&root) || !path.is_file() {
-                    continue;
+                if let Some(access) =
+                    mapped_track_access(&root, server_prefix, local_prefix, track)?
+                {
+                    database.upsert_local_access(source, &access).await?;
+                    accepted += 1;
                 }
-                let metadata = std::fs::metadata(&path)
-                    .map_err(|error| SourceError::Other(error.to_string()))?;
-                let mtime_ns = metadata
-                    .modified()
-                    .ok()
-                    .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                    .and_then(|value| i64::try_from(value.as_nanos()).ok())
-                    .unwrap_or_default();
-                #[cfg(unix)]
-                let (device_id, inode) = {
-                    use std::os::unix::fs::MetadataExt;
-                    (
-                        i64::try_from(metadata.dev()).ok(),
-                        i64::try_from(metadata.ino()).ok(),
-                    )
-                };
-                #[cfg(not(unix))]
-                let (device_id, inode) = (None, None);
-                let media_uri = url::Url::from_file_path(&path)
-                    .map_err(|()| {
-                        SourceError::Other("could not create mapped file URI".to_string())
-                    })?
-                    .to_string();
-                let relative_path = path
-                    .strip_prefix(&root)
-                    .unwrap_or(&path)
-                    .to_string_lossy()
-                    .into_owned();
-                let mut hash = blake3::Hasher::new();
-                hash.update(path.to_string_lossy().as_bytes());
-                hash.update(&metadata.len().to_le_bytes());
-                hash.update(&mtime_ns.to_le_bytes());
-                database
-                    .upsert_local_access(
-                        source,
-                        &library::LocalAccessWrite {
-                            track_object_id: Some(track.object_id),
-                            origin: library::LocalAccessOrigin::Mapping,
-                            path: path.to_string_lossy().into_owned(),
-                            root: root.to_string_lossy().into_owned(),
-                            relative_path,
-                            size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-                            mtime_ns,
-                            device_id,
-                            inode,
-                            parser_version: 1,
-                            title: track.title,
-                            album: track.album,
-                            artist: track.artist,
-                            disc_number: track.disc_number,
-                            track_number: track.track_number,
-                            duration_millis: track.duration_millis,
-                            media_uri,
-                            loudness_analysis_key: *hash.finalize().as_bytes(),
-                        },
-                    )
-                    .await?;
-                accepted += 1;
             }
         }
-        accepted += crate::local::apply_metadata_mapping(database, source, &root).await?;
+        accepted += crate::local::apply_metadata_mapping(database, source, &root, &|| {
+            cancelled.load(Ordering::Acquire)
+        })
+        .await?;
         Ok(accepted)
     }
+}
+
+fn mapped_track_access(
+    root: &std::path::Path,
+    server_prefix: Option<&str>,
+    local_prefix: Option<&str>,
+    track: library::MappingTrackRow,
+) -> SourceResult<Option<library::LocalAccessWrite>> {
+    let Some(path) = mapped_local_path(root, server_prefix, local_prefix, &track.source_path)
+    else {
+        return Ok(None);
+    };
+    let metadata =
+        std::fs::metadata(&path).map_err(|error| SourceError::Other(error.to_string()))?;
+    let mtime_ns = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .and_then(|value| i64::try_from(value.as_nanos()).ok())
+        .unwrap_or_default();
+    #[cfg(unix)]
+    let (device_id, inode) = {
+        use std::os::unix::fs::MetadataExt;
+        (
+            i64::try_from(metadata.dev()).ok(),
+            i64::try_from(metadata.ino()).ok(),
+        )
+    };
+    #[cfg(not(unix))]
+    let (device_id, inode) = (None, None);
+    let media_uri = url::Url::from_file_path(&path)
+        .map_err(|()| SourceError::Other("could not create mapped file URI".to_string()))?
+        .to_string();
+    let mut hash = blake3::Hasher::new();
+    hash.update(path.to_string_lossy().as_bytes());
+    hash.update(&metadata.len().to_le_bytes());
+    hash.update(&mtime_ns.to_le_bytes());
+    Ok(Some(library::LocalAccessWrite {
+        track_object_id: Some(track.object_id),
+        origin: library::LocalAccessOrigin::Mapping,
+        path: path.to_string_lossy().into_owned(),
+        root: root.to_string_lossy().into_owned(),
+        relative_path: path
+            .strip_prefix(root)
+            .unwrap_or(&path)
+            .to_string_lossy()
+            .into_owned(),
+        size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+        mtime_ns,
+        device_id,
+        inode,
+        parser_version: 1,
+        title: track.title,
+        album: track.album,
+        artist: track.artist,
+        disc_number: track.disc_number,
+        track_number: track.track_number,
+        duration_millis: track.duration_millis,
+        media_uri,
+        loudness_analysis_key: *hash.finalize().as_bytes(),
+    }))
+}
+
+fn mapped_local_path(
+    root: &std::path::Path,
+    server_prefix: Option<&str>,
+    local_prefix: Option<&str>,
+    source_path: &str,
+) -> Option<PathBuf> {
+    let mut base = root.to_path_buf();
+    if let Some(prefix) = local_prefix.filter(|prefix| !prefix.trim().is_empty()) {
+        base.push(prefix);
+    }
+    if let Some(prefix) = server_prefix {
+        let relative = source_path
+            .strip_prefix(prefix)?
+            .trim_start_matches(['/', '\\']);
+        return mapped_file(root, base.join(relative.replace('\\', "/")));
+    }
+    if let Some(path) = mapped_file(root, PathBuf::from(source_path)) {
+        return Some(path);
+    }
+    let components = std::path::Path::new(source_path)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(value) => Some(value),
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    (0..components.len()).find_map(|start| {
+        let path = components[start..]
+            .iter()
+            .fold(base.clone(), |mut path, part| {
+                path.push(part);
+                path
+            });
+        mapped_file(root, path)
+    })
+}
+
+fn mapped_file(root: &std::path::Path, candidate: PathBuf) -> Option<PathBuf> {
+    let path = std::fs::canonicalize(candidate).ok()?;
+    (path.starts_with(root) && path.is_file()).then_some(path)
 }
 
 struct MetadataFileTarget {
@@ -1932,58 +2314,39 @@ fn metadata_database_error(error: library::LibraryError) -> crate::SourceMetadat
     crate::SourceMetadataError::Write(error.to_string())
 }
 
-async fn apply_playlist_edit(
-    source: &impl RemotePlaylistSource,
-    edit: RemotePlaylistEdit,
-) -> SourceResult<Option<String>> {
-    match edit {
-        RemotePlaylistEdit::Create {
-            name,
-            track_object_ids,
-        } => source
-            .create_playlist(&name, &track_object_ids)
-            .await
-            .map(Some),
-        RemotePlaylistEdit::Rename {
-            playlist_object_id,
-            name,
-        } => {
-            source.rename_playlist(&playlist_object_id, &name).await?;
-            Ok(Some(playlist_object_id))
-        }
-        RemotePlaylistEdit::Delete { playlist_object_id } => {
-            source.delete_playlist(&playlist_object_id).await?;
-            Ok(None)
-        }
-        RemotePlaylistEdit::Add {
-            playlist_object_id,
-            track_object_ids,
-        } => {
-            source
-                .add_playlist_tracks(&playlist_object_id, &track_object_ids)
-                .await?;
-            Ok(Some(playlist_object_id))
-        }
-        RemotePlaylistEdit::Remove {
-            playlist_object_id,
-            occurrence_ids,
-        } => {
-            source
-                .remove_playlist_entries(&playlist_object_id, &occurrence_ids)
-                .await?;
-            Ok(Some(playlist_object_id))
-        }
-        RemotePlaylistEdit::Move {
-            playlist_object_id,
-            occurrence_id,
-            position,
-        } => {
-            source
-                .move_playlist_entry(&playlist_object_id, &occurrence_id, position)
-                .await?;
-            Ok(Some(playlist_object_id))
-        }
+async fn source_playlist_id(
+    database: &Database,
+    source: library::SourceKey,
+    playlist: library::PlaylistKey,
+) -> SourceResult<String> {
+    database
+        .source_playlist_object_id(source, playlist, &library::ReadCancellation::new())
+        .await?
+        .ok_or(SourceError::InvalidRequest("Playlist is no longer current"))
+}
+
+async fn playlist_track_ids(
+    database: &Database,
+    source: library::SourceKey,
+    playlist: Option<library::PlaylistKey>,
+    tracks: &[library::TrackKey],
+    skip_existing: bool,
+) -> SourceResult<Vec<String>> {
+    let ids = database
+        .source_playlist_track_object_ids(
+            source,
+            playlist,
+            tracks,
+            skip_existing,
+            &library::ReadCancellation::new(),
+        )
+        .await?;
+    if !skip_existing && ids.len() != tracks.len() {
+        return Err(SourceError::InvalidRequest(
+            "Playlist Track is no longer current",
+        ));
     }
+    Ok(ids)
 }
 
 pub(crate) fn require_source_edit(
@@ -2017,5 +2380,133 @@ pub(crate) fn edited_source_name(requested: &str, current: &str) -> String {
         current.to_string()
     } else {
         requested.to_string()
+    }
+}
+
+#[cfg(test)]
+mod refresh_laws {
+    use super::*;
+
+    #[tokio::test]
+    async fn unsupported_freshness_never_widens_to_a_catalog_acquisition() {
+        let directory = tempfile::tempdir().expect("Store directory");
+        let database = Database::open(directory.path().join("library.sqlite"))
+            .await
+            .expect("Database");
+        let source = Source::open(
+            SourceConfiguration {
+                source_id: SourceId::new("jellyfin:test"),
+                kind: "jellyfin".to_string(),
+                name: "Jellyfin".to_string(),
+                provider_payload: serde_json::json!({
+                    "version": 1,
+                    "base_url": "http://127.0.0.1:9",
+                    "server_id": "test",
+                    "user_id": "user",
+                    "username": "listener",
+                    "trust_invalid_cert": false,
+                    "use_jellyfin_instant_mix": false
+                })
+                .to_string(),
+            },
+            Some("token".to_string()),
+            Some("device".to_string()),
+        )
+        .expect("open Jellyfin source");
+
+        assert_eq!(
+            source
+                .refresh_if_needed(
+                    &database,
+                    "Jellyfin",
+                    &|_| panic!("unsupported freshness started acquisition progress"),
+                    Arc::new(AtomicBool::new(false)),
+                )
+                .await
+                .expect("freshness check"),
+            None
+        );
+        assert!(
+            database
+                .cached_source("jellyfin:test", &library::ReadCancellation::new())
+                .await
+                .expect("cached source")
+                .is_none()
+        );
+    }
+
+    #[test]
+    fn selected_feed_accumulates_exact_jellyfin_ids_with_one_bound() {
+        let merged = SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+            upserts: vec!["two".to_string(), "one".to_string()],
+            removals: Vec::new(),
+        })
+        .merge(SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+            upserts: vec!["one".to_string(), "three".to_string()],
+            removals: vec!["gone".to_string()],
+        }));
+        let SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items { upserts, removals }) = merged
+        else {
+            panic!("exact evidence widened unexpectedly");
+        };
+        assert_eq!(upserts, ["one", "three", "two"]);
+        assert_eq!(removals, ["gone"]);
+    }
+
+    #[test]
+    fn selected_feed_overflow_coalesces_to_one_boundary_operation() {
+        let merged = SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+            upserts: (0..LIVE_CHANGE_LIMIT)
+                .map(|index| format!("item-{index}"))
+                .collect(),
+            removals: Vec::new(),
+        })
+        .merge(SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+            upserts: vec!["overflow".to_string()],
+            removals: Vec::new(),
+        }));
+        assert!(matches!(
+            merged,
+            SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost)
+        ));
+    }
+
+    #[test]
+    fn repeated_boundary_evidence_admits_one_recovery() {
+        let (wake, receiver) = async_channel::bounded(1);
+        let mut pending = Some(SelectedFeedChange::Jellyfin(
+            JellyfinLiveChange::BoundaryLost,
+        ));
+        pending = Some(pending.take().expect("first boundary").merge(
+            SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost),
+        ));
+        assert!(wake.try_send(()).is_ok());
+        let _ = wake.try_send(());
+        assert!(matches!(
+            pending.as_ref(),
+            Some(SelectedFeedChange::Jellyfin(
+                JellyfinLiveChange::BoundaryLost
+            ))
+        ));
+        assert!(receiver.try_recv().is_ok());
+        assert!(receiver.try_recv().is_err());
+    }
+
+    #[test]
+    fn representative_mapping_finds_the_existing_suffix_without_a_manual_server_prefix() {
+        let root = tempfile::tempdir().expect("local music root");
+        let track = root.path().join("Artist").join("Album").join("Track.flac");
+        std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
+        std::fs::write(&track, b"media").expect("write Track");
+
+        assert_eq!(
+            mapped_local_path(
+                root.path(),
+                None,
+                None,
+                "/srv/navidrome/music/Artist/Album/Track.flac",
+            ),
+            Some(track.canonicalize().expect("canonical Track"))
+        );
     }
 }

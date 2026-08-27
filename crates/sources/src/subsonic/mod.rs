@@ -15,6 +15,7 @@ use tracing::instrument;
 
 mod client;
 mod item;
+mod navidrome;
 mod refresh;
 
 use client::*;
@@ -88,7 +89,6 @@ struct Track {
     title: String,
     artist: String,
     album: String,
-    album_artwork: Option<()>,
     year: u16,
     release_date: Option<String>,
     date_added: Option<String>,
@@ -420,6 +420,8 @@ pub struct SubsonicSource {
     username: String,
     credential: Arc<SubsonicCredential>,
     flavor: SubsonicFlavor,
+    navidrome_library: bool,
+    navidrome_session: navidrome::NavidromeSession,
     trust_invalid_cert: bool,
     metadata_editing: AtomicBool,
 }
@@ -432,6 +434,7 @@ impl SubsonicSource {
         let base_url = normalize_base_url(&config.base_url)?;
         let client = build_client(config.trust_invalid_cert)?;
         let credential = SubsonicCredential::parse(&credential)?;
+        let navidrome_library = config.navidrome_library_version > 0;
         if config.navidrome_library_version > NAVIDROME_LIBRARY_VERSION {
             return Err(SourceError::InvalidConfig(format!(
                 "Navidrome library version {} is not supported.",
@@ -456,6 +459,8 @@ impl SubsonicSource {
             username: config.username,
             credential: Arc::new(credential),
             flavor,
+            navidrome_library,
+            navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert: config.trust_invalid_cert,
             metadata_editing: AtomicBool::new(false),
         })
@@ -556,6 +561,8 @@ impl SubsonicSource {
             username: canonical_username,
             credential: Arc::new(credential),
             flavor,
+            navidrome_library: flavor == SubsonicFlavor::Navidrome,
+            navidrome_session: navidrome::NavidromeSession::default(),
             trust_invalid_cert,
             metadata_editing: AtomicBool::new(metadata_editing),
         };

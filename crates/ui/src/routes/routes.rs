@@ -12,13 +12,12 @@ use localization::msgid;
 use super::album_detail::{AlbumCollectionModels, AlbumCollectionOrder};
 use super::collections::{
     album_collection_projection, artist_collection_projection, library_route_inset,
-    playlist_collection_projection, smart_playlist_collection_projection,
     track_collection_projection,
 };
+use super::named_collections::{NamedOrderLoad, NamedReadRequest};
 use super::route::Route;
 use super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET;
-use super::route_shell::LibraryPageShellOptions;
-use super::route_shell::LibraryToolbarProjection;
+use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use super::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
 
 struct RootTrackRouteOptions {
@@ -45,6 +44,7 @@ pub(crate) struct SearchableTrackOptions {
     pub(crate) context_id: String,
     pub(crate) content_inset: i32,
     pub(crate) fixed_layout: Option<LibraryLayout>,
+    pub(crate) search: Option<gtk::SearchEntry>,
 }
 
 #[derive(Clone)]
@@ -102,9 +102,8 @@ impl TrackListProjection {
         callback: impl Fn(TrackProjectionRequest) + 'static,
     ) {
         let model = self.model.clone();
-        self.search.connect_search_changed(move |_| {
-            callback(model.projection_request());
-        });
+        self.search
+            .connect_search_changed(move |_| callback(model.projection_request()));
     }
 
     pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection) -> bool {
@@ -147,6 +146,7 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         key: LibraryListKey,
         context: &str,
         context_id: String,
@@ -154,12 +154,14 @@ impl Shell {
         let projection = self.searchable_track_collection(
             selected,
             order,
+            first_rows,
             key,
             SearchableTrackOptions {
                 on_visible_count_changed: None,
                 context_id,
                 content_inset: PRIMARY_ROUTE_HORIZONTAL_INSET,
                 fixed_layout: None,
+                search: None,
             },
         );
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 10);
@@ -176,49 +178,53 @@ impl Shell {
     pub(crate) fn library_albums_route(
         self: &Rc<Self>,
         order: AlbumCollectionOrder,
+        first_rows: Vec<library::AlbumRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
         let settings = self.settings.current.borrow().library_list(key);
         let applied_settings = Rc::new(RefCell::new(settings.clone()));
-        let models = AlbumCollectionModels::new(&selected, order, settings.layout);
+        let models = AlbumCollectionModels::new(&selected, order, first_rows, settings.layout);
 
         let search = gtk::SearchEntry::new();
         bind_search_placeholder(&search, "Search");
-        search.set_hexpand(true);
         let query = Rc::new(RefCell::new(String::new()));
         let content = album_collection_projection(self, models.clone(), key);
-        let visible_models = models.clone();
-        let page_shell = self.library_page_shell(LibraryPageShellOptions {
+        let page = self.library_page_shell(LibraryPageShellOptions {
             key,
-            empty: models.albums().n_items() == 0 && models.detail().n_items() == 0,
+            empty: models.is_empty(),
             empty_body: msgid("Nothing here yet"),
             search: search.clone(),
-            has_visible_results: Rc::new(move || {
-                visible_models.albums().n_items() != 0 || visible_models.detail().n_items() != 0
-            }),
+            has_visible_results: {
+                let models = models.clone();
+                Rc::new(move || !models.is_empty())
+            },
             content: content.scrolling_widget(),
         });
         let apply = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let models = models.clone();
             let content = content.clone();
-            let page_shell = page_shell.clone();
+            let page = page.clone();
             let applied_settings = Rc::clone(&applied_settings);
             Rc::new(
                 move |request: CollectionReadRequest,
-                      result: Result<AlbumCollectionOrder, String>| {
+                      result: Result<(AlbumCollectionOrder, Vec<library::AlbumRow>), String>| {
+                    let Some(shell) = shell.upgrade() else {
+                        return;
+                    };
                     if shell.navigation.routes.borrow().current() != &Route::Albums {
                         return;
                     }
                     match result {
-                        Ok(order) => {
-                            models.replace_order(order);
+                        Ok((order, first_rows)) => {
+                            if !models.replace_prepared(order, first_rows) {
+                                warn!("rejected a mismatched prepared Albums page");
+                                return;
+                            }
                             content.apply_settings(&request.settings);
-                            page_shell.apply_library_list_settings(key, &request.settings);
-                            page_shell.set_empty(
-                                models.albums().n_items() == 0 && models.detail().n_items() == 0,
-                            );
+                            page.apply_library_list_settings(key, &request.settings);
+                            page.set_empty(models.is_empty());
                             applied_settings.replace(request.settings);
                         }
                         Err(error) => warn!(%error, "failed to refresh Albums order"),
@@ -244,27 +250,22 @@ impl Shell {
                             &cancellation,
                         )
                         .await
-                        .map(AlbumCollectionOrder::Detail)
+                        .map(|order| (AlbumCollectionOrder::Detail(order), Vec::new()))
                         .map_err(|error| error.to_string())
-                } else if request.query.is_empty() {
-                    database
-                        .album_order(
+                } else {
+                    let (order, first_rows) = database
+                        .album_route_page(
                             source,
                             folder,
                             false,
+                            &request.query,
                             request.settings.sort_key.album_sort(),
                             request.settings.descending,
                             &cancellation,
                         )
                         .await
-                        .map(AlbumCollectionOrder::Rows)
-                        .map_err(|error| error.to_string())
-                } else {
-                    database
-                        .album_filter_order(source, folder, &request.query, &cancellation)
-                        .await
-                        .map(AlbumCollectionOrder::Rows)
-                        .map_err(|error| error.to_string())
+                        .map_err(|error| error.to_string())?;
+                    Ok((AlbumCollectionOrder::Rows(order), first_rows))
                 }
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         });
@@ -276,13 +277,13 @@ impl Shell {
         );
         {
             let read = Rc::downgrade(&read);
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let query_state = Rc::clone(&query);
-            search.connect_search_changed(move |entry| {
-                let Some(read) = read.upgrade() else {
+            search.connect_search_changed(move |search| {
+                let (Some(read), Some(shell)) = (read.upgrade(), shell.upgrade()) else {
                     return;
                 };
-                let text = entry.text().trim().to_string();
+                let text = search.text().trim().to_string();
                 query_state.replace(text.clone());
                 let settings = shell.settings.current.borrow().library_list(key);
                 read.request_with(CollectionReadRequest {
@@ -292,13 +293,16 @@ impl Shell {
             });
         }
         let resume = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let query = Rc::clone(&query);
             let content = content.clone();
-            let page_shell = page_shell.clone();
+            let page = page.clone();
             let applied_settings = Rc::clone(&applied_settings);
             let read = Rc::clone(&read);
             Rc::new(move || {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 let settings = shell.settings.current.borrow().library_list(key);
                 let previous = applied_settings.borrow().clone();
                 if previous.layout != settings.layout {
@@ -306,7 +310,7 @@ impl Shell {
                     return;
                 }
                 content.apply_settings(&settings);
-                page_shell.apply_library_list_settings(key, &settings);
+                page.apply_library_list_settings(key, &settings);
                 if previous.sort_key != settings.sort_key
                     || previous.descending != settings.descending
                 {
@@ -321,8 +325,8 @@ impl Shell {
         let favorite_models = models.clone();
         let favorite_read = Rc::clone(&read);
         let favorite_query = Rc::clone(&query);
-        page_shell
-            .mounted_route(resume, content.item_navigation())
+        MountedRoute::new(page.widget(), resume)
+            .with_item_navigation(content.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let library::FavoriteTarget::Album(album) = settlement.target else {
                     return;
@@ -341,6 +345,7 @@ impl Shell {
     pub(crate) fn library_tracks_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         self.root_track_route(
@@ -352,6 +357,7 @@ impl Shell {
                 history: false,
             },
             order,
+            first_rows,
             selected,
             false,
         )
@@ -360,6 +366,7 @@ impl Shell {
     pub(crate) fn favorites_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::FavoriteTracks;
@@ -372,6 +379,7 @@ impl Shell {
                 history: false,
             },
             order,
+            first_rows,
             selected,
             true,
         )
@@ -381,6 +389,7 @@ impl Shell {
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -391,12 +400,14 @@ impl Shell {
         let projection = self.searchable_track_collection(
             &selected,
             order,
+            first_rows,
             options.key,
             SearchableTrackOptions {
                 on_visible_count_changed: None,
                 context_id,
                 content_inset: 0,
                 fixed_layout: None,
+                search: None,
             },
         );
         self.track_page_route(options, projection, selected, favorites_only)
@@ -405,6 +416,7 @@ impl Shell {
     pub(crate) fn history_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         self.root_track_route(
@@ -416,6 +428,7 @@ impl Shell {
                 history: true,
             },
             order,
+            first_rows,
             selected,
             false,
         )
@@ -425,6 +438,7 @@ impl Shell {
         self: &Rc<Self>,
         album_artist: bool,
         order: Vec<library::ArtistKey>,
+        first_rows: Vec<library::ArtistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = if album_artist {
@@ -458,12 +472,12 @@ impl Shell {
             selected.runtime.clone(),
             row_load,
         );
-        let model = sparse.list_model();
-        let content = artist_collection_projection(self, model.clone(), key);
+        sparse.seed_matching(first_rows, |row| row.artist_key);
+        let content = artist_collection_projection(self, Rc::clone(&sparse), key);
         let search = gtk::SearchEntry::new();
         bind_search_placeholder(&search, "Search");
         let query = Rc::new(RefCell::new(String::new()));
-        let page_shell = self.library_page_shell(LibraryPageShellOptions {
+        let page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: sparse.len() == 0,
             empty_body: msgid("Nothing here yet"),
@@ -477,20 +491,29 @@ impl Shell {
         let apply = {
             let sparse = Rc::clone(&sparse);
             let content = content.clone();
-            let page_shell = page_shell.clone();
-            let shell = Rc::clone(self);
+            let page = page.clone();
+            let shell = Rc::downgrade(self);
             Rc::new(
                 move |request: CollectionReadRequest,
-                      result: Result<Vec<library::ArtistKey>, String>| {
+                      result: Result<
+                    (Vec<library::ArtistKey>, Vec<library::ArtistRow>),
+                    String,
+                >| {
+                    let Some(shell) = shell.upgrade() else {
+                        return;
+                    };
                     if shell.navigation.routes.borrow().current() != &route {
                         return;
                     }
                     match result {
-                        Ok(order) => {
-                            sparse.replace_order(order);
+                        Ok((order, first_rows)) => {
+                            if !sparse.replace_prepared(order, first_rows, |row| row.artist_key) {
+                                warn!("rejected a mismatched prepared Artist page");
+                                return;
+                            }
                             content.apply_settings(&request.settings);
-                            page_shell.apply_library_list_settings(key, &request.settings);
-                            page_shell.set_empty(sparse.len() == 0);
+                            page.apply_library_list_settings(key, &request.settings);
+                            page.set_empty(sparse.len() == 0);
                         }
                         Err(error) => warn!(%error, "failed to refresh Artist order"),
                     }
@@ -502,30 +525,19 @@ impl Shell {
             let database = Arc::clone(&order_database);
             Box::pin(async move {
                 let cancellation = library::ReadCancellation::new();
-                if request.query.is_empty() {
-                    database
-                        .artist_order(
-                            source,
-                            folder,
-                            album_artist,
-                            false,
-                            request.settings.sort_key.artist_sort(),
-                            request.settings.descending,
-                            &cancellation,
-                        )
-                        .await
-                } else {
-                    database
-                        .artist_filter_order(
-                            source,
-                            folder,
-                            album_artist,
-                            &request.query,
-                            &cancellation,
-                        )
-                        .await
-                }
-                .map_err(|error| error.to_string())
+                database
+                    .artist_route_page(
+                        source,
+                        folder,
+                        album_artist,
+                        false,
+                        &request.query,
+                        request.settings.sort_key.artist_sort(),
+                        request.settings.descending,
+                        &cancellation,
+                    )
+                    .await
+                    .map_err(|error| error.to_string())
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         });
         let read = LatestMountedRouteRead::new_with_request(
@@ -536,11 +548,13 @@ impl Shell {
         );
         {
             let read = Rc::downgrade(&read);
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let query_state = Rc::clone(&query);
-            search.connect_search_changed(move |entry| {
-                let Some(read) = read.upgrade() else { return };
-                let text = entry.text().trim().to_string();
+            search.connect_search_changed(move |search| {
+                let (Some(read), Some(shell)) = (read.upgrade(), shell.upgrade()) else {
+                    return;
+                };
+                let text = search.text().trim().to_string();
                 query_state.replace(text.clone());
                 read.request_with(CollectionReadRequest {
                     query: text,
@@ -549,15 +563,18 @@ impl Shell {
             });
         }
         let resume = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let read = Rc::clone(&read);
             let query = Rc::clone(&query);
             let content = content.clone();
-            let page_shell = page_shell.clone();
+            let page = page.clone();
             Rc::new(move || {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 let settings = shell.settings.current.borrow().library_list(key);
                 content.apply_settings(&settings);
-                page_shell.apply_library_list_settings(key, &settings);
+                page.apply_library_list_settings(key, &settings);
                 read.request_with(CollectionReadRequest {
                     query: query.borrow().clone(),
                     settings,
@@ -567,10 +584,13 @@ impl Shell {
         let favorite_sparse = Rc::clone(&sparse);
         let favorite_read = Rc::clone(&read);
         let favorite_query = Rc::clone(&query);
-        let favorite_shell = Rc::clone(self);
-        page_shell
-            .mounted_route(resume, content.item_navigation())
+        let favorite_shell = Rc::downgrade(self);
+        MountedRoute::new(page.widget(), resume)
+            .with_item_navigation(content.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {
+                let Some(favorite_shell) = favorite_shell.upgrade() else {
+                    return;
+                };
                 let library::FavoriteTarget::Artist(artist) = settlement.target else {
                     return;
                 };
@@ -590,6 +610,7 @@ impl Shell {
     pub(crate) fn library_playlists_route(
         self: &Rc<Self>,
         order: Vec<library::PlaylistKey>,
+        first_rows: Vec<library::PlaylistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::Playlists;
@@ -608,122 +629,45 @@ impl Shell {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = super::sparse_model::SparseRouteModel::new(
-            order,
-            32,
-            selected.runtime.clone(),
-            row_load,
-        );
-        let content = playlist_collection_projection(self, sparse.list_model());
-        let search = gtk::SearchEntry::new();
-        bind_search_placeholder(&search, "Search");
-        let query = Rc::new(RefCell::new(String::new()));
-        let page_shell = self.library_page_shell(LibraryPageShellOptions {
-            key,
-            empty: sparse.len() == 0,
-            empty_body: msgid("Nothing here yet"),
-            search: search.clone(),
-            has_visible_results: {
-                let sparse = Rc::clone(&sparse);
-                Rc::new(move || sparse.len() != 0)
-            },
-            content: content.scrolling_widget(),
-        });
-        let apply = {
-            let shell = Rc::clone(self);
-            let sparse = Rc::clone(&sparse);
-            let content = content.clone();
-            let page_shell = page_shell.clone();
-            Rc::new(
-                move |request: CollectionReadRequest,
-                      result: Result<Vec<library::PlaylistKey>, String>| {
-                    if shell.navigation.routes.borrow().current() != &Route::Playlists {
-                        return;
-                    }
-                    match result {
-                        Ok(order) => {
-                            sparse.replace_order(order);
-                            content.apply_settings(&request.settings);
-                            page_shell.apply_library_list_settings(key, &request.settings);
-                            page_shell.set_empty(sparse.len() == 0);
-                        }
-                        Err(error) => warn!(%error, "failed to refresh Playlist order"),
-                    }
-                },
-            )
-        };
         let order_database = Arc::clone(&database);
-        let load = Arc::new(move |request: CollectionReadRequest| {
-            let database = Arc::clone(&order_database);
-            Box::pin(async move {
-                let cancellation = library::ReadCancellation::new();
-                if request.query.is_empty() {
+        let order_load: NamedOrderLoad<library::PlaylistKey, library::PlaylistRow> =
+            Arc::new(move |request: NamedReadRequest| {
+                let database = Arc::clone(&order_database);
+                Box::pin(async move {
+                    let cancellation = library::ReadCancellation::new();
                     database
-                        .playlist_order(
+                        .playlist_route_page(
                             source,
                             folder,
                             request.settings.sort_key.playlist_sort(),
                             request.settings.descending,
+                            &request.query,
                             &cancellation,
                         )
                         .await
-                } else {
-                    database
-                        .playlist_filter_order(source, folder, &request.query, &cancellation)
-                        .await
-                }
-                .map_err(|error| error.to_string())
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        });
-        let read = LatestMountedRouteRead::new_with_request(
-            selected.runtime.clone(),
-            apply,
-            load,
-            "mounted Playlist route",
-        );
-        {
-            let read = Rc::downgrade(&read);
-            let shell = Rc::clone(self);
-            let query_state = Rc::clone(&query);
-            search.connect_search_changed(move |entry| {
-                let Some(read) = read.upgrade() else { return };
-                let text = entry.text().trim().to_string();
-                query_state.replace(text.clone());
-                read.request_with(CollectionReadRequest {
-                    query: text,
-                    settings: shell.settings.current.borrow().library_list(key),
-                });
+                        .map_err(|error| error.to_string())
+                })
             });
-        }
-        let resume = {
-            let shell = Rc::clone(self);
-            let read = Rc::clone(&read);
-            let query = Rc::clone(&query);
-            let content = content.clone();
-            let page_shell = page_shell.clone();
-            Rc::new(move || {
-                let settings = shell.settings.current.borrow().library_list(key);
-                content.apply_settings(&settings);
-                page_shell.apply_library_list_settings(key, &settings);
-                read.request_with(CollectionReadRequest {
-                    query: query.borrow().clone(),
-                    settings,
-                });
-            })
-        };
-        page_shell.mounted_route(resume, content.item_navigation())
+        self.named_collection_route(
+            Route::Playlists,
+            key,
+            msgid("Nothing here yet"),
+            order,
+            first_rows,
+            |row: &library::PlaylistRow| row.playlist_key,
+            selected,
+            row_load,
+            order_load,
+        )
     }
 
     pub(crate) fn library_smart_playlists_route(
         self: &Rc<Self>,
         order: Vec<library::SmartPlaylistKey>,
+        first_rows: Vec<library::SmartPlaylistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::SmartPlaylists;
-        let settings = self.settings.current.borrow().library_list(key);
-        let now = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
@@ -732,6 +676,9 @@ impl Shell {
             move |keys: Vec<library::SmartPlaylistKey>, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&row_database);
                 Box::pin(async move {
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
                     database
                         .smart_playlist_rows(source, &keys, folder, now, &cancellation)
                         .await
@@ -739,44 +686,46 @@ impl Shell {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = super::sparse_model::SparseRouteModel::new(
-            order,
-            16,
-            selected.runtime.clone(),
-            row_load,
-        );
-        let content = smart_playlist_collection_projection(self, sparse.list_model());
-        let search = gtk::SearchEntry::new();
-        bind_search_placeholder(&search, "Search");
-        let page_shell = self.library_page_shell(LibraryPageShellOptions {
+        let order_database = Arc::clone(&database);
+        let order_load: NamedOrderLoad<library::SmartPlaylistKey, library::SmartPlaylistRow> =
+            Arc::new(move |request: NamedReadRequest| {
+                let database = Arc::clone(&order_database);
+                Box::pin(async move {
+                    let cancellation = library::ReadCancellation::new();
+                    let now = std::time::SystemTime::now()
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
+                    database
+                        .smart_playlist_route_page(
+                            source,
+                            folder,
+                            request.settings.sort_key.smart_playlist_sort(),
+                            request.settings.descending,
+                            now,
+                            &cancellation,
+                        )
+                        .await
+                        .map_err(|error| error.to_string())
+                })
+            });
+        self.named_collection_route(
+            Route::SmartPlaylists,
             key,
-            empty: sparse.len() == 0,
-            empty_body: msgid("No smart playlists yet"),
-            search: search.clone(),
-            has_visible_results: {
-                let sparse = Rc::clone(&sparse);
-                Rc::new(move || sparse.len() != 0)
-            },
-            content: content.scrolling_widget(),
-        });
-        let resume = {
-            let shell = Rc::clone(self);
-            let content = content.clone();
-            let page_shell = page_shell.clone();
-            Rc::new(move || {
-                let settings = shell.settings.current.borrow().library_list(key);
-                content.apply_settings(&settings);
-                page_shell.apply_library_list_settings(key, &settings);
-            })
-        };
-        let _ = settings;
-        page_shell.mounted_route(resume, content.item_navigation())
+            msgid("No smart playlists yet"),
+            order,
+            first_rows,
+            |row: &library::SmartPlaylistRow| row.smart_playlist_key,
+            selected,
+            row_load,
+            order_load,
+        )
     }
 
     pub(crate) fn searchable_track_collection(
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         key: LibraryListKey,
         options: SearchableTrackOptions,
     ) -> TrackListProjection {
@@ -790,15 +739,17 @@ impl Shell {
             Arc::clone(&selected.database),
             selected.runtime.clone(),
             order,
+            first_rows,
             settings.clone(),
         );
         if let Some(on_visible_count_changed) = options.on_visible_count_changed.as_ref() {
             on_visible_count_changed(model.visible_count());
         }
-        let search = gtk::SearchEntry::new();
+        let persistent_search = options.search.is_some();
+        let search = options.search.unwrap_or_else(gtk::SearchEntry::new);
         bind_search_placeholder(&search, "Search");
         search.set_hexpand(true);
-        {
+        if !persistent_search {
             let model = model.clone();
             let on_visible_count_changed = options.on_visible_count_changed.clone();
             search.connect_search_changed(move |entry| {
@@ -835,23 +786,28 @@ impl Shell {
         favorites_only: bool,
     ) -> MountedRoute {
         let key = options.key;
-        let visible_model = projection.model.clone();
-        let page_shell = self.library_page_shell(LibraryPageShellOptions {
+        let page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: projection.source_is_empty(),
             empty_body: options.empty_body,
             search: projection.search(),
-            has_visible_results: Rc::new(move || visible_model.visible_count() != 0),
+            has_visible_results: {
+                let model = projection.model.clone();
+                Rc::new(move || model.visible_count() != 0)
+            },
             content: projection.scrolling_widget(),
         });
         let apply = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let projection = projection.clone();
-            let page_shell = page_shell.clone();
+            let page = page.clone();
             let route = options.route.clone();
             let source_key = selected.source_key;
             let epoch = selected.source_session_epoch;
             Rc::new(move |_request: TrackRouteReadRequest, result| {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 if shell.navigation.routes.borrow().current() != &route
                     || !shell.selected_library().as_deref().is_some_and(|selected| {
                         selected.source_key == source_key && selected.source_session_epoch == epoch
@@ -867,7 +823,7 @@ impl Shell {
                     }
                 };
                 if projection.replace_prepared(prepared) {
-                    page_shell.set_empty(projection.source_is_empty());
+                    page.set_empty(projection.source_is_empty());
                 }
             })
         };
@@ -878,9 +834,9 @@ impl Shell {
             let database = Arc::clone(&database);
             Box::pin(async move {
                 let cancellation = library::ReadCancellation::new();
-                let order = if options.history {
+                let page = if options.history {
                     database
-                        .history_track_order(
+                        .history_track_page(
                             source_key,
                             folder,
                             &request.tracks.query,
@@ -889,7 +845,7 @@ impl Shell {
                         .await
                 } else {
                     database
-                        .track_route_order(
+                        .track_route_page(
                             source_key,
                             folder,
                             favorites_only,
@@ -902,7 +858,8 @@ impl Shell {
                 }
                 .map_err(|error| error.to_string())?;
                 Ok::<PreparedTrackProjection, String>(PreparedTrackProjection {
-                    order,
+                    order: page.order,
+                    first_rows: page.first_rows,
                     request: request.tracks,
                 })
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -923,14 +880,17 @@ impl Shell {
             });
         }
         let resume = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let projection = projection.clone();
-            let page_shell = page_shell.clone();
+            let page = page.clone();
             let read = Rc::clone(&read);
             Rc::new(move || {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 let settings = shell.settings.current.borrow().library_list(key);
                 projection.apply_library_list_settings(key, &settings);
-                page_shell.apply_library_list_settings(key, &settings);
+                page.apply_library_list_settings(key, &settings);
                 read.request_with(TrackRouteReadRequest {
                     tracks: projection.projection_request(),
                 });
@@ -938,8 +898,8 @@ impl Shell {
         };
         let favorite_projection = projection.clone();
         let favorite_read = Rc::clone(&read);
-        page_shell
-            .mounted_route(resume, projection.item_navigation())
+        MountedRoute::new(page.widget(), resume)
+            .with_item_navigation(projection.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let library::FavoriteTarget::Track(track) = settlement.target else {
                     return;

@@ -1,0 +1,31 @@
+id: notify-outside-refcell-owner-borrow
+valid:
+  - |
+      fn accept(model: Model) {
+          let updates = model.with_typed_mut::<Key, Row, _>(|state| {
+              state.collect_updates()
+          });
+          for (item, value) in updates {
+              item.replace(value, true);
+          }
+      }
+  - |
+      fn accept(model: Model) {
+          model.with_typed_mut::<Key, Row, _>(|state| {
+              state.rows.insert(1, Row::default());
+          });
+      }
+invalid:
+  - |
+      fn accept(model: Model) {
+          model.with_typed_mut::<Key, Row, _>(|state| {
+              let item = state.item();
+              item.replace(Row::default(), true);
+          });
+      }
+  - |
+      fn accept(model: Model) {
+          model.with_state_mut(|state| {
+              state.current.replace(Some(1));
+          });
+      }

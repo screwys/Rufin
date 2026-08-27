@@ -154,8 +154,9 @@ impl NamedDetailSummary {
         match self {
             Self::Genre(row) => row
                 .artwork_binding
-                .iter()
-                .chain(&row.representative_artwork)
+                .as_ref()
+                .or_else(|| row.representative_artwork.first())
+                .into_iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
             Self::Mood(row) => row
@@ -180,6 +181,7 @@ impl Shell {
         id: NamedDetailId,
         summary: Option<NamedDetailSummary>,
         order: Vec<library::TrackKey>,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let Some(summary) = summary else {
@@ -205,15 +207,17 @@ impl Shell {
             context_menu,
             selected: selected.clone(),
             tracks: order,
+            first_rows,
             play_order: None,
             table_context: id.table_context(),
             playback_context: id.context_id(),
             play_label: id.play_label(),
         });
+        let tracks = Rc::new(grouped.tracks().clone());
         let lane = Rc::new(NamedOrderLane::new());
         {
             let shell = Rc::downgrade(self);
-            let projection = grouped.tracks().clone();
+            let projection = Rc::downgrade(&tracks);
             let selected = selected.clone();
             let lane = Rc::clone(&lane);
             grouped.tracks().connect_search_request(move |request| {
@@ -229,7 +233,7 @@ impl Shell {
         }
         let resume = {
             let shell = Rc::downgrade(self);
-            let projection = grouped.tracks().clone();
+            let projection = Rc::clone(&tracks);
             let selected = selected.clone();
             let lane = Rc::clone(&lane);
             Rc::new(move || {
@@ -240,7 +244,7 @@ impl Shell {
                 projection.apply_library_list_settings(id.key(), &settings);
                 request_named_order(
                     Rc::downgrade(&shell),
-                    projection.clone(),
+                    Rc::downgrade(&projection),
                     selected.clone(),
                     id,
                     projection.projection_request(),
@@ -254,7 +258,7 @@ impl Shell {
 
 fn request_named_order(
     shell: std::rc::Weak<Shell>,
-    projection: super::routes::TrackListProjection,
+    projection: std::rc::Weak<super::routes::TrackListProjection>,
     selected: crate::runtime::SelectedLibrary,
     id: NamedDetailId,
     request: TrackProjectionRequest,
@@ -271,12 +275,28 @@ fn request_named_order(
         match id {
             NamedDetailId::Genre(key) => {
                 database
-                    .genre_track_order(source, key, folder, &query, sort, descending, &cancellation)
+                    .genre_track_route_page(
+                        source,
+                        key,
+                        folder,
+                        &query,
+                        sort,
+                        descending,
+                        &cancellation,
+                    )
                     .await
             }
             NamedDetailId::Mood(key) => {
                 database
-                    .mood_track_order(source, key, folder, &query, sort, descending, &cancellation)
+                    .mood_track_route_page(
+                        source,
+                        key,
+                        folder,
+                        &query,
+                        sort,
+                        descending,
+                        &cancellation,
+                    )
                     .await
             }
         }
@@ -285,12 +305,19 @@ fn request_named_order(
         let Some(shell) = shell.upgrade() else {
             return;
         };
-        let order = task.await.ok().and_then(Result::ok);
+        let page = task.await.ok().and_then(Result::ok);
+        let Some(projection) = projection.upgrade() else {
+            return;
+        };
         if !lane.finish(generation) || shell.navigation.routes.borrow().current() != &id.route() {
             return;
         }
-        if let Some(order) = order {
-            projection.replace_prepared(PreparedTrackProjection { order, request });
+        if let Some(page) = page {
+            projection.replace_prepared(PreparedTrackProjection {
+                order: page.order,
+                first_rows: page.first_rows,
+                request,
+            });
         }
     });
 }
@@ -302,7 +329,7 @@ pub(crate) async fn load_named_detail(
     id: NamedDetailId,
     settings: &LibraryListSettings,
     cancellation: &ReadCancellation,
-) -> Result<(Option<NamedDetailSummary>, Vec<library::TrackKey>), String> {
+) -> Result<(Option<NamedDetailSummary>, library::TrackRoutePage), String> {
     let sort = settings.sort_key.track_sort();
     let descending = settings.descending;
     match id {
@@ -324,11 +351,11 @@ pub(crate) async fn load_named_detail(
             } else {
                 None
             };
-            let order = database
-                .genre_track_order(source, key, folder, "", sort, descending, cancellation)
+            let page = database
+                .genre_track_route_page(source, key, folder, "", sort, descending, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok((detail, order))
+            Ok((detail, page))
         }
         NamedDetailId::Mood(key) => {
             let detail = database
@@ -348,11 +375,11 @@ pub(crate) async fn load_named_detail(
             } else {
                 None
             };
-            let order = database
-                .mood_track_order(source, key, folder, "", sort, descending, cancellation)
+            let page = database
+                .mood_track_route_page(source, key, folder, "", sort, descending, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
-            Ok((detail, order))
+            Ok((detail, page))
         }
     }
 }

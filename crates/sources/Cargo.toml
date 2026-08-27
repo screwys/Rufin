@@ -1,5 +1,6 @@
 [package]
 name = "sources"
+autotests = false
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

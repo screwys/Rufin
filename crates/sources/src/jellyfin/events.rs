@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 use super::*;
 use crate::JellyfinLiveChange;
+use crate::source::LIVE_CHANGE_LIMIT;
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
 const JELLYFIN_WEBSOCKET_KEY_BYTES: usize = 16;
@@ -74,8 +75,15 @@ impl JellyfinSource {
         on_change: &mut (dyn FnMut(JellyfinLiveChange) -> bool + Send),
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
+        let mut boundary_established = false;
+        let mut gap_reported = false;
         loop {
-            let keep_listening = match self.listen_library_changes_once(on_ready, on_change).await {
+            let ready = &mut || {
+                boundary_established = true;
+                gap_reported = false;
+                on_ready()
+            };
+            let keep_listening = match self.listen_library_changes_once(ready, on_change).await {
                 Ok(keep_listening) => keep_listening,
                 Err(error) => {
                     warn!(%error, "Jellyfin library change feed disconnected");
@@ -85,8 +93,11 @@ impl JellyfinSource {
             if !keep_listening {
                 return Ok(());
             }
-            if !on_gap() {
-                return Ok(());
+            if boundary_established && !gap_reported {
+                gap_reported = true;
+                if !on_gap() {
+                    return Ok(());
+                }
             }
             sleep(delay).await;
             delay = delay.saturating_mul(2).min(FEED_RETRY_MAX);
@@ -192,7 +203,11 @@ fn library_socket_message(text: &str) -> SourceResult<JellyfinSocketMessage> {
             let mut removals = data.items_removed;
             removals.sort();
             removals.dedup();
-            if upserts.is_empty() && removals.is_empty() && folder_change {
+            if upserts.len().saturating_add(removals.len()) > LIVE_CHANGE_LIMIT {
+                Ok(JellyfinSocketMessage::Change(
+                    JellyfinLiveChange::BoundaryLost,
+                ))
+            } else if upserts.is_empty() && removals.is_empty() && folder_change {
                 Ok(JellyfinSocketMessage::Change(
                     JellyfinLiveChange::BoundaryLost,
                 ))
@@ -303,5 +318,22 @@ mod tests {
         .expect("parse message");
 
         assert_eq!(message, JellyfinSocketMessage::Other);
+    }
+
+    #[test]
+    fn source_sized_item_evidence_loses_the_exact_boundary() {
+        let ids = (0..=LIVE_CHANGE_LIMIT)
+            .map(|index| format!(r#""item-{index}""#))
+            .collect::<Vec<_>>()
+            .join(",");
+        let message = library_socket_message(&format!(
+            r#"{{"MessageType":"LibraryChanged","Data":{{"ItemsUpdated":[{ids}]}}}}"#
+        ))
+        .expect("parse message");
+
+        assert_eq!(
+            message,
+            JellyfinSocketMessage::Change(JellyfinLiveChange::BoundaryLost)
+        );
     }
 }

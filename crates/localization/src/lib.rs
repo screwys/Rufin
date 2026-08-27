@@ -752,7 +752,7 @@ fn locale_dir() -> PathBuf {
         }
     }
 
-    PathBuf::from("crates/localization/locales")
+    PathBuf::from("locales")
 }
 
 fn locale_dir_candidates() -> Vec<PathBuf> {
@@ -764,7 +764,7 @@ fn locale_dir_candidates() -> Vec<PathBuf> {
         candidates.push(path);
     }
     if let Some(manifest_dir) = option_env!("CARGO_MANIFEST_DIR") {
-        candidates.push(PathBuf::from(manifest_dir).join("locales"));
+        candidates.push(PathBuf::from(manifest_dir).join("../../locales"));
     }
     if let Ok(exe) = env::current_exe()
         && let Some(exe_dir) = exe.parent()
@@ -773,7 +773,7 @@ fn locale_dir_candidates() -> Vec<PathBuf> {
         candidates.push(exe_dir.join("../share/locale"));
         candidates.push(exe_dir.join("../Resources/share/locale"));
     }
-    candidates.push(PathBuf::from("crates/localization/locales"));
+    candidates.push(PathBuf::from("locales"));
     candidates
 }
 

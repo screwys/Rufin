@@ -22,11 +22,11 @@ mod smart_playlists;
 mod tracks;
 
 pub use activity::{
-    ActivityAlbumRow, ActivityArtistRow, ActivityBaseline, ActivityGenreRow, ActivityHistoryRow,
-    ActivityPeriod, ActivityTrackRow, CalendarActivityPeriod, CalendarActivitySummary,
-    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
+    ActivityAlbumRow, ActivityArtistRow, ActivityGenreRow, ActivityHistoryRow, ActivityTrackRow,
+    CalendarActivityPeriod, CalendarActivitySummary, ListenDeliveryTarget, ListenWrite,
+    PendingListenDelivery,
 };
-pub use artwork::{ArtworkPreparationPage, LocalAlbumArtworkCandidate, LocalArtworkObservation};
+pub use artwork::LocalAlbumArtworkInput;
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
@@ -34,7 +34,7 @@ pub use collections::{
     GenreSort, MoodDetail, MoodRow, MoodSort,
 };
 pub use db::{Database, ReadCancellation};
-pub use favorites::{FavoriteTarget, PendingFavorite};
+pub use favorites::FavoriteTarget;
 pub use home::{
     HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage, HomeProviderSection,
     HomeSectionRows, HomeShowcaseRow, HomeTrackRow,
@@ -51,11 +51,12 @@ pub use local::{
 pub use loudness::{AlbumLoudnessTrack, AlbumLoudnessWork, LoudnessMeasurement, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
 pub use playlists::{
-    PlaylistEntryRow, PlaylistEntrySort, PlaylistGenreLink, PlaylistRow, PlaylistSort,
+    PlaylistEntryOrder, PlaylistEntryRow, PlaylistEntrySort, PlaylistGenreLink, PlaylistRow,
+    PlaylistSort,
 };
 pub use queue::{
-    QueueCompactOccurrence, QueueCurrentNext, QueueMedia, QueuePageRow, QueueProvenance,
-    QueueRepeatMode, QueueRestore, QueueState,
+    QueueCompactOccurrence, QueueMedia, QueuePageRow, QueueProvenance, QueueRepeatMode,
+    QueueRestore,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{CachedSource, Freshness, Publication, Scan, ScanLink, ScanOutcome};
@@ -66,7 +67,7 @@ pub use smart_playlists::{
     SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
 };
 pub use tracks::{
-    TrackArtistLink, TrackDetail, TrackGenreLink, TrackMetadataWrite, TrackRow, TrackSort,
+    TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackRoutePage, TrackRow, TrackSort,
 };
 
 use thiserror::Error;

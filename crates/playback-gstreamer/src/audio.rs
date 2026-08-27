@@ -5,8 +5,8 @@ use gstreamer as gst;
 use gstreamer_app as gst_app;
 use playback::TrackLoudness;
 use playback::{
-    AudioOutput, BackendAudioSettings, EQUALIZER_BAND_COUNT, EqualizerSettings,
-    LOUDNESS_NORMALIZATION_TARGET_LUFS, LoudnessNormalizationMode,
+    AudioOutput, BackendAudioSettings, DEFAULT_PLAYBACK_RATE, EQUALIZER_BAND_COUNT,
+    EqualizerSettings, LOUDNESS_NORMALIZATION_TARGET_LUFS, LoudnessNormalizationMode,
 };
 use std::collections::HashSet;
 use std::sync::{Arc, Mutex};
@@ -22,15 +22,17 @@ const EQUALIZER_DUMMY_HIGH_FREQUENCY: f64 = 20_000.0;
 struct AudioGraphConfig {
     loudness_normalization: LoudnessNormalizationMode,
     audio_output: Option<String>,
-    preserve_pitch: bool,
+    equalizer_enabled: bool,
+    tempo_enabled: bool,
 }
 
 impl AudioGraphConfig {
-    fn new(settings: &BackendAudioSettings) -> Self {
+    fn new(settings: &BackendAudioSettings, playback_rate: f64) -> Self {
         Self {
             loudness_normalization: settings.loudness_normalization,
             audio_output: settings.audio_output.clone(),
-            preserve_pitch: settings.preserve_pitch,
+            equalizer_enabled: settings.equalizer.enabled,
+            tempo_enabled: tempo_enabled(settings, playback_rate),
         }
     }
 }
@@ -39,13 +41,13 @@ pub(super) struct AudioGraph {
     root: gst::Element,
     config: AudioGraphConfig,
     output: gst::Element,
-    equalizer: gst::Element,
+    equalizer: Option<gst::Element>,
     loudness_tags: Option<LoudnessTags>,
     visualizer_pad: Option<gst::Pad>,
 }
 
 impl AudioGraph {
-    pub(super) fn new(settings: &BackendAudioSettings) -> Result<Self, String> {
+    pub(super) fn new(settings: &BackendAudioSettings, playback_rate: f64) -> Result<Self, String> {
         let normalizes_loudness = settings.loudness_normalization != LoudnessNormalizationMode::Off;
         let bin = gst::Bin::new();
         let convert_in = make_element("audioconvert", "rufin-audio-convert-in")?;
@@ -56,10 +58,17 @@ impl AudioGraph {
         configure_test_output(&output);
         let mut elements = vec![convert_in.clone()];
 
-        let equalizer = make_element("equalizer-nbands", "rufin-equalizer")?;
-        equalizer.set_property("num-bands", (EQUALIZER_BAND_COUNT + 2) as u32);
-        configure_equalizer(&equalizer, &settings.equalizer);
-        elements.push(equalizer.clone());
+        let equalizer = settings
+            .equalizer
+            .enabled
+            .then(|| {
+                let equalizer = make_element("equalizer-nbands", "rufin-equalizer")?;
+                equalizer.set_property("num-bands", (EQUALIZER_BAND_COUNT + 2) as u32);
+                configure_equalizer(&equalizer, &settings.equalizer);
+                elements.push(equalizer.clone());
+                Ok::<_, String>(equalizer)
+            })
+            .transpose()?;
 
         let mut loudness_tags = None;
         if normalizes_loudness {
@@ -75,7 +84,7 @@ impl AudioGraph {
             elements.push(rgvolume);
         }
 
-        if settings.preserve_pitch {
+        if tempo_enabled(settings, playback_rate) {
             let scaletempo = make_element("scaletempo", "rufin-playback-rate")?;
             elements.push(scaletempo);
         }
@@ -103,7 +112,7 @@ impl AudioGraph {
 
         Ok(Self {
             root: bin.upcast(),
-            config: AudioGraphConfig::new(settings),
+            config: AudioGraphConfig::new(settings, playback_rate),
             output,
             equalizer,
             loudness_tags,
@@ -115,10 +124,15 @@ impl AudioGraph {
         &self.root
     }
 
-    pub(super) fn reconfigure(&mut self, settings: &BackendAudioSettings) -> Result<bool, String> {
-        let config = AudioGraphConfig::new(settings);
+    pub(super) fn reconfigure(
+        &mut self,
+        settings: &BackendAudioSettings,
+        playback_rate: f64,
+    ) -> Result<bool, String> {
+        let config = AudioGraphConfig::new(settings, playback_rate);
         if self.config.loudness_normalization != config.loudness_normalization
-            || self.config.preserve_pitch != config.preserve_pitch
+            || self.config.equalizer_enabled != config.equalizer_enabled
+            || self.config.tempo_enabled != config.tempo_enabled
         {
             return Ok(false);
         }
@@ -159,8 +173,14 @@ impl AudioGraph {
     }
 
     fn apply_equalizer(&self, settings: &EqualizerSettings) {
-        configure_equalizer(&self.equalizer, settings);
+        if let Some(equalizer) = self.equalizer.as_ref() {
+            configure_equalizer(equalizer, settings);
+        }
     }
+}
+
+fn tempo_enabled(settings: &BackendAudioSettings, playback_rate: f64) -> bool {
+    settings.preserve_pitch && (playback_rate - DEFAULT_PLAYBACK_RATE).abs() > f64::EPSILON
 }
 
 #[cfg(test)]
@@ -705,11 +725,16 @@ mod tests {
             audio_output: Some("pulsesink".to_string()),
             ..BackendAudioSettings::default()
         };
-        let mut graph = AudioGraph::new(&settings).expect("Pulse output graph");
+        let mut graph =
+            AudioGraph::new(&settings, DEFAULT_PLAYBACK_RATE).expect("Pulse output graph");
         let mut changed = settings;
         changed.audio_output = Some(audio_output_device_id("alsa_output.selected"));
 
-        assert!(graph.reconfigure(&changed).expect("retarget output"));
+        assert!(
+            graph
+                .reconfigure(&changed, DEFAULT_PLAYBACK_RATE)
+                .expect("retarget output")
+        );
         assert_eq!(
             graph
                 .output
@@ -743,6 +768,31 @@ mod tests {
     }
 
     #[test]
+    fn disabled_equalizer_is_absent_and_enabling_replaces_the_audio_graph() {
+        initialize_gstreamer();
+        let disabled = BackendAudioSettings {
+            audio_output: Some("fakesink".to_string()),
+            ..BackendAudioSettings::default()
+        };
+        let mut graph = AudioGraph::new(&disabled, DEFAULT_PLAYBACK_RATE)
+            .expect("audio graph without equalizer");
+        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        assert!(bin.by_name("rufin-equalizer").is_none());
+
+        let mut enabled = disabled;
+        enabled.equalizer.enabled = true;
+        assert!(
+            !graph
+                .reconfigure(&enabled, DEFAULT_PLAYBACK_RATE)
+                .expect("equalizer activation boundary")
+        );
+        let graph =
+            AudioGraph::new(&enabled, DEFAULT_PLAYBACK_RATE).expect("audio graph with equalizer");
+        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        assert!(bin.by_name("rufin-equalizer").is_some());
+    }
+
+    #[test]
     fn track_normalization_disables_album_mode_without_a_limiter() {
         initialize_gstreamer();
         let settings = BackendAudioSettings {
@@ -751,7 +801,8 @@ mod tests {
             ..BackendAudioSettings::default()
         };
 
-        let graph = AudioGraph::new(&settings).expect("track normalization graph");
+        let graph =
+            AudioGraph::new(&settings, DEFAULT_PLAYBACK_RATE).expect("track normalization graph");
         let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
         let rgvolume = bin
             .by_name("rufin-loudness-normalization")
@@ -769,7 +820,12 @@ mod tests {
             preserve_pitch: true,
             ..BackendAudioSettings::default()
         };
-        let mut graph = AudioGraph::new(&enabled).expect("pitch-preserving audio graph");
+        let graph =
+            AudioGraph::new(&enabled, DEFAULT_PLAYBACK_RATE).expect("normal-speed audio graph");
+        let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
+        assert!(bin.by_name("rufin-playback-rate").is_none());
+
+        let mut graph = AudioGraph::new(&enabled, 1.25).expect("pitch-preserving audio graph");
         let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
         assert!(bin.by_name("rufin-playback-rate").is_some());
 
@@ -779,10 +835,10 @@ mod tests {
         };
         assert!(
             !graph
-                .reconfigure(&disabled)
+                .reconfigure(&disabled, 1.25)
                 .expect("pitch preservation configuration change")
         );
-        let graph = AudioGraph::new(&disabled).expect("pitch-shifting audio graph");
+        let graph = AudioGraph::new(&disabled, 1.25).expect("pitch-shifting audio graph");
         let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
         assert!(bin.by_name("rufin-playback-rate").is_none());
     }
@@ -795,7 +851,8 @@ mod tests {
             audio_output: Some("fakesink".to_string()),
             ..BackendAudioSettings::default()
         };
-        let graph = AudioGraph::new(&settings).expect("album normalization graph");
+        let graph =
+            AudioGraph::new(&settings, DEFAULT_PLAYBACK_RATE).expect("album normalization graph");
         graph.apply_loudness(&TrackLoudness {
             track: Some(measurement(-21.0, Some(0.4))),
             album: Some(measurement(-23.0, Some(0.8))),
@@ -859,7 +916,7 @@ mod tests {
             audio_output: Some("fakesink".to_string()),
             ..BackendAudioSettings::default()
         };
-        let graph = AudioGraph::new(&settings).expect("normalization graph");
+        let graph = AudioGraph::new(&settings, DEFAULT_PLAYBACK_RATE).expect("normalization graph");
         graph.apply_loudness(&TrackLoudness {
             track: Some(measurement(-23.0, Some(0.1))),
             album: None,

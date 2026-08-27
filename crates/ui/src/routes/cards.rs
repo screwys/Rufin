@@ -583,9 +583,12 @@ impl CoverHoverControls {
         let transport_for_leave = self.transport.clone();
         let favorite_for_leave = self.favorite.clone();
         let menu_for_leave = self.menu.clone();
-        let overlay_for_leave = overlay.clone();
+        let overlay_for_leave = overlay.downgrade();
         motion.connect_leave(move |_| {
-            if overlay_for_leave.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS) {
+            if overlay_for_leave
+                .upgrade()
+                .is_some_and(|overlay| overlay.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS))
+            {
                 return;
             }
             shade_for_leave.set_visible(false);

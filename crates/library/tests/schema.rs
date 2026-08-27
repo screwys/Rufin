@@ -72,13 +72,13 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
 }
 
 #[tokio::test]
-async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
+async fn schema_40_store_migrates_to_released_schema_41() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     create_released_store(&path).await;
     let database = Database::open(&path)
         .await
-        .expect("automatically repair and open released Store");
+        .expect("migrate and open released Store");
     assert!(
         std::fs::read_dir(directory.path())
             .expect("read Store directory")
@@ -86,8 +86,8 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
             .any(|entry| entry
                 .file_name()
                 .to_string_lossy()
-                .starts_with("library.sqlite3.recovered-")),
-        "automatic repair preserves the released Store beside the final Store"
+                .starts_with("library.sqlite3.schema-40-")),
+        "migration preserves the schema-40 Store beside schema 41"
     );
     let mut reader = connection(&path, false).await;
     assert_eq!(
@@ -113,6 +113,60 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         .await
         .expect("read recovered user facts"),
         (1, 80)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT first_seen_at FROM tracks WHERE object_id='released-track'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read migrated first-seen fact"),
+        50
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, String, i64)>(
+            "SELECT playlist.name, playlist.ownership, count(entry.playlist_entry_key)
+             FROM playlists AS playlist
+             LEFT JOIN playlist_entries AS entry USING (playlist_key)
+             GROUP BY playlist.playlist_key ORDER BY playlist.ownership"
+        )
+        .fetch_all(&mut reader)
+        .await
+        .expect("read migrated source and user Playlists"),
+        [
+            ("Source List".to_string(), "source".to_string(), 1),
+            ("User List".to_string(), "user".to_string(), 2),
+        ]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>(
+            "SELECT playlist_entries.object_id FROM playlist_entries
+             JOIN playlists USING (playlist_key)
+             WHERE playlists.object_id='user-list' ORDER BY position"
+        )
+        .fetch_all(&mut reader)
+        .await
+        .expect("read migrated duplicate Playlist occurrences"),
+        [
+            "user-occurrence-one".to_string(),
+            "user-occurrence-two".to_string()
+        ]
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT object_id FROM smart_playlists")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read migrated Smart Playlist"),
+        "smart-list"
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64, i64)>(
+            "SELECT favorite,attempts,next_attempt_at FROM favorite_outbox"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read migrated Favorite outbox"),
+        (1, 2, 200)
     );
     assert_eq!(
         sqlx::query_as::<_, (Option<String>, Option<String>)>(
@@ -142,6 +196,13 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         .expect("query recovered calendar Activity");
     assert_eq!(month.tracks[0].play_count, 3);
     assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read intentionally fresh schema-41 Queue"),
+        0
+    );
+    assert_eq!(
         sqlx::query_scalar::<_, i64>(
             "SELECT count(*) FROM home_entries WHERE source_key=1 AND section_id='most-played'"
         )
@@ -149,80 +210,6 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         .await
         .expect("read recovered Home"),
         1
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (String, i64, i64, String, Option<String>, Option<i64>)>(
-            "SELECT object_id, position, traversal_position, provenance_kind,
-                    provenance_context_id, provenance_source_rank
-             FROM queue_occurrences ORDER BY position",
-        )
-        .fetch_all(&mut reader)
-        .await
-        .expect("read recovered queue orders and provenance"),
-        [
-            (
-                "occ-context".to_string(),
-                0,
-                1,
-                "context".to_string(),
-                Some("route-album".to_string()),
-                Some(7),
-            ),
-            (
-                "occ-auto".to_string(),
-                1,
-                0,
-                "auto-dj".to_string(),
-                None,
-                None,
-            ),
-        ]
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (String, i64)>(
-            "SELECT occurrence.object_id, state.shuffled
-             FROM queue_state AS state
-             JOIN queue_occurrences AS occurrence
-               ON occurrence.queue_occurrence_key=state.current_occurrence_key",
-        )
-        .fetch_one(&mut reader)
-        .await
-        .expect("read recovered selected shuffled occurrence"),
-        ("occ-context".to_string(), 1)
-    );
-    let source_key = sqlx::query_scalar::<_, i64>(
-        "SELECT source_key FROM sources WHERE object_id='released-source'",
-    )
-    .fetch_one(&mut reader)
-    .await
-    .expect("read recovered source key");
-    let canonical_plan = sqlx::query_as::<_, (i64, i64, i64, String)>(
-        "EXPLAIN QUERY PLAN
-         SELECT queue_occurrence_key FROM queue_occurrences
-         WHERE source_key=?1 ORDER BY position",
-    )
-    .bind(source_key)
-    .fetch_one(&mut reader)
-    .await
-    .expect("read canonical queue plan")
-    .3;
-    assert!(
-        canonical_plan.contains("queue_occurrences_page_idx"),
-        "{canonical_plan}"
-    );
-    let traversal_plan = sqlx::query_as::<_, (i64, i64, i64, String)>(
-        "EXPLAIN QUERY PLAN
-         SELECT queue_occurrence_key FROM queue_occurrences
-         WHERE source_key=?1 ORDER BY traversal_position",
-    )
-    .bind(source_key)
-    .fetch_one(&mut reader)
-    .await
-    .expect("read traversal queue plan")
-    .3;
-    assert!(
-        traversal_plan.contains("queue_occurrences_traversal_idx"),
-        "{traversal_plan}"
     );
     assert_eq!(
         sqlx::query_as::<
@@ -262,21 +249,6 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         )
     );
     assert_eq!(
-        sqlx::query_as::<_, (Option<String>, Option<String>, Option<Vec<u8>>)>(
-            "SELECT fallback_album_object_id, fallback_primary_artist_object_id,
-                    fallback_artwork_binding
-             FROM queue_occurrences WHERE object_id='occ-context'",
-        )
-        .fetch_one(&mut reader)
-        .await
-        .expect("read recovered queue identity and Local artwork fallback"),
-        (
-            Some("released-album".to_string()),
-            Some("released-artist".to_string()),
-            Some(br#"{"File":{"path":"/music/local-cover.jpg","revision":"released"}}"#.to_vec(),),
-        )
-    );
-    assert_eq!(
         sqlx::query_as::<_, (String, String, String, String, i64)>(
             "SELECT album.date_added, album.musicbrainz_release_id,
                     album.musicbrainz_release_group_id,
@@ -304,6 +276,26 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         serde_json::from_slice::<serde_json::Value>(&genre_binding)
             .expect("decode recovered native artwork binding"),
         serde_json::json!({"item_id":"genre-image","tag":"genre-tag"})
+    );
+    let (album_binding, track_binding, artist_binding) =
+        sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>)>(
+            "SELECT album.artwork_binding,track.artwork_binding,artist.artwork_binding
+             FROM albums album,tracks track,artists artist",
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read recovered Local artwork bindings");
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&album_binding).expect("Album artwork"),
+        serde_json::json!({"File":{"path":"/music/cover.jpg","revision":"album-rev"}})
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&track_binding).expect("Track artwork"),
+        serde_json::json!({"Embedded":{"path":"/music/track.flac","picture_index":2,"revision":"track-rev"}})
+    );
+    assert_eq!(
+        serde_json::from_slice::<serde_json::Value>(&artist_binding).expect("Artist artwork"),
+        serde_json::json!({"File":{"path":"/music/artist.jpg","revision":"artist-rev"}})
     );
     assert_eq!(
         sqlx::query_as::<_, (String, String, String, String, String)>(
@@ -340,54 +332,11 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         ["Remix".to_string()]
     );
     assert_eq!(
-        sqlx::query_as::<
-            _,
-            (
-                i64,
-                i64,
-                i64,
-                i64,
-                i64,
-                Option<String>,
-                String,
-                String,
-                String,
-                i64,
-                i64
-            ),
-        >(
-            "SELECT fallback_duration_millis, fallback_disc_number,
-                    fallback_track_number, fallback_year, fallback_favorite,
-                    fallback_media_uri,
-                    fallback_source_format, fallback_musicbrainz_recording_id,
-                    fallback_cue_path, fallback_cue_start_millis,
-                    fallback_cue_end_millis
-             FROM queue_occurrences WHERE object_id='occ-context'",
-        )
-        .fetch_one(&mut reader)
-        .await
-        .expect("read recovered queue fallback"),
-        (
-            180000,
-            1,
-            1,
-            2024,
-            1,
-            None,
-            "FLAC".to_string(),
-            "recording-id".to_string(),
-            "/music/album.cue".to_string(),
-            1000,
-            181000,
-        )
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64, i64)>(
+        sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
             "SELECT
                  (SELECT count(*) FROM album_artists),
                  (SELECT count(*) FROM track_moods),
                  (SELECT count(*) FROM album_release_types),
-                 (SELECT count(*) FROM queue_occurrences),
                  (SELECT count(*) FROM local_file_dependencies),
                  (SELECT count(*) FROM local_access_files),
                  (SELECT count(*) FROM listen_outbox)",
@@ -395,7 +344,7 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
         .fetch_one(&mut reader)
         .await
         .expect("read recovered families"),
-        (1, 1, 1, 2, 1, 1, 1)
+        (1, 1, 1, 1, 1, 1)
     );
     assert_eq!(
         sqlx::query_as::<_, (f64, Option<f64>)>(
@@ -463,6 +412,84 @@ async fn released_store_is_preserved_and_salvaged_into_fresh_schema() {
 }
 
 #[tokio::test]
+async fn failed_schema_40_migration_restores_the_original_store() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    create_released_store(&path).await;
+    let mut released = connection(&path, false).await;
+    sqlx::query("UPDATE tracks SET duration_seconds=-1 WHERE track_id='released-track'")
+        .execute(&mut released)
+        .await
+        .expect("make one schema-40 value invalid for schema 41");
+    released.close().await.expect("close schema-40 fixture");
+
+    assert!(
+        Database::open(&path).await.is_err(),
+        "invalid copied data must roll back the migration"
+    );
+
+    let mut restored = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut restored)
+            .await
+            .expect("read restored schema version"),
+        40
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT duration_seconds FROM tracks WHERE track_id='released-track'"
+        )
+        .fetch_one(&mut restored)
+        .await
+        .expect("read restored schema-40 Track"),
+        -1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='sources'"
+        )
+        .fetch_one(&mut restored)
+        .await
+        .expect("check for partial schema-41 tables"),
+        0
+    );
+}
+
+#[tokio::test]
+async fn recognizable_released_store_salvages_readable_families_independently() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    create_released_store(&path).await;
+    let mut released = connection(&path, false).await;
+    sqlx::query("DROP TABLE genres")
+        .execute(&mut released)
+        .await
+        .expect("remove one released family");
+    released.close().await.expect("close partial Store");
+
+    let database = Database::open(&path)
+        .await
+        .expect("salvage recognizable partial released Store");
+    let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read salvaged source family"),
+        1
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read salvaged Track family"),
+        1
+    );
+    drop(database);
+}
+
+#[tokio::test]
 async fn not_a_database_is_preserved_and_rebuilt_automatically() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
@@ -498,6 +525,8 @@ async fn create_released_store(path: &Path) {
              year INTEGER, release_date TEXT, date_added TEXT,
              musicbrainz_release_id TEXT, musicbrainz_release_group_id TEXT,
              image_item_id TEXT, image_tag TEXT,
+             local_artwork_kind TEXT, local_artwork_path TEXT,
+             local_artwork_picture_index INTEGER, local_artwork_revision TEXT,
              favorite INTEGER NOT NULL, user_rating INTEGER,
              release_types_json TEXT NOT NULL, relations_json TEXT NOT NULL,
              is_compilation INTEGER
@@ -511,13 +540,19 @@ async fn create_released_store(path: &Path) {
              source_format TEXT, comment TEXT, bpm INTEGER,
              musicbrainz_recording_id TEXT, musicbrainz_release_track_id TEXT,
              cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
-             image_item_id TEXT, image_tag TEXT, favorite INTEGER NOT NULL,
+             image_item_id TEXT, image_tag TEXT,
+             local_artwork_kind TEXT, local_artwork_path TEXT,
+             local_artwork_picture_index INTEGER, local_artwork_revision TEXT,
+             favorite INTEGER NOT NULL,
              user_rating INTEGER, relations_json TEXT NOT NULL
          ) STRICT;
          CREATE TABLE artists(
              library_id INTEGER NOT NULL, artist_id TEXT NOT NULL, name TEXT NOT NULL,
              musicbrainz_artist_id TEXT,
-             image_item_id TEXT, image_tag TEXT, favorite INTEGER NOT NULL,
+             image_item_id TEXT, image_tag TEXT,
+             local_artwork_kind TEXT, local_artwork_path TEXT,
+             local_artwork_picture_index INTEGER, local_artwork_revision TEXT,
+             favorite INTEGER NOT NULL,
              user_rating INTEGER
          ) STRICT;
          CREATE TABLE genres(
@@ -528,12 +563,44 @@ async fn create_released_store(path: &Path) {
              library_id INTEGER NOT NULL, folder_id TEXT NOT NULL, name TEXT NOT NULL,
              image_item_id TEXT, image_tag TEXT
          ) STRICT;
+         CREATE TABLE source_playlists(
+             library_id INTEGER NOT NULL, playlist_id TEXT NOT NULL,
+             name TEXT NOT NULL, image_item_id TEXT, image_tag TEXT
+         ) STRICT;
+         CREATE TABLE source_playlist_entries(
+             library_id INTEGER NOT NULL, playlist_id TEXT NOT NULL,
+             position INTEGER NOT NULL, occurrence_id TEXT NOT NULL,
+             track_id TEXT NOT NULL
+         ) STRICT;
          CREATE TABLE local_favorites(
              source_id TEXT NOT NULL, item_kind TEXT NOT NULL, item_id TEXT NOT NULL
          ) STRICT;
          CREATE TABLE user_ratings(
              source_id TEXT NOT NULL, item_kind TEXT NOT NULL,
              item_id TEXT NOT NULL, rating INTEGER NOT NULL
+         ) STRICT;
+         CREATE TABLE pending_favorites(
+             source_id TEXT NOT NULL, item_kind TEXT NOT NULL,
+             item_id TEXT NOT NULL, favorite INTEGER NOT NULL,
+             previous_favorite INTEGER NOT NULL, attempts INTEGER NOT NULL,
+             next_attempt_at INTEGER NOT NULL
+         ) STRICT;
+         CREATE TABLE local_playlists(
+             source_id TEXT NOT NULL, playlist_id TEXT NOT NULL, name TEXT NOT NULL
+         ) STRICT;
+         CREATE TABLE local_playlist_entries(
+             source_id TEXT NOT NULL, playlist_id TEXT NOT NULL,
+             position INTEGER NOT NULL, occurrence_id TEXT NOT NULL,
+             track_id TEXT NOT NULL
+         ) STRICT;
+         CREATE TABLE smart_playlists(
+             source_id TEXT NOT NULL, smart_playlist_id TEXT NOT NULL,
+             name TEXT NOT NULL, builtin_key TEXT, definition_json TEXT NOT NULL,
+             position INTEGER NOT NULL
+         ) STRICT;
+         CREATE TABLE local_imports(
+             source_id TEXT NOT NULL, track_id TEXT NOT NULL,
+             first_seen_at INTEGER NOT NULL
          ) STRICT;
          CREATE TABLE playback_queues(
              source_id TEXT PRIMARY KEY, revision INTEGER NOT NULL,
@@ -595,7 +662,8 @@ async fn create_released_store(path: &Path) {
          INSERT INTO albums VALUES(
              1, 'released-album', 'Released Album', 'Released Artist',
              2024, '2024-01-01', '2024-01-02', 'release-id', 'release-group-id',
-             NULL, NULL, 0, NULL, '[\"Album\"]',
+             NULL, NULL, 'file', '/music/cover.jpg', NULL, 'album-rev',
+             0, NULL, '[\"Album\"]',
              '{\"album_artists\":[{\"id\":\"released-artist\",\"name\":\"Released Artist\"}],\"genres\":[{\"id\":\"released-genre\",\"name\":\"Released Genre\"}]}', 1
          );
          INSERT INTO tracks VALUES(
@@ -603,11 +671,13 @@ async fn create_released_store(path: &Path) {
              'Released Album', 'Released Artist', 180, 1, 1, 2024,
              '2024-01-01', '2024-01-02', '/music/track.flac', 'FLAC',
              'Released comment', 120, 'recording-id', 'release-track-id',
-             '/music/album.cue', 1000, 181000, NULL, NULL, 0, NULL,
+             '/music/album.cue', 1000, 181000, NULL, NULL,
+             'embedded', '/music/track.flac', 2, 'track-rev', 0, NULL,
              '{\"artists\":[{\"id\":\"released-artist\",\"name\":\"Released Artist\"}],\"genres\":[{\"id\":\"released-genre\",\"name\":\"Released Genre\"}],\"moods\":[{\"id\":\"released-mood\",\"name\":\"Released Mood\"}],\"music_folders\":[\"released-folder\"]}'
          );
          INSERT INTO artists VALUES(
-             1, 'released-artist', 'Released Artist', 'artist-id', NULL, NULL, 0, NULL
+             1, 'released-artist', 'Released Artist', 'artist-id', NULL, NULL,
+             'file', '/music/artist.jpg', NULL, 'artist-rev', 0, NULL
          );
          INSERT INTO genres VALUES(
              1, 'released-genre', 'Released Genre', 'genre-image', 'genre-tag'
@@ -615,11 +685,36 @@ async fn create_released_store(path: &Path) {
          INSERT INTO music_folders VALUES(
              1, 'released-folder', 'Released Folder', NULL, NULL
          );
+         INSERT INTO source_playlists VALUES(
+             1, 'source-list', 'Source List', NULL, NULL
+         );
+         INSERT INTO source_playlist_entries VALUES(
+             1, 'source-list', 0, 'source-occurrence', 'released-track'
+         );
          INSERT INTO local_favorites VALUES(
              'released-source', 'track', 'released-track'
          );
          INSERT INTO user_ratings VALUES(
              'released-source', 'track', 'released-track', 8
+         );
+         INSERT INTO pending_favorites VALUES(
+             'released-source', 'track', 'released-track', 1, 0, 2, 200
+         );
+         INSERT INTO local_playlists VALUES(
+             'released-source', 'user-list', 'User List'
+         );
+         INSERT INTO local_playlist_entries VALUES(
+             'released-source', 'user-list', 0, 'user-occurrence-one', 'released-track'
+         );
+         INSERT INTO local_playlist_entries VALUES(
+             'released-source', 'user-list', 1, 'user-occurrence-two', 'released-track'
+         );
+         INSERT INTO smart_playlists VALUES(
+             'released-source', 'smart-list', 'Smart List', NULL,
+             '{\"match_all\":[],\"match_any\":[],\"sort_field\":\"Title\",\"descending\":false}', 0
+         );
+         INSERT INTO local_imports VALUES(
+             'released-source', 'released-track', 50
          );
          INSERT INTO playback_queues VALUES(
              'released-source', 1,

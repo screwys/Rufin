@@ -7,8 +7,8 @@ use std::{
 #[test]
 fn i18n_files_omit_source_references() {
     let root = repo_root();
-    let mut files = po_files(&root.join("crates/localization/locales"));
-    files.push(root.join("crates/localization/locales/rufin.pot"));
+    let mut files = po_files(&root.join("locales"));
+    files.push(root.join("locales/rufin.pot"));
     for file in files {
         let content = fs::read_to_string(&file)
             .unwrap_or_else(|error| panic!("read {}: {error}", file.display()));
@@ -23,7 +23,7 @@ fn i18n_files_omit_source_references() {
 #[test]
 fn i18n_source_msgids_use_ascii_ellipsis() {
     let root = repo_root();
-    let template = root.join("crates/localization/locales/rufin.pot");
+    let template = root.join("locales/rufin.pot");
     let content = fs::read_to_string(&template)
         .unwrap_or_else(|error| panic!("read {}: {error}", template.display()));
     assert_active_msgids_use_ascii_ellipsis(&template, &content);
@@ -32,7 +32,7 @@ fn i18n_source_msgids_use_ascii_ellipsis() {
 #[test]
 fn i18n_catalogs_pass_msgfmt_check() {
     let root = repo_root();
-    let catalogs = po_files(&root.join("crates/localization/locales"));
+    let catalogs = po_files(&root.join("locales"));
     assert!(!catalogs.is_empty(), "expected at least one .po catalog");
 
     for catalog in catalogs {

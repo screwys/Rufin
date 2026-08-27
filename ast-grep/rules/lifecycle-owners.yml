@@ -1,0 +1,260 @@
+id: notify-outside-refcell-owner-borrow
+language: Rust
+severity: error
+message: Collect ready updates while the RefCell owner is borrowed, then notify outside the borrow.
+rule:
+  any:
+    - all:
+        - pattern: $OWNER.with_typed_mut::<$$$TYPES>($CALLBACK)
+        - has:
+            pattern: $ITEM.replace($$$ARGS)
+            stopBy: end
+    - all:
+        - pattern: $OWNER.with_state_mut($CALLBACK)
+        - has:
+            pattern: $ITEM.replace($$$ARGS)
+            stopBy: end
+---
+id: no-strong-clone-in-owned-signal
+language: Rust
+severity: error
+message: A widget-owned signal must not capture a strong clone of its owning projection.
+rule:
+  any:
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $OWNER.clone();
+          $$$MIDDLE
+          $OWNER.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $OWNER.clone();
+          $$$MIDDLE
+          $OWNER.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CALL($$$CALL_ARGS, $CAPTURE.clone());
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = Rc::clone(&$OWNER);
+          $$$MIDDLE
+          $OWNER.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CALL($$$CALL_ARGS, $CAPTURE.clone());
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = Rc::clone(&$OWNER);
+          $$$MIDDLE
+          $OWNER.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
+constraints:
+  CONNECT:
+    regex: ^connect_
+---
+id: visualizer-lane-must-be-bounded
+language: Rust
+severity: error
+message: Visualizer telemetry must use a bounded latest-frame lane.
+rule:
+  pattern: let ($EVENTS, $RECEIVER) = unbounded();
+constraints:
+  EVENTS:
+    regex: visualizer
+---
+id: playback-publication-lane-must-be-bounded
+language: Rust
+severity: error
+message: Playback position and state publications must use one bounded latest-value lane.
+rule:
+  pattern: let ($EVENTS, $RECEIVER) = unbounded();
+constraints:
+  EVENTS:
+    regex: playback
+---
+id: bound-row-must-not-reenter-route-model
+language: Rust
+severity: error
+message: Format the bound row directly instead of re-entering the sparse route model.
+rule:
+  pattern: $MODEL.played_at_text($POSITION)
+---
+id: mounted-route-callback-must-not-own-shell
+language: Rust
+severity: error
+message: A mounted route callback must capture Weak<Shell> so route teardown cannot retain application ownership.
+rule:
+  any:
+    - pattern: |
+        let $CALLBACK = {
+          let $SHELL = Rc::clone(self);
+          $$$SETUP
+          Rc::new(move || {
+            $$$BEFORE
+            $SHELL.$METHOD($$$ARGS);
+            $$$AFTER
+          })
+        };
+    - pattern: |
+        let $CALLBACK = {
+          $$$SETUP
+          let $SHELL = Rc::clone(self);
+          Rc::new(move |$$$PARAMS| {
+            $$$BEFORE
+            $SHELL.$METHOD($$$ARGS);
+            $$$AFTER
+          })
+        };
+---
+id: artwork-preparation-must-not-refresh-live-bindings
+language: Rust
+severity: error
+message: Background artwork preparation completion must not repaint mounted bindings.
+rule:
+  all:
+    - pattern: $SHELL.refresh_artwork_bindings()
+    - inside:
+        pattern: |
+          fn apply_source_artwork_preparation($$$PARAMS) {
+            $$$BODY
+          }
+        stopBy: end
+---
+id: artwork-tile-must-not-admit-on-map
+language: Rust
+severity: error
+message: GTK factory bind owns artwork admission; map callbacks must not start or repeat cover work.
+rule:
+  all:
+    - pattern: $WIDGET.connect_map($$$ARGS)
+    - inside:
+        pattern: |
+          impl ArtworkTile {
+            $$$MEMBERS
+          }
+        stopBy: end
+---
+id: sparse-ready-handlers-must-not-append
+language: Rust
+severity: error
+message: Sparse readiness subscriptions are bind-owned and must replace an owner key, not append forever.
+rule:
+  all:
+    - pattern: $HANDLERS.borrow_mut().push($HANDLER)
+    - inside:
+        pattern: |
+          impl SparseObjectItem {
+            $$$MEMBERS
+          }
+        stopBy: end
+---
+id: cover-hover-controller-must-not-own-overlay
+language: Rust
+severity: error
+message: A controller parented by a cover overlay must capture that overlay weakly.
+rule:
+  all:
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $OVERLAY.clone();
+          $$$MIDDLE
+          $MOTION.connect_leave(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - inside:
+        pattern: |
+          fn connect_hover(&self, $OVERLAY: &gtk::Overlay) {
+            $$$FUNCTION_BODY
+          }
+        stopBy: end
+---
+id: track-search-callback-must-not-own-track-projection
+language: Rust
+severity: error
+message: Track search callbacks must capture the model or a weak read lane, never the widget-owning TrackListProjection.
+rule:
+  all:
+    - any:
+        - pattern: Rc::new(move || projection.source_count() != 0)
+        - all:
+            - pattern: |
+                Rc::new(move || {
+                  $$$BODY
+                })
+            - has:
+                pattern: projection.source_count()
+                stopBy: end
+        - pattern: projection.search().connect_search_changed($$$ARGS)
+    - inside:
+        pattern: |
+          fn track_page_route($$$PARAMS) -> MountedRoute {
+            $$$FUNCTION_BODY
+          }
+        stopBy: end
+---
+id: source-acquisition-must-precede-serialized-lane
+language: Rust
+severity: error
+message: Admit and cancel source acquisitions at request time; an older queued operation must not create a token that cancels a newer request.
+rule:
+  all:
+    - pattern: $SHARED.begin_acquisition()
+    - inside:
+        pattern: |
+          $OWNER.spawn_serialized(move |$$$PARAMS| async move {
+            $$$BODY
+          })
+        stopBy: end
+---
+id: track-activation-must-use-ready-row
+language: Rust
+severity: error
+message: Track tables must activate a loaded Track row, not the sparse loading placeholder wrapper.
+rule:
+  kind: type_identifier
+  regex: ^TrackListItem$
+---
+id: column-view-activation-needs-row-factory
+language: Rust
+severity: error
+message: Shared ColumnView activation requires an explicit activatable GtkColumnViewRow factory.
+rule:
+  all:
+    - pattern: $TABLE.connect_activate($$$ARGS)
+    - inside:
+        all:
+          - pattern: |
+              fn collection_table_with_width($$$PARAMS) {
+                $$$BODY
+              }
+          - not:
+              has:
+                pattern: $TABLE.set_row_factory($$$FACTORY)
+                stopBy: end
+        stopBy: end

@@ -2,7 +2,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use library::{Database, PlaylistEntryKey, PlaylistEntryRow, PlaylistKey, SourceKey};
+use library::{PlaylistEntryKey, PlaylistEntryOrder, PlaylistEntryRow, PlaylistKey, SourceKey};
 use playback::SourceSessionEpoch;
 
 use crate::LibraryListSettings;
@@ -27,9 +27,8 @@ struct PlaylistEntryModelState {
     source_session_epoch: SourceSessionEpoch,
     playlist_key: PlaylistKey,
     sparse: Rc<SparseRouteModel<PlaylistEntryKey, PlaylistEntryRow>>,
-    database: Arc<Database>,
-    runtime: tokio::runtime::Handle,
-    folder: Option<library::FolderKey>,
+    tracks: RefCell<Arc<[library::TrackKey]>>,
+    track_positions: RefCell<Arc<[usize]>>,
     request: RefCell<PlaylistEntryProjectionRequest>,
 }
 
@@ -37,13 +36,13 @@ impl PlaylistEntryModel {
     pub(crate) fn new(
         selected: &crate::runtime::SelectedLibrary,
         playlist_key: PlaylistKey,
-        order: Vec<PlaylistEntryKey>,
+        order: PlaylistEntryOrder,
+        first_rows: Vec<PlaylistEntryRow>,
         settings: LibraryListSettings,
     ) -> Self {
         let source_key = selected.source_key;
         let folder = selected.music_folder_key;
-        let database = Arc::clone(&selected.database);
-        let loader_database = Arc::clone(&database);
+        let loader_database = Arc::clone(&selected.database);
         let load = Arc::new(
             move |keys: Vec<PlaylistEntryKey>, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&loader_database);
@@ -55,20 +54,26 @@ impl PlaylistEntryModel {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
+        let PlaylistEntryOrder {
+            entries,
+            tracks,
+            track_positions,
+        } = order;
+        let sparse = SparseRouteModel::new(
+            entries,
+            PLAYLIST_ENTRY_OVERSCAN,
+            selected.runtime.clone(),
+            load,
+        );
+        sparse.seed_matching(first_rows, |row| row.playlist_entry_key);
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 source_key,
                 source_session_epoch: selected.source_session_epoch,
                 playlist_key,
-                sparse: SparseRouteModel::new(
-                    order,
-                    PLAYLIST_ENTRY_OVERSCAN,
-                    selected.runtime.clone(),
-                    load,
-                ),
-                database,
-                runtime: selected.runtime.clone(),
-                folder,
+                sparse,
+                tracks: RefCell::new(tracks.into()),
+                track_positions: RefCell::new(track_positions.into()),
                 request: RefCell::new(PlaylistEntryProjectionRequest {
                     query: String::new(),
                     settings,
@@ -108,8 +113,12 @@ impl PlaylistEntryModel {
         true
     }
 
-    pub(crate) fn replace_order(&self, order: Vec<PlaylistEntryKey>) {
-        self.inner.sparse.replace_order(order);
+    pub(crate) fn replace_order(&self, order: PlaylistEntryOrder) {
+        self.inner.tracks.replace(order.tracks.into());
+        self.inner
+            .track_positions
+            .replace(order.track_positions.into());
+        self.inner.sparse.replace_order(order.entries);
     }
 
     pub(crate) fn ready(&self, position: u32) -> Option<Arc<PlaylistEntryRow>> {
@@ -134,17 +143,15 @@ impl PlaylistEntryModel {
         source_rank: usize,
     ) -> Option<u32> {
         if context_id == self.visible_context_id()
-            && self.inner.sparse.order().get(source_rank).is_some()
+            && let Some(position) = self.inner.track_positions.borrow().get(source_rank)
         {
-            return u32::try_from(source_rank).ok();
+            return u32::try_from(*position).ok();
         }
         if context_id != format!("playlist:{}", self.inner.playlist_key) {
             return None;
         }
-        (0..self.inner.sparse.len()).find_map(|position| {
-            let row = self.ready(position as u32)?;
-            (row.track_key == Some(track) && row.position.max(0) as usize == source_rank)
-                .then_some(position as u32)
+        self.inner.sparse.ready_position(|row| {
+            row.track_key == Some(track) && row.position.max(0) as usize == source_rank
         })
     }
 
@@ -152,44 +159,32 @@ impl PlaylistEntryModel {
         let Some(row) = self.ready(position) else {
             return;
         };
-        let database = Arc::clone(&self.inner.database);
         let source = self.inner.source_key;
         let epoch = self.inner.source_session_epoch;
-        let playlist = self.inner.playlist_key;
-        let folder = self.inner.folder;
-        let entry = row.playlist_entry_key;
-        let entries = self.inner.sparse.order();
+        let position = position as usize;
+        let positions = self.inner.track_positions.borrow();
+        let Ok(anchor_index) = positions.binary_search(&position) else {
+            return;
+        };
+        let order = self.inner.tracks.borrow().clone();
+        if order.get(anchor_index) != row.track_key.as_ref() {
+            return;
+        }
         let context = self.visible_context_id();
-        self.inner.runtime.spawn(async move {
-            let cancellation = library::ReadCancellation::new();
-            let Some((order, anchor_index, anchor)) = database
-                .playlist_projection_playback(
-                    source,
-                    playlist,
-                    &entries,
-                    entry,
-                    folder,
-                    &cancellation,
-                )
-                .await
-                .ok()
-                .flatten()
-            else {
-                return;
-            };
-            let Some(request) = playback::LoadedPlayRequest::context(
-                source,
-                epoch,
-                order.into(),
-                playback::PlaybackMedia::from(anchor),
-                anchor_index,
-                playback::QueuePlacement::Now,
-                context,
-                false,
-            ) else {
-                return;
-            };
+        let Some(track) = row.track.clone() else {
+            return;
+        };
+        if let Some(request) = playback::LoadedPlayRequest::context(
+            source,
+            epoch,
+            order,
+            playback::PlaybackMedia::from(track),
+            anchor_index,
+            playback::QueuePlacement::Now,
+            context,
+            false,
+        ) {
             queue.play_loaded(request);
-        });
+        }
     }
 }

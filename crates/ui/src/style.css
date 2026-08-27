@@ -2272,6 +2272,10 @@ scale.fullscreen-player-equalizer-scale trough {
   border-radius: 6px;
 }
 
+.folder-row-label {
+  color: var(--window-fg-color);
+}
+
 .folder-tree-row.active,
 .folder-table-row:selected {
   background: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
@@ -2307,6 +2311,9 @@ modelbutton.rufin-menu-selected:dir(rtl) {
   background-size: 100% 16px;
   border-radius: 6px;
   color: transparent;
+}
+.track-skeleton.favorite-skeleton-cell {
+  background-size: 65% 16px;
 }
 .collection-grid-cover-skeleton {
   background-color: rgba(128, 128, 128, 0.16);

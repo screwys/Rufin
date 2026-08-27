@@ -39,6 +39,9 @@ pub(super) struct ArtistReleaseRoutePreamble {
 #[derive(Clone)]
 pub(super) struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
+    orders: Rc<RefCell<[Vec<library::AlbumKey>; 6]>>,
+    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
     layout: Rc<Cell<LibraryLayout>>,
     favorite: Option<gtk::Widget>,
@@ -51,6 +54,9 @@ pub(super) struct ArtistReleaseProjections {
 
 struct ArtistAlbumProjection {
     sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    model: gtk::SliceListModel,
+    start: Cell<usize>,
+    count: Cell<usize>,
     source_present: Cell<bool>,
     search: gtk::SearchEntry,
     header: gtk::Widget,
@@ -62,8 +68,7 @@ struct ArtistAlbumProjection {
     layout: Rc<Cell<LibraryLayout>>,
     columns: Rc<Cell<usize>>,
     applied_settings: RefCell<LibraryListSettings>,
-    shell: Rc<Shell>,
-    lane: Rc<super::named_detail::NamedOrderLane>,
+    shell: Weak<Shell>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
@@ -101,9 +106,10 @@ struct ArtistGridSlot {
 impl ArtistAlbumProjection {
     fn new(
         shell: &Rc<Shell>,
-        selected: &crate::runtime::SelectedLibrary,
         title: &'static str,
-        order: Vec<library::AlbumKey>,
+        sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+        start: usize,
+        count: usize,
         layout: Rc<Cell<LibraryLayout>>,
         columns: Rc<Cell<usize>>,
     ) -> Rc<Self> {
@@ -123,29 +129,22 @@ impl ArtistAlbumProjection {
         let header: gtk::Widget = header.upcast();
         let rows = static_artist_route_model(header.clone());
 
-        let database = Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let load = Arc::new(
-            move |keys: Vec<library::AlbumKey>, cancellation: library::ReadCancellation| {
-                let database = Arc::clone(&database);
-                Box::pin(async move {
-                    database
-                        .album_rows(source, &keys, folder, &cancellation)
-                        .await
-                        .map_err(|error| error.to_string())
-                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-            },
-        );
         let settings = shell
             .settings
             .current
             .borrow()
             .library_list(LibraryListKey::ArtistAlbums);
-        let source_present = !order.is_empty();
-        let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), load);
+        let source_present = count != 0;
+        let model = gtk::SliceListModel::new(
+            Some(sparse.list_model()),
+            start.min(u32::MAX as usize) as u32,
+            count.min(u32::MAX as usize) as u32,
+        );
         let projection = Rc::new(Self {
             sparse,
+            model,
+            start: Cell::new(start),
+            count: Cell::new(count),
             source_present: Cell::new(source_present),
             search,
             header,
@@ -157,16 +156,14 @@ impl ArtistAlbumProjection {
             layout,
             columns,
             applied_settings: RefCell::new(settings),
-            shell: Rc::clone(shell),
-            lane: Rc::new(super::named_detail::NamedOrderLane::new()),
+            shell: Rc::downgrade(shell),
         });
         let weak = Rc::downgrade(&projection);
         projection
             .sparse
-            .list_model()
-            .connect_items_changed(move |_, position, removed, added| {
+            .connect_ready_changed(move |position, count| {
                 if let Some(projection) = weak.upgrade() {
-                    projection.refresh_grid_range(position, removed, added);
+                    projection.refresh_grid_range(position, count);
                 }
             });
         projection.refresh_body();
@@ -185,11 +182,14 @@ impl ArtistAlbumProjection {
         self.rows.clone()
     }
 
-    fn replace_order(self: &Rc<Self>, order: Vec<library::AlbumKey>, authoritative: bool) {
+    fn set_range(self: &Rc<Self>, start: usize, count: usize, authoritative: bool) {
         if authoritative {
-            self.source_present.set(!order.is_empty());
+            self.source_present.set(count != 0);
         }
-        self.sparse.replace_order(order);
+        self.start.set(start);
+        self.count.set(count);
+        self.model.set_offset(start.min(u32::MAX as usize) as u32);
+        self.model.set_size(count.min(u32::MAX as usize) as u32);
         self.refresh_body();
     }
 
@@ -200,9 +200,12 @@ impl ArtistAlbumProjection {
             }
             return surface.clone();
         }
+        let Some(shell) = self.shell.upgrade() else {
+            return gtk::Box::new(gtk::Orientation::Vertical, 0).upcast();
+        };
         let table = album_table(
-            &self.shell,
-            self.sparse.list_model(),
+            &shell,
+            self.model.clone(),
             LibraryListKey::ArtistAlbums,
             None,
         );
@@ -229,6 +232,15 @@ impl ArtistAlbumProjection {
             return;
         }
         self.header.set_visible(true);
+        if self.layout.get() == LibraryLayout::Row
+            && self.body_layout.get() == Some(LibraryLayout::Row)
+        {
+            self.header.set_margin_bottom(ARTIST_RELEASE_HEADER_GAP);
+            let settings = self.applied_settings.borrow().clone();
+            let row = self.row_widget(&settings);
+            row.set_margin_bottom(ARTIST_RELEASE_SECTION_GAP);
+            return;
+        }
         match self.layout.get() {
             LibraryLayout::Row => {
                 self.header.set_margin_bottom(ARTIST_RELEASE_HEADER_GAP);
@@ -241,7 +253,7 @@ impl ArtistAlbumProjection {
                 );
             }
             LibraryLayout::Grid | LibraryLayout::Detail => {
-                self.header.set_margin_bottom(if self.sparse.len() == 0 {
+                self.header.set_margin_bottom(if self.count.get() == 0 {
                     ARTIST_RELEASE_SECTION_GAP
                 } else {
                     ARTIST_RELEASE_HEADER_GAP
@@ -253,20 +265,20 @@ impl ArtistAlbumProjection {
     }
 
     fn grid_row_count(&self) -> usize {
-        self.sparse.len().div_ceil(self.columns.get().max(1))
+        self.count.get().div_ceil(self.columns.get().max(1))
     }
 
     fn grid_rows(self: &Rc<Self>, start_row: usize, end_row: usize) -> Vec<ArtistRouteRow> {
         let columns = self.columns.get().max(1);
-        let count = self.sparse.len();
+        let count = self.count.get();
         let row_count = self.grid_row_count();
         (start_row..end_row.min(row_count))
             .map(|row| {
-                let start = row * columns;
+                let local_start = row * columns;
                 ArtistRouteRow::AlbumGrid {
                     section: Rc::downgrade(self),
-                    start,
-                    len: (count - start).min(columns),
+                    start: self.start.get() + local_start,
+                    len: (count - local_start).min(columns),
                     columns,
                     margin_bottom: if row + 1 == row_count {
                         ARTIST_RELEASE_SECTION_GAP
@@ -278,8 +290,15 @@ impl ArtistAlbumProjection {
             .collect()
     }
 
-    fn refresh_grid_range(self: &Rc<Self>, position: u32, removed: u32, added: u32) {
+    fn refresh_grid_range(self: &Rc<Self>, position: u32, count: u32) {
         if self.layout.get() != LibraryLayout::Grid || self.source_is_empty() {
+            return;
+        }
+        let section_start = self.start.get();
+        let section_end = section_start.saturating_add(self.count.get());
+        let change_start = position as usize;
+        let change_end = change_start.saturating_add(count as usize);
+        if change_end <= section_start || change_start >= section_end {
             return;
         }
         let columns = self.columns.get().max(1);
@@ -287,10 +306,11 @@ impl ArtistAlbumProjection {
         if row_count == 0 {
             return;
         }
-        let first = (position as usize / columns).min(row_count - 1);
-        let changed = removed.max(added).max(1) as usize;
-        let end = (position as usize)
-            .saturating_add(changed)
+        let local_start = change_start.saturating_sub(section_start);
+        let local_end = change_end.min(section_end).saturating_sub(section_start);
+        let first = (local_start / columns).min(row_count - 1);
+        let end = local_end
+            .max(local_start.saturating_add(1))
             .div_ceil(columns)
             .min(row_count)
             .max(first + 1);
@@ -317,6 +337,7 @@ impl ArtistReleaseProjections {
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
         orders: [Vec<library::AlbumKey>; 6],
+        first_rows: Vec<library::AlbumRow>,
     ) -> Self {
         let settings = shell
             .settings
@@ -325,19 +346,42 @@ impl ArtistReleaseProjections {
             .library_list(LibraryListKey::ArtistAlbums);
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
+        let flat_order = orders.iter().flatten().copied().collect::<Vec<_>>();
+        let database = Arc::clone(&selected.database);
+        let source = selected.source_key;
+        let folder = selected.music_folder_key;
+        let load = Arc::new(
+            move |keys: Vec<library::AlbumKey>, cancellation: library::ReadCancellation| {
+                let database = Arc::clone(&database);
+                Box::pin(async move {
+                    database
+                        .album_rows(source, &keys, folder, &cancellation)
+                        .await
+                        .map_err(|error| error.to_string())
+                }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+            },
+        );
+        let sparse = SparseRouteModel::new(flat_order, 32, selected.runtime.clone(), load);
+        sparse.seed_matching(first_rows, |row| row.album_key);
+        let orders = Rc::new(RefCell::new(orders));
+        let mut start = 0_usize;
         let sections = Rc::new(
             titles
                 .into_iter()
-                .zip(orders)
-                .map(|(title, order)| {
-                    ArtistAlbumProjection::new(
+                .enumerate()
+                .map(|(index, title)| {
+                    let count = orders.borrow()[index].len();
+                    let section = ArtistAlbumProjection::new(
                         shell,
-                        selected,
                         title,
-                        order,
+                        Rc::clone(&sparse),
+                        start,
+                        count,
                         Rc::clone(&layout),
                         Rc::clone(&columns),
-                    )
+                    );
+                    start += count;
+                    section
                 })
                 .collect::<Vec<_>>(),
         );
@@ -414,6 +458,9 @@ impl ArtistReleaseProjections {
         }
         Self {
             sections,
+            orders,
+            sparse,
+            lane: Rc::new(super::named_detail::NamedOrderLane::new()),
             surface: owner.upcast(),
             layout,
             favorite: favorite_widget,
@@ -437,9 +484,11 @@ impl ArtistReleaseProjections {
         &self,
         index: usize,
     ) -> Option<Rc<super::named_detail::NamedOrderLane>> {
-        self.sections
-            .get(index)
-            .map(|section| Rc::clone(&section.lane))
+        self.sections.get(index).map(|_| Rc::clone(&self.lane))
+    }
+
+    pub(super) fn lane(&self) -> Rc<super::named_detail::NamedOrderLane> {
+        Rc::clone(&self.lane)
     }
 
     pub(super) fn replace_section_order(
@@ -448,9 +497,42 @@ impl ArtistReleaseProjections {
         order: Vec<library::AlbumKey>,
         authoritative: bool,
     ) {
-        if let Some(section) = self.sections.get(index) {
-            section.replace_order(order, authoritative);
+        if index >= self.sections.len() {
+            return;
         }
+        self.orders.borrow_mut()[index] = order;
+        self.publish_orders(authoritative, None);
+    }
+
+    pub(super) fn replace_orders(
+        &self,
+        orders: [Vec<library::AlbumKey>; 6],
+        first_rows: Vec<library::AlbumRow>,
+        authoritative: bool,
+    ) {
+        self.orders.replace(orders);
+        self.publish_orders(authoritative, Some(first_rows));
+    }
+
+    fn publish_orders(&self, authoritative: bool, first_rows: Option<Vec<library::AlbumRow>>) {
+        let orders = self.orders.borrow();
+        let flat = orders.iter().flatten().copied().collect::<Vec<_>>();
+        if let Some(first_rows) = first_rows {
+            if !self
+                .sparse
+                .replace_prepared(flat.clone(), first_rows, |row| row.album_key)
+            {
+                self.sparse.replace_order(flat);
+            }
+        } else {
+            self.sparse.replace_order(flat);
+        }
+        let mut start = 0;
+        for (section, order) in self.sections.iter().zip(orders.iter()) {
+            section.set_range(start, order.len(), authoritative);
+            start += order.len();
+        }
+        drop(orders);
         self.sync_empty();
     }
 
@@ -578,7 +660,10 @@ fn artist_route_list(
                 state.root.set_orientation(gtk::Orientation::Vertical);
                 state.root.set_homogeneous(false);
                 state.root.set_margin_bottom(0);
-                if widget.parent().is_none() {
+                if widget.parent().as_ref() != Some(state.root.upcast_ref()) {
+                    if let Some(parent) = widget.parent().and_downcast::<gtk::Box>() {
+                        parent.remove(&widget);
+                    }
                     state.root.append(&widget);
                 }
             }
@@ -598,8 +683,7 @@ fn artist_route_list(
                     state.root.set_homogeneous(true);
                     state.root.add_css_class("album-grid");
                     for _ in 0..columns {
-                        let cell =
-                            AlbumGridCell::new(Rc::clone(&bind_shell), &bind_fields.borrow(), None);
+                        let cell = AlbumGridCell::new(&bind_shell, &bind_fields.borrow(), None);
                         let widget = cell.widget();
                         let wrapper = cards::collection_grid_card_inset(
                             &widget,

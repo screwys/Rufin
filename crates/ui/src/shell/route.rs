@@ -109,7 +109,7 @@ pub(crate) fn route_current_track(
             context_id,
             source_rank,
         } => Some(RouteCurrentTrackContext {
-            context_id: context_id.clone(),
+            context_id: context_id.to_string(),
             source_rank: *source_rank,
         }),
         playback::Provenance::Manual
@@ -828,12 +828,18 @@ impl Shell {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::ArtistTracks);
+                let album_settings = self
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(LibraryListKey::ArtistAlbums);
                 self.queue_artist_overview_route(
                     selected,
                     route,
                     artist_id,
                     album_artist,
                     track_settings,
+                    album_settings,
                     render_started,
                 );
             }
@@ -844,12 +850,12 @@ impl Shell {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::ArtistAlbums);
-                let _ = settings;
                 self.queue_artist_discography_route(
                     selected,
                     route,
                     artist_id,
                     album_artist,
+                    settings,
                     render_started,
                 );
             }
@@ -932,7 +938,7 @@ impl Shell {
         let runtime = selected.runtime.clone();
         let task = runtime.spawn(async move {
             database
-                .track_route_order(
+                .track_route_page(
                     source_key,
                     folder,
                     favorites_only,
@@ -951,8 +957,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let page = match task.await {
+                Ok(Ok(page)) => page,
                 Ok(Err(error)) => {
                     warn!(%error, ?route, "failed to read Track route order");
                     return;
@@ -971,14 +977,19 @@ impl Shell {
             }
             let build_selected = selected;
             let build_shell = Rc::clone(&shell);
+            let library::TrackRoutePage { order, first_rows } = page;
             shell.replace_mounted_route(
                 route.clone(),
                 Some(source_id),
                 render_started,
                 0,
                 move || match route {
-                    Route::Tracks => build_shell.library_tracks_route(order, build_selected),
-                    Route::Favorites => build_shell.favorites_route(order, build_selected),
+                    Route::Tracks => {
+                        build_shell.library_tracks_route(order, first_rows, build_selected)
+                    }
+                    Route::Favorites => {
+                        build_shell.favorites_route(order, first_rows, build_selected)
+                    }
                     _ => unreachable!("root Track route owner"),
                 },
             );
@@ -1063,19 +1074,20 @@ impl Shell {
                         &cancellation,
                     )
                     .await
-                    .map(AlbumCollectionOrder::Detail)
+                    .map(|order| (AlbumCollectionOrder::Detail(order), Vec::new()))
             } else {
-                database
-                    .album_order(
+                let (order, first_rows) = database
+                    .album_route_page(
                         source_key,
                         folder,
                         false,
+                        "",
                         settings.sort_key.album_sort(),
                         settings.descending,
                         &cancellation,
                     )
-                    .await
-                    .map(AlbumCollectionOrder::Rows)
+                    .await?;
+                Ok((AlbumCollectionOrder::Rows(order), first_rows))
             }
         });
         let shell = Rc::downgrade(self);
@@ -1086,8 +1098,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Album route order");
                     return;
@@ -1106,7 +1118,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_albums_route(order, selected)
+                build_shell.library_albums_route(order, first_rows, selected)
             });
         });
     }
@@ -1127,11 +1139,12 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .artist_order(
+                .artist_route_page(
                     source_key,
                     folder,
                     album_artist,
                     false,
+                    "",
                     settings.sort_key.artist_sort(),
                     settings.descending,
                     &cancellation,
@@ -1144,8 +1157,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Artist route order");
                     return;
@@ -1164,7 +1177,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_artist_list_route(album_artist, order, selected)
+                build_shell.library_artist_list_route(album_artist, order, first_rows, selected)
             });
         });
     }
@@ -1242,7 +1255,8 @@ impl Shell {
         route: Route,
         artist: library::ArtistKey,
         album_artist: bool,
-        settings: LibraryListSettings,
+        track_settings: LibraryListSettings,
+        album_settings: LibraryListSettings,
         render_started: Instant,
     ) {
         let database = Arc::clone(&selected.database);
@@ -1258,7 +1272,8 @@ impl Shell {
                 folder,
                 artist,
                 album_artist,
-                &settings,
+                &track_settings,
+                &album_settings,
                 &cancellation,
             )
             .await
@@ -1286,6 +1301,7 @@ impl Shell {
         route: Route,
         artist: library::ArtistKey,
         album_artist: bool,
+        settings: LibraryListSettings,
         render_started: Instant,
     ) {
         let database = Arc::clone(&selected.database);
@@ -1301,6 +1317,7 @@ impl Shell {
                 folder,
                 artist,
                 album_artist,
+                &settings,
                 &cancellation,
             )
             .await
@@ -1395,7 +1412,7 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let (summary, order) = match task.await {
+            let (summary, page) = match task.await {
                 Ok(Ok(result)) => result,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read named detail route");
@@ -1414,8 +1431,9 @@ impl Shell {
                 return;
             }
             let build_shell = Rc::clone(&shell);
+            let library::TrackRoutePage { order, first_rows } = page;
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.named_detail_view(id, summary, order, selected)
+                build_shell.named_detail_view(id, summary, order, first_rows, selected)
             });
         });
     }
@@ -1435,11 +1453,12 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .playlist_order(
+                .playlist_route_page(
                     source_key,
                     folder,
                     settings.sort_key.playlist_sort(),
                     settings.descending,
+                    "",
                     &cancellation,
                 )
                 .await
@@ -1450,8 +1469,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Playlist route order");
                     return;
@@ -1470,7 +1489,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_playlists_route(order, selected)
+                build_shell.library_playlists_route(order, first_rows, selected)
             });
         });
     }
@@ -1493,7 +1512,7 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .smart_playlist_order(
+                .smart_playlist_route_page(
                     source_key,
                     folder,
                     settings.sort_key.smart_playlist_sort(),
@@ -1509,8 +1528,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Smart Playlist order");
                     return;
@@ -1529,7 +1548,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_smart_playlists_route(order, selected)
+                build_shell.library_smart_playlists_route(order, first_rows, selected)
             });
         });
     }
@@ -1548,7 +1567,7 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .history_track_order(source_key, folder, "", &cancellation)
+                .history_track_page(source_key, folder, "", &cancellation)
                 .await
         });
         let shell = Rc::downgrade(self);
@@ -1557,8 +1576,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let rows = match task.await {
-                Ok(Ok(rows)) => rows,
+            let page = match task.await {
+                Ok(Ok(page)) => page,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read History");
                     return;
@@ -1576,8 +1595,12 @@ impl Shell {
                 return;
             }
             let build_shell = Rc::clone(&shell);
+            let library::TrackRoutePage {
+                order: rows,
+                first_rows,
+            } = page;
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.history_route(rows, selected)
+                build_shell.history_route(rows, first_rows, selected)
             });
         });
     }
@@ -1597,9 +1620,10 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .genre_order(
+                .genre_route_page(
                     source_key,
                     folder,
+                    "",
                     settings.sort_key.genre_sort(),
                     settings.descending,
                     &cancellation,
@@ -1612,8 +1636,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Genre order");
                     return;
@@ -1632,7 +1656,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_genres_route(order, selected)
+                build_shell.library_genres_route(order, first_rows, selected)
             });
         });
     }
@@ -1652,9 +1676,10 @@ impl Shell {
         let (read_generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .mood_order(
+                .mood_route_page(
                     source_key,
                     folder,
+                    "",
                     settings.sort_key.mood_sort(),
                     settings.descending,
                     &cancellation,
@@ -1667,8 +1692,8 @@ impl Shell {
             if !shell.finish_root_order_read(read_generation) {
                 return;
             }
-            let order = match task.await {
-                Ok(Ok(order)) => order,
+            let (order, first_rows) = match task.await {
+                Ok(Ok(prepared)) => prepared,
                 Ok(Err(error)) => {
                     warn!(%error, "failed to read Mood order");
                     return;
@@ -1687,7 +1712,7 @@ impl Shell {
             }
             let build_shell = Rc::clone(&shell);
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_moods_route(order, selected)
+                build_shell.library_moods_route(order, first_rows, selected)
             });
         });
     }
@@ -1744,20 +1769,18 @@ impl Shell {
         build: impl FnOnce() -> MountedRoute,
     ) {
         let replacement_started = Instant::now();
-        if let Some(previous) = self.begin_mounted_route_replacement() {
-            self.clear_favorite_controls();
-            self.route_viewport.route_host.remove(&previous.surface);
-            drop(previous);
-        }
-        self.cancel_route_artwork_interaction();
-        let teardown_ms = elapsed_ms(replacement_started);
-
+        let previous = self.begin_mounted_route_replacement();
         let model_started = Instant::now();
         let view = build();
         let model_ms = elapsed_ms(model_started);
 
         let mount_started = Instant::now();
         let widget = view.widget();
+        if let Some(previous) = previous {
+            self.route_viewport.route_host.remove(&previous.surface);
+            drop(previous);
+        }
+        let teardown_ms = elapsed_ms(replacement_started).saturating_sub(model_ms);
         let scroll_adjustment = primary_route_scroll_adjustment(&widget);
         let position_key = source_id
             .filter(|_| scroll_adjustment.is_some())
@@ -1777,9 +1800,6 @@ impl Shell {
         };
         let context = self.take_current_route_context();
         self.route_viewport.route_host.add_child(&surface);
-        if let Some(adjustment) = scroll_adjustment.as_ref() {
-            self.install_route_artwork_interaction(adjustment);
-        }
         let displaced = self
             .route_viewport
             .mounted_route
@@ -1792,7 +1812,6 @@ impl Shell {
             }));
         debug_assert!(displaced.is_none());
         self.install_current_route_context(context);
-        view.resume();
         self.route_viewport.route_host.set_visible_child(&surface);
         let mount_ms = elapsed_ms(mount_started);
         let total_ms = elapsed_ms(render_started);
@@ -1852,6 +1871,7 @@ impl Shell {
                 .borrow_mut()
                 .record(key.clone(), adjustment.value());
         }
+        self.clear_favorite_controls();
         self.clear_current_route_context();
         previous
     }
@@ -1890,15 +1910,14 @@ impl Shell {
     pub(crate) fn clear_mounted_routes(&self) {
         let mounted_route = self.begin_mounted_route_replacement();
         if mounted_route.is_none() && self.route_viewport.route_host.first_child().is_none() {
-            self.cancel_route_artwork_interaction();
             return;
         }
-        self.clear_favorite_controls();
-        while let Some(child) = self.route_viewport.route_host.first_child() {
-            self.route_viewport.route_host.remove(&child);
+        let mut child = self.route_viewport.route_host.first_child();
+        while let Some(current) = child {
+            child = current.next_sibling();
+            self.route_viewport.route_host.remove(&current);
         }
         drop(mounted_route);
-        self.cancel_route_artwork_interaction();
     }
 }
 

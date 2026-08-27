@@ -14,7 +14,7 @@ target
 **/mutants.out*/
 
 # Generated gettext catalogs
-crates/localization/locales/*/LC_MESSAGES/*.mo
+locales/*/LC_MESSAGES/*.mo
 
 # RustRover
 #  JetBrains specific template is maintained in a separate JetBrains.gitignore that can

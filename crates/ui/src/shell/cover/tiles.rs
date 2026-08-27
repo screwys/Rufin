@@ -3,16 +3,8 @@ use std::{cell::Cell, rc::Rc};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 
-use super::{ArtworkTile, LARGE_COVER_SIZE, MEDIUM_COVER_SIZE, cover_fetch_size_for_display};
+use super::{ArtworkTile, cover_fetch_size_for_display};
 use crate::shell::Shell;
-
-fn elastic_cover_fetch_size(artwork_count: usize, mosaic_fetch_size: u32) -> u32 {
-    if artwork_count == 1 {
-        LARGE_COVER_SIZE
-    } else {
-        mosaic_fetch_size
-    }
-}
 
 #[derive(Clone)]
 pub(crate) struct CoverGroupProjection {
@@ -122,75 +114,5 @@ impl Shell {
         };
         projection.replace(self, artwork);
         projection
-    }
-
-    pub(crate) fn elastic_cover_tile_for_candidates(
-        self: &Rc<Self>,
-        candidates: ArtworkBinding,
-        fetch_size: u32,
-    ) -> (gtk::Widget, ArtworkTile) {
-        let tile = ArtworkTile::new_elastic_square();
-        let widget = tile.widget();
-        self.bind_artwork_tile(&tile, candidates, MEDIUM_COVER_SIZE as i32, fetch_size);
-        (widget, tile)
-    }
-
-    pub(crate) fn elastic_cover_group_tile_for_artwork(
-        self: &Rc<Self>,
-        artwork: &[ArtworkBinding],
-        mosaic_fetch_size: u32,
-    ) -> gtk::Widget {
-        let fetch_size = elastic_cover_fetch_size(artwork.len(), mosaic_fetch_size);
-        match artwork.len() {
-            0 => {
-                self.elastic_cover_tile_for_candidates(ArtworkBinding::new(), fetch_size)
-                    .0
-            }
-            1 => {
-                self.elastic_cover_tile_for_candidates(artwork[0].clone(), fetch_size)
-                    .0
-            }
-            _ => {
-                let grid = gtk::Grid::new();
-                grid.add_css_class("cover-tile");
-                grid.add_css_class("card");
-                grid.set_overflow(gtk::Overflow::Hidden);
-                grid.set_row_homogeneous(true);
-                grid.set_column_homogeneous(true);
-                grid.set_hexpand(true);
-                grid.set_vexpand(true);
-                grid.set_halign(gtk::Align::Fill);
-                grid.set_valign(gtk::Align::Fill);
-
-                for index in 0..4 {
-                    let child = self
-                        .elastic_cover_tile_for_candidates(
-                            artwork[index % artwork.len()].clone(),
-                            fetch_size,
-                        )
-                        .0;
-                    grid.attach(&child, (index % 2) as i32, (index / 2) as i32, 1, 1);
-                }
-                grid.upcast()
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::elastic_cover_fetch_size;
-    use crate::shell::cover::{LARGE_COVER_SIZE, THUMB_COVER_SIZE};
-
-    #[test]
-    fn a_single_elastic_grid_cover_uses_the_large_fetch_size() {
-        assert_eq!(
-            elastic_cover_fetch_size(1, THUMB_COVER_SIZE),
-            LARGE_COVER_SIZE
-        );
-        assert_eq!(
-            elastic_cover_fetch_size(4, THUMB_COVER_SIZE),
-            THUMB_COVER_SIZE
-        );
     }
 }

@@ -167,6 +167,9 @@ msgstr ""
 msgid "Added to favorites"
 msgstr ""
 
+msgid "Added to"
+msgstr ""
+
 msgid "Album Artists"
 msgstr ""
 
@@ -219,6 +222,9 @@ msgid "Appears On"
 msgstr ""
 
 msgid "Application name"
+msgstr ""
+
+msgid "Artist / Album"
 msgstr ""
 
 msgid "Artist albums"
@@ -479,6 +485,9 @@ msgstr ""
 msgid "Default right sidebar"
 msgstr ""
 
+msgid "Delete Playlist"
+msgstr ""
+
 msgid "Delete"
 msgstr ""
 
@@ -510,6 +519,9 @@ msgid "Discography"
 msgstr ""
 
 msgid "Discord"
+msgstr ""
+
+msgid "Don't duplicate"
 msgstr ""
 
 msgid "Download Folder"
@@ -935,9 +947,6 @@ msgstr ""
 msgid "More actions"
 msgstr ""
 
-msgid "Most Played (Lifetime)"
-msgstr ""
-
 msgid "Most Played (Monthly)"
 msgstr ""
 
@@ -947,13 +956,13 @@ msgstr ""
 msgid "Most Played (Yearly)"
 msgstr ""
 
+msgid "Most Played"
+msgstr ""
+
+msgid "Most Skipped"
+msgstr ""
+
 msgid "Most played"
-msgstr ""
-
-msgid "Move Last"
-msgstr ""
-
-msgid "Move Next"
 msgstr ""
 
 msgid "Move down"
@@ -1052,6 +1061,9 @@ msgstr ""
 msgid "Next audio device"
 msgstr ""
 
+msgid "Next page"
+msgstr ""
+
 msgid "Next"
 msgstr ""
 
@@ -1127,6 +1139,9 @@ msgstr ""
 msgid "Nothing in this folder"
 msgstr ""
 
+msgid "Nothing played yet"
+msgstr ""
+
 msgid "Nothing playing"
 msgstr ""
 
@@ -1190,7 +1205,7 @@ msgstr ""
 msgid "Original"
 msgstr ""
 
-msgid "Other"
+msgid "Other releases"
 msgstr ""
 
 msgid "Overview"
@@ -1257,9 +1272,6 @@ msgid "Play random (play next)"
 msgstr ""
 
 msgid "Play random"
-msgstr ""
-
-msgid "Play smart playlist"
 msgstr ""
 
 msgid "Play track"
@@ -1344,6 +1356,9 @@ msgstr ""
 msgid "Previous audio device"
 msgstr ""
 
+msgid "Previous page"
+msgstr ""
+
 msgid "Previous"
 msgstr ""
 
@@ -1372,9 +1387,6 @@ msgid "Queue a track to begin"
 msgstr ""
 
 msgid "Queue and transitions"
-msgstr ""
-
-msgid "Queue is empty"
 msgstr ""
 
 msgid "Queue"
@@ -1426,9 +1438,6 @@ msgid "Release notifications"
 msgstr ""
 
 msgid "Release"
-msgstr ""
-
-msgid "Releases"
 msgstr ""
 
 msgid "Remote lyrics"
@@ -1576,6 +1585,12 @@ msgid "Search Again"
 msgstr ""
 
 msgid "Search Lyrics"
+msgstr ""
+
+msgid "Search current folder"
+msgstr ""
+
+msgid "Search is unavailable"
 msgstr ""
 
 msgid "Search lyrics"
@@ -1887,6 +1902,9 @@ msgid "Turn off private mode"
 msgstr ""
 
 msgid "Turn on private mode"
+msgstr ""
+
+msgid "Type to search or create a new playlist"
 msgstr ""
 
 msgid "Type to search"

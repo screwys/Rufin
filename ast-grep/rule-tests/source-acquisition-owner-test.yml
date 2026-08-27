@@ -1,0 +1,21 @@
+id: source-acquisition-must-precede-serialized-lane
+valid:
+  - |
+      fn select_source(&self, source_id: SourceId) {
+          let cancelled = self.shared.begin_acquisition();
+          self.spawn_serialized(move |owner| async move {
+              if cancelled.load(Ordering::Acquire) {
+                  return;
+              }
+              owner.select_now(source_id, cancelled).await;
+          });
+      }
+invalid:
+  - |
+      fn select_source(&self, source_id: SourceId) {
+          self.shared.cancel_acquisition();
+          self.spawn_serialized(move |owner| async move {
+              let cancelled = owner.shared.begin_acquisition();
+              owner.select_now(source_id, cancelled).await;
+          });
+      }

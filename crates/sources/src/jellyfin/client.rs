@@ -1,7 +1,6 @@
 use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
-use crate::source::RemotePlaylistSource;
 use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use std::time::Duration;
 
@@ -85,10 +84,18 @@ impl JellyfinSource {
         if matches!(seed, crate::SourceRadioSeed::Genre(_)) {
             url.query_pairs_mut().append_pair("Id", raw);
         }
-        Ok(self
-            .get_json::<ItemQueryResult>(url)
-            .await?
-            .items
+        let mut items = self.get_json::<ItemQueryResult>(url).await?.items;
+        if items.is_empty()
+            && matches!(seed, crate::SourceRadioSeed::Track(_))
+            && !self.use_instant_mix
+        {
+            let mut url = endpoint(&self.base_url, &format!("Songs/{raw}/InstantMix"))?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Limit", &limit.clamp(1, 500).to_string());
+            items = self.get_json::<ItemQueryResult>(url).await?.items;
+        }
+        Ok(items
             .into_iter()
             .filter(is_audio_item)
             .map(|item| jellyfin_id("track", &item.id))
@@ -126,18 +133,7 @@ impl JellyfinSource {
                 continue;
             }
             if is_audio_item(&item) {
-                let track = track_from_item(item);
-                page.tracks.push(crate::LiveSearchTrack {
-                    object_id: track.id,
-                    title: track.title,
-                    artist: track.artist,
-                    album: track.album,
-                    artwork_binding: track
-                        .image_ref
-                        .as_ref()
-                        .map(serde_json::to_vec)
-                        .transpose()?,
-                });
+                page.tracks.push(jellyfin_id("track", &item.id));
             } else if item.name.is_some() {
                 page.folders.push(crate::LiveFolder {
                     object_id: jellyfin_id("folder", &item.id),
@@ -269,17 +265,9 @@ impl JellyfinSource {
             let finished = pages.advance(count, response.total_record_count)?;
             scan.begin_batch().await?;
             for (offset, item) in response.items.into_iter().enumerate() {
-                let Some(entry_id) = item.playlist_item_id.as_deref().filter(|id| !id.is_empty())
-                else {
-                    return Err(incomplete_playlist());
-                };
-                scan.write_playlist_entry(
-                    playlist_id,
-                    entry_id,
-                    &jellyfin_id("track", &item.id),
-                    (page_start + offset) as i64,
-                )
-                .await?;
+                let (entry_id, track_id, position) = playlist_entry(item, page_start + offset)?;
+                scan.write_playlist_entry(playlist_id, &entry_id, &track_id, position)
+                    .await?;
             }
             scan.finish_batch().await?;
             if finished {
@@ -287,6 +275,14 @@ impl JellyfinSource {
             }
         }
     }
+}
+
+fn playlist_entry(item: JellyfinItem, position: usize) -> SourceResult<(String, String, i64)> {
+    let entry_id = item
+        .playlist_item_id
+        .filter(|id| !id.is_empty())
+        .ok_or_else(incomplete_playlist)?;
+    Ok((entry_id, jellyfin_id("track", &item.id), position as i64))
 }
 
 fn incomplete_playlist() -> SourceError {
@@ -419,8 +415,12 @@ impl JellyfinSource {
     }
 }
 
-impl RemotePlaylistSource for JellyfinSource {
-    async fn create_playlist(&self, name: &str, track_ids: &[String]) -> SourceResult<PlaylistId> {
+impl JellyfinSource {
+    pub(crate) async fn create_playlist(
+        &self,
+        name: &str,
+        track_ids: &[String],
+    ) -> SourceResult<PlaylistId> {
         let url = endpoint(&self.base_url, "Playlists")?;
         let body = CreatePlaylistDto {
             name: name.to_string(),
@@ -434,7 +434,7 @@ impl RemotePlaylistSource for JellyfinSource {
             .await?;
         Ok(String::from(jellyfin_id("playlist", &result.id)))
     }
-    async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
+    pub(crate) async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
         let url = endpoint(
             &self.base_url,
             &format!("Playlists/{}", raw_item_id(playlist_id)),
@@ -444,14 +444,14 @@ impl RemotePlaylistSource for JellyfinSource {
         };
         self.send_unit(self.client.post(url).json(&body)).await
     }
-    async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
+    pub(crate) async fn delete_playlist(&self, playlist_id: &str) -> SourceResult<()> {
         let url = endpoint(
             &self.base_url,
             &format!("Items/{}", raw_item_id(playlist_id)),
         )?;
         self.send_unit(self.client.delete(url)).await
     }
-    async fn add_playlist_tracks(
+    pub(crate) async fn add_playlist_tracks(
         &self,
         playlist_id: &str,
         track_ids: &[String],
@@ -468,7 +468,7 @@ impl RemotePlaylistSource for JellyfinSource {
         }
         Ok(())
     }
-    async fn remove_playlist_entries(
+    pub(crate) async fn remove_playlist_entries(
         &self,
         playlist_id: &str,
         entry_ids: &[String],
@@ -484,7 +484,7 @@ impl RemotePlaylistSource for JellyfinSource {
         }
         Ok(())
     }
-    async fn move_playlist_entry(
+    pub(crate) async fn move_playlist_entry(
         &self,
         playlist_id: &str,
         entry_id: &str,
@@ -916,14 +916,6 @@ pub(super) struct AuthenticationResult {
 pub(super) struct JellyfinUser {
     pub(super) id: String,
     pub(super) name: String,
-    #[serde(default)]
-    pub(super) policy: JellyfinUserPolicy,
-}
-
-#[derive(Clone, Debug, Default, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub(super) struct JellyfinUserPolicy {
-    pub(super) is_administrator: bool,
 }
 
 #[derive(Clone, Debug, Serialize)]
@@ -1001,5 +993,263 @@ impl PlaybackReportDto {
             playback_order: if report.shuffle { "Shuffle" } else { "Default" },
             failed: report.failed,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{playlist_entry, stream_descriptor};
+    use crate::jellyfin::item::{
+        JellyfinItem, album_from_item, stage_album, stage_track, track_from_item,
+    };
+    use crate::jellyfin::{JellyfinSource, JellyfinSourceConfig};
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    #[test]
+    fn playlist_entries_keep_provider_occurrences_when_tracks_repeat() {
+        let items: Vec<JellyfinItem> = serde_json::from_value(serde_json::json!([{
+            "Id": "track-one",
+            "Type": "Audio",
+            "PlaylistItemId": "entry-one"
+        }, {
+            "Id": "track-one",
+            "Type": "Audio",
+            "PlaylistItemId": "entry-two"
+        }]))
+        .expect("playlist items");
+        let entries = items
+            .into_iter()
+            .enumerate()
+            .map(|(position, item)| playlist_entry(item, position).expect("complete entry"))
+            .collect::<Vec<_>>();
+
+        assert_eq!(entries[0].0, "entry-one");
+        assert_eq!(entries[1].0, "entry-two");
+        assert_eq!(entries[0].1, entries[1].1);
+        assert_eq!((entries[0].2, entries[1].2), (0, 1));
+    }
+
+    #[test]
+    fn playlist_entries_reject_missing_or_empty_provider_occurrences() {
+        for item in [
+            serde_json::json!({"Id": "track-one", "Type": "Audio"}),
+            serde_json::json!({
+                "Id": "track-one",
+                "Type": "Audio",
+                "PlaylistItemId": ""
+            }),
+        ] {
+            let item: JellyfinItem = serde_json::from_value(item).expect("playlist item");
+            assert!(playlist_entry(item, 0).is_err());
+        }
+    }
+
+    #[test]
+    fn playback_stream_keeps_authentication_out_of_diagnostics() {
+        let stream = stream_descriptor(
+            &reqwest::Url::parse("https://music.example/jellyfin/").expect("base URL"),
+            "user-one",
+            "device-one",
+            "secret-token",
+            false,
+            &playback::StreamRequest::original("jellyfin:track:track-one"),
+        )
+        .expect("stream descriptor");
+
+        assert!(stream.uri().contains("secret-token"));
+        assert!(!stream.redacted_uri().contains("secret-token"));
+        assert!(stream.redacted_uri().contains("api_key=%3Credacted%3E"));
+    }
+
+    #[tokio::test]
+    async fn empty_similar_tracks_fall_back_to_jellyfin_instant_mix() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Items/track-one/Similar"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Items": [], "TotalRecordCount": 0
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Songs/track-one/InstantMix"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Items": [{"Id": "track-two", "Type": "Audio"}],
+                "TotalRecordCount": 1
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server-one".to_string()),
+                user_id: "user-one".to_string(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "secret-token".to_string(),
+            "device-one".to_string(),
+        )
+        .expect("Jellyfin source");
+
+        assert_eq!(
+            source
+                .generated_track_object_ids(
+                    &crate::SourceRadioSeed::Track("jellyfin:track:track-one".to_string()),
+                    20,
+                )
+                .await
+                .expect("Jellyfin recommendations"),
+            ["jellyfin:track:track-two"]
+        );
+    }
+
+    #[tokio::test]
+    async fn exact_track_change_closes_over_its_album_and_removal_fetches_nothing() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Items/track-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Id": "track-one",
+                "Name": "Updated Track",
+                "Type": "Audio",
+                "AlbumId": "album-one",
+                "Album": "Updated Album"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Items/album-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Id": "album-one",
+                "Name": "Updated Album",
+                "Type": "MusicAlbum"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/Items/track-one/Ancestors"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!([])))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server-one".to_string()),
+                user_id: "user-one".to_string(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "secret-token".to_string(),
+            "device-one".to_string(),
+        )
+        .expect("Jellyfin source");
+        let directory = tempfile::tempdir().expect("Library directory");
+        let database = library::Database::open(directory.path().join("library.sqlite3"))
+            .await
+            .expect("Library database");
+        let mut scan =
+            library::Scan::begin(&database, "jellyfin:test", "Jellyfin", "jellyfin", None)
+                .await
+                .expect("initial Scan");
+        scan.begin_batch().await.expect("initial batch");
+        stage_album(
+            &mut scan,
+            album_from_item(
+                serde_json::from_value(serde_json::json!({
+                    "Id": "album-one", "Name": "Old Album", "Type": "MusicAlbum"
+                }))
+                .expect("old Album"),
+            ),
+        )
+        .await
+        .expect("stage old Album");
+        stage_track(
+            &mut scan,
+            track_from_item(
+                serde_json::from_value(serde_json::json!({
+                    "Id": "track-one", "Name": "Old Track", "Type": "Audio",
+                    "AlbumId": "album-one", "Album": "Old Album"
+                }))
+                .expect("old Track"),
+            ),
+        )
+        .await
+        .expect("stage old Track");
+        scan.finish_batch().await.expect("finish initial batch");
+        scan.finish().await.expect("publish initial Scan");
+
+        source
+            .apply_live_items(
+                &database,
+                "jellyfin:test",
+                vec!["track-one".to_string()],
+                Vec::new(),
+            )
+            .await
+            .expect("apply exact Track change");
+        let cancellation = library::ReadCancellation::new();
+        let source_key = database
+            .cached_source("jellyfin:test", &cancellation)
+            .await
+            .expect("cached source")
+            .expect("published source")
+            .source;
+        let (_, albums) = database
+            .album_route_page(
+                source_key,
+                None,
+                false,
+                "Updated Album",
+                library::AlbumSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("updated Album page");
+        assert_eq!(albums[0].title, "Updated Album");
+
+        source
+            .apply_live_items(
+                &database,
+                "jellyfin:test",
+                Vec::new(),
+                vec!["track-one".to_string()],
+            )
+            .await
+            .expect("apply exact removal");
+        assert!(
+            database
+                .track_route_page(
+                    source_key,
+                    None,
+                    false,
+                    "",
+                    library::TrackSort::Title,
+                    false,
+                    &cancellation,
+                )
+                .await
+                .expect("Track page")
+                .order
+                .is_empty()
+        );
+        assert_eq!(
+            server
+                .received_requests()
+                .await
+                .expect("Jellyfin requests")
+                .len(),
+            3,
+            "the removal path must use accepted Store identity without fetching"
+        );
     }
 }

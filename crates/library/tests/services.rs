@@ -4,7 +4,7 @@ use library::{
     ReadCancellation,
 };
 
-use super::support::{connection, fixture};
+use super::support::{connection, fixture, persist_queue};
 
 #[tokio::test]
 async fn loudness_selects_one_unit_and_source_facts_win() {
@@ -365,68 +365,78 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 }
 
 #[tokio::test]
+async fn loudness_keeps_provider_identity_when_remote_media_has_no_direct_uri() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET media_uri=NULL")
+        .execute(&mut raw)
+        .await
+        .expect("remove direct remote media URIs");
+
+    let track = fixture
+        .database
+        .next_missing_track_loudness(fixture.source, &cancel)
+        .await
+        .expect("select provider-resolved Track loudness")
+        .expect("provider Track loudness work");
+    assert_eq!(track.track_key, fixture.tracks[0]);
+    assert_eq!(track.track_object_id, "track-0");
+    assert_eq!(track.media_uri, None);
+
+    let album = fixture
+        .database
+        .next_missing_album_loudness(fixture.source, &cancel)
+        .await
+        .expect("select provider-resolved Album loudness")
+        .expect("provider Album loudness work");
+    assert_eq!(album.tracks.len(), 2);
+    assert!(album.tracks.iter().all(|track| track.media_uri.is_none()));
+    assert_eq!(album.tracks[0].track_object_id, "track-0");
+}
+
+#[tokio::test]
 async fn artwork_pages_distinct_opaque_bindings_by_digest() {
     let fixture = fixture().await;
     let digest = [9; 32];
-    assert!(
-        fixture
-            .database
-            .write_track_artwork_binding(
-                fixture.source,
-                fixture.tracks[0],
-                Some(b"binding-a"),
-                digest
-            )
-            .await
-            .expect("write Track artwork")
-    );
-    assert!(
-        fixture
-            .database
-            .write_album_artwork_binding(
-                fixture.source,
-                fixture.albums[0],
-                Some(b"binding-a"),
-                digest
-            )
-            .await
-            .expect("write duplicate Album artwork")
-    );
-    assert!(
-        fixture
-            .database
-            .write_artist_artwork_binding(
-                fixture.source,
-                fixture.artists[0],
-                Some(b"binding-b"),
-                digest
-            )
-            .await
-            .expect("write Artist artwork")
-    );
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET artwork_binding=?2 WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .bind(b"binding-a".as_slice())
+        .execute(&mut raw)
+        .await
+        .expect("hydrate Track artwork");
+    sqlx::query("UPDATE albums SET artwork_binding=?2 WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .bind(b"binding-a".as_slice())
+        .execute(&mut raw)
+        .await
+        .expect("hydrate duplicate Album artwork");
+    sqlx::query("UPDATE artists SET artwork_binding=?2 WHERE artist_key=?1")
+        .bind(fixture.artists[0])
+        .bind(b"binding-b".as_slice())
+        .execute(&mut raw)
+        .await
+        .expect("hydrate Artist artwork");
+    sqlx::query("UPDATE sources SET artwork_digest=?2 WHERE source_key=?1")
+        .bind(fixture.source)
+        .bind(digest.as_slice())
+        .execute(&mut raw)
+        .await
+        .expect("hydrate artwork digest");
     let cancel = ReadCancellation::new();
-    assert_eq!(
-        fixture
-            .database
-            .track_artwork_binding(fixture.source, fixture.tracks[0], &cancel)
-            .await
-            .expect("read artwork"),
-        Some(b"binding-a".to_vec())
-    );
     let first = fixture
         .database
         .artwork_preparation_page(fixture.source, None, 1, &cancel)
         .await
         .expect("first artwork page");
-    assert_eq!(first.artwork_digest, digest);
-    assert_eq!(first.bindings.len(), 1);
+    assert_eq!(first.len(), 1);
     let second = fixture
         .database
-        .artwork_preparation_page(fixture.source, Some(&first.bindings[0]), 128, &cancel)
+        .artwork_preparation_page(fixture.source, Some(&first[0]), 128, &cancel)
         .await
         .expect("resume artwork page");
-    assert_eq!(second.bindings, [b"binding-b".to_vec()]);
-    let mut raw = connection(&fixture.path).await;
+    assert_eq!(second, [b"binding-b".to_vec()]);
     let plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artwork_binding FROM tracks WHERE source_key=?1 AND artwork_binding IS NOT NULL AND artwork_binding>?2 ORDER BY artwork_binding LIMIT 128")
         .bind(fixture.source).bind(b"binding-a".as_slice()).fetch_all(&mut raw).await.expect("artwork preparation plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(plan.contains("tracks_artwork_idx"), "{plan}");
@@ -450,11 +460,33 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     let dependencies = (0..300)
         .map(|index| format!("/generic/component-{index:03}.bin"))
         .collect::<Vec<_>>();
-    let key = fixture
-        .database
-        .upsert_local_file(fixture.source, &cue, &dependencies)
-        .await
-        .expect("write Local CUE observation");
+    let mut raw = connection(&fixture.path).await;
+    let key = sqlx::query_scalar::<_, library::LocalFileKey>(
+        "INSERT INTO local_files(source_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state)
+         VALUES(?1,?2,?3,?4,'cue',?5,?6,?7,?8,?9,'accepted') RETURNING local_file_key",
+    )
+    .bind(fixture.source)
+    .bind(&cue.path)
+    .bind(&cue.root)
+    .bind(&cue.relative_path)
+    .bind(cue.size_bytes)
+    .bind(cue.mtime_ns)
+    .bind(cue.device_id)
+    .bind(cue.inode)
+    .bind(cue.parse_version)
+    .fetch_one(&mut raw)
+    .await
+    .expect("write Local CUE observation");
+    for (position, dependency) in dependencies.iter().enumerate() {
+        sqlx::query("INSERT INTO local_file_dependencies(local_file_key,dependency_path,position) VALUES(?1,?2,?3)")
+            .bind(key)
+            .bind(dependency)
+            .bind(position as i64)
+            .execute(&mut raw)
+            .await
+            .expect("write Local CUE dependency");
+    }
+    drop(raw);
     let cancel = ReadCancellation::new();
     let page = fixture
         .database
@@ -465,10 +497,10 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(page[0].dependencies, dependencies);
     let identity = fixture
         .database
-        .local_file_identity(fixture.source, 1, 2, &cancel)
+        .local_file_reuse_candidates(fixture.source, std::slice::from_ref(&cue), &cancel)
         .await
         .expect("Local identity")
-        .unwrap();
+        .remove(0);
     assert_eq!(identity.path, "/music/album.cue");
     assert_eq!(identity.dependencies, dependencies);
     let metadata = LocalAccessWrite {
@@ -572,6 +604,41 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
 }
 
 #[tokio::test]
+async fn local_mapping_selects_one_exact_or_representative_track_without_a_library_walk() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET source_path='/server/music/track.flac' WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .expect("install provider source path");
+    let representative = fixture
+        .database
+        .mapping_track_page(fixture.source, None, None, 1, &cancel)
+        .await
+        .expect("representative mapping Track")
+        .pop()
+        .expect("mapping Track");
+    let exact = fixture
+        .database
+        .mapping_track_page(
+            fixture.source,
+            None,
+            Some(&representative.source_path),
+            1,
+            &cancel,
+        )
+        .await
+        .expect("exact mapping Track")
+        .pop()
+        .expect("exact mapping Track");
+
+    assert_eq!(exact.track_key, representative.track_key);
+    assert_eq!(exact.object_id, representative.object_id);
+}
+
+#[tokio::test]
 async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
@@ -593,10 +660,9 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         .expect("write lyrics");
     let row = fixture
         .database
-        .lyrics_cache(
+        .lyrics_cache_for_role(
             fixture.source,
             fixture.tracks[0],
-            "source",
             "lyrics",
             "en",
             "Latn",
@@ -610,10 +676,9 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     assert!(
         fixture
             .database
-            .lyrics_cache(
+            .lyrics_cache_for_role(
                 fixture.source,
                 fixture.tracks[0],
-                "source",
                 "lyrics",
                 "en",
                 "Latn",
@@ -642,10 +707,9 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .lyrics_cache(
+            .lyrics_cache_for_role(
                 fixture.source,
                 fixture.tracks[1],
-                "source",
                 "lyrics",
                 "",
                 "",
@@ -677,31 +741,6 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             )
             .await
             .is_err()
-    );
-    assert_eq!(
-        fixture
-            .database
-            .evict_lyrics_cache(fixture.source, 15, 1)
-            .await
-            .expect("evict one lyrics row"),
-        1
-    );
-    assert!(
-        fixture
-            .database
-            .lyrics_cache(
-                fixture.source,
-                fixture.tracks[0],
-                "source",
-                "lyrics",
-                "en",
-                "Latn",
-                [1; 32],
-                &cancel
-            )
-            .await
-            .expect("evicted lyrics")
-            .is_none()
     );
     assert!(
         fixture
@@ -775,26 +814,23 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         )
         .await
         .expect("write source loudness");
-    fixture
-        .database
-        .persist_compact_queue(
-            fixture.source,
-            &[QueueCompactOccurrence {
-                occurrence_key: None,
-                object_id: "remove-queue".to_string(),
-                track_key: Some(fixture.tracks[0]),
-                canonical_position: 0,
-                traversal_position: 0,
-                provenance: QueueProvenance::Manual,
-            }],
-            Some("remove-queue"),
-            None,
-            0,
-            QueueRepeatMode::None,
-            false,
-        )
-        .await
-        .expect("write source Queue");
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &[QueueCompactOccurrence {
+            object_id: "remove-queue".to_string(),
+            track_key: Some(fixture.tracks[0]),
+            canonical_position: 0,
+            traversal_position: 0,
+            provenance: QueueProvenance::Manual,
+        }],
+        Some("remove-queue"),
+        None,
+        0,
+        QueueRepeatMode::None,
+        false,
+    )
+    .await;
     assert!(
         fixture
             .database

@@ -15,76 +15,37 @@ use crate::{
 };
 
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(33);
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) struct QueuePersistenceChange {
-    pub expected_revision: u64,
-    pub rows_changed: bool,
-}
+const QUEUE_PERSISTENCE_PAGE_LIMIT: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct QueuePersistence {
     source_key: SourceKey,
     revision: u64,
-    rows: QueueRows,
+    total: usize,
     current: Option<crate::OccurrenceId>,
+    prepared_next: Option<crate::OccurrenceId>,
     progress_millis: u64,
     repeat_mode: crate::RepeatMode,
     shuffled: bool,
-    rows_changed: bool,
-}
-
-#[derive(Clone, Debug)]
-enum QueueRows {
-    Full {
-        entries: Vec<SequenceEntry>,
-        traversal: Option<Vec<crate::OccurrenceId>>,
-    },
-    Traversal(Vec<crate::OccurrenceId>),
 }
 
 impl QueuePersistence {
-    pub(crate) fn capture(sequence: &Sequence, change: QueuePersistenceChange) -> Self {
-        let rows = if change.rows_changed {
-            QueueRows::Full {
-                entries: sequence.persistence_entries(),
-                traversal: None,
-            }
-        } else {
-            QueueRows::Traversal(
-                sequence
-                    .entries()
-                    .iter()
-                    .map(|entry| entry.occurrence.clone())
-                    .collect(),
-            )
-        };
+    pub(crate) fn capture(sequence: &Sequence) -> Self {
         Self {
             source_key: sequence.source_key(),
             revision: sequence.revision(),
-            rows,
+            total: sequence.entries().len(),
             current: sequence.selected().map(|entry| entry.occurrence.clone()),
+            prepared_next: sequence
+                .peek_next_eos()
+                .map(|entry| entry.occurrence.clone()),
             progress_millis: sequence.progress_millis(),
             repeat_mode: sequence.repeat_mode(),
             shuffled: sequence.shuffle_enabled(),
-            rows_changed: change.rows_changed,
         }
     }
     pub fn coalesce(&mut self, newer: Self) {
         if self.source_key != newer.source_key || newer.revision < self.revision {
-            return;
-        }
-        if self.rows_changed && !newer.rows_changed {
-            if let (QueueRows::Full { traversal, .. }, QueueRows::Traversal(order)) =
-                (&mut self.rows, &newer.rows)
-            {
-                *traversal = Some(order.clone());
-            }
-            self.revision = newer.revision;
-            self.current = newer.current;
-            self.progress_millis = newer.progress_millis;
-            self.repeat_mode = newer.repeat_mode;
-            self.shuffled = newer.shuffled;
             return;
         }
         *self = newer;
@@ -95,20 +56,14 @@ impl QueuePersistence {
     pub const fn revision(&self) -> u64 {
         self.revision
     }
-    pub fn full_entries(&self) -> Option<&[SequenceEntry]> {
-        match &self.rows {
-            QueueRows::Full { entries, .. } => Some(entries),
-            QueueRows::Traversal(_) => None,
-        }
-    }
-    pub fn traversal(&self) -> Option<&[crate::OccurrenceId]> {
-        match &self.rows {
-            QueueRows::Traversal(entries) => Some(entries),
-            QueueRows::Full { traversal, .. } => traversal.as_deref(),
-        }
+    pub const fn total(&self) -> usize {
+        self.total
     }
     pub fn current(&self) -> Option<&crate::OccurrenceId> {
         self.current.as_ref()
+    }
+    pub fn prepared_next(&self) -> Option<&crate::OccurrenceId> {
+        self.prepared_next.as_ref()
     }
     pub const fn progress_millis(&self) -> u64 {
         self.progress_millis
@@ -118,9 +73,6 @@ impl QueuePersistence {
     }
     pub const fn shuffled(&self) -> bool {
         self.shuffled
-    }
-    pub const fn rows_changed(&self) -> bool {
-        self.rows_changed
     }
 }
 
@@ -149,15 +101,17 @@ pub struct PlaybackUpdate {
     pub effects: Vec<SessionEffect>,
     pub current_media_changed: bool,
     pub queue_changed: bool,
+    pub visualizer: Option<(RunId, Vec<f64>)>,
 }
 
 impl PlaybackUpdate {
-    fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.queue_persistence.is_none()
             && self.projection.is_none()
             && self.effects.is_empty()
             && !self.current_media_changed
             && !self.queue_changed
+            && self.visualizer.is_none()
     }
 
     fn merge(&mut self, mut newer: Self) {
@@ -181,6 +135,9 @@ impl PlaybackUpdate {
         self.effects.append(&mut newer.effects);
         self.current_media_changed |= newer.current_media_changed;
         self.queue_changed |= newer.queue_changed;
+        if newer.visualizer.is_some() {
+            self.visualizer = newer.visualizer;
+        }
     }
 }
 
@@ -264,6 +221,12 @@ enum RuntimeCommand {
     },
     Projection {
         reply: Reply<PlaybackProjection>,
+    },
+    QueuePersistencePage {
+        revision: u64,
+        offset: usize,
+        limit: usize,
+        reply: Reply<Option<Vec<SequenceEntry>>>,
     },
     ReplaceBackend {
         output: SelectedPlaybackOutput,
@@ -467,6 +430,20 @@ impl Playback {
         self.request(|reply| RuntimeCommand::Projection { reply })
     }
 
+    pub fn queue_persistence_page(
+        &self,
+        revision: u64,
+        offset: usize,
+        limit: usize,
+    ) -> PlaybackResult<Option<Vec<SequenceEntry>>> {
+        self.request(|reply| RuntimeCommand::QueuePersistencePage {
+            revision,
+            offset,
+            limit,
+            reply,
+        })
+    }
+
     pub fn replace_backend(
         &self,
         output: SelectedPlaybackOutput,
@@ -667,6 +644,24 @@ fn apply_runtime_command(
         RuntimeCommand::Projection { reply } => {
             let _ = reply.send(Ok(runtime.initial_projection()));
         }
+        RuntimeCommand::QueuePersistencePage {
+            revision,
+            offset,
+            limit,
+            reply,
+        } => {
+            let sequence = runtime.session.sequence();
+            let page = (sequence.revision() == revision).then(|| {
+                sequence
+                    .entries()
+                    .iter()
+                    .skip(offset)
+                    .take(limit.clamp(1, QUEUE_PERSISTENCE_PAGE_LIMIT))
+                    .cloned()
+                    .collect()
+            });
+            let _ = reply.send(Ok(page));
+        }
         RuntimeCommand::ReplaceBackend {
             output,
             backend,
@@ -773,7 +768,7 @@ mod persistence_tests {
     #[test]
     fn traversal_coalesces_into_one_pending_structural_order() {
         let mut sequence = Sequence::new(SourceKey::from_raw(1));
-        let change = sequence
+        sequence
             .apply_batch_with_change(
                 Batch::new(
                     (1..=4)
@@ -783,27 +778,14 @@ mod persistence_tests {
                 Placement::Replace { anchor_index: 0 },
             )
             .expect("batch");
-        let mut pending = QueuePersistence::capture(
-            &sequence,
-            QueuePersistenceChange {
-                expected_revision: change.expected_revision,
-                rows_changed: true,
-            },
-        );
-        let revision = sequence.revision();
+        let mut pending = QueuePersistence::capture(&sequence);
         sequence.set_shuffle_seed(true, 7);
-        let newer = QueuePersistence::capture(
-            &sequence,
-            QueuePersistenceChange {
-                expected_revision: revision,
-                rows_changed: false,
-            },
-        );
-        let expected = newer.traversal().expect("traversal").to_vec();
+        let newer = QueuePersistence::capture(&sequence);
+        let expected_revision = newer.revision();
         pending.coalesce(newer);
-        assert!(pending.rows_changed());
-        assert_eq!(pending.traversal().expect("coalesced traversal"), expected);
-        assert_eq!(pending.full_entries().expect("full rows").len(), 4);
+        assert_eq!(pending.revision(), expected_revision);
+        assert_eq!(pending.total(), 4);
+        assert!(pending.shuffled());
     }
 }
 
@@ -1070,25 +1052,23 @@ impl PlaybackRuntime {
 
     fn commit(&self, update: SessionUpdate) -> PlaybackUpdate {
         let queue_persistence = update
-            .queue_persistence_change
-            .map(|change| QueuePersistence::capture(self.session.sequence(), change));
+            .queue_persistence_changed
+            .then(|| QueuePersistence::capture(self.session.sequence()));
         let mut notices = Vec::new();
         let mut effects = Vec::new();
         let mut current_media_changed = false;
+        let mut visualizer = None;
         for effect in update.effects {
-            match &effect {
-                SessionEffect::Listening(crate::ListeningFact::Started { run, .. }) => {
-                    notices.push(PlaybackNotice::RunStarted(*run));
+            match effect {
+                effect @ SessionEffect::Listening(crate::ListeningFact::Started { run, .. }) => {
+                    notices.push(PlaybackNotice::RunStarted(run));
                     effects.push(effect);
                 }
                 SessionEffect::PositionDiscontinuity(discontinuity) => {
-                    notices.push(PlaybackNotice::PositionDiscontinuity(*discontinuity));
+                    notices.push(PlaybackNotice::PositionDiscontinuity(discontinuity));
                 }
                 SessionEffect::Visualizer { run, levels } => {
-                    notices.push(PlaybackNotice::Visualizer {
-                        run: *run,
-                        levels: levels.clone(),
-                    });
+                    visualizer = Some((run, levels));
                 }
                 SessionEffect::CurrentMediaChanged => {
                     current_media_changed = true;
@@ -1106,6 +1086,7 @@ impl PlaybackRuntime {
             effects,
             current_media_changed,
             queue_changed: update.queue_changed,
+            visualizer,
         }
     }
 }

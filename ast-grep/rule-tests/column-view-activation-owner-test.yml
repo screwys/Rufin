@@ -1,0 +1,15 @@
+id: column-view-activation-needs-row-factory
+valid:
+  - |
+      fn collection_table_with_width(model: Model) {
+          let table = gtk::ColumnView::new(Some(model));
+          let factory = gtk::SignalListItemFactory::new();
+          table.set_row_factory(Some(&factory));
+          table.connect_activate(move |_, position| activate(position));
+      }
+invalid:
+  - |
+      fn collection_table_with_width(model: Model) {
+          let table = gtk::ColumnView::new(Some(model));
+          table.connect_activate(move |_, position| activate(position));
+      }

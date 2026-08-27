@@ -11,10 +11,15 @@ use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use localization::{album_count_text, track_count_text};
 use localization::{msgid, tr};
 
-use super::sparse_model::SparseItem;
+use super::sparse_model::{SparseItem, SparseObjectItem};
 
 pub(crate) fn smart_playlist_display_name(playlist: &SmartPlaylistRow) -> String {
-    playlist.name.clone()
+    match playlist.object_id.as_str() {
+        "builtin:most_played" => tr(msgid("Most Played")),
+        "builtin:never_played" => tr(msgid("Never Played")),
+        "builtin:most_skipped" => tr(msgid("Most Skipped")),
+        _ => playlist.name.clone(),
+    }
 }
 
 pub(crate) fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
@@ -73,6 +78,28 @@ pub(crate) fn playlist_field(playlist: &PlaylistRow, field: LibraryField) -> Str
         _ => String::new(),
     }
 }
+
+pub(crate) fn playlist_artwork(playlist: &PlaylistRow, prefer_server: bool) -> Vec<ArtworkBinding> {
+    let bindings: &[Vec<u8>] = if prefer_server {
+        playlist
+            .artwork_binding
+            .as_ref()
+            .map(std::slice::from_ref)
+            .unwrap_or(&playlist.representative_artwork)
+    } else if playlist.representative_artwork.is_empty() {
+        playlist
+            .artwork_binding
+            .as_ref()
+            .map(std::slice::from_ref)
+            .unwrap_or_default()
+    } else {
+        &playlist.representative_artwork
+    };
+    bindings
+        .iter()
+        .map(|binding| ArtworkBinding::opaque(binding))
+        .collect()
+}
 pub(crate) fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => smart_playlist_display_name(playlist),
@@ -114,14 +141,15 @@ pub(crate) fn track_field(track: &TrackRow, field: LibraryField) -> String {
     }
 }
 fn boxed_item<T: Clone + 'static>(boxed: &glib::BoxedAnyObject) -> Option<T> {
-    if let Ok(item) = boxed.try_borrow::<T>() {
-        return Some(item.clone());
-    }
+    boxed.try_borrow::<T>().ok().map(|item| item.clone())
+}
+
+pub(super) fn sparse_item<T: Clone + 'static>(item: &SparseObjectItem) -> Option<T> {
     macro_rules! ready {
         ($key:ty) => {
-            if let Ok(item) = boxed.try_borrow::<SparseItem<$key, T>>() {
-                return match &*item {
-                    SparseItem::Ready(row) => Some((**row).clone()),
+            if let Some(item) = item.value::<SparseItem<$key, T>>() {
+                return match item {
+                    SparseItem::Ready(row) => Some((*row).clone()),
                     SparseItem::Placeholder(_) => None,
                 };
             }
@@ -135,28 +163,31 @@ fn boxed_item<T: Clone + 'static>(boxed: &glib::BoxedAnyObject) -> Option<T> {
     ready!(library::PlaylistKey);
     ready!(library::PlaylistEntryKey);
     ready!(library::SmartPlaylistKey);
+    ready!(super::folders::FolderLink);
     None
+}
+
+fn object_item<T: Clone + 'static>(item: glib::Object) -> Option<T> {
+    match item.downcast::<glib::BoxedAnyObject>() {
+        Ok(boxed) => boxed_item(&boxed),
+        Err(item) => item
+            .downcast::<SparseObjectItem>()
+            .ok()
+            .and_then(|item| sparse_item(&item)),
+    }
 }
 
 pub(crate) fn item_at<T: Clone + 'static>(
     model: &impl IsA<gio::ListModel>,
     position: u32,
 ) -> Option<T> {
-    model
-        .item(position)
-        .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-        .and_then(|boxed| boxed_item(&boxed))
+    model.item(position).and_then(object_item)
 }
 pub(crate) fn item_at_from_item<T: Clone + 'static>(item: &gtk::ListItem) -> Option<T> {
-    item.item()
-        .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-        .and_then(|boxed| boxed_item(&boxed))
+    item.item().and_then(object_item)
 }
 pub(crate) fn track_artwork_at_from_item(item: &gtk::ListItem) -> Option<ArtworkBinding> {
-    let boxed = item
-        .item()
-        .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())?;
-    boxed_item::<TrackRow>(&boxed).map(|track| {
+    item_at_from_item::<TrackRow>(item).map(|track| {
         track
             .artwork_binding
             .as_deref()

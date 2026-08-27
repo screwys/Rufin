@@ -1,9 +1,11 @@
 //! Owns Smart Playlist definitions and direct SQL membership, row, and list queries.
 //! One shared policy implements rule, Activity-window, limit, and ordering semantics.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 use sqlx::sqlite::SqliteRow;
-use sqlx::{AssertSqlSafe, Connection, FromRow, QueryBuilder, Row, Sqlite};
+use sqlx::{AssertSqlSafe, Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, SmartPlaylistKey,
@@ -13,6 +15,9 @@ use crate::{
 const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
 const SMART_PLAYLIST_RULE_LIMIT: usize = 64;
 const SMART_PLAYLIST_DEFINITION_BYTES: usize = 256 * 1024;
+const MOST_PLAYED_OBJECT_ID: &str = "builtin:most_played";
+const NEVER_PLAYED_OBJECT_ID: &str = "builtin:never_played";
+const MOST_SKIPPED_OBJECT_ID: &str = "builtin:most_skipped";
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum SmartPlaylistRuleField {
@@ -292,6 +297,59 @@ impl Default for SmartPlaylistDefinition {
     }
 }
 
+fn default_smart_playlists() -> [(&'static str, &'static str, SmartPlaylistDefinition); 3] {
+    [
+        (
+            MOST_PLAYED_OBJECT_ID,
+            "Most Played",
+            SmartPlaylistDefinition {
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::Played,
+                    operator: SmartPlaylistRuleOperator::Is,
+                    value: Some(SmartPlaylistRuleValue::Bool(true)),
+                }],
+                match_any: Vec::new(),
+                sort_field: SmartPlaylistSort::PlayCount,
+                descending: true,
+                activity_period: SmartPlaylistActivityPeriod::Lifetime,
+                limit: None,
+            },
+        ),
+        (
+            NEVER_PLAYED_OBJECT_ID,
+            "Never Played",
+            SmartPlaylistDefinition {
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::Played,
+                    operator: SmartPlaylistRuleOperator::Is,
+                    value: Some(SmartPlaylistRuleValue::Bool(false)),
+                }],
+                match_any: Vec::new(),
+                sort_field: SmartPlaylistSort::Title,
+                descending: false,
+                activity_period: SmartPlaylistActivityPeriod::Lifetime,
+                limit: None,
+            },
+        ),
+        (
+            MOST_SKIPPED_OBJECT_ID,
+            "Most Skipped",
+            SmartPlaylistDefinition {
+                match_all: vec![SmartPlaylistRule {
+                    field: SmartPlaylistRuleField::SkipCount,
+                    operator: SmartPlaylistRuleOperator::Above,
+                    value: Some(SmartPlaylistRuleValue::Number(0)),
+                }],
+                match_any: Vec::new(),
+                sort_field: SmartPlaylistSort::SkipCount,
+                descending: true,
+                activity_period: SmartPlaylistActivityPeriod::Lifetime,
+                limit: None,
+            },
+        ),
+    ]
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct SmartPlaylistRow {
     pub smart_playlist_key: SmartPlaylistKey,
@@ -331,7 +389,174 @@ impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
     }
 }
 
+async fn load_smart_playlist_order(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    folder: Option<FolderKey>,
+    sort: SmartPlaylistListSort,
+    descending: bool,
+    now: i64,
+) -> LibraryResult<Vec<SmartPlaylistKey>> {
+    if folder.is_none()
+        && matches!(
+            sort,
+            SmartPlaylistListSort::Position | SmartPlaylistListSort::Title
+        )
+    {
+        let sql = match (sort, descending) {
+            (SmartPlaylistListSort::Position, false) => {
+                "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position,smart_playlist_key"
+            }
+            (SmartPlaylistListSort::Position, true) => {
+                "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position DESC,smart_playlist_key"
+            }
+            (SmartPlaylistListSort::Title, false) => {
+                "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY normalized_name,smart_playlist_key"
+            }
+            (SmartPlaylistListSort::Title, true) => {
+                "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY normalized_name DESC,smart_playlist_key"
+            }
+            _ => unreachable!(),
+        };
+        return Ok(sqlx::query_scalar::<_, SmartPlaylistKey>(sql)
+            .bind(source)
+            .fetch_all(connection)
+            .await?);
+    }
+    let sql = format!("{SMART_POLICY_SQL}\n{SMART_LIST_SELECT}");
+    Ok(
+        sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql.as_str()))
+            .persistent(false)
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(Option::<SmartPlaylistKey>::None)
+            .bind(match sort {
+                SmartPlaylistListSort::Position => 0_i64,
+                SmartPlaylistListSort::Title => 1,
+                SmartPlaylistListSort::TrackCount => 2,
+                SmartPlaylistListSort::Duration => 3,
+            })
+            .bind(descending)
+            .fetch_all(connection)
+            .await?,
+    )
+}
+
+async fn load_smart_playlist_rows(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    keys: &[SmartPlaylistKey],
+    folder: Option<FolderKey>,
+    now: i64,
+) -> LibraryResult<Vec<SmartPlaylistRow>> {
+    if keys.len() > SMART_PLAYLIST_ROW_LIMIT {
+        return Err(LibraryError::InvalidRequest(format!(
+            "Smart Playlist reads are limited to {SMART_PLAYLIST_ROW_LIMIT} keys"
+        )));
+    }
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    let mut query = QueryBuilder::<Sqlite>::new("WITH requested(smart_playlist_key, ordinal) AS (");
+    query.push_values(keys.iter().enumerate(), |mut row, (ordinal, key)| {
+        row.push_bind(*key).push_bind(ordinal as i64);
+    });
+    query.push(
+        ") SELECT playlist.smart_playlist_key, playlist.source_key,
+                  playlist.object_id, playlist.name,
+                  playlist.definition_json, playlist.position,
+                  0 AS track_count, 0 AS duration_millis
+           FROM requested JOIN smart_playlists AS playlist USING(smart_playlist_key)
+           WHERE playlist.source_key=",
+    );
+    query.push_bind(source).push(" ORDER BY requested.ordinal");
+    let mut result = query
+        .build_query_as::<SmartPlaylistRow>()
+        .persistent(false)
+        .fetch_all(&mut *connection)
+        .await?;
+    let requested = (0..keys.len())
+        .map(|index| format!("?{}", index + 5))
+        .collect::<Vec<_>>()
+        .join(",");
+    let facts_sql = format!(
+        "{SMART_POLICY_SQL}\nSELECT definition_key,count(*),COALESCE(sum(duration_millis),0),count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=?1 AND access.track_object_id=selected.object_id AND access.origin='download') THEN 1 END) FROM selected WHERE definition_key IN ({requested}) GROUP BY definition_key"
+    );
+    let mut facts_query =
+        sqlx::query_as::<_, (SmartPlaylistKey, i64, i64, i64)>(AssertSqlSafe(facts_sql.as_str()))
+            .persistent(false)
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(Option::<SmartPlaylistKey>::None);
+    for key in keys {
+        facts_query = facts_query.bind(*key);
+    }
+    let facts = facts_query
+        .fetch_all(&mut *connection)
+        .await?
+        .into_iter()
+        .map(|(key, tracks, duration, downloaded)| (key, (tracks, duration, downloaded)))
+        .collect::<BTreeMap<_, _>>();
+    let artwork_sql = format!(
+        "{SMART_POLICY_SQL}\nSELECT definition_key,artwork_binding FROM (SELECT selected.definition_key,album.artwork_binding,row_number() OVER (PARTITION BY selected.definition_key ORDER BY min(membership_position)) artwork_position FROM selected JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE selected.definition_key IN ({requested}) AND album.artwork_binding IS NOT NULL GROUP BY selected.definition_key,album.album_key) WHERE artwork_position<=4 ORDER BY definition_key,artwork_position"
+    );
+    let mut artwork_query =
+        sqlx::query_as::<_, (SmartPlaylistKey, Vec<u8>)>(AssertSqlSafe(artwork_sql.as_str()))
+            .persistent(false)
+            .bind(source)
+            .bind(now)
+            .bind(folder)
+            .bind(Option::<SmartPlaylistKey>::None);
+    for key in keys {
+        artwork_query = artwork_query.bind(*key);
+    }
+    let mut artwork = BTreeMap::<SmartPlaylistKey, Vec<Vec<u8>>>::new();
+    for (key, binding) in artwork_query.fetch_all(&mut *connection).await? {
+        artwork.entry(key).or_default().push(binding);
+    }
+    for row in &mut result {
+        normalize_definition(&mut row.definition)?;
+        if let Some((tracks, duration, downloaded)) = facts.get(&row.smart_playlist_key) {
+            row.track_count = *tracks;
+            row.duration_millis = *duration;
+            row.downloaded_count = *downloaded;
+        }
+        row.artwork_bindings = artwork.remove(&row.smart_playlist_key).unwrap_or_default();
+    }
+    Ok(result)
+}
+
 impl Database {
+    pub async fn ensure_default_smart_playlists(&self, source: SourceKey) -> LibraryResult<bool> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let mut changed = false;
+        for (object_id, name, definition) in default_smart_playlists() {
+            changed |= sqlx::query(
+                "INSERT INTO smart_playlists(
+                     source_key, object_id, name, normalized_name,
+                     definition_json, position
+                 ) SELECT ?1, ?2, ?3, lower(?3), ?4,
+                          COALESCE(max(position) + 1, 0)
+                   FROM smart_playlists WHERE source_key=?1
+                 ON CONFLICT(source_key, object_id) DO NOTHING",
+            )
+            .bind(source)
+            .bind(object_id)
+            .bind(name)
+            .bind(encode_definition(&definition)?)
+            .execute(&mut *transaction)
+            .await?
+            .rows_affected()
+                == 1;
+        }
+        transaction.commit().await?;
+        Ok(changed)
+    }
+
     pub async fn smart_playlist_value_suggestions(
         &self,
         source: SourceKey,
@@ -385,7 +610,7 @@ impl Database {
         Ok(result?)
     }
 
-    pub async fn smart_playlist_order(
+    pub async fn smart_playlist_route_page(
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
@@ -393,57 +618,23 @@ impl Database {
         descending: bool,
         now: i64,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<SmartPlaylistKey>> {
+    ) -> LibraryResult<(Vec<SmartPlaylistKey>, Vec<SmartPlaylistRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        if folder.is_none()
-            && matches!(
-                sort,
-                SmartPlaylistListSort::Position | SmartPlaylistListSort::Title
-            )
-        {
-            let sql = match (sort, descending) {
-                (SmartPlaylistListSort::Position, false) => {
-                    "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position,smart_playlist_key"
-                }
-                (SmartPlaylistListSort::Position, true) => {
-                    "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY position DESC,smart_playlist_key"
-                }
-                (SmartPlaylistListSort::Title, false) => {
-                    "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY normalized_name,smart_playlist_key"
-                }
-                (SmartPlaylistListSort::Title, true) => {
-                    "SELECT smart_playlist_key FROM smart_playlists WHERE source_key=?1 ORDER BY normalized_name DESC,smart_playlist_key"
-                }
-                _ => unreachable!(),
-            };
-            let order = sqlx::query_scalar::<_, SmartPlaylistKey>(sql)
-                .bind(source)
-                .fetch_all(&mut *transaction)
+        let order =
+            load_smart_playlist_order(&mut transaction, source, folder, sort, descending, now)
                 .await?;
-            transaction.commit().await?;
-            Database::clear_progress(&mut connection).await?;
-            return Ok(order);
-        }
-        let sql = format!("{SMART_POLICY_SQL}\n{SMART_LIST_SELECT}");
-        let order = sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql.as_str()))
-            .persistent(false)
-            .bind(source)
-            .bind(now)
-            .bind(folder)
-            .bind(Option::<SmartPlaylistKey>::None)
-            .bind(match sort {
-                SmartPlaylistListSort::Position => 0_i64,
-                SmartPlaylistListSort::Title => 1,
-                SmartPlaylistListSort::TrackCount => 2,
-                SmartPlaylistListSort::Duration => 3,
-            })
-            .bind(descending)
-            .fetch_all(&mut *transaction)
-            .await?;
+        let first_rows = load_smart_playlist_rows(
+            &mut transaction,
+            source,
+            &order[..order.len().min(SMART_PLAYLIST_ROW_LIMIT)],
+            folder,
+            now,
+        )
+        .await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(order)
+        Ok((order, first_rows))
     }
 
     pub async fn smart_playlist_rows(
@@ -454,57 +645,9 @@ impl Database {
         now: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<SmartPlaylistRow>> {
-        if keys.len() > SMART_PLAYLIST_ROW_LIMIT {
-            return Err(LibraryError::InvalidRequest(format!(
-                "Smart Playlist reads are limited to {SMART_PLAYLIST_ROW_LIMIT} keys"
-            )));
-        }
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(smart_playlist_key, ordinal) AS (");
-        query.push_values(keys.iter().enumerate(), |mut row, (ordinal, key)| {
-            row.push_bind(*key).push_bind(ordinal as i64);
-        });
-        query.push(
-            ") SELECT playlist.smart_playlist_key, playlist.source_key,
-                      playlist.object_id, playlist.name,
-                      playlist.definition_json, playlist.position,
-                      0 AS track_count, 0 AS duration_millis
-               FROM requested JOIN smart_playlists AS playlist USING(smart_playlist_key)
-               WHERE playlist.source_key=",
-        );
-        query.push_bind(source).push(" ORDER BY requested.ordinal");
-        let mut result = query
-            .build_query_as::<SmartPlaylistRow>()
-            .persistent(false)
-            .fetch_all(&mut *transaction)
-            .await?;
-        for row in &mut result {
-            normalize_definition(&mut row.definition)?;
-            let facts = membership_facts(
-                &mut transaction,
-                source,
-                row.smart_playlist_key,
-                folder,
-                now,
-            )
-            .await?;
-            row.track_count = facts.0;
-            row.duration_millis = facts.1;
-            row.downloaded_count = facts.2;
-            row.artwork_bindings = membership_artwork(
-                &mut transaction,
-                source,
-                row.smart_playlist_key,
-                folder,
-                now,
-            )
-            .await?;
-        }
+        let result = load_smart_playlist_rows(&mut transaction, source, keys, folder, now).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(result)
@@ -677,51 +820,6 @@ impl Database {
         Database::clear_progress(&mut connection).await?;
         Ok(result?)
     }
-}
-
-async fn membership_facts(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    source: SourceKey,
-    key: SmartPlaylistKey,
-    folder: Option<FolderKey>,
-    now: i64,
-) -> LibraryResult<(i64, i64, i64)> {
-    let sql = format!("{SMART_POLICY_SQL}\n{SMART_FACTS_SELECT}");
-    Ok(
-        sqlx::query_as::<_, (i64, i64, i64)>(AssertSqlSafe(sql.as_str()))
-            .persistent(false)
-            .bind(source)
-            .bind(now)
-            .bind(folder)
-            .bind(key)
-            .fetch_one(&mut **transaction)
-            .await?,
-    )
-}
-
-async fn membership_artwork(
-    transaction: &mut sqlx::Transaction<'_, Sqlite>,
-    source: SourceKey,
-    key: SmartPlaylistKey,
-    folder: Option<FolderKey>,
-    now: i64,
-) -> LibraryResult<Vec<Vec<u8>>> {
-    let sql = format!(
-        "{SMART_POLICY_SQL}\nSELECT album.artwork_binding
-         FROM selected JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
-         WHERE definition_key=?4 AND album.artwork_binding IS NOT NULL
-         GROUP BY album.album_key ORDER BY min(membership_position) LIMIT 4"
-    );
-    Ok(
-        sqlx::query_scalar::<_, Vec<u8>>(AssertSqlSafe(sql.as_str()))
-            .persistent(false)
-            .bind(source)
-            .bind(now)
-            .bind(folder)
-            .bind(key)
-            .fetch_all(&mut **transaction)
-            .await?,
-    )
 }
 
 fn require_name(name: &str) -> LibraryResult<&str> {
@@ -1166,12 +1264,6 @@ SELECT track_key
 FROM selected
 WHERE definition_key=?4
 ORDER BY membership_position
-"#;
-
-const SMART_FACTS_SELECT: &str = r#"
-SELECT count(*), COALESCE(sum(duration_millis), 0),
-       count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.source_key=?1 AND access.track_object_id=selected.object_id AND access.origin='download') THEN 1 END)
-FROM selected WHERE definition_key=?4
 "#;
 
 const SMART_LIST_SELECT: &str = r#"

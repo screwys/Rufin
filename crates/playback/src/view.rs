@@ -225,7 +225,6 @@ pub struct PlaybackView {
 pub enum PlaybackNotice {
     RunStarted(RunId),
     PositionDiscontinuity(crate::PositionDiscontinuity),
-    Visualizer { run: RunId, levels: Vec<f64> },
 }
 
 #[derive(Clone, Debug, PartialEq)]

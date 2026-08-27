@@ -18,6 +18,40 @@ struct ScanWait {
 }
 
 impl SubsonicSource {
+    pub(crate) async fn stage_playlist_snapshot(
+        &self,
+        scan: &mut Scan,
+        playlist_id: &str,
+    ) -> SourceResult<()> {
+        let snapshot = self.read_playlist(playlist_id).await?;
+        let artwork = snapshot
+            .playlist
+            .image_ref
+            .as_ref()
+            .map(serde_json::to_vec)
+            .transpose()?;
+        scan.begin_batch().await?;
+        scan.write_playlist(
+            &snapshot.playlist.id,
+            &snapshot.playlist.name,
+            &snapshot.playlist.name.to_lowercase(),
+            &snapshot.playlist.name.to_lowercase(),
+            artwork.as_deref(),
+        )
+        .await?;
+        for (position, entry) in snapshot.entries.iter().enumerate() {
+            scan.write_playlist_entry(
+                &snapshot.playlist.id,
+                &entry.occurrence_id,
+                &entry.track_id,
+                position as i64,
+            )
+            .await?;
+        }
+        scan.finish_batch().await?;
+        Ok(())
+    }
+
     pub(crate) async fn home_section(
         &self,
         section: crate::SourceHomeSection,
@@ -62,10 +96,10 @@ impl SubsonicSource {
     }
     pub(crate) async fn freshness(&self) -> SourceResult<Option<Freshness>> {
         let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
-        if body.scan_status.scanning {
+        let Some(marker) = completed_freshness(body.scan_status) else {
             return Ok(None);
-        }
-        Ok(Some(Freshness::new(freshness(body.scan_status))?))
+        };
+        Ok(Some(Freshness::new(marker)?))
     }
 
     pub(crate) async fn stage_catalog(
@@ -89,14 +123,19 @@ impl SubsonicSource {
         }
         scan.finish_batch().await?;
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Albums, 0));
-        self.emit_albums(scan, progress, cancelled).await?;
-        progress(stage(SourceReadStage::Tracks, 0));
-        self.emit_tracks(&music_folders, scan, progress, cancelled)
-            .await?;
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Artists, 0));
-        self.stage_artists(scan, progress, cancelled).await?;
+        if self.has_navidrome_library() {
+            self.stage_navidrome_library(scan, progress, cancelled)
+                .await?;
+        } else {
+            progress(stage(SourceReadStage::Albums, 0));
+            self.emit_albums(scan, progress, cancelled).await?;
+            progress(stage(SourceReadStage::Tracks, 0));
+            self.emit_tracks(&music_folders, scan, progress, cancelled)
+                .await?;
+            check_cancelled(cancelled)?;
+            progress(stage(SourceReadStage::Artists, 0));
+            self.stage_artists(scan, progress, cancelled).await?;
+        }
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Genres, 0));
@@ -196,14 +235,22 @@ impl SubsonicSource {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
                 scan.begin_batch().await?;
+                let mut folder_links = Vec::new();
                 for song in page {
                     let track = track_from_dto(self, song);
                     if let Some(folder) = folder {
-                        scan.write_track_folder(&track.id, &folder.id, 0).await?;
+                        folder_links.push((track.id.clone(), folder.id.clone()));
                     }
                     stage_track(scan, track).await?;
                     emitted += 1;
                 }
+                scan.write_track_folders(
+                    &folder_links
+                        .iter()
+                        .map(|(track, folder)| library::ScanLink::new(track, folder, 0))
+                        .collect::<Vec<_>>(),
+                )
+                .await?;
                 scan.finish_batch().await?;
                 progress(stage(SourceReadStage::Tracks, emitted));
             }
@@ -250,32 +297,7 @@ impl SubsonicSource {
         for (position, playlist) in playlists.into_iter().enumerate() {
             check_cancelled(cancelled)?;
             let id = String::from(self.id("playlist", &raw_id_string(&playlist.id)));
-            let snapshot = self.read_playlist(&id).await?;
-            let artwork = snapshot
-                .playlist
-                .image_ref
-                .as_ref()
-                .map(serde_json::to_vec)
-                .transpose()?;
-            scan.begin_batch().await?;
-            scan.write_playlist(
-                &snapshot.playlist.id,
-                &snapshot.playlist.name,
-                &snapshot.playlist.name.to_lowercase(),
-                &snapshot.playlist.name.to_lowercase(),
-                artwork.as_deref(),
-            )
-            .await?;
-            for (entry_position, entry) in snapshot.entries.iter().enumerate() {
-                scan.write_playlist_entry(
-                    &snapshot.playlist.id,
-                    &entry.occurrence_id,
-                    &entry.track_id,
-                    entry_position as i64,
-                )
-                .await?;
-            }
-            scan.finish_batch().await?;
+            self.stage_playlist_snapshot(scan, &id).await?;
             progress(SourceReadProgress {
                 stage: SourceReadStage::Playlists,
                 completed: position + 1,
@@ -434,6 +456,10 @@ fn freshness(status: ScanStatus) -> Vec<u8> {
     marker
 }
 
+fn completed_freshness(status: ScanStatus) -> Option<Vec<u8>> {
+    (!status.scanning).then(|| freshness(status))
+}
+
 fn stage(stage: SourceReadStage, completed: usize) -> SourceReadProgress {
     SourceReadProgress {
         stage,
@@ -447,5 +473,40 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
         Err(SourceError::Cancelled)
     } else {
         Ok(())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ScanStatus, completed_freshness};
+
+    fn status(count: i64, last_scan: &str) -> ScanStatus {
+        ScanStatus {
+            scanning: false,
+            count,
+            folder_count: Some(3),
+            last_scan: Some(last_scan.to_string()),
+            error: None,
+        }
+    }
+
+    #[test]
+    fn completed_scan_marker_changes_only_with_provider_freshness() {
+        let accepted = completed_freshness(status(40, "2026-08-27T00:00:00Z"));
+        assert_eq!(
+            completed_freshness(status(40, "2026-08-27T00:00:00Z")),
+            accepted
+        );
+        assert_ne!(
+            completed_freshness(status(41, "2026-08-27T00:00:00Z")),
+            accepted
+        );
+        assert_ne!(
+            completed_freshness(status(40, "2026-08-27T00:01:00Z")),
+            accepted
+        );
+        let mut scanning = status(41, "2026-08-27T00:01:00Z");
+        scanning.scanning = true;
+        assert_eq!(completed_freshness(scanning), None);
     }
 }

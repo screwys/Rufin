@@ -195,11 +195,12 @@ impl PlayerPipeline {
         &mut self,
         rate: f64,
         seek_current_position: bool,
+        settings: &BackendAudioSettings,
     ) -> Result<bool, String> {
         let Some(session) = self.session.as_mut() else {
             return Ok(false);
         };
-        session.set_playback_rate(rate, seek_current_position)
+        session.set_playback_rate(rate, seek_current_position, settings)
     }
 
     pub(super) fn needs_initial_rate_seek(&self) -> bool {
@@ -372,12 +373,12 @@ impl PipelineSession {
         settings: &BackendAudioSettings,
     ) -> Result<(), String> {
         if let Some(graph) = self.audio_graph.as_mut()
-            && graph.reconfigure(settings)?
+            && graph.reconfigure(settings, self.playback_rate)?
         {
             return Ok(());
         }
         self.clear_visualizer_tap();
-        let graph = AudioGraph::new(settings)?;
+        let graph = AudioGraph::new(settings, self.playback_rate)?;
         graph.apply_loudness(&self.current_stream.loudness);
         *self
             .loudness_tags
@@ -389,9 +390,9 @@ impl PipelineSession {
     }
 
     fn try_reconfigure_audio(&mut self, settings: &BackendAudioSettings) -> Result<bool, String> {
-        self.audio_graph
-            .as_mut()
-            .map_or(Ok(false), |graph| graph.reconfigure(settings))
+        self.audio_graph.as_mut().map_or(Ok(false), |graph| {
+            graph.reconfigure(settings, self.playback_rate)
+        })
     }
 
     fn set_stream(&mut self, stream: &PreparedStream) {
@@ -504,8 +505,10 @@ impl PipelineSession {
         &mut self,
         rate: f64,
         seek_current_position: bool,
+        settings: &BackendAudioSettings,
     ) -> Result<bool, String> {
         self.playback_rate = sanitize_playback_rate(rate);
+        self.configure_audio(settings)?;
         if !seek_current_position {
             return Ok(false);
         }

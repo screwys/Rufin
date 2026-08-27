@@ -2,8 +2,7 @@ use std::rc::Rc;
 
 use crate::settings::HomeBlockKind;
 use crate::{
-    AccentPreference, LeftSidebarMode, LibraryColumnWidth, LibraryListKey, LibraryListSettings,
-    ThemePreference,
+    AccentPreference, LeftSidebarMode, LibraryListKey, LibraryListSettings, ThemePreference,
 };
 use adw::prelude::*;
 use desktop_integration::{DisplayType, LinkType};
@@ -385,7 +384,6 @@ impl Shell {
     }
 
     fn refresh_artwork_policy(self: &Rc<Self>) {
-        self.refresh_artwork_bindings();
         self.update_media_controls();
     }
 
@@ -490,44 +488,6 @@ impl Shell {
         if committed.is_some() {
             self.reconcile_mounted_route();
         }
-    }
-
-    pub(crate) fn save_library_column_widths(
-        &self,
-        key: LibraryListKey,
-        widths: Vec<LibraryColumnWidth>,
-    ) {
-        self.update_app_settings("library column widths", |settings| {
-            if !settings.library_lists.iter().any(|entry| entry.key == key) {
-                settings
-                    .library_lists
-                    .push(crate::LibraryListSettingsEntry {
-                        key,
-                        settings: LibraryListSettings::for_key(key),
-                    });
-            }
-            let Some(list) = settings
-                .library_lists
-                .iter_mut()
-                .find(|entry| entry.key == key)
-                .map(|entry| &mut entry.settings)
-            else {
-                return false;
-            };
-            let previous = list.row_column_widths.clone();
-            for width in widths {
-                if let Some(saved) = list
-                    .row_column_widths
-                    .iter_mut()
-                    .find(|saved| saved.field == width.field)
-                {
-                    *saved = width;
-                } else {
-                    list.row_column_widths.push(width);
-                }
-            }
-            list.row_column_widths != previous
-        });
     }
 
     pub(crate) fn update_playback_settings(

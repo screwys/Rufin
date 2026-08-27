@@ -283,7 +283,7 @@ fn generate_japanese_readings(source: &Path, check: bool) -> Result<()> {
 
 fn i18n_template_command(mut args: Vec<String>) -> Result<()> {
     let mut check = false;
-    let mut output = PathBuf::from("crates/localization/locales/rufin.pot");
+    let mut output = PathBuf::from("locales/rufin.pot");
 
     while !args.is_empty() {
         match args.remove(0).as_str() {
@@ -316,13 +316,13 @@ pub(crate) fn i18n_template_check() -> Result<()> {
     let output = temp_path("i18n-template.pot");
     i18n_template_to(&output)?;
     let generated = read_to_string(&output)?;
-    let checked_in = read_to_string(&root.join("crates/localization/locales/rufin.pot"))?;
+    let checked_in = read_to_string(&root.join("locales/rufin.pot"))?;
     let _ = fs::remove_file(&output);
     if checked_in == generated {
         Ok(())
     } else {
         Err(
-            "crates/localization/locales/rufin.pot is stale; run cargo run --locked -p xtask -- generate i18n-template"
+            "locales/rufin.pot is stale; run cargo run --locked -p xtask -- generate i18n-template"
                 .into(),
         )
     }

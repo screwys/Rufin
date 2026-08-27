@@ -97,15 +97,13 @@ async fn write_small_catalog(
         let (object_id, track_title, position) = tracks[index];
         write_track(&mut scan, object_id, track_title, position).await;
     }
-    scan.write_album_artist("album-one", "artist-one", 0)
-        .await
-        .expect("stage album artist");
-    scan.write_album_genre("album-one", "genre-one", 0)
-        .await
-        .expect("stage album genre");
-    scan.write_album_release_type("album-one", "Album", 0)
-        .await
-        .expect("stage release type");
+    scan.write_album_relations(
+        &[("album-one", "artist-one")],
+        &[("album-one", "genre-one")],
+        &[("album-one", "Album")],
+    )
+    .await
+    .expect("stage album relations");
     scan.finish().await.expect("finish scan")
 }
 
@@ -146,16 +144,14 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
     )
     .await
     .expect("stage track");
-    scan.write_track_artist(object_id, "artist-one", 0)
-        .await
-        .expect("stage track artist");
-    scan.write_track_genre(object_id, "genre-one", 0)
-        .await
-        .expect("stage track genre");
-    scan.write_track_mood(object_id, "mood-one", 0)
-        .await
-        .expect("stage track mood");
-    scan.write_track_folder(object_id, "folder-one", 0)
+    scan.write_track_relations(
+        &[(object_id, "artist-one")],
+        &[(object_id, "genre-one")],
+        &[(object_id, "mood-one")],
+    )
+    .await
+    .expect("stage track relations");
+    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
         .await
         .expect("stage track folder");
     scan.write_playlist_entry(
@@ -350,6 +346,7 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     .await
     .expect("read artwork digest after Genre change");
     assert_ne!(artwork_after, artwork_before);
+    assert_eq!(artwork_change.artwork_digest.as_slice(), artwork_after);
 }
 
 #[tokio::test]
@@ -605,5 +602,59 @@ async fn ordinary_orders_and_point_rows_use_named_indexes() {
             .map(|row| row.detail.as_str())
             .collect::<Vec<_>>(),
         ["SEARCH tracks USING INTEGER PRIMARY KEY (rowid=?)"]
+    );
+}
+
+#[tokio::test]
+async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+
+    let mut point = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Playlist point scan");
+    point.begin_batch().await.unwrap();
+    point
+        .write_playlist(
+            "playlist-one",
+            "Playlist One",
+            "playlist one",
+            "playlist one",
+            None,
+        )
+        .await
+        .unwrap();
+    point
+        .write_playlist("playlist-two", "Other", "other", "other", None)
+        .await
+        .unwrap();
+    point
+        .write_playlist_entry("playlist-one", "entry-one", "track-one", 0)
+        .await
+        .unwrap();
+    point.finish_batch().await.unwrap();
+    point.finish().await.unwrap();
+
+    let mut removal = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Playlist removal");
+    removal.begin_batch().await.unwrap();
+    removal.remove_playlist("playlist-two").await.unwrap();
+    removal.finish_batch().await.unwrap();
+    removal.finish().await.unwrap();
+
+    let mut outside = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM playlist_entries entry
+             JOIN playlists playlist USING(playlist_key)
+             WHERE playlist.object_id='playlist-one'",
+        )
+        .fetch_one(&mut outside)
+        .await
+        .expect("count preserved Playlist entries"),
+        1
     );
 }

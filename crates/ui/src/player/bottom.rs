@@ -30,7 +30,6 @@ use super::progress::seekbar_target_seconds;
 use crate::interactions::add_widget_click;
 use crate::layout::{AllocationOwner, allocation_owner};
 use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
-use crate::ratings::RatingControl;
 use crate::routes::collection_context::{
     install_current_track_context_menu, present_current_track_context_menu,
 };
@@ -67,13 +66,10 @@ const BOTTOM_PLAYER_IDENTITY_HEIGHT: i32 = 58;
 const BOTTOM_PLAYER_TITLE_ROW_HEIGHT: i32 = 20;
 const BOTTOM_PLAYER_META_ROW_HEIGHT: i32 = 18;
 const BOTTOM_PLAYER_ACTION_SPACING: i32 = 0;
-const BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y: i32 = 5;
 const BOTTOM_PLAYER_PROGRESS_SPACING: i32 = 6;
 const BOTTOM_PLAYER_VOLUME_SPACING: i32 = 1;
 const BOTTOM_PLAYER_VOLUME_SLOT_WIDTH: i32 = 95;
 const BOTTOM_PLAYER_VOLUME_SLOT_LAYOUT_WIDTH: i32 = 90;
-const BOTTOM_PLAYER_RATING_WIDTH: i32 = 85;
-const BOTTOM_PLAYER_RATING_HEIGHT: i32 = 24;
 const OUTPUT_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH: i32 = 126;
 const BOTTOM_PLAYER_TINY_CONTROL_SPACING: i32 = 2;
@@ -144,8 +140,6 @@ pub(crate) struct PlayerControls {
     pub(super) queue_button: gtk::Button,
     pub(super) queue_icon: gtk::Image,
     pub(crate) favorite_button: gtk::Button,
-    rating: RatingControl,
-    rating_available: Cell<bool>,
     progress_row: gtk::Box,
     elapsed: gtk::Label,
     progress_stack: gtk::Stack,
@@ -154,7 +148,7 @@ pub(crate) struct PlayerControls {
     waveform_key: RefCell<Option<CurrentMediaId>>,
     waveform_peak_count: Cell<usize>,
     duration: gtk::Label,
-    actions: gtk::Overlay,
+    actions: gtk::Box,
     pub(crate) mute_button: gtk::Button,
     mute_icon: gtk::Image,
     mute_icon_state: Rc<Cell<VolumeIcon>>,
@@ -194,11 +188,10 @@ struct TransportControls {
 }
 
 struct PlayerActionControls {
-    root: gtk::Overlay,
+    root: gtk::Box,
     queue_button: gtk::Button,
     queue_icon: gtk::Image,
     favorite_button: gtk::Button,
-    rating: RatingControl,
     mute_button: gtk::Button,
     mute_icon: gtk::Image,
     mute_icon_state: Rc<Cell<VolumeIcon>>,
@@ -621,20 +614,6 @@ impl Shell {
                 .album
                 .set_sensitive(current.is_some_and(|entry| !entry.track.album.is_empty()));
             controls.favorite_button.set_sensitive(current.is_some());
-            let rating_available = current.is_some_and(|entry| {
-                entry.track.track_key.is_some_and(|track| {
-                    self.rating_available(&library::FavoriteTarget::Track(track))
-                })
-            });
-            controls.rating_available.set(rating_available);
-            controls.rating.widget().set_sensitive(rating_available);
-            controls.rating.widget().set_visible(rating_available);
-            controls.rating.set_rating(current.and_then(|entry| {
-                entry
-                    .track
-                    .rating
-                    .and_then(|value| u8::try_from(value).ok())
-            }));
         }
 
         controls.play_icon_playing.set(matches!(
@@ -840,7 +819,6 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         queue_button,
         queue_icon,
         favorite_button,
-        rating,
         mute_button,
         mute_icon,
         mute_icon_state,
@@ -920,8 +898,6 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         queue_button,
         queue_icon,
         favorite_button,
-        rating,
-        rating_available: Cell::new(false),
         progress_row,
         elapsed,
         progress_stack,
@@ -1123,6 +1099,7 @@ fn build_transport_controls() -> TransportControls {
     progress_row.set_valign(gtk::Align::Center);
     let elapsed = gtk::Label::new(Some("0:00"));
     elapsed.add_css_class("muted");
+    elapsed.add_css_class("player-timestamp");
     elapsed.set_width_chars(4);
     elapsed.set_xalign(1.0);
     let progress = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 1.0);
@@ -1139,6 +1116,7 @@ fn build_transport_controls() -> TransportControls {
     progress_stack.set_visible_child(&progress);
     let duration = gtk::Label::new(Some("0:00"));
     duration.add_css_class("muted");
+    duration.add_css_class("player-timestamp");
     duration.set_width_chars(4);
     progress_row.append(&elapsed);
     progress_row.append(&progress_stack);
@@ -1169,25 +1147,9 @@ fn build_transport_controls() -> TransportControls {
 }
 
 fn build_player_action_controls() -> PlayerActionControls {
-    let root = gtk::Overlay::new();
+    let root = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_ACTION_SPACING);
     root.set_halign(gtk::Align::End);
-    root.set_valign(gtk::Align::Fill);
-    root.set_vexpand(true);
-    let rating = RatingControl::new(None);
-    rating
-        .widget()
-        .set_size_request(BOTTOM_PLAYER_RATING_WIDTH, BOTTOM_PLAYER_RATING_HEIGHT);
-    rating.widget().set_halign(gtk::Align::End);
-    rating.widget().set_valign(gtk::Align::Start);
-    rating.widget().set_margin_top(5);
-    rating.widget().set_margin_end(15);
-    root.add_overlay(rating.widget());
-    root.set_measure_overlay(rating.widget(), false);
-
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_ACTION_SPACING);
-    buttons.set_halign(gtk::Align::End);
-    buttons.set_valign(gtk::Align::Center);
-    buttons.set_margin_top(BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2);
+    root.set_valign(gtk::Align::Center);
     let output_button = icon_button_without_tooltip(
         "rufin-video-display-symbolic",
         msgid("Choose playback output"),
@@ -1199,7 +1161,7 @@ fn build_player_action_controls() -> PlayerActionControls {
         .and_then(|child| child.downcast::<gtk::Image>().ok())
         .expect("an icon button contains an image");
     output_icon.add_css_class("player-output-icon");
-    buttons.append(&output_button);
+    root.append(&output_button);
     let settings_button = gtk::MenuButton::new();
     settings_button.set_icon_name("rufin-preferences-system-symbolic");
     settings_button.set_direction(gtk::ArrowType::Up);
@@ -1211,7 +1173,7 @@ fn build_player_action_controls() -> PlayerActionControls {
     settings_button.set_valign(gtk::Align::Center);
     bind_widget_tooltip(&settings_button, "Playback settings");
     bind_widget_accessible_label(&settings_button, "Playback settings");
-    buttons.append(&settings_button);
+    root.append(&settings_button);
 
     let volume_group = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_VOLUME_SPACING);
     volume_group.set_valign(gtk::Align::Center);
@@ -1237,15 +1199,13 @@ fn build_player_action_controls() -> PlayerActionControls {
     volume_slot.add_css_class("volume-slider-slot");
     volume_slot.set_valign(gtk::Align::Fill);
     volume_group.append(&volume_slot);
-    buttons.append(&volume_group);
-    root.set_child(Some(&buttons));
+    root.append(&volume_group);
 
     PlayerActionControls {
         root,
         queue_button,
         queue_icon,
         favorite_button,
-        rating,
         mute_button,
         mute_icon,
         mute_icon_state,
@@ -1959,13 +1919,6 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
         .favorite_button
         .connect_clicked(move |_| favorite_shell.toggle_current_track_favorite());
 
-    let rating_shell = Rc::clone(shell);
-    shell
-        .player_view
-        .player_controls
-        .rating
-        .connect_commit(move |rating| rating_shell.set_current_track_rating(rating));
-
     let mute_shell = Rc::clone(shell);
     shell
         .player_view
@@ -2247,10 +2200,6 @@ impl Shell {
         player
             .queue_button
             .set_visible(matches!(actions, BottomPlayerActions::Queue));
-        player
-            .rating
-            .widget()
-            .set_visible(player.rating_available.get());
     }
 }
 

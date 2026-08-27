@@ -733,7 +733,7 @@ _build-dmg identity="development":
         "$app_path/Contents/Resources/share/licenses/rufin/japanese-readings.LICENSE"
     cp "${repo_root}/LICENSE" "$app_path/Contents/Resources/LICENSE"
 
-    for po_file in "${repo_root}"/crates/localization/locales/*.po; do
+    for po_file in "${repo_root}"/locales/*.po; do
         language="$(basename "$po_file" .po)"
         copy_directory \
             "${brew_prefix}/share/locale/${language}" \
@@ -1093,7 +1093,7 @@ _build-windows identity="development":
     copy_directory "$runtime_prefix/share/themes" "$app_share/themes"
     copy_directory "$runtime_prefix/share/licenses" "$app_share/licenses"
 
-    for po_file in "$repo_root"/crates/localization/locales/*.po; do
+    for po_file in "$repo_root"/locales/*.po; do
         language="$(basename "$po_file" .po)"
         copy_directory \
             "$runtime_prefix/share/locale/$language" \

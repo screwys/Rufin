@@ -18,7 +18,7 @@ use crate::routes::collection_context::{
     present_playlist_context_menu, present_smart_playlist_context_menu,
 };
 use crate::routes::collections::PlaybackTarget;
-use crate::routes::library_fields::smart_playlist_display_name;
+use crate::routes::library_fields::{playlist_artwork, smart_playlist_display_name};
 use crate::routes::route::Route;
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
@@ -242,6 +242,7 @@ impl Shell {
                     folder,
                     library::PlaylistSort::Title,
                     false,
+                    "",
                     &cancellation,
                 )
                 .await?;
@@ -956,25 +957,12 @@ impl SidebarPinItem {
                 .collect(),
             Self::Genre(genre) => genre
                 .artwork_binding
-                .iter()
-                .chain(&genre.representative_artwork)
+                .as_ref()
+                .or_else(|| genre.representative_artwork.first())
+                .into_iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect(),
-            Self::Playlist(playlist) => {
-                let server = playlist.artwork_binding.iter();
-                let representatives = playlist.representative_artwork.iter();
-                if prefer_server_playlist_covers {
-                    server
-                        .chain(representatives)
-                        .map(|binding| ArtworkBinding::opaque(binding))
-                        .collect()
-                } else {
-                    representatives
-                        .chain(server)
-                        .map(|binding| ArtworkBinding::opaque(binding))
-                        .collect()
-                }
-            }
+            Self::Playlist(playlist) => playlist_artwork(playlist, prefer_server_playlist_covers),
             Self::SmartPlaylist(playlist) => playlist
                 .artwork_bindings
                 .iter()
@@ -1308,6 +1296,7 @@ fn sidebar_pin_row(
 
     let navigation_shell = Rc::clone(shell);
     activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
+    install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
 
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 1);
@@ -1398,6 +1387,7 @@ fn compact_sidebar_pin(
     activate.set_child(Some(&cover));
     let navigation_shell = Rc::clone(shell);
     activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
+    install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
 
     let (controls, play) = cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
@@ -1420,6 +1410,24 @@ fn compact_sidebar_pin(
         }),
     );
     row
+}
+
+fn install_sidebar_pin_double_click(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    playback: PlaybackTarget,
+) {
+    let click = gtk::GestureClick::new();
+    click.set_button(1);
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let shell = Rc::clone(shell);
+    click.connect_pressed(move |gesture, presses, _, _| {
+        if presses >= 2 && presses % 2 == 0 {
+            gesture.set_state(gtk::EventSequenceState::Claimed);
+            playback.play(&shell, QueuePlacement::Now, true);
+        }
+    });
+    target.add_controller(click);
 }
 
 fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {

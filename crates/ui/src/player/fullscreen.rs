@@ -105,6 +105,7 @@ pub(crate) struct FullscreenPlayerParts {
     visualizer_area: gtk::DrawingArea,
     visualizer_levels: Rc<RefCell<Vec<f64>>>,
     visualizer_targets: Rc<RefCell<Vec<f64>>>,
+    visualizer_generation: Rc<Cell<u64>>,
     visualizer_tick: RefCell<Option<gtk::TickCallbackId>>,
     visualizer_active: Cell<bool>,
     pub(crate) equalizer_panel: gtk::ScrolledWindow,
@@ -263,6 +264,7 @@ pub(crate) fn build_fullscreen_player(
         visualizer_area,
         visualizer_levels,
         visualizer_targets,
+        visualizer_generation: Rc::new(Cell::new(0)),
         visualizer_tick: RefCell::new(None),
         visualizer_active: Cell::new(false),
         equalizer_panel: equalizer.root.clone(),
@@ -1392,6 +1394,8 @@ impl Shell {
             .fullscreen_player
             .visualizer_targets
             .borrow_mut() = visualizer_display_levels(&levels);
+        let generation = &self.player_view.fullscreen_player.visualizer_generation;
+        generation.set(generation.get().wrapping_add(1).max(1));
         self.start_visualizer_tick();
     }
 
@@ -1450,9 +1454,23 @@ impl Shell {
         }
         let levels = Rc::clone(&self.player_view.fullscreen_player.visualizer_levels);
         let targets = Rc::clone(&self.player_view.fullscreen_player.visualizer_targets);
+        let generation = Rc::clone(&self.player_view.fullscreen_player.visualizer_generation);
         let fullscreen_area = self.player_view.fullscreen_player.visualizer_area.clone();
         let sidebar_area = self.right_panel.visualizer_area.clone();
+        let shell = Rc::downgrade(self);
+        let seen_generation = Cell::new(generation.get());
+        let stale_frames = Cell::new(0_u8);
         let tick = self.chrome.window.add_tick_callback(move |_, _| {
+            let next_generation = generation.get();
+            if next_generation == seen_generation.get() {
+                stale_frames.set(stale_frames.get().saturating_add(1));
+            } else {
+                seen_generation.set(next_generation);
+                stale_frames.set(0);
+            }
+            if stale_frames.get() >= 8 {
+                targets.borrow_mut().fill(0.0);
+            }
             let mut current = levels.borrow_mut();
             let target = targets.borrow();
             let len = target
@@ -1460,14 +1478,34 @@ impl Shell {
                 .max(current.len())
                 .max(FULLSCREEN_VISUALIZER_BANDS);
             current.resize(len, 0.0);
+            let mut changed = false;
             for index in 0..len {
                 let next = target.get(index).copied().unwrap_or(0.0);
                 let value = current[index];
-                current[index] = next * FULLSCREEN_VISUALIZER_EMA_WEIGHT
+                let smoothed = next * FULLSCREEN_VISUALIZER_EMA_WEIGHT
                     + value * (1.0 - FULLSCREEN_VISUALIZER_EMA_WEIGHT);
+                changed |= (smoothed - value).abs() > 0.0005;
+                current[index] = smoothed;
             }
-            fullscreen_area.queue_draw();
-            sidebar_area.queue_draw();
+            if fullscreen_area.is_mapped() {
+                fullscreen_area.queue_draw();
+            } else if sidebar_area.is_mapped() {
+                sidebar_area.queue_draw();
+            }
+            if stale_frames.get() >= 8 && !changed {
+                let shell = shell.clone();
+                glib::idle_add_local_once(move || {
+                    if let Some(shell) = shell.upgrade() {
+                        shell
+                            .player_view
+                            .fullscreen_player
+                            .visualizer_tick
+                            .borrow_mut()
+                            .take();
+                    }
+                });
+                return glib::ControlFlow::Break;
+            }
             glib::ControlFlow::Continue
         });
         *self

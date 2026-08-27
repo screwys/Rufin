@@ -92,12 +92,14 @@ impl Shell {
         let track_projection = self.searchable_track_collection(
             &selected,
             tracks,
+            Vec::new(),
             LibraryListKey::AlbumDetailTracks,
             SearchableTrackOptions {
                 on_visible_count_changed: Some(resize_tracks),
                 context_id: context_id.clone(),
                 content_inset: ALBUM_DETAIL_ROUTE_INSET,
                 fixed_layout: None,
+                search: None,
             },
         );
         let cover_size = detail_showcase_cover_size(inner_content_width);
@@ -279,12 +281,15 @@ impl Shell {
         route_stack.set_visible_child_name("content");
 
         let apply = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let track_projection = track_projection.clone();
             let route = Route::AlbumDetail(album_id);
             Rc::new(
                 move |_: AlbumDetailReadRequest,
                       result: Result<PreparedTrackProjection, String>| {
+                    let Some(shell) = shell.upgrade() else {
+                        return;
+                    };
                     if shell.navigation.routes.borrow().current() != &route {
                         return;
                     }
@@ -304,8 +309,8 @@ impl Shell {
             let database = Arc::clone(&database);
             Box::pin(async move {
                 let cancellation = library::ReadCancellation::new();
-                let order = database
-                    .album_track_order(
+                let page = database
+                    .album_track_route_page(
                         source,
                         album_id,
                         folder,
@@ -317,7 +322,8 @@ impl Shell {
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok::<_, String>(PreparedTrackProjection {
-                    order,
+                    order: page.order,
+                    first_rows: page.first_rows,
                     request: request.tracks,
                 })
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
@@ -338,13 +344,16 @@ impl Shell {
             });
         }
         let resume = {
-            let shell = Rc::clone(self);
+            let shell = Rc::downgrade(self);
             let album = Rc::clone(&current_album);
             let external_links = external_links.clone();
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
             let read = Rc::clone(&read);
             Rc::new(move || {
+                let Some(shell) = shell.upgrade() else {
+                    return;
+                };
                 let external_link_settings =
                     shell.settings.current.borrow().external_site_links.clone();
                 if *applied_external_link_settings.borrow() != external_link_settings {

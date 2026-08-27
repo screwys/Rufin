@@ -40,20 +40,30 @@ pub(super) async fn stage_album(
     } else {
         &album.relations.album_artists
     };
-    for (position, artist) in effective_album_artists.iter().enumerate() {
+    for artist in effective_album_artists {
         stage_artist_credit(scan, artist).await?;
-        scan.write_album_artist(&album.id, &artist.id, position as i64)
-            .await?;
     }
-    for (position, genre) in album.relations.genres.iter().enumerate() {
+    for genre in &album.relations.genres {
         stage_genre_credit(scan, genre).await?;
-        scan.write_album_genre(&album.id, &genre.id, position as i64)
-            .await?;
     }
-    for (position, release_type) in album.release_types.iter().enumerate() {
-        scan.write_album_release_type(&album.id, release_type, position as i64)
-            .await?;
-    }
+    scan.write_album_relations(
+        &effective_album_artists
+            .iter()
+            .map(|artist| (album.id.as_str(), artist.id.as_str()))
+            .collect::<Vec<_>>(),
+        &album
+            .relations
+            .genres
+            .iter()
+            .map(|genre| (album.id.as_str(), genre.id.as_str()))
+            .collect::<Vec<_>>(),
+        &album
+            .release_types
+            .iter()
+            .map(|release_type| (album.id.as_str(), release_type.as_str()))
+            .collect::<Vec<_>>(),
+    )
+    .await?;
     Ok(())
 }
 
@@ -120,19 +130,31 @@ pub(super) async fn stage_track(
         key,
     )
     .await?;
-    for (position, artist) in track.relations.artists.iter().enumerate() {
+    for artist in &track.relations.artists {
         stage_artist_credit(scan, artist).await?;
-        scan.write_track_artist(&track.id, &artist.id, position as i64)
-            .await?;
     }
     for artist in &track.relations.album_artists {
         stage_artist_credit(scan, artist).await?;
     }
-    for (position, genre) in track.relations.genres.iter().enumerate() {
+    for genre in &track.relations.genres {
         stage_genre_credit(scan, genre).await?;
-        scan.write_track_genre(&track.id, &genre.id, position as i64)
-            .await?;
     }
+    scan.write_track_relations(
+        &track
+            .relations
+            .artists
+            .iter()
+            .map(|artist| (track.id.as_str(), artist.id.as_str()))
+            .collect::<Vec<_>>(),
+        &track
+            .relations
+            .genres
+            .iter()
+            .map(|genre| (track.id.as_str(), genre.id.as_str()))
+            .collect::<Vec<_>>(),
+        &[],
+    )
+    .await?;
     Ok(())
 }
 

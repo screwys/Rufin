@@ -4,7 +4,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::{Instant, SystemTime, UNIX_EPOCH};
 
-use async_channel::Sender as EventSender;
+use async_channel::{Receiver, Sender as EventSender, TrySendError};
 use library::{
     Database, ListenWrite, QueueCompactOccurrence, QueueProvenance, QueueRepeatMode,
     ReadCancellation,
@@ -18,7 +18,7 @@ use playback::{
 use scrobbling::Scrobbler;
 use sources::Source;
 use tracing::{debug, warn};
-use ui::runtime::PlaybackPublication;
+use ui::runtime::{PlaybackPublication, VisualizerPublication};
 
 use crate::loudness::LoudnessAnalysisOwner;
 use crate::settings::SettingsFile;
@@ -70,6 +70,9 @@ pub(crate) struct PlaybackOwner {
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
     events: EventSender<PlaybackPublication>,
+    event_drain: Receiver<PlaybackPublication>,
+    visualizer_events: EventSender<ui::runtime::VisualizerPublication>,
+    visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
     loudness: Arc<LoudnessAnalysisOwner>,
     lyrics: Arc<LyricsService>,
@@ -101,6 +104,9 @@ impl PlaybackOwner {
         settings: SettingsFile,
         runtime: tokio::runtime::Handle,
         events: EventSender<PlaybackPublication>,
+        event_drain: Receiver<PlaybackPublication>,
+        visualizer_events: EventSender<ui::runtime::VisualizerPublication>,
+        visualizer_drain: Receiver<VisualizerPublication>,
         _artwork: artwork::Artwork,
         waveform: Arc<WaveformOwner>,
         lyrics: Arc<LyricsService>,
@@ -118,6 +124,9 @@ impl PlaybackOwner {
             settings,
             runtime: runtime.clone(),
             events,
+            event_drain,
+            visualizer_events,
+            visualizer_drain,
             waveform,
             loudness: LoudnessAnalysisOwner::new(runtime),
             lyrics,
@@ -166,28 +175,28 @@ impl PlaybackOwner {
             .restore_queue(selected.source_key)
             .await
             .map_err(string_error)?;
-        let current_occurrence = restore
-            .state
-            .current
-            .and_then(|key| {
-                restore
-                    .occurrences
-                    .iter()
-                    .find(|row| row.occurrence_key == Some(key))
-            })
-            .map(|row| OccurrenceId::new(row.object_id.clone()));
-        let entries = restore
-            .occurrences
-            .iter()
+        let library::QueueRestore {
+            occurrences,
+            current_occurrence,
+            prepared_next_occurrence,
+            progress_millis,
+            repeat_mode,
+            shuffled,
+            current,
+            prepared_next,
+        } = restore;
+        let current_occurrence = current_occurrence.map(OccurrenceId::new);
+        let queue_empty = occurrences.is_empty();
+        let entries = occurrences
+            .into_iter()
             .map(|row| playback::SequenceEntry {
-                occurrence_key: row.occurrence_key,
-                occurrence: OccurrenceId::new(row.object_id.clone()),
+                occurrence: OccurrenceId::new(row.object_id),
                 track_key: row.track_key,
                 canonical_position: usize::try_from(row.canonical_position).unwrap_or_default(),
-                provenance: playback_provenance(&row.provenance),
+                provenance: playback_provenance(row.provenance),
             })
             .collect();
-        let sequence = if restore.occurrences.is_empty() {
+        let sequence = if queue_empty {
             let mut sequence = playback::Sequence::new(selected.source_key);
             sequence.set_repeat_mode(stored.ui.repeat_mode);
             sequence.set_shuffle_seed(stored.ui.shuffle_enabled, random_u64());
@@ -197,10 +206,10 @@ impl PlaybackOwner {
                 selected.source_key,
                 entries,
                 current_occurrence.clone(),
-                playback_repeat(restore.state.repeat_mode),
-                restore.state.shuffled,
+                playback_repeat(repeat_mode),
+                shuffled,
                 0,
-                u64::try_from(restore.state.progress_millis).unwrap_or_default(),
+                u64::try_from(progress_millis).unwrap_or_default(),
             )
             .map_err(string_error)?
         };
@@ -242,30 +251,28 @@ impl PlaybackOwner {
             },
         )
         .map_err(string_error)?;
-        if let Some(current) = restore.current {
-            let occurrence = current_occurrence.unwrap_or_else(|| {
-                OccurrenceId::new(format!("restore:{}", current.occurrence_key))
-            });
+        if let Some(current) = current {
+            let occurrence =
+                current_occurrence.unwrap_or_else(|| OccurrenceId::new("restore:current"));
             playback
                 .command(SessionCommand::MediaResolved {
                     occurrence,
                     media: Box::new(Some(current.into())),
                     prepared: false,
+                    start_run: false,
                 })
                 .map_err(string_error)?;
         }
-        if let Some(next) = restore.prepared_next {
-            let occurrence = restore
-                .occurrences
-                .iter()
-                .find(|row| row.occurrence_key == Some(next.occurrence_key))
-                .map(|row| OccurrenceId::new(row.object_id.clone()))
-                .unwrap_or_else(|| OccurrenceId::new(format!("restore:{}", next.occurrence_key)));
+        if let Some(next) = prepared_next {
+            let occurrence = prepared_next_occurrence
+                .map(OccurrenceId::new)
+                .unwrap_or_else(|| OccurrenceId::new("restore:prepared"));
             playback
                 .command(SessionCommand::MediaResolved {
                     occurrence,
                     media: Box::new(Some(next.into())),
                     prepared: true,
+                    start_run: false,
                 })
                 .map_err(string_error)?;
         }
@@ -338,6 +345,21 @@ impl PlaybackOwner {
                 *pending = Some(persistence);
             }
         }
+        if let Some((run, levels)) = update.visualizer.take() {
+            let frame = VisualizerPublication {
+                source_key,
+                source_session_epoch: epoch,
+                run,
+                levels,
+            };
+            if let Err(TrySendError::Full(frame)) = self.visualizer_events.try_send(frame) {
+                let _ = self.visualizer_drain.try_recv();
+                let _ = self.visualizer_events.try_send(frame);
+            }
+        }
+        if update.is_empty() {
+            return;
+        }
         if self
             .update_sender
             .send_blocking(PlaybackWork {
@@ -387,7 +409,7 @@ impl PlaybackOwner {
                     matches!(notice, playback::PlaybackNotice::PositionDiscontinuity(_))
                 }),
             );
-            let _ = self.events.try_send(PlaybackPublication {
+            self.publish_projection(PlaybackPublication {
                 source_key,
                 source_session_epoch: epoch,
                 projection,
@@ -395,97 +417,58 @@ impl PlaybackOwner {
         }
     }
 
+    fn publish_projection(&self, publication: PlaybackPublication) {
+        let Err(TrySendError::Full(mut publication)) = self.events.try_send(publication) else {
+            return;
+        };
+        if let Ok(previous) = self.event_drain.try_recv() {
+            prepend_playback_notices(
+                &mut publication.projection.notices,
+                previous.projection.notices,
+            );
+        }
+        let _ = self.events.try_send(publication);
+    }
+
     async fn persist_queue(
         &self,
         playback: &Playback,
         persistence: &playback::QueuePersistence,
     ) -> Result<(), String> {
-        if persistence.rows_changed() {
-            let entries = persistence
-                .full_entries()
-                .ok_or_else(|| "structural Queue persistence has no rows".to_string())?;
-            let traversal_positions = persistence.traversal().map(|order| {
-                order
-                    .iter()
-                    .enumerate()
-                    .map(|(position, occurrence)| (occurrence.as_str(), position))
-                    .collect::<std::collections::BTreeMap<_, _>>()
-            });
-            let prepared_occurrence = persistence.current().and_then(|current| {
-                if let Some(order) = persistence.traversal() {
-                    order
-                        .iter()
-                        .position(|occurrence| occurrence == current)
-                        .and_then(|position| order.get(position + 1))
-                } else {
-                    entries
-                        .iter()
-                        .position(|entry| &entry.occurrence == current)
-                        .and_then(|position| entries.get(position + 1))
-                        .map(|entry| &entry.occurrence)
-                }
-            });
-            let occurrences = entries
-                .iter()
-                .enumerate()
-                .map(|(position, entry)| {
-                    queue_occurrence(
-                        entry,
-                        traversal_positions
-                            .as_ref()
-                            .and_then(|positions| positions.get(entry.occurrence.as_str()))
-                            .copied()
-                            .unwrap_or(position),
-                    )
-                })
-                .collect::<Vec<_>>();
-            let keys = self
-                .database
-                .persist_compact_queue(
-                    persistence.source_key(),
-                    &occurrences,
-                    persistence.current().map(OccurrenceId::as_str),
-                    prepared_occurrence.map(OccurrenceId::as_str),
-                    persistence.progress_millis() as i64,
-                    library_repeat(persistence.repeat_mode()),
-                    persistence.shuffled(),
-                )
-                .await
-                .map_err(string_error)?;
-            playback
-                .command(SessionCommand::PersistedQueue {
-                    revision: persistence.revision(),
-                    keys,
-                })
-                .map_err(string_error)?;
-        } else {
-            let order = persistence
-                .traversal()
-                .ok_or_else(|| "Queue traversal has no order".to_string())?
-                .iter()
-                .map(|occurrence| occurrence.as_str().to_string())
-                .collect::<Vec<_>>();
-            self.database
-                .persist_queue_traversal_objects(persistence.source_key(), &order)
-                .await
-                .map_err(string_error)?;
-            self.database
-                .persist_queue_progress(
-                    persistence.source_key(),
-                    persistence.current().map(OccurrenceId::as_str),
-                    persistence.progress_millis() as i64,
-                )
-                .await
-                .map_err(string_error)?;
-            self.database
-                .persist_queue_modes(
-                    persistence.source_key(),
-                    library_repeat(persistence.repeat_mode()),
-                    persistence.shuffled(),
-                )
-                .await
-                .map_err(string_error)?;
-        }
+        let revision = persistence.revision();
+        let playback = playback.clone();
+        self.database
+            .persist_compact_queue(
+                persistence.source_key(),
+                persistence.total(),
+                move |offset, limit| {
+                    let playback = playback.clone();
+                    async move {
+                        let entries = playback
+                            .queue_persistence_page(revision, offset, limit)
+                            .map_err(|error| {
+                                library::LibraryError::InvalidRequest(error.to_string())
+                            })?
+                            .ok_or_else(|| {
+                                library::LibraryError::InvalidRequest(
+                                    "Queue changed during persistence".to_string(),
+                                )
+                            })?;
+                        Ok(entries
+                            .iter()
+                            .enumerate()
+                            .map(|(position, entry)| queue_occurrence(entry, offset + position))
+                            .collect())
+                    }
+                },
+                persistence.current().map(OccurrenceId::as_str),
+                persistence.prepared_next().map(OccurrenceId::as_str),
+                persistence.progress_millis() as i64,
+                library_repeat(persistence.repeat_mode()),
+                persistence.shuffled(),
+            )
+            .await
+            .map_err(string_error)?;
         Ok(())
     }
 
@@ -512,6 +495,7 @@ impl PlaybackOwner {
                     occurrence,
                     media: Box::new(media),
                     prepared,
+                    start_run: true,
                 });
             }
             SessionEffect::ResolveStream {
@@ -872,6 +856,14 @@ impl PlaybackOwner {
     }
 }
 
+fn prepend_playback_notices(
+    current: &mut Vec<playback::PlaybackNotice>,
+    mut previous: Vec<playback::PlaybackNotice>,
+) {
+    previous.append(current);
+    *current = previous;
+}
+
 impl QueueCommandPort for PlaybackOwner {
     fn play_loaded(&self, request: LoadedPlayRequest) {
         let Some(active) = self.active().filter(|active| {
@@ -1123,14 +1115,14 @@ async fn local_media_exists(uri: Option<&str>) -> bool {
         .is_ok_and(|metadata| metadata.is_file())
 }
 
-fn playback_provenance(value: &QueueProvenance) -> playback::Provenance {
+fn playback_provenance(value: QueueProvenance) -> playback::Provenance {
     match value {
         QueueProvenance::Context {
             context_id,
             source_rank,
         } => playback::Provenance::Context {
-            context_id: context_id.clone(),
-            source_rank: usize::try_from(*source_rank).unwrap_or_default(),
+            context_id: context_id.into(),
+            source_rank: usize::try_from(source_rank).unwrap_or_default(),
         },
         QueueProvenance::Manual => playback::Provenance::Manual,
         QueueProvenance::Random => playback::Provenance::Random,
@@ -1145,7 +1137,7 @@ fn library_provenance(value: &playback::Provenance) -> QueueProvenance {
             context_id,
             source_rank,
         } => QueueProvenance::Context {
-            context_id: context_id.clone(),
+            context_id: context_id.to_string(),
             source_rank: *source_rank as i64,
         },
         playback::Provenance::Manual => QueueProvenance::Manual,
@@ -1157,7 +1149,6 @@ fn library_provenance(value: &playback::Provenance) -> QueueProvenance {
 }
 fn queue_occurrence(entry: &playback::SequenceEntry, traversal: usize) -> QueueCompactOccurrence {
     QueueCompactOccurrence {
-        occurrence_key: entry.occurrence_key,
         object_id: entry.occurrence.as_str().to_string(),
         track_key: entry.track_key,
         canonical_position: entry.canonical_position as i64,
@@ -1223,12 +1214,32 @@ fn string_error(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{external_source_reporting_enabled, preferred_media_uri};
+    use super::{external_source_reporting_enabled, preferred_media_uri, prepend_playback_notices};
 
     #[test]
     fn private_mode_gates_only_external_source_reporting() {
         assert!(external_source_reporting_enabled(false));
         assert!(!external_source_reporting_enabled(true));
+    }
+
+    #[test]
+    fn coalesced_playback_publication_keeps_structural_notices_in_order() {
+        let mut current = vec![playback::PlaybackNotice::RunStarted(playback::RunId::new(
+            2,
+        ))];
+        prepend_playback_notices(
+            &mut current,
+            vec![playback::PlaybackNotice::RunStarted(playback::RunId::new(
+                1,
+            ))],
+        );
+        assert_eq!(
+            current,
+            [
+                playback::PlaybackNotice::RunStarted(playback::RunId::new(1)),
+                playback::PlaybackNotice::RunStarted(playback::RunId::new(2)),
+            ]
+        );
     }
 
     #[tokio::test]

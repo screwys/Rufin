@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::fs;
 use std::io;
 use std::path::{Path, PathBuf};
@@ -270,33 +269,6 @@ impl FilesystemCache {
         }
     }
 
-    pub(crate) fn complete_source_manifest(
-        &self,
-        source_id: &SourceId,
-        revision: u64,
-        identities: impl IntoIterator<Item = String>,
-    ) -> io::Result<()> {
-        let retained = identities
-            .into_iter()
-            .map(|identity| digest(&identity))
-            .collect::<HashSet<_>>();
-        let source = digest(source_id.as_str());
-        reconcile_source_directory(
-            &self.root.join("ready/native").join(&source),
-            &retained,
-            true,
-        )?;
-        reconcile_source_directory(
-            &self.root.join("missing/native").join(source),
-            &retained,
-            false,
-        )?;
-        atomic_write(
-            &self.source_manifest_path(source_id),
-            revision.to_string().as_bytes(),
-        )
-    }
-
     fn ready_path(&self, source_id: &SourceId, candidate: &Candidate, size: u32) -> PathBuf {
         self.candidate_path("ready", source_id, candidate, size, "img")
     }
@@ -510,35 +482,6 @@ fn path_usage(path: &Path) -> io::Result<CacheUsage> {
 
 fn is_external_path(root: &Path, path: &Path) -> bool {
     path.starts_with(root.join("ready/external")) || path.starts_with(root.join("missing/external"))
-}
-
-fn reconcile_source_directory(
-    path: &Path,
-    retained: &HashSet<String>,
-    keep_manifest: bool,
-) -> io::Result<()> {
-    let entries = match fs::read_dir(path) {
-        Ok(entries) => entries,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    for entry in entries {
-        let entry = entry?;
-        let name = entry.file_name();
-        if keep_manifest && name == ".manifest" {
-            continue;
-        }
-        if retained.contains(&name.to_string_lossy().into_owned()) {
-            continue;
-        }
-        let entry_path = entry.path();
-        if entry_path.is_dir() {
-            remove_dir_if_present(&entry_path)?;
-        } else {
-            remove_file_if_present(&entry_path)?;
-        }
-    }
-    Ok(())
 }
 
 fn reconcile_source_directory_marked(

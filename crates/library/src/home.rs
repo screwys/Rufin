@@ -56,6 +56,10 @@ pub struct HomeAlbumRow {
 }
 
 #[derive(Clone, Debug, PartialEq)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "Home showcase reads are hard-bounded and keep final rows inline"
+)]
 pub enum HomeShowcaseRow {
     Track(HomeTrackRow),
     Album(HomeAlbumRow),

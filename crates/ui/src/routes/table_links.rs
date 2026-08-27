@@ -10,6 +10,7 @@ use crate::shell::Shell;
 use super::detail_links::{DetailLinkBinding, DetailLinks};
 use super::factory_cells::FactoryCells;
 use super::library_fields::item_at_from_item;
+use super::sparse_model::connect_sparse_bind;
 
 #[derive(Clone)]
 pub(crate) struct TrackLinkCell {
@@ -66,7 +67,7 @@ where
     });
 
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, list_item| {
+    connect_sparse_bind(&factory, move |list_item| {
         let Some(list_item) = list_item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -74,6 +75,8 @@ where
             return;
         };
         let Some(track) = item_at_from_item::<TrackRow>(list_item) else {
+            cell.links.clear();
+            *cell.current_track.borrow_mut() = None;
             return;
         };
         let links = value(&track);

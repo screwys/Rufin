@@ -38,9 +38,10 @@ pub(super) async fn publish_metadata_paths(
     let mut worker = media::Worker::default();
     for page in paths.chunks(LOCAL_BATCH_SIZE) {
         scan.begin_batch().await?;
+        let mut tracks = Vec::with_capacity(page.len());
         for path in page {
             match media::read_media(&mut worker, path.clone(), None) {
-                MediaRead::Accepted(track) => stage_track(&mut scan, &track).await?,
+                MediaRead::Accepted(track) => tracks.push(*track),
                 MediaRead::Rejected | MediaRead::Unreadable => {
                     return Err(SourceError::Other(format!(
                         "Could not reread metadata from {}",
@@ -49,9 +50,89 @@ pub(super) async fn publish_metadata_paths(
                 }
             }
         }
+        stage_audio_tracks_batch(&mut scan, &tracks).await?;
         scan.finish_batch().await?;
     }
     Ok(scan.finish().await?)
+}
+
+pub(super) async fn catch_up(
+    database: &library::Database,
+    source: library::SourceKey,
+    source_id: &str,
+    roots: &[PathBuf],
+    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> SourceResult<library::ScanOutcome> {
+    let mut scan = Scan::begin_items(database, source_id).await?;
+    let mut after = None;
+    let mut completed = 0_usize;
+    let mut changed = false;
+    loop {
+        check_cancelled(cancelled)?;
+        let page = database
+            .local_file_page(
+                source,
+                after,
+                LOCAL_BATCH_SIZE,
+                &library::ReadCancellation::new(),
+            )
+            .await?;
+        if page.is_empty() {
+            break;
+        }
+        after = page.last().map(|file| file.local_file_key);
+        let changed_paths = page
+            .iter()
+            .filter(|file| {
+                matches!(
+                    file.kind,
+                    library::LocalFileKind::Media
+                        | library::LocalFileKind::Cue
+                        | library::LocalFileKind::Directory
+                )
+            })
+            .filter(|file| cached_observation_changed(file))
+            .map(|file| PathBuf::from(&file.path))
+            .collect::<Vec<_>>();
+        if !changed_paths.is_empty() {
+            let seeds = changed_paths
+                .iter()
+                .map(|path| path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            stage_component_paths(&mut scan, source, &changed_paths, &seeds, cancelled).await?;
+            changed = true;
+        }
+        completed = completed.saturating_add(page.len());
+        progress(SourceReadProgress {
+            stage: SourceReadStage::Files,
+            completed,
+            total: None,
+        });
+    }
+    if changed {
+        stage_component(database, source, roots, &mut scan, false, None, cancelled).await?;
+    }
+    Ok(scan.finish().await?)
+}
+
+fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
+    let Ok(metadata) = fs::metadata(&file.path) else {
+        return true;
+    };
+    let size = i64::try_from(metadata.len()).ok();
+    let mtime_ns = metadata
+        .modified()
+        .ok()
+        .and_then(|modified| modified.duration_since(UNIX_EPOCH).ok())
+        .and_then(|duration| i64::try_from(duration.as_nanos()).ok())
+        .unwrap_or_default();
+    file.size_bytes != size
+        || file.mtime_ns != mtime_ns
+        || matches!(
+            file.kind,
+            library::LocalFileKind::Media | library::LocalFileKind::Cue
+        ) && file.parse_version != Some(i64::from(LOCAL_PARSER_VERSION))
 }
 
 pub(super) async fn publish_paths(
@@ -60,6 +141,7 @@ pub(super) async fn publish_paths(
     source_id: &str,
     roots: &[PathBuf],
     paths: &[PathBuf],
+    rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<library::ScanOutcome> {
     let seeds = paths
         .iter()
@@ -75,10 +157,30 @@ pub(super) async fn publish_paths(
         .iter()
         .all(|path| super::artwork::supported_image(path));
     let mut scan = Scan::begin_items(database, source_id).await?;
+    stage_component_paths(&mut scan, source, paths, &seeds, &|| false).await?;
+    stage_component(
+        database,
+        source,
+        roots,
+        &mut scan,
+        artwork_only,
+        rename,
+        &|| false,
+    )
+    .await?;
+    Ok(scan.finish().await?)
+}
+
+async fn stage_component_paths(
+    scan: &mut Scan,
+    source: library::SourceKey,
+    paths: &[PathBuf],
+    seeds: &[String],
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> SourceResult<()> {
     for page in seeds.chunks(LOCAL_BATCH_SIZE) {
-        scan.begin_batch().await?;
-        scan.write_local_component_paths(page).await?;
-        scan.finish_batch().await?;
+        check_cancelled(cancelled)?;
+        stage_component_path_page(scan, source, page).await?;
     }
 
     let mut walked = Vec::with_capacity(LOCAL_BATCH_SIZE);
@@ -87,73 +189,82 @@ pub(super) async fn publish_paths(
             .follow_links(false)
             .sort_by_file_name()
         {
+            check_cancelled(cancelled)?;
             let entry = entry.map_err(|error| {
                 SourceError::Other(format!("Local component walk failed: {error}"))
             })?;
             walked.push(entry.path().to_string_lossy().into_owned());
             if walked.len() == LOCAL_BATCH_SIZE {
-                scan.begin_batch().await?;
-                scan.write_local_component_paths(&walked).await?;
-                scan.finish_batch().await?;
+                stage_component_path_page(scan, source, &walked).await?;
                 walked.clear();
             }
         }
     }
     if !walked.is_empty() {
-        scan.begin_batch().await?;
-        scan.write_local_component_paths(&walked).await?;
-        scan.finish_batch().await?;
+        stage_component_path_page(scan, source, &walked).await?;
     }
+    Ok(())
+}
+
+async fn stage_component_path_page(
+    scan: &mut Scan,
+    source: library::SourceKey,
+    paths: &[String],
+) -> SourceResult<()> {
+    let mut directories = BTreeSet::new();
+    let mut image_directories = BTreeSet::new();
+    for path in paths.iter().map(PathBuf::from) {
+        let target = if path.is_dir() {
+            &mut directories
+        } else if super::artwork::supported_image(&path) {
+            &mut image_directories
+        } else {
+            continue;
+        };
+        if let Some(directory) = path
+            .is_dir()
+            .then_some(path.as_path())
+            .or_else(|| path.parent())
+        {
+            target.insert(format!(
+                "{}/",
+                directory.to_string_lossy().trim_end_matches('/')
+            ));
+        }
+    }
+    scan.begin_batch().await?;
+    scan.write_local_component_paths(paths).await?;
+    scan.expand_local_artwork_prefixes(
+        source,
+        &directories.into_iter().collect::<Vec<_>>(),
+        &image_directories.into_iter().collect::<Vec<_>>(),
+    )
+    .await?;
+    scan.finish_batch().await?;
+    Ok(())
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn stage_component(
+    database: &library::Database,
+    source: library::SourceKey,
+    roots: &[PathBuf],
+    scan: &mut Scan,
+    artwork_only: bool,
+    rename: Option<&(PathBuf, PathBuf)>,
+    cancelled: &(dyn Fn() -> bool + Send + Sync),
+) -> SourceResult<()> {
     scan.begin_batch().await?;
     scan.expand_local_component(source).await?;
     scan.finish_batch().await?;
 
-    let mut after = None;
-    loop {
-        let page = scan
-            .local_component_path_page(after.as_deref(), LOCAL_BATCH_SIZE)
-            .await?;
-        if page.is_empty() {
-            break;
-        }
-        after = page.last().cloned();
-        let mut prefixes = BTreeSet::new();
-        for path in page.iter().map(PathBuf::from) {
-            if super::artwork::supported_image(&path)
-                && let Some(directory) = path.parent()
-            {
-                let prefix = format!("{}/", directory.to_string_lossy().trim_end_matches('/'));
-                if database
-                    .local_directory_album_count(source, &prefix, &library::ReadCancellation::new())
-                    .await?
-                    == 1
-                {
-                    prefixes.insert(prefix);
-                }
-            }
-            if path.is_dir() {
-                prefixes.insert(format!("{}/", path.to_string_lossy().trim_end_matches('/')));
-            }
-        }
-        if !prefixes.is_empty() {
-            let prefixes = prefixes.into_iter().collect::<Vec<_>>();
-            scan.begin_batch().await?;
-            scan.write_local_component_prefixes(source, &prefixes)
-                .await?;
-            for prefix in &prefixes {
-                scan.invalidate_local_album_artwork_directory(prefix)
-                    .await?;
-            }
-            scan.finish_batch().await?;
-        }
-    }
     scan.begin_batch().await?;
-    scan.expand_local_component(source).await?;
     if !artwork_only {
         scan.remove_local_component_tracks(source).await?;
     }
     scan.finish_batch().await?;
 
+    let mut parsers = MediaPool::new();
     let mut after = None;
     loop {
         let page = scan
@@ -163,136 +274,164 @@ pub(super) async fn publish_paths(
             break;
         }
         after = page.last().cloned();
-        scan.begin_batch().await?;
-        for path in &page {
-            if !Path::new(path).exists() {
-                scan.remove_local_file_path(path).await?;
+        let mut missing = Vec::new();
+        let mut cues = Vec::new();
+        let mut audio = Vec::new();
+        let mut observations = Vec::new();
+        for path in page.into_iter().map(PathBuf::from) {
+            if !path.exists() {
+                missing.push(path.to_string_lossy().into_owned());
+            } else if path.is_dir() {
+                observations.push(file_observation(
+                    roots,
+                    &path,
+                    library::LocalFileKind::Directory,
+                    library::LocalFileState::Observed,
+                    &[],
+                )?);
+            } else if super::artwork::supported_image(&path) {
+                observations.push(file_observation(
+                    roots,
+                    &path,
+                    library::LocalFileKind::Image,
+                    library::LocalFileState::Observed,
+                    &[],
+                )?);
+            } else if !artwork_only && is_cue(&path) {
+                cues.push(path);
+            } else if !artwork_only && path.is_file() {
+                audio.push(path);
             }
         }
-        scan.finish_batch().await?;
+        if !missing.is_empty() {
+            scan.begin_batch().await?;
+            scan.remove_local_file_paths(&missing).await?;
+            scan.finish_batch().await?;
+        }
+        for path in cues {
+            stage_exact_cue(database, roots, scan, &path, true).await?;
+        }
+        if !audio.is_empty() {
+            stage_audio_batch(
+                database,
+                roots,
+                scan,
+                &audio,
+                cancelled,
+                true,
+                rename,
+                &mut parsers,
+            )
+            .await?;
+        }
+        if !observations.is_empty() {
+            scan.begin_batch().await?;
+            persist_observations(scan, observations).await?;
+            scan.finish_batch().await?;
+        }
     }
 
     if !artwork_only {
         let mut after = None;
         loop {
             let page = scan
-                .local_component_path_page(after.as_deref(), LOCAL_BATCH_SIZE)
+                .local_affected_album_path_page(source, after.as_deref(), LOCAL_BATCH_SIZE)
                 .await?;
             if page.is_empty() {
                 break;
             }
             after = page.last().cloned();
-            for path in page.iter().map(PathBuf::from).filter(|path| is_cue(path)) {
-                if !path.is_file() {
-                    continue;
-                }
-                let (state, dependencies, tracks) = match read_cue(&path) {
-                    Some(sheet) => {
-                        let dependencies = sheet
-                            .files
-                            .iter()
-                            .map(|file| file.path.to_string_lossy().into_owned())
-                            .collect::<Vec<_>>();
-                        let tracks = read_cue_tracks(&mut media::Worker::default(), &path, sheet);
-                        let state = if tracks.is_some() {
-                            library::LocalFileState::Accepted
-                        } else {
-                            library::LocalFileState::Unreadable
-                        };
-                        (state, dependencies, tracks.unwrap_or_default())
+            let mut media = Vec::new();
+            for path in page.into_iter().map(PathBuf::from) {
+                if is_cue(&path) {
+                    if path.is_file() {
+                        stage_exact_cue(database, roots, scan, &path, true).await?;
                     }
-                    None => (library::LocalFileState::Unreadable, Vec::new(), Vec::new()),
-                };
-                scan.begin_batch().await?;
-                for dependency in &dependencies {
-                    scan.write_local_dependency_path(dependency).await?;
+                } else if path.is_file() {
+                    media.push(path);
                 }
-                for track in &tracks {
-                    stage_track(&mut scan, track).await?;
-                }
-                persist_observations(
-                    &mut scan,
-                    vec![file_observation(
-                        roots,
-                        &path,
-                        library::LocalFileKind::Cue,
-                        state,
-                        &dependencies,
-                    )?],
-                )
-                .await?;
-                scan.finish_batch().await?;
             }
-        }
-
-        let mut parsers = MediaPool::new();
-        let mut after = None;
-        loop {
-            let page = scan
-                .local_component_path_page(after.as_deref(), LOCAL_BATCH_SIZE)
-                .await?;
-            if page.is_empty() {
-                break;
-            }
-            after = page.last().cloned();
-            let audio = page
-                .into_iter()
-                .map(PathBuf::from)
-                .filter(|path| {
-                    path.is_file() && !is_cue(path) && !super::artwork::supported_image(path)
-                })
-                .collect::<Vec<_>>();
-            if !audio.is_empty() {
+            if !media.is_empty() {
                 stage_audio_batch(
                     database,
                     roots,
-                    &mut scan,
-                    &audio,
-                    &|| false,
-                    true,
+                    scan,
+                    &media,
+                    cancelled,
+                    false,
+                    rename,
                     &mut parsers,
                 )
                 .await?;
             }
         }
     }
+    Ok(())
+}
 
-    let mut after = None;
-    loop {
-        let page = scan
-            .local_component_path_page(after.as_deref(), LOCAL_BATCH_SIZE)
-            .await?;
-        if page.is_empty() {
-            break;
+async fn stage_exact_cue(
+    database: &library::Database,
+    roots: &[PathBuf],
+    scan: &mut Scan,
+    path: &Path,
+    retain_unreadable: bool,
+) -> SourceResult<usize> {
+    let (state, dependencies, tracks, retain) = match read_cue(path) {
+        CueRead::Accepted(sheet) => {
+            let dependencies = sheet
+                .files
+                .iter()
+                .map(|file| file.path.to_string_lossy().into_owned())
+                .collect::<Vec<_>>();
+            let tracks = read_cue_tracks(&mut media::Worker::default(), path, sheet);
+            let state = if tracks.is_some() {
+                library::LocalFileState::Accepted
+            } else {
+                library::LocalFileState::Unreadable
+            };
+            let retain = retain_unreadable && tracks.is_none();
+            (state, dependencies, tracks.unwrap_or_default(), retain)
         }
-        after = page.last().cloned();
-        let observations = page
-            .into_iter()
-            .map(PathBuf::from)
-            .filter_map(|path| {
-                let kind = if path.is_dir() {
-                    Some(library::LocalFileKind::Directory)
-                } else if path.is_file() && super::artwork::supported_image(&path) {
-                    Some(library::LocalFileKind::Image)
-                } else {
-                    None
-                }?;
-                Some(file_observation(
-                    roots,
-                    &path,
-                    kind,
-                    library::LocalFileState::Observed,
-                    &[],
-                ))
-            })
-            .collect::<SourceResult<Vec<_>>>()?;
-        if !observations.is_empty() {
-            scan.begin_batch().await?;
-            persist_observations(&mut scan, observations).await?;
-            scan.finish_batch().await?;
-        }
+        CueRead::Rejected => (
+            library::LocalFileState::Rejected,
+            Vec::new(),
+            Vec::new(),
+            false,
+        ),
+        CueRead::Unreadable => (
+            library::LocalFileState::Unreadable,
+            if retain_unreadable {
+                retained_cue_dependencies(database, scan, roots, path).await?
+            } else {
+                Vec::new()
+            },
+            Vec::new(),
+            retain_unreadable,
+        ),
+    };
+    let accepted = tracks.len();
+    scan.begin_batch().await?;
+    for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
+        scan.write_local_dependency_paths(page).await?;
     }
-    Ok(scan.finish().await?)
+    stage_audio_tracks_batch(scan, &tracks).await?;
+    if retain {
+        scan.retain_local_cue_path(path.to_string_lossy().as_ref())
+            .await?;
+    }
+    persist_observations(
+        scan,
+        vec![file_observation(
+            roots,
+            path,
+            library::LocalFileKind::Cue,
+            state,
+            &dependencies,
+        )?],
+    )
+    .await?;
+    scan.finish_batch().await?;
+    Ok(accepted)
 }
 
 pub(super) async fn stage_catalog(
@@ -304,6 +443,7 @@ pub(super) async fn stage_catalog(
     reuse_unchanged: bool,
 ) -> SourceResult<()> {
     let mut observations = Vec::with_capacity(LOCAL_BATCH_SIZE);
+    let mut completed = 0_usize;
     for root in roots {
         for entry in WalkDir::new(root).follow_links(false).sort_by_file_name() {
             check_cancelled(cancelled)?;
@@ -317,22 +457,11 @@ pub(super) async fn stage_catalog(
                     Vec::new(),
                 )
             } else if is_cue(path) {
-                match read_cue(path) {
-                    Some(sheet) => (
-                        library::LocalFileKind::Cue,
-                        library::LocalFileState::Observed,
-                        sheet
-                            .files
-                            .into_iter()
-                            .map(|file| file.path.to_string_lossy().into_owned())
-                            .collect(),
-                    ),
-                    None => (
-                        library::LocalFileKind::Cue,
-                        library::LocalFileState::Unreadable,
-                        Vec::new(),
-                    ),
-                }
+                (
+                    library::LocalFileKind::Cue,
+                    library::LocalFileState::Observed,
+                    Vec::new(),
+                )
             } else if super::artwork::supported_image(path) {
                 (
                     library::LocalFileKind::Image,
@@ -350,19 +479,31 @@ pub(super) async fn stage_catalog(
             };
             observations.push(file_observation(roots, path, kind, state, &dependencies)?);
             if observations.len() == LOCAL_BATCH_SIZE {
+                completed = completed.saturating_add(observations.len());
                 scan.begin_batch().await?;
                 persist_observations(scan, std::mem::take(&mut observations)).await?;
                 scan.finish_batch().await?;
+                progress(SourceReadProgress {
+                    stage: SourceReadStage::Files,
+                    completed,
+                    total: None,
+                });
             }
         }
     }
     if !observations.is_empty() {
+        completed = completed.saturating_add(observations.len());
         scan.begin_batch().await?;
         persist_observations(scan, observations).await?;
         scan.finish_batch().await?;
+        progress(SourceReadProgress {
+            stage: SourceReadStage::Files,
+            completed,
+            total: None,
+        });
     }
 
-    let mut completed = 0_usize;
+    let mut parsed = 0_usize;
     let mut after = None;
     let mut parsers = MediaPool::new();
     loop {
@@ -385,59 +526,17 @@ pub(super) async fn stage_catalog(
                 && let Some(dependencies) = unchanged_cue(database, scan, roots, &path).await?
             {
                 scan.begin_batch().await?;
-                for dependency in &dependencies {
-                    scan.write_local_dependency_path(dependency).await?;
+                for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
+                    scan.write_local_dependency_paths(page).await?;
                 }
                 scan.retain_local_cue_path(&path_text).await?;
                 scan.finish_batch().await?;
                 continue;
             }
-            let sheet = read_cue(&path);
-            let dependencies = match sheet.as_ref() {
-                Some(sheet) => sheet
-                    .files
-                    .iter()
-                    .map(|file| file.path.to_string_lossy().into_owned())
-                    .collect::<Vec<_>>(),
-                None if reuse_unchanged => {
-                    retained_cue_dependencies(database, scan, roots, &path).await?
-                }
-                None => Vec::new(),
-            };
-            let tracks = sheet
-                .and_then(|sheet| read_cue_tracks(&mut media::Worker::default(), &path, sheet));
-            let state = if tracks.is_some() {
-                library::LocalFileState::Accepted
-            } else {
-                library::LocalFileState::Unreadable
-            };
-            scan.begin_batch().await?;
-            for dependency in &dependencies {
-                scan.write_local_dependency_path(dependency).await?;
-            }
-            if let Some(tracks) = tracks {
-                for track in &tracks {
-                    stage_track(scan, track).await?;
-                }
-            } else if reuse_unchanged {
-                scan.retain_local_cue_path(&path_text).await?;
-            }
-            persist_observations(
-                scan,
-                vec![file_observation(
-                    roots,
-                    &path,
-                    library::LocalFileKind::Cue,
-                    state,
-                    &dependencies,
-                )?],
-            )
-            .await?;
-            scan.finish_batch().await?;
-            completed += 1;
+            parsed += stage_exact_cue(database, roots, scan, &path, reuse_unchanged).await?;
             progress(SourceReadProgress {
-                stage: SourceReadStage::Files,
-                completed,
+                stage: SourceReadStage::Tracks,
+                completed: parsed,
                 total: None,
             });
         }
@@ -458,27 +557,27 @@ pub(super) async fn stage_catalog(
         }
         after = paths.last().cloned();
         let paths = paths.into_iter().map(PathBuf::from).collect::<Vec<_>>();
-        stage_audio_batch(
+        parsed += stage_audio_batch(
             database,
             roots,
             scan,
             &paths,
             cancelled,
             reuse_unchanged,
+            None,
             &mut parsers,
         )
         .await?;
-        completed += paths.len();
         progress(SourceReadProgress {
             stage: SourceReadStage::Tracks,
-            completed,
+            completed: parsed,
             total: None,
         });
     }
     progress(SourceReadProgress {
         stage: SourceReadStage::Finalizing,
-        completed,
-        total: Some(completed),
+        completed: parsed,
+        total: Some(parsed),
     });
     Ok(())
 }
@@ -488,9 +587,6 @@ async fn unchanged_cue(
     roots: &[PathBuf],
     path: &Path,
 ) -> SourceResult<Option<Vec<String>>> {
-    let Some(source) = scan.existing_source() else {
-        return Ok(None);
-    };
     let observation = file_observation(
         roots,
         path,
@@ -499,24 +595,16 @@ async fn unchanged_cue(
         &[],
     )?
     .0;
-    let (Some(device), Some(inode)) = (observation.device_id, observation.inode) else {
-        return Ok(None);
-    };
-    let current = database
-        .local_file_identities(
-            source,
-            &[(device, inode)],
-            &library::ReadCancellation::new(),
-        )
-        .await?;
-    Ok(current.into_iter().find_map(|stored| {
-        (stored.path == observation.path
-            && stored.size_bytes == observation.size_bytes
-            && stored.mtime_ns == observation.mtime_ns
-            && stored.parse_version == Some(i64::from(LOCAL_PARSER_VERSION))
-            && stored.state == library::LocalFileState::Accepted)
-            .then_some(stored.dependencies)
-    }))
+    Ok(cached_cue(database, scan, &observation)
+        .await?
+        .and_then(|stored| {
+            (stored.path == observation.path
+                && stored.size_bytes == observation.size_bytes
+                && stored.mtime_ns == observation.mtime_ns
+                && stored.parse_version == Some(i64::from(LOCAL_PARSER_VERSION))
+                && stored.state == library::LocalFileState::Accepted)
+                .then_some(stored.dependencies)
+        }))
 }
 
 async fn retained_cue_dependencies(
@@ -525,9 +613,6 @@ async fn retained_cue_dependencies(
     roots: &[PathBuf],
     path: &Path,
 ) -> SourceResult<Vec<String>> {
-    let Some(source) = scan.existing_source() else {
-        return Ok(Vec::new());
-    };
     let observation = file_observation(
         roots,
         path,
@@ -536,20 +621,29 @@ async fn retained_cue_dependencies(
         &[],
     )?
     .0;
-    let (Some(device), Some(inode)) = (observation.device_id, observation.inode) else {
-        return Ok(Vec::new());
+    Ok(cached_cue(database, scan, &observation)
+        .await?
+        .map(|file| file.dependencies)
+        .unwrap_or_default())
+}
+
+async fn cached_cue(
+    database: &library::Database,
+    scan: &Scan,
+    observation: &library::LocalFileWrite,
+) -> SourceResult<Option<library::LocalFileRow>> {
+    let Some(source) = scan.existing_source() else {
+        return Ok(None);
     };
     Ok(database
-        .local_file_identities(
+        .local_file_reuse_candidates(
             source,
-            &[(device, inode)],
+            std::slice::from_ref(&observation),
             &library::ReadCancellation::new(),
         )
         .await?
         .into_iter()
-        .next()
-        .map(|file| file.dependencies)
-        .unwrap_or_default())
+        .find(|stored| stored.path == observation.path))
 }
 
 async fn stage_audio_batch(
@@ -559,8 +653,9 @@ async fn stage_audio_batch(
     paths: &[PathBuf],
     cancelled: &(dyn Fn() -> bool + Send + Sync),
     reuse_unchanged: bool,
+    explicit_rename: Option<&(PathBuf, PathBuf)>,
     parsers: &mut MediaPool,
-) -> SourceResult<()> {
+) -> SourceResult<usize> {
     let path_text = paths
         .iter()
         .map(|path| path.to_string_lossy().into_owned())
@@ -571,39 +666,13 @@ async fn stage_audio_batch(
         .into_iter()
         .collect::<BTreeSet<_>>();
     let reuse = if reuse_unchanged {
-        path_reuse(database, scan, roots, paths).await?
+        path_reuse(database, scan, roots, paths, explicit_rename).await?
     } else {
         PathReuse::default()
     };
     let unchanged = reuse.unchanged;
-    let mut renamed_ids = BTreeMap::new();
-    for (new_path, old_path) in reuse.renamed {
-        if let Some(object_id) = database
-            .local_track_objects_for_paths(
-                scan.existing_source()
-                    .expect("reused Local path has a source"),
-                std::slice::from_ref(&old_path),
-                &library::ReadCancellation::new(),
-            )
-            .await?
-            .into_iter()
-            .next()
-        {
-            renamed_ids.insert(new_path, object_id);
-        }
-    }
-    let accepted_current = if reuse_unchanged {
-        match scan.existing_source() {
-            Some(source) => database
-                .local_accepted_paths(source, &path_text, &library::ReadCancellation::new())
-                .await?
-                .into_iter()
-                .collect::<BTreeSet<_>>(),
-            None => BTreeSet::new(),
-        }
-    } else {
-        BTreeSet::new()
-    };
+    let renamed_ids = reuse.renamed;
+    let accepted_current = reuse.accepted;
     let mut accepted = Vec::with_capacity(paths.len());
     let mut retained = Vec::new();
     let mut observations = Vec::with_capacity(paths.len());
@@ -674,11 +743,12 @@ async fn stage_audio_batch(
         }
     }
     persist_observations(scan, observations).await?;
+    let accepted_count = accepted.len();
     scan.begin_batch().await?;
     stage_audio_tracks_batch(scan, &accepted).await?;
     scan.retain_local_media_paths(&retained).await?;
     scan.finish_batch().await?;
-    Ok(())
+    Ok(accepted_count)
 }
 
 async fn stage_audio_tracks_batch(scan: &mut Scan, tracks: &[ScannedTrack]) -> SourceResult<()> {
@@ -686,13 +756,6 @@ async fn stage_audio_tracks_batch(scan: &mut Scan, tracks: &[ScannedTrack]) -> S
     let mut artists = BTreeSet::new();
     let mut genres = BTreeSet::new();
     let mut moods = BTreeSet::new();
-    let mut album_artists = Vec::new();
-    let mut album_genres = Vec::new();
-    let mut album_release_types = Vec::new();
-    let mut track_artists = Vec::new();
-    let mut track_genres = Vec::new();
-    let mut track_moods = Vec::new();
-
     for track in tracks {
         if albums.insert(track.album_id.as_str()) {
             stage_album(scan, track).await?;
@@ -701,64 +764,83 @@ async fn stage_audio_tracks_batch(scan: &mut Scan, tracks: &[ScannedTrack]) -> S
             if artists.insert(artist.id.as_str()) {
                 stage_artist(scan, artist).await?;
             }
-            album_artists.push(library::ScanLink {
-                owner_id: &track.album_id,
-                related_id: &artist.id,
-                position: 0,
-            });
-        }
-        for release_type in &track.release_types {
-            album_release_types.push(library::ScanLink {
-                owner_id: &track.album_id,
-                related_id: release_type,
-                position: 0,
-            });
         }
         stage_track_row(scan, track).await?;
-        for (position, artist) in track.artists.iter().enumerate() {
+        for artist in &track.artists {
             if artists.insert(artist.id.as_str()) {
                 stage_artist(scan, artist).await?;
             }
-            track_artists.push(library::ScanLink {
-                owner_id: &track.id,
-                related_id: &artist.id,
-                position: position as i64,
-            });
         }
-        for (position, genre) in track.genres.iter().enumerate() {
+        for genre in &track.genres {
             if genres.insert(genre.id.as_str()) {
                 stage_genre(scan, genre).await?;
             }
-            track_genres.push(library::ScanLink {
-                owner_id: &track.id,
-                related_id: &genre.id,
-                position: position as i64,
-            });
-            album_genres.push(library::ScanLink {
-                owner_id: &track.album_id,
-                related_id: &genre.id,
-                position: 0,
-            });
         }
-        for (position, mood) in track.moods.iter().enumerate() {
+        for mood in &track.moods {
             if moods.insert(mood.id.as_str()) {
                 stage_mood(scan, mood).await?;
             }
-            track_moods.push(library::ScanLink {
-                owner_id: &track.id,
-                related_id: &mood.id,
-                position: position as i64,
-            });
         }
         stage_loudness(scan, track).await?;
     }
-    scan.write_local_album_artists(&album_artists).await?;
-    scan.write_local_album_genres(&album_genres).await?;
-    scan.write_local_album_release_types(&album_release_types)
+    let album_artists = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .album_artists
+                .iter()
+                .map(|artist| (track.album_id.as_str(), artist.id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let album_genres = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .genres
+                .iter()
+                .map(|genre| (track.album_id.as_str(), genre.id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let album_release_types = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .release_types
+                .iter()
+                .map(|kind| (track.album_id.as_str(), kind.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let track_artists = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .artists
+                .iter()
+                .map(|artist| (track.id.as_str(), artist.id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let track_genres = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .genres
+                .iter()
+                .map(|genre| (track.id.as_str(), genre.id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    let track_moods = tracks
+        .iter()
+        .flat_map(|track| {
+            track
+                .moods
+                .iter()
+                .map(|mood| (track.id.as_str(), mood.id.as_str()))
+        })
+        .collect::<Vec<_>>();
+    scan.write_album_relations(&album_artists, &album_genres, &album_release_types)
         .await?;
-    scan.write_track_artists(&track_artists).await?;
-    scan.write_track_genres(&track_genres).await?;
-    scan.write_track_moods(&track_moods).await?;
+    scan.write_track_relations(&track_artists, &track_genres, &track_moods)
+        .await?;
     Ok(())
 }
 
@@ -864,6 +946,7 @@ impl Drop for MediaPool {
 #[derive(Default)]
 struct PathReuse {
     unchanged: BTreeMap<String, library::LocalFileState>,
+    accepted: BTreeSet<String>,
     renamed: BTreeMap<String, String>,
 }
 
@@ -872,12 +955,12 @@ async fn path_reuse(
     scan: &Scan,
     roots: &[PathBuf],
     paths: &[PathBuf],
+    explicit_rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<PathReuse> {
     let Some(source) = scan.existing_source() else {
         return Ok(PathReuse::default());
     };
     let mut facts = Vec::new();
-    let mut identities = Vec::new();
     for path in paths {
         let observation = file_observation(
             roots,
@@ -887,16 +970,30 @@ async fn path_reuse(
             &[],
         )?
         .0;
-        if let (Some(device), Some(inode)) = (observation.device_id, observation.inode) {
-            identities.push((device, inode));
-            facts.push(observation);
-        }
+        facts.push(observation);
+    }
+    let original_count = facts.len();
+    let explicit = explicit_rename
+        .filter(|(_, new_path)| paths.iter().any(|path| path == new_path))
+        .map(|(old_path, new_path)| {
+            (
+                old_path.to_string_lossy().into_owned(),
+                new_path.to_string_lossy().into_owned(),
+            )
+        });
+    if let Some((old_path, _)) = explicit.as_ref()
+        && let Some(mut old) = facts.first().cloned()
+    {
+        old.path = old_path.clone();
+        old.device_id = None;
+        old.inode = None;
+        facts.push(old);
     }
     let current = database
-        .local_file_identities(source, &identities, &library::ReadCancellation::new())
+        .local_file_reuse_candidates(source, &facts, &library::ReadCancellation::new())
         .await?;
     let mut reuse = PathReuse::default();
-    for observation in facts {
+    for observation in facts.into_iter().take(original_count) {
         if current.iter().any(|stored| {
             stored.path == observation.path
                 && stored.size_bytes == observation.size_bytes
@@ -908,12 +1005,24 @@ async fn path_reuse(
                 .find(|stored| stored.path == observation.path)
             {
                 reuse.unchanged.insert(observation.path, stored.state);
+                if stored.track_object_id.is_some() {
+                    reuse.accepted.insert(stored.path.clone());
+                }
             }
         } else if let Some(stored) = current.iter().find(|stored| {
             stored.device_id == observation.device_id && stored.inode == observation.inode
-        }) {
-            reuse.renamed.insert(observation.path, stored.path.clone());
+        }) && let Some(object_id) = stored.track_object_id.as_ref()
+        {
+            reuse.renamed.insert(observation.path, object_id.clone());
         }
+    }
+    if let Some((old_path, new_path)) = explicit
+        && let Some(object_id) = current
+            .iter()
+            .find(|stored| stored.path == old_path)
+            .and_then(|stored| stored.track_object_id.clone())
+    {
+        reuse.renamed.insert(new_path, object_id);
     }
     Ok(reuse)
 }
@@ -1007,38 +1116,6 @@ fn cue_track(
     track.cue_start_millis = i64::try_from(cue.index_start_ms).ok();
     track.cue_end_millis = i64::try_from(end_millis).ok();
     track
-}
-
-async fn stage_track(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
-    stage_album(scan, track).await?;
-    for artist in &track.album_artists {
-        stage_artist(scan, artist).await?;
-        scan.write_local_album_artist(&track.album_id, &artist.id)
-            .await?;
-    }
-    for release_type in &track.release_types {
-        scan.write_local_album_release_type(&track.album_id, release_type)
-            .await?;
-    }
-    stage_track_row(scan, track).await?;
-    for (position, artist) in track.artists.iter().enumerate() {
-        stage_artist(scan, artist).await?;
-        scan.write_track_artist(&track.id, &artist.id, position as i64)
-            .await?;
-    }
-    for (position, genre) in track.genres.iter().enumerate() {
-        stage_genre(scan, genre).await?;
-        scan.write_track_genre(&track.id, &genre.id, position as i64)
-            .await?;
-        scan.write_local_album_genre(&track.album_id, &genre.id)
-            .await?;
-    }
-    for (position, mood) in track.moods.iter().enumerate() {
-        stage_mood(scan, mood).await?;
-        scan.write_track_mood(&track.id, &mood.id, position as i64)
-            .await?;
-    }
-    stage_loudness(scan, track).await
 }
 
 async fn stage_album(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
@@ -1258,13 +1335,25 @@ async fn persist_observations(
     Ok(())
 }
 
-fn read_cue(path: &Path) -> Option<CueSheet> {
-    let metadata = fs::metadata(path).ok()?;
+enum CueRead {
+    Accepted(CueSheet),
+    Rejected,
+    Unreadable,
+}
+
+fn read_cue(path: &Path) -> CueRead {
+    let Ok(metadata) = fs::metadata(path) else {
+        return CueRead::Unreadable;
+    };
     if metadata.len() > LOCAL_CUE_MAX_BYTES {
-        return None;
+        return CueRead::Rejected;
     }
-    let text = fs::read_to_string(path).ok()?;
+    let Ok(text) = fs::read_to_string(path) else {
+        return CueRead::Unreadable;
+    };
     parse_cue_sheet(path, &text)
+        .map(CueRead::Accepted)
+        .unwrap_or(CueRead::Rejected)
 }
 
 fn is_cue(path: &Path) -> bool {

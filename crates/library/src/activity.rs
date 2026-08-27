@@ -5,11 +5,12 @@ use sqlx::{Connection, FromRow};
 
 use crate::{
     AlbumKey, ArtistKey, Database, GenreKey, LibraryError, LibraryResult, ListenKey,
-    ListenOutboxKey, ReadCancellation, SourceKey, TrackKey,
+    ListenOutboxKey, ReadCancellation, SourceKey, TrackKey, TrackRoutePage,
+    tracks::load_track_rows,
 };
 
 const HISTORY_LIMIT: i64 = 100;
-const ACTIVITY_TRACK_LIMIT: usize = 100;
+const ACTIVITY_RESULT_LIMIT: usize = 100;
 const DELIVERY_LIMIT: usize = 100;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -48,15 +49,6 @@ pub struct ActivityHistoryRow {
     pub listened_millis: i64,
     pub skipped: bool,
     pub artwork_binding: Option<Vec<u8>>,
-}
-
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum ActivityPeriod {
-    SevenDays,
-    ThirtyDays,
-    ThreeHundredSixtyFiveDays,
-    #[default]
-    Lifetime,
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
@@ -112,13 +104,6 @@ pub struct CalendarActivitySummary {
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
-pub struct ActivityBaseline {
-    pub play_count: i64,
-    pub skip_count: i64,
-    pub last_played_at: Option<i64>,
-}
-
-#[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct PendingListenDelivery {
     pub outbox_key: ListenOutboxKey,
     pub listen_key: ListenKey,
@@ -135,17 +120,6 @@ pub struct PendingListenDelivery {
     pub duration_millis: i64,
     pub listened_millis: i64,
     pub skipped: bool,
-}
-
-impl ActivityPeriod {
-    fn cutoff(self, now: i64) -> Option<i64> {
-        match self {
-            Self::SevenDays => Some(now.saturating_sub(604_800)),
-            Self::ThirtyDays => Some(now.saturating_sub(2_592_000)),
-            Self::ThreeHundredSixtyFiveDays => Some(now.saturating_sub(31_536_000)),
-            Self::Lifetime => None,
-        }
-    }
 }
 
 impl Database {
@@ -204,24 +178,6 @@ impl Database {
         Ok(key)
     }
 
-    pub async fn set_listen_skipped(
-        &self,
-        listen: ListenKey,
-        skipped: bool,
-    ) -> LibraryResult<bool> {
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(
-            sqlx::query("UPDATE listens SET skipped=?2 WHERE listen_key=?1")
-                .bind(listen)
-                .bind(skipped)
-                .execute(connection)
-                .await?
-                .rows_affected()
-                == 1,
-        )
-    }
-
     pub async fn activity_history(
         &self,
         source: SourceKey,
@@ -235,7 +191,7 @@ impl Database {
                     COALESCE(track.display_album,listen.album_title) album,
                     listen.started_at,COALESCE(track.duration_millis,listen.duration_millis) duration_millis,
                     listen.listened_millis,listen.skipped,
-                    COALESCE(track.artwork_binding,album.artwork_binding) artwork_binding
+                    COALESCE(album.artwork_binding,track.artwork_binding) artwork_binding
              FROM listens listen LEFT JOIN tracks track USING(track_key)
              LEFT JOIN albums album ON album.album_key=track.album_key
              WHERE listen.source_key=?1
@@ -249,16 +205,17 @@ impl Database {
         Ok(result?)
     }
 
-    pub async fn history_track_order(
+    pub async fn history_track_page(
         &self,
         source: SourceKey,
         folder: Option<crate::FolderKey>,
         query: &str,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
+    ) -> LibraryResult<TrackRoutePage> {
         let query: String = query.trim().to_lowercase().chars().take(256).collect();
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_scalar::<_, TrackKey>(
+        let mut transaction = connection.begin().await?;
+        let order = sqlx::query_scalar::<_, TrackKey>(
             "SELECT track.track_key FROM listens listen
              JOIN tracks track USING(track_key)
              WHERE listen.source_key=?1
@@ -277,58 +234,13 @@ impl Database {
         .bind(query.is_empty())
         .bind(query)
         .bind(HISTORY_LIMIT)
-        .fetch_all(&mut *connection)
-        .await;
+        .fetch_all(&mut *transaction)
+        .await?;
+        let first_rows =
+            load_track_rows(&mut transaction, source, &order[..order.len().min(64)]).await?;
+        transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn activity_tracks(
-        &self,
-        source: SourceKey,
-        period: ActivityPeriod,
-        now: i64,
-        limit: usize,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<ActivityTrackRow>> {
-        let limit = limit.clamp(1, ACTIVITY_TRACK_LIMIT) as i64;
-        let cutoff = period.cutoff(now);
-        let lifetime = period == ActivityPeriod::Lifetime;
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, ActivityTrackRow>(
-            "WITH window AS (
-               SELECT track_key,count(*) play_count,COALESCE(sum(skipped),0) skip_count,
-                      max(started_at) last_played,COALESCE(sum(listened_millis),0) listened_millis
-               FROM listens
-               WHERE source_key=?1 AND track_key IS NOT NULL
-                 AND (?2 IS NULL OR started_at>=?2) AND started_at<=?3
-               GROUP BY track_key
-             )
-             SELECT track.track_key,track.title,track.display_artist artist,
-                    track.display_album album,
-                    CASE WHEN ?4 THEN COALESCE(baseline.play_count,0) ELSE 0 END+
-                      COALESCE(window.play_count,0) play_count,
-                    CASE WHEN ?4 THEN COALESCE(baseline.skip_count,0) ELSE 0 END+
-                      COALESCE(window.skip_count,0) skip_count,
-                    CASE WHEN NOT ?4 THEN window.last_played
-                         WHEN baseline.last_played_at IS NULL THEN window.last_played
-                         WHEN window.last_played IS NULL THEN baseline.last_played_at
-                         ELSE max(baseline.last_played_at,window.last_played) END last_played,
-                    COALESCE(window.listened_millis,0) listened_millis
-             FROM tracks track
-             LEFT JOIN activity_baseline baseline
-               ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id
-              AND baseline.period='lifetime' AND baseline.item_kind='track'
-             LEFT JOIN window USING(track_key)
-             WHERE track.source_key=?1
-               AND (COALESCE(window.play_count,0)+CASE WHEN ?4 THEN COALESCE(baseline.play_count,0) ELSE 0 END)>0
-             ORDER BY play_count DESC,last_played DESC NULLS LAST,track.sort_text,track.track_key
-             LIMIT ?5",
-        )
-        .bind(source).bind(cutoff).bind(now).bind(lifetime).bind(limit)
-        .fetch_all(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        Ok(TrackRoutePage { order, first_rows })
     }
 
     pub async fn calendar_activity_summary(
@@ -338,7 +250,7 @@ impl Database {
         limit: usize,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<CalendarActivitySummary> {
-        let limit = limit.clamp(1, ACTIVITY_TRACK_LIMIT) as i64;
+        let limit = limit.clamp(1, ACTIVITY_RESULT_LIMIT) as i64;
         let (month, year, lifetime) = calendar_filter(period)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
@@ -434,38 +346,6 @@ impl Database {
             artists,
             genres,
         })
-    }
-
-    pub async fn activity_baseline(
-        &self,
-        source: SourceKey,
-        track_object_id: &str,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<ActivityBaseline>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as("SELECT play_count,skip_count,last_played_at FROM activity_baseline WHERE source_key=?1 AND period='lifetime' AND item_kind='track' AND track_object_id=?2")
-            .bind(source).bind(track_object_id).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
-    }
-
-    pub async fn write_activity_baseline(
-        &self,
-        source: SourceKey,
-        track_object_id: &str,
-        baseline: ActivityBaseline,
-    ) -> LibraryResult<()> {
-        if baseline.play_count < 0 || baseline.skip_count < 0 {
-            return Err(LibraryError::InvalidRequest(
-                "Activity baseline counts cannot be negative".to_string(),
-            ));
-        }
-        let mut writer = self.writer().await?;
-        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("INSERT INTO activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES (?1,'lifetime','track',?2,?3,?4,?5) ON CONFLICT(source_key,period,item_kind,track_object_id) DO UPDATE SET play_count=excluded.play_count,skip_count=excluded.skip_count,last_played_at=excluded.last_played_at")
-            .bind(source).bind(track_object_id).bind(baseline.play_count)
-            .bind(baseline.skip_count).bind(baseline.last_played_at).execute(connection).await?;
-        Ok(())
     }
 
     pub async fn due_listen_deliveries(

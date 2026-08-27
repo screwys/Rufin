@@ -24,7 +24,6 @@ tokio = { workspace = true, features = ["fs", "io-util", "macros", "rt", "sync",
 tracing.workspace = true
 
 [dev-dependencies]
-proptest = "1.6.0"
 tempfile.workspace = true
 
 [lints]

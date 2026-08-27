@@ -86,7 +86,9 @@ impl Database {
             Err(error) if recovery::is_store_content_failure(&error) => {}
             Err(error) => return Err(error),
         }
-        if matches!(recovery::is_intact_released(&path).await, Ok(true)) {
+        if matches!(recovery::is_migratable_schema_40(&path).await, Ok(true)) {
+            recovery::migrate_schema_40(&path).await?;
+        } else if matches!(recovery::is_repairable_released(&path).await, Ok(true)) {
             recovery::repair_released(&path).await?;
         } else {
             recovery::rebuild_unusable(&path).await?;

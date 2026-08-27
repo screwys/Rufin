@@ -1,6 +1,4 @@
-use library::{
-    ActivityBaseline, ActivityPeriod, ListenDeliveryTarget, ListenWrite, ReadCancellation,
-};
+use library::{CalendarActivityPeriod, ListenDeliveryTarget, ListenWrite, ReadCancellation};
 
 use super::support::{connection, fixture};
 
@@ -18,7 +16,7 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         local_period: "2023-11".to_string(),
         duration_millis: 180_000,
         listened_millis: 90_000,
-        skipped: false,
+        skipped: true,
     };
     let targets = (0..12)
         .map(|index| ListenDeliveryTarget {
@@ -45,13 +43,6 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
             .expect("record listen idempotently"),
         key
     );
-    assert!(
-        fixture
-            .database
-            .set_listen_skipped(key, true)
-            .await
-            .expect("mark listen skipped")
-    );
     let cancel = ReadCancellation::new();
     let history = fixture
         .database
@@ -62,32 +53,25 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert!(history[0].skipped);
     assert_eq!(history[0].title, "Alpha");
     assert_eq!(history[0].duration_millis, 180_000);
-    fixture
-        .database
-        .write_activity_baseline(
-            fixture.source,
-            "track-0",
-            ActivityBaseline {
-                play_count: 3,
-                skip_count: 1,
-                last_played_at: Some(1_600_000_000),
-            },
-        )
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES (?1,'lifetime','track','track-0',3,1,1600000000)")
+        .bind(fixture.source)
+        .execute(&mut raw)
         .await
-        .expect("write Activity baseline");
-    let tracks = fixture
+        .expect("seed recovered Activity baseline");
+    drop(raw);
+    let summary = fixture
         .database
-        .activity_tracks(
+        .calendar_activity_summary(
             fixture.source,
-            ActivityPeriod::Lifetime,
-            1_800_000_000,
+            CalendarActivityPeriod::Lifetime,
             100,
             &cancel,
         )
         .await
         .expect("lifetime Activity");
-    assert_eq!(tracks[0].track_key, fixture.tracks[0]);
-    assert_eq!(tracks[0].play_count, 4);
+    assert_eq!(summary.tracks[0].track_key, fixture.tracks[0]);
+    assert_eq!(summary.tracks[0].play_count, 4);
     let due = fixture
         .database
         .due_listen_deliveries(10, 100, &cancel)

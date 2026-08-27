@@ -1,0 +1,27 @@
+id: track-search-callback-must-not-own-track-projection
+valid:
+  - |
+      fn track_page_route(projection: TrackListProjection) -> MountedRoute {
+          let model = projection.model.clone();
+          let visible = Rc::new(move || model.visible_count() != 0);
+          projection.connect_search_request(move |request| read.request(request));
+          MountedRoute::new(visible)
+      }
+invalid:
+  - |
+      fn track_page_route(projection: TrackListProjection) -> MountedRoute {
+          let visible = {
+              let projection = projection.clone();
+              Rc::new(move || {
+                  projection.source_count() != 0
+              })
+          };
+          MountedRoute::new(visible)
+      }
+  - |
+      fn track_page_route(projection: TrackListProjection) -> MountedRoute {
+          projection.search().connect_search_changed(move |search| {
+              projection.search_request(search.text().as_str());
+          });
+          MountedRoute::new(Rc::new(|| true))
+      }

@@ -34,6 +34,7 @@ use super::library_fields::{
 };
 use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
 use super::route_shell::LibraryToolbarProjection;
+use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width_with_inset;
 
 const PLAYLIST_ENTRY_REORDER_COLUMN_WIDTH: i32 = 30;
@@ -94,11 +95,15 @@ impl PlaylistEntriesView {
         )
     }
 
-    pub(crate) fn replace_order(&self, generation: u64, order: Vec<PlaylistEntryKey>) -> bool {
+    pub(crate) fn replace_order(
+        &self,
+        generation: u64,
+        order: library::PlaylistEntryOrder,
+    ) -> bool {
         if !self.order_generation.accepts(generation) {
             return false;
         }
-        let empty = order.is_empty();
+        let empty = order.entries.is_empty();
         self.model.replace_order(order);
         self.toolbar_widget.set_visible(!empty);
         self.stack
@@ -125,14 +130,15 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         playlist: PlaylistKey,
-        order: Vec<PlaylistEntryKey>,
+        order: library::PlaylistEntryOrder,
+        first_rows: Vec<PlaylistEntryRow>,
     ) -> PlaylistEntriesView {
         let settings = self
             .settings
             .current
             .borrow()
             .library_list(LibraryListKey::PlaylistTracks);
-        let model = PlaylistEntryModel::new(selected, playlist, order, settings);
+        let model = PlaylistEntryModel::new(selected, playlist, order, first_rows, settings);
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 8);
         wrapper.set_hexpand(true);
         wrapper.set_width_request(1);
@@ -307,11 +313,12 @@ fn playlist_entry_number_column(
     });
     let bind_cells = cells.clone();
     let bind_playing = playing.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
@@ -373,11 +380,12 @@ fn playlist_entry_image_column(
     });
     let bind_shell = Rc::clone(shell);
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
@@ -471,11 +479,12 @@ fn playlist_entry_favorite_column(
         setup_cells.insert(item, PlaylistEntryFavoriteCell { button, current });
     });
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
@@ -572,11 +581,12 @@ fn playlist_entry_title_column(
     let bind_shell = Rc::clone(shell);
     let bind_cells = cells.clone();
     let bind_playing = playing.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
@@ -688,11 +698,12 @@ fn playlist_entry_text_column(
         );
     });
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         let Some(cell) = bind_cells.get(item) else {
@@ -841,11 +852,12 @@ fn playlist_entry_reorder_column(
         setup_cells.insert(item, current);
     });
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(entry) = item_at_from_item::<PlaylistEntryRow>(item) else {
+        let entry = item_at_from_item::<PlaylistEntryRow>(item);
+        let Some(entry) = entry else {
             return;
         };
         if let Some(current) = bind_cells.get(item) {
@@ -893,6 +905,30 @@ impl PlaylistEntryGridCell {
             current,
         }
     }
+
+    fn bind_current_artwork(&self) {
+        let current = self.current.borrow();
+        let Some(track) = current.as_ref().and_then(|entry| entry.track.as_ref()) else {
+            return;
+        };
+        self.cover
+            .widget()
+            .remove_css_class("collection-grid-cover-skeleton");
+        self.shell.bind_artwork_tile(
+            &self.cover,
+            opaque_artwork(track.artwork_binding.as_deref()),
+            COLLECTION_GRID_MAX_CARD_WIDTH,
+            crate::shell::cover::LARGE_COVER_SIZE,
+        );
+    }
+
+    fn release_artwork(&self) {
+        self.shell.clear_artwork_tile(&self.cover);
+        self.cover
+            .widget()
+            .add_css_class("collection-grid-cover-skeleton");
+        self.cover.widget().set_opacity(1.0);
+    }
 }
 
 impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
@@ -904,23 +940,22 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
         let Some(track) = entry.track.as_ref() else {
             return;
         };
-        self.shell.bind_artwork_tile(
-            &self.cover,
-            opaque_artwork(track.artwork_binding.as_deref()),
-            COLLECTION_GRID_MAX_CARD_WIDTH,
-            crate::shell::cover::LARGE_COVER_SIZE,
-        );
         self.body
             .bind(&track.title, |field| track_grid_field_links(track, field));
         self.body
             .set_download_target(&self.shell, track.is_downloaded);
         self.current.replace(Some(entry));
+        self.bind_current_artwork();
     }
 
     fn clear(&self) {
-        self.shell.clear_artwork_tile(&self.cover);
+        self.release_artwork();
         self.body.clear(&self.shell);
         self.current.take();
+    }
+
+    fn set_ready(&self, ready: bool) {
+        self.body.set_ready(ready);
     }
 
     fn apply_fields(&self, fields: &[LibraryField]) {

@@ -21,6 +21,7 @@ thiserror.workspace = true
 tokio = { workspace = true, features = ["macros", "sync", "time"] }
 
 [dev-dependencies]
+proptest = "1.6.0"
 tempfile.workspace = true
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
 tracing.workspace = true

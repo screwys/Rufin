@@ -925,7 +925,6 @@ dependencies = [
  "httpdate",
  "library",
  "playback",
- "proptest",
  "reqwest",
  "serde",
  "serde_json",
@@ -2429,6 +2428,7 @@ version = "0.13.1"
 dependencies = [
  "blake3",
  "futures-util",
+ "proptest",
  "serde",
  "serde_json",
  "sqlx",

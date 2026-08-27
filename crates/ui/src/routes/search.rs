@@ -29,19 +29,23 @@ use super::collections::{
     LibraryCollectionProjection, LibraryPresentationProjection, PlaybackTarget,
     dynamic_collection_table, library_route_inset,
 };
-use super::columns::{column_fit_width, row_index_column};
-use super::detail_links::DetailLinks;
+use super::columns::column_fit_width;
+use super::detail_links::{
+    DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
+    track_artist_links,
+};
 use super::grid_cells::{
     CollectionGridCardCell, ReusableCollectionGridCell, collection_grid,
     collection_grid_cover_shell,
 };
 use super::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, album_field, artist_field, clear_list_item_child, column_width,
-    item_at_from_item, track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, album_field, artist_field, column_width, item_at_from_item,
+    track_field,
 };
 use super::route::Route;
 use super::route_layout::ROUTE_TOP_MARGIN;
 use super::route_shell::LibraryToolbarProjection;
+use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width;
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
@@ -115,6 +119,10 @@ impl SearchCategory {
 }
 
 #[derive(Clone)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "provider Search results are bounded and keep final result values inline"
+)]
 enum SearchItem {
     Track {
         media: playback::PlaybackMedia,
@@ -188,6 +196,39 @@ impl SearchItem {
                 },
                 |row| artist_field(row, field),
             ),
+        }
+    }
+
+    fn field_links(&self, field: LibraryField) -> DetailLinks {
+        let text = self.field(field);
+        match self {
+            Self::Track { row: Some(row), .. } => match field {
+                LibraryField::Artist => track_artist_links(row),
+                LibraryField::AlbumArtist => track_album_artist_links(row),
+                LibraryField::Album => {
+                    DetailLinks::route(&text, row.album_key.map(Route::AlbumDetail))
+                }
+                _ => DetailLinks::text(&text),
+            },
+            Self::Album { row: Some(row), .. } => match field {
+                LibraryField::Artist | LibraryField::AlbumArtist => album_artist_links(row),
+                LibraryField::Title => {
+                    DetailLinks::route(&text, Some(Route::AlbumDetail(row.album_key)))
+                }
+                _ => DetailLinks::text(&text),
+            },
+            Self::Artist { row: Some(row), .. } if field == LibraryField::Title => {
+                DetailLinks::route(&text, Some(Route::ArtistDetail(row.artist_key)))
+            }
+            _ => DetailLinks::text(&text),
+        }
+    }
+
+    fn subtitle_links(&self) -> DetailLinks {
+        match self {
+            Self::Track { row: Some(row), .. } => track_artist_links(row),
+            Self::Album { row: Some(row), .. } => album_artist_links(row),
+            _ => DetailLinks::text(self.subtitle()),
         }
     }
 
@@ -458,6 +499,29 @@ impl SearchGridCell {
             controls,
         }
     }
+
+    fn bind_current_artwork(&self) {
+        let Some(item) = self.current.borrow().as_ref().cloned() else {
+            return;
+        };
+        self.cover
+            .widget()
+            .remove_css_class("collection-grid-cover-skeleton");
+        self.shell.bind_artwork_tile(
+            &self.cover,
+            item.artwork(),
+            COLLECTION_GRID_MAX_CARD_WIDTH,
+            LARGE_COVER_SIZE,
+        );
+    }
+
+    fn release_artwork(&self) {
+        self.shell.clear_artwork_tile(&self.cover);
+        self.cover
+            .widget()
+            .add_css_class("collection-grid-cover-skeleton");
+        self.cover.widget().set_opacity(1.0);
+    }
 }
 
 impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
@@ -467,14 +531,8 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
 
     fn bind(&self, _: u32, item: SearchItem) {
         self.cover_button.set_can_target(true);
-        self.shell.bind_artwork_tile(
-            &self.cover,
-            item.artwork(),
-            COLLECTION_GRID_MAX_CARD_WIDTH,
-            LARGE_COVER_SIZE,
-        );
         self.body
-            .bind(item.title(), |field| DetailLinks::text(&item.field(field)));
+            .bind(item.title(), |field| item.field_links(field));
         let favorite = item.favorite();
         if let Some(button) = self.controls.favorite.as_ref() {
             set_favorite_button_active(button, favorite.as_ref().is_some_and(|(_, value)| *value));
@@ -482,13 +540,22 @@ impl ReusableCollectionGridCell<SearchItem> for SearchGridCell {
             button.set_opacity(if favorite.is_some() { 1.0 } else { 0.0 });
         }
         *self.current.borrow_mut() = Some(item);
+        self.bind_current_artwork();
     }
 
     fn clear(&self) {
-        self.shell.clear_artwork_tile(&self.cover);
+        self.release_artwork();
         self.body.clear(&self.shell);
         self.cover_button.set_can_target(false);
+        if let Some(button) = self.controls.favorite.as_ref() {
+            button.set_visible(false);
+            button.set_sensitive(false);
+        }
         self.current.take();
+    }
+
+    fn set_ready(&self, ready: bool) {
+        self.body.set_ready(ready);
     }
 
     fn apply_fields(&self, fields: &[LibraryField]) {
@@ -912,7 +979,7 @@ fn search_column(
                 |item| matches!(item, SearchItem::Track { .. }),
             );
         }
-        return row_index_column();
+        return super::columns::row_index_column_with_width(column_width(field));
     }
     if field == LibraryField::Image {
         return super::columns::artwork_column::<SearchItem, _>(
@@ -934,30 +1001,47 @@ fn search_column(
         return search_favorite_column(shell);
     }
     let factory = gtk::SignalListItemFactory::new();
-    factory.connect_setup(|_, item| {
+    let cells = super::factory_cells::FactoryCells::<Rc<DetailLinkBinding>>::new();
+    let setup_shell = Rc::clone(shell);
+    let setup_cells = cells.clone();
+    factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
         let label = gtk::Label::new(None);
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        let links = Rc::new(DetailLinkBinding::new(&label, &setup_shell));
         item.set_child(Some(&label));
+        setup_cells.insert(item, links);
     });
-    factory.connect_bind(move |_, item| {
+    let bind_cells = cells.clone();
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(row) = item_at_from_item::<SearchItem>(item) else {
+        let Some(links) = bind_cells.get(item) else {
             return;
         };
-        if let Some(label) = item
-            .child()
-            .and_then(|child| child.downcast::<gtk::Label>().ok())
-        {
-            label.set_text(&row.field(field));
+        if let Some(row) = item_at_from_item::<SearchItem>(item) {
+            links.bind(row.field_links(field));
+        } else {
+            links.clear();
         }
     });
-    factory.connect_unbind(clear_list_item_child);
+    let unbind_cells = cells.clone();
+    factory.connect_unbind(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+            && let Some(links) = unbind_cells.get(item)
+        {
+            links.clear();
+        }
+    });
+    factory.connect_teardown(move |_, item| {
+        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
+            cells.remove(item);
+        }
+    });
     gtk::ColumnViewColumn::new(Some(field.title()), Some(factory))
 }
 
@@ -966,6 +1050,7 @@ struct SearchMergedCell {
     cover: ArtworkTile,
     title: gtk::Label,
     subtitle: gtk::Label,
+    subtitle_links: DetailLinkBinding,
     downloaded: Option<gtk::Image>,
     current: Rc<RefCell<Option<SearchItem>>>,
 }
@@ -1027,6 +1112,7 @@ fn search_merged_column(
         subtitle.set_single_line_mode(true);
         subtitle.set_width_chars(1);
         subtitle.set_max_width_chars(28);
+        let subtitle_links = DetailLinkBinding::new(&subtitle, &setup_shell);
         labels.append(&subtitle);
         row.append(&labels);
         if category == SearchCategory::Tracks {
@@ -1048,6 +1134,7 @@ fn search_merged_column(
                 cover,
                 title,
                 subtitle,
+                subtitle_links,
                 downloaded,
                 current,
             },
@@ -1056,14 +1143,25 @@ fn search_merged_column(
     let bind_shell = Rc::clone(shell);
     let bind_cells = cells.clone();
     let bind_playing = playing.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(value) = item_at_from_item::<SearchItem>(item) else {
+        let Some(cell) = bind_cells.get(item) else {
             return;
         };
-        let Some(cell) = bind_cells.get(item) else {
+        let Some(value) = item_at_from_item::<SearchItem>(item) else {
+            bind_shell.clear_artwork_tile(&cell.cover);
+            cell.title.set_text("");
+            cell.subtitle_links.clear();
+            cell.subtitle.set_visible(false);
+            if let Some(downloaded) = cell.downloaded.as_ref() {
+                bind_shell.clear_download_badge(downloaded);
+            }
+            if let Some(playing) = bind_playing.as_ref() {
+                playing.unbind(cell.title.upcast_ref());
+            }
+            cell.current.take();
             return;
         };
         bind_shell.bind_artwork_tile(
@@ -1073,7 +1171,7 @@ fn search_merged_column(
             crate::shell::cover::THUMB_COVER_SIZE,
         );
         cell.title.set_text(value.title());
-        cell.subtitle.set_text(value.subtitle());
+        cell.subtitle_links.bind(value.subtitle_links());
         cell.subtitle.set_visible(!value.subtitle().is_empty());
         if let Some(downloaded) = cell.downloaded.as_ref() {
             bind_shell.bind_download_badge(downloaded, value.is_downloaded());
@@ -1092,7 +1190,8 @@ fn search_merged_column(
         if let Some(cell) = clear_cells.get(item) {
             clear_shell.clear_artwork_tile(&cell.cover);
             cell.title.set_text("");
-            cell.subtitle.set_text("");
+            cell.subtitle_links.clear();
+            cell.subtitle.set_visible(false);
             if let Some(downloaded) = cell.downloaded.as_ref() {
                 clear_shell.clear_download_badge(downloaded);
             }
@@ -1155,7 +1254,7 @@ fn search_favorite_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
         setup_cells.insert(item, (button, current));
     });
     let bind_cells = cells.clone();
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
@@ -1472,6 +1571,36 @@ mod tests {
         assert_eq!(
             compare_optional(Some(1_i64), Some(2)),
             std::cmp::Ordering::Less
+        );
+    }
+
+    #[test]
+    fn accepted_search_metadata_keeps_its_exact_route_link() {
+        let artist_key = library::ArtistKey::from_raw(7);
+        let item = SearchItem::Artist {
+            object_id: "artist-object".to_string(),
+            name: "Performer".to_string(),
+            artwork: None,
+            row: Some(library::ArtistRow {
+                artist_key,
+                source_key: library::SourceKey::from_raw(3),
+                object_id: "artist-object".to_string(),
+                name: "Performer".to_string(),
+                musicbrainz_artist_id: None,
+                artwork_binding: None,
+                favorite: false,
+                rating: None,
+                play_count: 0,
+                last_played: None,
+                album_count: 1,
+                track_count: 1,
+                duration_millis: 1,
+                downloaded_count: 0,
+            }),
+        };
+        assert_eq!(
+            item.field_links(LibraryField::Title),
+            DetailLinks::route("Performer", Some(Route::ArtistDetail(artist_key)))
         );
     }
 }

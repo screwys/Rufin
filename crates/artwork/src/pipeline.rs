@@ -93,6 +93,7 @@ struct PreparationSubscriber {
 #[derive(Clone, Copy)]
 enum BackgroundResult {
     Ready,
+    Cached,
     Missing,
     Failed,
 }
@@ -227,7 +228,7 @@ impl Pipeline {
         let mut state = lock_state(&self.shared);
         let request_id = RequestId(state.next_request);
         state.next_request = state.next_request.wrapping_add(1).max(1);
-        let (ready, _) = decoded_for_request(&mut state, &self.shared.cache, &source, &request);
+        let ready = decoded_from_memory(&mut state, &source, &request);
         if let Some(image) = ready {
             return Ok(ArtworkLoad::Ready(image));
         }
@@ -284,38 +285,6 @@ impl Pipeline {
         self.prepare_source_artwork_jobs(source, artwork, progress, cancelled)
     }
 
-    pub(crate) fn prepare_source_artwork(
-        &self,
-        source: SourceImages,
-        revision: u64,
-        artwork: Arc<[Vec<u8>]>,
-        progress: &(dyn Fn(usize, usize) + Send + Sync),
-        cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> Result<ArtworkPreparation, ArtworkError> {
-        if self.source_preparation_complete(&source.source_id, revision)? {
-            return Ok(ArtworkPreparation::default());
-        }
-        let summary = self.prepare_source_artwork_jobs(
-            source.clone(),
-            Arc::clone(&artwork),
-            progress,
-            cancelled,
-        )?;
-        if summary.failed == 0 && !cancelled() {
-            let identities = artwork.iter().filter_map(|source_artwork| {
-                ArtworkBinding::opaque(source_artwork)
-                    .candidates()
-                    .first()
-                    .map(Candidate::stable_identity)
-            });
-            let _commit = lock_cache_commit(&self.shared);
-            self.shared
-                .cache
-                .complete_source_manifest(&source.source_id, revision, identities)?;
-        }
-        Ok(summary)
-    }
-
     fn prepare_source_artwork_jobs(
         &self,
         source: SourceImages,
@@ -365,10 +334,9 @@ impl Pipeline {
                         continue;
                     }
                     if decoded_for_request(&mut state, &self.shared.cache, &source, &request)
-                        .0
                         .is_some()
                     {
-                        let _ = completion.send(BackgroundResult::Ready);
+                        let _ = completion.send(BackgroundResult::Cached);
                         continue;
                     }
                     enqueue_background(
@@ -388,6 +356,10 @@ impl Pipeline {
 
             match completed.recv_timeout(Duration::from_millis(25)) {
                 Ok(BackgroundResult::Ready) => summary.ready += 1,
+                Ok(BackgroundResult::Cached) => {
+                    summary.ready += 1;
+                    summary.cached += 1;
+                }
                 Ok(BackgroundResult::Missing) => summary.missing += 1,
                 Ok(BackgroundResult::Failed) => summary.failed += 1,
                 Err(RecvTimeoutError::Timeout) => continue,
@@ -436,17 +408,13 @@ impl Pipeline {
         None
     }
 
-    pub(crate) fn binding_identity_and_images(
+    pub(crate) fn binding_identity_and_image(
         &self,
         source: &SourceImages,
         request: &ArtworkRequest,
-    ) -> (
-        ArtworkBindingIdentity,
-        Option<Arc<DecodedImage>>,
-        Option<Arc<DecodedImage>>,
-    ) {
+    ) -> (ArtworkBindingIdentity, Option<Arc<DecodedImage>>) {
         let mut state = lock_state(&self.shared);
-        binding_identity_and_images_from_state(&mut state, &self.shared.cache, source, request)
+        binding_identity_and_image_from_state(&mut state, source, request)
     }
 
     pub(crate) fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -531,19 +499,34 @@ fn binding_identity_from_state(
     }
 }
 
-fn binding_identity_and_images_from_state(
+fn binding_identity_and_image_from_state(
     state: &mut State,
-    cache: &FilesystemCache,
     source: &SourceImages,
     request: &ArtworkRequest,
-) -> (
-    ArtworkBindingIdentity,
-    Option<Arc<DecodedImage>>,
-    Option<Arc<DecodedImage>>,
-) {
+) -> (ArtworkBindingIdentity, Option<Arc<DecodedImage>>) {
     let identity = binding_identity_from_state(state, source, request);
-    let (ready, preview) = decoded_for_request(state, cache, source, request);
-    (identity, ready, preview)
+    let ready = decoded_from_memory(state, source, request);
+    (identity, ready)
+}
+
+fn decoded_from_memory(
+    state: &mut State,
+    source: &SourceImages,
+    request: &ArtworkRequest,
+) -> Option<Arc<DecodedImage>> {
+    let source_epoch = source_epoch(state, &source.source_id);
+    let candidate = request.binding.candidates().first()?;
+    let external = candidate.is_external();
+    if external && !request.external.allow_cached && !request.external.allow_network {
+        return None;
+    }
+    let external_epoch = if external { state.external_epoch } else { 0 };
+    let family =
+        decoded_candidate_family(&source.source_id, candidate, source_epoch, external_epoch);
+    let exact = decoded_key(&family, request.fetch_size, request.render_size);
+    state
+        .decoded_index
+        .get_for_request(&exact, &family, request.render_size)
 }
 
 fn artwork_visual_identity(
@@ -566,7 +549,7 @@ fn decoded_for_request(
     cache: &FilesystemCache,
     source: &SourceImages,
     request: &ArtworkRequest,
-) -> (Option<Arc<DecodedImage>>, Option<Arc<DecodedImage>>) {
+) -> Option<Arc<DecodedImage>> {
     let source_epoch = source_epoch(state, &source.source_id);
     for candidate in request.binding.candidates() {
         let external = candidate.is_external();
@@ -575,23 +558,19 @@ fn decoded_for_request(
         let family =
             decoded_candidate_family(&source.source_id, candidate, source_epoch, external_epoch);
         let exact = decoded_key(&family, request.fetch_size, request.render_size);
-        let mut preview = None;
         if may_read_cache {
             if let Some(image) =
                 state
                     .decoded_index
                     .get_for_request(&exact, &family, request.render_size)
             {
-                return (Some(image), None);
+                return Some(image);
             }
-            preview = state
-                .decoded_index
-                .get_preview(&family, request.render_size);
             if cache
                 .ready_entry(&source.source_id, candidate, request.fetch_size)
                 .is_some()
             {
-                return (None, preview);
+                return None;
             }
             if cache.is_missing(&source.source_id, candidate, request.fetch_size) {
                 continue;
@@ -601,10 +580,10 @@ fn decoded_for_request(
             continue;
         }
         if source.can_fetch() {
-            return (None, preview);
+            return None;
         }
     }
-    (None, None)
+    None
 }
 
 fn decoded_candidate_family(
@@ -665,23 +644,6 @@ impl DecodedIndex {
             .get(family)
             .into_iter()
             .flat_map(|sizes| sizes.range(render_size..))
-            .flat_map(|(_, keys)| keys.iter().cloned())
-            .collect::<Vec<_>>();
-        reusable
-            .into_iter()
-            .find_map(|reusable| self.get(&reusable))
-    }
-
-    fn get_preview(
-        &mut self,
-        family: &DecodedFamily,
-        render_size: u32,
-    ) -> Option<Arc<DecodedImage>> {
-        let reusable = self
-            .families
-            .get(family)
-            .into_iter()
-            .flat_map(|sizes| sizes.range(..render_size).rev())
             .flat_map(|(_, keys)| keys.iter().cloned())
             .collect::<Vec<_>>();
         reusable
@@ -1377,7 +1339,8 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         }
     }
     let background_result = match &resolution {
-        Resolution::Ready { .. } | Resolution::Cached => BackgroundResult::Ready,
+        Resolution::Ready { .. } => BackgroundResult::Ready,
+        Resolution::Cached => BackgroundResult::Cached,
         Resolution::Missing => BackgroundResult::Missing,
         Resolution::Failed(_) => BackgroundResult::Failed,
     };

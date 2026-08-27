@@ -18,8 +18,9 @@ pub struct LoudnessMeasurement {
 #[derive(Clone, Debug, PartialEq)]
 pub struct TrackLoudnessWork {
     pub track_key: TrackKey,
+    pub track_object_id: String,
     pub expected_analysis_key: [u8; 32],
-    pub media_uri: String,
+    pub media_uri: Option<String>,
     pub duration_millis: i64,
     pub cue_path: Option<String>,
     pub cue_start_millis: Option<i64>,
@@ -29,7 +30,8 @@ pub struct TrackLoudnessWork {
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct AlbumLoudnessTrack {
     pub track_key: TrackKey,
-    pub media_uri: String,
+    pub track_object_id: String,
+    pub media_uri: Option<String>,
     pub duration_millis: i64,
     pub cue_path: Option<String>,
     pub cue_start_millis: Option<i64>,
@@ -46,8 +48,9 @@ pub struct AlbumLoudnessWork {
 #[derive(FromRow)]
 struct TrackWorkScalar {
     track_key: TrackKey,
+    track_object_id: String,
     expected_analysis_key: Vec<u8>,
-    media_uri: String,
+    media_uri: Option<String>,
     duration_millis: i64,
     cue_path: Option<String>,
     cue_start_millis: Option<i64>,
@@ -59,6 +62,7 @@ impl TryFrom<TrackWorkScalar> for TrackLoudnessWork {
     fn try_from(value: TrackWorkScalar) -> Result<Self, Self::Error> {
         Ok(Self {
             track_key: value.track_key,
+            track_object_id: value.track_object_id,
             expected_analysis_key: value.expected_analysis_key.try_into().map_err(|_| {
                 LibraryError::InvalidStore(
                     "Track loudness analysis key is not 32 bytes".to_string(),
@@ -126,7 +130,7 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<TrackLoudnessWork>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track LEFT JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) IS NOT NULL AND (measurement.entity_key IS NULL OR measurement.analysis_key<>track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
+        let result = sqlx::query_as::<_, TrackWorkScalar>("SELECT track.track_key,track.object_id track_object_id,track.loudness_analysis_key expected_analysis_key,COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track LEFT JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND (measurement.entity_key IS NULL OR measurement.analysis_key<>track.loudness_analysis_key) ORDER BY track.track_key LIMIT 1")
             .bind(source).fetch_optional(&mut *connection).await;
         Database::clear_progress(&mut connection).await?;
         result?.map(TryInto::try_into).transpose()
@@ -139,10 +143,10 @@ impl Database {
     ) -> LibraryResult<Option<AlbumLoudnessWork>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>("SELECT album.album_key,album.loudness_analysis_key FROM albums album LEFT JOIN loudness_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key WHERE album.source_key=?1 AND (measurement.entity_key IS NULL OR measurement.analysis_key<>album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track WHERE track.album_key=album.album_key AND COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) IS NOT NULL) ORDER BY album.album_key LIMIT 1")
+        let album = sqlx::query_as::<_,(AlbumKey,Vec<u8>)>("SELECT album.album_key,album.loudness_analysis_key FROM albums album LEFT JOIN loudness_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key WHERE album.source_key=?1 AND (measurement.entity_key IS NULL OR measurement.analysis_key<>album.loudness_analysis_key) AND EXISTS (SELECT 1 FROM tracks track WHERE track.album_key=album.album_key) ORDER BY album.album_key LIMIT 1")
             .bind(source).fetch_optional(&mut *transaction).await?;
         let result = if let Some((album_key, expected)) = album {
-            let tracks = sqlx::query_as::<_, AlbumLoudnessTrack>("SELECT track.track_key,COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track WHERE track.source_key=?1 AND track.album_key=?2 AND COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) IS NOT NULL ORDER BY track.disc_number,track.track_number,track.track_key")
+            let tracks = sqlx::query_as::<_, AlbumLoudnessTrack>("SELECT track.track_key,track.object_id track_object_id,COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=track.source_key AND access.track_object_id=track.object_id ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.media_uri) media_uri,track.duration_millis,track.cue_path,track.cue_start_millis,track.cue_end_millis FROM tracks track WHERE track.source_key=?1 AND track.album_key=?2 ORDER BY track.disc_number,track.track_number,track.track_key")
                 .bind(source).bind(album_key).fetch_all(&mut *transaction).await?;
             Some(AlbumLoudnessWork {
                 album_key,
@@ -347,26 +351,44 @@ pub(crate) async fn initialize_recovered_loudness_keys(
 ) -> LibraryResult<()> {
     let mut after = 0_i64;
     loop {
-        let row=sqlx::query_as::<_,(TrackKey,Option<String>,Option<String>,i64,Option<String>,Option<i64>,Option<i64>)>("SELECT track_key,media_uri,source_format,duration_millis,cue_path,cue_start_millis,cue_end_millis FROM tracks WHERE track_key>?1 ORDER BY track_key LIMIT 1")
-            .bind(after).fetch_optional(&mut **transaction).await?;
-        let Some((track, media_uri, source_format, duration, cue_path, cue_start, cue_end)) = row
-        else {
+        let rows=sqlx::query_as::<_,(TrackKey,Option<String>,Option<String>,i64,Option<String>,Option<i64>,Option<i64>)>("SELECT track_key,media_uri,source_format,duration_millis,cue_path,cue_start_millis,cue_end_millis FROM tracks WHERE track_key>?1 ORDER BY track_key LIMIT 128")
+            .bind(after).fetch_all(&mut **transaction).await?;
+        if rows.is_empty() {
             break;
-        };
-        after = track.raw();
-        let key = source_track_loudness_key(
-            media_uri.as_deref(),
-            source_format.as_deref(),
-            duration,
-            cue_path.as_deref(),
-            cue_start,
-            cue_end,
+        }
+        let updates = rows
+            .into_iter()
+            .map(
+                |(track, media_uri, source_format, duration, cue_path, cue_start, cue_end)| {
+                    let key = source_track_loudness_key(
+                        media_uri.as_deref(),
+                        source_format.as_deref(),
+                        duration,
+                        cue_path.as_deref(),
+                        cue_start,
+                        cue_end,
+                    );
+                    (track, key)
+                },
+            )
+            .collect::<Vec<_>>();
+        after = updates.last().expect("nonempty loudness page").0.raw();
+        let mut query =
+            sqlx::QueryBuilder::<Sqlite>::new("WITH updated(track_key,analysis_key) AS (");
+        query.push_values(&updates, |mut row, (track, key)| {
+            row.push_bind(*track).push_bind(key.as_slice());
+        });
+        query.push(
+            ") UPDATE tracks SET
+                 source_loudness_analysis_key=(
+                     SELECT analysis_key FROM updated WHERE updated.track_key=tracks.track_key
+                 ),
+                 loudness_analysis_key=(
+                     SELECT analysis_key FROM updated WHERE updated.track_key=tracks.track_key
+                 )
+             WHERE track_key IN (SELECT track_key FROM updated)",
         );
-        sqlx::query("UPDATE tracks SET source_loudness_analysis_key=?2,loudness_analysis_key=?2 WHERE track_key=?1")
-            .bind(track)
-            .bind(key.as_slice())
-            .execute(&mut **transaction)
-            .await?;
+        query.build().execute(&mut **transaction).await?;
     }
     let mut album_after = 0_i64;
     loop {

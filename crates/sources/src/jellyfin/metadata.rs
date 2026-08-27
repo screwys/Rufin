@@ -119,9 +119,6 @@ impl JellyfinSource {
         &self,
         raw: &str,
     ) -> Result<(Value, EditorInfo), SourceMetadataError> {
-        if !self.metadata_editing_available() {
-            return Err(SourceMetadataError::Unavailable);
-        }
         let editor = endpoint(&self.base_url, &format!("Items/{raw}/MetadataEditor"))
             .map_err(metadata_write)?;
         let editor = self
@@ -752,7 +749,6 @@ fn preserve_complete_artist_items(item: &mut Map<String, Value>) {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::atomic::Ordering;
 
     use wiremock::matchers::{method, path};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -790,8 +786,6 @@ mod tests {
             "device".to_string(),
         )
         .expect("open Jellyfin");
-        source.metadata_editing.store(true, Ordering::Release);
-
         let mut row = track_row();
         row.musicbrainz_release_track_id = Some("rufin-release-track".to_string());
         let metadata = source

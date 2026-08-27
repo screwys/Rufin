@@ -6,11 +6,10 @@
 
 use std::collections::HashMap;
 use std::fmt;
+use std::future::Future;
+use std::pin::Pin;
 
-use library::{
-    Album, AlbumId, AlbumRelations, Artist, ArtistCredit, ArtistId, CandidateBatch, GenreCredit,
-    GenreId, ImageRef, Track, TrackData, TrackId, TrackRelations, normalize_release_types,
-};
+use library::Scan;
 use reqwest::Url;
 use reqwest::header::HeaderName;
 use serde::de::DeserializeOwned;
@@ -19,10 +18,14 @@ use tokio::sync::Mutex;
 
 use crate::policy::normalized_date;
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
-use crate::source::{BatchEmitter, SourceReadProgress, SourceReadStage};
+use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
 
-use super::SubsonicSource;
+use super::item::{stage_album, stage_artist, stage_track};
+use super::{
+    Album, AlbumRelations, Artist, ArtistCredit, GenreCredit, ImageRef, SubsonicSource, Track,
+    TrackRelations, normalize_release_types,
+};
 
 const NAVIDROME_PAGE_SIZE: usize = 1_000;
 const NAVIDROME_JSON_MAX_BYTES: usize = 16 * 1024 * 1024;
@@ -69,73 +72,68 @@ impl fmt::Debug for NavidromeSession {
 
 impl SubsonicSource {
     pub(super) fn has_navidrome_library(&self) -> bool {
-        self.navidrome_library_version > 0
+        self.navidrome_library
     }
 
-    pub(super) async fn emit_navidrome_library(
+    pub(super) async fn stage_navidrome_library(
         &self,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        self.emit_navidrome_pages::<NavidromeAlbum>(
+        self.stage_navidrome_pages::<NavidromeAlbum>(
             "album",
             SourceReadStage::Albums,
-            emitter,
+            scan,
             progress,
             cancelled,
-            |page| {
-                CandidateBatch::Albums(
-                    page.into_iter()
-                        .map(|album| album_from_navidrome(self, album))
-                        .collect(),
-                )
-            },
+            |scan, album| Box::pin(stage_album(scan, album_from_navidrome(self, album))),
         )
         .await?;
-        self.emit_navidrome_pages::<NavidromeTrack>(
+        self.stage_navidrome_pages::<NavidromeTrack>(
             "song",
             SourceReadStage::Tracks,
-            emitter,
+            scan,
             progress,
             cancelled,
-            |page| {
-                CandidateBatch::Tracks(
-                    page.into_iter()
-                        .map(|track| track_from_navidrome(self, track))
-                        .collect(),
-                )
+            |scan, track| {
+                Box::pin(stage_navidrome_track(
+                    scan,
+                    track_from_navidrome(self, track),
+                ))
             },
         )
         .await?;
-        self.emit_navidrome_pages::<NavidromeArtist>(
+        self.stage_navidrome_pages::<NavidromeArtist>(
             "artist",
             SourceReadStage::Artists,
-            emitter,
+            scan,
             progress,
             cancelled,
-            |page| {
-                CandidateBatch::Artists(
-                    page.into_iter()
-                        .map(|artist| artist_from_navidrome(self, artist))
-                        .collect(),
-                )
-            },
+            |scan, artist| Box::pin(stage_artist(scan, artist_from_navidrome(self, artist))),
         )
         .await?;
 
         Ok(())
     }
 
-    async fn emit_navidrome_pages<T: DeserializeOwned>(
+    async fn stage_navidrome_pages<T: DeserializeOwned>(
         &self,
         endpoint: &str,
         stage: SourceReadStage,
-        emitter: &BatchEmitter,
+        scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-        mut transform: impl FnMut(Vec<T>) -> CandidateBatch,
-    ) -> SourceResult<()> {
+        mut write: impl for<'scan> FnMut(
+            &'scan mut Scan,
+            T,
+        ) -> Pin<
+            Box<dyn Future<Output = library::LibraryResult<()>> + Send + 'scan>,
+        >,
+    ) -> SourceResult<()>
+    where
+        T: Send,
+    {
         progress(SourceReadProgress {
             stage,
             completed: 0,
@@ -154,7 +152,11 @@ impl SubsonicSource {
             offset = offset.checked_add(page_len).ok_or_else(|| {
                 SourceError::Other(format!("Navidrome {endpoint} offset overflowed"))
             })?;
-            emitter.emit_async(transform(page)).await?;
+            scan.begin_batch().await?;
+            for item in page {
+                write(scan, item).await?;
+            }
+            scan.finish_batch().await?;
             progress(SourceReadProgress {
                 stage,
                 completed: offset,
@@ -244,6 +246,19 @@ impl SubsonicSource {
         *token = Some(next.clone());
         Ok(next)
     }
+}
+
+async fn stage_navidrome_track(scan: &mut Scan, track: Track) -> library::LibraryResult<()> {
+    let track_id = track.id.clone();
+    let folders = track.relations.music_folders.clone();
+    stage_track(scan, track).await?;
+    scan.write_track_folders(
+        &folders
+            .iter()
+            .map(|folder| library::ScanLink::new(&track_id, folder, 0))
+            .collect::<Vec<_>>(),
+    )
+    .await
 }
 
 async fn navidrome_login(
@@ -555,11 +570,10 @@ fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track
         title: clean(track.title).unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
         album: clean(track.album).unwrap_or_else(|| "Unknown Album".to_string()),
-        album_artwork: None,
         year: positive_u16(Some(track.year)).unwrap_or_default(),
         release_date: normalized_date(track.release_date),
         date_added: normalized_date(track.created_at),
-        last_played: clean_optional(track.play_date),
+        last_played: crate::policy::unix_seconds(track.play_date),
         play_count: capped_u32(track.play_count),
         user_rating: rating(track.rating),
         duration_seconds: duration_seconds(track.duration),
@@ -582,11 +596,7 @@ fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track
             genres: genre_credits(source, track.genres),
             moods: super::moods_from_item(source, tag_values(&track.tags, "mood")),
             music_folders: (track.library_id > 0)
-                .then(|| {
-                    String::from(
-                        source.id("music-folder", &track.library_id.to_string()),
-                    )
-                })
+                .then(|| String::from(source.id("music-folder", &track.library_id.to_string())))
                 .into_iter()
                 .collect(),
         },
@@ -706,7 +716,9 @@ fn capped_u32(value: Option<u64>) -> Option<u32> {
 }
 
 fn rating(value: Option<f64>) -> Option<u8> {
-    value.and_then(library::rating_from_five_star)
+    value.and_then(|value| {
+        (value.is_finite() && value > 0.0).then(|| (value * 2.0).round().clamp(1.0, 10.0) as u8)
+    })
 }
 
 fn duration_seconds(value: f64) -> u32 {
@@ -887,7 +899,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn typed_page_walker_emits_every_navidrome_page() {
+    async fn typed_pages_preserve_the_exact_bounded_offsets() {
         let server = MockServer::start().await;
         let first_page = (0..NAVIDROME_PAGE_SIZE)
             .map(|index| serde_json::json!({ "id": format!("artist-{index}") }))
@@ -907,36 +919,217 @@ mod tests {
             .mount(&server)
             .await;
         let source = navidrome_source_with_token(&server, "token-a");
-        let (batches, receiver) = async_channel::unbounded();
-        let emitter = BatchEmitter::new(batches);
+        let first = source
+            .navidrome_page::<NavidromeArtist>("artist", 0)
+            .await
+            .expect("first Navidrome artist page");
+        let second = source
+            .navidrome_page::<NavidromeArtist>("artist", NAVIDROME_PAGE_SIZE)
+            .await
+            .expect("second Navidrome artist page");
 
+        assert_eq!(first.len(), NAVIDROME_PAGE_SIZE);
+        assert_eq!(second.len(), 1);
+    }
+
+    #[tokio::test]
+    async fn private_library_pages_publish_rich_navidrome_facts_through_scan() {
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/auth/login"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "token": "token-a"
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let mut first_albums = vec![serde_json::json!({
+            "id": "album-one",
+            "name": "AAA Rich Album",
+            "albumArtist": "Album Artist",
+            "albumArtistId": "album-artist-one",
+            "updatedAt": "2026-08-27T00:00:00Z",
+            "mbzAlbumId": "release-one",
+            "mbzReleaseGroupId": "release-group-one",
+            "participants": {"albumartist": [{
+                "id": "album-artist-one",
+                "name": "Album Artist",
+                "mbzArtistId": "album-artist-mbid"
+            }]},
+            "tags": {"releasetype": ["Album", "Live"]}
+        })];
+        first_albums.extend((1..NAVIDROME_PAGE_SIZE).map(|index| {
+            serde_json::json!({
+                "id": format!("album-{index}"),
+                "name": format!("ZZZ Album {index}")
+            })
+        }));
+        page_match("album", 0, "token-a")
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .insert_header("x-nd-authorization", "token-b")
+                    .set_body_json(first_albums),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        page_match("album", NAVIDROME_PAGE_SIZE, "token-b")
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "album-last",
+                    "name": "ZZZ Last Album"
+                }])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        page_match("song", 0, "token-b")
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "song-one",
+                    "albumId": "album-one",
+                    "title": "Track One",
+                    "artist": "Track Artist",
+                    "artistId": "track-artist-one",
+                    "album": "AAA Rich Album",
+                    "albumArtist": "Album Artist",
+                    "albumArtistId": "album-artist-one",
+                    "libraryId": 1,
+                    "libraryPath": "/srv/navidrome/audio",
+                    "path": "Artist/Album/Track.flac",
+                    "suffix": "flac",
+                    "duration": 181.4,
+                    "bpm": 123,
+                    "mbzRecordingID": "recording-one",
+                    "mbzReleaseTrackId": "release-track-one",
+                    "participants": {
+                        "artist": [{
+                            "id": "track-artist-one",
+                            "name": "Track Artist",
+                            "mbzArtistId": "track-artist-mbid"
+                        }],
+                        "albumartist": [{
+                            "id": "album-artist-one",
+                            "name": "Album Artist",
+                            "mbzArtistId": "album-artist-mbid"
+                        }]
+                    },
+                    "tags": {"mood": ["Focused"]}
+                }])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+        page_match("artist", 0, "token-b")
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(serde_json::json!([{
+                    "id": "track-artist-one",
+                    "name": "Track Artist",
+                    "mbzArtistId": "track-artist-mbid"
+                }])),
+            )
+            .expect(1)
+            .mount(&server)
+            .await;
+
+        let source = navidrome_source(&server.uri());
+        let directory = tempfile::tempdir().expect("Library directory");
+        let database = library::Database::open(directory.path().join("library.sqlite3"))
+            .await
+            .expect("Library database");
+        let mut scan =
+            library::Scan::begin(&database, "navidrome:test", "Navidrome", "navidrome", None)
+                .await
+                .expect("Navidrome Scan");
+        scan.begin_batch().await.expect("Folder batch");
+        scan.write_folder("navidrome:music-folder:1", "Music", "music", "music", None)
+            .await
+            .expect("Music Folder");
+        scan.finish_batch().await.expect("finish Folder batch");
         source
-            .emit_navidrome_pages::<NavidromeArtist>(
-                "artist",
-                SourceReadStage::Artists,
-                &emitter,
-                &|_| {},
-                &|| false,
-                |page| {
-                    CandidateBatch::Artists(
-                        page.into_iter()
-                            .map(|artist| artist_from_navidrome(&source, artist))
-                            .collect(),
-                    )
-                },
+            .stage_navidrome_library(&mut scan, &|_| {}, &|| false)
+            .await
+            .expect("private Navidrome library");
+        scan.finish().await.expect("publish Navidrome Scan");
+        let cancellation = library::ReadCancellation::new();
+        let source_key = database
+            .cached_source("navidrome:test", &cancellation)
+            .await
+            .expect("cached source")
+            .expect("published source")
+            .source;
+        let (_, albums) = database
+            .album_route_page(
+                source_key,
+                None,
+                false,
+                "AAA Rich Album",
+                library::AlbumSort::Title,
+                false,
+                &cancellation,
             )
             .await
-            .expect("Navidrome artist pages");
-        drop(emitter);
-
+            .expect("Album page");
+        let album = albums.first().expect("rich Album");
         assert_eq!(
-            std::iter::from_fn(|| receiver.try_recv().ok())
-                .map(|batch| match batch {
-                    CandidateBatch::Artists(artists) => artists.len(),
-                    _ => panic!("artist batch"),
-                })
-                .collect::<Vec<_>>(),
-            [NAVIDROME_PAGE_SIZE, 1]
+            album.musicbrainz_release_group_id.as_deref(),
+            Some("release-group-one")
+        );
+        assert_eq!(album.release_types, ["album", "live"]);
+        let image: ImageRef = serde_json::from_slice(
+            album
+                .artwork_binding
+                .as_deref()
+                .expect("Album artwork binding"),
+        )
+        .expect("Album image ref");
+        assert_eq!(image.tag.as_deref(), Some("2026-08-27T00:00:00Z"));
+        let tracks = database
+            .track_route_page(
+                source_key,
+                None,
+                false,
+                "",
+                library::TrackSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("Track page");
+        let track = tracks.first_rows.first().expect("rich Track");
+        assert_eq!(
+            track.musicbrainz_recording_id.as_deref(),
+            Some("recording-one")
+        );
+        assert_eq!(
+            track.musicbrainz_release_track_id.as_deref(),
+            Some("release-track-one")
+        );
+        assert_eq!(track.bpm, Some(123));
+        let mapping = database
+            .mapping_track_page(source_key, None, None, 1, &cancellation)
+            .await
+            .expect("mapping Track");
+        assert_eq!(
+            mapping[0].source_path,
+            "/srv/navidrome/audio/Artist/Album/Track.flac"
+        );
+        let (_, artists) = database
+            .artist_route_page(
+                source_key,
+                None,
+                false,
+                false,
+                "Track Artist",
+                library::ArtistSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("Track Artist page");
+        assert_eq!(
+            artists[0].musicbrainz_artist_id.as_deref(),
+            Some("track-artist-mbid")
         );
     }
 

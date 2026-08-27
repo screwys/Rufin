@@ -806,15 +806,8 @@ pub struct LibraryListSettings {
     pub detail_track_fields: Vec<LibraryField>,
     pub sort_key: LibraryField,
     pub descending: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub row_column_widths: Vec<LibraryColumnWidth>,
     #[serde(default)]
     pub layout_version: u8,
-}
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct LibraryColumnWidth {
-    pub field: LibraryField,
-    pub width: i32,
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct LibraryListSettingsEntry {
@@ -830,7 +823,6 @@ impl LibraryListSettings {
             detail_track_fields: default_detail_track_fields(),
             sort_key: default_sort_key(key),
             descending: default_descending(key),
-            row_column_widths: Vec::new(),
             layout_version: LIBRARY_LIST_LAYOUT_VERSION,
         }
     }
@@ -857,26 +849,7 @@ impl LibraryListSettings {
             self.sort_key = default_sort_key(key);
             self.descending = default_descending(key);
         }
-        let mut seen = HashSet::new();
-        self.row_column_widths.retain_mut(|entry| {
-            let valid = entry.field != LibraryField::RowIndex
-                && available_row_fields(key).contains(&entry.field)
-                && seen.insert(entry.field);
-            if valid {
-                entry.width = entry
-                    .width
-                    .clamp(MIN_TABLE_COLUMN_WIDTH, MAX_TABLE_COLUMN_WIDTH);
-            }
-            valid
-        });
         self.layout_version = LIBRARY_LIST_LAYOUT_VERSION;
-    }
-
-    pub fn row_column_width(&self, field: LibraryField) -> Option<i32> {
-        self.row_column_widths
-            .iter()
-            .find(|entry| entry.field == field)
-            .map(|entry| entry.width)
     }
 
     fn migrate_defaults(&mut self, key: LibraryListKey) {

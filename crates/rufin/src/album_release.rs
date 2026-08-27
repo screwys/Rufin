@@ -7,7 +7,7 @@ use async_channel::Sender;
 use library::{AlbumReleaseResult, ReadCancellation, SourceKey};
 use playback::SourceSessionEpoch;
 use tracing::{info, warn};
-use ui::runtime::{CatalogPublication, SourceEvent};
+use ui::runtime::{CatalogChange, CatalogPublication, SourceEvent};
 
 use crate::settings::SettingsFile;
 use crate::source::WeakActiveSource;
@@ -52,39 +52,55 @@ pub(crate) async fn run_selected_album_release_lookup(
             if !lookup_allowed(&settings, &cancelled) {
                 break;
             }
-            let identity = candidate.lookup_identity.as_str();
-            let (release_group, release) = identity.strip_prefix("release-group:").map_or_else(
-                || (None, identity.strip_prefix("release:")),
-                |id| (Some(id), None),
-            );
-            let result = match metadata_lookup::lookup_album_release(release_group, release) {
-                Ok(Some(metadata)) => {
+            let identity = candidate.lookup_identity.clone();
+            let lookup_identity = identity.clone();
+            let lookup = tokio::task::spawn_blocking(move || {
+                let (release_group, release) =
+                    lookup_identity.strip_prefix("release-group:").map_or_else(
+                        || (None, lookup_identity.strip_prefix("release:")),
+                        |id| (Some(id), None),
+                    );
+                metadata_lookup::lookup_album_release(release_group, release)
+            })
+            .await;
+            let result = match lookup {
+                Ok(Ok(Some(metadata))) => {
                     found += 1;
                     AlbumReleaseResult::Found {
                         release_types: metadata.release_types,
                     }
                 }
-                Ok(None) => {
+                Ok(Ok(None)) => {
                     missing += 1;
                     AlbumReleaseResult::Missing
                 }
-                Err(error) => {
+                Ok(Err(error)) => {
                     errors += 1;
                     warn!(%error, album_key = %candidate.album_key, "Album release lookup failed");
+                    continue;
+                }
+                Err(error) => {
+                    errors += 1;
+                    warn!(%error, album_key = %candidate.album_key, "Album release worker failed");
                     continue;
                 }
             };
             match current
                 .database
-                .accept_album_release_result(source_key, candidate.album_key, identity, result)
+                .accept_album_release_result(
+                    source_key,
+                    candidate.album_key,
+                    identity.as_str(),
+                    result,
+                )
                 .await
             {
                 Ok(Some(_)) => {
                     let _ = events.try_send(SourceEvent::CatalogPublished(CatalogPublication {
                         source_key,
                         source_session_epoch,
-                        catalog_revision: current.catalog_revision,
                         favorite: None,
+                        change: CatalogChange::Album(candidate.album_key),
                     }));
                 }
                 Ok(None) => {}
