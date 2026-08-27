@@ -143,6 +143,12 @@ pub(super) async fn publish_paths(
     paths: &[PathBuf],
     rename: Option<&(PathBuf, PathBuf)>,
 ) -> SourceResult<library::ScanOutcome> {
+    let paths = paths
+        .iter()
+        .map(|path| normalize_observed_path(path))
+        .collect::<Vec<_>>();
+    let rename =
+        rename.map(|(old, new)| (normalize_observed_path(old), normalize_observed_path(new)));
     let seeds = paths
         .iter()
         .filter(|path| roots.iter().any(|root| path.starts_with(root)))
@@ -157,18 +163,40 @@ pub(super) async fn publish_paths(
         .iter()
         .all(|path| super::artwork::supported_image(path));
     let mut scan = Scan::begin_items(database, source_id).await?;
-    stage_component_paths(&mut scan, source, paths, &seeds, &|| false).await?;
+    stage_component_paths(&mut scan, source, &paths, &seeds, &|| false).await?;
     stage_component(
         database,
         source,
         roots,
         &mut scan,
         artwork_only,
-        rename,
+        rename.as_ref(),
         &|| false,
     )
     .await?;
     Ok(scan.finish().await?)
+}
+
+fn normalize_observed_path(path: &Path) -> PathBuf {
+    if let Ok(path) = fs::canonicalize(path) {
+        return path;
+    }
+    let mut current = path;
+    let mut missing = Vec::new();
+    while let Some(name) = current.file_name() {
+        missing.push(name.to_os_string());
+        let Some(parent) = current.parent() else {
+            break;
+        };
+        current = parent;
+        if let Ok(mut canonical) = fs::canonicalize(current) {
+            for component in missing.iter().rev() {
+                canonical.push(component);
+            }
+            return canonical;
+        }
+    }
+    path.to_path_buf()
 }
 
 async fn stage_component_paths(

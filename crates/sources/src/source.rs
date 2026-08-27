@@ -2498,10 +2498,11 @@ mod refresh_laws {
         let track = root.path().join("Artist").join("Album").join("Track.flac");
         std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
         std::fs::write(&track, b"media").expect("write Track");
+        let canonical_root = root.path().canonicalize().expect("canonical music root");
 
         assert_eq!(
             mapped_local_path(
-                root.path(),
+                &canonical_root,
                 None,
                 None,
                 "/srv/navidrome/music/Artist/Album/Track.flac",
