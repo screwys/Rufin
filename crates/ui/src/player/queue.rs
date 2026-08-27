@@ -8,7 +8,7 @@ use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use library::QueuePageRow;
 use localization::tr;
-use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest};
+use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest, QueueReorderTarget};
 
 use crate::favorites::{favorite_icon_button, set_favorite_button_active};
 use crate::interactions::install_context_menu_openers;
@@ -47,6 +47,44 @@ struct QueueFullscreenColumnWidgets {
     title: gtk::Widget,
     album: gtk::Widget,
     year: gtk::Widget,
+}
+
+#[derive(Default)]
+struct QueueDragBinding {
+    occurrence: RefCell<Option<OccurrenceId>>,
+}
+
+impl QueueDragBinding {
+    fn bind(&self, occurrence: OccurrenceId) {
+        self.occurrence.replace(Some(occurrence));
+    }
+
+    fn clear(&self) {
+        self.occurrence.borrow_mut().take();
+    }
+
+    fn occurrence(&self) -> Option<OccurrenceId> {
+        self.occurrence.borrow().clone()
+    }
+
+    fn reorder_request(
+        &self,
+        occurrence: OccurrenceId,
+        after: bool,
+    ) -> Option<QueueReorderRequest> {
+        let target = self.occurrence()?;
+        if occurrence == target {
+            return None;
+        }
+        Some(QueueReorderRequest {
+            occurrence,
+            target: if after {
+                QueueReorderTarget::After(target)
+            } else {
+                QueueReorderTarget::Before(target)
+            },
+        })
+    }
 }
 
 impl QueueFullscreenColumnWidgets {
@@ -391,12 +429,18 @@ fn render_panel(
         stack
     } else {
         let factory = gtk::SignalListItemFactory::new();
-        factory.connect_setup(|_, item| {
+        let drag_bindings = Rc::new(RefCell::new(HashMap::<usize, Rc<QueueDragBinding>>::new()));
+        let setup_bindings = Rc::clone(&drag_bindings);
+        factory.connect_setup(move |_, item| {
             if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
                 item.set_child(Some(&gtk::Box::new(gtk::Orientation::Vertical, 0)));
+                setup_bindings
+                    .borrow_mut()
+                    .insert(item.as_ptr() as usize, Rc::new(QueueDragBinding::default()));
             }
         });
         let bind_shell = Rc::clone(shell);
+        let bind_bindings = Rc::clone(&drag_bindings);
         factory.connect_bind(move |_, item| {
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
@@ -408,6 +452,14 @@ fn render_panel(
                 return;
             };
             let row = object.borrow::<QueuePageRow>().clone();
+            let Some(binding) = bind_bindings
+                .borrow()
+                .get(&(item.as_ptr() as usize))
+                .cloned()
+            else {
+                return;
+            };
+            binding.bind(OccurrenceId::new(row.object_id.clone()));
             let current = bind_shell
                 .selected_playback()
                 .as_deref()
@@ -422,7 +474,23 @@ fn render_panel(
                 current.as_ref(),
                 fullscreen,
                 reorderable,
+                binding,
             )));
+        });
+        let unbind_bindings = Rc::clone(&drag_bindings);
+        factory.connect_unbind(move |_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            if let Some(binding) = unbind_bindings.borrow().get(&(item.as_ptr() as usize)) {
+                binding.clear();
+            }
+        });
+        factory.connect_teardown(move |_, item| {
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            drag_bindings.borrow_mut().remove(&(item.as_ptr() as usize));
         });
         let selection = gtk::NoSelection::new(Some(model.clone()));
         let list = gtk::ListView::new(Some(selection), Some(factory));
@@ -633,6 +701,7 @@ fn queue_row(
     current: Option<&OccurrenceId>,
     fullscreen: bool,
     reorderable: bool,
+    drag_binding: Rc<QueueDragBinding>,
 ) -> gtk::Widget {
     let occurrence = OccurrenceId::new(row.object_id.clone());
     let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
@@ -664,15 +733,18 @@ fn queue_row(
         let source = gtk::DragSource::builder()
             .actions(gtk::gdk::DragAction::MOVE)
             .build();
-        let object_id = occurrence.to_string();
+        let source_binding = Rc::clone(&drag_binding);
         source.connect_prepare(move |_, _, _| {
-            Some(gtk::gdk::ContentProvider::for_value(&object_id.to_value()))
+            let occurrence = source_binding.occurrence()?;
+            Some(gtk::gdk::ContentProvider::for_value(
+                &occurrence.to_string().to_value(),
+            ))
         });
         root.add_controller(source);
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         let queue = shell.products.playback.queue.clone();
-        let target_index = usize::try_from(row.position).unwrap_or_default();
         let root_for_drop = root.downgrade();
+        let target_binding = Rc::clone(&drag_binding);
         drop.connect_drop(move |_, value, _, y| {
             let Ok(object_id) = value.get::<String>() else {
                 return false;
@@ -680,11 +752,13 @@ fn queue_row(
             let Some(root) = root_for_drop.upgrade() else {
                 return false;
             };
-            queue.reorder(QueueReorderRequest {
-                occurrence: OccurrenceId::new(object_id),
-                target_index,
-                after: y > f64::from(root.height()) / 2.0,
-            });
+            let Some(request) = target_binding.reorder_request(
+                OccurrenceId::new(object_id),
+                y > f64::from(root.height()) / 2.0,
+            ) else {
+                return false;
+            };
+            queue.reorder(request);
             true
         });
         root.add_controller(drop);
@@ -1131,6 +1205,34 @@ mod tests {
         next[1].favorite = Some(true);
         assert_eq!(changed_queue_positions(&previous, &next), [1]);
         assert!(changed_queue_positions(&next, &next).is_empty());
+    }
+
+    #[test]
+    fn queue_drag_binding_uses_the_current_recycled_row() {
+        let binding = QueueDragBinding::default();
+        binding.bind(OccurrenceId::new("old-target"));
+        assert_eq!(
+            binding
+                .reorder_request(OccurrenceId::new("dragged"), false)
+                .expect("bound old target")
+                .target,
+            QueueReorderTarget::Before(OccurrenceId::new("old-target"))
+        );
+
+        binding.bind(OccurrenceId::new("new-target"));
+        assert_eq!(
+            binding
+                .reorder_request(OccurrenceId::new("dragged"), true)
+                .expect("bound new target")
+                .target,
+            QueueReorderTarget::After(OccurrenceId::new("new-target"))
+        );
+        binding.clear();
+        assert!(
+            binding
+                .reorder_request(OccurrenceId::new("dragged"), false)
+                .is_none()
+        );
     }
 
     #[test]

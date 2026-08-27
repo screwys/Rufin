@@ -40,6 +40,13 @@ impl fmt::Display for OccurrenceId {
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum QueueReorderTarget {
+    Before(OccurrenceId),
+    After(OccurrenceId),
+    End,
+}
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub enum RepeatMode {
     #[default]
@@ -431,31 +438,37 @@ impl Sequence {
         Some(removed)
     }
 
-    pub fn reorder(&mut self, occurrence: &OccurrenceId, new_index: usize) -> bool {
-        let Some(old_index) = self.occurrence_index(occurrence) else {
+    pub fn reorder(&mut self, occurrence: &OccurrenceId, target: &QueueReorderTarget) -> bool {
+        let Some(old_position) = self
+            .occurrence(occurrence)
+            .map(|entry| entry.canonical_position)
+        else {
             return false;
         };
-        let target = new_index.min(self.entries.len().saturating_sub(1));
-        if old_index == target {
+        let insertion = match target {
+            QueueReorderTarget::Before(target) => self
+                .occurrence(target)
+                .map(|entry| entry.canonical_position),
+            QueueReorderTarget::After(target) => self
+                .occurrence(target)
+                .map(|entry| entry.canonical_position.saturating_add(1)),
+            QueueReorderTarget::End => Some(self.entries.len()),
+        };
+        let Some(mut target) = insertion else {
+            return false;
+        };
+        if old_position < target {
+            target = target.saturating_sub(1);
+        }
+        let target = target.min(self.entries.len().saturating_sub(1));
+        if old_position == target {
             return false;
         }
         let selected = self.selected().map(|entry| entry.occurrence.clone());
-        let mut entry = self.entries.remove(old_index);
-        let old_canonical = entry.canonical_position;
-        let canonical_target = new_index.min(self.entries.len());
-        for current in &mut self.entries {
-            if canonical_target < old_canonical
-                && (canonical_target..old_canonical).contains(&current.canonical_position)
-            {
-                current.canonical_position += 1;
-            } else if canonical_target > old_canonical
-                && (old_canonical + 1..=canonical_target).contains(&current.canonical_position)
-            {
-                current.canonical_position -= 1;
-            }
+        self.set_canonical_position(occurrence, old_position, target);
+        if !self.shuffle_enabled {
+            self.entries.sort_by_key(|entry| entry.canonical_position);
         }
-        entry.canonical_position = canonical_target;
-        self.entries.insert(target, entry);
         self.selected_index = selected
             .as_ref()
             .and_then(|selected| self.occurrence_index(selected));
@@ -463,9 +476,68 @@ impl Sequence {
         true
     }
 
+    fn set_canonical_position(
+        &mut self,
+        occurrence: &OccurrenceId,
+        old_position: usize,
+        target: usize,
+    ) {
+        for entry in &mut self.entries {
+            if &entry.occurrence == occurrence {
+                entry.canonical_position = target;
+            } else if target < old_position
+                && (target..old_position).contains(&entry.canonical_position)
+            {
+                entry.canonical_position += 1;
+            } else if old_position < target
+                && (old_position + 1..=target).contains(&entry.canonical_position)
+            {
+                entry.canonical_position -= 1;
+            }
+        }
+    }
+
     pub fn move_after_current(&mut self, occurrence: &OccurrenceId) -> bool {
-        let target = self.selected_index.map_or(0, |index| index + 1);
-        self.reorder(occurrence, target)
+        let Some(current_index) = self.selected_index else {
+            return false;
+        };
+        let current = self.entries[current_index].occurrence.clone();
+        if &current == occurrence {
+            return false;
+        }
+        let Some(old_index) = self.occurrence_index(occurrence) else {
+            return false;
+        };
+        let old_position = self.entries[old_index].canonical_position;
+        let current_position = self.entries[current_index].canonical_position;
+        let mut canonical_target = current_position.saturating_add(1);
+        if old_position < canonical_target {
+            canonical_target = canonical_target.saturating_sub(1);
+        }
+        let traversal_target = if old_index < current_index {
+            current_index
+        } else {
+            current_index.saturating_add(1)
+        };
+        let canonical_changed = old_position != canonical_target;
+        let traversal_changed = old_index != traversal_target;
+        if !canonical_changed && !traversal_changed {
+            return false;
+        }
+        if canonical_changed {
+            self.set_canonical_position(occurrence, old_position, canonical_target);
+        }
+        if traversal_changed {
+            let entry = self.entries.remove(old_index);
+            let current_index =
+                current_index.saturating_sub(usize::from(old_index < current_index));
+            self.entries.insert(current_index + 1, entry);
+            self.selected_index = Some(current_index);
+        } else {
+            self.selected_index = Some(current_index);
+        }
+        self.bump_revision();
+        true
     }
 
     pub(crate) fn clear(&mut self) -> bool {
@@ -644,6 +716,26 @@ mod tests {
         BatchItem::new(track(number), Provenance::Manual)
     }
 
+    fn occurrence_for_track(sequence: &Sequence, number: i64) -> OccurrenceId {
+        sequence
+            .entries()
+            .iter()
+            .find(|entry| entry.track_key == Some(track(number)))
+            .unwrap_or_else(|| panic!("canonical Track {number}"))
+            .occurrence
+            .clone()
+    }
+
+    fn canonical_tracks(sequence: &Sequence) -> Vec<Option<TrackKey>> {
+        let mut canonical = sequence
+            .entries()
+            .iter()
+            .map(|entry| (entry.canonical_position, entry.track_key))
+            .collect::<Vec<_>>();
+        canonical.sort_by_key(|(position, _)| *position);
+        canonical.into_iter().map(|(_, track)| track).collect()
+    }
+
     #[test]
     fn backend_may_reinstall_the_current_occurrence_but_user_activation_is_a_no_op() {
         let mut sequence = Sequence::new(source(1));
@@ -710,6 +802,127 @@ mod tests {
                 Some(track(2)),
                 Some(track(4)),
                 Some(track(3))
+            ]
+        );
+    }
+
+    #[test]
+    fn canonical_reorder_preserves_the_active_shuffled_traversal() {
+        let mut sequence = Sequence::new(source(1));
+        sequence
+            .apply_batch(
+                Batch::new(vec![manual(1), manual(2), manual(3), manual(4)]),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("queue Tracks");
+        sequence.set_shuffle_seed(true, 19);
+        let traversal = sequence
+            .entries()
+            .iter()
+            .map(|entry| entry.occurrence.clone())
+            .collect::<Vec<_>>();
+        let occurrence = occurrence_for_track(&sequence, 4);
+        let target = occurrence_for_track(&sequence, 1);
+        assert!(sequence.reorder(&occurrence, &QueueReorderTarget::Before(target)));
+        assert_eq!(
+            sequence
+                .entries()
+                .iter()
+                .map(|entry| entry.occurrence.clone())
+                .collect::<Vec<_>>(),
+            traversal
+        );
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [
+                Some(track(4)),
+                Some(track(1)),
+                Some(track(2)),
+                Some(track(3)),
+            ]
+        );
+    }
+
+    #[test]
+    fn relative_reorder_targets_cover_both_directions_and_the_end() {
+        let mut sequence = Sequence::new(source(1));
+        sequence
+            .apply_batch(
+                Batch::new(vec![manual(1), manual(2), manual(3), manual(4)]),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("queue Tracks");
+        let one = occurrence_for_track(&sequence, 1);
+        let two = occurrence_for_track(&sequence, 2);
+        let three = occurrence_for_track(&sequence, 3);
+        let four = occurrence_for_track(&sequence, 4);
+
+        assert!(sequence.reorder(&four, &QueueReorderTarget::Before(two)));
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [
+                Some(track(1)),
+                Some(track(4)),
+                Some(track(2)),
+                Some(track(3)),
+            ]
+        );
+        assert!(sequence.reorder(&four, &QueueReorderTarget::After(three)));
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [
+                Some(track(1)),
+                Some(track(2)),
+                Some(track(3)),
+                Some(track(4)),
+            ]
+        );
+        assert!(sequence.reorder(&one, &QueueReorderTarget::End));
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [
+                Some(track(2)),
+                Some(track(3)),
+                Some(track(4)),
+                Some(track(1)),
+            ]
+        );
+    }
+
+    #[test]
+    fn move_after_current_updates_canonical_and_shuffled_traversal_order() {
+        let mut sequence = Sequence::new(source(1));
+        sequence
+            .apply_batch(
+                Batch::new(vec![manual(1), manual(2), manual(3), manual(4)]),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("queue Tracks");
+        sequence.set_shuffle_seed(true, 19);
+        let current = sequence
+            .selected()
+            .expect("current Track")
+            .occurrence
+            .clone();
+        let occurrence = occurrence_for_track(&sequence, 4);
+
+        assert!(sequence.move_after_current(&occurrence));
+        assert_eq!(
+            sequence
+                .entries()
+                .iter()
+                .take(2)
+                .map(|entry| entry.occurrence.clone())
+                .collect::<Vec<_>>(),
+            [current, occurrence]
+        );
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [
+                Some(track(1)),
+                Some(track(4)),
+                Some(track(2)),
+                Some(track(3)),
             ]
         );
     }

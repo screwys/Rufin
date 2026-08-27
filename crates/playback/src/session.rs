@@ -148,8 +148,7 @@ pub enum SessionCommand {
     Remove(OccurrenceId),
     Reorder {
         occurrence: OccurrenceId,
-        target_index: usize,
-        after: bool,
+        target: crate::QueueReorderTarget,
     },
     MoveAfterCurrent(OccurrenceId),
     ClearUpcoming,
@@ -600,11 +599,9 @@ impl PlaybackSession {
         match command {
             SessionCommand::Activate(occurrence) => Ok(self.activate(&occurrence, sample)),
             SessionCommand::Remove(occurrence) => Ok(self.remove(&occurrence, sample)),
-            SessionCommand::Reorder {
-                occurrence,
-                target_index,
-                after,
-            } => Ok(self.reorder(&occurrence, target_index, after)),
+            SessionCommand::Reorder { occurrence, target } => {
+                Ok(self.reorder(&occurrence, &target))
+            }
             SessionCommand::MoveAfterCurrent(occurrence) => {
                 Ok(self.move_after_current(&occurrence))
             }
@@ -1068,25 +1065,9 @@ impl PlaybackSession {
     fn reorder(
         &mut self,
         occurrence: &OccurrenceId,
-        target_index: usize,
-        after: bool,
+        target: &crate::QueueReorderTarget,
     ) -> SessionUpdate {
-        let Some(old_index) = self
-            .sequence
-            .entries()
-            .iter()
-            .position(|entry| &entry.occurrence == occurrence)
-        else {
-            return SessionUpdate::default();
-        };
-        let mut absolute_index = target_index.saturating_add(usize::from(after));
-        if old_index < absolute_index {
-            absolute_index = absolute_index.saturating_sub(1);
-        }
-        if old_index == absolute_index {
-            return SessionUpdate::default();
-        }
-        if !self.sequence.reorder(occurrence, absolute_index) {
+        if !self.sequence.reorder(occurrence, target) {
             return SessionUpdate::default();
         }
         self.pending_replacement = None;

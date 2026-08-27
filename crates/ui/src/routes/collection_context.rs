@@ -374,8 +374,7 @@ fn present_track_menu(
         surface.add_action("play-last", move || {
             queue.reorder(playback::QueueReorderRequest {
                 occurrence: occurrence.clone(),
-                target_index: usize::MAX,
-                after: false,
+                target: playback::QueueReorderTarget::End,
             });
         });
     }

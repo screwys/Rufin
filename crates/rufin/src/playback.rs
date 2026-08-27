@@ -928,8 +928,7 @@ impl QueueCommandPort for PlaybackOwner {
     fn reorder(&self, request: QueueReorderRequest) {
         self.send(SessionCommand::Reorder {
             occurrence: request.occurrence,
-            target_index: request.target_index,
-            after: request.after,
+            target: request.target,
         });
     }
     fn clear(&self) {

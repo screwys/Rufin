@@ -4,7 +4,7 @@ use library::{RadioSeed, RandomCriteria, SourceKey, TrackKey};
 
 use crate::{
     AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackMedia,
-    PlaybackOutput, Provenance, RemoteOutput, RepeatMode, SourceSessionEpoch,
+    PlaybackOutput, Provenance, QueueReorderTarget, RemoteOutput, RepeatMode, SourceSessionEpoch,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -197,10 +197,10 @@ fn compact_provenance(
     }
 }
 
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueReorderRequest {
     pub occurrence: OccurrenceId,
-    pub target_index: usize,
-    pub after: bool,
+    pub target: QueueReorderTarget,
 }
 
 #[derive(Clone, Debug, PartialEq)]
