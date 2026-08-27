@@ -635,8 +635,8 @@ _build-dmg identity="development":
         CARGO_TARGET_DIR="$target_dir" \
         cargo build --locked --release -p rufin "${cargo_features[@]}"
     cp "$target_dir/release/rufin" "$app_path/Contents/MacOS/rufin"
-    cp "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
-    cp "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" \
+    cp -L "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
+    cp -L "$(brew --prefix gdk-pixbuf)/bin/gdk-pixbuf-query-loaders" \
         "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
     chmod +x "$app_path/Contents/MacOS/"*
     sed \
