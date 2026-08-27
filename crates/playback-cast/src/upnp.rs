@@ -1,17 +1,15 @@
 use std::time::{Duration, Instant};
 
 use playback::{BackendCommand, BackendEvent, BackendState, PreparedNext, PreparedStream, RunId};
-use rupnp::ssdp::URN;
-use rupnp::{Device, Service};
 
 use crate::relay::{PublishedResource, RelayRepresentation, RelayServer, source_content_type};
+use crate::upnp_transport::UpnpDevice;
 
-const AV_TRANSPORT: URN = URN::service("schemas-upnp-org", "AVTransport", 1);
-const CONNECTION_MANAGER: URN = URN::service("schemas-upnp-org", "ConnectionManager", 1);
-const RENDERING_CONTROL: URN = URN::service("schemas-upnp-org", "RenderingControl", 1);
+const AV_TRANSPORT: &str = "AVTransport";
+const CONNECTION_MANAGER: &str = "ConnectionManager";
+const RENDERING_CONTROL: &str = "RenderingControl";
 const END_POSITION_TOLERANCE_MILLIS: u64 = 2_000;
 const SEEK_POSITION_SAMPLES: u8 = 4;
-const ACTION_TIMEOUT: Duration = Duration::from_secs(10);
 const PLAY_READY_TIMEOUT: Duration = Duration::from_secs(5);
 const PLAY_READY_POLL_INTERVAL: Duration = Duration::from_millis(250);
 
@@ -158,8 +156,7 @@ impl QueuedMedia {
 }
 
 pub(crate) struct UpnpController {
-    runtime: tokio::runtime::Runtime,
-    device: Device,
+    device: UpnpDevice,
     sink_protocols: SinkProtocols,
     current: Option<QueuedMedia>,
     next_media: Option<QueuedMedia>,
@@ -174,19 +171,14 @@ pub(crate) struct UpnpController {
 }
 
 impl UpnpController {
-    pub(crate) fn new(device: Device) -> Result<Self, String> {
-        if find_service_any_version(&device, "AVTransport").is_none() {
+    pub(crate) fn new(device: UpnpDevice) -> Result<Self, String> {
+        if !device.has_service(AV_TRANSPORT) {
             return Err(format!(
                 "{} does not provide UPnP AVTransport",
                 device.friendly_name()
             ));
         }
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| error.to_string())?;
         Ok(Self {
-            runtime,
             device,
             sink_protocols: SinkProtocols(None),
             current: None,
@@ -223,6 +215,7 @@ impl UpnpController {
         if let Err(error) = &result {
             tracing::debug!(
                 description_url = %self.device.url(),
+                local_address = ?self.device.local_address(),
                 %error,
                 "UPnP renderer connection probe failed"
             );
@@ -778,20 +771,31 @@ impl UpnpController {
         if paused {
             self.play()?;
         }
-        let renderer_position = millis.saturating_sub(self.current_logical_offset_millis());
-        let result = self.seek(renderer_position);
+        let result = self.seek_logical_position(millis);
         if paused {
             let _ = self.pause();
         }
-        if result.is_ok() {
-            tracing::debug!(target_millis = millis, paused, "sent UPnP seek");
+        if let Ok(target_millis) = &result {
+            tracing::debug!(
+                requested_millis = millis,
+                target_millis,
+                paused,
+                "sent UPnP seek"
+            );
             self.pending_seek = Some(PendingSeek {
                 origin_millis: self.last_position_millis,
-                target_millis: millis,
+                target_millis: *target_millis,
                 remaining_samples: SEEK_POSITION_SAMPLES,
             });
         }
-        result
+        result.map(|_| ())
+    }
+
+    fn seek_logical_position(&self, millis: u64) -> Result<u64, String> {
+        let logical_offset = self.current_logical_offset_millis();
+        let renderer_position = quantize_upnp_time(millis.saturating_sub(logical_offset));
+        self.seek(renderer_position)?;
+        Ok(logical_offset.saturating_add(renderer_position))
     }
 
     fn accept_position_after_seek(&mut self, observed_millis: u64) -> bool {
@@ -811,6 +815,19 @@ impl UpnpController {
             }
             SeekObservation::Expired => true,
             SeekObservation::Waiting => {
+                if self.startup_output.is_some() {
+                    match self.seek_logical_position(pending.target_millis) {
+                        Ok(_) => tracing::debug!(
+                            target_millis = pending.target_millis,
+                            "retried UPnP startup seek"
+                        ),
+                        Err(error) => tracing::debug!(
+                            %error,
+                            target_millis = pending.target_millis,
+                            "UPnP startup seek retry was rejected"
+                        ),
+                    }
+                }
                 self.pending_seek = Some(pending);
                 false
             }
@@ -1025,62 +1042,26 @@ impl UpnpController {
 
     fn action(
         &self,
-        service_type: URN,
+        service_type: &str,
         action: &str,
         payload: &str,
     ) -> Result<std::collections::HashMap<String, String>, String> {
-        let service = self.service(&service_type)?;
         let started = Instant::now();
-        let result = match self.runtime.block_on(async {
-            tokio::time::timeout(
-                ACTION_TIMEOUT,
-                service.action(self.device.url(), action, payload),
-            )
-            .await
-        }) {
-            Ok(result) => result.map_err(|error| format!("UPnP {action} failed: {error}")),
-            Err(_) => Err(format!("UPnP {action} timed out")),
-        };
+        let result = self
+            .device
+            .action(service_type, action, payload)
+            .map_err(|error| format!("UPnP {action} failed: {error}"));
         let elapsed = started.elapsed();
         if result.is_err() || elapsed.as_millis() >= 250 {
             tracing::debug!(
                 action,
+                local_address = ?self.device.local_address(),
                 elapsed_ms = elapsed.as_millis(),
                 "completed UPnP action"
             );
         }
         result
     }
-
-    fn service(&self, service_type: &URN) -> Result<&Service, String> {
-        let name = if service_type == &AV_TRANSPORT {
-            "AVTransport"
-        } else if service_type == &CONNECTION_MANAGER {
-            "ConnectionManager"
-        } else if service_type == &RENDERING_CONTROL {
-            "RenderingControl"
-        } else {
-            return Err(format!("unsupported UPnP service {service_type}"));
-        };
-        find_service_any_version(&self.device, name).ok_or_else(|| {
-            format!(
-                "{} does not provide UPnP {name}",
-                self.device.friendly_name()
-            )
-        })
-    }
-}
-
-fn find_service_any_version<'a>(device: &'a Device, name: &str) -> Option<&'a Service> {
-    device
-        .services_iter()
-        .find(|service| service_type_matches(service.service_type(), name))
-}
-
-fn service_type_matches(service_type: &URN, name: &str) -> bool {
-    service_type
-        .to_string()
-        .contains(&format!(":service:{name}:"))
 }
 
 fn format_upnp_time(millis: u64) -> String {
@@ -1091,6 +1072,10 @@ fn format_upnp_time(millis: u64) -> String {
         (seconds / 60) % 60,
         seconds % 60
     )
+}
+
+fn quantize_upnp_time(millis: u64) -> u64 {
+    millis / 1_000 * 1_000
 }
 
 fn parse_upnp_time(value: &str) -> Option<u64> {
@@ -1210,20 +1195,13 @@ mod tests {
     use url::Url;
 
     use super::*;
+    use crate::upnp_transport::service_type_matches;
 
     const TEST_DEVICE_DESCRIPTION: &str = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service></serviceList></device></root>"#;
     const TEST_CAPABLE_DEVICE_DESCRIPTION: &str = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType><serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId><SCPDURL>/connection.xml</SCPDURL><controlURL>/connection</controlURL><eventSubURL>/connection-events</eventSubURL></service></serviceList></device></root>"#;
 
-    fn test_device(address: std::net::SocketAddr) -> Device {
-        tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .expect("runtime")
-            .block_on(Device::from_url(
-                format!("http://{address}/device.xml")
-                    .parse()
-                    .expect("device URL"),
-            ))
+    fn test_device(address: std::net::SocketAddr) -> UpnpDevice {
+        UpnpDevice::from_url(&format!("http://{address}/device.xml"), None)
             .expect("device description")
     }
 
@@ -1298,13 +1276,19 @@ mod tests {
     }
 
     #[test]
+    fn seek_confirmation_uses_the_exact_upnp_time_that_was_sent() {
+        assert_eq!(quantize_upnp_time(23_755), 23_000);
+        assert_eq!(format_upnp_time(23_755), "00:00:23");
+    }
+
+    #[test]
     fn renderer_services_match_supported_newer_versions() {
         assert!(service_type_matches(
-            &URN::service("schemas-upnp-org", "AVTransport", 3),
+            "urn:schemas-upnp-org:service:AVTransport:3",
             "AVTransport",
         ));
         assert!(!service_type_matches(
-            &URN::service("schemas-upnp-org", "RenderingControl", 3),
+            "urn:schemas-upnp-org:service:RenderingControl:3",
             "AVTransport",
         ));
     }
@@ -1743,9 +1727,9 @@ mod tests {
         let (sent, received) = mpsc::channel();
         let renderer = thread::spawn(move || {
             let mut current_uri = String::new();
-            let mut seeked = false;
+            let mut seek_attempts = 0;
             let mut playing = false;
-            for index in 0..23 {
+            for index in 0..24 {
                 let mut request = server.recv().expect("renderer request");
                 if index == 0 {
                     let description = format!(
@@ -1772,7 +1756,7 @@ mod tests {
                 } else if action.contains("#Play") {
                     playing = true;
                 } else if action.contains("#Seek") {
-                    seeked = true;
+                    seek_attempts += 1;
                 }
                 sent.send((action.clone(), body))
                     .expect("record SOAP request");
@@ -1789,7 +1773,11 @@ mod tests {
                 } else if action.contains("GetPositionInfo") {
                     format!(
                         "<TrackDuration>00:04:19</TrackDuration><TrackURI>{current_uri}</TrackURI><RelTime>{}</RelTime>",
-                        if seeked { "00:00:42" } else { "00:00:00" }
+                        if seek_attempts >= 2 {
+                            "00:00:42"
+                        } else {
+                            "00:00:00"
+                        }
                     )
                 } else if action.contains("GetCurrentTransportActions") {
                     "<Actions>Play,Pause,Stop,Seek</Actions>".to_string()
@@ -1848,7 +1836,7 @@ mod tests {
         );
 
         let actions = received.try_iter().collect::<Vec<_>>();
-        assert_eq!(actions.len(), 22);
+        assert_eq!(actions.len(), 23);
         assert!(actions[0].0.contains("GetCurrentTransportActions"));
         assert!(actions[1].0.contains("#Stop"));
         assert!(actions[2].0.contains("SetAVTransportURI"));
@@ -1867,16 +1855,16 @@ mod tests {
             .iter()
             .filter(|(action, _)| action.contains("#Seek"))
             .collect::<Vec<_>>();
-        assert_eq!(seeks.len(), 1);
+        assert_eq!(seeks.len(), 2);
         assert!(
             seeks
                 .iter()
                 .all(|(_, body)| body.contains("<Target>00:00:42</Target>"))
         );
-        assert!(actions[18].0.contains("SetVolume"));
-        assert!(actions[18].1.contains("<DesiredVolume>40</DesiredVolume>"));
-        assert!(actions[19].0.contains("SetMute"));
-        assert!(actions[19].1.contains("<DesiredMute>0</DesiredMute>"));
+        assert!(actions[21].0.contains("SetVolume"));
+        assert!(actions[21].1.contains("<DesiredVolume>40</DesiredVolume>"));
+        assert!(actions[22].0.contains("SetMute"));
+        assert!(actions[22].1.contains("<DesiredMute>0</DesiredMute>"));
         renderer.join().expect("renderer thread");
         relay.shutdown();
     }

@@ -18,11 +18,10 @@ mdns-sd.workspace = true
 playback.workspace = true
 playback-gstreamer.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
-rupnp.workspace = true
+roxmltree.workspace = true
 rustls.workspace = true
 socket2.workspace = true
 tiny_http.workspace = true
-tokio = { workspace = true, features = ["rt", "time"] }
 tracing.workspace = true
 url.workspace = true
 

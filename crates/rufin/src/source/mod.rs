@@ -777,19 +777,7 @@ impl SourceOwner {
         let Some(source) = selected.source.as_ref() else {
             return;
         };
-        self.publish_operation(SourceOperation::Refreshing {
-            source_id: selected.source_id().clone(),
-            progress: SourceProgress {
-                stage: SourceProgressStage::Files,
-                completed: 0,
-                total: None,
-            },
-        })
-        .await;
-        let progress = refreshing_progress(
-            self.shared.outputs.events.clone(),
-            selected.source_id().clone(),
-        );
+        let progress = |_: SourceReadProgress| {};
         match source
             .catch_up_local(
                 &selected.database,
@@ -805,7 +793,6 @@ impl SourceOwner {
             }
             Err(error) => warn!(%error, "Local startup catch-up failed"),
         }
-        self.publish_operation(SourceOperation::Idle).await;
     }
 
     async fn manual_refresh_selected(

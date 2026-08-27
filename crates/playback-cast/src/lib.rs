@@ -2,6 +2,7 @@ mod chromecast;
 mod discovery;
 mod relay;
 mod upnp;
+mod upnp_transport;
 
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -16,8 +17,9 @@ use playback::{
     BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, RemoteOutput,
     RemoteOutputProtocol,
 };
-use relay::{ArtworkResolver, RelayServer, available_networks};
+use relay::{ArtworkResolver, RelayServer, available_networks, local_address_for, network_address};
 use upnp::UpnpController;
+use upnp_transport::UpnpDevice;
 
 const DISCOVERY_TIMEOUT: Duration = Duration::from_secs(2);
 const GOOGLE_CAST_STATUS_INTERVAL: Duration = Duration::from_millis(500);
@@ -70,7 +72,28 @@ impl CastManager {
 
     pub fn discover(&self) -> Result<Vec<RemoteOutput>, String> {
         let started = Instant::now();
-        let upnp = thread::spawn(|| discover_upnp(DISCOVERY_TIMEOUT));
+        let network_interface = self
+            .network_interface
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone();
+        let local_address = network_interface
+            .as_deref()
+            .map(network_address)
+            .transpose()?
+            .flatten();
+        if network_interface.is_some() && local_address.is_none() {
+            tracing::warn!(
+                network_interface = ?network_interface,
+                "selected casting network is unavailable; using automatic discovery"
+            );
+        }
+        tracing::debug!(
+            network_interface = ?network_interface,
+            ?local_address,
+            "discovering cast outputs"
+        );
+        let upnp = thread::spawn(move || discover_upnp(DISCOVERY_TIMEOUT, local_address));
         let google_cast = thread::spawn(|| discover_google_cast(DISCOVERY_TIMEOUT));
         let upnp = upnp
             .join()
@@ -161,12 +184,28 @@ impl CastPlaybackBackend {
         network_interface: Option<String>,
         artwork_resolver: ArtworkResolver,
     ) -> Result<Self, String> {
+        let selected_local_address = network_interface
+            .as_deref()
+            .map(|network_interface| local_address_for(target.address(), Some(network_interface)))
+            .transpose()?;
+        tracing::debug!(
+            network_interface = ?network_interface,
+            local_address = ?selected_local_address,
+            renderer_address = %target.address(),
+            protocol = ?target.output().protocol,
+            "connecting cast output"
+        );
         let relay =
             RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?
                 .with_artwork_resolver(artwork_resolver);
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
-                let mut controller = UpnpController::new(*device)?;
+                let device = if device.local_address() == selected_local_address {
+                    *device
+                } else {
+                    UpnpDevice::from_url(device.url().as_str(), selected_local_address)?
+                };
+                let mut controller = UpnpController::new(device)?;
                 controller.verify_connection()?;
                 Controller::Upnp(Box::new(controller))
             }

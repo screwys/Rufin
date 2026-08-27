@@ -1796,32 +1796,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/genawaiter/genawaiter-0.99.1.crate",
-        "sha256": "c86bd0361bcbde39b13475e6e36cb24c329964aa2611be285289d1e4b751c1a0",
-        "dest": "cargo/vendor/genawaiter-0.99.1"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"c86bd0361bcbde39b13475e6e36cb24c329964aa2611be285289d1e4b751c1a0\", \"files\": {}}",
-        "dest": "cargo/vendor/genawaiter-0.99.1",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/genawaiter-macro/genawaiter-macro-0.99.1.crate",
-        "sha256": "0b32dfe1fdfc0bbde1f22a5da25355514b5e450c33a6af6770884c8750aedfbc",
-        "dest": "cargo/vendor/genawaiter-macro-0.99.1"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"0b32dfe1fdfc0bbde1f22a5da25355514b5e450c33a6af6770884c8750aedfbc\", \"files\": {}}",
-        "dest": "cargo/vendor/genawaiter-macro-0.99.1",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/generic-array/generic-array-0.14.7.crate",
         "sha256": "85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a",
         "dest": "cargo/vendor/generic-array-0.14.7"
@@ -2610,19 +2584,6 @@
         "type": "inline",
         "contents": "{\"package\": \"cb68373c0d6620ef8105e855e7745e18b0d00d3bdb07fb532e434244cdb9a714\", \"files\": {}}",
         "dest": "cargo/vendor/idna_adapter-1.2.2",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/if-addrs/if-addrs-0.13.4.crate",
-        "sha256": "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24",
-        "dest": "cargo/vendor/if-addrs-0.13.4"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24\", \"files\": {}}",
-        "dest": "cargo/vendor/if-addrs-0.13.4",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -4526,19 +4487,6 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/rupnp/rupnp-3.0.0.crate",
-        "sha256": "adade717fef50ae742ee4341495dfb1f78b2bc39e50ad8a6d485ffb81c1edbf6",
-        "dest": "cargo/vendor/rupnp-3.0.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"adade717fef50ae742ee4341495dfb1f78b2bc39e50ad8a6d485ffb81c1edbf6\", \"files\": {}}",
-        "dest": "cargo/vendor/rupnp-3.0.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/rustc-hash/rustc-hash-2.1.3.crate",
         "sha256": "6b1e7f9a428571be2dc5bc0505c13fb6bf936822b894ec87abf8a08a4e51742d",
         "dest": "cargo/vendor/rustc-hash-2.1.3"
@@ -5132,19 +5080,6 @@
         "type": "inline",
         "contents": "{\"package\": \"488e99c397a62007e4229aec669a179816339afc6d2620ca6fa420dbee2e982c\", \"files\": {}}",
         "dest": "cargo/vendor/sqlx-sqlite-0.9.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/ssdp-client/ssdp-client-2.1.0.crate",
-        "sha256": "04f4048b05716cdb270e1e5960d9dd4d428e7ceaa939ee5348a84f6e43d52df1",
-        "dest": "cargo/vendor/ssdp-client-2.1.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"04f4048b05716cdb270e1e5960d9dd4d428e7ceaa939ee5348a84f6e43d52df1\", \"files\": {}}",
-        "dest": "cargo/vendor/ssdp-client-2.1.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
@@ -6315,19 +6250,6 @@
         "type": "inline",
         "contents": "{\"package\": \"282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d\", \"files\": {}}",
         "dest": "cargo/vendor/windows-sys-0.52.0",
-        "dest-filename": ".cargo-checksum.json"
-    },
-    {
-        "type": "archive",
-        "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/windows-sys/windows-sys-0.59.0.crate",
-        "sha256": "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b",
-        "dest": "cargo/vendor/windows-sys-0.59.0"
-    },
-    {
-        "type": "inline",
-        "contents": "{\"package\": \"1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b\", \"files\": {}}",
-        "dest": "cargo/vendor/windows-sys-0.59.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {

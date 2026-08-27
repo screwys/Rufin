@@ -7,20 +7,20 @@ use std::time::{Duration, Instant};
 use if_addrs::IfAddr;
 use mdns_sd::{ServiceDaemon, ServiceEvent};
 use playback::{RemoteOutput, RemoteOutputProtocol};
-use rupnp::{Device, DeviceSpec};
 use socket2::{Domain, Protocol, SockAddr, Socket, Type};
+
+use crate::upnp_transport::UpnpDevice;
 
 const CAST_SERVICE: &str = "_googlecast._tcp.local.";
 const MEDIA_RENDERER: &str = "urn:schemas-upnp-org:device:MediaRenderer:1";
 const SSDP_ADDRESS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(239, 255, 255, 250), 1900);
 const SSDP_POLL_INTERVAL: Duration = Duration::from_millis(10);
-const DEVICE_DESCRIPTION_TIMEOUT: Duration = Duration::from_secs(8);
 
 #[derive(Clone, Debug)]
 pub(crate) enum DiscoveredTarget {
     Upnp {
         output: RemoteOutput,
-        device: Box<Device>,
+        device: Box<UpnpDevice>,
         address: SocketAddr,
     },
     GoogleCast {
@@ -43,36 +43,19 @@ impl DiscoveredTarget {
     }
 }
 
-pub(crate) fn discover_upnp(timeout: Duration) -> Result<Vec<DiscoveredTarget>, String> {
-    let locations = discover_upnp_locations(timeout)?;
-    let runtime = tokio::runtime::Builder::new_current_thread()
-        .enable_all()
-        .build()
-        .map_err(|error| error.to_string())?;
+pub(crate) fn discover_upnp(
+    timeout: Duration,
+    local_address: Option<IpAddr>,
+) -> Result<Vec<DiscoveredTarget>, String> {
+    let locations = discover_upnp_locations(timeout, local_address)?;
     let mut targets = Vec::new();
     for (location, identity) in locations {
-        let uri = match location.parse() {
-            Ok(uri) => uri,
+        let device = match UpnpDevice::from_url(&location, local_address) {
+            Ok(device) => device,
             Err(error) => {
-                tracing::debug!(%location, %error, "UPnP renderer advertised an invalid location");
+                tracing::debug!(%location, ?local_address, %error, "UPnP renderer description was unusable");
                 continue;
             }
-        };
-        let device = match runtime.block_on(async {
-            tokio::time::timeout(DEVICE_DESCRIPTION_TIMEOUT, Device::from_url(uri)).await
-        }) {
-            Ok(Ok(device)) => device,
-            Ok(Err(error)) => {
-                tracing::debug!(%location, %error, "UPnP renderer description was unusable");
-                continue;
-            }
-            Err(_) => {
-                tracing::debug!(%location, "UPnP renderer description timed out");
-                continue;
-            }
-        };
-        let Some(renderer) = media_renderer(&device) else {
-            continue;
         };
         let Some(address) = device_address(&device) else {
             tracing::debug!(url = %device.url(), "UPnP renderer address could not be resolved");
@@ -80,7 +63,7 @@ pub(crate) fn discover_upnp(timeout: Duration) -> Result<Vec<DiscoveredTarget>, 
         };
         let output = RemoteOutput {
             id: format!("upnp:{identity}"),
-            name: renderer.friendly_name().to_string(),
+            name: device.friendly_name().to_string(),
             protocol: RemoteOutputProtocol::Upnp,
         };
         targets.push(DiscoveredTarget::Upnp {
@@ -94,21 +77,12 @@ pub(crate) fn discover_upnp(timeout: Duration) -> Result<Vec<DiscoveredTarget>, 
     Ok(targets)
 }
 
-fn media_renderer(device: &Device) -> Option<&DeviceSpec> {
-    std::iter::once(&**device)
-        .chain(device.devices_iter())
-        .find(|device| device_type_matches(device.device_type(), "MediaRenderer"))
-}
-
-fn device_type_matches(device_type: &rupnp::ssdp::URN, name: &str) -> bool {
-    device_type
-        .to_string()
-        .contains(&format!(":device:{name}:"))
-}
-
-fn discover_upnp_locations(timeout: Duration) -> Result<HashMap<String, String>, String> {
+fn discover_upnp_locations(
+    timeout: Duration,
+    local_address: Option<IpAddr>,
+) -> Result<HashMap<String, String>, String> {
     let interfaces = if_addrs::get_if_addrs().map_err(|error| error.to_string())?;
-    let mut addresses = interfaces
+    let addresses = interfaces
         .into_iter()
         .filter_map(|interface| match interface.addr {
             IfAddr::V4(address) if !address.ip.is_loopback() && !address.ip.is_unspecified() => {
@@ -117,8 +91,8 @@ fn discover_upnp_locations(timeout: Duration) -> Result<HashMap<String, String>,
             _ => None,
         })
         .collect::<Vec<_>>();
-    addresses.sort_unstable();
-    addresses.dedup();
+    let addresses = selected_discovery_addresses(addresses, local_address);
+
     let sockets = addresses
         .into_iter()
         .filter_map(|address| match discovery_socket(address) {
@@ -171,6 +145,20 @@ fn discover_upnp_locations(timeout: Duration) -> Result<HashMap<String, String>,
     Ok(locations)
 }
 
+fn selected_discovery_addresses(
+    mut addresses: Vec<Ipv4Addr>,
+    local_address: Option<IpAddr>,
+) -> Vec<Ipv4Addr> {
+    addresses.sort_unstable();
+    addresses.dedup();
+    match local_address {
+        Some(IpAddr::V4(selected)) => addresses.retain(|address| *address == selected),
+        Some(IpAddr::V6(_)) => addresses.clear(),
+        None => {}
+    }
+    addresses
+}
+
 fn discovery_socket(address: Ipv4Addr) -> Result<UdpSocket, String> {
     let socket = Socket::new(Domain::IPV4, Type::DGRAM, Some(Protocol::UDP))
         .map_err(|error| error.to_string())?;
@@ -220,9 +208,9 @@ fn parse_ssdp_renderer(response: &str) -> Option<(&str, &str)> {
     Some((location, identity))
 }
 
-fn device_address(device: &Device) -> Option<SocketAddr> {
-    let host = device.url().host()?;
-    let port = device.url().port_u16().unwrap_or(80);
+fn device_address(device: &UpnpDevice) -> Option<SocketAddr> {
+    let host = device.url().host_str()?;
+    let port = device.url().port().unwrap_or(80);
     (host, port).to_socket_addrs().ok()?.next()
 }
 
@@ -289,7 +277,7 @@ fn preferred_address(addresses: impl IntoIterator<Item = IpAddr>) -> Option<IpAd
 #[cfg(test)]
 mod tests {
     use super::*;
-    use rupnp::ssdp::URN;
+    use crate::upnp_transport::device_type_matches;
 
     #[test]
     fn media_renderer_response_yields_its_description_location() {
@@ -315,12 +303,23 @@ mod tests {
     #[test]
     fn newer_media_renderer_versions_remain_discoverable() {
         assert!(device_type_matches(
-            &URN::device("schemas-upnp-org", "MediaRenderer", 3),
+            "urn:schemas-upnp-org:device:MediaRenderer:3",
             "MediaRenderer",
         ));
         assert!(!device_type_matches(
-            &URN::device("schemas-upnp-org", "MediaServer", 3),
+            "urn:schemas-upnp-org:device:MediaServer:3",
             "MediaRenderer",
         ));
+    }
+
+    #[test]
+    fn selected_network_excludes_virtual_discovery_interfaces() {
+        let lan = "192.168.1.103".parse().expect("LAN address");
+        let tailscale = "100.64.0.12".parse().expect("Tailscale address");
+
+        assert_eq!(
+            selected_discovery_addresses(vec![tailscale, lan], Some(IpAddr::V4(lan)),),
+            vec![lan]
+        );
     }
 }

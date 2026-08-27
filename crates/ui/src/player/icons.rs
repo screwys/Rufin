@@ -87,7 +87,7 @@ pub(super) fn play_icon_button(label: &str) -> (gtk::Button, gtk::Image) {
 }
 
 pub(super) fn set_play_icon(icon: &gtk::Image, playing: bool) {
-    icon.set_margin_start(if playing { 0 } else { 4 });
+    icon.set_margin_start(if playing { 2 } else { 4 });
     icon.set_icon_name(Some(if playing {
         "rufin-media-playback-pause-symbolic"
     } else {

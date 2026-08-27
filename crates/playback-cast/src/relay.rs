@@ -333,7 +333,20 @@ pub(crate) fn available_networks() -> Result<Vec<CastNetwork>, String> {
         .collect())
 }
 
-fn local_address_for(
+pub(crate) fn network_address(network_interface: &str) -> Result<Option<IpAddr>, String> {
+    let mut addresses = local_interface_addresses()?
+        .into_iter()
+        .filter_map(|(name, address)| (name == network_interface).then_some(address))
+        .collect::<Vec<_>>();
+    addresses.sort_unstable();
+    Ok(addresses
+        .iter()
+        .copied()
+        .find(IpAddr::is_ipv4)
+        .or_else(|| addresses.first().copied()))
+}
+
+pub(crate) fn local_address_for(
     target: SocketAddr,
     network_interface: Option<&str>,
 ) -> Result<IpAddr, String> {

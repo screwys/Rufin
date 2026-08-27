@@ -1335,22 +1335,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "genawaiter"
-version = "0.99.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c86bd0361bcbde39b13475e6e36cb24c329964aa2611be285289d1e4b751c1a0"
-dependencies = [
- "futures-core",
- "genawaiter-macro",
-]
-
-[[package]]
-name = "genawaiter-macro"
-version = "0.99.1"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "0b32dfe1fdfc0bbde1f22a5da25355514b5e450c33a6af6770884c8750aedfbc"
-
-[[package]]
 name = "generic-array"
 version = "0.14.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2125,16 +2109,6 @@ dependencies = [
 
 [[package]]
 name = "if-addrs"
-version = "0.13.4"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "69b2eeee38fef3aa9b4cc5f1beea8a2444fc00e7377cafae396de3f5c2065e24"
-dependencies = [
- "libc",
- "windows-sys 0.59.0",
-]
-
-[[package]]
-name = "if-addrs"
 version = "0.15.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c0a05c691e1fae256cf7013d99dad472dc52d5543322761f83ec8d47eab40d2b"
@@ -2639,7 +2613,7 @@ checksum = "ba97b4c886eea3c2823388120d92063c011ac866919ffc4200a0e4b1642a54a5"
 dependencies = [
  "fastrand",
  "flume",
- "if-addrs 0.15.0",
+ "if-addrs",
  "mio",
  "socket-pktinfo",
  "socket2",
@@ -3210,18 +3184,17 @@ version = "0.13.1"
 dependencies = [
  "fcast-sender-sdk",
  "getrandom 0.4.3",
- "if-addrs 0.15.0",
+ "if-addrs",
  "library",
  "mdns-sd",
  "playback",
  "playback-gstreamer",
  "reqwest",
- "rupnp",
+ "roxmltree",
  "rustls",
  "socket2",
  "tempfile",
  "tiny_http",
- "tokio",
  "tracing",
  "url",
 ]
@@ -3806,26 +3779,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "rupnp"
-version = "3.0.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "adade717fef50ae742ee4341495dfb1f78b2bc39e50ad8a6d485ffb81c1edbf6"
-dependencies = [
- "bytes",
- "futures-core",
- "futures-util",
- "genawaiter",
- "http",
- "http-body-util",
- "hyper",
- "hyper-util",
- "if-addrs 0.13.4",
- "roxmltree",
- "ssdp-client",
- "tokio",
-]
-
-[[package]]
 name = "rustc-hash"
 version = "2.1.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4261,7 +4214,7 @@ dependencies = [
  "futures-util",
  "getrandom 0.4.3",
  "gstreamer-pbutils",
- "if-addrs 0.15.0",
+ "if-addrs",
  "library",
  "lofty",
  "md5",
@@ -4395,18 +4348,6 @@ dependencies = [
  "thiserror",
  "tracing",
  "url",
-]
-
-[[package]]
-name = "ssdp-client"
-version = "2.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "04f4048b05716cdb270e1e5960d9dd4d428e7ceaa939ee5348a84f6e43d52df1"
-dependencies = [
- "futures-core",
- "genawaiter",
- "log",
- "tokio",
 ]
 
 [[package]]
@@ -5334,15 +5275,6 @@ name = "windows-sys"
 version = "0.52.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "282be5f36a8ce781fad8c8ae18fa3f9beff57ec1b52cb3de0789201425d9a33d"
-dependencies = [
- "windows-targets 0.52.6",
-]
-
-[[package]]
-name = "windows-sys"
-version = "0.59.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1e38bc4d79ed67fd075bcc251a1c39b32a1776bbe92e5bef1f0bf1f8c531853b"
 dependencies = [
  "windows-targets 0.52.6",
 ]
