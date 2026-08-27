@@ -811,12 +811,14 @@ _build-dmg identity="development":
             fi
         fi
     done < <(find "$app_path/Contents" -type f -print0)
-    for bundled_executable in \
-        "$app_path/Contents/MacOS/rufin" \
-        "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders" \
-        "$app_path/Contents/MacOS/gst-plugin-scanner"; do
-        codesign "${signing_args[@]}" "$bundled_executable"
-    done
+    codesign "${signing_args[@]}" --identifier "$app_id" \
+        "$app_path/Contents/MacOS/rufin"
+    codesign "${signing_args[@]}" --identifier "$app_id.gdk-pixbuf-query-loaders" \
+        "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
+    codesign "${signing_args[@]}" --identifier "$app_id.gst-plugin-scanner" \
+        "$app_path/Contents/MacOS/gst-plugin-scanner"
+    codesign --verify --strict "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
+    codesign --verify --strict "$app_path/Contents/MacOS/gst-plugin-scanner"
     codesign "${signing_args[@]}" --deep --identifier "$app_id" "$app_path"
     codesign --verify --deep --strict "$app_path"
 
