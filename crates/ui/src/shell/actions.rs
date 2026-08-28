@@ -209,6 +209,26 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || shell.focus_current_route_search()
     });
     #[cfg(target_os = "macos")]
+    let navigate_search_accels = &["<Meta>k"][..];
+    #[cfg(not(target_os = "macos"))]
+    let navigate_search_accels = &["<Control>k"][..];
+    add_window_action(shell, "navigate-search", navigate_search_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.navigate(crate::routes::route::Route::Search)
+    });
+    #[cfg(target_os = "macos")]
+    let cycle_layout_accels = &["<Meta>j"][..];
+    #[cfg(not(target_os = "macos"))]
+    let cycle_layout_accels = &["<Control>j"][..];
+    add_window_action(shell, "cycle-layout", cycle_layout_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.cycle_current_route_layout()
+    });
+    add_window_action(shell, "cycle-tabs", &["<Control>Tab"], {
+        let shell = Rc::clone(shell);
+        move || shell.cycle_current_route_tabs()
+    });
+    #[cfg(target_os = "macos")]
     let favorite_accels = &["<Meta>l"][..];
     #[cfg(not(target_os = "macos"))]
     let favorite_accels = &["<Control>l"][..];
@@ -487,6 +507,9 @@ fn macos_menu_model() -> gio::Menu {
             (tr("Back"), "win.go-back"),
             (tr("Forward"), "win.go-forward"),
             (tr("Search"), "win.focus-search"),
+            (tr("Navigate to Search"), "win.navigate-search"),
+            (tr("Switch between layouts"), "win.cycle-layout"),
+            (tr("Switch Search/Favorites tabs"), "win.cycle-tabs"),
             (tr("Menu"), "win.show-primary-menu"),
         ],
     );
@@ -877,6 +900,18 @@ fn show_shortcuts_dialog(shell: &Shell) {
     dialog.add(section);
 
     let section = adw::ShortcutsSection::new(Some(&tr("Navigation")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Navigate to Search"),
+        "win.navigate-search",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Switch between layouts"),
+        "win.cycle-layout",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Switch Search/Favorites tabs"),
+        "win.cycle-tabs",
+    ));
     #[cfg(target_os = "macos")]
     {
         section.add(adw::ShortcutsItem::new(
@@ -970,6 +1005,9 @@ mod tests {
             "win.go-back",
             "win.go-forward",
             "win.focus-search",
+            "win.navigate-search",
+            "win.cycle-layout",
+            "win.cycle-tabs",
             "win.show-primary-menu",
             "win.navigate-sidebar",
             "win.toggle-queue",

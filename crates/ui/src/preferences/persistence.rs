@@ -2,7 +2,8 @@ use std::rc::Rc;
 
 use crate::settings::HomeBlockKind;
 use crate::{
-    AccentPreference, LeftSidebarMode, LibraryListKey, LibraryListSettings, ThemePreference,
+    AccentPreference, LeftSidebarMode, LibraryListKey, LibraryListSettings, RightSidebarMode,
+    ThemePreference,
 };
 use adw::prelude::*;
 use desktop_integration::{DisplayType, LinkType};
@@ -311,7 +312,12 @@ impl Shell {
         self.chrome.window.queue_resize();
     }
 
-    pub(crate) fn save_left_sidebar_drag(self: &Rc<Self>, mode: LeftSidebarMode, width: i32) {
+    pub(crate) fn save_left_sidebar_drag(
+        self: &Rc<Self>,
+        mode: LeftSidebarMode,
+        width: i32,
+        hide_right: bool,
+    ) {
         let active_profile =
             resolve_layout(&self.settings.current.borrow().layout, self.layout_width()).profile;
         self.update_app_settings("left sidebar drag", |settings| {
@@ -322,6 +328,10 @@ impl Shell {
             let mut changed = false;
             if profile.left_sidebar != mode {
                 profile.left_sidebar = mode;
+                changed = true;
+            }
+            if hide_right && profile.right_sidebar != RightSidebarMode::Hidden {
+                profile.right_sidebar = RightSidebarMode::Hidden;
                 changed = true;
             }
             if mode == LeftSidebarMode::Full {

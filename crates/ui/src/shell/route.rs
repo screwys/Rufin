@@ -24,7 +24,7 @@ use super::navigation::update_navigation_selection;
 use super::route_position::{
     RoutePositionKey, RoutePositionMemory, restore_route_position_before_snapshot,
 };
-use crate::routes::route::Route;
+use crate::routes::route::{CollectionCategory, Route};
 use crate::routes::route_layout::{primary_route_scroll_adjustment, route_boundary};
 use crate::routes::{
     AlbumCollectionOrder, NamedDetailId, load_artist_discography, load_artist_overview,
@@ -141,6 +141,7 @@ fn route_is_current(
 
 pub(crate) type RouteCurrentTrackSelection = Rc<dyn Fn(Option<&RouteCurrentTrack>) -> bool>;
 pub(crate) type MountedRouteResume = Rc<dyn Fn()>;
+pub(crate) type MountedRouteCommand = Rc<dyn Fn()>;
 pub(crate) type MountedFavoriteSettlement = Rc<dyn Fn(crate::runtime::FavoriteSettlement)>;
 pub(crate) type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
 pub(crate) type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
@@ -346,6 +347,8 @@ pub(crate) struct RouteViewport {
     current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
     pub(crate) route_search: RefCell<Option<gtk::SearchEntry>>,
     pub(crate) route_search_focus: RefCell<Option<Rc<dyn Fn()>>>,
+    pub(crate) route_layout_cycle: RefCell<Option<MountedRouteCommand>>,
+    pub(crate) route_tab_cycle: RefCell<Option<MountedRouteCommand>>,
     order_read_generation: Cell<u64>,
     order_cancellation: RefCell<Option<(u64, library::ReadCancellation)>>,
 }
@@ -355,6 +358,8 @@ struct RouteActivationContext {
     current_track_selections: Vec<RouteCurrentTrackSelection>,
     route_search: Option<gtk::SearchEntry>,
     route_search_focus: Option<Rc<dyn Fn()>>,
+    route_layout_cycle: Option<MountedRouteCommand>,
+    route_tab_cycle: Option<MountedRouteCommand>,
 }
 
 struct MountedRouteEntry {
@@ -374,6 +379,8 @@ impl RouteViewport {
             current_track_selections: RefCell::new(Vec::new()),
             route_search: RefCell::new(None),
             route_search_focus: RefCell::new(None),
+            route_layout_cycle: RefCell::new(None),
+            route_tab_cycle: RefCell::new(None),
             order_read_generation: Cell::new(0),
             order_cancellation: RefCell::new(None),
         }
@@ -607,6 +614,20 @@ impl Shell {
         }
     }
 
+    pub(crate) fn cycle_current_route_layout(&self) {
+        let cycle = self.route_viewport.route_layout_cycle.borrow().clone();
+        if let Some(cycle) = cycle {
+            cycle();
+        }
+    }
+
+    pub(crate) fn cycle_current_route_tabs(&self) {
+        let cycle = self.route_viewport.route_tab_cycle.borrow().clone();
+        if let Some(cycle) = cycle {
+            cycle();
+        }
+    }
+
     pub(crate) fn release_first_run_setup(&self) {
         let Some(view) = self.take_first_run_setup_view() else {
             return;
@@ -642,6 +663,15 @@ impl Shell {
         self.close_fullscreen_player();
         self.navigation.routes.borrow_mut().navigate(route);
         self.render_current_route();
+    }
+
+    pub(crate) fn set_favorite_category(self: &Rc<Self>, category: CollectionCategory) {
+        if self.navigation.favorite_category.replace(category) == category
+            || self.navigation.routes.borrow().current() != &Route::Favorites
+        {
+            return;
+        }
+        self.replace_current_route_when_ready();
     }
 
     pub(crate) fn reset_navigation_to_home(self: &Rc<Self>) {
@@ -760,7 +790,7 @@ impl Shell {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::Albums);
-                self.queue_album_route(selected, route, settings, render_started);
+                self.queue_album_route(selected, route, settings, false, render_started);
             }
             Route::Tracks => {
                 let settings = self
@@ -778,16 +808,41 @@ impl Shell {
                     LibraryListKey::Artists
                 };
                 let settings = self.settings.current.borrow().library_list(key);
-                self.queue_artist_route(selected, route, album_artists, settings, render_started);
+                self.queue_artist_route(
+                    selected,
+                    route,
+                    album_artists,
+                    settings,
+                    false,
+                    render_started,
+                );
             }
-            Route::Favorites => {
-                let settings = self
-                    .settings
-                    .current
-                    .borrow()
-                    .library_list(LibraryListKey::FavoriteTracks);
-                self.queue_root_track_route(selected, route, settings, true, render_started);
-            }
+            Route::Favorites => match self.navigation.favorite_category.get() {
+                CollectionCategory::Tracks => {
+                    let settings = self
+                        .settings
+                        .current
+                        .borrow()
+                        .library_list(LibraryListKey::FavoriteTracks);
+                    self.queue_root_track_route(selected, route, settings, true, render_started);
+                }
+                CollectionCategory::Albums => {
+                    let settings = self
+                        .settings
+                        .current
+                        .borrow()
+                        .library_list(LibraryListKey::Albums);
+                    self.queue_album_route(selected, route, settings, true, render_started);
+                }
+                CollectionCategory::Artists => {
+                    let settings = self
+                        .settings
+                        .current
+                        .borrow()
+                        .library_list(LibraryListKey::Artists);
+                    self.queue_artist_route(selected, route, false, settings, true, render_started);
+                }
+            },
             Route::History => {
                 self.queue_history_route(selected, route, render_started);
             }
@@ -1053,6 +1108,7 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
+        favorites_only: bool,
         render_started: Instant,
     ) {
         let database = Arc::clone(&selected.database);
@@ -1068,6 +1124,7 @@ impl Shell {
                     .album_detail_route_order(
                         source_key,
                         folder,
+                        favorites_only,
                         "",
                         settings.sort_key.album_sort(),
                         settings.descending,
@@ -1080,7 +1137,7 @@ impl Shell {
                     .album_route_page(
                         source_key,
                         folder,
-                        false,
+                        favorites_only,
                         "",
                         settings.sort_key.album_sort(),
                         settings.descending,
@@ -1117,8 +1174,15 @@ impl Shell {
                 return;
             }
             let build_shell = Rc::clone(&shell);
+            let build_route = route.clone();
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_albums_route(order, first_rows, selected)
+                build_shell.library_albums_route(
+                    build_route,
+                    favorites_only,
+                    order,
+                    first_rows,
+                    selected,
+                )
             });
         });
     }
@@ -1129,6 +1193,7 @@ impl Shell {
         route: Route,
         album_artist: bool,
         settings: LibraryListSettings,
+        favorites_only: bool,
         render_started: Instant,
     ) {
         let database = Arc::clone(&selected.database);
@@ -1143,7 +1208,7 @@ impl Shell {
                     source_key,
                     folder,
                     album_artist,
-                    false,
+                    favorites_only,
                     "",
                     settings.sort_key.artist_sort(),
                     settings.descending,
@@ -1176,8 +1241,16 @@ impl Shell {
                 return;
             }
             let build_shell = Rc::clone(&shell);
+            let build_route = route.clone();
             shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_artist_list_route(album_artist, order, first_rows, selected)
+                build_shell.library_artist_list_route(
+                    build_route,
+                    album_artist,
+                    favorites_only,
+                    order,
+                    first_rows,
+                    selected,
+                )
             });
         });
     }
@@ -1883,6 +1956,8 @@ impl Shell {
             ),
             route_search: self.route_viewport.route_search.borrow_mut().take(),
             route_search_focus: self.route_viewport.route_search_focus.borrow_mut().take(),
+            route_layout_cycle: self.route_viewport.route_layout_cycle.borrow_mut().take(),
+            route_tab_cycle: self.route_viewport.route_tab_cycle.borrow_mut().take(),
         }
     }
 
@@ -1896,11 +1971,19 @@ impl Shell {
         self.route_viewport
             .route_search_focus
             .replace(context.route_search_focus);
+        self.route_viewport
+            .route_layout_cycle
+            .replace(context.route_layout_cycle);
+        self.route_viewport
+            .route_tab_cycle
+            .replace(context.route_tab_cycle);
     }
 
     fn clear_current_route_context(&self) {
         self.route_viewport.route_search.borrow_mut().take();
         self.route_viewport.route_search_focus.borrow_mut().take();
+        self.route_viewport.route_layout_cycle.borrow_mut().take();
+        self.route_viewport.route_tab_cycle.borrow_mut().take();
         self.route_viewport
             .current_track_selections
             .borrow_mut()

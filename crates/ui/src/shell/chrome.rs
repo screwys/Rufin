@@ -5,6 +5,7 @@ use app_identity::DISPLAY_NAME;
 use std::{cell::Cell, rc::Rc};
 
 use crate::layout::configure_fill_width_clip;
+use crate::routes::route_layout::ROUTE_TOP_MARGIN;
 use localization::tr;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
@@ -16,7 +17,7 @@ const WINDOW_START_CONTROLS_MARGIN_TOP: i32 = 6;
 const WINDOW_END_CONTROLS_MARGIN_TOP: i32 = 10;
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 const WINDOW_CHROME_MARGIN_START: i32 = 8;
-const WINDOW_DRAG_HANDLE_HEIGHT: i32 = 10;
+const WINDOW_DRAG_HANDLE_HEIGHT: i32 = ROUTE_TOP_MARGIN;
 const WINDOW_DRAG_HANDLE_MARGIN_START: i32 = 56;
 pub(super) const RIGHT_RESIZE_HANDLE_WIDTH: i32 = 4;
 pub(crate) const ROUTE_VIEWPORT_CLASS: &str = "route-viewport";
@@ -364,12 +365,7 @@ pub(super) fn build_content_chrome(
     main_area.set_valign(gtk::Align::Fill);
     main_area.set_overflow(gtk::Overflow::Hidden);
     main_well.set_child(Some(main_area));
-    let drag_handle = window_drag_handle_with_margins(
-        "window-drag-handle",
-        WINDOW_DRAG_HANDLE_HEIGHT,
-        WINDOW_DRAG_HANDLE_MARGIN_START,
-        0,
-    );
+    let drag_handle = top_window_drag_handle("window-drag-handle");
     main_well.add_overlay(&drag_handle);
     main_well.set_measure_overlay(&drag_handle, false);
 
@@ -533,6 +529,15 @@ pub(crate) fn window_drag_handle_with_child(
     handle.set_vexpand(false);
     handle.set_child(Some(child));
     handle
+}
+
+pub(crate) fn top_window_drag_handle(css_class: &str) -> gtk::WindowHandle {
+    window_drag_handle_with_margins(
+        css_class,
+        WINDOW_DRAG_HANDLE_HEIGHT,
+        WINDOW_DRAG_HANDLE_MARGIN_START,
+        0,
+    )
 }
 
 fn window_drag_handle_with_margins(

@@ -667,7 +667,6 @@ row:focus {
   border-radius: 12px;
 }
 
-.compact-sidebar-pin.selected,
 .compact-sidebar-pin.playing {
   box-shadow: 0 0 0 2px var(--accent-color);
 }

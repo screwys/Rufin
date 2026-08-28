@@ -236,11 +236,11 @@ impl LyricsPane {
         clear_auto_search_button.add_css_class("flat");
         clear_auto_search_button.add_css_class("circular");
 
-        let search_button = gtk::Button::from_icon_name("rufin-system-search-symbolic");
+        let search_button = gtk::Button::from_icon_name("rufin-lyrics-search-symbolic");
         search_button.add_css_class("icon-button");
         search_button.add_css_class("flat");
         search_button.add_css_class("circular");
-        let edit_button = gtk::Button::from_icon_name("rufin-edit-symbolic");
+        let edit_button = gtk::Button::from_icon_name("rufin-document-edit-symbolic");
         edit_button.add_css_class("icon-button");
         edit_button.add_css_class("flat");
         edit_button.add_css_class("circular");
@@ -276,7 +276,7 @@ impl LyricsPane {
         offset_entry.add_css_class("lyrics-offset-value");
         let offset_increase_button = lyrics_control_button("rufin-list-add-symbolic");
 
-        let save_button = lyrics_control_button("rufin-document-save-disk-symbolic");
+        let save_button = lyrics_control_button("rufin-download-symbolic");
 
         let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         controls.add_css_class("lyrics-controls");

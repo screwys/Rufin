@@ -31,6 +31,8 @@ use super::playlist_picker::{
 };
 use super::route::Route;
 
+const EDIT_METADATA_ICON: &str = "rufin-document-edit-symbolic";
+
 #[derive(Clone)]
 pub(crate) struct TrackContext {
     key: Option<TrackKey>,
@@ -275,7 +277,7 @@ fn present_track_menu(
                 ContextMenuItem::EditMetadata,
                 msgid("Edit metadata"),
                 "edit-metadata",
-                EDIT_ICON,
+                EDIT_METADATA_ICON,
             );
         }
     }
@@ -430,7 +432,7 @@ pub(crate) fn present_album_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        EDIT_ICON,
+        EDIT_METADATA_ICON,
     );
     install_sidebar_pin_action(
         &surface,
@@ -541,7 +543,7 @@ pub(crate) fn present_artist_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        EDIT_ICON,
+        EDIT_METADATA_ICON,
     );
     install_sidebar_pin_action(
         &surface,
