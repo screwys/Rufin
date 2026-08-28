@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 use std::io::ErrorKind;
 use std::net::{IpAddr, Ipv4Addr, SocketAddr, SocketAddrV4, ToSocketAddrs, UdpSocket};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -15,6 +16,8 @@ const CAST_SERVICE: &str = "_googlecast._tcp.local.";
 const MEDIA_RENDERER: &str = "urn:schemas-upnp-org:device:MediaRenderer:1";
 const SSDP_ADDRESS: SocketAddrV4 = SocketAddrV4::new(Ipv4Addr::new(239, 255, 255, 250), 1900);
 const SSDP_POLL_INTERVAL: Duration = Duration::from_millis(10);
+const DEVICE_DESCRIPTION_TIMEOUT: Duration = Duration::from_secs(10);
+const MAX_DEVICE_DESCRIPTION_WORKERS: usize = 4;
 
 #[derive(Clone, Debug)]
 pub(crate) enum DiscoveredTarget {
@@ -46,32 +49,62 @@ impl DiscoveredTarget {
 pub(crate) fn discover_upnp(
     timeout: Duration,
     local_address: Option<IpAddr>,
+    network_interface: Option<&str>,
 ) -> Result<Vec<DiscoveredTarget>, String> {
-    let locations = discover_upnp_locations(timeout, local_address)?;
-    let mut targets = Vec::new();
-    for (location, identity) in locations {
-        let device = match UpnpDevice::from_url(&location, local_address) {
-            Ok(device) => device,
-            Err(error) => {
-                tracing::debug!(%location, ?local_address, %error, "UPnP renderer description was unusable");
-                continue;
-            }
-        };
-        let Some(address) = device_address(&device) else {
-            tracing::debug!(url = %device.url(), "UPnP renderer address could not be resolved");
-            continue;
-        };
-        let output = RemoteOutput {
-            id: format!("upnp:{identity}"),
-            name: device.friendly_name().to_string(),
-            protocol: RemoteOutputProtocol::Upnp,
-        };
-        targets.push(DiscoveredTarget::Upnp {
-            output,
-            device: Box::new(device),
-            address,
-        });
-    }
+    let locations = discover_upnp_locations(timeout, local_address)?
+        .into_iter()
+        .collect::<Vec<_>>();
+    let deadline = Instant::now() + DEVICE_DESCRIPTION_TIMEOUT;
+    let next = AtomicUsize::new(0);
+    let mut targets = thread::scope(|scope| {
+        let workers = (0..locations.len().min(MAX_DEVICE_DESCRIPTION_WORKERS))
+            .map(|_| {
+                scope.spawn(|| {
+                    let mut targets = Vec::new();
+                    loop {
+                        let index = next.fetch_add(1, Ordering::Relaxed);
+                        let Some((location, identity)) = locations.get(index) else {
+                            break;
+                        };
+                        let remaining = deadline.saturating_duration_since(Instant::now());
+                        if remaining.is_zero() {
+                            break;
+                        }
+                        let device = match UpnpDevice::from_url_with_timeout(
+                            location,
+                            local_address,
+                            network_interface,
+                            remaining,
+                        ) {
+                            Ok(device) => device,
+                            Err(error) => {
+                                tracing::debug!(%location, ?local_address, %error, "UPnP renderer description was unusable");
+                                continue;
+                            }
+                        };
+                        let Some(address) = device_address(&device) else {
+                            tracing::debug!(url = %device.url(), "UPnP renderer address could not be resolved");
+                            continue;
+                        };
+                        targets.push(DiscoveredTarget::Upnp {
+                            output: RemoteOutput {
+                                id: format!("upnp:{identity}"),
+                                name: device.friendly_name().to_string(),
+                                protocol: RemoteOutputProtocol::Upnp,
+                            },
+                            device: Box::new(device),
+                            address,
+                        });
+                    }
+                    targets
+                })
+            })
+            .collect::<Vec<_>>();
+        workers
+            .into_iter()
+            .flat_map(|worker| worker.join().expect("UPnP description worker"))
+            .collect::<Vec<_>>()
+    });
     targets.sort_by(|left, right| left.output().name.cmp(&right.output().name));
     targets.dedup_by(|left, right| left.output().id == right.output().id);
     Ok(targets)

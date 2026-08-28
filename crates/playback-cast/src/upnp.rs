@@ -1201,7 +1201,7 @@ mod tests {
     const TEST_CAPABLE_DEVICE_DESCRIPTION: &str = r#"<root xmlns="urn:schemas-upnp-org:device-1-0"><device><deviceType>urn:schemas-upnp-org:device:MediaRenderer:1</deviceType><friendlyName>Test Renderer</friendlyName><serviceList><service><serviceType>urn:schemas-upnp-org:service:AVTransport:1</serviceType><serviceId>urn:upnp-org:serviceId:AVTransport</serviceId><SCPDURL>/transport.xml</SCPDURL><controlURL>/transport</controlURL><eventSubURL>/events</eventSubURL></service><service><serviceType>urn:schemas-upnp-org:service:ConnectionManager:1</serviceType><serviceId>urn:upnp-org:serviceId:ConnectionManager</serviceId><SCPDURL>/connection.xml</SCPDURL><controlURL>/connection</controlURL><eventSubURL>/connection-events</eventSubURL></service></serviceList></device></root>"#;
 
     fn test_device(address: std::net::SocketAddr) -> UpnpDevice {
-        UpnpDevice::from_url(&format!("http://{address}/device.xml"), None)
+        UpnpDevice::from_url(&format!("http://{address}/device.xml"), None, None)
             .expect("device description")
     }
 

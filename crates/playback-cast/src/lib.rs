@@ -17,7 +17,9 @@ use playback::{
     BackendCommand, BackendError, BackendEvent, BackendFailure, PlaybackBackend, RemoteOutput,
     RemoteOutputProtocol,
 };
-use relay::{ArtworkResolver, RelayServer, available_networks, local_address_for, network_address};
+use relay::{
+    ArtworkResolver, RelayServer, available_networks, network_address, network_binding_for,
+};
 use upnp::UpnpController;
 use upnp_transport::UpnpDevice;
 
@@ -93,7 +95,14 @@ impl CastManager {
             ?local_address,
             "discovering cast outputs"
         );
-        let upnp = thread::spawn(move || discover_upnp(DISCOVERY_TIMEOUT, local_address));
+        let bound_network_interface = local_address.and(network_interface.clone());
+        let upnp = thread::spawn(move || {
+            discover_upnp(
+                DISCOVERY_TIMEOUT,
+                local_address,
+                bound_network_interface.as_deref(),
+            )
+        });
         let google_cast = thread::spawn(|| discover_google_cast(DISCOVERY_TIMEOUT));
         let upnp = upnp
             .join()
@@ -184,12 +193,17 @@ impl CastPlaybackBackend {
         network_interface: Option<String>,
         artwork_resolver: ArtworkResolver,
     ) -> Result<Self, String> {
-        let selected_local_address = network_interface
-            .as_deref()
-            .map(|network_interface| local_address_for(target.address(), Some(network_interface)))
-            .transpose()?;
+        let (selected_local_address, bound_network_interface) =
+            if let Some(network_interface) = network_interface.as_deref() {
+                let (address, bound_interface) =
+                    network_binding_for(target.address(), Some(network_interface))?;
+                (Some(address), bound_interface.map(ToOwned::to_owned))
+            } else {
+                (None, None)
+            };
         tracing::debug!(
             network_interface = ?network_interface,
+            bound_network_interface = ?bound_network_interface,
             local_address = ?selected_local_address,
             renderer_address = %target.address(),
             protocol = ?target.output().protocol,
@@ -200,10 +214,16 @@ impl CastPlaybackBackend {
                 .with_artwork_resolver(artwork_resolver);
         let controller = match target {
             DiscoveredTarget::Upnp { device, .. } => {
-                let device = if device.local_address() == selected_local_address {
+                let device = if device.local_address() == selected_local_address
+                    && device.network_interface() == bound_network_interface.as_deref()
+                {
                     *device
                 } else {
-                    UpnpDevice::from_url(device.url().as_str(), selected_local_address)?
+                    UpnpDevice::from_url(
+                        device.url().as_str(),
+                        selected_local_address,
+                        bound_network_interface.as_deref(),
+                    )?
                 };
                 let mut controller = UpnpController::new(device)?;
                 controller.verify_connection()?;

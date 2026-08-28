@@ -20,10 +20,24 @@ pub(crate) struct UpnpDevice {
     services: Vec<UpnpService>,
     client: reqwest::blocking::Client,
     local_address: Option<IpAddr>,
+    network_interface: Option<String>,
 }
 
 impl UpnpDevice {
-    pub(crate) fn from_url(url: &str, local_address: Option<IpAddr>) -> Result<Self, String> {
+    pub(crate) fn from_url(
+        url: &str,
+        local_address: Option<IpAddr>,
+        network_interface: Option<&str>,
+    ) -> Result<Self, String> {
+        Self::from_url_with_timeout(url, local_address, network_interface, REQUEST_TIMEOUT)
+    }
+
+    pub(crate) fn from_url_with_timeout(
+        url: &str,
+        local_address: Option<IpAddr>,
+        network_interface: Option<&str>,
+        request_timeout: Duration,
+    ) -> Result<Self, String> {
         let url = Url::parse(url).map_err(|error| error.to_string())?;
         let mut builder = reqwest::blocking::Client::builder()
             .timeout(REQUEST_TIMEOUT)
@@ -31,9 +45,25 @@ impl UpnpDevice {
         if let Some(local_address) = local_address {
             builder = builder.local_address(local_address);
         }
+        #[cfg(any(
+            target_os = "android",
+            target_os = "fuchsia",
+            target_os = "illumos",
+            target_os = "ios",
+            target_os = "linux",
+            target_os = "macos",
+            target_os = "solaris",
+            target_os = "tvos",
+            target_os = "visionos",
+            target_os = "watchos",
+        ))]
+        if let Some(network_interface) = network_interface {
+            builder = builder.interface(network_interface);
+        }
         let client = builder.build().map_err(|error| error.to_string())?;
         let response = client
             .get(url.clone())
+            .timeout(request_timeout)
             .send()
             .map_err(|error| error.to_string())?;
         if !response.status().is_success() {
@@ -79,6 +109,7 @@ impl UpnpDevice {
             services,
             client,
             local_address,
+            network_interface: network_interface.map(str::to_string),
         })
     }
 
@@ -92,6 +123,10 @@ impl UpnpDevice {
 
     pub(crate) fn local_address(&self) -> Option<IpAddr> {
         self.local_address
+    }
+
+    pub(crate) fn network_interface(&self) -> Option<&str> {
+        self.network_interface.as_deref()
     }
 
     pub(crate) fn has_service(&self, name: &str) -> bool {
@@ -191,7 +226,7 @@ fn parse_action_response(body: &str) -> Result<HashMap<String, String>, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+    use std::net::{IpAddr, SocketAddr};
     use std::sync::mpsc;
     use std::thread;
 
@@ -200,19 +235,17 @@ mod tests {
     use super::*;
 
     #[test]
-    fn selected_source_address_owns_description_and_soap_requests() {
-        let selected = if_addrs::get_if_addrs()
+    fn selected_interface_and_source_support_description_and_soap_requests() {
+        let (selected_interface, selected) = if_addrs::get_if_addrs()
             .expect("local interfaces")
             .into_iter()
             .find_map(|interface| match interface.addr {
-                if_addrs::IfAddr::V4(address)
-                    if !address.ip.is_loopback() && !address.ip.is_unspecified() =>
-                {
-                    Some(IpAddr::V4(address.ip))
+                if_addrs::IfAddr::V4(address) if address.ip.is_loopback() => {
+                    Some((interface.name, IpAddr::V4(address.ip)))
                 }
                 _ => None,
             })
-            .unwrap_or(IpAddr::V4(Ipv4Addr::LOCALHOST));
+            .expect("IPv4 loopback interface");
         let server = Server::http(SocketAddr::new(selected, 0)).expect("fake renderer");
         let port = server
             .server_addr()
@@ -241,11 +274,16 @@ mod tests {
         let device = UpnpDevice::from_url(
             &format!("http://{selected}:{port}/device.xml"),
             Some(selected),
+            Some(&selected_interface),
         )
         .expect("bound renderer description");
         assert_eq!(device.friendly_name(), "Test Renderer");
         assert_eq!(device.url().port(), Some(port));
         assert_eq!(device.local_address(), Some(selected));
+        assert_eq!(
+            device.network_interface(),
+            Some(selected_interface.as_str())
+        );
         assert!(device.has_service("AVTransport"));
         let state = device
             .action(

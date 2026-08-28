@@ -389,7 +389,7 @@ pub(crate) fn network_address(network_interface: &str) -> Result<Option<IpAddr>,
         .or_else(|| addresses.first().copied()))
 }
 
-fn network_binding_for<'a>(
+pub(crate) fn network_binding_for<'a>(
     target: SocketAddr,
     network_interface: Option<&'a str>,
 ) -> Result<(IpAddr, Option<&'a str>), String> {
@@ -410,13 +410,6 @@ fn network_binding_for<'a>(
         );
     }
     automatic_local_address_for(target).map(|address| (address, None))
-}
-
-pub(crate) fn local_address_for(
-    target: SocketAddr,
-    network_interface: Option<&str>,
-) -> Result<IpAddr, String> {
-    network_binding_for(target, network_interface).map(|(address, _)| address)
 }
 
 fn automatic_local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
@@ -1077,6 +1070,17 @@ mod tests {
             ),
             Some("fd00::103".parse().expect("selected IPv6 address"))
         );
+    }
+
+    #[test]
+    fn unavailable_selected_network_preserves_automatic_routing() {
+        let target = "127.0.0.1:9".parse().expect("target");
+
+        let (address, interface) =
+            network_binding_for(target, Some("rufin-missing-interface")).expect("fallback route");
+
+        assert_eq!(address, IpAddr::V4(Ipv4Addr::LOCALHOST));
+        assert_eq!(interface, None);
     }
 
     #[cfg(target_os = "linux")]
