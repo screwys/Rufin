@@ -1,4 +1,4 @@
-use super::audio::{AudioGraph, SharedLoudnessTags};
+use super::audio::{AudioGraph, SharedQueuedStream};
 use super::engine::{PipelineId, PreparedRun, SharedBackendState, Slot, handle_about_to_finish};
 use super::visualizer::VisualizerTap;
 use super::*;
@@ -69,9 +69,9 @@ struct PipelineSession {
     trust_invalid_certificate: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
-    loudness_tags: SharedLoudnessTags,
     visualizer_probe: Option<gst::PadProbeId>,
     current_stream: PreparedStream,
+    queued_stream: SharedQueuedStream,
     playback_rate: f64,
 }
 impl PlayerPipeline {
@@ -244,8 +244,13 @@ impl PlayerPipeline {
             .and_then(|session| session.clock.fixed_duration())
     }
 
-    pub(super) fn set_source_clock(&mut self, stream: &ResolvedStream) {
+    pub(super) fn activate_stream(&mut self, stream: &PreparedStream) {
         if let Some(session) = self.session.as_mut() {
+            session.current_stream = stream.clone();
+            *session
+                .queued_stream
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
             session.clock = SourceClock::from_stream(stream);
         }
     }
@@ -338,14 +343,14 @@ impl PipelineSession {
 
         let pipeline_for_signal = pipeline.clone();
         let shared_for_signal = Arc::clone(&shared);
-        let loudness_tags = Arc::new(Mutex::new(None));
-        let loudness_tags_for_signal = Arc::clone(&loudness_tags);
+        let queued_stream = Arc::new(Mutex::new(stream.clone()));
+        let queued_stream_for_signal = Arc::clone(&queued_stream);
         let certificate_policy_for_signal = Arc::clone(&trust_invalid_certificate);
         let about_to_finish_id = pipeline.connect("about-to-finish", false, move |_| {
             handle_about_to_finish(
                 &pipeline_for_signal,
                 &shared_for_signal,
-                &loudness_tags_for_signal,
+                &queued_stream_for_signal,
                 &certificate_policy_for_signal,
                 slot,
                 id,
@@ -361,9 +366,9 @@ impl PipelineSession {
             trust_invalid_certificate,
             about_to_finish_id: Some(about_to_finish_id),
             audio_graph: None,
-            loudness_tags,
             visualizer_probe: None,
             current_stream: stream.clone(),
+            queued_stream,
             playback_rate: sanitize_playback_rate(playback_rate),
         })
     }
@@ -373,17 +378,17 @@ impl PipelineSession {
         settings: &BackendAudioSettings,
     ) -> Result<(), String> {
         if let Some(graph) = self.audio_graph.as_mut()
-            && graph.reconfigure(settings, self.playback_rate)?
+            && graph.reconfigure(settings, self.playback_rate, &self.current_stream.loudness)?
         {
             return Ok(());
         }
         self.clear_visualizer_tap();
-        let graph = AudioGraph::new(settings, self.playback_rate)?;
-        graph.apply_loudness(&self.current_stream.loudness);
-        *self
-            .loudness_tags
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = graph.loudness_tags();
+        let graph = AudioGraph::new(
+            settings,
+            self.playback_rate,
+            self.current_stream.loudness.clone(),
+            Arc::clone(&self.queued_stream),
+        )?;
         self.pipeline.set_property("audio-sink", graph.root());
         self.audio_graph = Some(graph);
         Ok(())
@@ -391,15 +396,15 @@ impl PipelineSession {
 
     fn try_reconfigure_audio(&mut self, settings: &BackendAudioSettings) -> Result<bool, String> {
         self.audio_graph.as_mut().map_or(Ok(false), |graph| {
-            graph.reconfigure(settings, self.playback_rate)
+            graph.reconfigure(settings, self.playback_rate, &self.current_stream.loudness)
         })
     }
 
     fn set_stream(&mut self, stream: &PreparedStream) {
-        if let Some(graph) = self.audio_graph.as_ref() {
-            graph.apply_loudness(&stream.loudness);
-        }
-        self.current_stream = stream.clone();
+        *self
+            .queued_stream
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
         self.trust_invalid_certificate
             .store(stream.trust_invalid_certificate(), Ordering::SeqCst);
         self.pipeline.set_property("uri", stream.uri());
@@ -463,10 +468,6 @@ impl PipelineSession {
             self.pipeline.disconnect(handler_id);
         }
         self.clear_visualizer_tap();
-        self.loudness_tags
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .take();
         let _ = self.pipeline.set_state(gst::State::Null);
     }
 
@@ -524,10 +525,10 @@ impl PipelineSession {
     }
 
     fn rearm_stream_window(&mut self, stream: &PreparedStream) -> Result<gst::Seqnum, String> {
-        if let Some(graph) = self.audio_graph.as_ref() {
-            graph.apply_loudness(&stream.loudness);
-        }
-        self.current_stream = stream.clone();
+        *self
+            .queued_stream
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
         let clock = SourceClock::from_stream(stream);
         let start_millis = clock.physical_seek(0);
         let end_millis = clock

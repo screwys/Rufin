@@ -1,4 +1,4 @@
-use super::audio::{SharedLoudnessTags, apply_shared_loudness, audio_output_is_available};
+use super::audio::{SharedQueuedStream, audio_output_is_available, uses_direct_loudness};
 use super::pipeline::{AboutToFinishAction, PlayerPipeline, SourceClock};
 #[cfg(test)]
 use super::visualizer::visualizer_pipeline_is_live;
@@ -876,7 +876,7 @@ impl GstEngine {
     fn commit_adjacent_window_handoff(&mut self, slot: Slot, old_run: RunId, item: PreparedNext) {
         let new_run = item.run;
         self.pipeline_for_slot_mut(slot)
-            .set_source_clock(&item.stream);
+            .activate_stream(&item.stream);
         let visualizer_enabled = {
             let mut shared = lock_recover(&self.shared);
             shared.current = Some(PreparedRun::from_next(&item));
@@ -2013,7 +2013,7 @@ impl GstEngine {
         self.ended_run = None;
         self.last_position_tick = Instant::now();
         self.pipeline_for_slot_mut(self.active_slot())
-            .set_source_clock(&stream);
+            .activate_stream(&stream);
         let visualizer_enabled = self.visualizer_enabled();
         self.sync_visualizer_taps(visualizer_enabled);
         if visualizer_enabled {
@@ -3005,7 +3005,7 @@ fn run_gstreamer_thread(
 pub(super) fn handle_about_to_finish(
     pipeline: &gst::Element,
     shared: &Arc<Mutex<SharedBackendState>>,
-    loudness_tags: &SharedLoudnessTags,
+    queued_stream: &SharedQueuedStream,
     trust_invalid_certificate: &AtomicBool,
     slot: Slot,
     id: PipelineId,
@@ -3027,7 +3027,9 @@ pub(super) fn handle_about_to_finish(
                 uri = %next.stream.redacted_uri(),
                 "preloading gapless next stream"
             );
-            apply_shared_loudness(loudness_tags, &next.stream.loudness);
+            *queued_stream
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()) = next.stream.clone();
             trust_invalid_certificate
                 .store(next.stream.trust_invalid_certificate(), Ordering::SeqCst);
             pipeline.set_property("uri", next.stream.uri());
@@ -3141,7 +3143,9 @@ fn gapless_uses_separate_pipeline(
     current: &PreparedRun,
     next: &PreparedNext,
 ) -> bool {
-    current.stream.stream == next.stream.stream
+    uses_direct_loudness(settings, &current.stream.loudness)
+        != uses_direct_loudness(settings, &next.stream.loudness)
+        || current.stream.stream == next.stream.stream
         || (next.stream.window().is_some()
             && (!adjacent_window_can_reuse_pipeline(settings)
                 || !streams_are_adjacent_windows(&current.stream, &next.stream)))
@@ -3208,6 +3212,8 @@ fn stream_uri_scheme(uri: &str) -> &str {
 mod tests {
     use std::fs::File;
     use std::io::Write;
+
+    use library::LoudnessMeasurement;
 
     use super::*;
 
@@ -3355,6 +3361,56 @@ mod tests {
 
         settings.loudness_normalization_scope = LoudnessNormalizationScope::Album;
         assert!(!adjacent_window_can_reuse_pipeline(&settings));
+    }
+
+    #[test]
+    fn gapless_changes_normalizer_strategy_only_between_pipelines() {
+        let settings = BackendAudioSettings {
+            loudness_normalization: LoudnessNormalization::ReplayGain,
+            loudness_normalization_scope: LoudnessNormalizationScope::Track,
+            ..BackendAudioSettings::default()
+        };
+        let direct_loudness = TrackLoudness {
+            track: Some(Box::new(LoudnessMeasurement {
+                analysis_key: [1; 32],
+                integrated_lufs: None,
+                true_peak: None,
+                replay_gain_db: Some(-4.0),
+                replay_gain_peak: Some(0.8),
+            })),
+            album: None,
+        };
+        let current = PreparedRun {
+            run: RunId::new(1),
+            stream: PreparedStream::new(
+                ResolvedStream::new("file:///music/current.flac"),
+                direct_loudness.clone(),
+            ),
+        };
+        let direct_next = PreparedNext::new(
+            RunId::new(2),
+            PreparedStream::new(
+                ResolvedStream::new("file:///music/direct-next.flac"),
+                direct_loudness,
+            ),
+            NextTransition::Gapless,
+        );
+        let native_next = PreparedNext::new(
+            RunId::new(3),
+            PreparedStream::from(ResolvedStream::new("file:///music/native-next.flac")),
+            NextTransition::Gapless,
+        );
+
+        assert!(!gapless_uses_separate_pipeline(
+            &settings,
+            &current,
+            &direct_next
+        ));
+        assert!(gapless_uses_separate_pipeline(
+            &settings,
+            &current,
+            &native_next
+        ));
     }
 
     #[test]
