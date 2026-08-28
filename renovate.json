@@ -8,20 +8,10 @@
   },
   "dependencyDashboard": false,
   "minimumReleaseAge": "7 days",
-  "internalChecksFilter": "strict",
   "lockFileMaintenance": {
     "enabled": true
   },
-  "automergeType": "pr",
-  "platformAutomerge": false,
-  "prConcurrentLimit": 3,
-  "prHourlyLimit": 0,
   "packageRules": [
-    {
-      "description": "Keep dependency updates manual until branch protection requires strict CI gates.",
-      "matchUpdateTypes": ["minor", "patch", "digest", "pin", "pinDigest"],
-      "automerge": false
-    },
     {
       "description": "Regenerate Flatpak cargo sources after Rust dependency updates.",
       "matchManagers": ["cargo"],
@@ -30,33 +20,6 @@
         "fileFilters": ["packaging/flatpak/cargo-sources.json"],
         "executionMode": "branch"
       }
-    },
-    {
-      "description": "Group Rust minor and patch updates.",
-      "matchManagers": ["cargo"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "rust minor and patch dependencies",
-      "groupSlug": "rust-minor-patch"
-    },
-    {
-      "description": "Keep bundled SQLite updates isolated because native build scripts are toolchain-sensitive.",
-      "matchManagers": ["cargo"],
-      "matchPackageNames": ["rusqlite"],
-      "matchUpdateTypes": ["minor", "patch"],
-      "groupName": "rust sqlite dependency",
-      "groupSlug": "rust-sqlite"
-    },
-    {
-      "description": "Group GitHub Actions updates.",
-      "matchManagers": ["github-actions"],
-      "groupName": "github actions dependencies",
-      "groupSlug": "github-actions"
-    },
-    {
-      "description": "Group Nix flake input updates.",
-      "matchManagers": ["nix"],
-      "groupName": "nix flake inputs",
-      "groupSlug": "nix-flake-inputs"
     }
   ]
 }
