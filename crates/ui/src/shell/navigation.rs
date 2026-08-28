@@ -19,7 +19,7 @@ use crate::routes::collection_context::{
 };
 use crate::routes::collections::PlaybackTarget;
 use crate::routes::library_fields::{playlist_artwork, smart_playlist_display_name};
-use crate::routes::route::Route;
+use crate::routes::route::{CollectionCategory, Route};
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
@@ -102,6 +102,7 @@ const NAV_ROUTE_ICONS: [(&str, &str, Option<&str>); 13] = [
 
 pub(crate) struct NavigationState {
     pub(crate) routes: RefCell<RouteStack>,
+    pub(crate) favorite_category: Cell<CollectionCategory>,
     pin_generation: Cell<u64>,
     pin_identity: RefCell<Option<SidebarPinIdentity>>,
     pin_items: RefCell<Vec<SidebarPinItem>>,
@@ -112,6 +113,7 @@ impl NavigationState {
     pub(crate) fn new() -> Self {
         Self {
             routes: RefCell::new(RouteStack::new(Route::Home)),
+            favorite_category: Cell::new(CollectionCategory::Tracks),
             pin_generation: Cell::new(0),
             pin_identity: RefCell::new(None),
             pin_items: RefCell::new(Vec::new()),
@@ -155,10 +157,9 @@ pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
 }
 
 pub(super) fn build_compact_navigation(shell: &Rc<Shell>) {
-    shell
-        .navigation_view
-        .compact_nav
-        .append(&shell.chrome.window_controls.compact_start_reservation());
+    let top_reservation = shell.chrome.window_controls.compact_start_reservation();
+    let top_handle = chrome::window_drag_handle_with_child("sidebar-drag-handle", &top_reservation);
+    shell.navigation_view.compact_nav.append(&top_handle);
     shell
         .navigation_view
         .compact_nav
@@ -468,7 +469,9 @@ fn update_native_route_selection(shell: &Shell, active_route: &Route, pin_is_sel
                     NAV_ROUTE_ICONS.iter().find_map(
                         |(class, normal_icon_name, selected_icon_name)| {
                             (*class == route_class).then_some(
-                                if selected_index == Some(index as u32) {
+                                if selected_index == Some(index as u32)
+                                    && route_class != NAV_ROUTE_FAVORITES_CLASS
+                                {
                                     selected_icon_name.unwrap_or(normal_icon_name)
                                 } else {
                                     *normal_icon_name
@@ -507,18 +510,14 @@ pub(super) fn install_normal_navigation_activation(shell: &Rc<Shell>) {
 
 fn update_button_navigation_selection(container: &gtk::Box, active_route: &Route) {
     let active_route_class = nav_route_class(active_route);
-    let active_pin_key = sidebar_pin_route_key(active_route);
     let mut child = container.first_child();
     while let Some(widget) = child {
         child = widget.next_sibling();
         if !widget.has_css_class("nav-button") {
             continue;
         }
-        let selected = active_route_class
-            .is_some_and(|route_class| widget.has_css_class(route_class))
-            || active_pin_key
-                .as_ref()
-                .is_some_and(|key| widget.widget_name().as_str() == key);
+        let selected =
+            active_route_class.is_some_and(|route_class| widget.has_css_class(route_class));
         if selected {
             widget.add_css_class(NAV_SELECTED_CLASS);
         } else {

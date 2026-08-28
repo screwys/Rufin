@@ -227,10 +227,7 @@ pub fn build(
     normal_nav_pins.set_vexpand(false);
     normal_nav.append(&normal_nav_routes);
     normal_nav.append(&normal_nav_pins);
-    let normal_nav_handle = window_drag_handle_with_child("sidebar-drag-handle", &normal_nav);
-    normal_nav_handle.set_vexpand(true);
-    normal_nav_handle.set_valign(gtk::Align::Fill);
-    let normal_nav_scroller = sidebar_scroll_slot(NORMAL_SIDEBAR_WIDTH, &normal_nav_handle);
+    let normal_nav_scroller = sidebar_scroll_slot(NORMAL_SIDEBAR_WIDTH, &normal_nav);
     normal_nav_scroller.set_width_request(1);
     normal_nav_scroller.set_min_content_width(1);
     normal_nav_scroller.set_max_content_width(-1);
@@ -246,10 +243,7 @@ pub fn build(
     compact_nav.set_hexpand(false);
     compact_nav.set_vexpand(true);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
-    let compact_nav_handle = window_drag_handle_with_child("sidebar-drag-handle", &compact_nav);
-    compact_nav_handle.set_vexpand(true);
-    compact_nav_handle.set_valign(gtk::Align::Fill);
-    let compact_nav_slot = sidebar_scroll_slot(COMPACT_RAIL_WIDTH, &compact_nav_handle);
+    let compact_nav_slot = sidebar_scroll_slot(COMPACT_RAIL_WIDTH, &compact_nav);
     compact_nav_slot.add_css_class("sidebar-pane");
     compact_nav_slot.add_css_class("compact-rail-slot");
     let normal_main_menu = gtk::MenuButton::new();
@@ -332,9 +326,7 @@ pub fn build(
     app_content_overlay.set_measure_overlay(&fullscreen_player.root, false);
 
     app_root.append(&app_content_overlay);
-    let bottom_player_handle =
-        window_drag_handle_with_child("bottom-player-drag-handle", &player_controls.root);
-    app_root.append(&bottom_player_handle);
+    app_root.append(&player_controls.root);
 
     let app_root_overlay = gtk::Overlay::new();
     app_root_overlay.set_hexpand(true);
@@ -529,13 +521,15 @@ pub fn build(
             }
         });
     }
+    let normal_header = normal_sidebar_header(
+        &shell,
+        &shell.chrome.window_controls.start_width_reservation(),
+    );
+    let normal_header_handle = window_drag_handle_with_child("sidebar-drag-handle", &normal_header);
     shell
         .navigation_view
         .normal_nav_panel
-        .prepend(&normal_sidebar_header(
-            &shell,
-            &shell.chrome.window_controls.start_width_reservation(),
-        ));
+        .prepend(&normal_header_handle);
     install_normal_navigation_activation(&shell);
     build_normal_navigation(&shell);
     build_compact_navigation(&shell);

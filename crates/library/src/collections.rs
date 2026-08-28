@@ -793,6 +793,7 @@ impl Database {
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
+        favorites_only: bool,
         filter: &str,
         sort: AlbumSort,
         descending: bool,
@@ -839,6 +840,7 @@ impl Database {
                LEFT JOIN listens_by_track listen USING(track_key)
                WHERE album.source_key=?1
                  AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4))
+                 AND (?5=0 OR COALESCE(album.user_favorite,album.source_favorite)=1)
                  AND (?6 OR instr(album.normalized_title || ' ' || lower(album.display_artist),?7)>0 OR CAST(album.year AS TEXT)=?7 OR EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,?7)>0) OR EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,?7)>0))
                GROUP BY album.album_key
              ), ordered AS (
@@ -880,7 +882,7 @@ impl Database {
         .bind(sort.code())
         .bind(descending)
         .bind(folder)
-        .bind(false)
+        .bind(favorites_only)
         .bind(filter.is_empty())
         .bind(filter)
         .fetch_all(&mut *connection)

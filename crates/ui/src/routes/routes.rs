@@ -15,7 +15,7 @@ use super::collections::{
     track_collection_projection,
 };
 use super::named_collections::{NamedOrderLoad, NamedReadRequest};
-use super::route::Route;
+use super::route::{CollectionCategory, Route};
 use super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET;
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use super::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
@@ -177,6 +177,8 @@ impl Shell {
 
     pub(crate) fn library_albums_route(
         self: &Rc<Self>,
+        route: Route,
+        favorites_only: bool,
         order: AlbumCollectionOrder,
         first_rows: Vec<library::AlbumRow>,
         selected: crate::runtime::SelectedLibrary,
@@ -193,7 +195,11 @@ impl Shell {
         let page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: models.is_empty(),
-            empty_body: msgid("Nothing here yet"),
+            empty_body: if favorites_only {
+                msgid("No favorite albums yet")
+            } else {
+                msgid("Nothing here yet")
+            },
             search: search.clone(),
             has_visible_results: {
                 let models = models.clone();
@@ -213,7 +219,7 @@ impl Shell {
                     let Some(shell) = shell.upgrade() else {
                         return;
                     };
-                    if shell.navigation.routes.borrow().current() != &Route::Albums {
+                    if shell.navigation.routes.borrow().current() != &route {
                         return;
                     }
                     match result {
@@ -244,6 +250,7 @@ impl Shell {
                         .album_detail_route_order(
                             source,
                             folder,
+                            favorites_only,
                             &request.query,
                             request.settings.sort_key.album_sort(),
                             request.settings.descending,
@@ -257,7 +264,7 @@ impl Shell {
                         .album_route_page(
                             source,
                             folder,
-                            false,
+                            favorites_only,
                             &request.query,
                             request.settings.sort_key.album_sort(),
                             request.settings.descending,
@@ -325,6 +332,9 @@ impl Shell {
         let favorite_models = models.clone();
         let favorite_read = Rc::clone(&read);
         let favorite_query = Rc::clone(&query);
+        if favorites_only {
+            self.install_favorite_category_tabs(CollectionCategory::Albums, &page);
+        }
         MountedRoute::new(page.widget(), resume)
             .with_item_navigation(content.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {
@@ -333,7 +343,7 @@ impl Shell {
                 };
                 favorite_models.update_favorite(album, settlement.effective);
                 let settings = applied_settings.borrow().clone();
-                if settings.sort_key == crate::LibraryField::Favorite {
+                if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(CollectionReadRequest {
                         query: favorite_query.borrow().clone(),
                         settings,
@@ -436,7 +446,9 @@ impl Shell {
 
     pub(crate) fn library_artist_list_route(
         self: &Rc<Self>,
+        route: Route,
         album_artist: bool,
+        favorites_only: bool,
         order: Vec<library::ArtistKey>,
         first_rows: Vec<library::ArtistRow>,
         selected: crate::runtime::SelectedLibrary,
@@ -445,11 +457,6 @@ impl Shell {
             LibraryListKey::AlbumArtists
         } else {
             LibraryListKey::Artists
-        };
-        let route = if album_artist {
-            Route::AlbumArtists
-        } else {
-            Route::Artists
         };
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
@@ -480,7 +487,11 @@ impl Shell {
         let page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: sparse.len() == 0,
-            empty_body: msgid("Nothing here yet"),
+            empty_body: if favorites_only {
+                msgid("No favorite artists yet")
+            } else {
+                msgid("Nothing here yet")
+            },
             search: search.clone(),
             has_visible_results: {
                 let sparse = Rc::clone(&sparse);
@@ -530,7 +541,7 @@ impl Shell {
                         source,
                         folder,
                         album_artist,
-                        false,
+                        favorites_only,
                         &request.query,
                         request.settings.sort_key.artist_sort(),
                         request.settings.descending,
@@ -585,6 +596,9 @@ impl Shell {
         let favorite_read = Rc::clone(&read);
         let favorite_query = Rc::clone(&query);
         let favorite_shell = Rc::downgrade(self);
+        if favorites_only {
+            self.install_favorite_category_tabs(CollectionCategory::Artists, &page);
+        }
         MountedRoute::new(page.widget(), resume)
             .with_item_navigation(content.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {
@@ -598,7 +612,7 @@ impl Shell {
                     row.favorite = settlement.effective;
                 });
                 let settings = favorite_shell.settings.current.borrow().library_list(key);
-                if settings.sort_key == crate::LibraryField::Favorite {
+                if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(CollectionReadRequest {
                         query: favorite_query.borrow().clone(),
                         settings,
@@ -898,6 +912,9 @@ impl Shell {
         };
         let favorite_projection = projection.clone();
         let favorite_read = Rc::clone(&read);
+        if favorites_only {
+            self.install_favorite_category_tabs(CollectionCategory::Tracks, &page);
+        }
         MountedRoute::new(page.widget(), resume)
             .with_item_navigation(projection.item_navigation())
             .with_favorite_settlement(Rc::new(move |settlement| {

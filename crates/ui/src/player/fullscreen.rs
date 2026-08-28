@@ -11,7 +11,7 @@ use playback::{CurrentMedia, EQUALIZER_BAND_COUNT, EqualizerSettings, PlaybackVi
 use crate::layout::allocation_owner;
 use crate::shell::Shell;
 use crate::shell::actions::icon_button;
-use crate::shell::chrome::window_drag_handle_with_child;
+use crate::shell::chrome::top_window_drag_handle;
 use crate::shell::cover::ArtworkTile;
 use crate::shell::cover::cover_fetch_size_for_display;
 use crate::shell::layout::MIN_USEFUL_MAIN_WIDTH;
@@ -81,7 +81,6 @@ pub(crate) struct FullscreenPlayerParts {
     pub(crate) animation_tick: RefCell<Option<gtk::TickCallbackId>>,
     pub(crate) close_button: gtk::Button,
     pub(crate) inline_close_button: gtk::Button,
-    hero_handle: gtk::WindowHandle,
     hero: gtk::Box,
     cover: ArtworkTile,
     title: gtk::Label,
@@ -174,8 +173,7 @@ pub(crate) fn build_fullscreen_player(
     details.append(&album);
     details.append(&meta);
     hero.append(&details);
-    let hero_handle = window_drag_handle_with_child("fullscreen-player-drag-handle", &hero);
-    body.append(&hero_handle);
+    body.append(&hero);
 
     let stack = adw::ViewStack::builder()
         .hhomogeneous(false)
@@ -225,6 +223,9 @@ pub(crate) fn build_fullscreen_player(
     body.append(&switcher_bar);
     body.append(&stack);
     root.set_child(Some(&body));
+    let drag_handle = top_window_drag_handle("fullscreen-player-drag-handle");
+    root.add_overlay(&drag_handle);
+    root.set_measure_overlay(&drag_handle, false);
 
     FullscreenPlayerParts {
         root,
@@ -232,7 +233,6 @@ pub(crate) fn build_fullscreen_player(
         animation_tick: RefCell::new(None),
         close_button,
         inline_close_button,
-        hero_handle,
         hero,
         cover,
         title,
@@ -985,10 +985,6 @@ impl Shell {
             .fullscreen_player
             .inline_close_button
             .set_visible(!show_hero);
-        self.player_view
-            .fullscreen_player
-            .hero_handle
-            .set_visible(show_hero);
         self.player_view
             .fullscreen_player
             .hero

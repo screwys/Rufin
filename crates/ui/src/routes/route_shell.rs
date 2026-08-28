@@ -51,7 +51,7 @@ pub(crate) struct LibraryPageShellOptions {
 
 #[derive(Clone)]
 pub(crate) struct LibraryPageShell {
-    widget: gtk::Widget,
+    widget: gtk::Box,
     contents: gtk::Stack,
     toolbar: LibraryToolbarProjection,
     search: gtk::SearchEntry,
@@ -61,7 +61,11 @@ pub(crate) struct LibraryPageShell {
 
 impl LibraryPageShell {
     pub(crate) fn widget(&self) -> gtk::Widget {
-        self.widget.clone()
+        self.widget.clone().upcast()
+    }
+    pub(crate) fn insert_after_toolbar(&self, widget: &impl IsA<gtk::Widget>) {
+        self.widget
+            .insert_child_after(widget, Some(&self.toolbar.widget()));
     }
     pub(crate) fn apply_library_list_settings(
         &self,
@@ -117,6 +121,12 @@ impl LibraryToolbarProjection {
 
     pub(crate) fn set_layout_control_visible(&self, visible: bool) {
         self.layout.set_visible(visible);
+    }
+
+    pub(crate) fn cycle_layout(&self) {
+        if self.layout.is_visible() && self.layout.is_sensitive() {
+            self.layout.emit_clicked();
+        }
     }
 
     pub(crate) fn apply(&self, key: LibraryListKey, settings: &LibraryListSettings) {
@@ -188,7 +198,7 @@ impl Shell {
             ));
         });
         LibraryPageShell {
-            widget: wrapper.upcast(),
+            widget: wrapper,
             contents,
             toolbar,
             search: options.search,
@@ -209,6 +219,14 @@ impl Shell {
     ) {
         self.route_viewport.route_search.replace(Some(search));
         self.route_viewport.route_search_focus.replace(Some(focus));
+    }
+
+    pub(crate) fn set_current_route_layout_cycle(&self, cycle: Option<Rc<dyn Fn()>>) {
+        self.route_viewport.route_layout_cycle.replace(cycle);
+    }
+
+    pub(crate) fn set_current_route_tab_cycle(&self, cycle: Option<Rc<dyn Fn()>>) {
+        self.route_viewport.route_tab_cycle.replace(cycle);
     }
 
     pub(crate) fn focus_current_route_search(&self) {
@@ -549,7 +567,7 @@ impl Shell {
             }
         });
         let widget = owner.upcast();
-        LibraryToolbarProjection {
+        let projection = LibraryToolbarProjection {
             state: toolbar_state,
             widget,
             controls,
@@ -558,7 +576,12 @@ impl Shell {
             layout,
             layout_mode,
             syncing,
-        }
+        };
+        let layout_projection = projection.clone();
+        self.set_current_route_layout_cycle(Some(Rc::new(move || {
+            layout_projection.cycle_layout()
+        })));
+        projection
     }
     pub(crate) fn window_controls_end_area(
         &self,
@@ -736,7 +759,8 @@ fn next_row_grid_layout(layout: LibraryLayout) -> LibraryLayout {
 
 #[cfg(test)]
 mod search_empty_tests {
-    use super::library_page_child;
+    use super::{library_page_child, next_layout};
+    use crate::{LibraryLayout, LibraryListKey};
 
     #[test]
     fn library_page_only_shows_search_empty_for_an_unmatched_query() {
@@ -744,6 +768,26 @@ mod search_empty_tests {
         assert_eq!(library_page_child(false, "", false), "content");
         assert_eq!(library_page_child(false, "found", true), "content");
         assert_eq!(library_page_child(true, "missing", false), "empty");
+    }
+
+    #[test]
+    fn layout_cycle_includes_detail_only_when_the_route_supports_it() {
+        assert_eq!(
+            next_layout(LibraryListKey::Albums, LibraryLayout::Row),
+            LibraryLayout::Grid
+        );
+        assert_eq!(
+            next_layout(LibraryListKey::Albums, LibraryLayout::Grid),
+            LibraryLayout::Detail
+        );
+        assert_eq!(
+            next_layout(LibraryListKey::Albums, LibraryLayout::Detail),
+            LibraryLayout::Row
+        );
+        assert_eq!(
+            next_layout(LibraryListKey::Artists, LibraryLayout::Grid),
+            LibraryLayout::Row
+        );
     }
 }
 

@@ -133,6 +133,7 @@ impl ShellAllocationOwner {
 struct LeftSidebarDragPreview {
     mode: LeftSidebarMode,
     width: i32,
+    hide_right: bool,
 }
 
 pub(super) struct ShellLayoutState {
@@ -187,6 +188,42 @@ fn fitted_right_sidebar_width(available: i32, requested: i32) -> Option<i32> {
         requested
             .clamp(MIN_RIGHT_SIDEBAR_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH)
             .min(available)
+    })
+}
+
+fn fitted_left_sidebar_drag_width(
+    settings: &LayoutSettings,
+    window_width: i32,
+    requested: i32,
+) -> Option<(i32, bool)> {
+    let window_width = window_width.max(MIN_APP_WINDOW_WIDTH);
+    let resolved = resolve_layout(settings, window_width);
+    let right_reservation = if resolved.right_sidebar.is_visible() {
+        MIN_RIGHT_SIDEBAR_WIDTH + RIGHT_PANE_SEPARATOR_WIDTH
+    } else {
+        0
+    };
+    let maximum_with_right =
+        window_width - LEFT_PANE_SEPARATOR_WIDTH - MIN_USEFUL_MAIN_WIDTH - right_reservation;
+    if maximum_with_right >= MIN_LEFT_SIDEBAR_WIDTH {
+        return Some((
+            requested.clamp(
+                MIN_LEFT_SIDEBAR_WIDTH,
+                maximum_with_right.min(crate::MAX_LEFT_SIDEBAR_WIDTH),
+            ),
+            false,
+        ));
+    }
+
+    let maximum_without_right = window_width - LEFT_PANE_SEPARATOR_WIDTH - MIN_USEFUL_MAIN_WIDTH;
+    (maximum_without_right >= MIN_LEFT_SIDEBAR_WIDTH).then(|| {
+        (
+            requested.clamp(
+                MIN_LEFT_SIDEBAR_WIDTH,
+                maximum_without_right.min(crate::MAX_LEFT_SIDEBAR_WIDTH),
+            ),
+            true,
+        )
     })
 }
 
@@ -300,11 +337,16 @@ fn resolve_left_sidebar_drag_preview(
     window_width: i32,
     mode: LeftSidebarMode,
     width: i32,
+    hide_right: bool,
 ) -> ResolvedLayout {
     resolve_layout_with_drag_previews(
         settings,
         window_width,
-        Some(LeftSidebarDragPreview { mode, width }),
+        Some(LeftSidebarDragPreview {
+            mode,
+            width,
+            hide_right,
+        }),
         None,
     )
 }
@@ -326,6 +368,9 @@ fn resolve_layout_with_drag_previews(
             ActiveLayoutProfile::Narrow => &mut settings.narrow_profile,
         };
         profile.left_sidebar = left_drag.mode;
+        if left_drag.hide_right {
+            profile.right_sidebar = RightSidebarMode::Hidden;
+        }
         settings.preferred_left_sidebar_width = left_drag.width;
     }
     settings.sanitize();
@@ -581,10 +626,19 @@ impl Shell {
             .unwrap_or(1)
     }
 
-    fn set_left_sidebar_drag_preview(self: &Rc<Self>, mode: LeftSidebarMode, width: i32) {
+    fn set_left_sidebar_drag_preview(
+        self: &Rc<Self>,
+        mode: LeftSidebarMode,
+        width: i32,
+        hide_right: bool,
+    ) {
         self.layout_state
             .left_drag_preview
-            .set(Some(LeftSidebarDragPreview { mode, width }));
+            .set(Some(LeftSidebarDragPreview {
+                mode,
+                width,
+                hide_right,
+            }));
         self.update_layout();
     }
 
@@ -670,6 +724,7 @@ fn connect_left_sidebar_resize(shell: &Rc<Shell>) {
     let start_mode = Rc::new(Cell::new(LeftSidebarMode::Compact));
     let live_width = Rc::new(Cell::new(COMPACT_RAIL_WIDTH));
     let live_mode = Rc::new(Cell::new(LeftSidebarMode::Compact));
+    let live_hide_right = Rc::new(Cell::new(false));
     let active = Rc::new(Cell::new(false));
     let drag = gtk::GestureDrag::new();
     drag.set_button(1);
@@ -679,6 +734,7 @@ fn connect_left_sidebar_resize(shell: &Rc<Shell>) {
     let drag_start_mode = Rc::clone(&start_mode);
     let drag_live_width = Rc::clone(&live_width);
     let drag_live_mode = Rc::clone(&live_mode);
+    let drag_live_hide_right = Rc::clone(&live_hide_right);
     let drag_active = Rc::clone(&active);
     drag.connect_drag_begin(move |gesture, start_x, start_y| {
         drag_active.set(false);
@@ -713,12 +769,14 @@ fn connect_left_sidebar_resize(shell: &Rc<Shell>) {
         };
         drag_start_mode.set(mode);
         drag_live_mode.set(mode);
-        drag_shell.set_left_sidebar_drag_preview(mode, width);
+        drag_live_hide_right.set(false);
+        drag_shell.set_left_sidebar_drag_preview(mode, width, false);
     });
     let drag_shell = Rc::clone(shell);
     let drag_start_width = Rc::clone(&start_width);
     let drag_live_width = Rc::clone(&live_width);
     let drag_live_mode = Rc::clone(&live_mode);
+    let drag_live_hide_right = Rc::clone(&live_hide_right);
     let drag_active = Rc::clone(&active);
     drag.connect_drag_update(move |gesture, offset_x, _| {
         if !drag_active.get() {
@@ -733,20 +791,41 @@ fn connect_left_sidebar_resize(shell: &Rc<Shell>) {
         if requested < LEFT_SIDEBAR_COLLAPSE_DETENT || stays_compact {
             drag_live_mode.set(LeftSidebarMode::Compact);
             drag_live_width.set(COMPACT_RAIL_WIDTH);
-            drag_shell.set_left_sidebar_drag_preview(LeftSidebarMode::Compact, COMPACT_RAIL_WIDTH);
+            drag_live_hide_right.set(false);
+            drag_shell.set_left_sidebar_drag_preview(
+                LeftSidebarMode::Compact,
+                COMPACT_RAIL_WIDTH,
+                false,
+            );
             return;
         }
 
-        let width = requested.clamp(crate::MIN_LEFT_SIDEBAR_WIDTH, crate::MAX_LEFT_SIDEBAR_WIDTH);
+        let Some((width, hide_right)) = fitted_left_sidebar_drag_width(
+            &drag_shell.settings.current.borrow().layout,
+            drag_shell.layout_width(),
+            requested,
+        ) else {
+            drag_live_mode.set(LeftSidebarMode::Compact);
+            drag_live_width.set(COMPACT_RAIL_WIDTH);
+            drag_live_hide_right.set(false);
+            drag_shell.set_left_sidebar_drag_preview(
+                LeftSidebarMode::Compact,
+                COMPACT_RAIL_WIDTH,
+                false,
+            );
+            return;
+        };
         drag_live_mode.set(LeftSidebarMode::Full);
         drag_live_width.set(width);
-        drag_shell.set_left_sidebar_drag_preview(LeftSidebarMode::Full, width);
+        drag_live_hide_right.set(hide_right);
+        drag_shell.set_left_sidebar_drag_preview(LeftSidebarMode::Full, width, hide_right);
     });
     let drag_shell = Rc::clone(shell);
     let drag_start_width = Rc::clone(&start_width);
     let drag_start_mode = Rc::clone(&start_mode);
     let drag_live_width = Rc::clone(&live_width);
     let drag_live_mode = Rc::clone(&live_mode);
+    let drag_live_hide_right = Rc::clone(&live_hide_right);
     let drag_active = Rc::clone(&active);
     drag.connect_drag_end(move |_, _, _| {
         if !drag_active.replace(false) {
@@ -754,14 +833,17 @@ fn connect_left_sidebar_resize(shell: &Rc<Shell>) {
         }
         let end_mode = drag_live_mode.get();
         let end_width = drag_live_width.get();
+        let hide_right = drag_live_hide_right.get();
         drag_shell.layout_state.left_drag_preview.set(None);
-        if left_sidebar_drag_changed(
-            drag_start_mode.get(),
-            drag_start_width.get(),
-            end_mode,
-            end_width,
-        ) {
-            drag_shell.save_left_sidebar_drag(end_mode, end_width);
+        if hide_right
+            || left_sidebar_drag_changed(
+                drag_start_mode.get(),
+                drag_start_width.get(),
+                end_mode,
+                end_width,
+            )
+        {
+            drag_shell.save_left_sidebar_drag(end_mode, end_width, hide_right);
         } else {
             drag_shell.update_layout();
         }
@@ -1163,10 +1245,19 @@ mod tests {
             948,
             LeftSidebarMode::Compact,
             COMPACT_RAIL_WIDTH,
+            false,
         );
-        let fitted = resolve_left_sidebar_drag_preview(&settings, 948, LeftSidebarMode::Full, 246);
-        let restored =
-            resolve_left_sidebar_drag_preview(&settings, 948, LeftSidebarMode::Full, 400);
+        let fitted =
+            resolve_left_sidebar_drag_preview(&settings, 948, LeftSidebarMode::Full, 246, false);
+        let (overshot_width, hide_right) = fitted_left_sidebar_drag_width(&settings, 948, 400)
+            .expect("a full left sidebar fits beside both usable panes");
+        let overshot = resolve_left_sidebar_drag_preview(
+            &settings,
+            948,
+            LeftSidebarMode::Full,
+            overshot_width,
+            hide_right,
+        );
 
         assert_eq!(compact.left_sidebar, ResolvedLeftSidebarMode::Compact);
         assert_eq!(compact.right_sidebar, RightSidebarMode::Visible);
@@ -1174,9 +1265,27 @@ mod tests {
         assert_eq!(fitted.left_sidebar_width, 246);
         assert_eq!(fitted.right_sidebar_width, MIN_RIGHT_SIDEBAR_WIDTH);
         assert_eq!(fitted.main_width, MIN_USEFUL_MAIN_WIDTH);
-        assert_eq!(restored.left_sidebar, ResolvedLeftSidebarMode::Compact);
-        assert_eq!(restored.left_sidebar_width, COMPACT_RAIL_WIDTH);
-        assert_eq!(restored.right_sidebar, RightSidebarMode::Visible);
+        assert_eq!(overshot_width, 246);
+        assert!(!hide_right);
+        assert_eq!(overshot.left_sidebar, ResolvedLeftSidebarMode::Full);
+        assert_eq!(overshot.left_sidebar_width, 246);
+        assert_eq!(overshot.right_sidebar, RightSidebarMode::Visible);
+        assert_eq!(overshot.right_sidebar_width, MIN_RIGHT_SIDEBAR_WIDTH);
+
+        let (width, hide_right) = fitted_left_sidebar_drag_width(&settings, 900, 400)
+            .expect("the left sidebar fits after closing the right sidebar");
+        let left_priority = resolve_left_sidebar_drag_preview(
+            &settings,
+            900,
+            LeftSidebarMode::Full,
+            width,
+            hide_right,
+        );
+        assert_eq!(width, 400);
+        assert!(hide_right);
+        assert_eq!(left_priority.left_sidebar, ResolvedLeftSidebarMode::Full);
+        assert_eq!(left_priority.left_sidebar_width, 400);
+        assert_eq!(left_priority.right_sidebar, RightSidebarMode::Hidden);
     }
 
     #[test]
@@ -1262,6 +1371,7 @@ mod tests {
             Some(LeftSidebarDragPreview {
                 mode: LeftSidebarMode::Compact,
                 width: COMPACT_RAIL_WIDTH,
+                hide_right: false,
             }),
             Some(MAX_RIGHT_SIDEBAR_WIDTH),
         );

@@ -42,26 +42,17 @@ use super::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, album_field, artist_field, column_width, item_at_from_item,
     track_field,
 };
+use super::route::CollectionCategory;
 use super::route::Route;
 use super::route_layout::ROUTE_TOP_MARGIN;
-use super::route_shell::LibraryToolbarProjection;
+use super::route_shell::{LibraryPageShell, LibraryToolbarProjection};
 use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width;
 
 const SEARCH_DEBOUNCE: Duration = Duration::from_millis(300);
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-enum SearchCategory {
-    #[default]
-    Tracks,
-    Albums,
-    Artists,
-}
-
-impl SearchCategory {
-    const ALL: [Self; 3] = [Self::Tracks, Self::Albums, Self::Artists];
-
-    const fn name(self) -> &'static str {
+impl CollectionCategory {
+    pub(crate) const fn name(self) -> &'static str {
         match self {
             Self::Tracks => "tracks",
             Self::Albums => "albums",
@@ -69,7 +60,15 @@ impl SearchCategory {
         }
     }
 
-    const fn title(self) -> &'static str {
+    pub(crate) fn from_name(name: &str) -> Self {
+        match name {
+            "albums" => Self::Albums,
+            "artists" => Self::Artists,
+            _ => Self::Tracks,
+        }
+    }
+
+    pub(crate) const fn title(self) -> &'static str {
         match self {
             Self::Tracks => msgid("Tracks"),
             Self::Albums => msgid("Albums"),
@@ -77,7 +76,7 @@ impl SearchCategory {
         }
     }
 
-    const fn icon_name(self) -> &'static str {
+    pub(crate) const fn icon_name(self) -> &'static str {
         match self {
             Self::Tracks => "rufin-tracks-symbolic",
             Self::Albums => "rufin-albums-symbolic",
@@ -85,7 +84,7 @@ impl SearchCategory {
         }
     }
 
-    const fn key(self) -> LibraryListKey {
+    pub(crate) const fn key(self) -> LibraryListKey {
         match self {
             Self::Tracks => LibraryListKey::Tracks,
             Self::Albums => LibraryListKey::Albums,
@@ -573,6 +572,7 @@ struct SearchRouteProjection {
     selected: SelectedLibrary,
     search: gtk::SearchEntry,
     status: gtk::Stack,
+    results: adw::ViewStack,
     result_pages: [gtk::Stack; 3],
     models: [gio::ListStore; 3],
     collections: [LibraryCollectionProjection; 3],
@@ -597,13 +597,13 @@ impl SearchRouteProjection {
         search.set_width_request(1);
         bind_search_placeholder(&search, "Search");
 
-        let models = SearchCategory::ALL.map(|_| gio::ListStore::new::<glib::BoxedAnyObject>());
-        let collections = SearchCategory::ALL
+        let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<glib::BoxedAnyObject>());
+        let collections = CollectionCategory::ALL
             .map(|category| search_collection(shell, models[category as usize].clone(), category));
         let navigations = collections
             .each_ref()
             .map(LibraryCollectionProjection::item_navigation);
-        let result_pages = SearchCategory::ALL.map(|category| {
+        let result_pages = CollectionCategory::ALL.map(|category| {
             let stack = gtk::Stack::new();
             stack.set_hexpand(true);
             stack.set_vexpand(true);
@@ -619,26 +619,12 @@ impl SearchRouteProjection {
             stack
         });
 
-        let results = adw::ViewStack::builder()
-            .hexpand(true)
-            .vexpand(true)
-            .build();
-        for (category, page) in SearchCategory::ALL.into_iter().zip(result_pages.iter()) {
-            results.add_titled_with_icon(
-                page,
-                Some(category.name()),
-                &tr(category.title()),
-                category.icon_name(),
-            );
-        }
-        results.set_visible_child_name(SearchCategory::default().name());
-        let switcher = adw::ViewSwitcher::builder()
-            .policy(adw::ViewSwitcherPolicy::Wide)
-            .stack(&results)
-            .build();
-        switcher.set_halign(gtk::Align::Start);
+        let (results, switcher) = collection_category_tabs(
+            result_pages.each_ref().map(|page| page.clone().upcast()),
+            CollectionCategory::default(),
+        );
 
-        let toolbars = SearchCategory::ALL.map(|category| {
+        let toolbars = CollectionCategory::ALL.map(|category| {
             shell.library_toolbar_projection_without_detail(
                 category.key(),
                 gtk::SearchEntry::new(),
@@ -647,10 +633,10 @@ impl SearchRouteProjection {
         });
         let controls_stack = gtk::Stack::new();
         controls_stack.set_halign(gtk::Align::End);
-        for (category, toolbar) in SearchCategory::ALL.into_iter().zip(toolbars.iter()) {
+        for (category, toolbar) in CollectionCategory::ALL.into_iter().zip(toolbars.iter()) {
             controls_stack.add_named(&toolbar.detach_controls(), Some(category.name()));
         }
-        controls_stack.set_visible_child_name(SearchCategory::default().name());
+        controls_stack.set_visible_child_name(CollectionCategory::default().name());
         let controls_page = controls_stack.clone();
         results.connect_visible_child_notify(move |results| {
             if let Some(name) = results.visible_child_name() {
@@ -701,6 +687,7 @@ impl SearchRouteProjection {
             selected: selected.clone(),
             search,
             status,
+            results,
             result_pages,
             models,
             collections,
@@ -787,7 +774,7 @@ impl SearchRouteProjection {
     fn apply(&self, mut items: [Vec<SearchItem>; 3]) {
         for index in 0..3 {
             if let Some(shell) = self.shell.upgrade() {
-                let category = SearchCategory::ALL[index];
+                let category = CollectionCategory::ALL[index];
                 let settings = shell.settings.current.borrow().library_list(category.key());
                 sort_search_items(&mut items[index], settings.sort_key, settings.descending);
             }
@@ -807,7 +794,10 @@ impl SearchRouteProjection {
     }
 
     fn resume(&self) {
-        for (category, collection) in SearchCategory::ALL.into_iter().zip(self.collections.iter()) {
+        for (category, collection) in CollectionCategory::ALL
+            .into_iter()
+            .zip(self.collections.iter())
+        {
             let settings = self
                 .shell
                 .upgrade()
@@ -836,6 +826,23 @@ impl SearchRouteProjection {
             }
         }
     }
+
+    fn active_category(&self) -> CollectionCategory {
+        self.results
+            .visible_child_name()
+            .as_deref()
+            .map(CollectionCategory::from_name)
+            .unwrap_or_default()
+    }
+
+    fn cycle_category(&self) {
+        self.results
+            .set_visible_child_name(self.active_category().next().name());
+    }
+
+    fn cycle_layout(&self) {
+        self.toolbars[self.active_category() as usize].cycle_layout();
+    }
 }
 
 fn sort_search_items(items: &mut [SearchItem], field: LibraryField, descending: bool) {
@@ -858,9 +865,79 @@ fn compare_optional<T: Ord>(left: Option<T>, right: Option<T>) -> std::cmp::Orde
     left.cmp(&right)
 }
 
+fn collection_category_tabs(
+    pages: [gtk::Widget; 3],
+    active: CollectionCategory,
+) -> (adw::ViewStack, adw::ViewSwitcher) {
+    let stack = adw::ViewStack::builder()
+        .hexpand(true)
+        .vexpand(true)
+        .build();
+    for (category, page) in CollectionCategory::ALL.into_iter().zip(pages) {
+        stack.add_titled_with_icon(
+            &page,
+            Some(category.name()),
+            &tr(category.title()),
+            category.icon_name(),
+        );
+    }
+    stack.set_visible_child_name(active.name());
+    let switcher = adw::ViewSwitcher::builder()
+        .policy(adw::ViewSwitcherPolicy::Wide)
+        .stack(&stack)
+        .build();
+    switcher.set_halign(gtk::Align::Start);
+    (stack, switcher)
+}
+
 impl Shell {
+    pub(crate) fn install_favorite_category_tabs(
+        self: &Rc<Self>,
+        active: CollectionCategory,
+        page: &LibraryPageShell,
+    ) {
+        let category_pages =
+            CollectionCategory::ALL.map(|_| gtk::Box::new(gtk::Orientation::Vertical, 0).upcast());
+        let (pages, switcher) = collection_category_tabs(category_pages, active);
+        page.insert_after_toolbar(&library_route_inset(switcher.upcast()));
+
+        let shell = Rc::downgrade(self);
+        pages.connect_visible_child_notify(move |pages| {
+            let Some(category) = pages
+                .visible_child_name()
+                .as_deref()
+                .map(CollectionCategory::from_name)
+            else {
+                return;
+            };
+            if category != active
+                && let Some(shell) = shell.upgrade()
+            {
+                shell.set_favorite_category(category);
+            }
+        });
+        let shell = Rc::downgrade(self);
+        self.set_current_route_tab_cycle(Some(Rc::new(move || {
+            if let Some(shell) = shell.upgrade() {
+                shell.set_favorite_category(shell.navigation.favorite_category.get().next());
+            }
+        })));
+    }
+
     pub(crate) fn search_route(self: &Rc<Self>, selected: &SelectedLibrary) -> MountedRoute {
         let projection = SearchRouteProjection::new(self, selected);
+        let layout_projection = Rc::downgrade(&projection);
+        self.set_current_route_layout_cycle(Some(Rc::new(move || {
+            if let Some(projection) = layout_projection.upgrade() {
+                projection.cycle_layout();
+            }
+        })));
+        let tab_projection = Rc::downgrade(&projection);
+        self.set_current_route_tab_cycle(Some(Rc::new(move || {
+            if let Some(projection) = tab_projection.upgrade() {
+                projection.cycle_category();
+            }
+        })));
         let resume_projection = Rc::clone(&projection);
         MountedRoute::new(
             projection.root.clone(),
@@ -873,11 +950,11 @@ impl Shell {
 fn search_collection(
     shell: &Rc<Shell>,
     model: gio::ListStore,
-    category: SearchCategory,
+    category: CollectionCategory,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(category.key());
-    let playing =
-        (category == SearchCategory::Tracks).then(super::columns::TrackRowPlayingIndicator::new);
+    let playing = (category == CollectionCategory::Tracks)
+        .then(super::columns::TrackRowPlayingIndicator::new);
     if let Some(indicator) = playing.as_ref() {
         let selection_model = model.clone();
         let selection_indicator = indicator.clone();
@@ -945,7 +1022,7 @@ fn search_collection(
                         move |field| search_column(&column_shell, category, field, playing.as_ref())
                     },
                     move |field| {
-                        if category == SearchCategory::Tracks {
+                        if category == CollectionCategory::Tracks {
                             super::columns::track_column_fit_width(category.key(), field)
                         } else {
                             column_fit_width(field, column_width(field))
@@ -965,12 +1042,12 @@ fn search_collection(
 
 fn search_column(
     shell: &Rc<Shell>,
-    category: SearchCategory,
+    category: CollectionCategory,
     field: LibraryField,
     playing: Option<&super::columns::TrackRowPlayingIndicator>,
 ) -> gtk::ColumnViewColumn {
     if field == LibraryField::RowIndex {
-        if category == SearchCategory::Tracks
+        if category == CollectionCategory::Tracks
             && let Some(playing) = playing
         {
             return super::columns::mapped_track_row_index_column_with_width::<SearchItem, _>(
@@ -990,14 +1067,14 @@ fn search_column(
         );
     }
     if field == LibraryField::TitleMerged {
-        let width = if category == SearchCategory::Tracks {
+        let width = if category == CollectionCategory::Tracks {
             super::columns::track_column_fit_width(category.key(), field)
         } else {
             column_width(field)
         };
         return search_merged_column(shell, category, width, playing.cloned());
     }
-    if field == LibraryField::Favorite && category == SearchCategory::Tracks {
+    if field == LibraryField::Favorite && category == CollectionCategory::Tracks {
         return search_favorite_column(shell);
     }
     let factory = gtk::SignalListItemFactory::new();
@@ -1057,7 +1134,7 @@ struct SearchMergedCell {
 
 fn search_merged_column(
     shell: &Rc<Shell>,
-    category: SearchCategory,
+    category: CollectionCategory,
     width: i32,
     playing: Option<super::columns::TrackRowPlayingIndicator>,
 ) -> gtk::ColumnViewColumn {
@@ -1079,14 +1156,14 @@ fn search_merged_column(
         labels.set_halign(gtk::Align::Fill);
         labels.set_width_request(1);
         let title = gtk::Label::new(None);
-        if category == SearchCategory::Tracks {
+        if category == CollectionCategory::Tracks {
             title.add_css_class("track-list-title");
         }
         title.set_xalign(0.0);
         title.set_wrap(false);
         title.set_ellipsize(gtk::pango::EllipsizeMode::End);
         title.set_single_line_mode(true);
-        let downloaded = (category == SearchCategory::Tracks).then(|| {
+        let downloaded = (category == CollectionCategory::Tracks).then(|| {
             let badge = setup_shell.download_badge(false);
             let title_row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
             title_row.append(&title);
@@ -1098,7 +1175,7 @@ fn search_merged_column(
             labels.append(&title);
         }
         let subtitle = gtk::Label::new(None);
-        if category == SearchCategory::Tracks {
+        if category == CollectionCategory::Tracks {
             subtitle.add_css_class("artist-label");
             subtitle.add_css_class("table-link-label");
         } else {
@@ -1115,7 +1192,7 @@ fn search_merged_column(
         let subtitle_links = DetailLinkBinding::new(&subtitle, &setup_shell);
         labels.append(&subtitle);
         row.append(&labels);
-        if category == SearchCategory::Tracks {
+        if category == CollectionCategory::Tracks {
             let context_shell = Rc::clone(&setup_shell);
             let context_current = Rc::clone(&current);
             install_context_menu_openers(
@@ -1541,6 +1618,22 @@ fn centered(widget: gtk::Widget) -> gtk::Widget {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn collection_tabs_cycle_tracks_albums_and_artists() {
+        assert_eq!(
+            CollectionCategory::Tracks.next(),
+            CollectionCategory::Albums
+        );
+        assert_eq!(
+            CollectionCategory::Albums.next(),
+            CollectionCategory::Artists
+        );
+        assert_eq!(
+            CollectionCategory::Artists.next(),
+            CollectionCategory::Tracks
+        );
+    }
 
     #[test]
     fn provider_only_track_keeps_a_playable_source_identity() {

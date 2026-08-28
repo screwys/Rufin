@@ -16,6 +16,7 @@
     <file>hicolor/scalable/actions/rufin-heart-filled-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-outline-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-list-drag-handle-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-lyrics-search-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-more-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-album-artists-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-albums-symbolic.svg</file>
@@ -35,32 +36,25 @@
     <file>hicolor/scalable/actions/rufin-sort-name-descending-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sort-name-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-list-details-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-list-ordered-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-view-list-symbolic.svg</file>
     <file>hicolor/16x16/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/16x16/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/16x16/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/16x16@2/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/16x16@2/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/16x16@2/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/22x22/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/22x22/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/22x22/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/22x22@2/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/22x22@2/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/22x22@2/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/24x24/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/24x24/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/24x24/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/24x24@2/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/24x24@2/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/24x24@2/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/32x32/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/32x32/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/32x32/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/32x32@2/actions/rufin-edit-clear-symbolic.svg</file>
     <file>hicolor/32x32@2/actions/rufin-system-search-symbolic.svg</file>
-    <file>hicolor/32x32@2/actions/rufin-view-grid-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-external-link-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-external-link-compact-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-appointment-new-symbolic.svg</file>
@@ -71,6 +65,7 @@
     <file>hicolor/scalable/actions/rufin-audio-volume-muted-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-audio-x-generic-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-edit-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-download-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-disk-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-drive-multidisk-symbolic.svg</file>

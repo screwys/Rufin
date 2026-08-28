@@ -1,9 +1,99 @@
 use library::{
-    AlbumMetadataWrite, AlbumReleaseResult, AlbumSort, ArtistMetadataWrite, ArtistSort, GenreSort,
-    MoodSort, ReadCancellation, SearchRequest, TrackMetadataWrite, TrackSort,
+    AlbumMetadataWrite, AlbumReleaseResult, AlbumSort, ArtistMetadataWrite, ArtistSort,
+    FavoriteTarget, GenreSort, MoodSort, ReadCancellation, SearchRequest, TrackMetadataWrite,
+    TrackSort,
 };
 
 use super::support::{connection, fixture};
+
+#[tokio::test]
+async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
+    let fixture = fixture().await;
+    let cancellation = ReadCancellation::new();
+    fixture
+        .database
+        .set_favorite(
+            fixture.source,
+            FavoriteTarget::Album(fixture.albums[0]),
+            true,
+        )
+        .await
+        .expect("favorite Album");
+    fixture
+        .database
+        .set_favorite(
+            fixture.source,
+            FavoriteTarget::Artist(fixture.artists[1]),
+            true,
+        )
+        .await
+        .expect("favorite Artist");
+
+    assert_eq!(
+        fixture
+            .database
+            .album_route_page(
+                fixture.source,
+                None,
+                true,
+                "",
+                AlbumSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("favorite Album order")
+            .0,
+        [fixture.albums[0]]
+    );
+    assert_eq!(
+        fixture
+            .database
+            .artist_route_page(
+                fixture.source,
+                None,
+                false,
+                true,
+                "",
+                ArtistSort::Title,
+                false,
+                &cancellation,
+            )
+            .await
+            .expect("favorite Artist order")
+            .0,
+        [fixture.artists[1]]
+    );
+
+    let order = fixture
+        .database
+        .album_detail_route_order(
+            fixture.source,
+            None,
+            true,
+            "",
+            AlbumSort::Title,
+            false,
+            &cancellation,
+        )
+        .await
+        .expect("favorite Album detail order");
+
+    assert_eq!(
+        order
+            .iter()
+            .filter_map(|key| key.album_key())
+            .collect::<Vec<_>>(),
+        [fixture.albums[0]]
+    );
+    assert_eq!(
+        order
+            .iter()
+            .filter_map(|key| key.track_key())
+            .collect::<Vec<_>>(),
+        fixture.tracks[..2]
+    );
+}
 
 #[tokio::test]
 async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
