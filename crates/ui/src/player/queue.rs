@@ -383,13 +383,13 @@ impl Shell {
         });
     }
 
-    pub(crate) fn position_startup_queue_for_reveal(self: &Rc<Self>) -> bool {
+    pub(crate) fn position_startup_queue_for_reveal(self: &Rc<Self>) {
         if !self.right_panel.root.is_visible() {
-            return false;
+            return;
         }
         let Some(scroller) = queue_panel_scroller(&self.right_panel.queue_panel) else {
             self.request_queue_page();
-            return true;
+            return;
         };
         let current_row = self.selected_queue().and_then(|queue| {
             let current = queue.current.borrow().clone()?;
@@ -399,7 +399,7 @@ impl Shell {
                 .iter()
                 .position(|row| row.object_id == current.as_str())
         });
-        reveal_queue_current_row(&scroller, current_row)
+        reveal_queue_current_row(&scroller, current_row);
     }
 
     pub(crate) fn invalidate_queue_panel_render_state(&self) {

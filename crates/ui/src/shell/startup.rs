@@ -122,10 +122,7 @@ impl Shell {
         {
             return;
         }
-        if self.position_startup_queue_for_reveal() {
-            self.layout_state.owner.queue_allocate();
-            return;
-        }
+        self.position_startup_queue_for_reveal();
         self.startup.route_allocated.set(true);
         if self.startup_route_ready_for_width(width) {
             self.commit_startup_route_reveal();
