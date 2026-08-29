@@ -34,6 +34,9 @@ use super::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, item_at_from_item, opaque_artwork, track_field,
 };
 use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
+use super::playlist_picker::{
+    PlaylistDragPreviewBinding, PlaylistTrackSource, playlist_drag_content_provider,
+};
 use super::route_shell::LibraryToolbarProjection;
 use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width_with_inset;
@@ -791,14 +794,27 @@ fn install_playlist_entry_drag(
     playlist: PlaylistKey,
     current: Rc<RefCell<Option<PlaylistEntryRow>>>,
 ) {
+    target.as_ref().set_valign(gtk::Align::Fill);
     let drag_source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
+    drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let preview = PlaylistDragPreviewBinding::default();
+    preview.connect(&drag_source);
+    let drag_preview = preview.clone();
     let drag_shell = Rc::downgrade(shell);
     let drag_current = Rc::clone(&current);
     drag_source.connect_prepare(move |_, _, _| {
+        drag_preview.clear();
         let shell = drag_shell.upgrade()?;
         let entry = drag_current.borrow().clone()?;
+        let track = entry.track.as_ref()?;
+        let title = track.title.clone();
+        let artwork = track
+            .artwork_binding
+            .as_deref()
+            .map(artwork::ArtworkBinding::opaque)
+            .unwrap_or_default();
         let selection = shell
             .current_playlist_entry_selection(entry.playlist_entry_key)
             .or_else(|| {
@@ -815,16 +831,18 @@ fn install_playlist_entry_drag(
             ));
         }
         if !selection.tracks.tracks.is_empty() {
-            let payload = gtk::glib::BoxedAnyObject::new(selection.tracks);
-            providers.push(gtk::gdk::ContentProvider::for_value(&payload.to_value()));
+            providers.push(playlist_drag_content_provider(
+                PlaylistTrackSource::selection(selection.tracks),
+            ));
         }
+        drag_preview.prepare_cache_only(&shell, title, artwork);
         match providers.as_slice() {
             [] => None,
             [provider] => Some(provider.clone()),
             providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
         }
     });
-    target.add_controller(drag_source);
+    target.as_ref().add_controller(drag_source);
 
     let operations = shell.selected_source_operations();
     let drop_target = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
@@ -849,7 +867,7 @@ fn install_playlist_entry_drag(
         );
         true
     });
-    target.add_controller(drop_target);
+    target.as_ref().add_controller(drop_target);
 }
 
 struct PlaylistEntryGridCell {

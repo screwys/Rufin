@@ -28,7 +28,7 @@ use localization::msgid;
 
 use super::collections::{CollectionPlay, PlaybackTarget};
 use super::playlist_picker::{
-    PlaylistTrackSource, append_context_menu_picker, append_context_menu_picker_selection,
+    append_context_menu_picker, append_context_menu_picker_selection,
     context_menu_can_add_to_playlist,
 };
 use super::route::Route;
@@ -284,11 +284,7 @@ fn present_track_menu(
             RADIO_ICON,
         );
         if context_menu_can_add_to_playlist(shell) {
-            append_context_menu_picker(
-                &surface,
-                shell,
-                PlaylistTrackSource::new(PlaybackTarget::Track(key)),
-            );
+            append_context_menu_picker(&surface, shell, PlaybackTarget::Track(key));
         }
         surface.append_configurable_action(
             ContextMenuItem::Favorites,
@@ -617,11 +613,7 @@ pub(crate) fn present_album_context_menu(
         RADIO_ICON,
     );
     if context_menu_can_add_to_playlist(shell) {
-        append_context_menu_picker(
-            &surface,
-            shell,
-            PlaylistTrackSource::new(PlaybackTarget::Album(album.album_key)),
-        );
+        append_context_menu_picker(&surface, shell, PlaybackTarget::Album(album.album_key));
     }
     append_favorite_action(&surface, favorite);
     surface.append_configurable_action(
@@ -723,11 +715,11 @@ pub(crate) fn present_artist_context_menu(
         append_context_menu_picker(
             &surface,
             shell,
-            PlaylistTrackSource::new(if album_artist {
+            if album_artist {
                 PlaybackTarget::AlbumArtist(artist.artist_key)
             } else {
                 PlaybackTarget::Artist(artist.artist_key)
-            }),
+            },
         );
     }
     append_favorite_action(&surface, favorite);
@@ -860,7 +852,7 @@ pub(crate) fn present_mood_context_menu(
     );
     install_loaded_actions(&surface, shell, playback.clone(), true, play);
     if context_menu_can_add_to_playlist(shell) {
-        append_context_menu_picker(&surface, shell, PlaylistTrackSource::new(playback));
+        append_context_menu_picker(&surface, shell, playback);
     }
     surface.popup(&shell.settings.current.borrow().context_menu);
 }

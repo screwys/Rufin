@@ -22,6 +22,16 @@ tooltip.background label {
   color: white;
 }
 
+.playlist-drag-preview {
+  background: var(--card-bg-color);
+  color: var(--window-fg-color);
+  border: 1px solid color-mix(in srgb, var(--window-fg-color) 28%, transparent);
+  border-radius: 10px;
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.32),
+    inset 0 1px color-mix(in srgb, white 14%, transparent);
+}
+
 toastoverlay toast {
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--card-bg-color) 12%);
   color: var(--window-fg-color);

@@ -17,7 +17,7 @@ use crate::shell::cover::presentation::{add_album_seed_gradient_class, stable_se
 use crate::shell::route::MountedRoute;
 
 use super::cards::album_cover_overlay;
-use super::collections::library_route_inset;
+use super::collections::{PlaybackTarget, library_route_inset};
 use super::detail_links::{
     DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
     track_artist_links,
@@ -32,6 +32,7 @@ use super::home_layout::{
     home_showcase_mode, home_showcase_spacing,
 };
 use super::library_fields::{COLLECTION_GRID_CARD_MARGIN, track_field};
+use super::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
 use super::route::Route;
 use super::route_layout::{ROUTE_TOP_MARGIN, home_album_content_width, route_scroller_widget};
 
@@ -498,6 +499,17 @@ impl Shell {
         let duration_millis = album.duration_millis;
         let artist_links = album_artist_links(&album);
         let radio = RadioSeed::Album(album.album_key);
+        let drag_album = album.album_key;
+        let drag_title = title_text.clone();
+        let drag_target = cover.widget();
+        let drag_artwork = cover.drag_paintable_source();
+        let drag_shell = Rc::downgrade(self);
+        install_compact_playlist_drag_source(&drag_target, &drag_artwork, move || {
+            let shell = drag_shell.upgrade()?;
+            let source =
+                PlaylistTrackSource::current_target(&shell, PlaybackTarget::Album(drag_album))?;
+            Some((source, drag_title.clone()))
+        });
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, home_showcase_spacing(width));
@@ -713,8 +725,17 @@ fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
                 _ => DetailLinks::text(&track_field(track, field)),
             });
             let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
+            let drag_title = track.title.clone();
+            let drag_artwork = cell.drag_paintable_source();
             cell.bind(0, track);
-            cell.widget()
+            let widget = cell.widget();
+            let drag_shell = Rc::downgrade(shell);
+            install_compact_playlist_drag_source(&widget, &drag_artwork, move || {
+                let shell = drag_shell.upgrade()?;
+                let source = PlaylistTrackSource::current_track(&shell, play_key)?;
+                Some((source, drag_title.clone()))
+            });
+            widget
         }
         HomeItem::Album(item) => {
             let mut album = item.album;
@@ -722,9 +743,20 @@ fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
             if item.artwork_binding.is_some() {
                 album.artwork_binding = item.artwork_binding;
             }
+            let album_key = album.album_key;
             let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
+            let drag_title = album.title.clone();
+            let drag_artwork = cell.drag_paintable_source();
             cell.bind(0, album);
-            cell.widget()
+            let widget = cell.widget();
+            let drag_shell = Rc::downgrade(shell);
+            install_compact_playlist_drag_source(&widget, &drag_artwork, move || {
+                let shell = drag_shell.upgrade()?;
+                let source =
+                    PlaylistTrackSource::current_target(&shell, PlaybackTarget::Album(album_key))?;
+                Some((source, drag_title.clone()))
+            });
+            widget
         }
     }
 }

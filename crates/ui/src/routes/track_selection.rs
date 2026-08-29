@@ -432,36 +432,6 @@ fn keys_at_positions<T: Copy>(order: &[T], positions: impl Iterator<Item = u32>)
         .collect()
 }
 
-pub(crate) fn install_track_drag_source(
-    target: &impl IsA<gtk::Widget>,
-    selection: TrackSelection,
-    current_track: impl Fn() -> Option<TrackKey> + 'static,
-) {
-    let target = target.as_ref();
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::COPY)
-        .build();
-    source.connect_prepare(move |_, _, _| {
-        let track = current_track()?;
-        let payload = glib::BoxedAnyObject::new(selection.dragged_tracks_for(track));
-        Some(gtk::gdk::ContentProvider::for_value(&payload.to_value()))
-    });
-    let weak_target = target.downgrade();
-    source.connect_drag_begin(move |source, _| {
-        let Some(target) = weak_target.upgrade() else {
-            return;
-        };
-        let paintable = gtk::WidgetPaintable::new(Some(&target));
-        source.set_icon(Some(&paintable), 0, 0);
-    });
-    target.add_controller(source);
-}
-
-pub(crate) fn track_drag_payload(value: &glib::Value) -> Option<TrackSelectionSnapshot> {
-    let payload = value.get::<glib::BoxedAnyObject>().ok()?;
-    Some(payload.try_borrow::<TrackSelectionSnapshot>().ok()?.clone())
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

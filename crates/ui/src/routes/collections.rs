@@ -35,6 +35,7 @@ use super::library_fields::{
     COLLECTION_GRID_CARD_GAP, clear_list_item_child, column_width, compact_header_column_width,
     grid_label_with_label, item_at, item_at_from_item, track_field,
 };
+use super::playlist_picker::install_track_drag_source;
 use super::route::Route;
 use super::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
 use super::route_shell::restore_single_click_activation_on_primary_press;
@@ -44,7 +45,7 @@ use super::table_sizing::{
     route_column_view_initial_width,
 };
 use super::track_model::TrackCollectionModel;
-use super::track_selection::{TrackSelection, install_track_drag_source};
+use super::track_selection::TrackSelection;
 use crate::runtime::SelectedLibrary;
 use downloads::DownloadSubject;
 
@@ -1286,7 +1287,7 @@ pub(crate) fn track_table(
                 track_column_for_key(&column_shell, key, field, &column_playing_indicator)
             };
             if field != LibraryField::Favorite {
-                install_track_column_drag_source(&column, column_selection.clone());
+                install_track_column_drag_source(&column, &column_shell, column_selection.clone());
             }
             column
         },
@@ -1300,13 +1301,18 @@ pub(crate) fn track_table(
     table
 }
 
-fn install_track_column_drag_source(column: &gtk::ColumnViewColumn, selection: TrackSelection) {
+fn install_track_column_drag_source(
+    column: &gtk::ColumnViewColumn,
+    shell: &Rc<Shell>,
+    selection: TrackSelection,
+) {
     let Some(factory) = column
         .factory()
         .and_then(|factory| factory.downcast::<gtk::SignalListItemFactory>().ok())
     else {
         return;
     };
+    let drag_shell = Rc::downgrade(shell);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -1314,10 +1320,20 @@ fn install_track_column_drag_source(column: &gtk::ColumnViewColumn, selection: T
         let Some(child) = item.child() else {
             return;
         };
+        let Some(shell) = drag_shell.upgrade() else {
+            return;
+        };
         let item = item.downgrade();
-        install_track_drag_source(&child, selection.clone(), move || {
+        install_track_drag_source(&child, &shell, selection.clone(), move || {
             let item = item.upgrade()?;
-            item_at_from_item::<TrackRow>(&item).map(|track| track.track_key)
+            item_at_from_item::<TrackRow>(&item).map(|track| {
+                let artwork = track
+                    .artwork_binding
+                    .as_deref()
+                    .map(artwork::ArtworkBinding::opaque)
+                    .unwrap_or_default();
+                (track.track_key, track.title, artwork)
+            })
         });
     });
 }

@@ -41,6 +41,10 @@ impl ShowcaseCoverOverlay {
         self.root.clone().upcast()
     }
 
+    pub(crate) fn drag_paintable_source(&self) -> gtk::Picture {
+        self.tile.drag_paintable_source()
+    }
+
     pub(crate) fn resize(&self, size: i32) {
         let size = size.max(1);
         if self.size.replace(size) == size {
