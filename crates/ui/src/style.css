@@ -280,7 +280,8 @@ button.release-note-update:hover {
   background: var(--window-bg-color);
 }
 
-scrolledwindow.route-scroll-owner scrollbar.vertical {
+scrolledwindow.route-scroll-owner scrollbar.vertical,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical {
   min-width: 9px;
   opacity: 1;
   background: transparent;
@@ -289,7 +290,9 @@ scrolledwindow.route-scroll-owner scrollbar.vertical {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range,
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough {
   min-width: 9px;
   margin: 0;
   padding: 0;
@@ -298,7 +301,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough {
   box-shadow: none;
 }
 
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider {
   min-width: 7px;
   min-height: 42px;
   margin: 0 1px;
@@ -310,12 +314,16 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:hover,
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:hover,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:active {
   background: color-mix(in srgb, var(--window-fg-color) 56%, transparent);
 }
 
 scrolledwindow.route-scroll-owner undershoot,
-scrolledwindow.route-scroll-owner overshoot {
+scrolledwindow.route-scroll-owner overshoot,
+.right-panel scrolledwindow.queue-scroller undershoot,
+.right-panel scrolledwindow.queue-scroller overshoot {
   background: transparent;
   background-image: none;
   border: none;

@@ -31,8 +31,6 @@ use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
 const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
-const QUEUE_OVERLAY_SCROLLBAR_WIDTH: i32 = 9;
-const QUEUE_SIDEBAR_END_INSET: i32 = WINDOW_CHROME_MARGIN_END + QUEUE_OVERLAY_SCROLLBAR_WIDTH;
 const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
 const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
@@ -833,7 +831,7 @@ fn queue_row(
     root.set_valign(gtk::Align::Center);
     root.set_focusable(true);
     if !fullscreen {
-        root.set_margin_end(QUEUE_SIDEBAR_END_INSET);
+        root.set_margin_end(WINDOW_CHROME_MARGIN_END);
     }
     if current == Some(&occurrence) {
         root.add_css_class("queue-row-current");
@@ -1193,7 +1191,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     if !fullscreen {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("queue-header");
-        header.set_margin_end(QUEUE_SIDEBAR_END_INSET);
+        header.set_margin_end(WINDOW_CHROME_MARGIN_END);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_width_request(50);
         header.append(&spacer);
