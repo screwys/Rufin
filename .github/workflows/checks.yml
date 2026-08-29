@@ -141,6 +141,9 @@ jobs:
                 crates/xtask/src/install.rs)
                   add_jobs workspace aur_bin aur_git flatpak nix rpm
                   ;;
+                crates/xtask/src/rpm.rs)
+                  add_jobs rpm
+                  ;;
                 crates/xtask/src/verify.rs)
                   add_jobs workspace
                   ;;
