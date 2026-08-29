@@ -2306,11 +2306,13 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player-equalizer-bands {
+  min-width: 0;
   min-height: 0;
 }
 
 scale.fullscreen-player-equalizer-scale {
   min-width: 0;
+  min-height: 0;
   padding: 0;
 }
 

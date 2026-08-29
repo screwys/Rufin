@@ -328,6 +328,17 @@ pub fn build(
     app_content_overlay.set_child(Some(&app_content_stack));
     app_content_overlay.add_overlay(&fullscreen_player.root);
     app_content_overlay.set_measure_overlay(&fullscreen_player.root, false);
+    let fullscreen_overlay = fullscreen_player.root.clone();
+    app_content_overlay.connect_get_child_position(move |overlay, child| {
+        if child != &fullscreen_overlay {
+            return None;
+        }
+        // The main child already has this layout pass's allocation; the overlay's cached size may
+        // still describe the preceding startup pass.
+        let content = overlay.child()?;
+        let (width, height) = (content.width(), content.height());
+        (width > 0 && height > 0).then(|| gtk::gdk::Rectangle::new(0, 0, width, height))
+    });
 
     app_root.append(&app_content_overlay);
     app_root.append(&player_controls.root);
