@@ -16,7 +16,8 @@ body:
       label: Rufin version
       description: You can check which version you are running from Main Menu/About Rufin
       options:
-        - 0.13.1 (latest)
+        - 0.13.1 (latest release)
+        - main (development)
         - 0.13.0
         - 0.12.5
         - 0.12.0

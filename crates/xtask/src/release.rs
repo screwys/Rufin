@@ -12,6 +12,8 @@ use crate::process::{
 
 const FLATHUB_MANIFEST: &str = "packaging/flatpak/io.github.screwys.Rufin.flathub.json";
 const RPM_SPEC: &str = "packaging/rpm/rufin.spec";
+const LATEST_RELEASE_SUFFIX: &str = " (latest release)";
+const DEVELOPMENT_VERSION: &str = "main (development)";
 
 pub(crate) fn run(mut args: Vec<String>) -> Result<()> {
     if args.is_empty() {
@@ -1068,7 +1070,7 @@ fn update_issue_template_versions_in(input: &str, version: &str) -> Result<Strin
             .trim()
             .strip_prefix("- ")
             .unwrap_or_default()
-            .trim_end_matches(" (latest)");
+            .trim_end_matches(LATEST_RELEASE_SUFFIX);
         if value != version && is_semverish(value) && !versions.iter().any(|seen| seen == value) {
             versions.push(value.to_owned());
             if versions.len() == 6 {
@@ -1082,13 +1084,18 @@ fn update_issue_template_versions_in(input: &str, version: &str) -> Result<Strin
         output.push_str(line);
         output.push('\n');
     }
-    for entry in versions {
+    for (index, entry) in versions.into_iter().enumerate() {
         output.push_str("        - ");
         output.push_str(&entry);
         if entry == version {
-            output.push_str(" (latest)");
+            output.push_str(LATEST_RELEASE_SUFFIX);
         }
         output.push('\n');
+        if index == 0 {
+            output.push_str("        - ");
+            output.push_str(DEVELOPMENT_VERSION);
+            output.push('\n');
+        }
     }
     for line in &lines[end..] {
         output.push_str(line);
