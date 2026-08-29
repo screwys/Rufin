@@ -26,7 +26,7 @@ pub use activity::{
     CalendarActivityPeriod, CalendarActivitySummary, ListenDeliveryTarget, ListenWrite,
     PendingListenDelivery,
 };
-pub use artwork::LocalAlbumArtworkInput;
+pub use artwork::{LocalAlbumArtworkInput, RepresentativeArtworkScope};
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,

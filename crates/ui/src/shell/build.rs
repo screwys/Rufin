@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
@@ -412,11 +411,6 @@ pub fn build(
     operation_feedback_action.set_valign(gtk::Align::Center);
     operation_feedback_action.set_visible(false);
     operation_feedback.append(&operation_feedback_action);
-    let operation_feedback_close = gtk::Button::from_icon_name("rufin-window-close-symbolic");
-    operation_feedback_close.add_css_class("flat");
-    operation_feedback_close.set_valign(gtk::Align::Center);
-    operation_feedback_close.set_tooltip_text(Some(&tr("Close")));
-    operation_feedback.append(&operation_feedback_close);
     app_root_overlay.add_overlay(&operation_feedback);
     app_root_overlay.set_measure_overlay(&operation_feedback, false);
     app_root_overlay.add_overlay(&startup_loading_host);
@@ -453,7 +447,6 @@ pub fn build(
         operation_feedback_title,
         operation_feedback_subtitle,
         operation_feedback_action,
-        operation_feedback_close,
         root_stack,
         app_root_overlay,
         app_content_stack,
@@ -531,17 +524,6 @@ pub fn build(
     });
 
     shell.connect_operation_feedback();
-    {
-        let release_updates = Arc::clone(&shell.products.release_updates);
-        let was_active = Cell::new(shell.chrome.window.is_active());
-        shell.chrome.window.connect_is_active_notify(move |window| {
-            let active = window.is_active();
-            let previous = was_active.replace(active);
-            if active && !previous {
-                release_updates.check();
-            }
-        });
-    }
     let normal_header = normal_sidebar_header(
         &shell,
         &shell.chrome.window_controls.start_width_reservation(),

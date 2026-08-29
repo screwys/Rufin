@@ -419,8 +419,8 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let track_object_id=sqlx::query_scalar::<_,Option<String>>("SELECT track_object_id FROM local_access_files WHERE source_key=?1 AND local_access_file_key=?2")
-            .bind(source).bind(key).fetch_optional(&mut *transaction).await?.flatten();
+        let removed_access=sqlx::query_as::<_,(Option<String>,String)>("SELECT track_object_id,media_uri FROM local_access_files WHERE source_key=?1 AND local_access_file_key=?2")
+            .bind(source).bind(key).fetch_optional(&mut *transaction).await?;
         let removed = sqlx::query(
             "DELETE FROM local_access_files WHERE source_key=?1 AND local_access_file_key=?2",
         )
@@ -430,6 +430,23 @@ impl Database {
         .await?
         .rows_affected()
             == 1;
+        let track_object_id = removed_access
+            .as_ref()
+            .and_then(|(track_object_id, _)| track_object_id.as_deref());
+        if removed
+            && let Some((track_object_id, removed_media_uri)) =
+                removed_access
+                    .as_ref()
+                    .and_then(|(track_object_id, media_uri)| {
+                        track_object_id.as_deref().map(|track| (track, media_uri))
+                    })
+        {
+            let replacement=sqlx::query_scalar::<_,Option<String>>("SELECT COALESCE((SELECT access.media_uri FROM local_access_files access WHERE access.source_key=?1 AND access.track_object_id=?2 ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),(SELECT track.media_uri FROM tracks track WHERE track.source_key=?1 AND track.object_id=?2))")
+                .bind(source).bind(track_object_id).fetch_one(&mut *transaction).await?;
+            sqlx::query("UPDATE queue_occurrences SET fallback_media_uri=?4 WHERE source_key=?1 AND track_object_id=?2 AND fallback_media_uri=?3")
+                .bind(source).bind(track_object_id).bind(removed_media_uri).bind(replacement)
+                .execute(&mut *transaction).await?;
+        }
         if let Some(track_object_id) = track_object_id
             && let Some((track, album)) =
                 sqlx::query_as::<_, (crate::TrackKey, Option<crate::AlbumKey>)>(

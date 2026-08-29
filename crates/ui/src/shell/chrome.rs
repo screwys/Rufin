@@ -36,7 +36,6 @@ pub(crate) struct WindowChrome {
     pub(crate) operation_feedback_title: gtk::Label,
     pub(crate) operation_feedback_subtitle: gtk::Label,
     pub(crate) operation_feedback_action: gtk::Button,
-    pub(crate) operation_feedback_close: gtk::Button,
     pub(super) root_stack: gtk::Stack,
     pub(crate) app_root_overlay: gtk::Overlay,
     pub(crate) app_content_stack: gtk::Stack,

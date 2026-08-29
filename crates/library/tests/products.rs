@@ -646,7 +646,7 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
 }
 
 #[tokio::test]
-async fn download_access_coexists_with_and_precedes_mapping_access() {
+async fn removed_local_access_reconciles_the_exact_queue_fallback() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture
@@ -696,6 +696,16 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
         )
         .await
         .expect("download access");
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET media_uri=NULL WHERE track_key=?1")
+        .bind(track.track_key)
+        .execute(&mut raw)
+        .await
+        .expect("make provider resolve the source stream");
+    sqlx::query("INSERT INTO queue_occurrences(source_key,object_id,position,traversal_position,provenance_kind,track_key,track_object_id,fallback_media_uri) VALUES(?1,'download-removal',0,0,'manual',?2,?3,'file:///validated/download.flac')")
+        .bind(fixture.source).bind(track.track_key).bind(&track.object_id)
+        .execute(&mut raw).await.expect("persist downloaded Queue fallback");
+    drop(raw);
 
     let preferred = fixture
         .database
@@ -739,6 +749,18 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
         .expect("mapping remains");
     assert_eq!(fallback.local_access_file_key, mapping);
     assert_eq!(fallback.origin, LocalAccessOrigin::Mapping);
+    let mut raw = connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT fallback_media_uri FROM queue_occurrences WHERE source_key=?1 AND object_id='download-removal'",
+        )
+        .bind(fixture.source)
+        .fetch_one(&mut raw)
+        .await
+        .expect("mapped Queue fallback"),
+        Some("file:///validated/mapping.flac".to_string())
+    );
+    drop(raw);
     assert!(
         !fixture
             .database
@@ -747,6 +769,20 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
             .expect("badge after Download deletion")[0]
             .is_downloaded
     );
+    assert!(
+        fixture
+            .database
+            .remove_local_access(fixture.source, mapping)
+            .await
+            .expect("remove mapping access")
+    );
+    let media = fixture
+        .database
+        .queue_media_for_occurrence(fixture.source, "download-removal")
+        .await
+        .expect("resolve provider Queue media")
+        .expect("provider Queue media");
+    assert_eq!(media.media_uri, None);
 }
 
 #[tokio::test]
