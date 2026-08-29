@@ -6,8 +6,9 @@ use gtk::glib;
 use gtk::prelude::*;
 use localization::{msgid, tr};
 use lyrics::{
-    JapaneseReadingSegment, LyricsAgentRole, LyricsCue, LyricsCueLine, LyricsDocument, LyricsLine,
-    japanese_reading_for_language_options,
+    JapaneseReading, JapaneseReadingSegment, LyricsAgentRole, LyricsCue, LyricsCueLine,
+    LyricsDocument, LyricsLine, japanese_reading_for_language_options,
+    japanese_reading_from_romanization,
 };
 
 use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
@@ -466,6 +467,7 @@ impl LyricsPane {
             self.append_document_rows(
                 current_lyrics,
                 LyricsRowTrack::Primary,
+                pronunciation,
                 show_furigana,
                 show_romanization && pronunciation.is_none(),
                 word_by_word_highlighting,
@@ -478,6 +480,7 @@ impl LyricsPane {
                 self.append_document_rows(
                     pronunciation,
                     LyricsRowTrack::Pronunciation,
+                    None,
                     false,
                     false,
                     word_by_word_highlighting,
@@ -531,6 +534,7 @@ impl LyricsPane {
         &self,
         document: &LyricsDocument,
         track: LyricsRowTrack,
+        pronunciation: Option<&LyricsDocument>,
         show_furigana: bool,
         show_romanization: bool,
         word_by_word_highlighting: bool,
@@ -551,18 +555,30 @@ impl LyricsPane {
             content.set_hexpand(true);
             content.set_halign(gtk::Align::Fill);
             let mut cue_highlights = Vec::new();
-            let reading = (show_furigana || show_romanization)
-                .then(|| {
-                    japanese_reading_for_language_options(
-                        &line.text,
-                        reading_language,
-                        show_furigana,
-                        show_romanization,
-                    )
-                })
+            let pronunciation_line = show_furigana
+                .then(|| pronunciation_line_for(line, pronunciation))
                 .flatten();
+            let reading = pronunciation_line
+                .and_then(|pronunciation| {
+                    japanese_reading_from_romanization(&line.text, &pronunciation.text)
+                })
+                .or_else(|| {
+                    (show_furigana || show_romanization)
+                        .then(|| {
+                            japanese_reading_for_language_options(
+                                &line.text,
+                                reading_language,
+                                show_furigana,
+                                show_romanization,
+                            )
+                        })
+                        .flatten()
+                });
             if word_by_word_highlighting && !line.cue_lines.is_empty() {
                 for cue_line in &line.cue_lines {
+                    let supplied_cue_reading = pronunciation_line.and_then(|pronunciation| {
+                        japanese_reading_from_romanization(&cue_line.text, &pronunciation.text)
+                    });
                     let cue_part = gtk::Box::new(gtk::Orientation::Vertical, 0);
                     if let Some(agent) = cue_line
                         .agent_id
@@ -620,6 +636,11 @@ impl LyricsPane {
                                 show_furigana,
                                 show_romanization,
                                 reading_language,
+                                supplied_reading_segments(
+                                    supplied_cue_reading.as_ref(),
+                                    cue.byte_start,
+                                    cue.byte_end_exclusive,
+                                ),
                             );
                             widget.add_css_class("lyrics-cue");
                             cue_line_widget.append(&widget);
@@ -864,8 +885,57 @@ fn ruby_line(segments: &[JapaneseReadingSegment]) -> WrappingLine {
     line
 }
 
+fn pronunciation_line_for<'a>(
+    line: &LyricsLine,
+    pronunciation: Option<&'a LyricsDocument>,
+) -> Option<&'a LyricsLine> {
+    let start_millis = line.start_millis?;
+    pronunciation?
+        .lines
+        .iter()
+        .find(|candidate| candidate.start_millis == Some(start_millis))
+}
+
+fn reading_segments_for_byte_range<'a>(
+    segments: &'a [JapaneseReadingSegment],
+    byte_start: usize,
+    byte_end_exclusive: usize,
+) -> Option<&'a [JapaneseReadingSegment]> {
+    if byte_start >= byte_end_exclusive {
+        return None;
+    }
+    let mut cursor = 0usize;
+    let mut segment_start = None;
+    for (index, segment) in segments.iter().enumerate() {
+        if cursor == byte_start {
+            segment_start = Some(index);
+        } else if cursor > byte_start && segment_start.is_none() {
+            return None;
+        }
+        let segment_end = cursor.checked_add(segment.surface.len())?;
+        if segment_end == byte_end_exclusive {
+            return segment_start.map(|start| &segments[start..=index]);
+        }
+        if segment_end > byte_end_exclusive {
+            return None;
+        }
+        cursor = segment_end;
+    }
+    None
+}
+
+fn supplied_reading_segments<'a>(
+    reading: Option<&'a JapaneseReading>,
+    byte_start: usize,
+    byte_end_exclusive: usize,
+) -> Option<&'a [JapaneseReadingSegment]> {
+    reading.and_then(|reading| {
+        reading_segments_for_byte_range(&reading.segments, byte_start, byte_end_exclusive)
+    })
+}
+
 fn lyrics_reading_unit(text: &str, show_furigana: bool, language: Option<&str>) -> gtk::Widget {
-    lyrics_karaoke_unit(text, show_furigana, false, language).0
+    lyrics_karaoke_unit(text, show_furigana, false, language, None).0
 }
 
 fn lyrics_karaoke_unit(
@@ -873,16 +943,19 @@ fn lyrics_karaoke_unit(
     show_furigana: bool,
     show_romanization: bool,
     language: Option<&str>,
+    supplied_segments: Option<&[JapaneseReadingSegment]>,
 ) -> (gtk::Widget, Option<String>) {
-    let reading = (show_furigana || show_romanization)
+    let reading = (show_romanization || show_furigana && supplied_segments.is_none())
         .then(|| {
             japanese_reading_for_language_options(text, language, show_furigana, show_romanization)
         })
         .flatten();
-    let widget = if show_furigana && let Some(reading) = reading.as_ref() {
+    let segments =
+        supplied_segments.or_else(|| reading.as_ref().map(|reading| reading.segments.as_slice()));
+    let widget = if show_furigana && let Some(segments) = segments {
         let phrase = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         phrase.set_valign(gtk::Align::Baseline);
-        for segment in &reading.segments {
+        for segment in segments {
             phrase.append(&ruby_segment(segment));
         }
         phrase.upcast()
@@ -1243,9 +1316,12 @@ mod tests {
         LyricsFollowScrollPause, active_lyrics_line_index, centered_scroll_target,
         karaoke_cue_progress, karaoke_rows_need_full_sync, lyrics_follow_scroll_pause_state,
         lyrics_follow_scroll_target, lyrics_scroll_animation_millis, next_lyrics_highlight_after,
-        next_lyrics_line_start_after, should_highlight_all_lyrics_lines,
+        next_lyrics_line_start_after, reading_segments_for_byte_range,
+        should_highlight_all_lyrics_lines,
     };
-    use lyrics::{LyricsCue, LyricsCueLine, LyricsLine as LyricLine};
+    use lyrics::{
+        LyricsCue, LyricsCueLine, LyricsLine as LyricLine, japanese_reading_from_romanization,
+    };
     use std::time::{Duration, Instant};
 
     #[test]
@@ -1397,6 +1473,21 @@ mod tests {
             cues: vec![cue],
         }];
         assert_eq!(next_lyrics_highlight_after(&[line], 1_000), Some(1_016));
+    }
+
+    #[test]
+    fn karaoke_cue_uses_the_supplied_kanji_reading() {
+        let reading =
+            japanese_reading_from_romanization("あの娘たぶんいいひと", "ano ko tabun ii hito")
+                .expect("aligned reading");
+        let start = "あの".len();
+        let segments =
+            reading_segments_for_byte_range(&reading.segments, start, start + "娘".len())
+                .expect("cue reading");
+
+        assert_eq!(segments.len(), 1);
+        assert_eq!(segments[0].surface, "娘");
+        assert_eq!(segments[0].furigana.as_deref(), Some("こ"));
     }
 
     #[test]
