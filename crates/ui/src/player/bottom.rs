@@ -35,7 +35,7 @@ use crate::routes::collection_context::{
     install_current_track_context_menu, present_current_track_context_menu,
 };
 use crate::shell::Shell;
-use crate::shell::actions::{MORE_ICON, icon_button_without_tooltip, set_active_class};
+use crate::shell::actions::{icon_button_without_tooltip, set_active_class};
 use crate::shell::cover::ArtworkTile;
 use crate::shell::cover::MEDIUM_COVER_SIZE;
 
@@ -63,6 +63,7 @@ const BOTTOM_PLAYER_WAVEFORM_HEIGHT: i32 = 32;
 const BOTTOM_PLAYER_ACTION_BUTTON_SIZE: i32 = 34;
 const BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE: i32 = 18;
 const BOTTOM_PLAYER_TITLE_MENU_GAP: i32 = 0;
+const BOTTOM_PLAYER_TITLE_MENU_ICON: &str = "rufin-player-more-symbolic";
 const BOTTOM_PLAYER_IDENTITY_HEIGHT: i32 = 58;
 const BOTTOM_PLAYER_TITLE_ROW_HEIGHT: i32 = 20;
 const BOTTOM_PLAYER_META_ROW_HEIGHT: i32 = 18;
@@ -966,7 +967,7 @@ fn build_now_playing_controls() -> NowPlayingControls {
     identity.set_halign(gtk::Align::Fill);
     identity.set_valign(gtk::Align::Center);
     let title = player_link("player-title");
-    let menu_button = icon_button_without_tooltip(MORE_ICON, "More actions");
+    let menu_button = icon_button_without_tooltip(BOTTOM_PLAYER_TITLE_MENU_ICON, "More actions");
     menu_button.add_css_class("player-title-menu-button");
     menu_button.set_size_request(
         BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE,

@@ -300,9 +300,14 @@ impl LyricsPane {
         body.set_margin_end(WINDOW_CHROME_MARGIN_END);
         body.add_css_class("lyrics-lines");
         scroller.set_child(Some(&body));
-        root.set_child(Some(&scroller));
+
+        let layout = gtk::Box::new(gtk::Orientation::Vertical, 0);
+        layout.set_hexpand(true);
+        layout.set_vexpand(true);
+        layout.append(&scroller);
+        layout.append(&controls);
+        root.set_child(Some(&layout));
         root.add_overlay(&top_controls);
-        root.add_overlay(&controls);
 
         let pane = Self {
             root,

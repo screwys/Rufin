@@ -31,7 +31,8 @@ const FULLSCREEN_PLAYER_CLOSE_TRANSITION_MS: u32 = 320;
 const FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE: i32 = 320;
 const FULLSCREEN_PLAYER_MIN_COVER_SIZE: i32 = 140;
 const FULLSCREEN_PLAYER_MAX_COVER_SIZE: i32 = 320;
-const FULLSCREEN_PLAYER_HORIZONTAL_RESERVED: i32 = 186;
+const FULLSCREEN_PLAYER_FALLBACK_HORIZONTAL_RESERVED: i32 = 186;
+const FULLSCREEN_PLAYER_HERO_SPACING: i32 = 18;
 const FULLSCREEN_PLAYER_VERTICAL_RESERVED: i32 = 430;
 const FULLSCREEN_PLAYER_HERO_MIN_WINDOW_HEIGHT: i32 = 560;
 const FULLSCREEN_ICON_SIZE: i32 = 18;
@@ -82,6 +83,7 @@ pub(crate) struct FullscreenPlayerParts {
     pub(crate) close_button: gtk::Button,
     pub(crate) inline_close_button: gtk::Button,
     hero: gtk::Box,
+    hero_content: gtk::Box,
     cover: ArtworkTile,
     title: gtk::Label,
     artist: gtk::Label,
@@ -116,8 +118,10 @@ struct EqualizerPanel {
 }
 
 pub(crate) fn build_fullscreen_player(
-    hero_window_controls: &impl IsA<gtk::Widget>,
-    inline_window_controls: &impl IsA<gtk::Widget>,
+    hero_start_controls: &impl IsA<gtk::Widget>,
+    hero_end_controls: &impl IsA<gtk::Widget>,
+    inline_start_controls: &impl IsA<gtk::Widget>,
+    inline_end_controls: &impl IsA<gtk::Widget>,
     visualizer_area: &gtk::DrawingArea,
 ) -> FullscreenPlayerParts {
     let root = gtk::Overlay::new();
@@ -138,19 +142,25 @@ pub(crate) fn build_fullscreen_player(
     body.set_hexpand(true);
     body.set_vexpand(true);
 
-    let hero = gtk::Box::new(gtk::Orientation::Horizontal, 18);
+    let hero = gtk::Box::new(gtk::Orientation::Horizontal, FULLSCREEN_PLAYER_HERO_SPACING);
     hero.add_css_class("fullscreen-player-hero");
     hero.set_halign(gtk::Align::Fill);
     hero.set_valign(gtk::Align::Center);
     hero.set_hexpand(true);
     hero.set_width_request(1);
-    hero.append(hero_window_controls);
+    hero.append(hero_start_controls);
     hero.append(&close_button);
+
+    let hero_content = gtk::Box::new(gtk::Orientation::Horizontal, FULLSCREEN_PLAYER_HERO_SPACING);
+    hero_content.set_width_request(1);
+    hero_content.set_hexpand(true);
+    hero_content.set_halign(gtk::Align::Fill);
+    hero_content.set_valign(gtk::Align::Center);
 
     let cover = ArtworkTile::new(FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE);
     cover.area.add_css_class("fullscreen-player-cover");
     cover.area.set_halign(gtk::Align::End);
-    hero.append(&cover.area);
+    hero_content.append(&cover.area);
 
     let details = gtk::Box::new(gtk::Orientation::Vertical, 5);
     details.add_css_class("fullscreen-player-details");
@@ -172,7 +182,9 @@ pub(crate) fn build_fullscreen_player(
     details.append(&artist);
     details.append(&album);
     details.append(&meta);
-    hero.append(&details);
+    hero_content.append(&details);
+    hero.append(&hero_content);
+    hero.append(hero_end_controls);
     body.append(&hero);
 
     let stack = adw::ViewStack::builder()
@@ -215,9 +227,10 @@ pub(crate) fn build_fullscreen_player(
     inline_close_button.add_css_class("fullscreen-player-close-button");
     inline_close_button.set_visible(false);
     let inline_start = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    inline_start.append(inline_window_controls);
+    inline_start.append(inline_start_controls);
     inline_start.append(&inline_close_button);
     switcher_bar.set_start_widget(Some(&inline_start));
+    switcher_bar.set_end_widget(Some(inline_end_controls));
     let (switcher, tabs) = fullscreen_player_switcher(&stack);
     switcher_bar.set_center_widget(Some(&switcher));
     body.append(&switcher_bar);
@@ -234,6 +247,7 @@ pub(crate) fn build_fullscreen_player(
         close_button,
         inline_close_button,
         hero,
+        hero_content,
         cover,
         title,
         artist,
@@ -1252,10 +1266,16 @@ impl Shell {
     }
 
     fn fullscreen_player_cover_size(&self) -> i32 {
-        let width = positive_min([
+        let surface_width = positive_min([
             self.chrome.app_content_stack.width(),
             self.chrome.window.width(),
         ]);
+        let allocated_content_width = self.player_view.fullscreen_player.hero_content.width();
+        let content_width = if allocated_content_width > 1 {
+            allocated_content_width
+        } else {
+            fullscreen_hero_content_fallback(surface_width)
+        };
         let height = positive_min([
             self.chrome.app_content_stack.height(),
             self.chrome
@@ -1263,7 +1283,7 @@ impl Shell {
                 .height()
                 .saturating_sub(BOTTOM_PLAYER_HEIGHT),
         ]);
-        fullscreen_artwork_size_for(width, height)
+        fullscreen_artwork_size_for(content_width, height)
     }
 
     pub(crate) fn clear_fullscreen_player_cover(self: &Rc<Self>) {
@@ -1470,8 +1490,17 @@ fn audio_source_label_from_format(value: &str) -> Option<String> {
     Some(normalized)
 }
 
-fn fullscreen_artwork_size_for(width: i32, height: i32) -> i32 {
-    let width_limit = (width - FULLSCREEN_PLAYER_HORIZONTAL_RESERVED).max(1);
+fn fullscreen_hero_content_fallback(surface_width: i32) -> i32 {
+    surface_width
+        .saturating_sub(FULLSCREEN_PLAYER_FALLBACK_HORIZONTAL_RESERVED)
+        .max(1)
+}
+
+fn fullscreen_artwork_size_for(content_width: i32, height: i32) -> i32 {
+    let width_limit = content_width
+        .saturating_sub(FULLSCREEN_PLAYER_HERO_SPACING)
+        .max(1)
+        / 2;
     let height_limit = (height - FULLSCREEN_PLAYER_VERTICAL_RESERVED).max(1);
     width_limit.min(height_limit).clamp(
         FULLSCREEN_PLAYER_MIN_COVER_SIZE,
@@ -1485,6 +1514,28 @@ fn fullscreen_show_hero_for(height: i32) -> bool {
 
 fn fullscreen_equalizer_compact_for(width: i32, height: i32) -> bool {
     width < MIN_USEFUL_MAIN_WIDTH || !fullscreen_show_hero_for(height)
+}
+
+#[cfg(test)]
+mod layout_tests {
+    use super::*;
+
+    #[test]
+    fn fullscreen_artwork_shares_narrow_hero_width_with_metadata() {
+        assert_eq!(fullscreen_hero_content_fallback(450), 264);
+        assert_eq!(
+            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(450), 900),
+            FULLSCREEN_PLAYER_MIN_COVER_SIZE
+        );
+        assert_eq!(
+            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(900), 700),
+            270
+        );
+        assert_eq!(
+            fullscreen_artwork_size_for(fullscreen_hero_content_fallback(1_440), 900),
+            FULLSCREEN_PLAYER_MAX_COVER_SIZE
+        );
+    }
 }
 
 #[cfg(test)]

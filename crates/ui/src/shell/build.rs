@@ -285,11 +285,15 @@ pub fn build(
     content_chrome
         .root
         .set_measure_overlay(&tiny_nav_button, false);
-    let fullscreen_hero_window_controls = window_controls.start_width_reservation();
-    let fullscreen_inline_window_controls = window_controls.start_width_reservation();
+    let fullscreen_hero_start_controls = window_controls.start_width_reservation();
+    let fullscreen_hero_end_controls = window_controls.end_width_reservation();
+    let fullscreen_inline_start_controls = window_controls.start_width_reservation();
+    let fullscreen_inline_end_controls = window_controls.end_width_reservation();
     let fullscreen_player = build_fullscreen_player(
-        &fullscreen_hero_window_controls,
-        &fullscreen_inline_window_controls,
+        &fullscreen_hero_start_controls,
+        &fullscreen_hero_end_controls,
+        &fullscreen_inline_start_controls,
+        &fullscreen_inline_end_controls,
         &visualizer.fullscreen_area,
     );
     let player_controls = build_bottom_player();

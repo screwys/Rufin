@@ -35,24 +35,20 @@ const QUEUE_SIDEBAR_END_INSET: i32 = WINDOW_CHROME_MARGIN_END + QUEUE_OVERLAY_SC
 const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
 const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
-const QUEUE_FULLSCREEN_TITLE_COLUMN_WIDTH: i32 = 320;
-const QUEUE_FULLSCREEN_ALBUM_COLUMN_WIDTH: i32 = 260;
-const QUEUE_FULLSCREEN_TITLE_MIN_WIDTH: i32 = 160;
-const QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH: i32 = 140;
+const QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH: i32 = 572;
+const QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH: i32 = 652;
 const QUEUE_DURATION_COLUMN_WIDTH: i32 = 82;
 const QUEUE_YEAR_COLUMN_WIDTH: i32 = 64;
 const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct QueueFullscreenColumnWidths {
-    title: i32,
-    album: i32,
-    show_album: bool,
-    show_year: bool,
+enum QueueFullscreenColumnMode {
+    TitleOnly,
+    Album,
+    AlbumAndYear,
 }
 
 struct QueueFullscreenColumnWidgets {
-    title: gtk::Widget,
     album: gtk::Widget,
     year: gtk::Widget,
 }
@@ -74,33 +70,14 @@ impl QueueDragBinding {
     fn occurrence(&self) -> Option<OccurrenceId> {
         self.occurrence.borrow().clone()
     }
-
-    fn reorder_request(
-        &self,
-        occurrence: OccurrenceId,
-        after: bool,
-    ) -> Option<QueueReorderRequest> {
-        let target = self.occurrence()?;
-        if occurrence == target {
-            return None;
-        }
-        Some(QueueReorderRequest {
-            occurrence,
-            target: if after {
-                QueueReorderTarget::After(target)
-            } else {
-                QueueReorderTarget::Before(target)
-            },
-        })
-    }
 }
 
 impl QueueFullscreenColumnWidgets {
-    fn apply(&self, widths: QueueFullscreenColumnWidths) {
-        self.title.set_width_request(widths.title);
-        self.album.set_width_request(widths.album.max(1));
-        self.album.set_visible(widths.show_album);
-        self.year.set_visible(widths.show_year);
+    fn apply(&self, mode: QueueFullscreenColumnMode) {
+        self.album
+            .set_visible(mode != QueueFullscreenColumnMode::TitleOnly);
+        self.year
+            .set_visible(mode == QueueFullscreenColumnMode::AlbumAndYear);
     }
 }
 
@@ -244,6 +221,31 @@ impl QueueState {
             }
         }
         true
+    }
+
+    fn reorder_request(
+        &self,
+        occurrence: OccurrenceId,
+        target: OccurrenceId,
+    ) -> Option<QueueReorderRequest> {
+        let rows = self.rows.borrow();
+        let occurrence_index = rows
+            .iter()
+            .position(|row| row.object_id == occurrence.as_str())?;
+        let target_index = rows
+            .iter()
+            .position(|row| row.object_id == target.as_str())?;
+        if occurrence_index == target_index {
+            return None;
+        }
+        Some(QueueReorderRequest {
+            occurrence,
+            target: if occurrence_index < target_index {
+                QueueReorderTarget::After(target)
+            } else {
+                QueueReorderTarget::Before(target)
+            },
+        })
     }
 
     fn invalidate(&self) {
@@ -864,19 +866,22 @@ fn queue_row(
     if reorderable {
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         let queue = shell.products.playback.queue.clone();
-        let root_for_drop = root.downgrade();
+        let drop_shell = Rc::downgrade(shell);
         let target_binding = Rc::clone(&drag_binding);
-        drop.connect_drop(move |_, value, _, y| {
+        drop.connect_drop(move |_, value, _, _| {
             let Ok(object_id) = value.get::<String>() else {
                 return false;
             };
-            let Some(root) = root_for_drop.upgrade() else {
+            let Some(shell) = drop_shell.upgrade() else {
                 return false;
             };
-            let Some(request) = target_binding.reorder_request(
-                OccurrenceId::new(object_id),
-                y > f64::from(root.height()) / 2.0,
-            ) else {
+            let Some(target) = target_binding.occurrence() else {
+                return false;
+            };
+            let Some(state) = shell.selected_queue() else {
+                return false;
+            };
+            let Some(request) = state.reorder_request(OccurrenceId::new(object_id), target) else {
                 return false;
             };
             queue.reorder(request);
@@ -999,6 +1004,8 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
 
     let identity = gtk::Box::new(gtk::Orientation::Vertical, 2);
     identity.set_width_request(1);
+    identity.set_hexpand(true);
+    identity.set_halign(gtk::Align::Fill);
     identity.set_valign(gtk::Align::Center);
     let title = gtk::Label::new(Some(&row.title));
     title.add_css_class("queue-title");
@@ -1014,6 +1021,7 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
     identity.append(&title);
     identity.append(&artist);
     let album = fullscreen_queue_text_cell(&row.album);
+    let text_columns = fullscreen_queue_text_columns(&identity, &album);
     let duration = fullscreen_queue_fixed_cell(
         &row.duration_millis
             .map(|duration| crate::format_duration((duration.max(0) / 1_000) as u32))
@@ -1024,8 +1032,7 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
         &row.year.map(|year| year.to_string()).unwrap_or_default(),
         QUEUE_YEAR_COLUMN_WIDTH,
     );
-    columns.append(&identity);
-    columns.append(&album);
+    columns.append(&text_columns);
     columns.append(&duration);
     columns.append(&year);
 
@@ -1053,7 +1060,6 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
     fullscreen_queue_column_owner(
         &columns,
         QueueFullscreenColumnWidgets {
-            title: identity.upcast(),
             album: album.upcast(),
             year: year.upcast(),
         },
@@ -1087,8 +1093,27 @@ fn fullscreen_queue_text_cell(text: &str) -> gtk::Label {
     label.add_css_class("muted");
     label.set_xalign(0.0);
     label.set_width_request(1);
+    label.set_hexpand(true);
+    label.set_halign(gtk::Align::Fill);
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     label
+}
+
+fn fullscreen_queue_text_columns(
+    title: &impl IsA<gtk::Widget>,
+    album: &impl IsA<gtk::Widget>,
+) -> gtk::Box {
+    let columns = gtk::Box::new(
+        gtk::Orientation::Horizontal,
+        QUEUE_FULLSCREEN_COLUMN_SPACING,
+    );
+    columns.set_homogeneous(true);
+    columns.set_width_request(1);
+    columns.set_hexpand(true);
+    columns.set_halign(gtk::Align::Fill);
+    columns.append(title);
+    columns.append(album);
+    columns
 }
 
 fn fullscreen_queue_fixed_cell(text: &str, width: i32) -> gtk::Label {
@@ -1103,80 +1128,25 @@ fn fullscreen_queue_column_owner(
     root: &gtk::Box,
     columns: QueueFullscreenColumnWidgets,
 ) -> gtk::Widget {
-    let initial = fullscreen_queue_column_widths(1);
+    let initial = fullscreen_queue_column_mode(1);
     columns.apply(initial);
     let last = Cell::new(initial);
     allocation_owner(root, move |width, _| {
-        let widths = fullscreen_queue_column_widths(width.max(1));
-        if last.replace(widths) != widths {
-            columns.apply(widths);
+        let mode = fullscreen_queue_column_mode(width.max(1));
+        if last.replace(mode) != mode {
+            columns.apply(mode);
         }
     })
     .upcast()
 }
 
-fn fullscreen_queue_column_widths(available_width: i32) -> QueueFullscreenColumnWidths {
-    let full_fixed = fullscreen_queue_fixed_width(true, true);
-    let full_variable = available_width.saturating_sub(full_fixed);
-    if full_variable >= QUEUE_FULLSCREEN_TITLE_MIN_WIDTH + QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH {
-        return split_queue_text_width(full_variable, true);
-    }
-    let compact_fixed = fullscreen_queue_fixed_width(true, false);
-    let compact_variable = available_width.saturating_sub(compact_fixed);
-    if compact_variable >= QUEUE_FULLSCREEN_TITLE_MIN_WIDTH + QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH {
-        return split_queue_text_width(compact_variable, false);
-    }
-    QueueFullscreenColumnWidths {
-        title: available_width
-            .saturating_sub(fullscreen_queue_fixed_width(false, false))
-            .max(1),
-        album: 0,
-        show_album: false,
-        show_year: false,
-    }
-}
-
-fn fullscreen_queue_fixed_width(show_album: bool, show_year: bool) -> i32 {
-    let columns = 4 + i32::from(show_album) + i32::from(show_year);
-    QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING
-        + QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH
-        + QUEUE_DURATION_COLUMN_WIDTH
-        + QUEUE_FAVORITE_COLUMN_WIDTH
-        + if show_year {
-            QUEUE_YEAR_COLUMN_WIDTH
-        } else {
-            0
-        }
-        + (columns - 1) * QUEUE_FULLSCREEN_COLUMN_SPACING
-}
-
-fn split_queue_text_width(width: i32, show_year: bool) -> QueueFullscreenColumnWidths {
-    let min_total = QUEUE_FULLSCREEN_TITLE_MIN_WIDTH + QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH;
-    if width <= min_total {
-        return QueueFullscreenColumnWidths {
-            title: QUEUE_FULLSCREEN_TITLE_MIN_WIDTH,
-            album: QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH,
-            show_album: true,
-            show_year,
-        };
-    }
-    let base_total = QUEUE_FULLSCREEN_TITLE_COLUMN_WIDTH + QUEUE_FULLSCREEN_ALBUM_COLUMN_WIDTH;
-    if width <= base_total {
-        let title = ((i64::from(width) * i64::from(QUEUE_FULLSCREEN_TITLE_COLUMN_WIDTH))
-            / i64::from(base_total)) as i32;
-        return QueueFullscreenColumnWidths {
-            title: title.max(QUEUE_FULLSCREEN_TITLE_MIN_WIDTH),
-            album: (width - title).max(QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH),
-            show_album: true,
-            show_year,
-        };
-    }
-    let extra = width - base_total;
-    QueueFullscreenColumnWidths {
-        title: QUEUE_FULLSCREEN_TITLE_COLUMN_WIDTH + extra / 2,
-        album: QUEUE_FULLSCREEN_ALBUM_COLUMN_WIDTH + extra - extra / 2,
-        show_album: true,
-        show_year,
+fn fullscreen_queue_column_mode(available_width: i32) -> QueueFullscreenColumnMode {
+    if available_width >= QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH {
+        QueueFullscreenColumnMode::AlbumAndYear
+    } else if available_width >= QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH {
+        QueueFullscreenColumnMode::Album
+    } else {
+        QueueFullscreenColumnMode::TitleOnly
     }
 }
 
@@ -1209,9 +1179,12 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     let title = gtk::Label::new(Some(&tr("Title").to_uppercase()));
     title.add_css_class("muted");
     title.set_xalign(0.0);
+    title.set_width_request(1);
     let album = gtk::Label::new(Some(&tr("Album").to_uppercase()));
     album.add_css_class("muted");
     album.set_xalign(0.0);
+    album.set_width_request(1);
+    let text_columns = fullscreen_queue_text_columns(&title, &album);
     let duration = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
     duration.add_css_class("muted");
     duration.set_width_request(QUEUE_DURATION_COLUMN_WIDTH);
@@ -1222,15 +1195,13 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     favorite.add_css_class("muted");
     favorite.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
     header.append(&spacer);
-    header.append(&title);
-    header.append(&album);
+    header.append(&text_columns);
     header.append(&duration);
     header.append(&year);
     header.append(&favorite);
     fullscreen_queue_column_owner(
         &header,
         QueueFullscreenColumnWidgets {
-            title: title.upcast(),
             album: album.upcast(),
             year: year.upcast(),
         },
@@ -1369,26 +1340,39 @@ mod tests {
     fn queue_drag_binding_uses_the_current_recycled_row() {
         let binding = QueueDragBinding::default();
         binding.bind(OccurrenceId::new("old-target"));
-        assert_eq!(
-            binding
-                .reorder_request(OccurrenceId::new("dragged"), false)
-                .expect("bound old target")
-                .target,
-            QueueReorderTarget::Before(OccurrenceId::new("old-target"))
-        );
-
+        assert_eq!(binding.occurrence(), Some(OccurrenceId::new("old-target")));
         binding.bind(OccurrenceId::new("new-target"));
-        assert_eq!(
-            binding
-                .reorder_request(OccurrenceId::new("dragged"), true)
-                .expect("bound new target")
-                .target,
-            QueueReorderTarget::After(OccurrenceId::new("new-target"))
-        );
+        assert_eq!(binding.occurrence(), Some(OccurrenceId::new("new-target")));
         binding.clear();
+        assert_eq!(binding.occurrence(), None);
+    }
+
+    #[test]
+    fn queue_drop_direction_follows_the_existing_order() {
+        let state = QueueState::new();
+        let (generation, _) = state.begin();
+        assert!(state.accept(
+            generation,
+            vec![row("one", "One"), row("two", "Two"), row("three", "Three")]
+        ));
+
+        assert_eq!(
+            state
+                .reorder_request(OccurrenceId::new("one"), OccurrenceId::new("two"))
+                .expect("moving down crosses the target")
+                .target,
+            QueueReorderTarget::After(OccurrenceId::new("two"))
+        );
+        assert_eq!(
+            state
+                .reorder_request(OccurrenceId::new("three"), OccurrenceId::new("two"))
+                .expect("moving up crosses the target")
+                .target,
+            QueueReorderTarget::Before(OccurrenceId::new("two"))
+        );
         assert!(
-            binding
-                .reorder_request(OccurrenceId::new("dragged"), false)
+            state
+                .reorder_request(OccurrenceId::new("two"), OccurrenceId::new("two"))
                 .is_none()
         );
     }
@@ -1482,17 +1466,22 @@ mod tests {
     }
 
     #[test]
-    fn fullscreen_queue_columns_never_outgrow_their_allocation() {
-        for available in [320, 542, 900] {
-            let widths = fullscreen_queue_column_widths(available);
-            let used = fullscreen_queue_fixed_width(widths.show_album, widths.show_year)
-                + widths.title
-                + if widths.show_album { widths.album } else { 0 };
-            assert!(used <= available, "{used} > {available}");
-            if widths.show_album {
-                assert!(widths.title >= QUEUE_FULLSCREEN_TITLE_MIN_WIDTH);
-                assert!(widths.album >= QUEUE_FULLSCREEN_ALBUM_MIN_WIDTH);
-            }
-        }
+    fn fullscreen_queue_columns_change_only_at_semantic_breakpoints() {
+        assert_eq!(
+            fullscreen_queue_column_mode(QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH - 1),
+            QueueFullscreenColumnMode::TitleOnly
+        );
+        assert_eq!(
+            fullscreen_queue_column_mode(QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH),
+            QueueFullscreenColumnMode::Album
+        );
+        assert_eq!(
+            fullscreen_queue_column_mode(QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH - 1),
+            QueueFullscreenColumnMode::Album
+        );
+        assert_eq!(
+            fullscreen_queue_column_mode(QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH),
+            QueueFullscreenColumnMode::AlbumAndYear
+        );
     }
 }

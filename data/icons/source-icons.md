@@ -9,3 +9,5 @@ External service icons in `hicolor/64x64/apps` are resized from [Last.fm favicon
 `hicolor/scalable/actions/rufin-audio-radio-symbolic.svg` is based on `audio-radio.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
 
 `hicolor/scalable/actions/rufin-open-menu-symbolic.svg` is based on `open-menu-symbolic.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
+
+`hicolor/scalable/actions/rufin-player-more-symbolic.svg` is based on `overflow-menu.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).

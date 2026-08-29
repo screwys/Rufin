@@ -387,6 +387,7 @@ pub(crate) fn verify_interface_resources() -> Result<(), String> {
         "scalable/actions/rufin-media-skip-backward-symbolic.svg",
         "scalable/actions/rufin-media-skip-forward-symbolic.svg",
         "scalable/actions/rufin-open-menu-symbolic.svg",
+        "scalable/actions/rufin-player-more-symbolic.svg",
         "scalable/actions/rufin-x-office-calendar-symbolic.svg",
         "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
     ] {

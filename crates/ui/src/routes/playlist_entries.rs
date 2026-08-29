@@ -825,27 +825,25 @@ fn install_playlist_entry_drag(
     target.add_controller(drag_source);
 
     let operations = shell.selected_source_operations();
-    let target_widget = target.as_ref().clone();
-    let weak_target = target_widget.downgrade();
     let drop_target = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
-    drop_target.connect_drop(move |_, value, _, y| {
+    drop_target.connect_drop(move |_, value, _, _| {
         let Ok(entry) = value.get::<i64>() else {
             return false;
         };
         let Some(target) = current.borrow().clone() else {
             return false;
         };
-        let Some(widget) = weak_target.upgrade() else {
-            return false;
-        };
         let Some(operations) = operations.as_ref() else {
             return false;
         };
-        let after = y > f64::from(widget.height()) / 2.0;
+        let entry = PlaylistEntryKey::from_raw(entry);
+        if entry == target.playlist_entry_key {
+            return false;
+        }
         operations.move_playlist_entry(
             playlist,
-            PlaylistEntryKey::from_raw(entry),
-            playlist_entry_drop_position(target.position, after),
+            entry,
+            playlist_entry_drop_position(target.position),
         );
         true
     });
@@ -985,8 +983,8 @@ fn playlist_entry_number(position: u32, ready: bool) -> String {
         .unwrap_or_default()
 }
 
-fn playlist_entry_drop_position(target_position: i64, after: bool) -> usize {
-    usize::try_from(target_position.max(0)).unwrap_or_default() + usize::from(after)
+fn playlist_entry_drop_position(target_position: i64) -> usize {
+    usize::try_from(target_position.max(0)).unwrap_or_default()
 }
 
 fn playlist_entry_column_width(field: LibraryField) -> i32 {
@@ -1019,9 +1017,8 @@ mod tests {
     }
 
     #[test]
-    fn duplicate_playlist_occurrences_keep_exact_drag_positions() {
-        assert_eq!(playlist_entry_drop_position(3, false), 3);
-        assert_eq!(playlist_entry_drop_position(3, true), 4);
-        assert_eq!(playlist_entry_drop_position(-1, false), 0);
+    fn playlist_drop_uses_the_crossed_target_position() {
+        assert_eq!(playlist_entry_drop_position(3), 3);
+        assert_eq!(playlist_entry_drop_position(-1), 0);
     }
 }
