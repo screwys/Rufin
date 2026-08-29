@@ -934,8 +934,8 @@ impl QueueCommandPort for PlaybackOwner {
             target: request.target,
         });
     }
-    fn clear(&self) {
-        self.send(SessionCommand::ClearUpcoming);
+    fn clear(&self, include_current: bool) {
+        self.send(SessionCommand::Clear { include_current });
     }
 }
 

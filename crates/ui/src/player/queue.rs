@@ -365,6 +365,11 @@ impl Drop for QueueState {
 }
 
 impl Shell {
+    pub(crate) fn clear_queue(&self) {
+        let include_current = self.settings.current.borrow().clear_queue_includes_current;
+        self.products.playback.queue.clear(include_current);
+    }
+
     pub(crate) fn schedule_queue_panel_render(self: &Rc<Self>) {
         let Some(queue) = self.selected_queue() else {
             return;
@@ -1309,11 +1314,15 @@ pub(crate) fn connect_queue_panel_controls(shell: &Rc<Shell>) {
             }
             sidebar_shell.request_queue_page();
         });
-    let queue = shell.products.playback.queue.clone();
+    let clear_shell = Rc::downgrade(shell);
     shell
         .right_panel
         .queue_clear_button
-        .connect_clicked(move |_| queue.clear());
+        .connect_clicked(move |_| {
+            if let Some(shell) = clear_shell.upgrade() {
+                shell.clear_queue();
+            }
+        });
 }
 
 #[cfg(test)]

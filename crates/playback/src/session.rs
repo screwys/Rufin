@@ -152,7 +152,9 @@ pub enum SessionCommand {
         target: crate::QueueReorderTarget,
     },
     MoveAfterCurrent(OccurrenceId),
-    ClearUpcoming,
+    Clear {
+        include_current: bool,
+    },
     PlayPause,
     Play,
     Pause,
@@ -607,7 +609,7 @@ impl PlaybackSession {
             SessionCommand::MoveAfterCurrent(occurrence) => {
                 Ok(self.move_after_current(&occurrence))
             }
-            SessionCommand::ClearUpcoming => Ok(self.clear_upcoming()),
+            SessionCommand::Clear { include_current } => Ok(self.clear(include_current, sample)),
             SessionCommand::PlayPause => Ok(self.play_pause()),
             SessionCommand::Play => Ok(self.set_playing(true)),
             SessionCommand::Pause => Ok(self.set_playing(false)),
@@ -1130,7 +1132,10 @@ impl PlaybackSession {
         update
     }
 
-    fn clear_upcoming(&mut self) -> SessionUpdate {
+    fn clear(&mut self, include_current: bool, sample: &ClockSample) -> SessionUpdate {
+        if include_current {
+            return self.clear_all(sample);
+        }
         let clears_current = self.current_run.is_none() && self.sequence.selected().is_some();
         let changed = if self.current_run.is_some() {
             self.sequence.clear_upcoming()
@@ -1158,6 +1163,39 @@ impl PlaybackSession {
                 }));
         }
         update
+    }
+
+    fn clear_all(&mut self, sample: &ClockSample) -> SessionUpdate {
+        let had_selected = self.sequence.selected().is_some();
+        let active_run = self.current_run.as_ref().map(|run| run.id);
+        self.pending_replacement = None;
+        self.pending_additive.clear();
+        self.auto_dj_in_flight = None;
+        self.auto_dj_waiting_for_continuation = false;
+
+        let mut effects = Vec::new();
+        if let Some(run) = active_run {
+            effects.push(SessionEffect::Backend(BackendCommand::Stop { run }));
+        }
+        self.finish_current(RunEndReason::Stopped, sample, &mut effects);
+        let changed = self.sequence.clear();
+        self.current_media = None;
+        self.prepared_media = None;
+        self.restored_paused = false;
+        self.next_plan = None;
+        self.buffering_percent = None;
+        if !changed && active_run.is_none() {
+            return SessionUpdate::default();
+        }
+        self.last_error = None;
+        if had_selected && active_run.is_none() {
+            effects.push(SessionEffect::CurrentMediaChanged);
+        }
+        effects.push(self.progress_effect());
+        SessionUpdate {
+            effects,
+            ..SessionUpdate::structural()
+        }
     }
 
     fn play_pause(&mut self) -> SessionUpdate {
@@ -2385,6 +2423,93 @@ mod orchestration_tests {
             cue_end_millis: None,
             artist_links: Vec::new(),
         }
+    }
+
+    fn active_two_track_session() -> PlaybackSession {
+        let source = SourceKey::from_raw(1);
+        let mut sequence = Sequence::new(source);
+        sequence
+            .apply_batch_with_change(
+                Batch::new(vec![
+                    BatchItem::new(TrackKey::from_raw(1), Provenance::Manual),
+                    BatchItem::new(TrackKey::from_raw(2), Provenance::Manual),
+                ]),
+                Placement::Replace { anchor_index: 0 },
+            )
+            .expect("two Track Queue");
+        let current = sequence.selected().expect("selected").occurrence.clone();
+        let mut session = PlaybackSession::new(
+            sequence,
+            SourceSessionEpoch::new(1),
+            "clear-queue-law",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        session.media_resolved(current, Some(restored_media()), false, true);
+        assert!(session.current_run().is_some());
+        session
+    }
+
+    #[test]
+    fn clearing_queue_without_current_keeps_the_active_run() {
+        let mut session = active_two_track_session();
+        let run = session.current_run().expect("active run");
+
+        let update = session
+            .handle_command(
+                SessionCommand::Clear {
+                    include_current: false,
+                },
+                &ClockSample {
+                    monotonic_millis: 0,
+                    unix_seconds: 0,
+                    local_period: "1970-01".to_string(),
+                },
+            )
+            .expect("clear upcoming Queue");
+
+        assert_eq!(session.sequence().entries().len(), 1);
+        assert_eq!(session.current_run(), Some(run));
+        assert!(session.view().transport.current.is_some());
+        assert!(
+            !update.effects.iter().any(|effect| matches!(
+                effect,
+                SessionEffect::Backend(BackendCommand::Stop { .. })
+            ))
+        );
+    }
+
+    #[test]
+    fn clearing_queue_with_current_stops_the_run_and_empties_the_session() {
+        let mut session = active_two_track_session();
+        let run = session.current_run().expect("active run");
+
+        let update = session
+            .handle_command(
+                SessionCommand::Clear {
+                    include_current: true,
+                },
+                &ClockSample {
+                    monotonic_millis: 0,
+                    unix_seconds: 0,
+                    local_period: "1970-01".to_string(),
+                },
+            )
+            .expect("clear complete Queue");
+
+        assert!(session.sequence().entries().is_empty());
+        assert_eq!(session.current_run(), None);
+        assert!(session.current_media_fact().is_none());
+        assert_eq!(session.status(), TransportStatus::Stopped);
+        assert!(session.view().transport.current.is_none());
+        assert!(update.queue_changed);
+        assert!(update.queue_persistence_changed);
+        assert!(update.effects.iter().any(|effect| matches!(
+            effect,
+            SessionEffect::Backend(BackendCommand::Stop { run: stopped }) if *stopped == run
+        )));
     }
 
     #[test]

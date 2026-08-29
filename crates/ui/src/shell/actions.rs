@@ -66,34 +66,42 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     go_forward.connect_activate(move |_, _| go_forward_shell.go_forward());
     shell.chrome.window.add_action(&go_forward);
 
-    let troubleshooting = gio::SimpleAction::new("troubleshooting", None);
-    let troubleshooting_shell = Rc::clone(shell);
-    troubleshooting.connect_activate(move |_, _| {
-        super::diagnostics::present_diagnostics(&troubleshooting_shell);
+    #[cfg(target_os = "macos")]
+    let troubleshooting_accels = &["<Alt><Meta>i"][..];
+    #[cfg(not(target_os = "macos"))]
+    let troubleshooting_accels = &["<Control><Shift>i"][..];
+    add_window_action(shell, "troubleshooting", troubleshooting_accels, {
+        let shell = Rc::clone(shell);
+        move || super::diagnostics::present_diagnostics(&shell)
     });
-    shell.chrome.window.add_action(&troubleshooting);
 
-    let toggle_left_sidebar = gio::SimpleAction::new("toggle-left-sidebar", None);
-    let toggle_left_sidebar_shell = Rc::clone(shell);
-    toggle_left_sidebar.connect_activate(move |_, _| {
-        toggle_left_sidebar_shell.toggle_active_left_sidebar_size();
+    #[cfg(target_os = "macos")]
+    let left_sidebar_accels = &["<Alt><Meta>s"][..];
+    #[cfg(not(target_os = "macos"))]
+    let left_sidebar_accels = &["<Control><Alt>s"][..];
+    add_window_action(shell, "toggle-left-sidebar", left_sidebar_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.toggle_active_left_sidebar_size()
     });
-    shell.chrome.window.add_action(&toggle_left_sidebar);
 
-    let toggle_private_mode = gio::SimpleAction::new("toggle-private-mode", None);
-    let private_mode_shell = Rc::clone(shell);
-    toggle_private_mode.connect_activate(move |_, _| {
-        let enabled = !private_mode_shell.settings.current.borrow().private_mode;
-        private_mode_shell.set_private_mode(enabled);
-        if private_mode_shell.settings.current.borrow().private_mode == enabled {
-            private_mode_shell.show_control_feedback_toast(if enabled {
-                tr("Private mode is on")
-            } else {
-                tr("Private mode is off")
-            });
+    #[cfg(target_os = "macos")]
+    let private_mode_accels = &["<Alt><Meta>p"][..];
+    #[cfg(not(target_os = "macos"))]
+    let private_mode_accels = &["<Control><Alt>p"][..];
+    add_window_action(shell, "toggle-private-mode", private_mode_accels, {
+        let shell = Rc::clone(shell);
+        move || {
+            let enabled = !shell.settings.current.borrow().private_mode;
+            shell.set_private_mode(enabled);
+            if shell.settings.current.borrow().private_mode == enabled {
+                shell.show_control_feedback_toast(if enabled {
+                    tr("Private mode is on")
+                } else {
+                    tr("Private mode is off")
+                });
+            }
         }
     });
-    shell.chrome.window.add_action(&toggle_private_mode);
 
     let fullscreen = gio::SimpleAction::new("toggle-fullscreen", None);
     let fullscreen_shell = Rc::clone(shell);
@@ -245,6 +253,14 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         move || toggle_auto_dj_shortcut(&shell)
     });
     #[cfg(target_os = "macos")]
+    let clear_queue_accels = &["<Meta>period"][..];
+    #[cfg(not(target_os = "macos"))]
+    let clear_queue_accels = &["<Control>period"][..];
+    add_window_action(shell, "clear-queue", clear_queue_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.clear_queue()
+    });
+    #[cfg(target_os = "macos")]
     let random_accels = &["<Alt><Meta>r"][..];
     #[cfg(not(target_os = "macos"))]
     let random_accels = &["<Control><Shift>r"][..];
@@ -382,10 +398,14 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
         let shell = Rc::clone(shell);
         move || navigation::popup_primary_menu(&shell)
     });
-    let release_notes = gio::SimpleAction::new("show-release-notes", None);
-    let release_notes_shell = Rc::clone(shell);
-    release_notes.connect_activate(move |_, _| release_notes_shell.present_release_notes());
-    shell.chrome.window.add_action(&release_notes);
+    #[cfg(target_os = "macos")]
+    let release_notes_accels = &["<Meta>y"][..];
+    #[cfg(not(target_os = "macos"))]
+    let release_notes_accels = &["<Control>h"][..];
+    add_window_action(shell, "show-release-notes", release_notes_accels, {
+        let shell = Rc::clone(shell);
+        move || shell.present_release_notes()
+    });
 
     #[cfg(target_os = "macos")]
     {
@@ -530,6 +550,7 @@ fn macos_menu_model() -> gio::Menu {
     append_macos_menu_section(
         &view,
         &[
+            (tr("Collapse/expand sidebar"), "win.toggle-left-sidebar"),
             (tr("Show/hide right sidebar"), "win.toggle-queue"),
             (tr("Show/hide lyrics"), "win.toggle-lyrics"),
             (tr("Private mode"), "win.toggle-private-mode"),
@@ -561,6 +582,7 @@ fn macos_menu_model() -> gio::Menu {
             (tr("Repeat"), "win.cycle-repeat"),
             (tr("Favorite"), "win.toggle-favorite"),
             (tr("Auto DJ"), "win.toggle-auto-dj"),
+            (tr("Clear queue"), "win.clear-queue"),
         ],
     );
     append_macos_menu_section(
@@ -756,16 +778,28 @@ fn show_shortcuts_dialog(shell: &Shell) {
         "win.show-primary-menu",
     ));
     section.add(adw::ShortcutsItem::from_action(
-        &tr("Search"),
-        "win.focus-search",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
         &tr("Preferences"),
         "app.preferences",
     ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Keyboard Shortcuts"),
         "app.show-shortcuts",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Troubleshooting"),
+        "win.troubleshooting",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Version History"),
+        "win.show-release-notes",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Private mode"),
+        "win.toggle-private-mode",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Collapse/expand sidebar"),
+        "win.toggle-left-sidebar",
     ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Resync Library"),
@@ -835,6 +869,10 @@ fn show_shortcuts_dialog(shell: &Shell) {
     section.add(adw::ShortcutsItem::from_action(
         &tr("Auto DJ"),
         "win.toggle-auto-dj",
+    ));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Clear queue"),
+        "win.clear-queue",
     ));
     dialog.add(section);
 
@@ -965,6 +1003,10 @@ fn show_shortcuts_dialog(shell: &Shell) {
     dialog.add(section);
 
     let section = adw::ShortcutsSection::new(Some(&tr("Navigation")));
+    section.add(adw::ShortcutsItem::from_action(
+        &tr("Search in page"),
+        "win.focus-search",
+    ));
     section.add(adw::ShortcutsItem::from_action(
         &tr("Navigate to Search"),
         "win.navigate-search",
@@ -1103,8 +1145,10 @@ mod tests {
             "win.cycle-tabs",
             "win.show-primary-menu",
             "win.navigate-sidebar",
+            "win.toggle-left-sidebar",
             "win.toggle-queue",
             "win.toggle-lyrics",
+            "win.toggle-private-mode",
             "win.toggle-fullscreen",
             "win.play-pause",
             "win.previous-track",
@@ -1115,9 +1159,12 @@ mod tests {
             "win.cycle-repeat",
             "win.toggle-favorite",
             "win.toggle-auto-dj",
+            "win.clear-queue",
             "win.mute",
             "win.volume-up",
             "win.volume-down",
+            "win.troubleshooting",
+            "win.show-release-notes",
             "window.close",
             "app.show-shortcuts",
         ] {

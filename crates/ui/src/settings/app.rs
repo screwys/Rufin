@@ -208,6 +208,8 @@ pub struct Settings {
     #[serde(default = "default_auto_dj_refill_threshold")]
     pub auto_dj_refill_threshold: u8,
     #[serde(default)]
+    pub clear_queue_includes_current: bool,
+    #[serde(default)]
     pub playback: PlaybackSettings,
     #[serde(default, skip_serializing_if = "RandomPlaySettings::is_default")]
     pub random_play: RandomPlaySettings,
@@ -265,6 +267,7 @@ impl Default for Settings {
             shuffle_enabled: false,
             repeat_mode: RepeatMode::Off,
             auto_dj_refill_threshold: DEFAULT_AUTO_DJ_REFILL_THRESHOLD,
+            clear_queue_includes_current: false,
             playback: PlaybackSettings::default(),
             random_play: RandomPlaySettings::default(),
             home_blocks: default_home_blocks(),

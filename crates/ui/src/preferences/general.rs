@@ -515,6 +515,22 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     refill_row.set_activatable_widget(Some(&refill));
     transition_group.add(&refill_row);
 
+    let clear_queue_row = adw::SwitchRow::builder()
+        .title(tr("Clearing queue also clears the current song"))
+        .active(app_settings.clear_queue_includes_current)
+        .build();
+    let clear_queue_shell = Rc::clone(shell);
+    clear_queue_row.connect_active_notify(move |row| {
+        clear_queue_shell.update_app_settings("clear queue setting", |settings| {
+            if settings.clear_queue_includes_current == row.is_active() {
+                return false;
+            }
+            settings.clear_queue_includes_current = row.is_active();
+            true
+        });
+    });
+    transition_group.add(&clear_queue_row);
+
     page.add(&transition_group);
 
     let audio_group = adw::PreferencesGroup::builder().title(tr("Audio")).build();
