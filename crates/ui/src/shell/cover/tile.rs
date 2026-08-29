@@ -102,6 +102,10 @@ impl ArtworkTile {
         self.area.clone().upcast()
     }
 
+    pub(crate) fn drag_paintable_source(&self) -> gtk::Picture {
+        self.image.clone()
+    }
+
     pub(crate) fn downgrade(&self) -> ArtworkTileWeak {
         ArtworkTileWeak {
             area: self.area.downgrade(),

@@ -24,6 +24,7 @@ pub(crate) enum OperationFeedbackKind {
     DownloadStarted,
     DownloadQueued,
     PlaylistAdded { destination: String },
+    PlaylistRemoved { destination: String },
 }
 
 pub(crate) struct OperationFeedback {
@@ -38,6 +39,7 @@ pub(crate) struct DownloadsState {
     queue_refresh: RefCell<Option<Weak<dyn Fn()>>>,
     feedback_generation: Rc<Cell<u64>>,
     feedback_opens_queue: Cell<bool>,
+    feedback_action: RefCell<Option<Box<dyn FnOnce()>>>,
     badges: Rc<RefCell<HashMap<usize, DownloadBadgeBinding>>>,
 }
 
@@ -121,6 +123,22 @@ impl Shell {
     }
 
     pub(crate) fn show_operation_feedback(self: &Rc<Self>, feedback: &OperationFeedback) {
+        self.show_operation_feedback_with_action(feedback, None);
+    }
+
+    pub(crate) fn show_undoable_operation_feedback(
+        self: &Rc<Self>,
+        feedback: &OperationFeedback,
+        undo: impl Fn() + 'static,
+    ) {
+        self.show_operation_feedback_with_action(feedback, Some(Box::new(undo)));
+    }
+
+    fn show_operation_feedback_with_action(
+        self: &Rc<Self>,
+        feedback: &OperationFeedback,
+        action: Option<Box<dyn FnOnce()>>,
+    ) {
         crate::preferences::dialogs::release_notes::dismiss_release_notification(self);
         let title = self.download_subject_title(&feedback.subject);
         let count = track_count_text(feedback.item_count as u64);
@@ -138,33 +156,48 @@ impl Shell {
         self.chrome.operation_feedback_title.set_text(&title);
         self.chrome.operation_feedback_subtitle.set_visible(true);
         self.chrome.operation_feedback_subtitle.set_text(&subtitle);
-        self.downloads.feedback_opens_queue.set(matches!(
+        let opens_queue = matches!(
             feedback.kind,
             OperationFeedbackKind::DownloadStarted | OperationFeedbackKind::DownloadQueued
-        ));
+        );
+        self.chrome
+            .operation_feedback_close
+            .set_visible(opens_queue);
+        self.downloads.feedback_opens_queue.set(opens_queue);
+        self.chrome.operation_feedback_action.set_label(&tr("Undo"));
+        self.chrome
+            .operation_feedback_action
+            .set_visible(action.is_some());
+        self.downloads.feedback_action.replace(action);
         self.present_download_feedback();
     }
 
-    fn show_download_notice(&self, message: &str) {
+    fn show_download_notice(self: &Rc<Self>, message: &str) {
         self.chrome
             .operation_feedback
             .add_css_class("operation-feedback-notice");
         self.chrome.operation_feedback_artwork.set_visible(false);
         self.chrome.operation_feedback_title.set_text(message);
         self.chrome.operation_feedback_subtitle.set_visible(false);
+        self.chrome.operation_feedback_close.set_visible(true);
         self.downloads.feedback_opens_queue.set(false);
+        self.chrome.operation_feedback_action.set_visible(false);
+        self.downloads.feedback_action.borrow_mut().take();
         self.present_download_feedback();
     }
 
-    fn present_download_feedback(&self) {
+    fn present_download_feedback(self: &Rc<Self>) {
         let generation = self.downloads.feedback_generation.get().wrapping_add(1);
         self.downloads.feedback_generation.set(generation);
         self.chrome.operation_feedback.set_visible(true);
-        let card = self.chrome.operation_feedback.clone();
-        let active_generation = Rc::clone(&self.downloads.feedback_generation);
+        let shell = Rc::downgrade(self);
         glib::timeout_add_local_once(Duration::from_secs(5), move || {
-            if active_generation.get() == generation {
-                card.set_visible(false);
+            let Some(shell) = shell.upgrade() else {
+                return;
+            };
+            if shell.downloads.feedback_generation.get() == generation {
+                shell.chrome.operation_feedback.set_visible(false);
+                shell.downloads.feedback_action.borrow_mut().take();
             }
         });
     }
@@ -229,13 +262,37 @@ impl Shell {
     }
 
     pub(crate) fn connect_operation_feedback(self: &Rc<Self>) {
-        let close_card = self.chrome.operation_feedback.clone();
-        let close_generation = Rc::clone(&self.downloads.feedback_generation);
+        let close_shell = Rc::downgrade(self);
         self.chrome
             .operation_feedback_close
             .connect_clicked(move |_| {
-                close_generation.set(close_generation.get().wrapping_add(1));
-                close_card.set_visible(false);
+                let Some(shell) = close_shell.upgrade() else {
+                    return;
+                };
+                shell
+                    .downloads
+                    .feedback_generation
+                    .set(shell.downloads.feedback_generation.get().wrapping_add(1));
+                shell.chrome.operation_feedback.set_visible(false);
+                shell.downloads.feedback_action.borrow_mut().take();
+            });
+
+        let action_shell = Rc::downgrade(self);
+        self.chrome
+            .operation_feedback_action
+            .connect_clicked(move |_| {
+                let Some(shell) = action_shell.upgrade() else {
+                    return;
+                };
+                shell
+                    .downloads
+                    .feedback_generation
+                    .set(shell.downloads.feedback_generation.get().wrapping_add(1));
+                shell.chrome.operation_feedback.set_visible(false);
+                let action = shell.downloads.feedback_action.borrow_mut().take();
+                if let Some(action) = action {
+                    action();
+                }
             });
 
         let click = gtk::GestureClick::new();
@@ -248,6 +305,7 @@ impl Shell {
                 crate::preferences::present_downloads_preferences_dialog(&shell);
             }
             shell.chrome.operation_feedback.set_visible(false);
+            shell.downloads.feedback_action.borrow_mut().take();
         });
         self.chrome.operation_feedback.add_controller(click);
     }
@@ -354,6 +412,9 @@ fn operation_feedback_subtitle(kind: &OperationFeedbackKind, count: &str) -> Str
         }
         OperationFeedbackKind::PlaylistAdded { destination } => {
             format!("{} {destination} · {count}", tr("Added to"))
+        }
+        OperationFeedbackKind::PlaylistRemoved { destination } => {
+            format!("{} {destination} · {count}", tr("Removed from"))
         }
     }
 }

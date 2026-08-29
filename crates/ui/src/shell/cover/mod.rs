@@ -159,7 +159,17 @@ impl Shell {
         render_size: i32,
         fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, None, artwork, render_size, fetch_size, false);
+        self.bind_artwork_tile_request(tile, None, artwork, render_size, fetch_size, false, false);
+    }
+
+    pub(crate) fn bind_cache_only_artwork_tile(
+        self: &Rc<Self>,
+        tile: &ArtworkTile,
+        artwork: ArtworkBinding,
+        render_size: i32,
+        fetch_size: u32,
+    ) {
+        self.bind_artwork_tile_request(tile, None, artwork, render_size, fetch_size, false, true);
     }
 
     pub(crate) fn bind_playback_artwork_tile(
@@ -177,6 +187,7 @@ impl Shell {
             render_size,
             fetch_size,
             true,
+            false,
         );
     }
 
@@ -188,6 +199,7 @@ impl Shell {
         render_size: i32,
         fetch_size_cap: u32,
         refresh_desktop_on_ready: bool,
+        cache_only: bool,
     ) {
         tile.install_request_cleanup_once();
         if artwork.stable_identity().is_empty() {
@@ -197,8 +209,22 @@ impl Shell {
         }
         let (fetch_size, render_size) =
             cover_request_sizes(render_size, fetch_size_cap, self.artwork_scale());
-        let external = artwork_external_policy(&self.settings.current.borrow());
-        let Some(source) = self.artwork_source(source_id.as_ref()) else {
+        let prepared_source = if cache_only {
+            self.selected_library().as_deref().map(|selected| {
+                (
+                    SourceImages::cache_only(selected.artwork.source_id.clone()),
+                    cache_only_artwork_external_policy(),
+                )
+            })
+        } else {
+            self.artwork_source(source_id.as_ref()).map(|source| {
+                (
+                    source,
+                    artwork_external_policy(&self.settings.current.borrow()),
+                )
+            })
+        };
+        let Some((source, external)) = prepared_source else {
             self.cancel_artwork_tile_request(tile);
             tile.bind_pending();
             return;
@@ -387,10 +413,15 @@ fn artwork_external_policy(settings: &UiSettings) -> artwork::ExternalPolicy {
     )
 }
 
+fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
+    artwork::ExternalPolicy::new(true, false, String::new()).with_musicbrainz(false)
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
-        StartupArtworkPrime, artwork_binding_needs_work, cover_decode_size, cover_request_sizes,
+        StartupArtworkPrime, artwork_binding_needs_work, cache_only_artwork_external_policy,
+        cover_decode_size, cover_request_sizes,
     };
 
     #[test]
@@ -412,6 +443,14 @@ mod tests {
         assert_eq!(cover_request_sizes(200, 512, 2.0), (512, 400));
         assert_eq!(cover_request_sizes(200, 256, 2.0), (256, 256));
         assert_eq!(cover_request_sizes(48, 96, 2.0), (96, 96));
+    }
+
+    #[test]
+    fn drag_preview_artwork_never_starts_external_network_work() {
+        let policy = cache_only_artwork_external_policy();
+        assert!(policy.allow_cached);
+        assert!(!policy.allow_network);
+        assert!(!policy.allow_musicbrainz);
     }
 
     #[test]

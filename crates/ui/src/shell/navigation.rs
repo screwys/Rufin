@@ -21,8 +21,9 @@ use crate::routes::collection_context::{
 };
 use crate::routes::collections::PlaybackTarget;
 use crate::routes::library_fields::{playlist_artwork, smart_playlist_display_name};
+use crate::routes::playlist_picker::{PlaylistTrackSource, playlist_drag_source};
 use crate::routes::route::{CollectionCategory, Route};
-use crate::routes::track_selection::{TrackSelectionSnapshot, track_drag_payload};
+use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
@@ -1426,6 +1427,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         let widget = normal_widgets.remove(&key).unwrap_or_else(|| {
             sidebar_pin_row(shell, item.clone(), prefer_server_playlist_covers).upcast()
         });
+        update_sidebar_pin_widget_metadata(&widget, item);
         if widget.parent().is_some() {
             normal.reorder_child_after(&widget, previous.as_ref());
         } else {
@@ -1484,6 +1486,37 @@ fn remove_sidebar_pin_widgets(container: &gtk::Box) {
     for widget in keyed_sidebar_pin_widgets(container).into_values() {
         container.remove(&widget);
     }
+}
+
+fn update_sidebar_pin_widget_metadata(widget: &gtk::Widget, item: &SidebarPinItem) {
+    for (class, text) in [
+        ("sidebar-pin-title", item.title()),
+        ("sidebar-pin-track-count", item.track_count().to_string()),
+        (
+            "sidebar-pin-duration",
+            format_duration_units(item.duration_seconds()),
+        ),
+    ] {
+        if let Some(label) = descendant_with_class(widget, class)
+            .and_then(|widget| widget.downcast::<gtk::Label>().ok())
+        {
+            label.set_text(&text);
+        }
+    }
+}
+
+fn descendant_with_class(widget: &gtk::Widget, class: &str) -> Option<gtk::Widget> {
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.has_css_class(class) {
+            return Some(widget);
+        }
+        if let Some(descendant) = descendant_with_class(&widget, class) {
+            return Some(descendant);
+        }
+    }
+    None
 }
 
 fn compact_pin_anchor(container: &gtk::Box) -> Option<gtk::Widget> {
@@ -1833,12 +1866,45 @@ fn install_playlist_pin_drop(
         let Some(shell) = shell.upgrade() else {
             return false;
         };
-        let Some(payload) = track_drag_payload(value) else {
+        let Some(source) = playlist_drag_source(value) else {
             return false;
         };
-        add_selection_to_playlist_pin(&shell, &playlist, payload)
+        add_source_to_playlist_pin(&shell, &playlist, source)
     });
     target.add_controller(drop_target);
+}
+
+fn add_source_to_playlist_pin(
+    shell: &Rc<Shell>,
+    playlist: &PlaylistRow,
+    source: PlaylistTrackSource,
+) -> bool {
+    if let Some(selection) = source.ready_selection() {
+        return add_selection_to_playlist_pin(shell, playlist, selection);
+    }
+    if !source.is_current(shell) {
+        return false;
+    }
+    let Some(selected) = shell.selected_library().as_deref().cloned() else {
+        return false;
+    };
+    let runtime = selected.runtime.clone();
+    let resolve_source = source.clone();
+    let task = runtime.spawn(async move { resolve_source.resolve(&selected).await });
+    let shell = Rc::downgrade(shell);
+    let playlist = playlist.clone();
+    gtk::glib::spawn_future_local(async move {
+        let Some(shell) = shell.upgrade() else {
+            return;
+        };
+        let Some((tracks, subject)) = task.await.ok().and_then(Result::ok) else {
+            return;
+        };
+        if source.is_current(&shell) {
+            add_tracks_to_playlist_pin(&shell, &playlist, tracks, subject);
+        }
+    });
+    true
 }
 
 fn add_selection_to_playlist_pin(
@@ -1849,6 +1915,20 @@ fn add_selection_to_playlist_pin(
     if !selection.is_current(shell) {
         return false;
     }
+    add_tracks_to_playlist_pin(
+        shell,
+        playlist,
+        selection.tracks.to_vec(),
+        selection.download_subject(),
+    )
+}
+
+fn add_tracks_to_playlist_pin(
+    shell: &Rc<Shell>,
+    playlist: &PlaylistRow,
+    tracks: Vec<library::TrackKey>,
+    subject: ::downloads::DownloadSubject,
+) -> bool {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return false;
     };
@@ -1856,16 +1936,12 @@ fn add_selection_to_playlist_pin(
     let Some(operations) = shell.selected_source_operations() else {
         return false;
     };
-    let scheduled = operations.add_playlist_tracks(
-        playlist.playlist_key,
-        selection.tracks.to_vec(),
-        skip_duplicates,
-    );
+    let scheduled = operations.add_playlist_tracks(playlist.playlist_key, tracks, skip_duplicates);
     if scheduled == 0 {
         return false;
     }
     shell.show_operation_feedback(&OperationFeedback {
-        subject: selection.download_subject(),
+        subject,
         item_count: scheduled,
         kind: OperationFeedbackKind::PlaylistAdded {
             destination: playlist.name.clone(),
@@ -1912,6 +1988,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     track_metadata.append(&tracks_icon);
     let tracks = gtk::Label::new(Some(&track_count.to_string()));
     tracks.add_css_class("sidebar-pin-metadata-label");
+    tracks.add_css_class("sidebar-pin-track-count");
     tracks.set_valign(gtk::Align::Center);
     tracks.set_yalign(0.5);
     track_metadata.append(&tracks);
@@ -1932,6 +2009,7 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     duration_metadata.append(&duration_icon);
     let duration = gtk::Label::new(Some(&format_duration_units(duration_seconds)));
     duration.add_css_class("sidebar-pin-metadata-label");
+    duration.add_css_class("sidebar-pin-duration");
     duration.set_hexpand(true);
     duration.set_width_request(1);
     duration.set_xalign(0.0);

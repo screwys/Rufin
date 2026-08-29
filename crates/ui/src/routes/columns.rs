@@ -10,8 +10,9 @@ use super::collection_context::{
     present_album_context_menu, present_artist_context_menu,
 };
 use crate::favorites::{
-    album_favorite_key, artist_favorite_key, favorite_button_is_active, favorite_icon_button,
-    set_favorite_button_active, track_favorite_key,
+    FAVORITE_COLUMN_TITLE, FAVORITE_COLUMN_WIDTH, album_favorite_key, artist_favorite_key,
+    favorite_button_is_active, row_favorite_icon_button, set_favorite_button_active,
+    track_favorite_key,
 };
 use crate::interactions::install_context_menu_openers;
 use crate::localization::localized_column;
@@ -25,15 +26,15 @@ use super::detail_links::{
 };
 use super::factory_cells::FactoryCells;
 use super::library_fields::{
-    album_field, artist_field, column_width, item_at_from_item, opaque_artwork,
-    play_count_column_width, playlist_artwork, playlist_field, smart_playlist_display_name,
-    smart_playlist_field, track_artwork_at_from_item, track_field,
+    add_field_skeleton_class, album_field, artist_field, column_width, item_at_from_item,
+    opaque_artwork, play_count_column_width, playlist_artwork, playlist_field,
+    smart_playlist_display_name, smart_playlist_field, track_artwork_at_from_item, track_field,
 };
 use super::route::Route;
 use super::sparse_model::connect_sparse_bind;
 use super::table_links::track_link_column;
 
-pub(crate) const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}\u{a0}#";
+pub(crate) const ROW_INDEX_COLUMN_TITLE: &str = "\u{2003}#";
 pub(crate) const ALBUM_DETAIL_DURATION_COLUMN_WIDTH: i32 = 48;
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
@@ -87,12 +88,15 @@ pub(crate) fn album_column(
             column_width(LibraryField::TitleMerged),
             playback_context,
         ),
-        LibraryField::Title => album_text_column(shell, "Title", 220, playback_context, |album| {
-            album.title.clone()
-        }),
+        LibraryField::Title => {
+            album_text_column(shell, field, "Title", 220, playback_context, |album| {
+                album.title.clone()
+            })
+        }
         LibraryField::Favorite => album_favorite_column(shell, playback_context),
         _ => album_text_column(
             shell,
+            field,
             field.title(),
             column_width(field),
             playback_context,
@@ -109,13 +113,14 @@ pub(crate) fn artist_column(
         LibraryField::RowIndex => mapped_row_index_column::<ArtistRow>(column_width(field)),
         LibraryField::Image => artist_image_column(shell, album_artist),
         LibraryField::TitleMerged | LibraryField::Title => {
-            artist_text_column(shell, "Title", 220, album_artist, |artist| {
+            artist_text_column(shell, field, "Title", 220, album_artist, |artist| {
                 artist.name.clone()
             })
         }
         LibraryField::Favorite => artist_favorite_column(shell, album_artist),
         _ => artist_text_column(
             shell,
+            field,
             field.title(),
             column_width(field),
             album_artist,
@@ -148,7 +153,7 @@ pub(crate) fn playlist_column(shell: &Rc<Shell>, field: LibraryField) -> gtk::Co
         LibraryField::Title | LibraryField::TitleMerged => {
             playlist_title_column(shell, "Title", 220, |playlist| playlist.name.clone())
         }
-        _ => text_column::<PlaylistRow, _>(field.title(), column_width(field), move |playlist| {
+        _ => text_column::<PlaylistRow, _>(field, column_width(field), move |playlist| {
             playlist_field(playlist, field)
         }),
     }
@@ -239,11 +244,9 @@ pub(crate) fn smart_playlist_column(
                 smart_playlist_display_name(&playlist)
             })
         }
-        _ => text_column::<SmartPlaylistRow, _>(
-            field.title(),
-            column_width(field),
-            move |playlist| smart_playlist_field(playlist, field),
-        ),
+        _ => text_column::<SmartPlaylistRow, _>(field, column_width(field), move |playlist| {
+            smart_playlist_field(playlist, field)
+        }),
     }
 }
 
@@ -334,10 +337,15 @@ pub(crate) fn track_column_for_key(
             },
         ),
         LibraryField::Title => {
-            let column =
-                track_text_column(shell, "Title", width, 0.0, Some(playing.clone()), |track| {
-                    track.title.clone()
-                });
+            let column = track_text_column(
+                shell,
+                field,
+                "Title",
+                width,
+                0.0,
+                Some(playing.clone()),
+                |track| track.title.clone(),
+            );
             if matches!(
                 key,
                 LibraryListKey::PlaylistTracks | LibraryListKey::SmartPlaylistTracks
@@ -370,12 +378,20 @@ pub(crate) fn track_column_for_key(
                 track.album_key.clone().map(Route::AlbumDetail),
             )
         }),
-        LibraryField::Duration => track_text_column(shell, "◷", width, 0.0, None, |track| {
-            track_field(track, LibraryField::Duration)
-        }),
-        _ => track_text_column(shell, field.title(), width, 0.0, None, move |track| {
-            track_field(track, field)
-        }),
+        LibraryField::Duration => {
+            track_text_column(shell, field, "◷", width, 0.0, None, |track| {
+                track_field(track, LibraryField::Duration)
+            })
+        }
+        _ => track_text_column(
+            shell,
+            field,
+            field.title(),
+            width,
+            0.0,
+            None,
+            move |track| track_field(track, field),
+        ),
     }
 }
 pub(crate) fn track_column_fit_width(key: LibraryListKey, field: LibraryField) -> i32 {
@@ -413,7 +429,7 @@ pub(crate) fn track_column_width(key: LibraryListKey, field: LibraryField) -> i3
         | LibraryField::Bpm => 62,
         LibraryField::Duration => 70,
         LibraryField::Image => column_width(LibraryField::Image),
-        LibraryField::Favorite => 48,
+        LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
     }
 }
 pub(crate) fn column_fit_width(field: LibraryField, width: i32) -> i32 {
@@ -434,21 +450,22 @@ fn track_list_column_width(field: LibraryField) -> i32 {
         | LibraryField::TrackNumber
         | LibraryField::Bpm => 70,
         LibraryField::Duration => 90,
-        LibraryField::Favorite => 76,
+        LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
         _ => column_width(field),
     }
 }
 
-pub(crate) fn text_column<T, F>(title: &str, width: i32, value: F) -> gtk::ColumnViewColumn
+pub(crate) fn text_column<T, F>(field: LibraryField, width: i32, value: F) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
     F: Fn(&T) -> String + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let value = Rc::new(value);
-    factory.connect_setup(|_, item| {
+    factory.connect_setup(move |_, item| {
         if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
             let label = gtk::Label::new(None);
+            add_field_skeleton_class(&label, field);
             label.set_xalign(0.0);
             label.set_halign(gtk::Align::Fill);
             label.set_hexpand(true);
@@ -485,7 +502,7 @@ where
             label.set_text("");
         }
     });
-    let column = localized_column(title, &factory);
+    let column = localized_column(field.title(), &factory);
     column.set_fixed_width(width);
     column
 }
@@ -869,6 +886,7 @@ pub(crate) fn album_image_column(
 
 pub(crate) fn album_text_column<F>(
     shell: &Rc<Shell>,
+    field: LibraryField,
     title: &'static str,
     width: i32,
     playback_context: Option<String>,
@@ -897,6 +915,7 @@ where
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_single_line_mode(true);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        add_field_skeleton_class(&row, field);
         row.set_hexpand(true);
         row.append(&label);
         let downloaded = setup_shell.download_badge(true);
@@ -1260,6 +1279,7 @@ pub(crate) fn artist_image_column(shell: &Rc<Shell>, album_artist: bool) -> gtk:
 }
 pub(crate) fn artist_text_column<F>(
     shell: &Rc<Shell>,
+    field: LibraryField,
     title: &str,
     width: i32,
     album_artist: bool,
@@ -1278,6 +1298,7 @@ where
             return;
         };
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        add_field_skeleton_class(&row, field);
         row.set_hexpand(true);
         let label = gtk::Label::new(None);
         label.set_xalign(0.0);
@@ -1445,6 +1466,7 @@ pub(crate) fn track_image_column(
 }
 pub(crate) fn track_text_column<F>(
     shell: &Rc<Shell>,
+    field: LibraryField,
     title: &'static str,
     width: i32,
     xalign: f32,
@@ -1454,13 +1476,20 @@ pub(crate) fn track_text_column<F>(
 where
     F: Fn(&TrackRow) -> String + 'static,
 {
-    track_position_text_column(shell, title, width, xalign, playing, move |_, track| {
-        value(track)
-    })
+    track_position_text_column(
+        shell,
+        field,
+        title,
+        width,
+        xalign,
+        playing,
+        move |_, track| value(track),
+    )
 }
 
 pub(crate) fn track_position_text_column<F>(
     shell: &Rc<Shell>,
+    field: LibraryField,
     title: &'static str,
     width: i32,
     xalign: f32,
@@ -1494,6 +1523,7 @@ where
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         label.set_single_line_mode(true);
         let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
+        add_field_skeleton_class(&row, field);
         row.set_hexpand(true);
         row.append(&label);
         let downloaded = setup_playing.as_ref().map(|_| {
@@ -1740,12 +1770,7 @@ where
     column
 }
 fn favorite_cell_button(item: &gtk::ListItem) -> Option<gtk::Button> {
-    let child = item.child()?;
-    child
-        .clone()
-        .downcast::<gtk::Button>()
-        .ok()
-        .or_else(|| child.first_child()?.downcast::<gtk::Button>().ok())
+    item.child()?.downcast::<gtk::Button>().ok()
 }
 
 pub(crate) fn album_favorite_column(
@@ -1759,7 +1784,7 @@ pub(crate) fn album_favorite_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = favorite_icon_button("Favorite album");
+        let button = row_favorite_icon_button("Favorite album");
         set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
@@ -1788,12 +1813,7 @@ pub(crate) fn album_favorite_column(
                 Some(button),
             );
         });
-        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        wrapper.add_css_class("favorite-skeleton-cell");
-        wrapper.set_hexpand(true);
-        wrapper.set_halign(gtk::Align::Fill);
-        wrapper.append(&button);
-        item.set_child(Some(&wrapper));
+        item.set_child(Some(&button));
     });
 
     connect_sparse_bind(&factory, |item| {
@@ -1818,7 +1838,7 @@ pub(crate) fn album_favorite_column(
             set_placeholder_favorite(&button, None);
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(column_width(LibraryField::Favorite));
     column
 }
@@ -1833,7 +1853,7 @@ pub(crate) fn artist_favorite_column(
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let button = favorite_icon_button("Favorite artist");
+        let button = row_favorite_icon_button("Favorite artist");
         set_placeholder_favorite(&button, None);
         let favorite_item = item.downgrade();
         shell.register_dynamic_favorite_button(
@@ -1862,12 +1882,7 @@ pub(crate) fn artist_favorite_column(
                 Some(button),
             );
         });
-        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        wrapper.add_css_class("favorite-skeleton-cell");
-        wrapper.set_hexpand(true);
-        wrapper.set_halign(gtk::Align::Fill);
-        wrapper.append(&button);
-        item.set_child(Some(&wrapper));
+        item.set_child(Some(&button));
     });
 
     connect_sparse_bind(&factory, |item| {
@@ -1892,7 +1907,7 @@ pub(crate) fn artist_favorite_column(
             set_placeholder_favorite(&button, None);
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(column_width(LibraryField::Favorite));
     column
 }
@@ -1919,7 +1934,7 @@ where
             return;
         };
         let current_track = Rc::new(RefCell::new(None::<TrackRow>));
-        let button = favorite_icon_button("Favorite track");
+        let button = row_favorite_icon_button("Favorite track");
         set_placeholder_favorite(&button, None);
         install_track_cell_context_menu(&button, &setup_shell, Rc::clone(&current_track));
         let favorite_key_track = Rc::clone(&current_track);
@@ -1945,12 +1960,7 @@ where
                 Some(button),
             );
         });
-        let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        wrapper.add_css_class("favorite-skeleton-cell");
-        wrapper.set_hexpand(true);
-        wrapper.set_halign(gtk::Align::Fill);
-        wrapper.append(&button);
-        item.set_child(Some(&wrapper));
+        item.set_child(Some(&button));
         setup_cells.insert(
             item,
             LibraryTrackFavoriteCell {
@@ -1999,7 +2009,7 @@ where
         }
     });
 
-    let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(column_width(LibraryField::Favorite));
     column
 }

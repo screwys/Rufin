@@ -180,6 +180,7 @@ struct SmartPlaylistEditor {
 }
 
 struct TemplatePicker {
+    button: gtk::Button,
     apply: Rc<dyn Fn()>,
 }
 
@@ -233,12 +234,6 @@ impl Shell {
         let (content, template_picker) =
             smart_playlist_editor_content(&editor, &templates, value_suggestions);
         let actions = dialog_action_row();
-        let restore = template_picker
-            .as_ref()
-            .map(|_| dialog_button(msgid("Use Template"), None));
-        if let Some(restore) = &restore {
-            actions.append(restore);
-        }
         let cancel = dialog_button(msgid("Cancel"), None);
         let create = dialog_button(msgid("Create"), Some("suggested-action"));
         sync_editor_button_enabled(&create, &editor);
@@ -257,9 +252,9 @@ impl Shell {
             });
         }
 
-        if let Some(restore) = restore {
-            let apply = Rc::clone(&template_picker.expect("template button has a picker").apply);
-            restore.connect_clicked(move |_| {
+        if let Some(template_picker) = template_picker {
+            let TemplatePicker { button, apply } = template_picker;
+            button.connect_clicked(move |_| {
                 apply();
             });
         }
@@ -429,7 +424,7 @@ fn smart_playlist_editor_content(
     content.set_margin_start(4);
     content.set_margin_end(4);
 
-    let default_dropdown = if templates.is_empty() {
+    let template_controls = if templates.is_empty() {
         None
     } else {
         let default_titles = templates
@@ -442,16 +437,19 @@ fn smart_playlist_editor_content(
             .collect::<Vec<_>>();
         let default_dropdown = dropdown_from_titles(&default_refs, 0);
         default_dropdown.set_hexpand(true);
-        let row = labeled_row(msgid("Template"), &[default_dropdown.clone().upcast()]);
-        content.append(&row);
-        Some(default_dropdown)
+        let apply = dialog_button(msgid("Apply Template"), None);
+        let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+        row.append(&default_dropdown);
+        row.append(&apply);
+        content.append(&labeled_control(msgid("Template"), &row));
+        Some((default_dropdown, apply))
     };
 
     content.append(&editor.name);
 
     let settings = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     settings.append(&labeled_control(msgid("Sort"), &editor.sort));
-    settings.append(&editor.descending);
+    settings.append(&labeled_control(msgid("Direction"), &editor.descending));
     settings.append(&labeled_control(msgid("Activity"), &editor.activity_period));
     settings.append(&labeled_control(msgid("Limit"), &editor.limit));
     content.append(&settings);
@@ -492,11 +490,12 @@ fn smart_playlist_editor_content(
     };
     *rerender_slot.borrow_mut() = Some(Rc::downgrade(&rerender));
     rerender();
-    let template_picker = default_dropdown.map(|dropdown| {
+    let template_picker = template_controls.map(|(dropdown, button)| {
         let templates = templates.to_vec();
         let editor = editor.clone();
         let rerender = Rc::clone(&rerender);
         TemplatePicker {
+            button,
             apply: Rc::new(move || {
                 let Some(template) = templates.get(dropdown.selected() as usize) else {
                     return;
@@ -1093,15 +1092,6 @@ fn labeled_control(label: &str, widget: &impl IsA<gtk::Widget>) -> gtk::Widget {
     box_.append(&label);
     box_.append(widget);
     box_.upcast()
-}
-
-fn labeled_row(label: &str, widgets: &[gtk::Widget]) -> gtk::Widget {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.append(&gtk::Label::new(Some(&tr(label))));
-    for widget in widgets {
-        row.append(widget);
-    }
-    row.upcast()
 }
 
 fn clear_box(box_: &gtk::Box) {

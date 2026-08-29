@@ -234,6 +234,9 @@ msgstr ""
 msgid "Application name"
 msgstr "應用程式名稱"
 
+msgid "Apply Template"
+msgstr ""
+
 msgid "Artist / Album"
 msgstr "藝人 / 專輯"
 
@@ -518,6 +521,11 @@ msgstr "已儲存診斷記錄"
 
 msgid "Diagnostic log"
 msgstr "診斷記錄"
+
+#, fuzzy
+#| msgid "Duration"
+msgid "Direction"
+msgstr "時長"
 
 msgid "Disable private mode"
 msgstr "禁用無痕模式"
@@ -1581,6 +1589,11 @@ msgstr "移除"
 msgid "Removed from favorites"
 msgstr "從最愛中移除"
 
+#, fuzzy
+#| msgid "Remove from Pins"
+msgid "Removed from"
+msgstr "從釘選中移除"
+
 msgid "Rename Playlist"
 msgstr "重新命名播放清單"
 
@@ -2048,9 +2061,6 @@ msgstr ""
 
 msgid "Use Rufin data folder"
 msgstr "使用 Rufin 資料資料夾"
-
-msgid "Use Template"
-msgstr ""
 
 msgid "Use a number above zero"
 msgstr ""

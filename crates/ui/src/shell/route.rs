@@ -540,11 +540,18 @@ impl Shell {
         let folder = selected.music_folder_key;
         let epoch = selected.source_session_epoch;
         let source_id = selected.artwork.source_id.clone();
-        let variation = self.home_variation.get();
+        let showcase_variation = self.home_showcase_variation.get();
+        let explore_variation = self.home_explore_variation.get();
         let (generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .home_page(source, folder, variation, &cancellation)
+                .home_page(
+                    source,
+                    folder,
+                    showcase_variation,
+                    explore_variation,
+                    &cancellation,
+                )
                 .await
         });
         let shell = Rc::downgrade(self);
@@ -575,10 +582,17 @@ impl Shell {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let epoch = selected.source_session_epoch;
-        let variation = self.home_variation.get();
+        let showcase_variation = self.home_showcase_variation.get();
+        let explore_variation = self.home_explore_variation.get();
         let task = selected.runtime.spawn(async move {
             database
-                .home_page(source, folder, variation, &library::ReadCancellation::new())
+                .home_page(
+                    source,
+                    folder,
+                    showcase_variation,
+                    explore_variation,
+                    &library::ReadCancellation::new(),
+                )
                 .await
         });
         let shell = Rc::downgrade(self);
@@ -724,6 +738,16 @@ impl Shell {
             .borrow()
             .as_ref()
             .and_then(|selection| selection.selected_entries_for(clicked))
+    }
+
+    pub(crate) fn current_playlist_entry_selection_snapshot(
+        &self,
+    ) -> Option<PlaylistEntrySelectionSnapshot> {
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow()
+            .as_ref()
+            .and_then(PlaylistEntrySelection::selected_entries)
     }
 
     pub(crate) fn current_playlist_entry_selection_owner(&self) -> Option<PlaylistEntrySelection> {
