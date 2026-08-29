@@ -69,17 +69,22 @@ pub(super) fn present_diagnostics(shell: &Rc<Shell>) {
     scroller.set_child(Some(&log));
     content.append(&scroller);
 
-    let save = gtk::Button::builder()
-        .label(tr("Save"))
-        .halign(gtk::Align::End)
-        .build();
+    let copy = gtk::Button::with_label(&tr("Copy"));
+    let save = gtk::Button::with_label(&tr("Save"));
     save.add_css_class("suggested-action");
+    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
+    actions.set_halign(gtk::Align::End);
+    actions.set_homogeneous(true);
+    actions.append(&copy);
+    actions.append(&save);
     let status = gtk::Label::new(None);
     status.set_halign(gtk::Align::Start);
-    status.set_wrap(true);
-    status.set_visible(false);
-    content.append(&status);
-    content.append(&save);
+    status.set_hexpand(true);
+    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
+    footer.append(&status);
+    footer.append(&actions);
+    content.append(&footer);
     toolbar.set_content(Some(&content));
 
     let dialog = adw::Dialog::builder()
@@ -136,6 +141,16 @@ pub(super) fn present_diagnostics(shell: &Rc<Shell>) {
             }
         }
         glib::ControlFlow::Continue
+    });
+
+    let copy_buffer = log.buffer();
+    let copy_status = status.clone();
+    copy.connect_clicked(move |button| {
+        let buffer = copy_buffer.clone();
+        let contents = buffer.text(&buffer.start_iter(), &buffer.end_iter(), true);
+        button.display().clipboard().set_text(&contents);
+        copy_status.remove_css_class("error");
+        copy_status.set_text(&tr("Logs are copied"));
     });
 
     let save_window = shell.chrome.window.clone();

@@ -65,14 +65,14 @@ impl UpnpDevice {
             .get(url.clone())
             .timeout(request_timeout)
             .send()
-            .map_err(|error| error.to_string())?;
+            .map_err(crate::private_http_error)?;
         if !response.status().is_success() {
             return Err(format!(
                 "the renderer description responded with status code {}",
                 response.status()
             ));
         }
-        let description = response.text().map_err(|error| error.to_string())?;
+        let description = response.text().map_err(crate::private_http_error)?;
         let document = Document::parse(&description).map_err(|error| error.to_string())?;
         let service_base = document
             .descendants()
@@ -166,14 +166,14 @@ impl UpnpDevice {
             )
             .body(envelope)
             .send()
-            .map_err(|error| error.to_string())?;
+            .map_err(crate::private_http_error)?;
         if !response.status().is_success() {
             return Err(format!(
                 "The control point responded with status code {}",
                 response.status()
             ));
         }
-        parse_action_response(&response.text().map_err(|error| error.to_string())?)
+        parse_action_response(&response.text().map_err(crate::private_http_error)?)
     }
 
     fn service(&self, name: &str) -> Option<&UpnpService> {
@@ -226,13 +226,28 @@ fn parse_action_response(body: &str) -> Result<HashMap<String, String>, String> 
 
 #[cfg(test)]
 mod tests {
-    use std::net::{IpAddr, SocketAddr};
+    use std::net::{IpAddr, SocketAddr, TcpListener};
     use std::sync::mpsc;
     use std::thread;
 
     use tiny_http::{Response, Server};
 
     use super::*;
+
+    #[test]
+    fn request_errors_do_not_expose_cast_endpoints() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("temporary endpoint");
+        let address = listener.local_addr().expect("temporary address");
+        drop(listener);
+        let endpoint = format!("http://{address}/private?token=secret");
+        let error = reqwest::blocking::get(&endpoint).expect_err("closed endpoint");
+
+        let message = crate::private_http_error(error);
+
+        assert_eq!(message, "connection failed");
+        assert!(!message.contains(&address.to_string()));
+        assert!(!message.contains("secret"));
+    }
 
     #[test]
     fn selected_interface_and_source_support_description_and_soap_requests() {

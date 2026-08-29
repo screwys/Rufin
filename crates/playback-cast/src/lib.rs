@@ -90,11 +90,6 @@ impl CastManager {
                 "selected casting network is unavailable; using automatic discovery"
             );
         }
-        tracing::debug!(
-            network_interface = ?network_interface,
-            ?local_address,
-            "discovering cast outputs"
-        );
         let bound_network_interface = local_address.and(network_interface.clone());
         let upnp = thread::spawn(move || {
             discover_upnp(
@@ -201,14 +196,6 @@ impl CastPlaybackBackend {
             } else {
                 (None, None)
             };
-        tracing::debug!(
-            network_interface = ?network_interface,
-            bound_network_interface = ?bound_network_interface,
-            local_address = ?selected_local_address,
-            renderer_address = %target.address(),
-            protocol = ?target.output().protocol,
-            "connecting cast output"
-        );
         let relay =
             RelayServer::start(target.address(), proxy_media, network_interface.as_deref())?
                 .with_artwork_resolver(artwork_resolver);
@@ -246,6 +233,21 @@ impl CastPlaybackBackend {
             thread: Some(thread),
         })
     }
+}
+
+fn private_http_error(error: reqwest::Error) -> String {
+    let description = if error.is_timeout() {
+        "request timed out"
+    } else if error.is_connect() {
+        "connection failed"
+    } else if error.is_body() {
+        "response body failed"
+    } else if error.is_decode() {
+        "response decoding failed"
+    } else {
+        return error.without_url().to_string();
+    };
+    description.to_string()
 }
 
 impl PlaybackBackend for CastPlaybackBackend {
