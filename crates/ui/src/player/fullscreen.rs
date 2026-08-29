@@ -8,7 +8,6 @@ use artwork::ArtworkBinding;
 use gtk::glib;
 use playback::{CurrentMedia, EQUALIZER_BAND_COUNT, EqualizerSettings, PlaybackView};
 
-use crate::layout::allocation_owner;
 use crate::shell::Shell;
 use crate::shell::actions::icon_button;
 use crate::shell::chrome::top_window_drag_handle;
@@ -37,19 +36,15 @@ const FULLSCREEN_PLAYER_VERTICAL_RESERVED: i32 = 430;
 const FULLSCREEN_PLAYER_HERO_MIN_WINDOW_HEIGHT: i32 = 560;
 const FULLSCREEN_ICON_SIZE: i32 = 18;
 const FULLSCREEN_EQUALIZER_MIN_SCALE_HEIGHT: i32 = 124;
-const FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT: i32 = 286;
 const FULLSCREEN_EQUALIZER_ROW_HEIGHT: i32 = 240;
 const FULLSCREEN_EQUALIZER_TINY_ROW_HEIGHT: i32 =
     FULLSCREEN_EQUALIZER_MIN_SCALE_HEIGHT + FULLSCREEN_EQUALIZER_LABEL_HEIGHT;
 const FULLSCREEN_EQUALIZER_LEVEL_WIDTH: i32 = 48;
 const FULLSCREEN_EQUALIZER_ROW_GAP: i32 = 16;
-const FULLSCREEN_EQUALIZER_MIN_BAND_WIDTH: i32 = 14;
-const FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH: i32 = 44;
-const FULLSCREEN_EQUALIZER_MIN_BAND_GAP: i32 = 2;
-const FULLSCREEN_EQUALIZER_MAX_BAND_GAP: i32 = 10;
+const FULLSCREEN_EQUALIZER_BAND_SPACING: i32 = 6;
 const FULLSCREEN_EQUALIZER_LABEL_HEIGHT: i32 = 50;
-const FULLSCREEN_EQUALIZER_MIN_FIT_INSET: i32 = 16;
-const FULLSCREEN_EQUALIZER_MAX_FIT_INSET: i32 = 24;
+const FULLSCREEN_EQUALIZER_GRAPH_MAX_WIDTH: i32 = 658;
+const FULLSCREEN_EQUALIZER_GRAPH_TIGHTENING_WIDTH: i32 = 560;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum FullscreenPlaybackRefresh {
@@ -483,65 +478,61 @@ fn build_fullscreen_equalizer_panel() -> EqualizerPanel {
     band_row.set_margin_bottom(6);
 
     let graph = gtk::Box::new(gtk::Orientation::Horizontal, FULLSCREEN_EQUALIZER_ROW_GAP);
-    graph.set_halign(gtk::Align::Center);
-    graph.set_valign(gtk::Align::Center);
-    graph.set_hexpand(false);
+    graph.set_halign(gtk::Align::Fill);
+    graph.set_valign(gtk::Align::Fill);
+    graph.set_hexpand(true);
+    graph.set_vexpand(true);
     graph.set_width_request(1);
     let left_levels = fullscreen_equalizer_level_labels(0.0);
     graph.append(&left_levels);
 
     let bands = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     bands.add_css_class("fullscreen-player-equalizer-bands");
-    bands.set_halign(gtk::Align::Center);
-    bands.set_valign(gtk::Align::Center);
-    bands.set_hexpand(false);
+    bands.set_homogeneous(true);
+    bands.set_width_request(1);
+    bands.set_halign(gtk::Align::Fill);
+    bands.set_valign(gtk::Align::Fill);
+    bands.set_hexpand(true);
+    bands.set_vexpand(true);
     let mut scales = Vec::with_capacity(EQUALIZER_BAND_COUNT);
-    let mut band_widgets = Vec::with_capacity(EQUALIZER_BAND_COUNT);
     for index in 0..EQUALIZER_BAND_COUNT {
-        let band = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        band.set_halign(gtk::Align::Center);
-        band.set_valign(gtk::Align::Center);
-        band.set_width_request(FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH);
+        let band = gtk::Box::new(
+            gtk::Orientation::Vertical,
+            FULLSCREEN_EQUALIZER_BAND_SPACING,
+        );
+        band.set_width_request(1);
+        band.set_halign(gtk::Align::Fill);
+        band.set_valign(gtk::Align::Fill);
+        band.set_hexpand(true);
+        band.set_vexpand(true);
         let scale = gtk::Scale::with_range(gtk::Orientation::Vertical, -12.0, 12.0, 0.5);
         scale.add_css_class("fullscreen-player-equalizer-scale");
         scale.set_inverted(true);
         scale.set_value(0.0);
         scale.set_draw_value(false);
-        scale.set_size_request(
-            FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH,
-            FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT,
-        );
-        scale.set_valign(gtk::Align::Center);
+        scale.set_width_request(1);
+        scale.set_halign(gtk::Align::Fill);
+        scale.set_valign(gtk::Align::Fill);
+        scale.set_hexpand(true);
+        scale.set_vexpand(true);
         scale.set_tooltip_text(Some(&equalizer_band_title(index)));
         install_equalizer_scroll(&scale);
         band.append(&scale);
         band.append(&fullscreen_equalizer_band_label(index));
         bands.append(&band);
-        band_widgets.push(band);
         scales.push(scale);
     }
     graph.append(&bands);
     let right_levels = fullscreen_equalizer_level_labels(1.0);
     graph.append(&right_levels);
-    let left_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    left_spacer.set_hexpand(true);
-    let right_spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    right_spacer.set_hexpand(true);
-    band_row.append(&left_spacer);
-    band_row.append(&graph);
-    band_row.append(&right_spacer);
-    let band_row_owner = fullscreen_equalizer_allocation_owner(
-        &band_row,
-        &graph,
-        &bands,
-        &band_widgets,
-        &scales,
-        &left_levels,
-        &right_levels,
-    );
-    band_row.set_margin_bottom(0);
-    band_row_owner.set_margin_bottom(6);
-    content.append(&band_row_owner);
+    let graph_clamp = adw::Clamp::new();
+    graph_clamp.set_maximum_size(FULLSCREEN_EQUALIZER_GRAPH_MAX_WIDTH);
+    graph_clamp.set_tightening_threshold(FULLSCREEN_EQUALIZER_GRAPH_TIGHTENING_WIDTH);
+    graph_clamp.set_hexpand(true);
+    graph_clamp.set_vexpand(true);
+    graph_clamp.set_child(Some(&graph));
+    band_row.append(&graph_clamp);
+    content.append(&band_row);
     root.set_child(Some(&content));
 
     EqualizerPanel {
@@ -557,159 +548,12 @@ fn build_fullscreen_equalizer_panel() -> EqualizerPanel {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct EqualizerFit {
-    band_width: i32,
-    band_gap: i32,
-    scale_height: i32,
-    show_right_levels: bool,
-}
-
-fn fullscreen_equalizer_fit(row_width: i32, row_height: i32) -> EqualizerFit {
-    let fit_inset = fullscreen_equalizer_fit_inset(row_width);
-    let row_width = row_width.saturating_sub(fit_inset);
-    let show_right_levels = true;
-    let side_width = fullscreen_equalizer_total_width(0, 0, show_right_levels);
-    let available = row_width.saturating_sub(side_width);
-    let band_gaps = EQUALIZER_BAND_COUNT.saturating_sub(1) as i32;
-    let full_width = FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH * EQUALIZER_BAND_COUNT as i32
-        + FULLSCREEN_EQUALIZER_MAX_BAND_GAP * band_gaps;
-    let band_gap = if available >= full_width {
-        FULLSCREEN_EQUALIZER_MAX_BAND_GAP
-    } else {
-        ((available - FULLSCREEN_EQUALIZER_MIN_BAND_WIDTH * EQUALIZER_BAND_COUNT as i32)
-            / band_gaps.max(1))
-        .clamp(
-            FULLSCREEN_EQUALIZER_MIN_BAND_GAP,
-            FULLSCREEN_EQUALIZER_MAX_BAND_GAP,
-        )
-    };
-    let band_width = ((available - band_gap * band_gaps) / EQUALIZER_BAND_COUNT as i32).clamp(
-        FULLSCREEN_EQUALIZER_MIN_BAND_WIDTH,
-        FULLSCREEN_EQUALIZER_MAX_BAND_WIDTH,
-    );
-    let scale_height = fullscreen_equalizer_scale_height(row_width, row_height, available);
-
-    EqualizerFit {
-        band_width,
-        band_gap,
-        scale_height,
-        show_right_levels,
-    }
-}
-
-fn fullscreen_equalizer_fit_inset(row_width: i32) -> i32 {
-    (row_width / 8).clamp(
-        FULLSCREEN_EQUALIZER_MIN_FIT_INSET,
-        FULLSCREEN_EQUALIZER_MAX_FIT_INSET,
-    )
-}
-
-fn fullscreen_equalizer_scale_height(row_width: i32, row_height: i32, available: i32) -> i32 {
-    let width_budget = row_width.min(available.max(1));
-    let width_height = (width_budget * FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT / 560).clamp(
-        FULLSCREEN_EQUALIZER_MIN_SCALE_HEIGHT,
-        FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT,
-    );
-    let height_height = if row_height > 0 {
-        row_height
-            .saturating_sub(FULLSCREEN_EQUALIZER_LABEL_HEIGHT)
-            .clamp(
-                FULLSCREEN_EQUALIZER_MIN_SCALE_HEIGHT,
-                FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT,
-            )
-    } else {
-        FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT
-    };
-    width_height.min(height_height)
-}
-
-fn fullscreen_equalizer_total_width(
-    band_width: i32,
-    band_gap: i32,
-    show_right_levels: bool,
-) -> i32 {
-    let side_width = if show_right_levels {
-        FULLSCREEN_EQUALIZER_LEVEL_WIDTH * 2 + FULLSCREEN_EQUALIZER_ROW_GAP * 2
-    } else {
-        FULLSCREEN_EQUALIZER_LEVEL_WIDTH + FULLSCREEN_EQUALIZER_ROW_GAP
-    };
-    side_width
-        + band_width * EQUALIZER_BAND_COUNT as i32
-        + band_gap * EQUALIZER_BAND_COUNT.saturating_sub(1) as i32
-}
-
-fn apply_fullscreen_equalizer_fit(
-    row_width: i32,
-    row_height: i32,
-    graph: &gtk::Box,
-    bands: &gtk::Box,
-    band_widgets: &[gtk::Box],
-    scales: &[gtk::Scale],
-    levels: (&gtk::Box, &gtk::Box),
-) {
-    if row_width <= 0 {
-        return;
-    }
-
-    let fit = fullscreen_equalizer_fit(row_width, row_height);
-    let band_area_width = fit.band_width * EQUALIZER_BAND_COUNT as i32
-        + fit.band_gap * EQUALIZER_BAND_COUNT.saturating_sub(1) as i32;
-    let graph_width =
-        fullscreen_equalizer_total_width(fit.band_width, fit.band_gap, fit.show_right_levels);
-    graph.set_width_request(graph_width);
-    bands.set_spacing(fit.band_gap);
-    bands.set_width_request(band_area_width);
-    let (left_levels, right_levels) = levels;
-    left_levels.set_height_request(fit.scale_height);
-    right_levels.set_visible(fit.show_right_levels);
-    right_levels.set_height_request(fit.scale_height);
-    for (band, scale) in band_widgets.iter().zip(scales.iter()) {
-        band.set_width_request(fit.band_width);
-        scale.set_size_request(fit.band_width, fit.scale_height);
-    }
-}
-
-fn fullscreen_equalizer_allocation_owner(
-    row: &gtk::Box,
-    graph: &gtk::Box,
-    bands: &gtk::Box,
-    band_widgets: &[gtk::Box],
-    scales: &[gtk::Scale],
-    left_levels: &gtk::Box,
-    right_levels: &gtk::Box,
-) -> gtk::Widget {
-    let resize_graph = graph.clone();
-    let resize_bands = bands.clone();
-    let resize_band_widgets = band_widgets.to_vec();
-    let resize_scales = scales.to_vec();
-    let resize_left_levels = left_levels.clone();
-    let resize_right_levels = right_levels.clone();
-    let last_allocation = Cell::new(None);
-    allocation_owner(row, move |width, height| {
-        let allocation = (width, height);
-        if width <= 0 || last_allocation.replace(Some(allocation)) == Some(allocation) {
-            return;
-        }
-        apply_fullscreen_equalizer_fit(
-            width,
-            height,
-            &resize_graph,
-            &resize_bands,
-            &resize_band_widgets,
-            &resize_scales,
-            (&resize_left_levels, &resize_right_levels),
-        );
-    })
-    .upcast()
-}
-
 fn fullscreen_equalizer_level_labels(xalign: f32) -> gtk::Box {
     let column = gtk::Box::new(gtk::Orientation::Vertical, 0);
     column.add_css_class("fullscreen-player-equalizer-levels");
     column.set_width_request(FULLSCREEN_EQUALIZER_LEVEL_WIDTH);
-    column.set_height_request(FULLSCREEN_EQUALIZER_MAX_SCALE_HEIGHT);
-    column.set_valign(gtk::Align::Start);
+    column.set_valign(gtk::Align::Fill);
+    column.set_vexpand(true);
     for (index, value) in ["12 dB", "6 dB", "0 dB", "-6 dB", "-12 dB"]
         .iter()
         .enumerate()
@@ -725,6 +569,9 @@ fn fullscreen_equalizer_level_labels(xalign: f32) -> gtk::Box {
         label.set_xalign(xalign);
         column.append(&label);
     }
+    let label_space = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    label_space.set_height_request(FULLSCREEN_EQUALIZER_LABEL_HEIGHT);
+    column.append(&label_space);
     column
 }
 
@@ -732,7 +579,9 @@ fn fullscreen_equalizer_band_label(index: usize) -> gtk::Widget {
     let (value, unit) = equalizer_band_label_parts(index);
     let label = gtk::Box::new(gtk::Orientation::Vertical, 0);
     label.add_css_class("fullscreen-player-equalizer-band-label");
+    label.set_height_request(FULLSCREEN_EQUALIZER_LABEL_HEIGHT - FULLSCREEN_EQUALIZER_BAND_SPACING);
     label.set_halign(gtk::Align::Center);
+    label.set_valign(gtk::Align::Center);
     for text in [value, unit] {
         let row = gtk::Label::new(Some(&text));
         row.add_css_class("muted");

@@ -2,6 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use adw::prelude::*;
+use artwork::ArtworkBinding;
 use downloads::DownloadSubject;
 use gtk::{gio, glib};
 use localization::{msgid, tr};
@@ -11,26 +12,174 @@ use crate::downloads::{OperationFeedback, OperationFeedbackKind};
 use crate::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface, popdown_native_menu};
 use crate::settings::ContextMenuItem;
 use crate::shell::Shell;
+use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
 
 use super::collections::PlaybackTarget;
 use super::library_fields::playlist_artwork;
-use super::track_selection::TrackSelectionSnapshot;
+use super::track_selection::{TrackSelection, TrackSelectionSnapshot};
 
-#[derive(Clone)]
-pub(crate) struct PlaylistTrackSource {
-    pub(crate) target: PlaybackTarget,
+const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
+const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
+
+#[derive(Clone, Default)]
+pub(crate) struct PlaylistDragPreviewBinding {
+    prepared: Rc<RefCell<Option<PlaylistDragPreview>>>,
+    active_tile: Rc<RefCell<Option<ArtworkTile>>>,
 }
 
-impl PlaylistTrackSource {
-    pub(crate) fn new(target: PlaybackTarget) -> Self {
-        Self { target }
+#[derive(Clone)]
+struct PlaylistDragPreview {
+    title: String,
+    artwork: PlaylistDragPreviewArtwork,
+}
+
+#[derive(Clone)]
+enum PlaylistDragPreviewArtwork {
+    Resident(Option<gtk::gdk::Paintable>),
+    CacheOnly {
+        shell: std::rc::Weak<Shell>,
+        binding: ArtworkBinding,
+    },
+}
+
+impl PlaylistDragPreviewBinding {
+    pub(crate) fn connect(&self, source: &gtk::DragSource) {
+        let prepared = Rc::clone(&self.prepared);
+        let active_tile = Rc::clone(&self.active_tile);
+        source.connect_drag_begin(move |_, drag| {
+            let Some(preview) = prepared.borrow().clone() else {
+                return;
+            };
+            active_tile.borrow_mut().take();
+            let cover = match preview.artwork {
+                PlaylistDragPreviewArtwork::Resident(artwork) => artwork.map(|artwork| {
+                    let cover = gtk::Picture::for_paintable(&artwork);
+                    cover.set_can_shrink(true);
+                    cover.set_content_fit(gtk::ContentFit::Cover);
+                    cover.upcast()
+                }),
+                PlaylistDragPreviewArtwork::CacheOnly { shell, binding } => {
+                    shell.upgrade().map(|shell| {
+                        let tile = ArtworkTile::new(PLAYLIST_DRAG_ICON_COVER_SIZE);
+                        shell.bind_cache_only_artwork_tile(
+                            &tile,
+                            binding,
+                            PLAYLIST_DRAG_ICON_COVER_SIZE,
+                            THUMB_COVER_SIZE,
+                        );
+                        let widget = tile.widget();
+                        active_tile.replace(Some(tile));
+                        widget
+                    })
+                }
+            };
+            let icon = compact_playlist_drag_icon(cover, &preview.title);
+            gtk::DragIcon::for_drag(drag).set_child(Some(&icon));
+            drag.set_hotspot(
+                PLAYLIST_DRAG_ICON_COVER_SIZE / 2,
+                PLAYLIST_DRAG_ICON_COVER_SIZE / 2,
+            );
+        });
+        let finished = self.clone();
+        source.connect_drag_end(move |_, _, _| finished.clear());
+    }
+
+    pub(crate) fn prepare(&self, title: String, artwork: Option<gtk::gdk::Paintable>) {
+        self.prepared.replace(Some(PlaylistDragPreview {
+            title,
+            artwork: PlaylistDragPreviewArtwork::Resident(artwork),
+        }));
+    }
+
+    pub(crate) fn prepare_cache_only(
+        &self,
+        shell: &Rc<Shell>,
+        title: String,
+        binding: ArtworkBinding,
+    ) {
+        self.prepared.replace(Some(PlaylistDragPreview {
+            title,
+            artwork: PlaylistDragPreviewArtwork::CacheOnly {
+                shell: Rc::downgrade(shell),
+                binding,
+            },
+        }));
+    }
+
+    pub(crate) fn clear(&self) {
+        self.prepared.borrow_mut().take();
+        self.active_tile.borrow_mut().take();
     }
 }
 
 #[derive(Clone)]
-enum ContextPlaylistSource {
-    Target(PlaylistTrackSource),
+pub(crate) enum PlaylistTrackSource {
+    Target {
+        source_key: library::SourceKey,
+        source_session_epoch: SourceSessionEpoch,
+        target: PlaybackTarget,
+    },
     Selection(TrackSelectionSnapshot),
+}
+
+impl PlaylistTrackSource {
+    pub(crate) fn current_target(shell: &Shell, target: PlaybackTarget) -> Option<Self> {
+        let selected = shell.selected_library()?;
+        Some(Self::Target {
+            source_key: selected.source_key,
+            source_session_epoch: selected.source_session_epoch,
+            target,
+        })
+    }
+
+    pub(crate) fn selection(selection: TrackSelectionSnapshot) -> Self {
+        Self::Selection(selection)
+    }
+
+    pub(crate) fn current_track(shell: &Shell, track: library::TrackKey) -> Option<Self> {
+        let selected = shell.selected_library()?;
+        Some(Self::track(
+            selected.source_key,
+            selected.source_session_epoch,
+            track,
+        ))
+    }
+
+    pub(crate) fn track(
+        source_key: library::SourceKey,
+        source_session_epoch: SourceSessionEpoch,
+        track: library::TrackKey,
+    ) -> Self {
+        Self::Selection(TrackSelectionSnapshot {
+            source_key,
+            source_session_epoch,
+            tracks: [track].into(),
+        })
+    }
+
+    pub(crate) fn is_current(&self, shell: &Shell) -> bool {
+        shell.selected_library().as_deref().is_some_and(|selected| {
+            let (source_key, source_session_epoch) = match self {
+                Self::Target {
+                    source_key,
+                    source_session_epoch,
+                    ..
+                } => (*source_key, *source_session_epoch),
+                Self::Selection(selection) => {
+                    (selection.source_key, selection.source_session_epoch)
+                }
+            };
+            selected.source_key == source_key
+                && selected.source_session_epoch == source_session_epoch
+        })
+    }
+
+    pub(crate) fn ready_selection(&self) -> Option<TrackSelectionSnapshot> {
+        match self {
+            Self::Selection(selection) => Some(selection.clone()),
+            Self::Target { .. } => None,
+        }
+    }
 }
 
 #[derive(Clone, Debug)]
@@ -56,12 +205,131 @@ pub(crate) fn refresh_context_playlist_picker(shell: &Rc<Shell>) {
     shell.refresh_playlist_picker();
 }
 
+pub(crate) fn playlist_drag_content_provider(
+    source: PlaylistTrackSource,
+) -> gtk::gdk::ContentProvider {
+    let payload = glib::BoxedAnyObject::new(source);
+    gtk::gdk::ContentProvider::for_value(&payload.to_value())
+}
+
+pub(crate) fn playlist_drag_source(value: &glib::Value) -> Option<PlaylistTrackSource> {
+    let payload = value.get::<glib::BoxedAnyObject>().ok()?;
+    Some(payload.try_borrow::<PlaylistTrackSource>().ok()?.clone())
+}
+
+pub(crate) fn install_compact_playlist_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    artwork: &gtk::Picture,
+    current: impl Fn() -> Option<(PlaylistTrackSource, String)> + 'static,
+) {
+    let preview = PlaylistDragPreviewBinding::default();
+    let source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY)
+        .build();
+    source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let prepare_preview = preview.clone();
+    let weak_artwork = artwork.downgrade();
+    source.connect_prepare(move |_, _, _| {
+        prepare_preview.clear();
+        let (source, title) = current()?;
+        let artwork = weak_artwork
+            .upgrade()
+            .and_then(|artwork| artwork.paintable());
+        prepare_preview.prepare(title, artwork);
+        Some(playlist_drag_content_provider(source))
+    });
+    preview.connect(&source);
+    target.as_ref().add_controller(source);
+}
+
+fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::Widget {
+    let root = gtk::Overlay::new();
+    root.add_css_class("card");
+    root.add_css_class("playlist-drag-preview");
+    root.set_overflow(gtk::Overflow::Hidden);
+    let measure = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    measure.set_size_request(PLAYLIST_DRAG_ICON_WIDTH, PLAYLIST_DRAG_ICON_COVER_SIZE + 8);
+    measure.set_can_target(false);
+    measure.set_accessible_role(gtk::AccessibleRole::Presentation);
+    root.set_child(Some(&measure));
+
+    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
+    content.set_margin_top(4);
+    content.set_margin_bottom(4);
+    content.set_margin_start(4);
+    content.set_margin_end(4);
+
+    let cover: gtk::Widget = cover.unwrap_or_else(|| {
+        let cover = gtk::Image::from_icon_name("rufin-tracks-symbolic");
+        cover.add_css_class("muted");
+        cover.set_pixel_size(20);
+        cover.upcast()
+    });
+    let cover_slot = gtk::Overlay::new();
+    cover_slot.set_overflow(gtk::Overflow::Hidden);
+    let cover_measure = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    cover_measure.set_size_request(PLAYLIST_DRAG_ICON_COVER_SIZE, PLAYLIST_DRAG_ICON_COVER_SIZE);
+    cover_measure.set_can_target(false);
+    cover_measure.set_accessible_role(gtk::AccessibleRole::Presentation);
+    cover_slot.set_child(Some(&cover_measure));
+    cover.set_hexpand(true);
+    cover.set_vexpand(true);
+    cover.set_halign(gtk::Align::Fill);
+    cover.set_valign(gtk::Align::Fill);
+    cover_slot.add_overlay(&cover);
+    cover_slot.set_measure_overlay(&cover, false);
+    cover_slot.set_clip_overlay(&cover, true);
+    content.append(&cover_slot);
+
+    let title = gtk::Label::new(Some(title));
+    title.add_css_class("heading");
+    title.set_hexpand(true);
+    title.set_xalign(0.0);
+    title.set_max_width_chars(18);
+    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
+    content.append(&title);
+    root.add_overlay(&content);
+    root.set_measure_overlay(&content, false);
+    root.set_clip_overlay(&content, true);
+    root.upcast()
+}
+
+pub(crate) fn install_track_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    selection: TrackSelection,
+    current_track: impl Fn() -> Option<(library::TrackKey, String, ArtworkBinding)> + 'static,
+) {
+    target.as_ref().set_valign(gtk::Align::Fill);
+    let preview = PlaylistDragPreviewBinding::default();
+    let source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY)
+        .build();
+    source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let prepare_preview = preview.clone();
+    let preview_shell = Rc::downgrade(shell);
+    source.connect_prepare(move |_, _, _| {
+        prepare_preview.clear();
+        let shell = preview_shell.upgrade()?;
+        let (track, title, artwork) = current_track()?;
+        prepare_preview.prepare_cache_only(&shell, title, artwork);
+        Some(playlist_drag_content_provider(
+            PlaylistTrackSource::selection(selection.dragged_tracks_for(track)),
+        ))
+    });
+    preview.connect(&source);
+    target.as_ref().add_controller(source);
+}
+
 pub(crate) fn append_context_menu_picker(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    source: PlaylistTrackSource,
+    target: PlaybackTarget,
 ) {
-    append_context_menu_picker_source(surface, shell, ContextPlaylistSource::Target(source));
+    let Some(source) = PlaylistTrackSource::current_target(shell, target) else {
+        return;
+    };
+    append_context_menu_picker_source(surface, shell, source);
 }
 
 pub(crate) fn append_context_menu_picker_selection(
@@ -69,13 +337,13 @@ pub(crate) fn append_context_menu_picker_selection(
     shell: &Rc<Shell>,
     selection: TrackSelectionSnapshot,
 ) {
-    append_context_menu_picker_source(surface, shell, ContextPlaylistSource::Selection(selection));
+    append_context_menu_picker_source(surface, shell, PlaylistTrackSource::selection(selection));
 }
 
 fn append_context_menu_picker_source(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    source: ContextPlaylistSource,
+    source: PlaylistTrackSource,
 ) {
     let picker = context_playlist_picker(shell, source.clone(), surface.popover());
     let click_shell = Rc::downgrade(shell);
@@ -97,10 +365,10 @@ pub(crate) fn present_playlist_picker_selection(
     shell: &Rc<Shell>,
     selection: TrackSelectionSnapshot,
 ) {
-    open_full_playlist_picker(shell, ContextPlaylistSource::Selection(selection));
+    open_full_playlist_picker(shell, PlaylistTrackSource::selection(selection));
 }
 
-fn open_full_playlist_picker(shell: &Rc<Shell>, source: ContextPlaylistSource) {
+fn open_full_playlist_picker(shell: &Rc<Shell>, source: PlaylistTrackSource) {
     let Some(selected) = shell.selected_library().as_deref().cloned() else {
         return;
     };
@@ -127,7 +395,7 @@ fn open_full_playlist_picker(shell: &Rc<Shell>, source: ContextPlaylistSource) {
 
 fn context_playlist_picker(
     shell: &Rc<Shell>,
-    source: ContextPlaylistSource,
+    source: PlaylistTrackSource,
     popover: &gtk::PopoverMenu,
 ) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -153,7 +421,7 @@ fn context_playlist_picker(
 fn populate_context_playlist_picker(
     root: &gtk::Box,
     shell: &Rc<Shell>,
-    source: ContextPlaylistSource,
+    source: PlaylistTrackSource,
     popover: &gtk::PopoverMenu,
 ) {
     let header = gtk::Overlay::new();
@@ -641,24 +909,31 @@ fn playlist_picker_meta(icon_name: &str, text: &str) -> gtk::Box {
     item
 }
 
-impl ContextPlaylistSource {
-    async fn resolve(
+impl PlaylistTrackSource {
+    pub(crate) async fn resolve(
         &self,
         selected: &crate::runtime::SelectedLibrary,
     ) -> Result<(Vec<library::TrackKey>, DownloadSubject), String> {
         match self {
-            Self::Target(source) => {
-                let subject = source.target.download_subject();
-                let (tracks, _) = source.target.resolve_order(selected).await?;
+            Self::Target {
+                source_key,
+                source_session_epoch,
+                target,
+            } if *source_key == selected.source_key
+                && *source_session_epoch == selected.source_session_epoch =>
+            {
+                let subject = target.download_subject();
+                let (tracks, _) = target.resolve_order(selected).await?;
                 Ok((tracks.to_vec(), subject))
             }
+            Self::Target { .. } => Err("playlist source is no longer current".to_string()),
             Self::Selection(selection)
                 if selection.source_key == selected.source_key
                     && selection.source_session_epoch == selected.source_session_epoch =>
             {
                 Ok((selection.tracks.to_vec(), selection.download_subject()))
             }
-            Self::Selection(_) => Err("playlist selection is no longer current".to_string()),
+            Self::Selection(_) => Err("playlist source is no longer current".to_string()),
         }
     }
 }
@@ -726,4 +1001,30 @@ fn picker_source_is_current(shell: &Shell, expected: &crate::runtime::SelectedLi
             && selected.source_session_epoch == expected.source_session_epoch
             && selected.music_folder_key == expected.music_folder_key
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn playlist_drag_value_roundtrips_the_scoped_source() {
+        let expected = TrackSelectionSnapshot {
+            source_key: library::SourceKey::from_raw(7),
+            source_session_epoch: SourceSessionEpoch::new(11),
+            tracks: std::sync::Arc::from([
+                library::TrackKey::from_raw(3),
+                library::TrackKey::from_raw(5),
+            ]),
+        };
+        let payload = glib::BoxedAnyObject::new(PlaylistTrackSource::selection(expected.clone()));
+        let decoded =
+            playlist_drag_source(&payload.to_value()).expect("scoped playlist drag source");
+        let PlaylistTrackSource::Selection(decoded) = decoded else {
+            panic!("track selection source");
+        };
+        assert_eq!(decoded.source_key, expected.source_key);
+        assert_eq!(decoded.source_session_epoch, expected.source_session_epoch);
+        assert_eq!(decoded.tracks, expected.tracks);
+    }
 }

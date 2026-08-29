@@ -853,6 +853,7 @@ fn show_shortcuts_dialog(shell: &Shell) {
         &tr("Range selection"),
         "<Shift>Pointer_Button1",
     ));
+    section.add(adw::ShortcutsItem::new(&tr("Delete"), "Delete"));
     #[cfg(target_os = "macos")]
     {
         section.add(adw::ShortcutsItem::new(&tr("Select all"), "<Meta>a"));

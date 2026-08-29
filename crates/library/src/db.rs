@@ -86,8 +86,14 @@ impl Database {
             Err(error) if recovery::is_store_content_failure(&error) => {}
             Err(error) => return Err(error),
         }
-        if matches!(recovery::is_migratable_schema_40(&path).await, Ok(true)) {
-            recovery::migrate_schema_40(&path).await?;
+        if matches!(recovery::is_migratable_legacy(&path).await, Ok(true)) {
+            if let Err(error) = recovery::migrate_legacy(&path).await {
+                if recovery::is_store_content_failure(&error) {
+                    recovery::repair_legacy(&path).await?;
+                } else {
+                    return Err(error);
+                }
+            }
         } else if matches!(recovery::is_repairable_legacy(&path).await, Ok(true)) {
             recovery::repair_legacy(&path).await?;
         } else {
@@ -98,7 +104,10 @@ impl Database {
 
     async fn open_final(path: &Path) -> LibraryResult<Self> {
         let mut writer = open_writer(&path).await?;
-        schema::initialize(&mut writer).await?;
+        if let Err(error) = schema::initialize(&mut writer).await {
+            writer.close().await?;
+            return Err(error);
+        }
         let readers = open_readers(&path).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {

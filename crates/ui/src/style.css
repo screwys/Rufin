@@ -22,6 +22,21 @@ tooltip.background label {
   color: white;
 }
 
+columnview > header > button > box {
+  font-size: 100%;
+  color: color-mix(in srgb, var(--window-fg-color) 70%, transparent);
+}
+
+.playlist-drag-preview {
+  background: var(--card-bg-color);
+  color: var(--window-fg-color);
+  border: 1px solid color-mix(in srgb, var(--window-fg-color) 28%, transparent);
+  border-radius: 10px;
+  box-shadow:
+    0 8px 20px rgba(0, 0, 0, 0.32),
+    inset 0 1px color-mix(in srgb, white 14%, transparent);
+}
+
 toastoverlay toast {
   background: color-mix(in srgb, var(--window-bg-color) 88%, var(--card-bg-color) 12%);
   color: var(--window-fg-color);
@@ -270,7 +285,8 @@ button.release-note-update:hover {
   background: var(--window-bg-color);
 }
 
-scrolledwindow.route-scroll-owner scrollbar.vertical {
+scrolledwindow.route-scroll-owner scrollbar.vertical,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical {
   min-width: 9px;
   opacity: 1;
   background: transparent;
@@ -279,7 +295,9 @@ scrolledwindow.route-scroll-owner scrollbar.vertical {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range,
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough {
   min-width: 9px;
   margin: 0;
   padding: 0;
@@ -288,7 +306,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough {
   box-shadow: none;
 }
 
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider {
   min-width: 7px;
   min-height: 42px;
   margin: 0 1px;
@@ -300,12 +319,16 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:hover,
-scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active {
+scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:hover,
+.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:active {
   background: color-mix(in srgb, var(--window-fg-color) 56%, transparent);
 }
 
 scrolledwindow.route-scroll-owner undershoot,
-scrolledwindow.route-scroll-owner overshoot {
+scrolledwindow.route-scroll-owner overshoot,
+.right-panel scrolledwindow.queue-scroller undershoot,
+.right-panel scrolledwindow.queue-scroller overshoot {
   background: transparent;
   background-image: none;
   border: none;
@@ -2031,13 +2054,39 @@ button.download-queue-pause image {
 }
 
 .queue-favorite-cell {
-  min-width: 64px;
+  min-width: 32px;
 }
 
 .queue-favorite-button {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
+}
+
+columnview > listview > row > cell > .row-favorite-button {
+  margin-right: 1px;
+  margin-left: 1px;
+}
+
+.row-favorite-button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.row-favorite-button image {
+  -gtk-icon-size: 14px;
+}
+
+.row-favorite-button:not(.active-toggle) {
+  opacity: 0;
+}
+
+columnview row:hover .row-favorite-button:not(.active-toggle),
+listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
+.album-detail-track-row:hover .row-favorite-button:not(.active-toggle),
+.row-favorite-button:not(.active-toggle):focus {
+  opacity: 1;
 }
 
 .queue-row-current .queue-title {
@@ -2257,11 +2306,13 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player-equalizer-bands {
+  min-width: 0;
   min-height: 0;
 }
 
 scale.fullscreen-player-equalizer-scale {
   min-width: 0;
+  min-height: 0;
   padding: 0;
 }
 
@@ -2374,8 +2425,24 @@ modelbutton.rufin-menu-selected:dir(rtl) {
   border-radius: 6px;
   color: transparent;
 }
-.track-skeleton.favorite-skeleton-cell {
-  background-size: 65% 16px;
+.track-skeleton.row-favorite-button {
+  background-image: none;
+}
+.track-skeleton.skeleton-short-value {
+  background-position: left center;
+  background-size: 32px 16px;
+}
+.track-skeleton.skeleton-track-number {
+  background-position: left center;
+  background-size: 40px 16px;
+}
+.track-skeleton.skeleton-duration {
+  background-position: left center;
+  background-size: 48px 16px;
+}
+.track-skeleton.skeleton-date {
+  background-position: left center;
+  background-size: 80px 16px;
 }
 .collection-grid-cover-skeleton {
   background-color: rgba(128, 128, 128, 0.16);

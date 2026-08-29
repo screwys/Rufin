@@ -6,7 +6,8 @@ use library::{PlaylistEntryKey, PlaylistEntryRow, PlaylistKey};
 use localization::msgid;
 
 use crate::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active, track_favorite_key,
+    FAVORITE_COLUMN_TITLE, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active, track_favorite_key,
 };
 use crate::interactions::install_context_menu_openers;
 use crate::localization::{bind_search_placeholder, localized_column};
@@ -31,9 +32,13 @@ use super::grid_cells::{
     collection_grid_with_selection_and_demand,
 };
 use super::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, item_at_from_item, opaque_artwork, track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, item_at_from_item, opaque_artwork,
+    track_field,
 };
 use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
+use super::playlist_picker::{
+    PlaylistDragPreviewBinding, PlaylistTrackSource, playlist_drag_content_provider,
+};
 use super::route_shell::LibraryToolbarProjection;
 use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width_with_inset;
@@ -130,6 +135,7 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         playlist: PlaylistKey,
+        playlist_name: String,
         order: library::PlaylistEntryOrder,
         first_rows: Vec<PlaylistEntryRow>,
     ) -> PlaylistEntriesView {
@@ -154,7 +160,7 @@ impl Shell {
         toolbar_widget.set_visible(!model.source_is_empty());
         wrapper.append(&toolbar_widget);
 
-        let collection = playlist_entry_collection(self, model.clone(), playlist);
+        let collection = playlist_entry_collection(self, model.clone(), playlist, playlist_name);
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
         stack.set_vexpand(true);
@@ -187,6 +193,7 @@ fn playlist_entry_collection(
     shell: &Rc<Shell>,
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
+    playlist_name: String,
 ) -> LibraryCollectionProjection {
     let settings = shell
         .settings
@@ -194,7 +201,7 @@ fn playlist_entry_collection(
         .borrow()
         .library_list(LibraryListKey::PlaylistTracks);
     let playing = TrackRowPlayingIndicator::new();
-    let selection = PlaylistEntrySelection::new(model.clone());
+    let selection = PlaylistEntrySelection::new(model.clone(), playlist_name);
     shell.set_current_playlist_entry_selection(selection.clone());
     let selected_source = shell
         .selected_library()
@@ -446,7 +453,7 @@ fn playlist_entry_favorite_column(
             return;
         };
         let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
-        let button = favorite_icon_button("Favorite track");
+        let button = row_favorite_icon_button("Favorite track");
         install_playlist_entry_context(&button, &setup_shell, playlist, Rc::clone(&current));
         let favorite_current = Rc::clone(&current);
         setup_shell.register_dynamic_favorite_button(
@@ -512,7 +519,7 @@ fn playlist_entry_favorite_column(
             teardown_cells.remove(item);
         }
     });
-    let column = gtk::ColumnViewColumn::new(None::<&str>, Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(width);
     column
 }
@@ -669,6 +676,7 @@ fn playlist_entry_text_column(
         };
         let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
         let label = gtk::Label::new(None);
+        add_field_skeleton_class(&label, field);
         label.add_css_class("muted");
         label.set_xalign(0.0);
         label.set_halign(gtk::Align::Fill);
@@ -789,14 +797,27 @@ fn install_playlist_entry_drag(
     playlist: PlaylistKey,
     current: Rc<RefCell<Option<PlaylistEntryRow>>>,
 ) {
+    target.as_ref().set_valign(gtk::Align::Fill);
     let drag_source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
+    drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let preview = PlaylistDragPreviewBinding::default();
+    preview.connect(&drag_source);
+    let drag_preview = preview.clone();
     let drag_shell = Rc::downgrade(shell);
     let drag_current = Rc::clone(&current);
     drag_source.connect_prepare(move |_, _, _| {
+        drag_preview.clear();
         let shell = drag_shell.upgrade()?;
         let entry = drag_current.borrow().clone()?;
+        let track = entry.track.as_ref()?;
+        let title = track.title.clone();
+        let artwork = track
+            .artwork_binding
+            .as_deref()
+            .map(artwork::ArtworkBinding::opaque)
+            .unwrap_or_default();
         let selection = shell
             .current_playlist_entry_selection(entry.playlist_entry_key)
             .or_else(|| {
@@ -813,16 +834,18 @@ fn install_playlist_entry_drag(
             ));
         }
         if !selection.tracks.tracks.is_empty() {
-            let payload = gtk::glib::BoxedAnyObject::new(selection.tracks);
-            providers.push(gtk::gdk::ContentProvider::for_value(&payload.to_value()));
+            providers.push(playlist_drag_content_provider(
+                PlaylistTrackSource::selection(selection.tracks),
+            ));
         }
+        drag_preview.prepare_cache_only(&shell, title, artwork);
         match providers.as_slice() {
             [] => None,
             [provider] => Some(provider.clone()),
             providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
         }
     });
-    target.add_controller(drag_source);
+    target.as_ref().add_controller(drag_source);
 
     let operations = shell.selected_source_operations();
     let drop_target = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
@@ -847,7 +870,7 @@ fn install_playlist_entry_drag(
         );
         true
     });
-    target.add_controller(drop_target);
+    target.as_ref().add_controller(drop_target);
 }
 
 struct PlaylistEntryGridCell {

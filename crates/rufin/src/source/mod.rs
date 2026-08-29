@@ -977,9 +977,12 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
-        let (publication, catalog_changed) = match outcome {
-            ScanOutcome::Changed(publication) => (publication, true),
-            ScanOutcome::ArtworkChanged(publication) => (publication, false),
+        let (publication, catalog_changed, change) = match outcome {
+            ScanOutcome::Changed(publication) => (publication, true, change),
+            ScanOutcome::PlaylistsChanged(publication) => {
+                (publication, true, CatalogChange::Playlists)
+            }
+            ScanOutcome::ArtworkChanged(publication) => (publication, false, change),
             ScanOutcome::Identical(_) | ScanOutcome::Stale | ScanOutcome::Failed => return,
         };
         if let Some(slot) = self
@@ -2524,6 +2527,7 @@ async fn acquire_required_catalog(
         .map_err(string_error)?
     {
         ScanOutcome::Changed(publication)
+        | ScanOutcome::PlaylistsChanged(publication)
         | ScanOutcome::ArtworkChanged(publication)
         | ScanOutcome::Identical(publication) => Ok(publication),
         ScanOutcome::Stale | ScanOutcome::Failed => {

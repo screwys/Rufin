@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 00:23+0000\n"
+"PO-Revision-Date: 2026-08-29 14:45+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -278,6 +278,11 @@ msgstr "Появляется в"
 
 msgid "Application name"
 msgstr "Название приложения"
+
+#, fuzzy
+#| msgid "Template"
+msgid "Apply Template"
+msgstr "Шаблон"
 
 msgid "Artist / Album"
 msgstr "Исполнитель / Альбом"
@@ -565,6 +570,11 @@ msgstr "Журнал диагностики сохранен"
 
 msgid "Diagnostic log"
 msgstr "Журнал диагностики"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
 
 msgid "Disable private mode"
 msgstr "Отключить приватный режим"
@@ -995,7 +1005,7 @@ msgid "Lock metadata"
 msgstr "Заблокировать метаданные"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Журналы скопированы"
 
 msgid "Loudness normalization"
 msgstr "Нормализация громкости"
@@ -1078,10 +1088,8 @@ msgstr "Переместить провайдера вверх"
 msgid "Move up"
 msgstr "Переместить вверх"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Выбор"
+msgstr "Множественный выбор"
 
 msgid "Multiple values"
 msgstr "Несколько значений"
@@ -1524,10 +1532,8 @@ msgstr "Закрыть Rufin"
 msgid "Quit"
 msgstr "Выход"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Выбор"
+msgstr "Выбор диапазона"
 
 msgid "Rating"
 msgstr "Оценка"
@@ -1621,6 +1627,9 @@ msgstr "Удалить"
 
 msgid "Removed from favorites"
 msgstr "Удалено из избранного"
+
+msgid "Removed from"
+msgstr "Удалено из"
 
 msgid "Rename Playlist"
 msgstr "Переименовать плейлист"
@@ -1781,8 +1790,6 @@ msgstr "Выбрать папку с музыкой"
 msgid "Select Source"
 msgstr "Выбрать Источник"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Выбрать всё"
 
@@ -2089,9 +2096,6 @@ msgstr "Использовать Мгновенный Микс Jellyfin для �
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
-msgid "Use Template"
-msgstr "Использовать шаблон"
-
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
 
@@ -2270,6 +2274,9 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
+#~ msgid "Use Template"
+#~ msgstr "Использовать шаблон"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Перейти к исполнителю"
 
@@ -2296,9 +2303,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "AirPlay and Sound Settings..."
 #~ msgstr "Настройки AirPlay и звука..."
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Свернуть в трей"

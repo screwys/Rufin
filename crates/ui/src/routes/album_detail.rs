@@ -11,7 +11,8 @@ use localization::track_count_text;
 use playback::{PlaybackMedia, QueuePlacement};
 
 use crate::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
+    FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active,
 };
 use crate::interactions::install_context_menu_openers;
 use crate::shell::Shell;
@@ -1177,6 +1178,11 @@ fn album_track_header(field_widths: &[(LibraryField, i32)]) -> gtk::Widget {
             image.add_css_class("muted");
             image.set_tooltip_text(Some(&localization::tr("Duration")));
             image.upcast()
+        } else if *field == LibraryField::Favorite {
+            let image = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
+            image.add_css_class("muted");
+            image.set_tooltip_text(Some(&localization::tr("Favorite")));
+            image.upcast()
         } else {
             let label = album_track_label(&localization::tr(field.title()), *field, *width);
             label.add_css_class("muted");
@@ -1242,7 +1248,7 @@ fn album_track_cell(
 ) -> gtk::Widget {
     match field {
         LibraryField::Favorite => {
-            let button = favorite_icon_button("Favorite track");
+            let button = row_favorite_icon_button("Favorite track");
             set_favorite_button_active(&button, track.favorite);
             shell.register_favorite_button(
                 crate::favorites::track_favorite_key(&track.track_key),
@@ -1373,7 +1379,7 @@ fn album_track_column_width(field: LibraryField) -> i32 {
         LibraryField::Year | LibraryField::Bpm => 52,
         LibraryField::PlayCount => 56,
         LibraryField::UserRating | LibraryField::SongCount | LibraryField::AlbumCount => 64,
-        LibraryField::Favorite => 40,
+        LibraryField::Favorite => FAVORITE_COLUMN_WIDTH,
         LibraryField::Image => 56,
         LibraryField::Title | LibraryField::TitleMerged => 320,
         LibraryField::Album
