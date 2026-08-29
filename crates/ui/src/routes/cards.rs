@@ -7,7 +7,7 @@ use crate::favorites::{
 use crate::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
 };
-use crate::routes::collection_context::{present_album_context_menu, present_track_context_menu};
+use crate::routes::collection_context::present_album_context_menu;
 use crate::routes::collections::PlaybackTarget;
 use crate::routes::route::Route;
 use crate::shell::Shell;
@@ -133,87 +133,6 @@ pub(crate) fn album_cover_overlay(
     ShowcaseCoverOverlay {
         root: overlay,
         button: album_button,
-        tile,
-        size: Rc::new(Cell::new(size)),
-    }
-}
-
-pub(crate) fn track_cover_overlay(
-    shell: &Rc<Shell>,
-    track: &library::TrackRow,
-    size: i32,
-) -> ShowcaseCoverOverlay {
-    let overlay = gtk::Overlay::new();
-    overlay.add_css_class("cover-frame");
-    constrain_cover_widget(&overlay, size);
-    let track_button = gtk::Button::new();
-    track_button.add_css_class("album-cover-button");
-    track_button.add_css_class("flat");
-    constrain_cover_widget(&track_button, size);
-    clip_cover(&track_button);
-    let tile = ArtworkTile::new_sized(size, size);
-    shell.bind_artwork_tile(
-        &tile,
-        track
-            .artwork_binding
-            .as_deref()
-            .map(ArtworkBinding::opaque)
-            .unwrap_or_default(),
-        super::home_layout::home_showcase_cover_size(i32::MAX),
-        LARGE_COVER_SIZE,
-    );
-    track_button.set_child(Some(&tile.widget()));
-    let play_shell = Rc::clone(shell);
-    let key = track.track_key;
-    track_button.connect_clicked(move |_| {
-        PlaybackTarget::Track(key).play(&play_shell, QueuePlacement::Now, false);
-    });
-    overlay.set_child(Some(&track_button));
-
-    let mut controls = cover_hover_controls(0, "Play track", track.favorite);
-    let menu = controls.add_context_button();
-    let menu_shell = Rc::clone(shell);
-    let menu_track = track.clone();
-    let open_menu: crate::interactions::ContextMenuOpen = Rc::new(move |target, position| {
-        present_track_context_menu(target, &menu_shell, menu_track.clone(), position);
-    });
-    install_context_menu_openers(&overlay, Rc::clone(&open_menu));
-    let menu_target = overlay.downgrade();
-    menu.connect_clicked(move |_| {
-        if let Some(target) = menu_target.upgrade() {
-            open_menu(target.upcast_ref(), elastic_cover_context_point(&target));
-        }
-    });
-    for (button, placement) in [
-        (&controls.play, QueuePlacement::Now),
-        (&controls.play_next, QueuePlacement::Next),
-        (&controls.play_last, QueuePlacement::Last),
-    ] {
-        let play_shell = Rc::clone(shell);
-        let target = PlaybackTarget::Track(track.track_key);
-        button.connect_clicked(move |_| target.play(&play_shell, placement, false));
-    }
-    if let Some(favorite) = controls.favorite.as_ref() {
-        let favorite_key = track.track_key;
-        shell.register_dynamic_favorite_button(
-            Rc::new(move || Some(crate::favorites::track_favorite_key(&favorite_key))),
-            favorite,
-        );
-        let favorite_shell = Rc::clone(shell);
-        let track_key = track.track_key;
-        favorite.connect_clicked(move |button| {
-            favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Track(track_key),
-                !favorite_button_is_active(button),
-                Some(button),
-            );
-        });
-    }
-    controls.add_to_overlay(&overlay);
-    controls.connect_hover(&overlay);
-    ShowcaseCoverOverlay {
-        root: overlay,
-        button: track_button,
         tile,
         size: Rc::new(Cell::new(size)),
     }

@@ -3,9 +3,7 @@ use std::rc::Rc;
 
 use adw::prelude::*;
 use gtk::{gio, glib};
-use library::{
-    HomeAlbumRow, HomeGenreRow, HomePage, HomeSectionRows, HomeShowcaseRow, HomeTrackRow, RadioSeed,
-};
+use library::{HomeAlbumRow, HomeGenreRow, HomePage, HomeSectionRows, HomeTrackRow, RadioSeed};
 use localization::{album_count_text, msgid, tr, track_count_text};
 use playback::RadioPlayRequest;
 
@@ -18,7 +16,7 @@ use crate::shell::Shell;
 use crate::shell::cover::presentation::{add_album_seed_gradient_class, stable_seed};
 use crate::shell::route::MountedRoute;
 
-use super::cards::{album_cover_overlay, track_cover_overlay};
+use super::cards::album_cover_overlay;
 use super::collections::library_route_inset;
 use super::detail_links::{
     DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
@@ -482,58 +480,24 @@ impl Shell {
         }
     }
 
-    fn home_showcase(self: &Rc<Self>, item: &HomeShowcaseRow) -> gtk::Widget {
+    fn home_showcase(self: &Rc<Self>, item: &HomeAlbumRow) -> gtk::Widget {
         let width = home_album_content_width(self);
         let mode = home_showcase_mode(width);
         let cover_size = home_showcase_cover_size(width);
-        let (
-            seed,
-            cover,
-            title_text,
-            artist_text,
-            year,
-            track_count,
-            duration_millis,
-            artist_links,
-            radio,
-        ) = match item {
-            HomeShowcaseRow::Album(item) => {
-                let mut album = item.album.clone();
-                album.title.clone_from(&item.title);
-                if item.artwork_binding.is_some() {
-                    album.artwork_binding.clone_from(&item.artwork_binding);
-                }
-                (
-                    stable_seed(&album.object_id),
-                    album_cover_overlay(self, &album, cover_size),
-                    album.title.clone(),
-                    album.display_artist.clone(),
-                    album.year,
-                    album.track_count,
-                    album.duration_millis,
-                    album_artist_links(&album),
-                    RadioSeed::Album(album.album_key),
-                )
-            }
-            HomeShowcaseRow::Track(item) => {
-                let mut track = item.track.clone();
-                track.title.clone_from(&item.title);
-                if item.artwork_binding.is_some() {
-                    track.artwork_binding.clone_from(&item.artwork_binding);
-                }
-                (
-                    stable_seed(&track.object_id),
-                    track_cover_overlay(self, &track, cover_size),
-                    track.title.clone(),
-                    track.display_artist.clone(),
-                    track.year,
-                    1,
-                    track.duration_millis,
-                    track_artist_links(&track),
-                    RadioSeed::Track(track.track_key),
-                )
-            }
-        };
+        let mut album = item.album.clone();
+        album.title.clone_from(&item.title);
+        if item.artwork_binding.is_some() {
+            album.artwork_binding.clone_from(&item.artwork_binding);
+        }
+        let seed = stable_seed(&album.object_id);
+        let cover = album_cover_overlay(self, &album, cover_size);
+        let title_text = album.title.clone();
+        let artist_text = album.display_artist.clone();
+        let year = album.year;
+        let track_count = album.track_count;
+        let duration_millis = album.duration_millis;
+        let artist_links = album_artist_links(&album);
+        let radio = RadioSeed::Album(album.album_key);
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
         let body = gtk::Box::new(gtk::Orientation::Horizontal, home_showcase_spacing(width));

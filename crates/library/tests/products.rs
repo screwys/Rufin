@@ -1125,14 +1125,15 @@ async fn home_search_and_radio_results_stay_bounded() {
         .expect("alternate launch Home page")
         .showcase
         .expect("alternate Showcase");
-    assert!(matches!(
-        initial_home.showcase,
-        Some(library::HomeShowcaseRow::Album(_))
-    ));
-    assert!(matches!(
-        alternate_showcase,
-        library::HomeShowcaseRow::Track(_)
-    ));
+    assert_eq!(
+        initial_home
+            .showcase
+            .expect("initial Showcase")
+            .album
+            .album_key,
+        fixture.albums[0]
+    );
+    assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
