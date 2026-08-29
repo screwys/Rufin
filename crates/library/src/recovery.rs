@@ -91,17 +91,21 @@ pub(crate) async fn migrate_legacy(path: &Path) -> LibraryResult<RecoveryReport>
         schema::upgrade_legacy_schema(&mut source).await?;
         source.close().await?;
         let mut destination = db::open_writer(&pending_store).await?;
-        schema::initialize(&mut destination).await?;
-        copy_legacy(
-            &mut destination,
-            path,
-            &mut report,
-            LegacyCopyMode::Migration,
-        )
-        .await?;
-        schema::validate(&mut destination).await?;
+        let result = async {
+            schema::initialize(&mut destination).await?;
+            copy_legacy(
+                &mut destination,
+                path,
+                &mut report,
+                LegacyCopyMode::Migration,
+            )
+            .await?;
+            schema::validate(&mut destination).await?;
+            Ok::<(), LibraryError>(())
+        }
+        .await;
         destination.close().await?;
-        Ok::<(), LibraryError>(())
+        result
     }
     .await;
     if let Err(error) = migration {

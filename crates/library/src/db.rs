@@ -104,7 +104,10 @@ impl Database {
 
     async fn open_final(path: &Path) -> LibraryResult<Self> {
         let mut writer = open_writer(&path).await?;
-        schema::initialize(&mut writer).await?;
+        if let Err(error) = schema::initialize(&mut writer).await {
+            writer.close().await?;
+            return Err(error);
+        }
         let readers = open_readers(&path).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
