@@ -221,7 +221,7 @@
           <li>Fixed a visual bug: Gapless preload was leaking in visually, when song was about to finish, next song duration was shown before the next song started playing.</li>
         </ul>
         <ul>
-          <li>Fixed an issue with Jellyfin artist metadata editing: it now confirms that edit is successfuly completed.</li>
+          <li>Fixed an issue with Jellyfin artist metadata editing: it now confirms that edit is successfully completed.</li>
         </ul>
         <ul>
           <li>Special thanks to @fenbyte for testing MacOS integration and suggesting various improvements/fixes; and @k2helix for Windows installer/app window behavior debugging!</li>
@@ -291,7 +291,7 @@
     </release>
     <release version="0.11.1" date="2026-07-30">
       <description>
-        <p>This is a patch release that adresses a regression with local library media formats.</p>
+        <p>This is a patch release that addresses a regression with local library media formats.</p>
         <ul>
           <li>Expanded the supported file formats. Now all the simple media formats are supported, plus MKA/WMA.</li>
         </ul>
@@ -319,7 +319,7 @@
       <description>
         <p>Download functionality and fully offline usage is here! You can now quickly download tracks, albums or full artist discography directly from the context menu; you can also select a pre-defined download option such as Favorites, Newly Added, or the whole library, and Rufin would automatically download based on these.</p>
         <ul>
-          <li>Adressed the likely the biggest remaining UX gap, by adding a Pins menu on sidebar. You can now pin playlists, smart playlists, artists or albums to sidebar directly from the context menu.</li>
+          <li>Addressed the likely the biggest remaining UX gap, by adding a Pins menu on sidebar. You can now pin playlists, smart playlists, artists or albums to sidebar directly from the context menu.</li>
         </ul>
         <ul>
           <li>Since the preferences menu grew quite a lot, it deserved a search button, so this was added as well.</li>
@@ -404,7 +404,7 @@
       <description>
         <p>Rufin is now officially available on Nixpkgs! This is a big release with the number of backend and UI fixes that are added. A lot of `hacks` we had for separate elements are now gotten ridden of and live under coherent models. Plus a new &quot;Moods&quot; page on sidebar for Navidrome/Subsonic and local libraries.</p>
         <ul>
-          <li>Adressed an issue about Rufin leaving libraries stale. Rufin now talks to Jellyfin's own `LibraryChanged` web socket, and has `notify` dependency added for local file system changes. Navidrome/Subsonic do a light refresh once every few minutes</li>
+          <li>Addressed an issue about Rufin leaving libraries stale. Rufin now talks to Jellyfin's own `LibraryChanged` web socket, and has `notify` dependency added for local file system changes. Navidrome/Subsonic do a light refresh once every few minutes</li>
         </ul>
         <ul>
           <li>Content width and height, grid cards and scrollbar got another polishing pass. Now scrollbar is strictly on right edge, it does not appear on top of content, and also allows more space for the page content</li>
@@ -537,7 +537,7 @@
           <li>Audio output names now use actual device names. You can also change your audio device directly with a button on the bottom, without needing to navigate to preferences</li>
         </ul>
         <ul>
-          <li>Adressed an issue with Jellyfin servers where rarely on cold launches there could be 4-6s delay to play the first song</li>
+          <li>Addressed an issue with Jellyfin servers where rarely on cold launches there could be 4-6s delay to play the first song</li>
         </ul>
         <ul>
           <li>Album/artist pages can now show navidrome server links as well</li>
