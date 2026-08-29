@@ -280,6 +280,96 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
 }
 
 #[tokio::test]
+async fn cue_catch_up_advances_a_shared_backing_media_observation() {
+    let root = tempfile::tempdir().expect("music root");
+    let media = root.path().join("album.wav");
+    let first_cue = root.path().join("first.cue");
+    let second_cue = root.path().join("second.cue");
+    write_silent_wav(&media, 2).expect("WAV");
+    fs::write(
+        &first_cue,
+        "PERFORMER \"Artist\"\nTITLE \"First Album\"\nFILE \"album.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"First Track\"\n    INDEX 01 00:00:00\n",
+    )
+    .expect("first CUE");
+    fs::write(
+        &second_cue,
+        "PERFORMER \"Artist\"\nTITLE \"Second Album\"\nFILE \"album.wav\" WAVE\n  TRACK 01 AUDIO\n    TITLE \"Second Track\"\n    INDEX 01 00:00:00\n",
+    )
+    .expect("second CUE");
+    let store = tempfile::tempdir().expect("Store");
+    let database = Database::open(store.path().join("library.sqlite"))
+        .await
+        .expect("Database");
+    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+        roots: vec![root.path().to_path_buf()],
+    }))
+    .await
+    .expect("Local");
+    let (configuration, source, _) = connected.into_parts();
+    let initial = publication(
+        source
+            .manual_refresh(
+                &database,
+                &configuration.name,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .expect("scan"),
+    );
+    let albums = database
+        .album_route_page(
+            initial.source,
+            None,
+            false,
+            "",
+            library::AlbumSort::Title,
+            false,
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("Album order")
+        .0;
+    assert_eq!(albums.len(), 2);
+    let bindings = albums
+        .iter()
+        .map(|album| (*album, b"accepted-art".to_vec()))
+        .collect::<Vec<_>>();
+    database
+        .write_album_artwork_bindings(initial.source, &bindings)
+        .await
+        .expect("prepared artwork binding");
+
+    write_silent_wav(&media, 3).expect("edit CUE backing media");
+    let changed = publication(
+        source
+            .catch_up_local(
+                &database,
+                initial.source,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .expect("first catch-up"),
+    );
+    database
+        .write_album_artwork_bindings(changed.source, &bindings)
+        .await
+        .expect("repeat artwork preparation");
+    let repeated = source
+        .catch_up_local(
+            &database,
+            changed.source,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .expect("second catch-up");
+
+    assert!(matches!(repeated, ScanOutcome::Identical(_)));
+}
+
+#[tokio::test]
 async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_them() {
     let root = tempfile::tempdir().expect("music root");
     let media = root.path().join("album.wav");
