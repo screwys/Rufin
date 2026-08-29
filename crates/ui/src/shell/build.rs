@@ -396,6 +396,11 @@ pub fn build(
     operation_feedback_text.append(&operation_feedback_title);
     operation_feedback_text.append(&operation_feedback_subtitle);
     operation_feedback.append(&operation_feedback_text);
+    let operation_feedback_action = gtk::Button::with_label(&tr("Undo"));
+    operation_feedback_action.add_css_class("flat");
+    operation_feedback_action.set_valign(gtk::Align::Center);
+    operation_feedback_action.set_visible(false);
+    operation_feedback.append(&operation_feedback_action);
     let operation_feedback_close = gtk::Button::from_icon_name("rufin-window-close-symbolic");
     operation_feedback_close.add_css_class("flat");
     operation_feedback_close.set_valign(gtk::Align::Center);
@@ -436,6 +441,7 @@ pub fn build(
         operation_feedback_artwork,
         operation_feedback_title,
         operation_feedback_subtitle,
+        operation_feedback_action,
         operation_feedback_close,
         root_stack,
         app_root_overlay,

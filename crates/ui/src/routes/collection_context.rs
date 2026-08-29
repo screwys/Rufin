@@ -8,6 +8,7 @@ use library::{
 use playback::{PlaybackMedia, QueuePlacement, RadioPlayRequest};
 
 use crate::SidebarPin;
+use crate::downloads::{OperationFeedback, OperationFeedbackKind};
 use crate::favorites::{FAVORITE_ADD_ICON, FAVORITE_REMOVE_ICON};
 use crate::interactions::{
     ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON, go_to_context_submenu,
@@ -404,11 +405,16 @@ fn present_track_menu(
             });
         });
     }
-    if let Some((playlist, entry)) = playlist_entry {
-        let operations = shell.selected_source_operations();
+    if let Some((_, entry)) = playlist_entry {
+        let removal = shell
+            .current_playlist_entry_selection_owner()
+            .map(|selection| selection.single_entry(entry, track.key));
+        let shell = Rc::downgrade(shell);
         surface.add_action("remove-from-playlist", move || {
-            if let Some(operations) = operations.as_ref() {
-                operations.remove_playlist_entries(playlist, vec![entry]);
+            if let Some(shell) = shell.upgrade()
+                && let Some(removal) = removal.as_ref()
+            {
+                remove_playlist_entry_selection(&shell, removal.clone());
             }
         });
     }
@@ -445,13 +451,52 @@ fn present_playlist_entry_selection_menu(
         REMOVE_ICON,
     );
     append_track_selection_actions(&surface, shell, selection.tracks.clone());
-    let operations = shell.selected_source_operations();
+    let remove_shell = Rc::clone(shell);
     surface.add_action("remove-from-playlist", move || {
-        if let Some(operations) = operations.as_ref() {
-            operations.remove_playlist_entries(selection.playlist, selection.entries.to_vec());
-        }
+        remove_playlist_entry_selection(&remove_shell, selection.clone());
     });
     surface.popup(&shell.settings.current.borrow().context_menu);
+}
+
+pub(crate) fn remove_playlist_entry_selection(
+    shell: &Rc<Shell>,
+    selection: PlaylistEntrySelectionSnapshot,
+) -> bool {
+    if selection.entries.is_empty() || !selection.tracks.is_current(shell) {
+        return false;
+    }
+    let Some(operations) = shell.selected_source_operations() else {
+        return false;
+    };
+    let item_count = selection.entries.len();
+    operations.remove_playlist_entries(selection.playlist, selection.entries.to_vec());
+
+    let feedback = OperationFeedback {
+        subject: selection.tracks.download_subject(),
+        item_count,
+        kind: OperationFeedbackKind::PlaylistRemoved {
+            destination: selection.playlist_name.to_string(),
+        },
+    };
+    if selection.tracks.tracks.len() == item_count {
+        let shell_for_undo = Rc::downgrade(shell);
+        let playlist = selection.playlist;
+        let tracks = selection.tracks;
+        shell.show_undoable_operation_feedback(&feedback, move || {
+            let Some(shell) = shell_for_undo.upgrade() else {
+                return;
+            };
+            if !tracks.is_current(&shell) {
+                return;
+            }
+            if let Some(operations) = shell.selected_source_operations() {
+                operations.add_playlist_tracks(playlist, tracks.tracks.to_vec(), false);
+            }
+        });
+    } else {
+        shell.show_operation_feedback(&feedback);
+    }
+    true
 }
 
 fn append_track_selection_actions(

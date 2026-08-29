@@ -726,6 +726,16 @@ impl Shell {
             .and_then(|selection| selection.selected_entries_for(clicked))
     }
 
+    pub(crate) fn current_playlist_entry_selection_snapshot(
+        &self,
+    ) -> Option<PlaylistEntrySelectionSnapshot> {
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow()
+            .as_ref()
+            .and_then(PlaylistEntrySelection::selected_entries)
+    }
+
     pub(crate) fn current_playlist_entry_selection_owner(&self) -> Option<PlaylistEntrySelection> {
         self.route_viewport
             .playlist_entry_selection

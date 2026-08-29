@@ -292,6 +292,15 @@ impl QueueState {
             .then(|| QueueSelectionSnapshot::new(shell, rows))
             .and_then(|selection| selection.tracks)
     }
+
+    pub(crate) fn selected_occurrences(&self) -> Option<Arc<[OccurrenceId]>> {
+        let positions = self.selection.borrow().as_ref()?.selection();
+        let occurrences = queue_rows_at_positions(&self.rows.borrow(), &positions)
+            .into_iter()
+            .map(|row| OccurrenceId::new(row.object_id))
+            .collect::<Vec<_>>();
+        (!occurrences.is_empty()).then(|| occurrences.into())
+    }
 }
 
 #[derive(Clone)]

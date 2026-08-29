@@ -1561,6 +1561,9 @@ msgstr ""
 msgid "Removed from favorites"
 msgstr ""
 
+msgid "Removed from"
+msgstr ""
+
 msgid "Rename Playlist"
 msgstr ""
 

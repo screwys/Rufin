@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::gio;
@@ -267,12 +268,17 @@ pub(crate) struct TrackSelectionSnapshot {
 pub(crate) struct PlaylistEntrySelection {
     model: PlaylistEntryModel,
     selection: PositionSelectionModel,
+    playlist_name: Rc<str>,
 }
 
 impl PlaylistEntrySelection {
-    pub(crate) fn new(model: PlaylistEntryModel) -> Self {
+    pub(crate) fn new(model: PlaylistEntryModel, playlist_name: String) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
-        Self { model, selection }
+        Self {
+            model,
+            selection,
+            playlist_name: playlist_name.into(),
+        }
     }
 
     pub(crate) fn selection_model(&self) -> gtk::SelectionModel {
@@ -290,9 +296,13 @@ impl PlaylistEntrySelection {
     }
 
     pub(crate) fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
+        self.selected_entries().map(|selection| selection.tracks)
+    }
+
+    pub(crate) fn selected_entries(&self) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
         let entries = selected_values(&self.model.order(), &positions);
-        (!entries.is_empty()).then(|| self.snapshot(entries, &positions).tracks)
+        (!entries.is_empty()).then(|| self.snapshot(entries, &positions))
     }
 
     pub(crate) fn single_entry(
@@ -302,6 +312,7 @@ impl PlaylistEntrySelection {
     ) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
+            playlist_name: Rc::clone(&self.playlist_name),
             entries: Arc::from([entry]),
             tracks: TrackSelectionSnapshot {
                 source_key: self.model.source_key(),
@@ -321,6 +332,7 @@ impl PlaylistEntrySelection {
             .collect::<Vec<_>>();
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
+            playlist_name: Rc::clone(&self.playlist_name),
             entries: entries.into(),
             tracks: TrackSelectionSnapshot {
                 source_key: self.model.source_key(),
@@ -334,6 +346,7 @@ impl PlaylistEntrySelection {
 #[derive(Clone)]
 pub(crate) struct PlaylistEntrySelectionSnapshot {
     pub(crate) playlist: PlaylistKey,
+    pub(crate) playlist_name: Rc<str>,
     pub(crate) entries: Arc<[PlaylistEntryKey]>,
     pub(crate) tracks: TrackSelectionSnapshot,
 }

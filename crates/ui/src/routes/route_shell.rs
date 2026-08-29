@@ -16,7 +16,9 @@ use crate::localization::{
 };
 use crate::player::{select_next_audio_output, select_previous_audio_output};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
-use crate::routes::collection_context::download_track_selection;
+use crate::routes::collection_context::{
+    download_track_selection, remove_playlist_entry_selection,
+};
 use crate::routes::playlist_picker::present_playlist_picker_selection;
 use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::shell::Shell;
@@ -58,6 +60,7 @@ enum SelectionShortcut {
     Play(QueuePlacement),
     AddToPlaylist,
     Download,
+    Delete,
 }
 
 #[derive(Clone)]
@@ -379,6 +382,9 @@ impl Shell {
         shortcut: SelectionShortcut,
         focus: Option<&gtk::Widget>,
     ) -> bool {
+        if matches!(shortcut, SelectionShortcut::Delete) {
+            return self.remove_focused_selection(focus);
+        }
         let Some(selection) = self.focused_track_selection(focus) else {
             return false;
         };
@@ -388,24 +394,46 @@ impl Shell {
             SelectionShortcut::Download => {
                 return download_track_selection(self, selection);
             }
+            SelectionShortcut::Delete => unreachable!(),
         }
         true
+    }
+
+    fn remove_focused_selection(self: &Rc<Self>, focus: Option<&gtk::Widget>) -> bool {
+        if self.queue_selection_focused(focus) {
+            let Some(occurrences) = self
+                .selected_queue()
+                .and_then(|queue| queue.selected_occurrences())
+            else {
+                return false;
+            };
+            self.products
+                .playback
+                .queue
+                .remove_many(occurrences.to_vec());
+            return true;
+        }
+        self.current_playlist_entry_selection_snapshot()
+            .is_some_and(|selection| remove_playlist_entry_selection(self, selection))
     }
 
     fn focused_track_selection(
         &self,
         focus: Option<&gtk::Widget>,
     ) -> Option<TrackSelectionSnapshot> {
-        let queue_focused = focus.is_some_and(|focus| {
-            focus.is_ancestor(&self.right_panel.queue_panel)
-                || focus.is_ancestor(&self.player_view.fullscreen_player.queue_panel)
-        });
-        if queue_focused {
+        if self.queue_selection_focused(focus) {
             return self
                 .selected_queue()
                 .and_then(|queue| queue.selected_tracks(self));
         }
         self.current_route_track_selection_snapshot()
+    }
+
+    fn queue_selection_focused(&self, focus: Option<&gtk::Widget>) -> bool {
+        focus.is_some_and(|focus| {
+            focus.is_ancestor(&self.right_panel.queue_panel)
+                || focus.is_ancestor(&self.player_view.fullscreen_player.queue_panel)
+        })
     }
 
     pub(crate) fn library_toolbar_projection(
@@ -942,6 +970,12 @@ fn selection_shortcut(
     if enter && modifiers == primary_shift {
         return Some(SelectionShortcut::Play(QueuePlacement::Last));
     }
+    let delete = matches!(key, gtk::gdk::Key::Delete | gtk::gdk::Key::KP_Delete);
+    #[cfg(target_os = "macos")]
+    let delete = delete || key == gtk::gdk::Key::BackSpace;
+    if delete && modifiers.is_empty() {
+        return Some(SelectionShortcut::Delete);
+    }
     if modifiers != primary_shift {
         return None;
     }
@@ -1207,6 +1241,16 @@ mod tests {
             ),
             Some(SelectionShortcut::AddToPlaylist)
         ));
+        assert!(matches!(
+            selection_shortcut(gtk::gdk::Key::Delete, gtk::gdk::ModifierType::empty()),
+            Some(SelectionShortcut::Delete)
+        ));
+        #[cfg(target_os = "macos")]
+        assert!(matches!(
+            selection_shortcut(gtk::gdk::Key::BackSpace, gtk::gdk::ModifierType::empty()),
+            Some(SelectionShortcut::Delete)
+        ));
+        assert!(selection_shortcut(gtk::gdk::Key::Delete, primary).is_none());
         assert!(selection_shortcut(gtk::gdk::Key::p, primary).is_none());
     }
 }

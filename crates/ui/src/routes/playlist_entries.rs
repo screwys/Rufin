@@ -130,6 +130,7 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         playlist: PlaylistKey,
+        playlist_name: String,
         order: library::PlaylistEntryOrder,
         first_rows: Vec<PlaylistEntryRow>,
     ) -> PlaylistEntriesView {
@@ -154,7 +155,7 @@ impl Shell {
         toolbar_widget.set_visible(!model.source_is_empty());
         wrapper.append(&toolbar_widget);
 
-        let collection = playlist_entry_collection(self, model.clone(), playlist);
+        let collection = playlist_entry_collection(self, model.clone(), playlist, playlist_name);
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
         stack.set_vexpand(true);
@@ -187,6 +188,7 @@ fn playlist_entry_collection(
     shell: &Rc<Shell>,
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
+    playlist_name: String,
 ) -> LibraryCollectionProjection {
     let settings = shell
         .settings
@@ -194,7 +196,7 @@ fn playlist_entry_collection(
         .borrow()
         .library_list(LibraryListKey::PlaylistTracks);
     let playing = TrackRowPlayingIndicator::new();
-    let selection = PlaylistEntrySelection::new(model.clone());
+    let selection = PlaylistEntrySelection::new(model.clone(), playlist_name);
     shell.set_current_playlist_entry_selection(selection.clone());
     let selected_source = shell
         .selected_library()
