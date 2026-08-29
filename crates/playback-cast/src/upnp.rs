@@ -212,14 +212,6 @@ impl UpnpController {
             "GetTransportInfo",
             "<InstanceID>0</InstanceID>",
         );
-        if let Err(error) = &result {
-            tracing::debug!(
-                description_url = %self.device.url(),
-                local_address = ?self.device.local_address(),
-                %error,
-                "UPnP renderer connection probe failed"
-            );
-        }
         result?;
         self.sink_protocols = self.read_sink_protocols();
         Ok(())
@@ -776,12 +768,6 @@ impl UpnpController {
             let _ = self.pause();
         }
         if let Ok(target_millis) = &result {
-            tracing::debug!(
-                requested_millis = millis,
-                target_millis,
-                paused,
-                "sent UPnP seek"
-            );
             self.pending_seek = Some(PendingSeek {
                 origin_millis: self.last_position_millis,
                 target_millis: *target_millis,
@@ -802,12 +788,6 @@ impl UpnpController {
         let Some(mut pending) = self.pending_seek.take() else {
             return true;
         };
-        tracing::debug!(
-            target_millis = pending.target_millis,
-            observed_millis,
-            difference_millis = observed_millis as i128 - pending.target_millis as i128,
-            "observed UPnP position after seek"
-        );
         match pending.observe(observed_millis) {
             SeekObservation::Reached => {
                 self.last_position_millis = observed_millis;
@@ -816,17 +796,7 @@ impl UpnpController {
             SeekObservation::Expired => true,
             SeekObservation::Waiting => {
                 if self.startup_output.is_some() {
-                    match self.seek_logical_position(pending.target_millis) {
-                        Ok(_) => tracing::debug!(
-                            target_millis = pending.target_millis,
-                            "retried UPnP startup seek"
-                        ),
-                        Err(error) => tracing::debug!(
-                            %error,
-                            target_millis = pending.target_millis,
-                            "UPnP startup seek retry was rejected"
-                        ),
-                    }
+                    let _ = self.seek_logical_position(pending.target_millis);
                 }
                 self.pending_seek = Some(pending);
                 false
@@ -1055,7 +1025,6 @@ impl UpnpController {
         if result.is_err() || elapsed.as_millis() >= 250 {
             tracing::debug!(
                 action,
-                local_address = ?self.device.local_address(),
                 elapsed_ms = elapsed.as_millis(),
                 "completed UPnP action"
             );

@@ -78,12 +78,12 @@ pub(crate) fn discover_upnp(
                         ) {
                             Ok(device) => device,
                             Err(error) => {
-                                tracing::debug!(%location, ?local_address, %error, "UPnP renderer description was unusable");
+                                tracing::debug!(%error, "UPnP renderer description was unusable");
                                 continue;
                             }
                         };
                         let Some(address) = device_address(&device) else {
-                            tracing::debug!(url = %device.url(), "UPnP renderer address could not be resolved");
+                            tracing::debug!("UPnP renderer address could not be resolved");
                             continue;
                         };
                         targets.push(DiscoveredTarget::Upnp {
@@ -131,7 +131,7 @@ fn discover_upnp_locations(
         .filter_map(|address| match discovery_socket(address) {
             Ok(socket) => Some(socket),
             Err(error) => {
-                tracing::debug!(%address, %error, "could not open SSDP discovery socket");
+                tracing::debug!(%error, "could not open SSDP discovery socket");
                 None
             }
         })

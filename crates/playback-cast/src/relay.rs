@@ -193,7 +193,6 @@ impl RelayServer {
             upstream_transport = transport_scheme(stream.uri()),
             renderer_transport = transport_scheme(&uri),
             relayed = !direct,
-            relay_address = %self.base_url,
             %content_type,
             content_length,
             transcode,
@@ -684,7 +683,7 @@ fn remote_response(
     if let Some(range) = range {
         upstream = upstream.header(reqwest::header::RANGE, range);
     }
-    let response = upstream.send().map_err(|error| error.to_string())?;
+    let response = upstream.send().map_err(crate::private_http_error)?;
     tracing::debug!(
         method = ?method,
         range = range.is_some(),

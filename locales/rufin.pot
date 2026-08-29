@@ -942,6 +942,9 @@ msgstr ""
 msgid "Lock metadata"
 msgstr ""
 
+msgid "Logs are copied"
+msgstr ""
+
 msgid "Loudness normalization"
 msgstr ""
 
