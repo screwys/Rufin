@@ -2063,9 +2063,9 @@ button.download-queue-pause image {
   padding: 0;
 }
 
-columnview > listview > row > cell.favorite-column-cell {
-  padding-right: 1px;
-  padding-left: 1px;
+columnview > listview > row > cell > .row-favorite-button {
+  margin-right: 1px;
+  margin-left: 1px;
 }
 
 .row-favorite-button {

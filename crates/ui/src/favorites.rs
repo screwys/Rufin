@@ -154,14 +154,6 @@ pub(crate) fn favorite_icon_button(label: &str) -> gtk::Button {
 pub(crate) fn row_favorite_icon_button(label: &str) -> gtk::Button {
     let button = favorite_icon_button(label);
     button.add_css_class("row-favorite-button");
-    button.connect_parent_notify(|button| {
-        let Some(parent) = button.parent() else {
-            return;
-        };
-        if parent.css_name() == "cell" {
-            parent.add_css_class("favorite-column-cell");
-        }
-    });
     button
 }
 
