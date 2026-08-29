@@ -1272,6 +1272,7 @@ pub(crate) fn track_table(
             let column = if key == LibraryListKey::History && field == LibraryField::LastPlayed {
                 track_position_text_column(
                     &column_shell,
+                    field,
                     field.title(),
                     track_column_fit_width(key, field),
                     0.0,

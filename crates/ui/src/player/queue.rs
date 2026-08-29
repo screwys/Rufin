@@ -10,7 +10,9 @@ use library::QueuePageRow;
 use localization::{msgid, tr};
 use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest, QueueReorderTarget};
 
-use crate::favorites::{favorite_icon_button, set_favorite_button_active};
+use crate::favorites::{
+    FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, row_favorite_icon_button, set_favorite_button_active,
+};
 use crate::interactions::{ContextMenuSurface, install_context_menu_openers};
 use crate::layout::allocation_owner;
 use crate::routes::collection_context::{
@@ -38,7 +40,7 @@ const QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH: i32 = 572;
 const QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH: i32 = 652;
 const QUEUE_DURATION_COLUMN_WIDTH: i32 = 82;
 const QUEUE_YEAR_COLUMN_WIDTH: i32 = 64;
-const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = 64;
+const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = FAVORITE_COLUMN_WIDTH;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QueueFullscreenColumnMode {
@@ -1073,7 +1075,7 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> QueueRowCo
     let favorite_cell = gtk::CenterBox::new();
     favorite_cell.add_css_class("queue-favorite-cell");
     favorite_cell.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
-    let favorite = favorite_icon_button("Favorite");
+    let favorite = row_favorite_icon_button("Favorite");
     favorite.add_css_class("queue-favorite-button");
     set_favorite_button_active(&favorite, row.favorite.unwrap_or(false));
     if let Some(key) = row.track_key {
@@ -1228,7 +1230,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     let year = gtk::Label::new(Some(&tr("Year").to_uppercase()));
     year.add_css_class("muted");
     year.set_width_request(QUEUE_YEAR_COLUMN_WIDTH);
-    let favorite = gtk::Image::from_icon_name("rufin-non-starred-symbolic");
+    let favorite = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
     favorite.add_css_class("muted");
     favorite.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
     header.append(&spacer);

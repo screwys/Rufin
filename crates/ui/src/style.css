@@ -22,6 +22,11 @@ tooltip.background label {
   color: white;
 }
 
+columnview > header > button > box {
+  font-size: 100%;
+  color: color-mix(in srgb, var(--window-fg-color) 70%, transparent);
+}
+
 .playlist-drag-preview {
   background: var(--card-bg-color);
   color: var(--window-fg-color);
@@ -2049,13 +2054,39 @@ button.download-queue-pause image {
 }
 
 .queue-favorite-cell {
-  min-width: 64px;
+  min-width: 32px;
 }
 
 .queue-favorite-button {
   min-width: 30px;
   min-height: 30px;
   padding: 0;
+}
+
+columnview > listview > row > cell.favorite-column-cell {
+  padding-right: 1px;
+  padding-left: 1px;
+}
+
+.row-favorite-button {
+  min-width: 30px;
+  min-height: 30px;
+  padding: 0;
+}
+
+.row-favorite-button image {
+  -gtk-icon-size: 14px;
+}
+
+.row-favorite-button:not(.active-toggle) {
+  opacity: 0;
+}
+
+columnview row:hover .row-favorite-button:not(.active-toggle),
+listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
+.album-detail-track-row:hover .row-favorite-button:not(.active-toggle),
+.row-favorite-button:not(.active-toggle):focus {
+  opacity: 1;
 }
 
 .queue-row-current .queue-title {
@@ -2392,8 +2423,24 @@ modelbutton.rufin-menu-selected:dir(rtl) {
   border-radius: 6px;
   color: transparent;
 }
-.track-skeleton.favorite-skeleton-cell {
-  background-size: 65% 16px;
+.track-skeleton.row-favorite-button {
+  background-image: none;
+}
+.track-skeleton.skeleton-short-value {
+  background-position: left center;
+  background-size: 32px 16px;
+}
+.track-skeleton.skeleton-track-number {
+  background-position: left center;
+  background-size: 40px 16px;
+}
+.track-skeleton.skeleton-duration {
+  background-position: left center;
+  background-size: 48px 16px;
+}
+.track-skeleton.skeleton-date {
+  background-position: left center;
+  background-size: 80px 16px;
 }
 .collection-grid-cover-skeleton {
   background-color: rgba(128, 128, 128, 0.16);

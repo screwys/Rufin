@@ -9,6 +9,8 @@ use localization::tr;
 
 pub(crate) const FAVORITE_ADD_ICON: &str = "rufin-heart-outline-symbolic";
 pub(crate) const FAVORITE_REMOVE_ICON: &str = "rufin-heart-filled-symbolic";
+pub(crate) const FAVORITE_COLUMN_TITLE: &str = " ♡";
+pub(crate) const FAVORITE_COLUMN_WIDTH: i32 = 32;
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub(crate) enum FavoriteControlKey {
@@ -146,6 +148,20 @@ pub(crate) fn favorite_icon_button(label: &str) -> gtk::Button {
     button.add_css_class("favorite-toggle");
     button.set_valign(gtk::Align::Center);
     bind_widget_tooltip(&button, label);
+    button
+}
+
+pub(crate) fn row_favorite_icon_button(label: &str) -> gtk::Button {
+    let button = favorite_icon_button(label);
+    button.add_css_class("row-favorite-button");
+    button.connect_parent_notify(|button| {
+        let Some(parent) = button.parent() else {
+            return;
+        };
+        if parent.css_name() == "cell" {
+            parent.add_css_class("favorite-column-cell");
+        }
+    });
     button
 }
 

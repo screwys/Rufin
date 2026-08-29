@@ -39,8 +39,8 @@ use super::grid_cells::{
     collection_grid_cover_shell,
 };
 use super::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, album_field, artist_field, column_width, item_at_from_item,
-    track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, album_field, artist_field,
+    column_width, item_at_from_item, track_field,
 };
 use super::route::CollectionCategory;
 use super::route::Route;
@@ -1074,7 +1074,7 @@ fn search_column(
         };
         return search_merged_column(shell, category, width, playing.cloned());
     }
-    if field == LibraryField::Favorite && category == CollectionCategory::Tracks {
+    if field == LibraryField::Favorite {
         return search_favorite_column(shell);
     }
     let factory = gtk::SignalListItemFactory::new();
@@ -1086,6 +1086,7 @@ fn search_column(
             return;
         };
         let label = gtk::Label::new(None);
+        add_field_skeleton_class(&label, field);
         label.set_xalign(0.0);
         label.set_ellipsize(gtk::pango::EllipsizeMode::End);
         let links = Rc::new(DetailLinkBinding::new(&label, &setup_shell));
@@ -1300,7 +1301,7 @@ fn search_favorite_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
             return;
         };
         let current = Rc::new(RefCell::new(None::<SearchItem>));
-        let button = crate::favorites::favorite_icon_button("Favorite");
+        let button = crate::favorites::row_favorite_icon_button("Favorite");
         let context_shell = Rc::clone(&setup_shell);
         let context_current = Rc::clone(&current);
         install_context_menu_openers(
@@ -1366,7 +1367,8 @@ fn search_favorite_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
             teardown_cells.remove(item);
         }
     });
-    let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
+    let column =
+        gtk::ColumnViewColumn::new(Some(crate::favorites::FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(column_width(LibraryField::Favorite));
     column
 }

@@ -6,7 +6,8 @@ use library::{PlaylistEntryKey, PlaylistEntryRow, PlaylistKey};
 use localization::msgid;
 
 use crate::favorites::{
-    favorite_button_is_active, favorite_icon_button, set_favorite_button_active, track_favorite_key,
+    FAVORITE_COLUMN_TITLE, favorite_button_is_active, row_favorite_icon_button,
+    set_favorite_button_active, track_favorite_key,
 };
 use crate::interactions::install_context_menu_openers;
 use crate::localization::{bind_search_placeholder, localized_column};
@@ -31,7 +32,8 @@ use super::grid_cells::{
     collection_grid_with_selection_and_demand,
 };
 use super::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, item_at_from_item, opaque_artwork, track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, item_at_from_item, opaque_artwork,
+    track_field,
 };
 use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
 use super::playlist_picker::{
@@ -451,7 +453,7 @@ fn playlist_entry_favorite_column(
             return;
         };
         let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
-        let button = favorite_icon_button("Favorite track");
+        let button = row_favorite_icon_button("Favorite track");
         install_playlist_entry_context(&button, &setup_shell, playlist, Rc::clone(&current));
         let favorite_current = Rc::clone(&current);
         setup_shell.register_dynamic_favorite_button(
@@ -517,7 +519,7 @@ fn playlist_entry_favorite_column(
             teardown_cells.remove(item);
         }
     });
-    let column = gtk::ColumnViewColumn::new(None::<&str>, Some(factory));
+    let column = gtk::ColumnViewColumn::new(Some(FAVORITE_COLUMN_TITLE), Some(factory));
     column.set_fixed_width(width);
     column
 }
@@ -674,6 +676,7 @@ fn playlist_entry_text_column(
         };
         let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
         let label = gtk::Label::new(None);
+        add_field_skeleton_class(&label, field);
         label.add_css_class("muted");
         label.set_xalign(0.0);
         label.set_halign(gtk::Align::Fill);
