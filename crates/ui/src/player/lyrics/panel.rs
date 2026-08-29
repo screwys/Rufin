@@ -187,7 +187,7 @@ impl Shell {
         );
     }
 
-    pub(crate) fn present_current_lyrics_save_dialog(self: &Rc<Self>) {
+    pub(crate) fn save_current_lyrics(self: &Rc<Self>) {
         let Some(current) = self
             .selected_playback()
             .as_deref()
@@ -206,6 +206,12 @@ impl Shell {
         };
         let offset_millis = lyrics.offset_millis.get();
         drop(lyrics);
+        if self.should_save_lyrics_to_source(&media_id) {
+            self.products
+                .lyrics
+                .save_current_to_source(media_id, offset_millis);
+            return;
+        }
         let shell = Rc::clone(self);
         gtk::glib::spawn_future_local(async move {
             let dialog = gtk::FileDialog::builder()
@@ -223,6 +229,11 @@ impl Shell {
                 .lyrics
                 .save_current(media_id, offset_millis, path);
         });
+    }
+
+    fn should_save_lyrics_to_source(&self, media_id: &playback::CurrentMediaId) -> bool {
+        self.settings.current.borrow().lyrics.save_lyrics_to_source
+            && self.products.lyrics.current_writable(media_id)
     }
 
     pub(crate) fn present_lyrics_edit_dialog(self: &Rc<Self>) {
@@ -643,6 +654,13 @@ impl Shell {
                 let shell = Rc::clone(&save_shell);
                 let media_id = save_media.clone();
                 let result = save_result.clone();
+                if shell.should_save_lyrics_to_source(&media_id) {
+                    shell
+                        .products
+                        .lyrics
+                        .save_result_to_source(media_id, result);
+                    return;
+                }
                 gtk::glib::spawn_future_local(async move {
                     let dialog = gtk::FileDialog::builder()
                         .title(tr("Save Lyrics"))

@@ -6,7 +6,6 @@ use localization::{
 };
 use lyrics::ExternalLyricsProvider;
 
-use crate::player::state::current_playback_track;
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::shell::Shell;
 
@@ -87,34 +86,109 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
     });
     sources.add(&prefer_server);
 
-    let save_fetched = switch_row(msgid("Save Lyrics"), settings.save_fetched_lyrics);
-    save_fetched.set_subtitle(&tr(msgid("Saves lyrics to your source")));
-    save_fetched.set_sensitive(settings.external_lyrics_enabled);
-    let save_shell = Rc::clone(shell);
-    save_fetched.connect_active_notify(move |row| {
-        let enabled = row.is_active();
-        if !save_shell.set_save_fetched_lyrics(enabled) {
-            return;
-        }
-        if !enabled
-            || !selected_source_uses_mapped_metadata(&save_shell)
-            || selected_source_has_local_mapping(&save_shell)
+    let save_to_source = switch_row(
+        msgid("Saves lyrics to your source"),
+        settings.save_lyrics_to_source,
+    );
+    save_to_source.set_subtitle(&tr(msgid(
+        "Save action saves the lyrics directly to your source",
+    )));
+    sources.add(&save_to_source);
+
+    let save_automatically = adw::ActionRow::builder()
+        .title(tr(msgid("Save lyrics automatically")))
+        .build();
+    let automatic_toggle = gtk::Switch::builder()
+        .active(settings.save_lyrics_automatically)
+        .valign(gtk::Align::Center)
+        .build();
+    automatic_toggle.set_can_target(false);
+    automatic_toggle.set_focusable(false);
+    save_automatically.add_suffix(&automatic_toggle);
+    save_automatically.set_activatable(true);
+    save_automatically.set_visible(settings.save_lyrics_to_source);
+    save_automatically.set_sensitive(settings.external_lyrics_enabled);
+    let automatic_shell = Rc::clone(shell);
+    let automatic_switch = automatic_toggle.clone();
+    save_automatically.connect_activated(move |_| {
+        if automatic_shell
+            .settings
+            .current
+            .borrow()
+            .lyrics
+            .save_lyrics_automatically
         {
+            automatic_shell.set_save_lyrics_automatically(false);
+            automatic_switch.set_active(false);
+            automatic_switch.set_state(false);
             return;
         }
-        let Some(track) = current_playback_track(save_shell.selected_playback().as_deref())
-            .and_then(|track| track.track_key)
-        else {
-            save_shell.show_feedback_toast(tr(msgid("Metadata editing is no longer available")));
-            return;
-        };
-        crate::preferences::dialogs::metadata::ensure_track_metadata_available(
-            &save_shell,
-            track,
-            Rc::new(|| {}),
+        let confirm = adw::AlertDialog::builder()
+            .heading(tr("Save lyrics automatically"))
+            .body(tr(msgid("This will overwrite your lyrics file with what Rufin fetched, it may be a better experience to use a dedicated program or plugin to fetch lyrics instead.")))
+            .build();
+        confirm.add_response("cancel", &tr("Cancel"));
+        confirm.add_response("confirm", &tr("Confirm"));
+        confirm.set_default_response(Some("cancel"));
+        confirm.set_close_response("cancel");
+        let shell = Rc::clone(&automatic_shell);
+        let toggle = automatic_switch.clone();
+        confirm.choose(
+            Some(&automatic_shell.chrome.window),
+            None::<&gtk::gio::Cancellable>,
+            move |response| {
+                if response.as_str() != "confirm" {
+                    return;
+                }
+                shell.set_save_lyrics_automatically(true);
+                toggle.set_active(true);
+                toggle.set_state(true);
+            },
         );
     });
-    sources.add(&save_fetched);
+    sources.add(&save_automatically);
+
+    let storage = adw::ActionRow::builder()
+        .title(tr(msgid("Lyrics storage")))
+        .build();
+    let storage_choices = gtk::Box::new(gtk::Orientation::Horizontal, 0);
+    storage_choices.add_css_class("linked");
+    storage_choices.add_css_class("preference-selection-buttons");
+    storage_choices.set_valign(gtk::Align::Center);
+    let embed = gtk::ToggleButton::with_label(&tr(msgid("Embed in track")));
+    let sidecar = gtk::ToggleButton::with_label(&tr(msgid("separate .lrc file")));
+    embed.add_css_class("preference-selection-button");
+    sidecar.add_css_class("preference-selection-button");
+    sidecar.set_group(Some(&embed));
+    embed.set_active(!settings.save_lyrics_as_sidecar);
+    sidecar.set_active(settings.save_lyrics_as_sidecar);
+    storage_choices.append(&embed);
+    storage_choices.append(&sidecar);
+    storage.add_suffix(&storage_choices);
+    storage.set_visible(
+        settings.save_lyrics_to_source && selected_source_uses_local_lyrics_storage(shell),
+    );
+    let storage_shell = Rc::clone(shell);
+    sidecar.connect_toggled(move |button| {
+        storage_shell.set_save_lyrics_as_sidecar(button.is_active());
+    });
+    sources.add(&storage);
+
+    let save_shell = Rc::clone(shell);
+    let automatic_row = save_automatically.clone();
+    let automatic_switch = automatic_toggle.clone();
+    let storage_row = storage.clone();
+    save_to_source.connect_active_notify(move |row| {
+        let enabled = row.is_active();
+        if !save_shell.set_save_lyrics_to_source(enabled) {
+            return;
+        }
+        automatic_row.set_visible(enabled);
+        if !enabled {
+            automatic_switch.set_active(false);
+        }
+        storage_row.set_visible(enabled && selected_source_uses_local_lyrics_storage(&save_shell));
+    });
 
     let provider_rows = Rc::new(RefCell::new(Vec::new()));
     populate_provider_rows(shell, &sources, &provider_rows);
@@ -122,13 +196,13 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let external_sources = sources.downgrade();
     let external_provider_rows = Rc::clone(&provider_rows);
     let external_prefer_server = prefer_server.clone();
-    let external_save_fetched = save_fetched.clone();
+    let external_save_automatically = save_automatically.clone();
     external.connect_active_notify(move |row| {
         if !external_shell.set_external_lyrics_enabled(row.is_active()) {
             return;
         }
         external_prefer_server.set_sensitive(row.is_active());
-        external_save_fetched.set_sensitive(row.is_active());
+        external_save_automatically.set_sensitive(row.is_active());
         let Some(sources) = external_sources.upgrade() else {
             return;
         };
@@ -304,7 +378,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
     page
 }
 
-fn selected_source_uses_mapped_metadata(shell: &Shell) -> bool {
+fn selected_source_uses_local_lyrics_storage(shell: &Shell) -> bool {
     let Some(source_id) = shell
         .selected_library()
         .as_deref()
@@ -318,8 +392,11 @@ fn selected_source_uses_mapped_metadata(shell: &Shell) -> bool {
         .borrow()
         .sources
         .iter()
-        .any(|source| {
-            source.id == source_id && matches!(source.kind.as_str(), "navidrome" | "subsonic")
+        .find(|source| source.id == source_id)
+        .is_some_and(|source| {
+            source.kind == "local"
+                || matches!(source.kind.as_str(), "navidrome" | "subsonic")
+                    && selected_source_has_local_mapping(shell)
         })
 }
 
@@ -608,14 +685,41 @@ impl Shell {
         });
     }
 
-    pub(crate) fn set_save_fetched_lyrics(self: &Rc<Self>, enabled: bool) -> bool {
-        self.update_lyrics_settings("save fetched lyrics setting", false, |settings| {
-            if settings.save_fetched_lyrics == enabled {
+    pub(crate) fn set_save_lyrics_to_source(self: &Rc<Self>, enabled: bool) -> bool {
+        self.update_lyrics_settings("save lyrics destination setting", false, |settings| {
+            if settings.save_lyrics_to_source == enabled {
                 return false;
             }
-            settings.save_fetched_lyrics = enabled;
+            settings.save_lyrics_to_source = enabled;
+            if !enabled {
+                settings.save_lyrics_automatically = false;
+            }
             true
         })
+    }
+
+    pub(crate) fn set_save_lyrics_automatically(self: &Rc<Self>, enabled: bool) -> bool {
+        self.update_lyrics_settings("automatic lyrics save setting", false, |settings| {
+            if settings.save_lyrics_automatically == enabled {
+                return false;
+            }
+            settings.save_lyrics_automatically = enabled;
+            true
+        })
+    }
+
+    pub(crate) fn set_save_lyrics_as_sidecar(self: &Rc<Self>, sidecar: bool) -> bool {
+        let changed = self.update_lyrics_settings("lyrics storage setting", false, |settings| {
+            if settings.save_lyrics_as_sidecar == sidecar {
+                return false;
+            }
+            settings.save_lyrics_as_sidecar = sidecar;
+            true
+        });
+        if changed {
+            self.products.lyrics.refresh_write_access();
+        }
+        changed
     }
 
     pub(crate) fn set_external_lyrics_provider_enabled(

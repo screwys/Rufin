@@ -2013,7 +2013,7 @@ pub struct LocalLyricsInput {
 }
 
 pub(crate) fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
-    for path in local_sidecar_candidates(&input.audio_path, Some(&input.title), input.cue_track) {
+    for path in local_sidecar_candidates(input) {
         if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
             return Some(lyrics);
         }
@@ -2041,53 +2041,26 @@ fn lyrics_from_sidecar_file(path: &Path) -> Option<Lyrics> {
     let content = read_text_file_bounded(path, LOCAL_LYRICS_MAX_BYTES).ok()?;
     lyrics_from_local_text(&content)
 }
-fn local_sidecar_candidates(
-    audio_path: &Path,
-    title: Option<&str>,
-    cue_track: bool,
-) -> Vec<PathBuf> {
+fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if !cue_track {
-        paths.push(audio_path.with_extension("lrc"));
+    if !input.cue_track {
+        paths.push(input.audio_path.with_extension("lrc"));
+        paths.push(input.audio_path.with_extension("LRC"));
     }
-    if let Some(path) = title_matched_lrc(audio_path.parent(), title)
-        && !paths.iter().any(|candidate| candidate == &path)
-    {
-        paths.push(path);
+    if let Some(parent) = input.audio_path.parent().filter(|_| {
+        let title = Path::new(&input.title);
+        title.components().count() == 1 && title.file_name().is_some()
+    }) {
+        for path in [
+            parent.join(format!("{}.lrc", input.title)),
+            parent.join(format!("{}.LRC", input.title)),
+        ] {
+            if !paths.iter().any(|candidate| candidate == &path) {
+                paths.push(path);
+            }
+        }
     }
     paths
-}
-fn title_matched_lrc(parent: Option<&Path>, title: Option<&str>) -> Option<PathBuf> {
-    let parent = parent?;
-    let title_key = normalized_lyrics_name(title?);
-    if title_key.is_empty() {
-        return None;
-    }
-    let mut matches = fs::read_dir(parent)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("lrc"))
-                && path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .is_some_and(|stem| normalized_lyrics_name(stem) == title_key)
-        })
-        .collect::<Vec<_>>();
-    matches.sort();
-    matches.into_iter().next()
-}
-fn normalized_lyrics_name(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(char::to_lowercase)
-        .filter(|character| character.is_alphanumeric())
-        .collect()
 }
 fn read_response_text_bounded(
     response: reqwest::blocking::Response,
@@ -2145,6 +2118,25 @@ fn bytes_to_mib(bytes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn local_sidecar_candidates_are_bounded_and_prefer_the_audio_stem() {
+        let input = LocalLyricsInput {
+            audio_path: PathBuf::from("/music/01 - Track.flac"),
+            title: "Track".to_string(),
+            cue_track: false,
+        };
+
+        assert_eq!(
+            local_sidecar_candidates(&input),
+            vec![
+                PathBuf::from("/music/01 - Track.lrc"),
+                PathBuf::from("/music/01 - Track.LRC"),
+                PathBuf::from("/music/Track.lrc"),
+                PathBuf::from("/music/Track.LRC"),
+            ]
+        );
+    }
 
     #[test]
     fn enhanced_lrc_preserves_unicode_word_ranges_and_round_trips() {

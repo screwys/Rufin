@@ -31,7 +31,7 @@ pub(crate) fn connect_lyrics_search_controls(shell: &Rc<Shell>) {
         let weak = Rc::downgrade(shell);
         pane.connect_save_clicked(move || {
             if let Some(shell) = weak.upgrade() {
-                shell.present_current_lyrics_save_dialog();
+                shell.save_current_lyrics();
             }
         });
         let weak = Rc::downgrade(shell);
