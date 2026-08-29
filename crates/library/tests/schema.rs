@@ -25,7 +25,7 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
             .fetch_one(&mut reader)
             .await
             .expect("read final schema version"),
-        42
+        43
     );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
@@ -73,7 +73,7 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
 }
 
 #[tokio::test]
-async fn schema_41_migrates_in_place_to_schema_42() {
+async fn oldest_current_format_schema_runs_the_committed_chain() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let database = Database::open(&path).await.expect("create current Store");
@@ -93,6 +93,8 @@ async fn schema_41_migrates_in_place_to_schema_42() {
              source_key,entity_kind,entity_key,analysis_key,
              integrated_lufs,true_peak,origin
          ) VALUES(1,'track',1,zeroblob(32),-18.0,0.9,'analysis');
+         DROP INDEX playlists_position_idx;
+         ALTER TABLE playlists DROP COLUMN position;
          DROP TABLE replay_gain_measurements;
          PRAGMA user_version=41;",
     )
@@ -105,13 +107,6 @@ async fn schema_41_migrates_in_place_to_schema_42() {
         .await
         .expect("migrate schema 41 in place");
     let mut reader = connection(&path, false).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
-            .fetch_one(&mut reader)
-            .await
-            .expect("read migrated version"),
-        42
-    );
     assert_eq!(
         sqlx::query_scalar::<_, f64>(
             "SELECT integrated_lufs FROM loudness_measurements WHERE entity_kind='track'"
@@ -142,6 +137,45 @@ async fn schema_41_migrates_in_place_to_schema_42() {
 }
 
 #[tokio::test]
+async fn schema_42_adds_stable_playlist_positions() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("create current Store");
+    drop(database);
+    let mut schema_42 = connection(&path, false).await;
+    sqlx::raw_sql(
+        "INSERT INTO sources(
+             source_key,object_id,display_name,normalized_name,
+             catalog_digest,artwork_digest
+         ) VALUES(1,'source','Source','source',zeroblob(32),zeroblob(32));
+         INSERT INTO playlists(
+             playlist_key,source_key,ownership,object_id,name,normalized_name,sort_text,position
+         ) VALUES
+             (1,1,'user','zulu','Zulu','zulu','zulu',0),
+             (2,1,'user','alpha','Alpha','alpha','alpha',1);
+         DROP INDEX playlists_position_idx;
+         ALTER TABLE playlists DROP COLUMN position;
+         PRAGMA user_version=42;",
+    )
+    .execute(&mut schema_42)
+    .await
+    .expect("create schema-42 fixture");
+    schema_42.close().await.expect("close schema-42 fixture");
+
+    let _database = Database::open(&path)
+        .await
+        .expect("migrate schema 42 in place");
+    let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT name FROM playlists ORDER BY position")
+            .fetch_all(&mut reader)
+            .await
+            .expect("read migrated Playlist order"),
+        ["Alpha", "Zulu"]
+    );
+}
+
+#[tokio::test]
 async fn schema_40_store_migrates_into_current_schema() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
@@ -165,7 +199,7 @@ async fn schema_40_store_migrates_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read recovered schema version"),
-        42
+        43
     );
     assert_eq!(
         sqlx::query_as::<_, (String, i64)>("SELECT object_id, catalog_revision FROM sources",)
@@ -212,7 +246,7 @@ async fn schema_40_store_migrates_into_current_schema() {
         sqlx::query_scalar::<_, String>(
             "SELECT playlist_entries.object_id FROM playlist_entries
              JOIN playlists USING (playlist_key)
-             WHERE playlists.object_id='user-list' ORDER BY position"
+             WHERE playlists.object_id='user-list' ORDER BY playlist_entries.position"
         )
         .fetch_all(&mut reader)
         .await
@@ -462,7 +496,7 @@ async fn schema_40_store_migrates_into_current_schema() {
     drop(database);
     let devel_path = directory.path().join("devel.sqlite3");
     let mut devel = connection(&devel_path, true).await;
-    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=43; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unsupported schema-43 Store");
+    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=44; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unsupported schema-44 Store");
     devel.close().await.expect("close Devel Store");
     let _database = Database::open(&devel_path)
         .await
@@ -473,7 +507,7 @@ async fn schema_40_store_migrates_into_current_schema() {
             .fetch_one(&mut rebuilt)
             .await
             .expect("read rebuilt final schema version"),
-        42
+        43
     );
     assert!(
         devel_path.exists(),
@@ -534,7 +568,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        42
+        43
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -575,7 +609,7 @@ async fn failed_known_schema_migration_repairs_readable_families_and_opens() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        42
+        43
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")

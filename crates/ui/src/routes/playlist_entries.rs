@@ -883,7 +883,8 @@ struct PlaylistEntryGridCell {
 impl PlaylistEntryGridCell {
     fn new(shell: Rc<Shell>, fields: &[LibraryField], playlist: PlaylistKey) -> Self {
         let cover = crate::shell::cover::ArtworkTile::new_elastic_square();
-        let body = CollectionGridCardCell::new(&shell, fields, cover.widget());
+        let cover_frame = super::cards::square_cover_frame(&cover.widget(), None);
+        let body = CollectionGridCardCell::new(&shell, fields, cover_frame.upcast());
         body.set_download_badge(shell.download_badge(true));
         let current = Rc::new(RefCell::new(None));
         install_playlist_entry_context(&body.card, &shell, playlist, Rc::clone(&current));

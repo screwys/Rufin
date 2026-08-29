@@ -733,7 +733,6 @@ impl Database {
         source: SourceKey,
         dragged: SmartPlaylistKey,
         target: SmartPlaylistKey,
-        after: bool,
     ) -> LibraryResult<bool> {
         if dragged == target {
             return Ok(false);
@@ -741,46 +740,78 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let mut transaction = connection.begin().await?;
-        let positions = sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
+        let positions = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
             "SELECT
                (SELECT position FROM smart_playlists WHERE source_key=?1 AND smart_playlist_key=?2),
-               (SELECT position FROM smart_playlists WHERE source_key=?1 AND smart_playlist_key=?3)",
+               (SELECT position FROM smart_playlists WHERE source_key=?1 AND smart_playlist_key=?3),
+               (SELECT max(position) FROM smart_playlists WHERE source_key=?1)",
         )
         .bind(source)
         .bind(dragged)
         .bind(target)
-        .fetch_optional(&mut *transaction)
+        .fetch_one(&mut *transaction)
         .await?;
-        let Some((Some(dragged_position), Some(target_position))) = positions else {
+        let (Some(dragged_position), Some(target_position), Some(max_position)) = positions else {
             transaction.rollback().await?;
             return Ok(false);
         };
-        let mut insertion = target_position + i64::from(after);
-        if dragged_position < insertion {
-            insertion -= 1;
-        }
+        let insertion = target_position;
         if insertion == dragged_position {
             transaction.rollback().await?;
             return Ok(false);
         }
+
+        let temporary = max_position + 1;
+        let offset = max_position + 2;
+        sqlx::query(
+            "UPDATE smart_playlists SET position=?3
+             WHERE source_key=?1 AND smart_playlist_key=?2",
+        )
+        .bind(source)
+        .bind(dragged)
+        .bind(temporary)
+        .execute(&mut *transaction)
+        .await?;
         if insertion < dragged_position {
             sqlx::query(
-                "UPDATE smart_playlists SET position=position+1
+                "UPDATE smart_playlists SET position=position+?4
                  WHERE source_key=?1 AND position>=?2 AND position<?3",
             )
             .bind(source)
             .bind(insertion)
             .bind(dragged_position)
+            .bind(offset)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "UPDATE smart_playlists SET position=position-?4+1
+                 WHERE source_key=?1 AND position>=?2+?4 AND position<?3+?4",
+            )
+            .bind(source)
+            .bind(insertion)
+            .bind(dragged_position)
+            .bind(offset)
             .execute(&mut *transaction)
             .await?;
         } else {
             sqlx::query(
-                "UPDATE smart_playlists SET position=position-1
+                "UPDATE smart_playlists SET position=position+?4
                  WHERE source_key=?1 AND position>?2 AND position<=?3",
             )
             .bind(source)
             .bind(dragged_position)
             .bind(insertion)
+            .bind(offset)
+            .execute(&mut *transaction)
+            .await?;
+            sqlx::query(
+                "UPDATE smart_playlists SET position=position-?4-1
+                 WHERE source_key=?1 AND position>?2+?4 AND position<=?3+?4",
+            )
+            .bind(source)
+            .bind(dragged_position)
+            .bind(insertion)
+            .bind(offset)
             .execute(&mut *transaction)
             .await?;
         }

@@ -477,7 +477,7 @@ impl SearchGridCell {
         }
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let cover_frame = cards::square_cover_frame(&overlay, &controls.transport);
+        let cover_frame = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(&shell, fields, cover_frame.upcast());
         let context_shell = Rc::clone(&shell);
         let context_item = Rc::clone(&current);

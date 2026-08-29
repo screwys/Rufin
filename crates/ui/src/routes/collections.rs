@@ -14,9 +14,9 @@ use gtk::{gio, glib};
 use crate::layout::{allocation_owner, configure_fill_width_clip, width_allocation_owner};
 use crate::preferences::dialogs::SmartPlaylistChange;
 use crate::shell::Shell;
+use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
 use crate::shell::route::{MountedRouteItemNavigation, item_navigation_entry_position};
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
-use localization::tr;
 use playback::{LoadedPlayRequest, QueuePlacement};
 use tracing::warn;
 
@@ -32,14 +32,13 @@ use super::grid_cells::{
     collection_grid_with_demand,
 };
 use super::library_fields::{
-    COLLECTION_GRID_CARD_GAP, clear_list_item_child, column_width, compact_header_column_width,
-    grid_label_with_label, item_at, item_at_from_item, track_field,
+    COLLECTION_GRID_CARD_GAP, column_width, compact_header_column_width, grid_label_with_label,
+    item_at, item_at_from_item, playlist_artwork, track_field,
 };
 use super::playlist_picker::install_track_drag_source;
 use super::route::Route;
 use super::route_layout::{PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START};
 use super::route_shell::restore_single_click_activation_on_primary_press;
-use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::{
     ColumnViewWidthFit, column_view_initial_width, install_column_view_width_fit,
     route_column_view_initial_width,
@@ -49,7 +48,6 @@ use super::track_selection::TrackSelection;
 use crate::runtime::SelectedLibrary;
 use downloads::DownloadSubject;
 
-pub(super) const SMART_PLAYLIST_REORDER_WIDTH: i32 = 30;
 pub(super) const LIBRARY_TABLE_HEADER_HEIGHT: i32 = 92;
 const LIBRARY_TABLE_ROW_HEIGHT: i32 = 58;
 
@@ -1012,7 +1010,6 @@ where
         .borrow()
         .library_list(LibraryListKey::SmartPlaylists)
         .row_fields;
-    let reorder_column = smart_playlist_reorder_column(shell);
     let activate_shell = Rc::clone(shell);
     let column_shell = Rc::clone(shell);
     dynamic_collection_table(
@@ -1020,7 +1017,7 @@ where
         LibraryListKey::SmartPlaylists,
         model,
         &fields,
-        vec![(reorder_column, SMART_PLAYLIST_REORDER_WIDTH)],
+        Vec::new(),
         move |field| smart_playlist_column(&column_shell, field),
         |field| column_fit_width(field, playlist_column_width(field)),
         true,
@@ -1181,25 +1178,6 @@ where
     (table, width_fit, navigation)
 }
 
-pub(crate) fn smart_playlist_reorder_column(shell: &Rc<Shell>) -> gtk::ColumnViewColumn {
-    let factory = gtk::SignalListItemFactory::new();
-    let shell = Rc::clone(shell);
-    connect_sparse_bind(&factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let Some(playlist) = item_at_from_item::<SmartPlaylistRow>(item) else {
-            return;
-        };
-        let handle = smart_playlist_drag_handle(&playlist.smart_playlist_key);
-        install_smart_playlist_drop_target(&handle, &shell, &playlist.smart_playlist_key);
-        item.set_child(Some(&handle));
-    });
-    factory.connect_unbind(clear_list_item_child);
-    let column = gtk::ColumnViewColumn::new(None::<&str>, Some(factory));
-    column.set_fixed_width(SMART_PLAYLIST_REORDER_WIDTH);
-    column
-}
 pub(crate) fn track_table(
     shell: &Rc<Shell>,
     model: TrackCollectionModel,
@@ -1370,58 +1348,215 @@ pub(crate) fn capped_library_table_content_height(
     let visible_rows = row_count.max(1).min(max_visible_rows.unwrap_or(max_rows));
     LIBRARY_TABLE_HEADER_HEIGHT + visible_rows as i32 * LIBRARY_TABLE_ROW_HEIGHT
 }
-pub(crate) fn smart_playlist_drag_handle(playlist_id: &SmartPlaylistKey) -> gtk::Image {
-    let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-    drag.add_css_class("dim-label");
-    drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-    drag.set_width_request(SMART_PLAYLIST_REORDER_WIDTH);
-    drag.set_halign(gtk::Align::Center);
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
-        .build();
-    let drag_id = playlist_id.to_string();
-    source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&drag_id.to_value()))
-    });
-    drag.add_controller(source);
-    drag
-}
 
-pub(crate) fn install_smart_playlist_drop_target(
+pub(crate) fn install_smart_playlist_reorder(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
-    target_id: &SmartPlaylistKey,
+    current: Rc<dyn Fn() -> Option<SmartPlaylistRow>>,
 ) {
+    let smart_shell = Rc::downgrade(shell);
+    install_playlist_order_drag(
+        target,
+        shell,
+        Rc::new(move || {
+            let playlist = current()?;
+            let artwork = playlist
+                .artwork_bindings
+                .iter()
+                .map(|binding| artwork::ArtworkBinding::opaque(binding))
+                .collect();
+            Some((playlist.smart_playlist_key.raw(), artwork))
+        }),
+        Rc::new(move |dragged, target| {
+            if let Some(shell) = smart_shell.upgrade() {
+                shell.update_library_list_settings(LibraryListKey::SmartPlaylists, |settings| {
+                    settings.sort_key = LibraryField::RowIndex;
+                    settings.descending = false;
+                });
+                shell.publish_smart_playlist_change(
+                    SmartPlaylistChange::Move {
+                        dragged: SmartPlaylistKey::from_raw(dragged),
+                        target: SmartPlaylistKey::from_raw(target),
+                    },
+                    None,
+                );
+            }
+        }),
+    );
+}
+
+pub(crate) fn install_playlist_reorder(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    current: Rc<dyn Fn() -> Option<PlaylistRow>>,
+) {
+    let move_shell = Rc::downgrade(shell);
+    let artwork_shell = Rc::downgrade(shell);
+    install_playlist_order_drag(
+        target,
+        shell,
+        Rc::new(move || {
+            let shell = artwork_shell.upgrade()?;
+            let playlist = current()?;
+            let prefer_server = shell
+                .settings
+                .current
+                .borrow()
+                .prefer_server_playlist_covers;
+            let artwork = playlist_artwork(&playlist, prefer_server);
+            Some((playlist.playlist_key.raw(), artwork))
+        }),
+        Rc::new(move |dragged, target| {
+            let Some(shell) = move_shell.upgrade() else {
+                return;
+            };
+            shell.update_library_list_settings(LibraryListKey::Playlists, |settings| {
+                settings.sort_key = LibraryField::RowIndex;
+                settings.descending = false;
+            });
+            let Some(selected) = shell.selected_library().as_deref().cloned() else {
+                return;
+            };
+            let database = Arc::clone(&selected.database);
+            let runtime = selected.runtime.clone();
+            let task = runtime.spawn(async move {
+                database
+                    .move_playlist(
+                        selected.source_key,
+                        PlaylistKey::from_raw(dragged),
+                        PlaylistKey::from_raw(target),
+                    )
+                    .await
+            });
+            let shell = Rc::downgrade(&shell);
+            glib::spawn_future_local(async move {
+                if task.await.ok().and_then(Result::ok) == Some(true)
+                    && let Some(shell) = shell.upgrade()
+                {
+                    shell.refresh_mounted_catalog();
+                }
+            });
+        }),
+    );
+}
+
+fn install_playlist_order_drag(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    current: Rc<dyn Fn() -> Option<(i64, Vec<artwork::ArtworkBinding>)>>,
+    reorder: Rc<dyn Fn(i64, i64)>,
+) {
+    let drag = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::MOVE)
+        .build();
+    let drag_current = Rc::clone(&current);
+    let prepared_artwork = Rc::new(RefCell::new(None::<Vec<artwork::ArtworkBinding>>));
+    let prepare_artwork = Rc::clone(&prepared_artwork);
+    drag.connect_prepare(move |_, _, _| {
+        let (key, artwork) = drag_current()?;
+        prepare_artwork.replace(Some(artwork));
+        Some(gtk::gdk::ContentProvider::for_value(&key.to_value()))
+    });
+    let drag_target = target.as_ref().downgrade();
+    let drag_shell = Rc::downgrade(shell);
+    let begin_artwork = Rc::clone(&prepared_artwork);
+    let active_tiles = Rc::new(RefCell::new(Vec::<ArtworkTile>::new()));
+    let begin_tiles = Rc::clone(&active_tiles);
+    drag.connect_drag_begin(move |_, drag| {
+        if let Some(target) = drag_target.upgrade() {
+            if let (Some(shell), Some(artwork)) =
+                (drag_shell.upgrade(), begin_artwork.borrow().clone())
+            {
+                let (cover, tiles) = playlist_order_drag_cover(&shell, &artwork);
+                gtk::DragIcon::for_drag(drag).set_child(Some(&cover));
+                drag.set_hotspot(32, 32);
+                begin_tiles.replace(tiles);
+            }
+            if let Some(table) = target
+                .ancestor(gtk::ColumnView::static_type())
+                .and_then(|widget| widget.downcast::<gtk::ColumnView>().ok())
+            {
+                table.set_single_click_activate(false);
+            }
+        }
+    });
+    let drag_end_target = target.as_ref().downgrade();
+    let end_artwork = prepared_artwork;
+    let end_tiles = active_tiles;
+    drag.connect_drag_end(move |_, _, _| {
+        end_artwork.borrow_mut().take();
+        end_tiles.borrow_mut().clear();
+        let drag_end_target = drag_end_target.clone();
+        glib::idle_add_local_once(move || {
+            if let Some(table) = drag_end_target
+                .upgrade()
+                .and_then(|target| target.ancestor(gtk::ColumnView::static_type()))
+                .and_then(|widget| widget.downcast::<gtk::ColumnView>().ok())
+            {
+                table.set_single_click_activate(true);
+            }
+        });
+    });
+    target.add_controller(drag);
+
     let widget = target.as_ref().downgrade();
-    let shell = Rc::clone(shell);
-    let target_id = *target_id;
-    let drop_target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-    drop_target.connect_drop(move |_, value, _, y| {
-        let Ok(dragged_id) = value.get::<String>() else {
+    let drop_shell = Rc::downgrade(shell);
+    let drop_current = current;
+    let drop = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
+    drop.connect_drop(move |_, value, _, _| {
+        let (Ok(dragged), Some((target, _)), Some(_shell), Some(_widget)) = (
+            value.get::<i64>(),
+            drop_current(),
+            drop_shell.upgrade(),
+            widget.upgrade(),
+        ) else {
             return false;
         };
-        let Ok(dragged_id) = dragged_id.parse::<i64>() else {
-            return false;
-        };
-        let dragged_id = SmartPlaylistKey::from_raw(dragged_id);
-        if dragged_id == target_id {
+        if dragged == target {
             return false;
         }
-        let Some(widget) = widget.upgrade() else {
-            return false;
-        };
-        let after = y > f64::from(widget.height()) / 2.0;
-        shell.publish_smart_playlist_change(
-            SmartPlaylistChange::Move {
-                dragged: dragged_id,
-                target: target_id,
-                after,
-            },
-            None,
-        );
+        reorder(dragged, target);
         true
     });
-    target.add_controller(drop_target);
+    target.add_controller(drop);
+}
+
+fn playlist_order_drag_cover(
+    shell: &Rc<Shell>,
+    artwork: &[artwork::ArtworkBinding],
+) -> (gtk::Widget, Vec<ArtworkTile>) {
+    if artwork.len() <= 1 {
+        let tile = ArtworkTile::new(64);
+        shell.bind_cache_only_artwork_tile(
+            &tile,
+            artwork.first().cloned().unwrap_or_default(),
+            64,
+            THUMB_COVER_SIZE,
+        );
+        return (tile.widget(), vec![tile]);
+    }
+
+    let mosaic = gtk::Grid::new();
+    mosaic.add_css_class("cover-tile");
+    mosaic.add_css_class("card");
+    mosaic.set_overflow(gtk::Overflow::Hidden);
+    mosaic.set_row_homogeneous(true);
+    mosaic.set_column_homogeneous(true);
+    mosaic.set_size_request(64, 64);
+    let tiles = (0..4)
+        .map(|index| {
+            let tile = ArtworkTile::new(32);
+            shell.bind_cache_only_artwork_tile(
+                &tile,
+                artwork[index % artwork.len()].clone(),
+                32,
+                THUMB_COVER_SIZE,
+            );
+            mosaic.attach(&tile.widget(), index as i32 % 2, index as i32 / 2, 1, 1);
+            tile
+        })
+        .collect();
+    (mosaic.upcast(), tiles)
 }
 fn collection_grid_field_class(field: LibraryField) -> &'static str {
     match field {

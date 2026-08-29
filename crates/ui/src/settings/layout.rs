@@ -784,6 +784,7 @@ impl LibraryField {
 
     pub fn playlist_sort(self) -> library::PlaylistSort {
         match self {
+            Self::RowIndex => library::PlaylistSort::Position,
             Self::SongCount => library::PlaylistSort::TrackCount,
             Self::Duration => library::PlaylistSort::Duration,
             _ => library::PlaylistSort::Title,

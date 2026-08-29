@@ -33,7 +33,6 @@ pub(crate) enum SmartPlaylistChange {
     Move {
         dragged: SmartPlaylistKey,
         target: SmartPlaylistKey,
-        after: bool,
     },
 }
 
@@ -67,14 +66,8 @@ impl Shell {
                 SmartPlaylistChange::Delete(key) => {
                     database.delete_smart_playlist(source, key).await
                 }
-                SmartPlaylistChange::Move {
-                    dragged,
-                    target,
-                    after,
-                } => {
-                    database
-                        .move_smart_playlist(source, dragged, target, after)
-                        .await
+                SmartPlaylistChange::Move { dragged, target } => {
+                    database.move_smart_playlist(source, dragged, target).await
                 }
             };
             accepted

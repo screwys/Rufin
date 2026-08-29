@@ -437,12 +437,14 @@ gtk::glib::wrapper! {
 
 pub(super) fn square_cover_frame(
     child: &impl IsA<gtk::Widget>,
-    transport: &gtk::Box,
+    transport: Option<&gtk::Box>,
 ) -> SquareCoverFrame {
     use gtk::subclass::prelude::ObjectSubclassIsExt;
 
     let frame: SquareCoverFrame = gtk::glib::Object::new();
-    frame.imp().transport.set(Some(transport));
+    if let Some(transport) = transport {
+        frame.imp().transport.set(Some(transport));
+    }
     frame.set_hexpand(true);
     frame.set_halign(gtk::Align::Fill);
     frame.set_valign(gtk::Align::Start);

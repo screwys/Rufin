@@ -799,6 +799,58 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
 }
 
 #[tokio::test]
+async fn smart_playlist_reordering_preserves_unique_positions() {
+    let fixture = fixture().await;
+    let definition = SmartPlaylistDefinition::default();
+    let first = fixture
+        .database
+        .create_smart_playlist(fixture.source, "First", &definition)
+        .await
+        .expect("create first Smart Playlist");
+    let second = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Second", &definition)
+        .await
+        .expect("create second Smart Playlist");
+    let third = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Third", &definition)
+        .await
+        .expect("create third Smart Playlist");
+
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, first)
+            .await
+            .expect("move Smart Playlist upward")
+    );
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, second)
+            .await
+            .expect("move Smart Playlist downward")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .smart_playlist_route_page(
+                fixture.source,
+                None,
+                SmartPlaylistListSort::Position,
+                false,
+                0,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("read reordered Smart Playlists")
+            .0,
+        [first, second, third]
+    );
+}
+
+#[tokio::test]
 async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();

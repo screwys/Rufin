@@ -845,13 +845,14 @@ async fn salvage_playlists(
         mode,
         "playlists",
         "INSERT INTO playlists(
-             source_key, ownership, object_id, name, normalized_name, sort_text, artwork_binding
+             source_key, ownership, object_id, name, normalized_name, sort_text, artwork_binding, position
          )
          SELECT source.source_key, 'source', item.playlist_id, item.name,
                 lower(item.name), lower(item.name),
                 CASE WHEN item.image_item_id IS NULL THEN NULL ELSE
                     CAST(json_object('item_id', item.image_item_id, 'tag', item.image_tag) AS BLOB)
-                END
+                END,
+                row_number() OVER (PARTITION BY source.source_key ORDER BY lower(item.name),item.playlist_id)-1
          FROM legacy.source_playlists AS item
          JOIN legacy.source_libraries AS library USING (library_id)
          JOIN sources AS source ON source.object_id = library.source_id
@@ -899,10 +900,12 @@ async fn salvage_playlists(
         mode,
         "user playlists",
         "INSERT INTO playlists(
-             source_key, ownership, object_id, name, normalized_name, sort_text
+             source_key, ownership, object_id, name, normalized_name, sort_text, position
          )
          SELECT source.source_key, 'user', item.playlist_id, item.name,
-                lower(item.name), lower(item.name)
+                lower(item.name), lower(item.name),
+                COALESCE((SELECT max(position)+1 FROM playlists current WHERE current.source_key=source.source_key),0)
+                  + row_number() OVER (PARTITION BY source.source_key ORDER BY lower(item.name),item.playlist_id)-1
          FROM legacy.local_playlists AS item
          JOIN sources AS source ON source.object_id=item.source_id",
     )

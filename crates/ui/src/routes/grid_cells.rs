@@ -582,7 +582,7 @@ impl TrackGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         if let Some(selection) = selection {
             let drag_current = Rc::clone(&current);
@@ -768,7 +768,7 @@ impl AlbumGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         body.set_download_badge(shell.download_badge(true));
         let context_shell = Rc::downgrade(shell);
@@ -906,7 +906,7 @@ impl ArtistGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         body.set_download_badge(shell.download_badge(true));
         let context_shell = Rc::downgrade(shell);

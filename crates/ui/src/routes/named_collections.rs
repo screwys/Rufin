@@ -444,6 +444,17 @@ impl NamedCollectionRow for PlaylistRow {
     ) {
         present_playlist_context_menu(target, shell, self.clone(), None, position);
     }
+    fn install_extra(
+        widget: &gtk::Widget,
+        shell: &Rc<Shell>,
+        current: Rc<std::cell::RefCell<Option<Self>>>,
+    ) {
+        super::collections::install_playlist_reorder(
+            widget,
+            shell,
+            Rc::new(move || current.borrow().as_ref().cloned()),
+        );
+    }
     fn table(
         shell: &Rc<Shell>,
         sparse: &Rc<SparseRouteModel<Self::Key, Self>>,
@@ -486,6 +497,17 @@ impl NamedCollectionRow for SmartPlaylistRow {
         position: Option<(f64, f64)>,
     ) {
         present_smart_playlist_context_menu(target, shell, self.clone(), None, position);
+    }
+    fn install_extra(
+        widget: &gtk::Widget,
+        shell: &Rc<Shell>,
+        current: Rc<std::cell::RefCell<Option<Self>>>,
+    ) {
+        super::collections::install_smart_playlist_reorder(
+            widget,
+            shell,
+            Rc::new(move || current.borrow().as_ref().cloned()),
+        );
     }
     fn table(
         shell: &Rc<Shell>,
@@ -598,7 +620,25 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         });
         overlay.set_child(Some(&cover_button));
 
-        let controls = super::cards::cover_play_hover_controls(0, msgid("Play"));
+        let mut controls = super::cards::cover_play_hover_controls(0, msgid("Play"));
+        let menu = controls.add_context_button();
+        let menu_shell = Rc::downgrade(&shell);
+        let menu_item = Rc::clone(&current);
+        let menu_target = overlay.downgrade();
+        menu.connect_clicked(move |_| {
+            let (Some(shell), Some(item), Some(target)) = (
+                menu_shell.upgrade(),
+                menu_item.borrow().as_ref().cloned(),
+                menu_target.upgrade(),
+            ) else {
+                return;
+            };
+            item.present_context(
+                target.upcast_ref(),
+                &shell,
+                super::cards::elastic_cover_context_point(&target),
+            );
+        });
         for (button, placement) in [
             (&controls.play, playback::QueuePlacement::Now),
             (&controls.play_next, playback::QueuePlacement::Next),
@@ -618,7 +658,7 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
         }
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let cover = super::cards::square_cover_frame(&overlay, &controls.transport);
+        let cover = super::cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(&shell, fields, cover.upcast());
         body.set_download_badge(shell.download_badge(true));
         let menu_shell = Rc::clone(&shell);

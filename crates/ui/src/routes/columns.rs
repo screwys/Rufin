@@ -20,6 +20,7 @@ use crate::shell::Shell;
 use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
 use crate::{LibraryField, LibraryListKey};
 
+use super::collections::{install_playlist_reorder, install_smart_playlist_reorder};
 use super::detail_links::{
     DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
     track_artist_links,
@@ -187,6 +188,16 @@ where
         let downloaded = setup_shell.download_badge(true);
         row.append(&downloaded);
         item.set_child(Some(&row));
+        let weak_item = item.downgrade();
+        install_playlist_reorder(
+            &row,
+            &setup_shell,
+            Rc::new(move || {
+                weak_item
+                    .upgrade()
+                    .and_then(|item| item_at_from_item::<PlaylistRow>(&item))
+            }),
+        );
     });
     let bind_shell = Rc::clone(shell);
     connect_sparse_bind(&factory, move |item| {
@@ -278,6 +289,16 @@ where
         let downloaded = setup_shell.download_badge(true);
         row.append(&downloaded);
         item.set_child(Some(&row));
+        let weak_item = item.downgrade();
+        install_smart_playlist_reorder(
+            &row,
+            &setup_shell,
+            Rc::new(move || {
+                weak_item
+                    .upgrade()
+                    .and_then(|item| item_at_from_item::<SmartPlaylistRow>(&item))
+            }),
+        );
     });
     let bind_shell = Rc::clone(shell);
     connect_sparse_bind(&factory, move |item| {

@@ -1824,12 +1824,35 @@ impl SelectedSourcePort for ActiveSource {
         });
     }
 
-    fn create_playlist(&self, name: String, tracks: Vec<TrackKey>) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .create_playlist(&selected.database, selected.source_key, &name, &tracks)
-                .await
+    fn create_playlist(
+        &self,
+        name: String,
+        tracks: Vec<TrackKey>,
+    ) -> Receiver<Result<Option<String>, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_selected(move |owner, selected| async move {
+            let result = match selected.source.as_ref().cloned() {
+                Some(source) => {
+                    source
+                        .create_playlist(&selected.database, selected.source_key, &name, &tracks)
+                        .await
+                }
+                None => Err(SourceError::InvalidRequest("Source is unavailable")),
+            };
+            match result {
+                Ok((changed, outcome, object_id)) => {
+                    owner
+                        .accept_playlist_result(&selected, Ok((changed, outcome)))
+                        .await;
+                    let _ = sender.send(Ok(object_id)).await;
+                }
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error.to_string());
+                    let _ = sender.send(Err(error.to_string())).await;
+                }
+            }
         });
+        receiver
     }
 
     fn rename_playlist(&self, playlist: PlaylistKey, name: String) {

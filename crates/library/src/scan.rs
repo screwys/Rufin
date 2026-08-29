@@ -2672,8 +2672,10 @@ async fn publish_entities(
              name=excluded.name, normalized_name=excluded.normalized_name,
              sort_text=excluded.sort_text, artwork_binding=excluded.artwork_binding",
         "INSERT INTO playlists(
-             source_key, ownership, object_id, name, normalized_name, sort_text, artwork_binding
-         ) SELECT ?1, 'source', object_id, name, normalized_name, sort_text, artwork_binding
+             source_key, ownership, object_id, name, normalized_name, sort_text, artwork_binding, position
+         ) SELECT ?1, 'source', object_id, name, normalized_name, sort_text, artwork_binding,
+                  COALESCE((SELECT max(position)+1 FROM playlists WHERE source_key=?1),0)
+                    + row_number() OVER (ORDER BY sort_text,object_id)-1
            FROM temp.scan_playlists WHERE true
          ON CONFLICT(source_key, ownership, object_id) DO UPDATE SET
              name=excluded.name, normalized_name=excluded.normalized_name,

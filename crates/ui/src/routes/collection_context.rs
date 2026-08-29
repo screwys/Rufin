@@ -34,7 +34,7 @@ use super::playlist_picker::{
 use super::route::Route;
 use super::track_selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 
-const EDIT_METADATA_ICON: &str = "rufin-document-edit-symbolic";
+const DOCUMENT_EDIT_ICON: &str = "rufin-document-edit-symbolic";
 
 #[derive(Clone)]
 pub(crate) struct TrackContext {
@@ -305,7 +305,7 @@ fn present_track_menu(
                 ContextMenuItem::EditMetadata,
                 msgid("Edit metadata"),
                 "edit-metadata",
-                EDIT_METADATA_ICON,
+                DOCUMENT_EDIT_ICON,
             );
         }
     }
@@ -620,7 +620,7 @@ pub(crate) fn present_album_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        EDIT_METADATA_ICON,
+        DOCUMENT_EDIT_ICON,
     );
     install_sidebar_pin_action(
         &surface,
@@ -727,7 +727,7 @@ pub(crate) fn present_artist_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        EDIT_METADATA_ICON,
+        DOCUMENT_EDIT_ICON,
     );
     install_sidebar_pin_action(
         &surface,
@@ -880,7 +880,7 @@ pub(crate) fn present_playlist_context_menu(
             playlist_id: playlist.object_id.clone(),
         }),
     );
-    surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
+    surface.append_fixed_action(msgid("Rename"), "rename", DOCUMENT_EDIT_ICON);
     surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let playback = PlaybackTarget::Playlist(playlist.playlist_key);

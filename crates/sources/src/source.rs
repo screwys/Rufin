@@ -1635,13 +1635,19 @@ impl Source {
         source: library::SourceKey,
         name: &str,
         tracks: &[library::TrackKey],
-    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+    ) -> SourceResult<(bool, Option<ScanOutcome>, Option<String>)> {
         if matches!(&self.implementation, Implementation::Local(_)) {
-            let changed = database
-                .create_playlist(source, name, tracks)
-                .await?
-                .is_some();
-            return Ok((changed, None));
+            let playlist = database.create_playlist(source, name, tracks).await?;
+            let object_id = match playlist {
+                Some(playlist) => database
+                    .playlist_rows(source, &[playlist], None, &library::ReadCancellation::new())
+                    .await?
+                    .into_iter()
+                    .next()
+                    .map(|row| row.object_id),
+                None => None,
+            };
+            return Ok((object_id.is_some(), None, object_id));
         }
         let mut pages = tracks.chunks(PROVIDER_PLAYLIST_PAGE);
         let first_ids = match pages.next() {
@@ -1669,9 +1675,10 @@ impl Source {
                 Implementation::Local(_) => unreachable!(),
             }
         }
-        self.accept_playlist_change(database, Some(playlist), None)
-            .await
-            .map(|outcome| (true, Some(outcome)))
+        let outcome = self
+            .accept_playlist_change(database, Some(playlist.clone()), None)
+            .await?;
+        Ok((true, Some(outcome), Some(playlist)))
     }
 
     pub async fn rename_playlist(

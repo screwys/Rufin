@@ -705,7 +705,6 @@ fn present_playlist_picker(
         }
         filter_add.set_sensitive(filter_rows.borrow().iter().any(|row| row.check.is_active()));
     });
-    let operations = selected.operations.clone();
     let create_shell = Rc::downgrade(shell);
     let create_selected = selected.clone();
     let create_tracks = tracks.clone();
@@ -720,7 +719,7 @@ fn present_playlist_picker(
         }
         let name = create_search.text().trim().to_string();
         if !name.is_empty() {
-            operations.create_playlist(name, create_tracks.clone());
+            shell.create_playlist_and_pin(name, create_tracks.clone());
             create_search.set_text("");
         }
     });
