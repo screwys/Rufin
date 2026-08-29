@@ -173,6 +173,7 @@ fn generate_srpm_inner(
             .stdin(Stdio::null()),
         "cargo vendor",
     )?;
+    #[cfg(unix)]
     clear_rust_source_executable_bits(&source_tree.join("vendor"))?;
 
     let timestamp_output = Command::new("git")
@@ -280,11 +281,6 @@ fn clear_rust_source_executable_bits(path: &Path) -> Result<()> {
         }
     }
     Ok(())
-}
-
-#[cfg(not(unix))]
-fn clear_rust_source_executable_bits(_path: &Path) -> Result<()> {
-    Err("RPM source generation is only supported on Unix".into())
 }
 
 fn verify_tag(root: &Path, tag: &str) -> Result<()> {
