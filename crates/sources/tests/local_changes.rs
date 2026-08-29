@@ -236,6 +236,50 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
 }
 
 #[tokio::test]
+async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
+    let root = tempfile::tempdir().expect("music root");
+    let track = root.path().join("track.wav");
+    write_silent_wav(&track, 1).expect("WAV");
+    let store = tempfile::tempdir().expect("Store");
+    let database = Database::open(store.path().join("library.sqlite"))
+        .await
+        .expect("Database");
+    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+        roots: vec![root.path().to_path_buf()],
+    }))
+    .await
+    .expect("Local");
+    let (configuration, source, _) = connected.into_parts();
+    let initial = publication(
+        source
+            .manual_refresh(
+                &database,
+                &configuration.name,
+                &|_| {},
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .expect("scan"),
+    );
+
+    fs::create_dir(root.path().join("empty")).expect("change only Local inventory bookkeeping");
+    let outcome = source
+        .catch_up_local(
+            &database,
+            initial.source,
+            &|_| {},
+            Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        )
+        .await
+        .expect("restart catch-up");
+
+    let ScanOutcome::Identical(publication) = outcome else {
+        panic!("unchanged parsed music facts must not publish: {outcome:?}");
+    };
+    assert_eq!(publication.catalog_revision, initial.catalog_revision);
+}
+
+#[tokio::test]
 async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_them() {
     let root = tempfile::tempdir().expect("music root");
     let media = root.path().join("album.wav");
@@ -595,6 +639,7 @@ fn set_genre(path: &Path, genre: &str) -> Result<(), Box<dyn std::error::Error>>
 fn publication(outcome: ScanOutcome) -> library::Publication {
     match outcome {
         ScanOutcome::Changed(publication)
+        | ScanOutcome::PlaylistsChanged(publication)
         | ScanOutcome::ArtworkChanged(publication)
         | ScanOutcome::Identical(publication) => publication,
         other => panic!("unexpected outcome: {other:?}"),
