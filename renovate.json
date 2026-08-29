@@ -11,6 +11,7 @@
   "lockFileMaintenance": {
     "enabled": true
   },
+  "prHourlyLimit": 0,
   "packageRules": [
     {
       "description": "Regenerate Flatpak cargo sources after Rust dependency updates.",
