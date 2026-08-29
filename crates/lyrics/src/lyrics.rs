@@ -583,6 +583,8 @@ struct NeteaseLyricsResponse {
     tlyric: Option<NeteaseLyricsBody>,
     #[serde(default)]
     yrc: Option<NeteaseLyricsBody>,
+    #[serde(default)]
+    romalrc: Option<NeteaseLyricsBody>,
 }
 #[derive(Debug, Deserialize)]
 struct NeteaseLyricsBody {
@@ -1186,6 +1188,23 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
             agents: Vec::new(),
         });
     }
+    if let Some(content) = response
+        .romalrc
+        .and_then(|body| body.lyric)
+        .filter(|lyrics| !lyrics.trim().is_empty())
+    {
+        documents.push(LyricsDocument {
+            role: LyricsRole::Pronunciation,
+            language: None,
+            offset_millis: 0,
+            lines: content
+                .lines()
+                .filter_map(lyric_line_from_text)
+                .filter(|line| provider_line_has_content(ExternalLyricsProvider::Netease, line))
+                .collect(),
+            agents: Vec::new(),
+        });
+    }
     lyrics_with_displayable_content(Lyrics::from_documents(
         LyricsOrigin::External(ExternalLyricsProvider::Netease),
         documents,
@@ -1201,6 +1220,7 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, Stri
         pairs.append_pair("lv", "-1");
         pairs.append_pair("tv", "-1");
         pairs.append_pair("yv", "-1");
+        pairs.append_pair("rv", "-1");
     }
     let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric lookup")?;
     let response = serde_json::from_str::<NeteaseLyricsResponse>(&body)
@@ -1213,6 +1233,11 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, Stri
             .map_or(0, str::len),
         lrc_bytes = response
             .lrc
+            .as_ref()
+            .and_then(|body| body.lyric.as_deref())
+            .map_or(0, str::len),
+        romalrc_bytes = response
+            .romalrc
             .as_ref()
             .and_then(|body| body.lyric.as_deref())
             .map_or(0, str::len),
@@ -2171,5 +2196,27 @@ mod tests {
         assert_eq!(document.lines[0].end_millis, Some(2_000));
         assert_eq!(document.lines[0].cue_lines[0].cues.len(), 2);
         assert!(document.has_word_timing());
+    }
+
+    #[test]
+    fn netease_romalrc_becomes_a_pronunciation_document() {
+        let response = serde_json::from_str::<NeteaseLyricsResponse>(
+            r#"{
+                "lrc":{"lyric":"[00:01.00]あの娘たぶんいいひと"},
+                "romalrc":{"lyric":"[00:01.00]ano ko tabun ii hito"}
+            }"#,
+        )
+        .expect("NetEase response");
+        let lyrics = lyrics_from_netease_response(response).expect("lyrics");
+        let original = lyrics
+            .selected_document(&crate::Settings::default())
+            .expect("original lyrics");
+        let pronunciation = lyrics
+            .pronunciation_for(original)
+            .expect("pronunciation lyrics");
+
+        assert_eq!(original.lines[0].text, "あの娘たぶんいいひと");
+        assert_eq!(pronunciation.lines[0].text, "ano ko tabun ii hito");
+        assert_eq!(pronunciation.lines[0].start_millis, Some(1_000));
     }
 }

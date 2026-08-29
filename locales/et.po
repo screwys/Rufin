@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 00:23+0000\n"
+"PO-Revision-Date: 2026-08-29 14:45+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -266,6 +266,11 @@ msgstr "Esineb"
 
 msgid "Application name"
 msgstr "Rakenduse nimi"
+
+#, fuzzy
+#| msgid "Template"
+msgid "Apply Template"
+msgstr "Mall"
 
 msgid "Artist / Album"
 msgstr "Esitaja / Album"
@@ -552,6 +557,11 @@ msgstr "Diagnostikalogi on salvestatud"
 
 msgid "Diagnostic log"
 msgstr "Diagnostikalogi"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
 
 msgid "Disable private mode"
 msgstr "Lülita privaatne režiim välja"
@@ -980,7 +990,7 @@ msgid "Lock metadata"
 msgstr "Lukusta metateave"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Logid on kopeeritud"
 
 msgid "Loudness normalization"
 msgstr "Helivaljuse normaliseerimine"
@@ -1063,10 +1073,8 @@ msgstr "Liiguta teenusepakkuja ülespoole"
 msgid "Move up"
 msgstr "Liiguta ülespoole"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Valik"
+msgstr "Mitmikvalik"
 
 msgid "Multiple values"
 msgstr "Mitu väärtust"
@@ -1507,10 +1515,8 @@ msgstr "Välju Rufinist"
 msgid "Quit"
 msgstr "Välju"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Valik"
+msgstr "Vahemiku valik"
 
 msgid "Rating"
 msgstr "Hinnang"
@@ -1604,6 +1610,9 @@ msgstr "Eemalda"
 
 msgid "Removed from favorites"
 msgstr "Eemaldatud lemmikute seast"
+
+msgid "Removed from"
+msgstr "Eemaldatud asukohast"
 
 msgid "Rename Playlist"
 msgstr "Muuda esitusloendi nime"
@@ -1764,8 +1773,6 @@ msgstr "Vali muusikakaust"
 msgid "Select Source"
 msgstr "Vali allikas"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Vali kõik"
 
@@ -2070,9 +2077,6 @@ msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
 msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
 
-msgid "Use Template"
-msgstr "Kasuta malli"
-
 msgid "Use a number above zero"
 msgstr "Kasuta nullist suuremat numbrit"
 
@@ -2243,6 +2247,9 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
 
+#~ msgid "Use Template"
+#~ msgstr "Kasuta malli"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Suundu esitaja juurde"
 
@@ -2266,9 +2273,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Väljumisel jäta rakendus süsteemisalve"

@@ -1,6 +1,7 @@
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{cell::RefCell, rc::Rc, sync::Arc, time::Duration};
 
 use adw::prelude::*;
+use gtk::glib;
 use tracing::warn;
 
 use crate::localization::bind_search_placeholder;
@@ -19,6 +20,8 @@ use super::route::{CollectionCategory, Route};
 use super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET;
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use super::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
+
+const TRACK_FILTER_DEBOUNCE: Duration = Duration::from_millis(150);
 
 struct RootTrackRouteOptions {
     key: LibraryListKey,
@@ -102,8 +105,27 @@ impl TrackListProjection {
         callback: impl Fn(TrackProjectionRequest) + 'static,
     ) {
         let model = self.model.clone();
-        self.search
-            .connect_search_changed(move |_| callback(model.projection_request()));
+        let callback = Rc::new(callback);
+        let pending = Rc::new(RefCell::new(None::<glib::SourceId>));
+        self.search.connect_search_changed(move |_| {
+            if let Some(source) = pending.borrow_mut().take() {
+                source.remove();
+            }
+            let request = model.projection_request();
+            if request.query.is_empty() {
+                callback(request);
+                return;
+            }
+            let callback = Rc::clone(&callback);
+            let pending_timeout = Rc::clone(&pending);
+            pending.replace(Some(glib::timeout_add_local_once(
+                TRACK_FILTER_DEBOUNCE,
+                move || {
+                    pending_timeout.borrow_mut().take();
+                    callback(request);
+                },
+            )));
+        });
     }
 
     pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection) -> bool {

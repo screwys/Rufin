@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 00:23+0000\n"
+"PO-Revision-Date: 2026-08-29 14:45+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Latvian <https://hosted.weblate.org/projects/rufin/app/lv/>\n"
 "Language: lv\n"
@@ -273,6 +273,11 @@ msgstr "Parādās ierakstos"
 
 msgid "Application name"
 msgstr "Lietotnes nosaukums"
+
+#, fuzzy
+#| msgid "Template"
+msgid "Apply Template"
+msgstr "Veidne"
 
 msgid "Artist / Album"
 msgstr "Izpildītājs / Albums"
@@ -560,6 +565,11 @@ msgstr "Diagnostikas žurnāls saglabāts"
 
 msgid "Diagnostic log"
 msgstr "Diagnostikas žurnāls"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
 
 msgid "Disable private mode"
 msgstr "Atslēgt privāto režīmu"
@@ -988,7 +998,7 @@ msgid "Lock metadata"
 msgstr "Bloķēt metadatus"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Žurnāls ir kopēts"
 
 msgid "Loudness normalization"
 msgstr "Skaļuma normalizācija"
@@ -1071,10 +1081,8 @@ msgstr "Pārvietot pakalpojumu uz augšu"
 msgid "Move up"
 msgstr "Pārvietot augšup"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Atlasīšana"
+msgstr "Vairāku elementu atlase"
 
 msgid "Multiple values"
 msgstr "Vairākas vērtības"
@@ -1515,10 +1523,8 @@ msgstr "Iziet no Rufin"
 msgid "Quit"
 msgstr "Iziet"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Atlasīšana"
+msgstr "Diapazona atlase"
 
 msgid "Rating"
 msgstr "Vērtējums"
@@ -1612,6 +1618,9 @@ msgstr "Noņemt"
 
 msgid "Removed from favorites"
 msgstr "Noņemts no izlases"
+
+msgid "Removed from"
+msgstr "Noņemts no"
 
 msgid "Rename Playlist"
 msgstr "Pārdēvēt atskaņošanas sarakstu"
@@ -1772,8 +1781,6 @@ msgstr "Izvēlēties mūzikas mapi"
 msgid "Select Source"
 msgstr "Izvēlēties avotu"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Atlasīt visu"
 
@@ -2077,9 +2084,6 @@ msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
 
-msgid "Use Template"
-msgstr "Izmantot veidni"
-
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
 
@@ -2256,6 +2260,9 @@ msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
 
+#~ msgid "Use Template"
+#~ msgstr "Izmantot veidni"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Pāriet uz Izpildītāju"
 
@@ -2279,9 +2286,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Iziet uz sistēmas joslu"

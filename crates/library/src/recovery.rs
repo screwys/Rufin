@@ -1,6 +1,5 @@
-//! Migrates the last legacy Store into the current schema and salvages readable
-//! families from older or damaged legacy Stores. Unknown newer schemas receive
-//! no compatibility path.
+//! Migrates known old-format Stores into the current schema and salvages
+//! readable facts from damaged or ancient Stores.
 
 use std::ffi::OsString;
 use std::fs;
@@ -14,34 +13,6 @@ use crate::{
 };
 
 static RECOVERY_NUMBER: AtomicU64 = AtomicU64::new(0);
-
-const SCHEMA_40_TABLES: &[&str] = &[
-    "album_release_info",
-    "albums",
-    "artists",
-    "genres",
-    "listening_aggregates",
-    "local_access_files",
-    "local_favorites",
-    "local_files",
-    "local_imports",
-    "local_playlist_entries",
-    "local_playlists",
-    "loudness_measurements",
-    "lyrics_cache",
-    "music_folders",
-    "pending_favorites",
-    "pending_scrobbles",
-    "playback_queues",
-    "playback_state",
-    "recent_plays",
-    "smart_playlists",
-    "source_libraries",
-    "source_playlist_entries",
-    "source_playlists",
-    "tracks",
-    "user_ratings",
-];
 
 /// What was preserved while replacing a legacy Store.
 #[derive(Debug)]
@@ -57,7 +28,7 @@ enum LegacyCopyMode {
     Repair,
 }
 
-pub(crate) async fn is_migratable_schema_40(path: &Path) -> LibraryResult<bool> {
+pub(crate) async fn is_migratable_legacy(path: &Path) -> LibraryResult<bool> {
     legacy_store_matches(path, true).await
 }
 
@@ -65,7 +36,7 @@ pub(crate) async fn is_repairable_legacy(path: &Path) -> LibraryResult<bool> {
     legacy_store_matches(path, false).await
 }
 
-async fn legacy_store_matches(path: &Path, exact_schema_40: bool) -> LibraryResult<bool> {
+async fn legacy_store_matches(path: &Path, require_integrity: bool) -> LibraryResult<bool> {
     if !path.exists() {
         return Ok(false);
     }
@@ -83,47 +54,32 @@ async fn legacy_store_matches(path: &Path, exact_schema_40: bool) -> LibraryResu
     let user_version = schema::pragma(&mut connection, "user_version")
         .await
         .unwrap_or_default();
-    let expected_version = if exact_schema_40 {
-        user_version == schema::LAST_LEGACY_SCHEMA_VERSION
-    } else {
-        user_version <= schema::LAST_LEGACY_SCHEMA_VERSION
-    };
-    if !schema::is_legacy_schema(application_id, user_version) || !expected_version {
+    if !schema::is_legacy_schema(application_id, user_version) {
         connection.close().await?;
         return Ok(false);
     }
-    let legacy_schema = if exact_schema_40 {
-        let intact = sqlx::query_scalar::<_, String>("PRAGMA quick_check")
+    let has_source_libraries = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='source_libraries'",
+    )
+    .fetch_optional(&mut connection)
+    .await?
+    .is_some();
+    let intact = !require_integrity
+        || sqlx::query_scalar::<_, String>("PRAGMA quick_check")
             .fetch_one(&mut connection)
             .await
             .is_ok_and(|value| value == "ok");
-        let tables = sqlx::query_scalar::<_, String>(
-            "SELECT name FROM sqlite_schema WHERE type='table' AND name NOT LIKE 'sqlite_%'",
-        )
-        .fetch_all(&mut connection)
-        .await?
-        .into_iter()
-        .collect::<std::collections::BTreeSet<_>>();
-        intact && SCHEMA_40_TABLES.iter().all(|table| tables.contains(*table))
-    } else {
-        sqlx::query_scalar::<_, i64>(
-            "SELECT 1 FROM sqlite_schema WHERE type='table' AND name='source_libraries'",
-        )
-        .fetch_optional(&mut connection)
-        .await?
-        .is_some()
-    };
     connection.close().await?;
-    Ok(legacy_schema)
+    Ok(has_source_libraries && intact)
 }
 
-pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryReport> {
-    if !is_migratable_schema_40(path).await? {
+pub(crate) async fn migrate_legacy(path: &Path) -> LibraryResult<RecoveryReport> {
+    if !is_migratable_legacy(path).await? {
         return Err(LibraryError::InvalidRequest(
-            "only a recognizable schema-40 Rufin Store can be migrated".to_string(),
+            "only a recognizable Rufin Store can be migrated".to_string(),
         ));
     }
-    let pending_store = unique_sibling(path, "schema-41-pending")?;
+    let pending_store = unique_sibling(path, "current-pending")?;
     let preserved_store = unique_sibling(path, "schema-40")?;
     let mut report = RecoveryReport {
         preserved_store: preserved_store.clone(),
@@ -131,18 +87,25 @@ pub(crate) async fn migrate_schema_40(path: &Path) -> LibraryResult<RecoveryRepo
         unreadable_families: Vec::new(),
     };
     let migration = async {
+        let mut source = db::open_writer(path).await?;
+        schema::upgrade_legacy_schema(&mut source).await?;
+        source.close().await?;
         let mut destination = db::open_writer(&pending_store).await?;
-        schema::initialize(&mut destination).await?;
-        copy_legacy(
-            &mut destination,
-            path,
-            &mut report,
-            LegacyCopyMode::Migration,
-        )
-        .await?;
-        schema::validate(&mut destination).await?;
+        let result = async {
+            schema::initialize(&mut destination).await?;
+            copy_legacy(
+                &mut destination,
+                path,
+                &mut report,
+                LegacyCopyMode::Migration,
+            )
+            .await?;
+            schema::validate(&mut destination).await?;
+            Ok::<(), LibraryError>(())
+        }
+        .await;
         destination.close().await?;
-        Ok::<(), LibraryError>(())
+        result
     }
     .await;
     if let Err(error) = migration {
@@ -183,8 +146,12 @@ async fn replace_legacy(path: &Path) -> LibraryResult<RecoveryReport> {
             .await
             .map(|value| value == "ok")
             .unwrap_or(false);
-        if intact && user_version < schema::LAST_LEGACY_SCHEMA_VERSION {
-            schema::upgrade_legacy_schema(&mut source).await?;
+        if intact
+            && user_version < schema::LAST_LEGACY_SCHEMA_VERSION
+            && let Err(error) = schema::upgrade_legacy_schema(&mut source).await
+            && !is_store_content_failure(&error)
+        {
+            return Err(error);
         }
         source.close().await?;
         let preserved_store = report.preserved_store.clone();
@@ -218,11 +185,14 @@ pub(crate) async fn rebuild_unusable(path: &Path) -> LibraryResult<()> {
 
 pub(crate) fn is_store_content_failure(error: &LibraryError) -> bool {
     match error {
-        LibraryError::UnsupportedStore { .. } | LibraryError::InvalidStore(_) => true,
+        LibraryError::UnsupportedStore { .. }
+        | LibraryError::InvalidStore(_)
+        | LibraryError::Json(_) => true,
         LibraryError::Sqlite(sqlx::Error::Database(error)) => error
             .code()
             .as_deref()
-            .is_some_and(|code| code == "11" || code == "26"),
+            .and_then(|code| code.parse::<i32>().ok())
+            .is_some_and(|code| matches!(code & 0xff, 1 | 11 | 19 | 20 | 26)),
         _ => false,
     }
 }
@@ -237,6 +207,12 @@ async fn copy_legacy(
         .bind(legacy_path.to_string_lossy().as_ref())
         .execute(&mut *destination)
         .await?;
+    let has_rating_overrides = sqlx::query_scalar::<_, i64>(
+        "SELECT 1 FROM legacy.sqlite_schema WHERE type='table' AND name='user_ratings'",
+    )
+    .fetch_optional(&mut *destination)
+    .await?
+    .is_some();
     let mut transaction = destination.begin().await?;
     copy_family(
         &mut transaction,
@@ -387,7 +363,7 @@ async fn copy_legacy(
          SELECT source.source_key,
                 CASE json_extract(section.value,'$.kind')
                   WHEN 'MostPlayed' THEN 'most-played' WHEN 'NewlyAdded' THEN 'newly-added'
-                  WHEN 'RecentlyPlayed' THEN 'recently-played' WHEN 'RecentlyLegacy' THEN 'recently-legacy' END,
+                  WHEN 'RecentlyPlayed' THEN 'recently-played' WHEN 'RecentlyReleased' THEN 'recently-released' END,
                 CAST(item.key AS INTEGER),json_extract(item.value,'$.kind'),
                 CASE json_extract(item.value,'$.kind')
                   WHEN 'track' THEN track.track_key WHEN 'album' THEN album.album_key END,
@@ -410,10 +386,7 @@ async fn copy_legacy(
            AND (track.track_key IS NOT NULL OR album.album_key IS NOT NULL)",
     ).await?;
     salvage_album_release(&mut transaction, report, mode).await?;
-    salvage_user_facts(&mut transaction, report, mode).await?;
-    if mode == LegacyCopyMode::Repair {
-        salvage_queue(&mut transaction, report, mode).await?;
-    }
+    salvage_user_facts(&mut transaction, report, mode, has_rating_overrides).await?;
     salvage_local(&mut transaction, report, mode).await?;
     initialize_recovered_loudness_keys(&mut transaction).await?;
     if mode == LegacyCopyMode::Migration {
@@ -490,7 +463,7 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
             .await?;
         if actual != expected {
             return Err(LibraryError::InvalidStore(format!(
-                "schema-40 migration changed {family} count from {expected} to {actual}"
+                "Store migration changed {family} count from {expected} to {actual}"
             )));
         }
     }
@@ -500,7 +473,7 @@ async fn validate_migration_copy(transaction: &mut Transaction<'_, Sqlite>) -> L
         .is_some();
     if foreign_key_failure {
         return Err(LibraryError::InvalidStore(
-            "schema-40 migration failed foreign-key validation".to_string(),
+            "Store migration failed foreign-key validation".to_string(),
         ));
     }
     Ok(())
@@ -729,6 +702,51 @@ async fn salvage_named_entities(
                )",
         ),
         (
+            "relationship artists",
+            "INSERT OR IGNORE INTO artists(
+                 source_key, object_id, name, normalized_name, sort_text,
+                 musicbrainz_artist_id
+             )
+             SELECT source_key, object_id, min(name), lower(min(name)), lower(min(name)),
+                    min(musicbrainz_artist_id)
+             FROM (
+                 SELECT source.source_key,
+                        json_extract(relation.value, '$.id') AS object_id,
+                        json_extract(relation.value, '$.name') AS name,
+                        json_extract(relation.value, '$.musicbrainz_artist_id')
+                            AS musicbrainz_artist_id
+                 FROM legacy.albums AS item
+                 JOIN legacy.source_libraries AS library USING (library_id)
+                 JOIN sources AS source ON source.object_id=library.source_id
+                 JOIN json_each(item.relations_json, '$.album_artists') AS relation
+                 WHERE library.accepted_at IS NOT NULL
+                   AND library.library_id=(
+                       SELECT max(current.library_id)
+                       FROM legacy.source_libraries AS current
+                       WHERE current.source_id=library.source_id
+                         AND current.accepted_at IS NOT NULL
+                   )
+                 UNION ALL
+                 SELECT source.source_key,
+                        json_extract(relation.value, '$.id'),
+                        json_extract(relation.value, '$.name'),
+                        json_extract(relation.value, '$.musicbrainz_artist_id')
+                 FROM legacy.tracks AS item
+                 JOIN legacy.source_libraries AS library USING (library_id)
+                 JOIN sources AS source ON source.object_id=library.source_id
+                 JOIN json_each(item.relations_json, '$.artists') AS relation
+                 WHERE library.accepted_at IS NOT NULL
+                   AND library.library_id=(
+                       SELECT max(current.library_id)
+                       FROM legacy.source_libraries AS current
+                       WHERE current.source_id=library.source_id
+                         AND current.accepted_at IS NOT NULL
+                   )
+             )
+             WHERE object_id IS NOT NULL AND object_id<>'' AND name IS NOT NULL
+             GROUP BY source_key, object_id",
+        ),
+        (
             "genres",
             "INSERT INTO genres(
                  source_key, object_id, name, normalized_name, sort_text, artwork_binding
@@ -748,6 +766,46 @@ async fn salvage_named_entities(
                    WHERE current.source_id = library.source_id
                      AND current.accepted_at IS NOT NULL
                )",
+        ),
+        (
+            "relationship genres",
+            "INSERT OR IGNORE INTO genres(
+                 source_key, object_id, name, normalized_name, sort_text
+             )
+             SELECT source_key, object_id, min(name), lower(min(name)), lower(min(name))
+             FROM (
+                 SELECT source.source_key,
+                        json_extract(relation.value, '$.id') AS object_id,
+                        json_extract(relation.value, '$.name') AS name
+                 FROM legacy.albums AS item
+                 JOIN legacy.source_libraries AS library USING (library_id)
+                 JOIN sources AS source ON source.object_id=library.source_id
+                 JOIN json_each(item.relations_json, '$.genres') AS relation
+                 WHERE library.accepted_at IS NOT NULL
+                   AND library.library_id=(
+                       SELECT max(current.library_id)
+                       FROM legacy.source_libraries AS current
+                       WHERE current.source_id=library.source_id
+                         AND current.accepted_at IS NOT NULL
+                   )
+                 UNION ALL
+                 SELECT source.source_key,
+                        json_extract(relation.value, '$.id'),
+                        json_extract(relation.value, '$.name')
+                 FROM legacy.tracks AS item
+                 JOIN legacy.source_libraries AS library USING (library_id)
+                 JOIN sources AS source ON source.object_id=library.source_id
+                 JOIN json_each(item.relations_json, '$.genres') AS relation
+                 WHERE library.accepted_at IS NOT NULL
+                   AND library.library_id=(
+                       SELECT max(current.library_id)
+                       FROM legacy.source_libraries AS current
+                       WHERE current.source_id=library.source_id
+                         AND current.accepted_at IS NOT NULL
+                   )
+             )
+             WHERE object_id IS NOT NULL AND object_id<>'' AND name IS NOT NULL
+             GROUP BY source_key, object_id",
         ),
         (
             "folders",
@@ -877,9 +935,11 @@ async fn salvage_user_facts(
     transaction: &mut Transaction<'_, Sqlite>,
     report: &mut RecoveryReport,
     mode: LegacyCopyMode,
+    has_rating_overrides: bool,
 ) -> LibraryResult<()> {
-    for (family, sql) in [
+    for (requires_rating_overrides, family, sql) in [
         (
+            false,
             "favorite overrides",
             "UPDATE tracks SET user_favorite = 1
              WHERE EXISTS (
@@ -907,6 +967,7 @@ async fn salvage_user_facts(
              )",
         ),
         (
+            true,
             "rating overrides",
             "UPDATE tracks SET user_rating = (
                  SELECT rating * 10 FROM legacy.user_ratings AS rating
@@ -949,6 +1010,7 @@ async fn salvage_user_facts(
              )",
         ),
         (
+            false,
             "favorite outbox",
             "INSERT INTO favorite_outbox(
                  source_key, entity_kind, entity_key, favorite,
@@ -972,6 +1034,7 @@ async fn salvage_user_facts(
              WHERE COALESCE(track.track_key, album.album_key, artist.artist_key) IS NOT NULL",
         ),
         (
+            false,
             "smart playlists",
             "INSERT INTO smart_playlists(
                  source_key, object_id, name, normalized_name, definition_json, position
@@ -982,6 +1045,7 @@ async fn salvage_user_facts(
              JOIN sources AS source ON source.object_id = item.source_id",
         ),
         (
+            false,
             "loudness",
             "INSERT INTO loudness_measurements(
                  source_key, entity_kind, entity_key, analysis_key,
@@ -1001,6 +1065,7 @@ async fn salvage_user_facts(
              WHERE track.track_key IS NOT NULL OR album.album_key IS NOT NULL",
         ),
         (
+            false,
             "activity baseline",
             "INSERT INTO activity_baseline(
                  source_key, period, item_kind, track_object_id,
@@ -1015,6 +1080,7 @@ async fn salvage_user_facts(
                 OR (length(item.period)=7 AND substr(item.period,5,1)='-')",
         ),
         (
+            false,
             "recent listens",
              "INSERT INTO listens(
                  external_id, source_key, track_key, track_object_id, track_title,
@@ -1029,6 +1095,7 @@ async fn salvage_user_facts(
                ON track.source_key=source.source_key AND track.object_id=item.track_id",
         ),
         (
+            false,
             "lyrics",
             "INSERT INTO lyrics_cache(
                  source_key, track_key, authority, role, language, script,
@@ -1043,144 +1110,11 @@ async fn salvage_user_facts(
                ON track.source_key=source.source_key AND track.object_id=item.track_id",
         ),
     ] {
+        if requires_rating_overrides && !has_rating_overrides {
+            continue;
+        }
         copy_family(transaction, report, mode, family, sql).await?;
     }
-    Ok(())
-}
-
-async fn salvage_queue(
-    transaction: &mut Transaction<'_, Sqlite>,
-    report: &mut RecoveryReport,
-    mode: LegacyCopyMode,
-) -> LibraryResult<()> {
-    copy_family(
-        transaction,
-        report,
-        mode,
-        "queue occurrences",
-        "INSERT INTO queue_occurrences(
-             source_key, object_id, position, traversal_position,
-             provenance_kind, provenance_context_id, provenance_source_rank,
-             track_key, track_object_id,
-             fallback_title, fallback_artist, fallback_album, fallback_album_display_artist,
-             fallback_album_object_id, fallback_primary_artist_object_id,
-             fallback_media_uri, fallback_artwork_binding,
-             fallback_duration_millis, fallback_disc_number,
-             fallback_track_number, fallback_year, fallback_release_date, fallback_favorite,
-             fallback_source_format, fallback_musicbrainz_recording_id,
-             fallback_musicbrainz_release_track_id, fallback_musicbrainz_album_id,
-             fallback_musicbrainz_release_group_id, fallback_primary_artist_musicbrainz_id,
-             fallback_cue_path, fallback_cue_start_millis, fallback_cue_end_millis
-         )
-         SELECT source.source_key,
-                json_extract(occurrence.value, '$.id'),
-                occurrence.key,
-                CASE
-                    WHEN json_array_length(queue.traversal_json)=0 THEN occurrence.key
-                    ELSE (
-                        SELECT traversal.key
-                        FROM json_each(queue.traversal_json) AS traversal
-                        WHERE traversal.value=json_extract(occurrence.value, '$.id')
-                    )
-                END,
-                CASE
-                    WHEN json_type(occurrence.value, '$.provenance.Context') = 'object'
-                        THEN 'context'
-                    WHEN json_extract(occurrence.value, '$.provenance') = 'Manual'
-                        THEN 'manual'
-                    WHEN json_extract(occurrence.value, '$.provenance') = 'Random'
-                        THEN 'random'
-                    WHEN json_extract(occurrence.value, '$.provenance') = 'Radio'
-                        THEN 'radio'
-                    WHEN json_extract(occurrence.value, '$.provenance') = 'AutoDj'
-                        THEN 'auto-dj'
-                    WHEN json_extract(occurrence.value, '$.provenance') = 'Legacy'
-                        THEN 'legacy'
-                END,
-                json_extract(
-                    occurrence.value, '$.provenance.Context.context_id'
-                ),
-                json_extract(
-                    occurrence.value, '$.provenance.Context.source_rank'
-                ),
-                track.track_key,
-                json_extract(occurrence.value, '$.track_id'),
-                json_extract(fallback.value, '$.title'),
-                json_extract(fallback.value, '$.artist'),
-                json_extract(fallback.value, '$.album'),
-                NULL,
-                json_extract(fallback.value, '$.album_id'),
-                json_extract(fallback.value, '$.primary_artist_id'),
-                CASE
-                    WHEN source.object_id<>'local:server:library' THEN NULL
-                    WHEN json_extract(fallback.value, '$.source_path') IS NULL THEN NULL
-                    WHEN substr(json_extract(fallback.value, '$.source_path'),1,7)='file://'
-                        THEN json_extract(fallback.value, '$.source_path')
-                    ELSE 'file://' || json_extract(fallback.value, '$.source_path')
-                END,
-                CASE
-                    WHEN json_extract(fallback.value, '$.image_ref') IS NOT NULL
-                        THEN CAST(json_extract(fallback.value, '$.image_ref') AS BLOB)
-                    WHEN json_extract(fallback.value, '$.local_artwork') IS NOT NULL
-                        THEN CAST(json_object(
-                            'File', json_object(
-                                'path', json_extract(fallback.value, '$.local_artwork'),
-                                'revision', 'legacy'
-                            )
-                        ) AS BLOB)
-                    ELSE NULL
-                END,
-                json_extract(fallback.value, '$.duration_seconds') * 1000,
-                json_extract(fallback.value, '$.disc_number'),
-                json_extract(fallback.value, '$.track_number'),
-                json_extract(fallback.value, '$.year'),
-                json_extract(fallback.value, '$.release_date'),
-                json_extract(fallback.value, '$.favorite'),
-                json_extract(fallback.value, '$.source_format'),
-                json_extract(fallback.value, '$.musicbrainz_recording_id'),
-                json_extract(fallback.value, '$.musicbrainz_release_track_id'),
-                json_extract(fallback.value, '$.album_artwork.musicbrainz_album_id'),
-                json_extract(fallback.value, '$.album_artwork.musicbrainz_release_group_id'),
-                json_extract(fallback.value, '$.relations.artists[0].musicbrainz_artist_id'),
-                json_extract(fallback.value, '$.cue.cue_path'),
-                json_extract(fallback.value, '$.cue.start_millis'),
-                json_extract(fallback.value, '$.cue.end_millis')
-         FROM legacy.playback_queues AS queue
-         JOIN sources AS source ON source.object_id=queue.source_id
-         JOIN json_each(queue.rows_json, '$.occurrences') AS occurrence
-         LEFT JOIN tracks AS track
-           ON track.source_key=source.source_key
-          AND track.object_id=json_extract(occurrence.value, '$.track_id')
-         LEFT JOIN json_each(queue.rows_json, '$.fallback_tracks') AS fallback
-           ON json_extract(fallback.value, '$.id')=json_extract(occurrence.value, '$.track_id')",
-    )
-    .await?;
-    copy_family(
-        transaction,
-        report,
-        mode,
-        "queue state",
-        "INSERT INTO queue_state(
-             source_key, current_occurrence_key, progress_millis, repeat_mode, shuffled
-         )
-         SELECT source.source_key, occurrence.queue_occurrence_key,
-                state.progress_millis, 'none',
-                CASE WHEN EXISTS (
-                    SELECT 1
-                    FROM json_each(queue.traversal_json) AS traversal
-                    JOIN json_each(queue.rows_json, '$.occurrences') AS occurrence
-                      ON occurrence.key=traversal.key
-                    WHERE traversal.value<>json_extract(occurrence.value, '$.id')
-                ) THEN 1 ELSE 0 END
-         FROM legacy.playback_queues AS queue
-         JOIN legacy.playback_state AS state
-           ON state.source_id=queue.source_id AND state.revision=queue.revision
-         JOIN sources AS source ON source.object_id=queue.source_id
-         LEFT JOIN queue_occurrences AS occurrence
-           ON occurrence.source_key=source.source_key
-          AND occurrence.object_id=state.selected_occurrence_id",
-    )
-    .await?;
     Ok(())
 }
 

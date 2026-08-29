@@ -845,10 +845,9 @@ fn named_collection_column<T: NamedCollectionRow>(
             gtk::ColumnViewColumn::new(Some(field.title()), Some(factory))
         }
         _ => {
-            let column =
-                text_column::<T, _>(field.title(), collection_column_width(field), move |row| {
-                    row.field(field)
-                });
+            let column = text_column::<T, _>(field, collection_column_width(field), move |row| {
+                row.field(field)
+            });
             column
         }
     }

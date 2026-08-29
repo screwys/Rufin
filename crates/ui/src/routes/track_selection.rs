@@ -7,6 +7,7 @@
 
 use std::cell::RefCell;
 use std::hash::{Hash, Hasher};
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gtk::gio;
@@ -267,12 +268,17 @@ pub(crate) struct TrackSelectionSnapshot {
 pub(crate) struct PlaylistEntrySelection {
     model: PlaylistEntryModel,
     selection: PositionSelectionModel,
+    playlist_name: Rc<str>,
 }
 
 impl PlaylistEntrySelection {
-    pub(crate) fn new(model: PlaylistEntryModel) -> Self {
+    pub(crate) fn new(model: PlaylistEntryModel, playlist_name: String) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
-        Self { model, selection }
+        Self {
+            model,
+            selection,
+            playlist_name: playlist_name.into(),
+        }
     }
 
     pub(crate) fn selection_model(&self) -> gtk::SelectionModel {
@@ -290,9 +296,13 @@ impl PlaylistEntrySelection {
     }
 
     pub(crate) fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
+        self.selected_entries().map(|selection| selection.tracks)
+    }
+
+    pub(crate) fn selected_entries(&self) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
         let entries = selected_values(&self.model.order(), &positions);
-        (!entries.is_empty()).then(|| self.snapshot(entries, &positions).tracks)
+        (!entries.is_empty()).then(|| self.snapshot(entries, &positions))
     }
 
     pub(crate) fn single_entry(
@@ -302,6 +312,7 @@ impl PlaylistEntrySelection {
     ) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
+            playlist_name: Rc::clone(&self.playlist_name),
             entries: Arc::from([entry]),
             tracks: TrackSelectionSnapshot {
                 source_key: self.model.source_key(),
@@ -321,6 +332,7 @@ impl PlaylistEntrySelection {
             .collect::<Vec<_>>();
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
+            playlist_name: Rc::clone(&self.playlist_name),
             entries: entries.into(),
             tracks: TrackSelectionSnapshot {
                 source_key: self.model.source_key(),
@@ -334,6 +346,7 @@ impl PlaylistEntrySelection {
 #[derive(Clone)]
 pub(crate) struct PlaylistEntrySelectionSnapshot {
     pub(crate) playlist: PlaylistKey,
+    pub(crate) playlist_name: Rc<str>,
     pub(crate) entries: Arc<[PlaylistEntryKey]>,
     pub(crate) tracks: TrackSelectionSnapshot,
 }
@@ -417,36 +430,6 @@ fn keys_at_positions<T: Copy>(order: &[T], positions: impl Iterator<Item = u32>)
     positions
         .filter_map(|position| order.get(position as usize).copied())
         .collect()
-}
-
-pub(crate) fn install_track_drag_source(
-    target: &impl IsA<gtk::Widget>,
-    selection: TrackSelection,
-    current_track: impl Fn() -> Option<TrackKey> + 'static,
-) {
-    let target = target.as_ref();
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::COPY)
-        .build();
-    source.connect_prepare(move |_, _, _| {
-        let track = current_track()?;
-        let payload = glib::BoxedAnyObject::new(selection.dragged_tracks_for(track));
-        Some(gtk::gdk::ContentProvider::for_value(&payload.to_value()))
-    });
-    let weak_target = target.downgrade();
-    source.connect_drag_begin(move |source, _| {
-        let Some(target) = weak_target.upgrade() else {
-            return;
-        };
-        let paintable = gtk::WidgetPaintable::new(Some(&target));
-        source.set_icon(Some(&paintable), 0, 0);
-    });
-    target.add_controller(source);
-}
-
-pub(crate) fn track_drag_payload(value: &glib::Value) -> Option<TrackSelectionSnapshot> {
-    let payload = value.get::<glib::BoxedAnyObject>().ok()?;
-    Some(payload.try_borrow::<TrackSelectionSnapshot>().ok()?.clone())
 }
 
 #[cfg(test)]

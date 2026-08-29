@@ -13,6 +13,22 @@ use localization::{msgid, tr};
 
 use super::sparse_model::{SparseItem, SparseObjectItem};
 
+pub(crate) fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryField) {
+    let class = match field {
+        LibraryField::Year
+        | LibraryField::UserRating
+        | LibraryField::Bpm
+        | LibraryField::DiscNumber => "skeleton-short-value",
+        LibraryField::TrackNumber => "skeleton-track-number",
+        LibraryField::Duration => "skeleton-duration",
+        LibraryField::ReleaseDate | LibraryField::DateAdded | LibraryField::LastPlayed => {
+            "skeleton-date"
+        }
+        _ => return,
+    };
+    widget.add_css_class(class);
+}
+
 pub(crate) fn smart_playlist_display_name(playlist: &SmartPlaylistRow) -> String {
     match playlist.object_id.as_str() {
         "builtin:most_played" => tr(msgid("Most Played")),
@@ -659,7 +675,8 @@ pub(crate) fn layout_title(layout: LibraryLayout) -> &'static str {
 pub(crate) fn column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::RowIndex => 48,
-        LibraryField::Image | LibraryField::Favorite => 56,
+        LibraryField::Image => 56,
+        LibraryField::Favorite => crate::favorites::FAVORITE_COLUMN_WIDTH,
         LibraryField::Title | LibraryField::TitleMerged => 220,
         LibraryField::Album
         | LibraryField::Artist
