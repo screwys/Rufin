@@ -142,13 +142,13 @@ async fn schema_41_migrates_in_place_to_schema_42() {
 }
 
 #[tokio::test]
-async fn schema_40_store_recovers_into_current_schema() {
+async fn schema_40_store_migrates_into_current_schema() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     create_legacy_store(&path).await;
     let database = Database::open(&path)
         .await
-        .expect("migrate and open legacy Store");
+        .expect("migrate and open schema-40 Store");
     assert!(
         std::fs::read_dir(directory.path())
             .expect("read Store directory")
@@ -157,7 +157,7 @@ async fn schema_40_store_recovers_into_current_schema() {
                 .file_name()
                 .to_string_lossy()
                 .starts_with("library.sqlite3.schema-40-")),
-        "migration preserves the schema-40 Store beside the current Store"
+        "migration preserves the schema-40 input"
     );
     let mut reader = connection(&path, false).await;
     assert_eq!(
@@ -273,13 +273,18 @@ async fn schema_40_store_recovers_into_current_schema() {
         0
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM home_entries WHERE source_key=1 AND section_id='most-played'"
+        sqlx::query_scalar::<_, String>(
+            "SELECT section_id FROM home_entries WHERE source_key=1 ORDER BY section_id"
         )
-        .fetch_one(&mut reader)
+        .fetch_all(&mut reader)
         .await
         .expect("read recovered Home"),
-        1
+        [
+            "most-played".to_string(),
+            "newly-added".to_string(),
+            "recently-played".to_string(),
+            "recently-released".to_string(),
+        ]
     );
     assert_eq!(
         sqlx::query_as::<
@@ -402,9 +407,14 @@ async fn schema_40_store_recovers_into_current_schema() {
         ["Remix".to_string()]
     );
     assert_eq!(
-        sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64)>(
+        sqlx::query_as::<_, (i64, i64, i64, i64, i64, i64, i64, i64, i64, i64, i64)>(
             "SELECT
+                 (SELECT count(*) FROM artists),
+                 (SELECT count(*) FROM genres),
                  (SELECT count(*) FROM album_artists),
+                 (SELECT count(*) FROM track_artists),
+                 (SELECT count(*) FROM album_genres),
+                 (SELECT count(*) FROM track_genres),
                  (SELECT count(*) FROM track_moods),
                  (SELECT count(*) FROM album_release_types),
                  (SELECT count(*) FROM local_file_dependencies),
@@ -414,7 +424,7 @@ async fn schema_40_store_recovers_into_current_schema() {
         .fetch_one(&mut reader)
         .await
         .expect("read recovered families"),
-        (1, 1, 1, 1, 1, 1)
+        (3, 3, 2, 2, 2, 2, 1, 1, 1, 1, 1)
     );
     assert_eq!(
         sqlx::query_as::<_, (f64, Option<f64>)>(
@@ -482,47 +492,114 @@ async fn schema_40_store_recovers_into_current_schema() {
 }
 
 #[tokio::test]
-async fn failed_schema_40_migration_restores_the_original_store() {
+async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    create_legacy_store(&path).await;
+    let mut schema_39 = connection(&path, false).await;
+    sqlx::raw_sql(
+        "DROP TABLE user_ratings;
+         UPDATE smart_playlists SET definition_json=
+           '{\"match_all\":[{\"field\":\"Rating\",\"operator\":\"Above\",\"value\":{\"Number\":4}}],\"match_any\":[],\"sort_field\":\"Title\",\"descending\":false}';
+         PRAGMA user_version=39;",
+    )
+    .execute(&mut schema_39)
+    .await
+    .expect("restore schema-39 facts");
+    schema_39.close().await.expect("close schema-39 fixture");
+
+    let _database = Database::open(&path)
+        .await
+        .expect("run the committed migration chain before opening the current Store");
+    let store_files = std::fs::read_dir(directory.path())
+        .expect("read Store directory")
+        .filter_map(Result::ok)
+        .map(|entry| entry.file_name().to_string_lossy().into_owned())
+        .collect::<Vec<_>>();
+    assert!(
+        store_files
+            .iter()
+            .any(|name| name.starts_with("library.sqlite3.schema-40-")),
+        "migration preserves its normalized schema-40 input"
+    );
+    assert!(
+        !store_files
+            .iter()
+            .any(|name| name.starts_with("library.sqlite3.recovered-")),
+        "an intact known schema must not be routed through recovery"
+    );
+    let mut reader = connection(&path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("PRAGMA user_version")
+            .fetch_one(&mut reader)
+            .await
+            .expect("read current schema version"),
+        42
+    );
+    let definition = sqlx::query_scalar::<_, String>(
+        "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
+    )
+    .fetch_one(&mut reader)
+    .await
+    .expect("read migrated Smart Playlist");
+    assert_eq!(
+        serde_json::from_str::<serde_json::Value>(&definition)
+            .expect("parse migrated Smart Playlist")["match_all"][0]["value"]["Number"],
+        8
+    );
+}
+
+#[tokio::test]
+async fn failed_known_schema_migration_repairs_readable_families_and_opens() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     create_legacy_store(&path).await;
     let mut legacy = connection(&path, false).await;
-    sqlx::query("UPDATE tracks SET duration_seconds=-1 WHERE track_id='legacy-track'")
-        .execute(&mut legacy)
-        .await
-        .expect("make one schema-40 value invalid for schema 41");
-    legacy.close().await.expect("close schema-40 fixture");
+    sqlx::raw_sql(
+        "DROP TABLE user_ratings;
+         UPDATE tracks SET duration_seconds=-1 WHERE track_id='legacy-track';
+         PRAGMA user_version=39;",
+    )
+    .execute(&mut legacy)
+    .await
+    .expect("make one known-schema value invalid for the current schema");
+    legacy.close().await.expect("close known-schema fixture");
 
-    assert!(
-        Database::open(&path).await.is_err(),
-        "invalid copied data must roll back the migration"
-    );
+    let _database = Database::open(&path)
+        .await
+        .expect("failed normal migration must fall through to automatic repair");
 
     let mut restored = connection(&path, false).await;
     assert_eq!(
         sqlx::query_scalar::<_, i64>("PRAGMA user_version")
             .fetch_one(&mut restored)
             .await
-            .expect("read restored schema version"),
-        40
+            .expect("read repaired schema version"),
+        42
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT duration_seconds FROM tracks WHERE track_id='legacy-track'"
-        )
-        .fetch_one(&mut restored)
-        .await
-        .expect("read restored schema-40 Track"),
-        -1
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")
+            .fetch_one(&mut restored)
+            .await
+            .expect("read repaired sources"),
+        1
     );
     assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM sqlite_schema WHERE type='table' AND name='sources'"
-        )
-        .fetch_one(&mut restored)
-        .await
-        .expect("check for partial schema-41 tables"),
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut restored)
+            .await
+            .expect("read skipped invalid Tracks family"),
         0
+    );
+    assert!(
+        std::fs::read_dir(directory.path())
+            .expect("read Store directory")
+            .filter_map(Result::ok)
+            .any(|entry| entry
+                .file_name()
+                .to_string_lossy()
+                .starts_with("library.sqlite3.recovered-")),
+        "automatic repair preserves the failed migration input"
     );
 }
 
@@ -727,14 +804,14 @@ async fn create_legacy_store(path: &Path) {
          ) STRICT;
          INSERT INTO source_libraries VALUES(
              1, 'legacy-source', zeroblob(32), zeroblob(32), X'01', zeroblob(32),
-             '{\"kind\":\"Source\",\"sections\":[{\"kind\":\"MostPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]}]}', 1
+             '{\"kind\":\"Source\",\"sections\":[{\"kind\":\"MostPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]},{\"kind\":\"NewlyAdded\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]},{\"kind\":\"RecentlyPlayed\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]},{\"kind\":\"RecentlyReleased\",\"items\":[{\"kind\":\"track\",\"id\":\"legacy-track\"}]}]}', 1
          );
          INSERT INTO albums VALUES(
              1, 'legacy-album', 'Legacy Album', 'Legacy Artist',
              2024, '2024-01-01', '2024-01-02', 'release-id', 'release-group-id',
              NULL, NULL, 'file', '/music/cover.jpg', NULL, 'album-rev',
              0, NULL, '[\"Album\"]',
-             '{\"album_artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"}]}', 1
+             '{\"album_artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"},{\"id\":\"album-credit-only\",\"name\":\"Album Credit\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"},{\"id\":\"album-genre-only\",\"name\":\"Album Genre\"}]}', 1
          );
          INSERT INTO tracks VALUES(
              1, 'legacy-track', 'legacy-album', 'Legacy Track',
@@ -743,7 +820,7 @@ async fn create_legacy_store(path: &Path) {
              'Legacy comment', 120, 'recording-id', 'release-track-id',
              '/music/album.cue', 1000, 181000, NULL, NULL,
              'embedded', '/music/track.flac', 2, 'track-rev', 0, NULL,
-             '{\"artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"}],\"moods\":[{\"id\":\"legacy-mood\",\"name\":\"Legacy Mood\"}],\"music_folders\":[\"legacy-folder\"]}'
+             '{\"artists\":[{\"id\":\"legacy-artist\",\"name\":\"Legacy Artist\"},{\"id\":\"track-credit-only\",\"name\":\"Track Credit\"}],\"genres\":[{\"id\":\"legacy-genre\",\"name\":\"Legacy Genre\"},{\"id\":\"track-genre-only\",\"name\":\"Track Genre\"}],\"moods\":[{\"id\":\"legacy-mood\",\"name\":\"Legacy Mood\"}],\"music_folders\":[\"legacy-folder\"]}'
          );
          INSERT INTO artists VALUES(
              1, 'legacy-artist', 'Legacy Artist', 'artist-id', NULL, NULL,
