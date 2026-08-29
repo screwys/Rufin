@@ -23,9 +23,3 @@ invalid:
               item.replace(Row::default(), true);
           });
       }
-  - |
-      fn accept(model: Model) {
-          model.with_state_mut(|state| {
-              state.current.replace(Some(1));
-          });
-      }

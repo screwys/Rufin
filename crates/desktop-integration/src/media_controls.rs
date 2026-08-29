@@ -1074,16 +1074,19 @@ mod macos {
                 return;
             };
             update_commands(playback);
-            let mut state = self.state.borrow_mut();
-            state.title.clone_from(&media.track.title);
-            state.artist.clone_from(&media.track.artist);
-            state.album.clone_from(&media.track.album);
-            state.duration_millis = playback.transport.duration_millis;
-            state.position_millis = playback.transport.position_millis;
-            state.playback = playback_state(playback);
-            state.artwork = art_url.and_then(load_artwork);
-            state.current = true;
-            self.apply(&state);
+            let artwork = art_url.and_then(load_artwork);
+            {
+                let mut state = self.state.borrow_mut();
+                state.title.clone_from(&media.track.title);
+                state.artist.clone_from(&media.track.artist);
+                state.album.clone_from(&media.track.album);
+                state.duration_millis = playback.transport.duration_millis;
+                state.position_millis = playback.transport.position_millis;
+                state.playback = playback_state(playback);
+                state.artwork = artwork;
+                state.current = true;
+            }
+            self.publish();
         }
 
         pub fn observe_position(
@@ -1095,32 +1098,38 @@ mod macos {
                 self.clear();
                 return;
             };
-            let mut state = self.state.borrow_mut();
-            if !state.current || state.position_millis == position_millis {
-                return;
+            {
+                let mut state = self.state.borrow_mut();
+                if !state.current || state.position_millis == position_millis {
+                    return;
+                }
+                state.position_millis = position_millis;
             }
-            state.position_millis = position_millis;
-            self.apply(&state);
+            self.publish();
         }
 
-        fn apply(&self, state: &MediaState) {
-            let rate = if state.playback == PlaybackState::Playing {
-                1.0
-            } else {
-                0.0
+        fn publish(&self) {
+            let (info, artwork, playback) = {
+                let state = self.state.borrow();
+                let rate = if state.playback == PlaybackState::Playing {
+                    1.0
+                } else {
+                    0.0
+                };
+                let info = NowPlayingInfo::new()
+                    .title(&state.title)
+                    .artist(&state.artist)
+                    .album_title(&state.album)
+                    .playback_duration(state.duration_millis as f64 / 1_000.0)
+                    .elapsed_playback_time(state.position_millis as f64 / 1_000.0)
+                    .playback_rate(rate)
+                    .default_playback_rate(1.0)
+                    .media_type(NowPlayingMediaType::Audio);
+                (info, state.artwork.clone(), state.playback)
             };
-            let info = NowPlayingInfo::new()
-                .title(&state.title)
-                .artist(&state.artist)
-                .album_title(&state.album)
-                .playback_duration(state.duration_millis as f64 / 1_000.0)
-                .elapsed_playback_time(state.position_millis as f64 / 1_000.0)
-                .playback_rate(rate)
-                .default_playback_rate(1.0)
-                .media_type(NowPlayingMediaType::Audio);
             self.center
-                .set_now_playing_info_with_artwork(&info, state.artwork.as_ref());
-            self.center.set_playback_state(state.playback);
+                .set_now_playing_info_with_artwork(&info, artwork.as_ref());
+            self.center.set_playback_state(playback);
         }
 
         fn clear(&self) {

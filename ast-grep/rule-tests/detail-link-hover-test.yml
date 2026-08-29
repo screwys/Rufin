@@ -1,0 +1,16 @@
+id: detail-links-must-use-native-link-hover
+valid:
+  - |
+      impl DetailLinkBinding {
+          fn bind(&self, markup: &str) {
+              self.label.set_markup(markup);
+          }
+      }
+invalid:
+  - |
+      impl DetailLinkBinding {
+          fn install_hover(&self) {
+              let motion = gtk::EventControllerMotion::new();
+              self.label.add_controller(motion);
+          }
+      }

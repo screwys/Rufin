@@ -554,10 +554,12 @@ fn rebuild_preferences_dialog(
                 false,
             );
         }
-        let mut items = search_items_for_button.borrow_mut();
-        items.clear();
-        for (kind, slot) in search_slots.iter() {
-            collect_preferences_search_items(slot.upcast_ref(), *kind, "", None, &mut items);
+        {
+            let mut items = search_items_for_button.borrow_mut();
+            items.clear();
+            for (kind, slot) in search_slots.iter() {
+                collect_preferences_search_items(slot.upcast_ref(), *kind, "", None, &mut items);
+            }
         }
         search_entry_for_button.grab_focus();
     });

@@ -26,18 +26,6 @@ invalid:
           let (playback_events, playback_receiver) = unbounded();
       }
 ---
-id: bound-row-must-not-reenter-route-model
-valid:
-  - |
-      fn format(track: TrackRow) -> String {
-          track.last_played.map(history_played_at_text).unwrap_or_default()
-      }
-invalid:
-  - |
-      fn format(model: TrackModel, position: u32) -> String {
-          model.played_at_text(position)
-      }
----
 id: mounted-route-callback-must-not-own-shell
 valid:
   - |

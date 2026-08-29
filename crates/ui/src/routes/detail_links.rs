@@ -1,11 +1,10 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
 use crate::preferences::source::login::source_kind_icon_name;
 use crate::shell::Shell;
 use ::library::{AlbumArtistLink, AlbumRow, ArtistKey, TrackArtistLink, TrackRow};
-use adw::prelude::{ObjectExt, WidgetExt};
 use gtk::glib;
 use localization::msgid;
 
@@ -122,7 +121,7 @@ impl DetailLinks {
         Self { text, links }
     }
 
-    fn markup(&self, hovered: Option<(usize, &gtk::gdk::RGBA)>) -> String {
+    fn markup(&self) -> String {
         let mut markup = String::new();
         let mut cursor = 0;
         for (link_index, link) in self.links.iter().enumerate() {
@@ -138,29 +137,7 @@ impl DetailLinks {
                 .text
                 .get(link.range.clone())
                 .expect("detail link ranges stay on text boundaries");
-            let text = glib::markup_escape_text(link_text);
-            if let Some((hovered_index, color)) = hovered
-                && hovered_index == link_index
-            {
-                let channel = |value: f32| (value.clamp(0.0, 1.0) * 255.0).round() as u8;
-                let luminance =
-                    color.red() * 0.2126 + color.green() * 0.7152 + color.blue() * 0.0722;
-                let underline_target = if luminance > 0.5 { 0.0 } else { 1.0 };
-                let underline_channel =
-                    |value: f32| channel(value * 0.65 + underline_target * 0.35);
-                markup.push_str(&format!(
-                    r##"<span foreground="#{:02X}{:02X}{:02X}{:02X}" underline="single" underline_color="#{:02X}{:02X}{:02X}">{text}</span>"##,
-                    channel(color.red()),
-                    channel(color.green()),
-                    channel(color.blue()),
-                    channel(color.alpha()),
-                    underline_channel(color.red()),
-                    underline_channel(color.green()),
-                    underline_channel(color.blue()),
-                ));
-            } else {
-                markup.push_str(&text);
-            }
+            markup.push_str(&glib::markup_escape_text(link_text));
             markup.push_str("</a>");
             cursor = link.range.end;
         }
@@ -184,64 +161,11 @@ impl DetailLinks {
 pub(crate) struct DetailLinkBinding {
     label: gtk::Label,
     links: Rc<RefCell<DetailLinks>>,
-    hovered: Rc<Cell<Option<usize>>>,
 }
 
 impl DetailLinkBinding {
     pub(crate) fn new(label: &gtk::Label, shell: &Rc<Shell>) -> Self {
         let links = Rc::new(RefCell::new(DetailLinks::default()));
-        let hovered = Rc::new(Cell::new(None));
-
-        let update_hover = {
-            let label = label.downgrade();
-            let links = Rc::clone(&links);
-            let hovered = Rc::clone(&hovered);
-            Rc::new(move |x: f64, y: f64| {
-                let Some(label) = label.upgrade() else {
-                    return;
-                };
-                let (offset_x, offset_y) = label.layout_offsets();
-                let scale = f64::from(gtk::pango::SCALE);
-                let (inside, byte_index, _) = label.layout().xy_to_index(
-                    ((x - f64::from(offset_x)) * scale) as i32,
-                    ((y - f64::from(offset_y)) * scale) as i32,
-                );
-                let hovered_link = inside.then_some(byte_index).and_then(|byte_index| {
-                    usize::try_from(byte_index).ok().and_then(|byte_index| {
-                        links
-                            .borrow()
-                            .links
-                            .iter()
-                            .position(|link| link.range.contains(&byte_index))
-                    })
-                });
-                if hovered.replace(hovered_link) == hovered_link {
-                    return;
-                }
-                let markup = if let Some(link_index) = hovered_link {
-                    let color = label.color();
-                    links.borrow().markup(Some((link_index, &color)))
-                } else {
-                    links.borrow().markup(None)
-                };
-                label.set_markup(&markup);
-            })
-        };
-        let motion = gtk::EventControllerMotion::new();
-        let enter_hover = Rc::clone(&update_hover);
-        motion.connect_enter(move |_, x, y| enter_hover(x, y));
-        motion.connect_motion(move |_, x, y| update_hover(x, y));
-        let leave_label = label.downgrade();
-        let leave_links = Rc::clone(&links);
-        let leave_hovered = Rc::clone(&hovered);
-        motion.connect_leave(move |_| {
-            if leave_hovered.take().is_some()
-                && let Some(label) = leave_label.upgrade()
-            {
-                label.set_markup(&leave_links.borrow().markup(None));
-            }
-        });
-        label.add_controller(motion);
 
         let activate_links = Rc::clone(&links);
         let shell = Rc::clone(shell);
@@ -254,19 +178,16 @@ impl DetailLinkBinding {
         Self {
             label: label.clone(),
             links,
-            hovered,
         }
     }
 
     pub(crate) fn bind(&self, links: DetailLinks) {
-        let markup = links.markup(None);
-        self.hovered.set(None);
+        let markup = links.markup();
         self.links.replace(links);
         self.label.set_markup(&markup);
     }
 
     pub(crate) fn clear(&self) {
-        self.hovered.set(None);
         self.links.replace(DetailLinks::default());
         self.label.set_text("");
     }
@@ -415,14 +336,14 @@ mod tests {
     fn track_artist_links_preserve_text_and_each_canonical_destination() {
         let mut track = track("A label without a relationship");
         let links = track_artist_links(&track);
-        assert_eq!(links.markup(None), "A label without a relationship");
+        assert_eq!(links.markup(), "A label without a relationship");
         assert_eq!(links.route_for_link("0"), None);
 
         track.display_artist = "First feat. Second".to_string();
         track.artists = vec![credit(3, "First"), credit(4, "Second")];
         let links = track_artist_links(&track);
         assert_eq!(
-            links.markup(None),
+            links.markup(),
             r#"<a href="0" class="inline-detail-link">First</a> feat. <a href="1" class="inline-detail-link">Second</a>"#
         );
         assert_eq!(
@@ -441,7 +362,7 @@ mod tests {
         track.album_artists = vec![credit(4, "Canonical artist")];
         let links = track_artist_links(&track);
         assert_eq!(
-            links.markup(None),
+            links.markup(),
             r#"Display name, <a href="0" class="inline-detail-link">Canonical artist</a>"#
         );
         assert_eq!(
@@ -468,7 +389,7 @@ mod tests {
         track.album_artists = credits;
         let links = track_album_artist_links(&track);
         assert_eq!(
-            links.markup(None),
+            links.markup(),
             r#"<a href="0" class="inline-detail-link">First</a>, <a href="1" class="inline-detail-link">Second</a>"#
         );
         assert_eq!(
@@ -484,7 +405,7 @@ mod tests {
             Some(Route::AlbumDetail(AlbumKey::from_raw(8))),
         );
         assert_eq!(
-            links.markup(None),
+            links.markup(),
             r#"<a href="0" class="inline-detail-link">Album &amp; title</a>"#
         );
         assert_eq!(

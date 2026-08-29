@@ -1584,16 +1584,23 @@ fn present_output_popover(anchor: &gtk::Button, shell: &Rc<Shell>) {
         match receiver.try_recv() {
             Ok(Ok(discovered)) => {
                 status_for_discovery.finish_search(discovered.is_empty());
-                let mut shown = shown_for_discovery.borrow_mut();
-                let previous = shown.clone();
-                replace_discovered_remote_outputs(&mut shown, discovered, &selected_for_discovery);
-                if *shown == previous {
-                    return glib::ControlFlow::Continue;
-                }
-                let mut rows = rows_for_discovery.borrow_mut();
-                for (_, row) in rows.drain(..) {
+                let shown = {
+                    let mut shown = shown_for_discovery.borrow_mut();
+                    let previous = shown.clone();
+                    replace_discovered_remote_outputs(
+                        &mut shown,
+                        discovered,
+                        &selected_for_discovery,
+                    );
+                    if *shown == previous {
+                        return glib::ControlFlow::Continue;
+                    }
+                    shown.clone()
+                };
+                for (_, row) in rows_for_discovery.take() {
                     outputs_for_discovery.remove(&row);
                 }
+                let mut rows = Vec::with_capacity(shown.len());
                 for output in shown.iter() {
                     let row = add_output_row(
                         &outputs_for_discovery,
@@ -1605,10 +1612,11 @@ fn present_output_popover(anchor: &gtk::Button, shell: &Rc<Shell>) {
                     );
                     rows.push((output.clone(), row));
                 }
-                *shell_for_discovery
+                rows_for_discovery.replace(rows);
+                shell_for_discovery
                     .playback
                     .remote_output_options
-                    .borrow_mut() = shown.clone();
+                    .replace(shown);
                 glib::ControlFlow::Continue
             }
             Ok(Err(error)) => {

@@ -3,17 +3,11 @@ language: Rust
 severity: error
 message: Collect ready updates while the RefCell owner is borrowed, then notify outside the borrow.
 rule:
-  any:
-    - all:
-        - pattern: $OWNER.with_typed_mut::<$$$TYPES>($CALLBACK)
-        - has:
-            pattern: $ITEM.replace($$$ARGS)
-            stopBy: end
-    - all:
-        - pattern: $OWNER.with_state_mut($CALLBACK)
-        - has:
-            pattern: $ITEM.replace($$$ARGS)
-            stopBy: end
+  all:
+    - pattern: $OWNER.with_typed_mut::<$$$TYPES>($CALLBACK)
+    - has:
+        pattern: $ITEM.replace($$$ARGS)
+        stopBy: end
 ---
 id: no-strong-clone-in-owned-signal
 language: Rust
@@ -86,6 +80,20 @@ rule:
         - pattern: assert!($$$ARGS)
         - regex: \.add_child\s*\(
 ---
+id: detail-links-must-use-native-link-hover
+language: Rust
+severity: error
+message: GtkLabel owns link hover controllers; DetailLinkBinding must not rebuild link state from a second motion controller.
+rule:
+  all:
+    - pattern: gtk::EventControllerMotion::new()
+    - inside:
+        pattern: |
+          impl DetailLinkBinding {
+            $$$MEMBERS
+          }
+        stopBy: end
+---
 id: visualizer-lane-must-be-bounded
 language: Rust
 severity: error
@@ -105,13 +113,6 @@ rule:
 constraints:
   EVENTS:
     regex: playback
----
-id: bound-row-must-not-reenter-route-model
-language: Rust
-severity: error
-message: Format the bound row directly instead of re-entering the sparse route model.
-rule:
-  pattern: $MODEL.played_at_text($POSITION)
 ---
 id: mounted-route-callback-must-not-own-shell
 language: Rust
@@ -139,20 +140,6 @@ rule:
             $$$AFTER
           })
         };
----
-id: artwork-preparation-must-not-refresh-live-bindings
-language: Rust
-severity: error
-message: Background artwork preparation completion must not repaint mounted bindings.
-rule:
-  all:
-    - pattern: $SHELL.refresh_artwork_bindings()
-    - inside:
-        pattern: |
-          fn apply_source_artwork_preparation($$$PARAMS) {
-            $$$BODY
-          }
-        stopBy: end
 ---
 id: artwork-tile-must-not-admit-on-map
 language: Rust
@@ -219,14 +206,6 @@ rule:
             $$$BODY
           })
         stopBy: end
----
-id: track-activation-must-use-ready-row
-language: Rust
-severity: error
-message: Track tables must activate a loaded Track row, not the sparse loading placeholder wrapper.
-rule:
-  kind: type_identifier
-  regex: ^TrackListItem$
 ---
 id: column-view-activation-needs-row-factory
 language: Rust

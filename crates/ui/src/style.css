@@ -1580,10 +1580,21 @@ popover.slider-value-popover label {
 
 link.inline-detail-link,
 link.inline-detail-link:visited,
-link.inline-detail-link:hover,
 link.inline-detail-link:active {
   color: inherit;
   text-decoration: none;
+}
+
+link.inline-detail-link:hover {
+  color: inherit;
+  text-decoration-line: underline;
+  text-decoration-color: color-mix(in srgb, currentColor 65%, var(--window-bg-color));
+}
+
+link.inline-detail-link:focus:focus-visible {
+  outline: none;
+  text-decoration-line: underline;
+  text-decoration-color: var(--accent-color);
 }
 
 .cached-row {
