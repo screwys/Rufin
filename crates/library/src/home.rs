@@ -197,7 +197,8 @@ impl Database {
         &self,
         source: SourceKey,
         folder: Option<FolderKey>,
-        variation: i64,
+        showcase_variation: i64,
+        explore_variation: i64,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<HomePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -216,7 +217,7 @@ impl Database {
         let showcase_offset = if album_count == 0 {
             0
         } else {
-            variation.rem_euclid(album_count)
+            showcase_variation.rem_euclid(album_count)
         };
         let showcase = sqlx::query_as::<_, HomeAlbumFact>(
             "SELECT album_key,title,artwork_binding FROM albums
@@ -231,21 +232,32 @@ impl Database {
         .fetch_optional(&mut *transaction)
         .await?;
 
-        let track_pivot = sqlx::query_scalar::<_, i64>(
-            "SELECT COALESCE(max(track.track_key),0) FROM tracks track
+        let first_track_key = sqlx::query_scalar::<_, i64>(
+            "SELECT track.track_key FROM tracks track
              WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
                SELECT 1 FROM track_folders scope
-               WHERE scope.track_key=track.track_key AND scope.folder_key=?2))",
+               WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+             ORDER BY track.track_key LIMIT 1",
         )
         .bind(source)
         .bind(folder)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let track_pivot = if track_pivot == 0 {
-            0
-        } else {
-            variation.rem_euclid(track_pivot + 1)
-        };
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or(0);
+        let last_track_key = sqlx::query_scalar::<_, i64>(
+            "SELECT track.track_key FROM tracks track
+             WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
+               SELECT 1 FROM track_folders scope
+               WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+             ORDER BY track.track_key DESC LIMIT 1",
+        )
+        .bind(source)
+        .bind(folder)
+        .fetch_optional(&mut *transaction)
+        .await?
+        .unwrap_or(0);
+        let track_pivot =
+            explore_track_pivot(source, explore_variation, first_track_key, last_track_key);
         let mut explore = sqlx::query_as::<_, HomeTrackFact>(
             "SELECT track_key,title,artwork_binding FROM tracks
              WHERE source_key=?1 AND track_key>=?2 AND (?3 IS NULL OR EXISTS (
@@ -402,6 +414,27 @@ impl Database {
         )
         .await
     }
+}
+
+fn explore_track_pivot(
+    source: SourceKey,
+    variation: i64,
+    first_track_key: i64,
+    last_track_key: i64,
+) -> i64 {
+    let Some(extent) = last_track_key
+        .checked_sub(first_track_key)
+        .and_then(|distance| distance.checked_add(1))
+        .filter(|extent| *extent > 0)
+    else {
+        return first_track_key;
+    };
+    let mut mixed = (variation as u64) ^ (source.raw() as u64).rotate_left(17);
+    mixed = mixed.wrapping_add(0x9e37_79b9_7f4a_7c15);
+    mixed = (mixed ^ (mixed >> 30)).wrapping_mul(0xbf58_476d_1ce4_e5b9);
+    mixed = (mixed ^ (mixed >> 27)).wrapping_mul(0x94d0_49bb_1331_11eb);
+    mixed ^= mixed >> 31;
+    first_track_key + (mixed % extent as u64) as i64
 }
 
 async fn enrich_home_page(
@@ -561,4 +594,30 @@ async fn provider_section(
     .fetch_all(&mut *connection)
     .await?;
     Ok(HomeSectionFacts { tracks, albums })
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{HOME_LIMIT, explore_track_pivot};
+    use crate::SourceKey;
+
+    #[test]
+    fn adjacent_explore_variations_do_not_slide_the_window_by_one_track() {
+        let source = SourceKey::from_raw(1);
+        let current = explore_track_pivot(source, 41, 1, 10_000);
+        let next = explore_track_pivot(source, 42, 1, 10_000);
+
+        assert!(current.abs_diff(next) > HOME_LIMIT as u64);
+    }
+
+    #[test]
+    fn explore_variation_uses_the_selected_sources_track_extent() {
+        let source = SourceKey::from_raw(3);
+
+        for variation in 0..32 {
+            assert!(
+                (4_854..=7_271).contains(&explore_track_pivot(source, variation, 4_854, 7_271,))
+            );
+        }
+    }
 }

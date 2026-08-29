@@ -458,11 +458,10 @@ impl Shell {
             let refresh_section = mounted.clone();
             header.refresh.connect_clicked(move |_| {
                 refresh_section.page_start.set(0);
-                refresh_section.render();
                 if kind == HomeSectionKind::Explore {
                     shell
-                        .home_variation
-                        .set(next_home_variation(shell.home_variation.get()));
+                        .home_explore_variation
+                        .set(next_home_variation(shell.home_explore_variation.get()));
                 }
                 if let Some(operations) = operations.as_ref() {
                     match home_refresh_action(kind) {

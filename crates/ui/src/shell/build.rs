@@ -488,13 +488,13 @@ pub fn build(
         visualizer,
     };
 
+    let home_variation_seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos() as i64);
     let shell = Rc::new(Shell {
         quitting,
-        home_variation: Cell::new(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos() as i64),
-        ),
+        home_showcase_variation: Cell::new(home_variation_seed),
+        home_explore_variation: Cell::new(home_variation_seed),
         diagnostics,
         appearance,
         settings: settings_state,

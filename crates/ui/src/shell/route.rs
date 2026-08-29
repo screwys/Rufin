@@ -540,11 +540,18 @@ impl Shell {
         let folder = selected.music_folder_key;
         let epoch = selected.source_session_epoch;
         let source_id = selected.artwork.source_id.clone();
-        let variation = self.home_variation.get();
+        let showcase_variation = self.home_showcase_variation.get();
+        let explore_variation = self.home_explore_variation.get();
         let (generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {
             database
-                .home_page(source, folder, variation, &cancellation)
+                .home_page(
+                    source,
+                    folder,
+                    showcase_variation,
+                    explore_variation,
+                    &cancellation,
+                )
                 .await
         });
         let shell = Rc::downgrade(self);
@@ -575,10 +582,17 @@ impl Shell {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         let epoch = selected.source_session_epoch;
-        let variation = self.home_variation.get();
+        let showcase_variation = self.home_showcase_variation.get();
+        let explore_variation = self.home_explore_variation.get();
         let task = selected.runtime.spawn(async move {
             database
-                .home_page(source, folder, variation, &library::ReadCancellation::new())
+                .home_page(
+                    source,
+                    folder,
+                    showcase_variation,
+                    explore_variation,
+                    &library::ReadCancellation::new(),
+                )
                 .await
         });
         let shell = Rc::downgrade(self);
