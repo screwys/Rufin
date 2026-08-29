@@ -173,6 +173,7 @@ fn generate_srpm_inner(
             .stdin(Stdio::null()),
         "cargo vendor",
     )?;
+    clear_rust_source_executable_bits(&source_tree.join("vendor"))?;
 
     let timestamp_output = Command::new("git")
         .current_dir(root)
@@ -259,6 +260,30 @@ fn set_archive_permissions(path: &Path) -> Result<()> {
 
 #[cfg(not(unix))]
 fn set_archive_permissions(_path: &Path) -> Result<()> {
+    Err("RPM source generation is only supported on Unix".into())
+}
+
+#[cfg(unix)]
+fn clear_rust_source_executable_bits(path: &Path) -> Result<()> {
+    for entry in fs::read_dir(path)? {
+        let entry = entry?;
+        let path = entry.path();
+        if path.is_dir() {
+            clear_rust_source_executable_bits(&path)?;
+        } else if path.extension().is_some_and(|extension| extension == "rs") {
+            let mut permissions = entry.metadata()?.permissions();
+            let mode = permissions.mode();
+            if mode & 0o111 != 0 {
+                permissions.set_mode(mode & !0o111);
+                fs::set_permissions(path, permissions)?;
+            }
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+fn clear_rust_source_executable_bits(_path: &Path) -> Result<()> {
     Err("RPM source generation is only supported on Unix".into())
 }
 
