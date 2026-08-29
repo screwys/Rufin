@@ -11,8 +11,8 @@ use serde::{Deserialize, Serialize};
 pub struct ReleaseNote {
     pub version: String,
     pub date: String,
-    pub summary: Option<String>,
-    pub items: Vec<String>,
+    pub url: String,
+    pub body: String,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]

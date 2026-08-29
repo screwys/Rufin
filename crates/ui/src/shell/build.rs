@@ -152,7 +152,7 @@ pub fn build(
     let preferences = PreferencesState {
         dialog: RefCell::new(None),
         release_history: RefCell::new(release_history),
-        release_history_list: RefCell::new(None),
+        release_history_view: RefCell::new(None),
         release_notification_toast: RefCell::new(None),
         release_updating: RefCell::new(None),
     };

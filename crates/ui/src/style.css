@@ -126,17 +126,12 @@ toastoverlay toast label {
   margin-bottom: 109px;
 }
 
-.release-note-summary {
-  background: color-mix(in srgb, var(--accent-bg-color) 10%, transparent);
-  color: color-mix(in srgb, var(--window-fg-color) 88%, transparent);
-  border-left: 3px solid color-mix(in srgb, var(--accent-bg-color) 64%, transparent);
-  border-radius: 8px;
-  font-size: 15px;
-  padding: 8px 11px;
+.release-note-selector label {
+  font-weight: 700;
 }
 
 .release-notes-list {
-  border-top: 1px solid color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+  padding-bottom: 2px;
 }
 
 .release-note-row {
@@ -201,8 +196,29 @@ button.release-note-update:hover {
   font-weight: 700;
 }
 
-.release-note-items {
+.release-note-body {
   margin-top: 5px;
+}
+
+.release-note-heading {
+  color: color-mix(in srgb, var(--window-fg-color) 94%, transparent);
+  font-size: 17px;
+  font-weight: 800;
+  margin-top: 10px;
+}
+
+.release-note-quote {
+  background: color-mix(in srgb, var(--accent-bg-color) 9%, transparent);
+  border-left: 3px solid color-mix(in srgb, var(--accent-bg-color) 56%, transparent);
+  border-radius: 6px;
+  padding: 7px 10px;
+}
+
+.release-note-code {
+  background: color-mix(in srgb, var(--window-fg-color) 6%, transparent);
+  border-radius: 6px;
+  font-family: monospace;
+  padding: 7px 9px;
 }
 
 .release-note-bullet {
