@@ -34,6 +34,7 @@ use crate::ratings::RatingControl;
 use crate::routes::collection_context::{
     install_current_track_context_menu, present_current_track_context_menu,
 };
+use crate::routes::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
 use crate::shell::Shell;
 use crate::shell::actions::{icon_button_without_tooltip, set_active_class};
 use crate::shell::cover::ArtworkTile;
@@ -118,7 +119,6 @@ pub(crate) struct PlayerControls {
     surface: gtk::Box,
     pub(crate) cover: ArtworkTile,
     title: gtk::Label,
-    title_links: RefCell<Option<DetailLinkBinding>>,
     pub(crate) menu_button: gtk::Button,
     artist: gtk::Label,
     artist_links: RefCell<Option<DetailLinkBinding>>,
@@ -589,11 +589,7 @@ impl Shell {
             let album_route = current
                 .and_then(|entry| entry.track.album_key)
                 .map(Route::AlbumDetail);
-            if let Some(title_links) = controls.title_links.borrow().as_ref() {
-                title_links.bind(DetailLinks::route(&title, album_route.clone()));
-            } else {
-                controls.title.set_text(&title);
-            }
+            controls.title.set_text(&title);
             if let Some(artist_links) = controls.artist_links.borrow().as_ref() {
                 artist_links.bind(current.map_or_else(
                     || DetailLinks::text(&artist),
@@ -891,7 +887,6 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         surface: root,
         cover,
         title,
-        title_links: RefCell::new(None),
         menu_button,
         artist,
         artist_links: RefCell::new(None),
@@ -1837,14 +1832,25 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
     connect_bottom_player_resize(shell);
     let controls = &shell.player_view.player_controls;
     controls
-        .title_links
-        .replace(Some(DetailLinkBinding::new(&controls.title, shell)));
-    controls
         .artist_links
         .replace(Some(DetailLinkBinding::new(&controls.artist, shell)));
     controls
         .album_links
         .replace(Some(DetailLinkBinding::new(&controls.album, shell)));
+    let drag_artwork = controls.cover.drag_paintable_source();
+    install_now_playing_drag_source(&controls.cover.area, &drag_artwork, shell);
+    install_now_playing_drag_source(&controls.title, &drag_artwork, shell);
+    let title_shell = Rc::clone(shell);
+    add_widget_click(controls.title.upcast_ref(), move || {
+        let album = title_shell
+            .selected_playback()
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+            .and_then(|current| current.track.album_key);
+        if let Some(album) = album {
+            title_shell.navigate(Route::AlbumDetail(album));
+        }
+    });
     install_current_track_context_menu(&shell.player_view.player_controls.cover.area, shell);
     let menu_shell = Rc::clone(shell);
     shell
@@ -2060,6 +2066,26 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
             }
             volume_shell.apply_user_volume(scale.value());
         });
+}
+
+fn install_now_playing_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    artwork: &gtk::Picture,
+    shell: &Rc<Shell>,
+) {
+    let drag_shell = Rc::downgrade(shell);
+    install_compact_playlist_drag_source(target, artwork, move || {
+        let shell = drag_shell.upgrade()?;
+        let player = shell.selected_playback()?;
+        let current = player.transport.current.as_ref()?;
+        let track = current.track.track_key?;
+        let source = PlaylistTrackSource::track(
+            current.id.source_key,
+            current.id.source_session_epoch,
+            track,
+        );
+        Some((source, current.track.title.clone()))
+    });
 }
 
 impl Shell {

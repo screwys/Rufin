@@ -254,7 +254,11 @@ pub trait SelectedSourcePort: Send + Sync {
     fn set_music_folder(&self, folder_object_id: Option<String>);
     fn set_favorite(&self, target: FavoriteTarget, favorite: bool);
     fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>);
-    fn create_playlist(&self, name: String, tracks: Vec<TrackKey>);
+    fn create_playlist(
+        &self,
+        name: String,
+        tracks: Vec<TrackKey>,
+    ) -> Receiver<Result<Option<String>, String>>;
     fn rename_playlist(&self, playlist: PlaylistKey, name: String);
     fn delete_playlist(&self, playlist: PlaylistKey);
     fn add_playlist_tracks(

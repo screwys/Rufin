@@ -588,6 +588,32 @@ pub fn japanese_reading_for_language_options(
     })
 }
 
+pub fn japanese_reading_from_romanization(
+    text: &str,
+    romanization: &str,
+) -> Option<JapaneseReading> {
+    if !text.chars().any(is_kanji) {
+        return None;
+    }
+    let reading = romanization
+        .to_hiragana()
+        .chars()
+        .filter(|character| !character.is_whitespace())
+        .collect::<String>();
+    if reading.is_empty() {
+        return None;
+    }
+    let segments = japanese_reading_segments(text.to_string(), reading);
+    segments
+        .iter()
+        .filter(|segment| segment.surface.chars().any(is_kanji))
+        .all(|segment| segment.furigana.is_some())
+        .then(|| JapaneseReading {
+            segments,
+            romanization: romanization.to_string(),
+        })
+}
+
 fn japanese_reader_needed(
     text: &str,
     language: Option<&str>,
@@ -1039,6 +1065,20 @@ mod tests {
         let reading = japanese_reading("君との Moon will shine 42!").expect("Japanese reading");
 
         assert_eq!(reading.romanization, "kimi to no Moon will shine 42!");
+    }
+
+    #[test]
+    fn supplied_romanization_owns_aligned_kanji_readings() {
+        let reading =
+            japanese_reading_from_romanization("あの娘たぶんいいひと", "ano ko tabun ii hito")
+                .expect("aligned reading");
+
+        assert!(reading.segments.iter().any(|segment| {
+            segment.surface == "娘" && segment.furigana.as_deref() == Some("こ")
+        }));
+        assert!(
+            japanese_reading_from_romanization("あの娘たぶんいいひと", "unrelated words").is_none()
+        );
     }
 
     #[test]

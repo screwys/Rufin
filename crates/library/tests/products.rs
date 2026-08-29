@@ -799,6 +799,58 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
 }
 
 #[tokio::test]
+async fn smart_playlist_reordering_preserves_unique_positions() {
+    let fixture = fixture().await;
+    let definition = SmartPlaylistDefinition::default();
+    let first = fixture
+        .database
+        .create_smart_playlist(fixture.source, "First", &definition)
+        .await
+        .expect("create first Smart Playlist");
+    let second = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Second", &definition)
+        .await
+        .expect("create second Smart Playlist");
+    let third = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Third", &definition)
+        .await
+        .expect("create third Smart Playlist");
+
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, first)
+            .await
+            .expect("move Smart Playlist upward")
+    );
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, second)
+            .await
+            .expect("move Smart Playlist downward")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .smart_playlist_route_page(
+                fixture.source,
+                None,
+                SmartPlaylistListSort::Position,
+                false,
+                0,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("read reordered Smart Playlists")
+            .0,
+        [first, second, third]
+    );
+}
+
+#[tokio::test]
 async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
@@ -1103,7 +1155,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     let initial_home = fixture
         .database
-        .home_page(fixture.source, None, 0, &cancel)
+        .home_page(fixture.source, None, 0, 0, &cancel)
         .await
         .expect("initial bounded Home page");
     assert!(initial_home.most_played.tracks.is_empty());
@@ -1118,27 +1170,38 @@ async fn home_search_and_radio_results_stay_bounded() {
             .len(),
         1
     );
-    let alternate_showcase = fixture
+    let alternate_showcase_home = fixture
         .database
-        .home_page(fixture.source, None, 1, &cancel)
+        .home_page(fixture.source, None, 1, 0, &cancel)
         .await
-        .expect("alternate launch Home page")
+        .expect("alternate Showcase Home page");
+    assert_eq!(initial_home.explore, alternate_showcase_home.explore);
+    let alternate_showcase = alternate_showcase_home
         .showcase
         .expect("alternate Showcase");
-    assert!(matches!(
-        initial_home.showcase,
-        Some(library::HomeShowcaseRow::Album(_))
-    ));
-    assert!(matches!(
-        alternate_showcase,
-        library::HomeShowcaseRow::Track(_)
-    ));
+    assert_eq!(
+        initial_home
+            .showcase
+            .as_ref()
+            .expect("initial Showcase")
+            .album
+            .album_key,
+        fixture.albums[0]
+    );
+    assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
+    let alternate_explore_home = fixture
+        .database
+        .home_page(fixture.source, None, 0, 2, &cancel)
+        .await
+        .expect("alternate Explore Home page");
+    assert_eq!(initial_home.showcase, alternate_explore_home.showcase);
+    assert_ne!(initial_home.explore, alternate_explore_home.explore);
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
     let newly_added = fixture
         .database
-        .home_page(fixture.source, None, 0, &cancel)
+        .home_page(fixture.source, None, 0, 0, &cancel)
         .await
         .expect("bounded Home Albums")
         .newly_added
@@ -1153,7 +1216,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, &cancel)
+            .home_page(fixture.source, None, 0, 0, &cancel)
             .await
             .expect("released Albums require a release fact")
             .recently_released
@@ -1166,7 +1229,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, &cancel)
+            .home_page(fixture.source, None, 0, 0, &cancel)
             .await
             .expect("bounded Home Genres")
             .genres

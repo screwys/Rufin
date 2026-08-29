@@ -242,6 +242,9 @@ msgstr ""
 msgid "Application name"
 msgstr ""
 
+msgid "Apply Template"
+msgstr ""
+
 msgid "Artist / Album"
 msgstr ""
 
@@ -524,6 +527,9 @@ msgid "Diagnostic log saved"
 msgstr ""
 
 msgid "Diagnostic log"
+msgstr ""
+
+msgid "Direction"
 msgstr ""
 
 msgid "Disable private mode"
@@ -1564,6 +1570,9 @@ msgstr ""
 msgid "Removed from favorites"
 msgstr ""
 
+msgid "Removed from"
+msgstr ""
+
 msgid "Rename Playlist"
 msgstr ""
 
@@ -2024,9 +2033,6 @@ msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
-msgstr ""
-
-msgid "Use Template"
 msgstr ""
 
 msgid "Use a number above zero"

@@ -13,6 +13,22 @@ use localization::{msgid, tr};
 
 use super::sparse_model::{SparseItem, SparseObjectItem};
 
+pub(crate) fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryField) {
+    let class = match field {
+        LibraryField::Year
+        | LibraryField::UserRating
+        | LibraryField::Bpm
+        | LibraryField::DiscNumber => "skeleton-short-value",
+        LibraryField::TrackNumber => "skeleton-track-number",
+        LibraryField::Duration => "skeleton-duration",
+        LibraryField::ReleaseDate | LibraryField::DateAdded | LibraryField::LastPlayed => {
+            "skeleton-date"
+        }
+        _ => return,
+    };
+    widget.add_css_class(class);
+}
+
 pub(crate) fn smart_playlist_display_name(playlist: &SmartPlaylistRow) -> String {
     match playlist.object_id.as_str() {
         "builtin:most_played" => tr(msgid("Most Played")),
@@ -198,11 +214,6 @@ pub(crate) fn track_artwork_at_from_item(item: &gtk::ListItem) -> Option<Artwork
 
 pub(crate) fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
-}
-pub(crate) fn clear_list_item_child(_: &gtk::SignalListItemFactory, item: &glib::Object) {
-    if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-        item.set_child(None::<&gtk::Widget>);
-    }
 }
 pub(crate) const COLLECTION_GRID_CARD_GAP: i32 = 2;
 pub(crate) const COLLECTION_GRID_CARD_MARGIN: i32 = 5;
@@ -659,7 +670,8 @@ pub(crate) fn layout_title(layout: LibraryLayout) -> &'static str {
 pub(crate) fn column_width(field: LibraryField) -> i32 {
     match field {
         LibraryField::RowIndex => 48,
-        LibraryField::Image | LibraryField::Favorite => 56,
+        LibraryField::Image => 56,
+        LibraryField::Favorite => crate::favorites::FAVORITE_COLUMN_WIDTH,
         LibraryField::Title | LibraryField::TitleMerged => 220,
         LibraryField::Album
         | LibraryField::Artist

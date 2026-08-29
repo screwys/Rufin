@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-28 16:54+0000\n"
+"PO-Revision-Date: 2026-08-29 11:10+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -271,6 +271,11 @@ msgstr "Erscheint auf"
 
 msgid "Application name"
 msgstr "Anwendungsname"
+
+#, fuzzy
+#| msgid "Template"
+msgid "Apply Template"
+msgstr "Vorlage"
 
 msgid "Artist / Album"
 msgstr "Künstler / Album"
@@ -557,6 +562,11 @@ msgstr "Diagnoseprotokoll gespeichert"
 
 msgid "Diagnostic log"
 msgstr "Diagnoseprotokoll"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
 
 msgid "Disable private mode"
 msgstr "Privaten Modus deaktivieren"
@@ -987,7 +997,7 @@ msgid "Lock metadata"
 msgstr "Metadaten sperren"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Protokolle wurden kopiert"
 
 msgid "Loudness normalization"
 msgstr "Lautstärkenormalisierung"
@@ -1070,10 +1080,8 @@ msgstr "Anbieter nach oben verschieben"
 msgid "Move up"
 msgstr "Nach oben verschieben"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Auswahl"
+msgstr "Mehrfachauswahl"
 
 msgid "Multiple values"
 msgstr "Mehrere Werte"
@@ -1126,10 +1134,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Seitenelemente navigieren"
 
-#, fuzzy
-#| msgid "Type to search"
 msgid "Navigate to Search"
-msgstr "Tippen zum Suchen"
+msgstr "Zur Suche wechseln"
 
 msgid "Navigation"
 msgstr "Navigation"
@@ -1181,15 +1187,11 @@ msgstr "Noch keine Alben von diesem Künstler"
 msgid "No cached server path yet"
 msgstr "Kein Server-Pfad zwischengespeichert"
 
-#, fuzzy
-#| msgid "No favorites yet"
 msgid "No favorite albums yet"
-msgstr "Noch keine Favoriten"
+msgstr "Noch keine Lieblingsalben"
 
-#, fuzzy
-#| msgid "No favorites yet"
 msgid "No favorite artists yet"
-msgstr "Noch keine Favoriten"
+msgstr "Noch keine Lieblingskünstler"
 
 msgid "No favorites yet"
 msgstr "Noch keine Favoriten"
@@ -1523,10 +1525,8 @@ msgstr "Rufin beenden"
 msgid "Quit"
 msgstr "Beenden"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Auswahl"
+msgstr "Bereichsauswahl"
 
 msgid "Rating"
 msgstr "Bewertung"
@@ -1620,6 +1620,11 @@ msgstr "Entfernen"
 
 msgid "Removed from favorites"
 msgstr "Aus Favoriten entfernt"
+
+#, fuzzy
+#| msgid "Remove from Pins"
+msgid "Removed from"
+msgstr "Aus den angehefteten Elementen entfernen"
 
 msgid "Rename Playlist"
 msgstr "Playlist umbenennen"
@@ -1780,8 +1785,6 @@ msgstr "Musikordner auswählen"
 msgid "Select Source"
 msgstr "Quelle auswählen"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Alle auswählen"
 
@@ -1963,10 +1966,10 @@ msgid "Support"
 msgstr "Support"
 
 msgid "Switch Search/Favorites tabs"
-msgstr ""
+msgstr "Zwischen „Suche“ und „Favoriten“ wechseln"
 
 msgid "Switch between layouts"
-msgstr ""
+msgstr "Zwischen Layouts wechseln"
 
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt..."
@@ -2084,9 +2087,6 @@ msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
-
-msgid "Use Template"
-msgstr "Vorlage verwenden"
 
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
@@ -2257,6 +2257,9 @@ msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
+#~ msgid "Use Template"
+#~ msgstr "Vorlage verwenden"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Zum Künstler springen"
 
@@ -2280,9 +2283,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "In den Infobereich minimieren"

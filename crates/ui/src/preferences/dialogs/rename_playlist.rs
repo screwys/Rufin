@@ -29,9 +29,11 @@ impl Shell {
             .build();
         dialog.add_response("cancel", &tr("Cancel"));
         dialog.add_response("rename", &tr("Rename"));
+        dialog.set_default_response(Some("rename"));
         dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
         let entry = gtk::Entry::new();
         entry.set_text(&current_name);
+        entry.set_activates_default(true);
         dialog.set_extra_child(Some(&entry));
         dialog.connect_response(None, move |_, response| {
             if response == "rename" {

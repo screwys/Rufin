@@ -269,6 +269,11 @@ msgstr "Objevuje se v"
 msgid "Application name"
 msgstr "Název aplikace"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Apply Template"
+msgstr "Šedá"
+
 msgid "Artist / Album"
 msgstr "Interpret / Album"
 
@@ -561,6 +566,11 @@ msgstr "Diagnostický protokol uložen"
 
 msgid "Diagnostic log"
 msgstr "Diagnostický protokol"
+
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
 
 msgid "Disable private mode"
 msgstr "Vypnout soukromý režim"
@@ -1637,6 +1647,11 @@ msgstr "Odebrat"
 msgid "Removed from favorites"
 msgstr "Odebrat z oblíbených"
 
+#, fuzzy
+#| msgid "Remove from Pins"
+msgid "Removed from"
+msgstr "Odepnout"
+
 msgid "Rename Playlist"
 msgstr "Přejmenovat Playlist"
 
@@ -2111,9 +2126,6 @@ msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
 
-msgid "Use Template"
-msgstr ""
-
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
 
@@ -2310,9 +2322,6 @@ msgstr[2] "Před {count} roky"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Ukončit do systémové lišty"

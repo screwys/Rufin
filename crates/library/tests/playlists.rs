@@ -54,6 +54,51 @@ async fn playlist_destinations_are_title_ordered_and_folder_scoped() {
 }
 
 #[tokio::test]
+async fn playlist_reordering_swaps_adjacent_positions_without_collisions() {
+    let fixture = fixture().await;
+    let mut playlists = Vec::new();
+    for name in ["One", "Two", "Three", "Four"] {
+        playlists.push(
+            fixture
+                .database
+                .create_playlist(fixture.source, name, &[])
+                .await
+                .expect("create Playlist")
+                .expect("Playlist key"),
+        );
+    }
+    assert!(
+        fixture
+            .database
+            .move_playlist(fixture.source, playlists[1], playlists[0])
+            .await
+            .expect("move 2 to 1")
+    );
+    assert!(
+        fixture
+            .database
+            .move_playlist(fixture.source, playlists[3], playlists[2])
+            .await
+            .expect("move 4 to 3")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .playlist_order(
+                fixture.source,
+                None,
+                PlaylistSort::Position,
+                false,
+                "",
+                &ReadCancellation::new()
+            )
+            .await
+            .expect("Playlist order"),
+        [playlists[1], playlists[0], playlists[3], playlists[2]]
+    );
+}
+
+#[tokio::test]
 async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
     let fixture = fixture().await;
     let playlist = fixture

@@ -17,6 +17,7 @@ const PLAYLIST_DELETE_BATCH: usize = 400;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum PlaylistSort {
+    Position,
     Title,
     TrackCount,
     Duration,
@@ -32,9 +33,10 @@ pub enum PlaylistEntrySort {
 impl PlaylistSort {
     const fn code(self) -> i64 {
         match self {
-            Self::Title => 0,
-            Self::TrackCount => 1,
-            Self::Duration => 2,
+            Self::Position => 0,
+            Self::Title => 1,
+            Self::TrackCount => 2,
+            Self::Duration => 3,
         }
     }
 }
@@ -271,11 +273,11 @@ impl Database {
             .fetch_all(connection)
             .await?);
         }
-        if sort == PlaylistSort::Title {
+        if matches!(sort, PlaylistSort::Position | PlaylistSort::Title) {
             return Ok(sqlx::query_scalar::<_, PlaylistKey>(if descending {
-                "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.sort_text DESC,playlist.playlist_key"
+                if sort == PlaylistSort::Position { "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.position DESC,playlist.playlist_key" } else { "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.sort_text DESC,playlist.playlist_key" }
             } else {
-                "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.sort_text,playlist.playlist_key"
+                if sort == PlaylistSort::Position { "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.position,playlist.playlist_key" } else { "SELECT playlist.playlist_key FROM playlists playlist WHERE playlist.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM playlist_entries entry JOIN track_folders scope USING(track_key) WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2)) ORDER BY playlist.sort_text,playlist.playlist_key" }
             })
             .bind(source)
             .bind(folder)
@@ -290,12 +292,12 @@ impl Database {
               LEFT JOIN tracks track USING(track_key)
               WHERE playlist.source_key=?1 GROUP BY playlist.playlist_key HAVING ?4 IS NULL OR count(entry.playlist_entry_key)>0)
              SELECT playlist_key FROM rows ORDER BY
-              CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
-              CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,
-              CASE WHEN ?2=1 AND ?3=0 THEN track_count END ASC,
-              CASE WHEN ?2=1 AND ?3=1 THEN track_count END DESC,
-              CASE WHEN ?2=2 AND ?3=0 THEN duration END ASC,
-              CASE WHEN ?2=2 AND ?3=1 THEN duration END DESC,sort_text,playlist_key",
+              CASE WHEN ?2=1 AND ?3=0 THEN sort_text END ASC,
+              CASE WHEN ?2=1 AND ?3=1 THEN sort_text END DESC,
+              CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,
+              CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,
+              CASE WHEN ?2=3 AND ?3=0 THEN duration END ASC,
+              CASE WHEN ?2=3 AND ?3=1 THEN duration END DESC,sort_text,playlist_key",
         )
         .bind(source)
         .bind(sort.code())
@@ -665,9 +667,10 @@ impl Database {
         }
         let result = sqlx::query(
             "INSERT INTO playlists(
-                 source_key, ownership, object_id, name, normalized_name, sort_text
+                 source_key, ownership, object_id, name, normalized_name, sort_text, position
              ) VALUES (?1, 'user', 'rufin:playlist:' || lower(hex(randomblob(16))),
-                       ?2, lower(?2), lower(?2))",
+                       ?2, lower(?2), lower(?2),
+                       (SELECT COALESCE(max(position)+1,0) FROM playlists WHERE source_key=?1))",
         )
         .bind(source)
         .bind(name)
@@ -704,6 +707,66 @@ impl Database {
         .await?
         .rows_affected()
             == 1)
+    }
+
+    pub async fn move_playlist(
+        &self,
+        source: SourceKey,
+        dragged: PlaylistKey,
+        target: PlaylistKey,
+    ) -> LibraryResult<bool> {
+        if dragged == target {
+            return Ok(false);
+        }
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let positions = sqlx::query_as::<_, (Option<i64>, Option<i64>, Option<i64>)>(
+            "SELECT
+               (SELECT position FROM playlists WHERE source_key=?1 AND playlist_key=?2),
+               (SELECT position FROM playlists WHERE source_key=?1 AND playlist_key=?3),
+               (SELECT max(position) FROM playlists WHERE source_key=?1)",
+        )
+        .bind(source)
+        .bind(dragged)
+        .bind(target)
+        .fetch_one(&mut *transaction)
+        .await?;
+        let (Some(dragged_position), Some(insertion), Some(max_position)) = positions else {
+            transaction.rollback().await?;
+            return Ok(false);
+        };
+        if insertion == dragged_position {
+            transaction.rollback().await?;
+            return Ok(false);
+        }
+        let temporary = max_position + 1;
+        let offset = max_position + 2;
+        sqlx::query("UPDATE playlists SET position=?3 WHERE source_key=?1 AND playlist_key=?2")
+            .bind(source)
+            .bind(dragged)
+            .bind(temporary)
+            .execute(&mut *transaction)
+            .await?;
+        let (lower, upper, adjustment) = if insertion < dragged_position {
+            (insertion, dragged_position - 1, 1_i64)
+        } else {
+            (dragged_position + 1, insertion, -1_i64)
+        };
+        sqlx::query("UPDATE playlists SET position=position+?4 WHERE source_key=?1 AND position>=?2 AND position<=?3")
+            .bind(source).bind(lower).bind(upper).bind(offset)
+            .execute(&mut *transaction).await?;
+        sqlx::query("UPDATE playlists SET position=position-?4+?5 WHERE source_key=?1 AND position>=?2+?4 AND position<=?3+?4")
+            .bind(source).bind(lower).bind(upper).bind(offset).bind(adjustment)
+            .execute(&mut *transaction).await?;
+        sqlx::query("UPDATE playlists SET position=?3 WHERE source_key=?1 AND playlist_key=?2")
+            .bind(source)
+            .bind(dragged)
+            .bind(insertion)
+            .execute(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Ok(true)
     }
 
     pub async fn delete_playlist(
