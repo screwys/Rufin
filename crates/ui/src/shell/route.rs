@@ -26,6 +26,9 @@ use super::route_position::{
 };
 use crate::routes::route::{CollectionCategory, Route};
 use crate::routes::route_layout::{primary_route_scroll_adjustment, route_boundary};
+use crate::routes::track_selection::{
+    PlaylistEntrySelection, PlaylistEntrySelectionSnapshot, TrackSelection, TrackSelectionSnapshot,
+};
 use crate::routes::{
     AlbumCollectionOrder, NamedDetailId, load_artist_discography, load_artist_overview,
     load_artist_tracks, load_named_detail, load_playlist_detail, load_smart_playlist_detail,
@@ -345,6 +348,8 @@ pub(crate) struct RouteViewport {
     mounted_route: RefCell<Option<MountedRouteEntry>>,
     position_memory: RefCell<RoutePositionMemory>,
     current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
+    track_selections: RefCell<Vec<TrackSelection>>,
+    playlist_entry_selection: RefCell<Option<PlaylistEntrySelection>>,
     pub(crate) route_search: RefCell<Option<gtk::SearchEntry>>,
     pub(crate) route_search_focus: RefCell<Option<Rc<dyn Fn()>>>,
     pub(crate) route_layout_cycle: RefCell<Option<MountedRouteCommand>>,
@@ -356,6 +361,8 @@ pub(crate) struct RouteViewport {
 #[derive(Default)]
 struct RouteActivationContext {
     current_track_selections: Vec<RouteCurrentTrackSelection>,
+    track_selections: Vec<TrackSelection>,
+    playlist_entry_selection: Option<PlaylistEntrySelection>,
     route_search: Option<gtk::SearchEntry>,
     route_search_focus: Option<Rc<dyn Fn()>>,
     route_layout_cycle: Option<MountedRouteCommand>,
@@ -377,6 +384,8 @@ impl RouteViewport {
             mounted_route: RefCell::new(None),
             position_memory: RefCell::new(RoutePositionMemory::default()),
             current_track_selections: RefCell::new(Vec::new()),
+            track_selections: RefCell::new(Vec::new()),
+            playlist_entry_selection: RefCell::new(None),
             route_search: RefCell::new(None),
             route_search_focus: RefCell::new(None),
             route_layout_cycle: RefCell::new(None),
@@ -648,6 +657,80 @@ impl Shell {
                 .borrow_mut()
                 .push(selection);
         }
+    }
+
+    pub(crate) fn register_current_route_track_selection_owner(
+        self: &Rc<Self>,
+        selection: TrackSelection,
+    ) {
+        let shell = Rc::downgrade(self);
+        selection.connect_changed(move |changed_selection| {
+            if changed_selection.selection().is_empty() {
+                return;
+            }
+            let Some(shell) = shell.upgrade() else {
+                return;
+            };
+            for other in shell.route_viewport.track_selections.borrow().iter() {
+                if !other.uses_selection(changed_selection) {
+                    other.clear();
+                }
+            }
+        });
+        self.route_viewport
+            .track_selections
+            .borrow_mut()
+            .push(selection);
+    }
+
+    pub(crate) fn current_route_track_selection(
+        &self,
+        clicked: TrackKey,
+    ) -> Option<TrackSelectionSnapshot> {
+        self.route_viewport
+            .track_selections
+            .borrow()
+            .iter()
+            .find_map(|selection| selection.selected_tracks_for(clicked))
+    }
+
+    pub(crate) fn current_route_track_selection_snapshot(&self) -> Option<TrackSelectionSnapshot> {
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow()
+            .as_ref()
+            .and_then(PlaylistEntrySelection::selected_tracks)
+            .or_else(|| {
+                self.route_viewport
+                    .track_selections
+                    .borrow()
+                    .iter()
+                    .find_map(TrackSelection::selected_tracks)
+            })
+    }
+
+    pub(crate) fn set_current_playlist_entry_selection(&self, selection: PlaylistEntrySelection) {
+        self.route_viewport
+            .playlist_entry_selection
+            .replace(Some(selection));
+    }
+
+    pub(crate) fn current_playlist_entry_selection(
+        &self,
+        clicked: library::PlaylistEntryKey,
+    ) -> Option<PlaylistEntrySelectionSnapshot> {
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow()
+            .as_ref()
+            .and_then(|selection| selection.selected_entries_for(clicked))
+    }
+
+    pub(crate) fn current_playlist_entry_selection_owner(&self) -> Option<PlaylistEntrySelection> {
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow()
+            .clone()
     }
 
     pub(crate) fn refresh_current_route_now_playing_selections(&self) {
@@ -1954,6 +2037,14 @@ impl Shell {
             current_track_selections: std::mem::take(
                 &mut *self.route_viewport.current_track_selections.borrow_mut(),
             ),
+            track_selections: std::mem::take(
+                &mut *self.route_viewport.track_selections.borrow_mut(),
+            ),
+            playlist_entry_selection: self
+                .route_viewport
+                .playlist_entry_selection
+                .borrow_mut()
+                .take(),
             route_search: self.route_viewport.route_search.borrow_mut().take(),
             route_search_focus: self.route_viewport.route_search_focus.borrow_mut().take(),
             route_layout_cycle: self.route_viewport.route_layout_cycle.borrow_mut().take(),
@@ -1965,6 +2056,12 @@ impl Shell {
         self.route_viewport
             .current_track_selections
             .replace(context.current_track_selections);
+        self.route_viewport
+            .track_selections
+            .replace(context.track_selections);
+        self.route_viewport
+            .playlist_entry_selection
+            .replace(context.playlist_entry_selection);
         self.route_viewport
             .route_search
             .replace(context.route_search);
@@ -1988,6 +2085,11 @@ impl Shell {
             .current_track_selections
             .borrow_mut()
             .clear();
+        self.route_viewport.track_selections.borrow_mut().clear();
+        self.route_viewport
+            .playlist_entry_selection
+            .borrow_mut()
+            .take();
     }
 
     pub(crate) fn clear_mounted_routes(&self) {

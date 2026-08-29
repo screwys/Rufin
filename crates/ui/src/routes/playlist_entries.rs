@@ -9,7 +9,7 @@ use crate::favorites::{
     favorite_button_is_active, favorite_icon_button, set_favorite_button_active, track_favorite_key,
 };
 use crate::interactions::install_context_menu_openers;
-use crate::localization::{bind_search_placeholder, bind_widget_tooltip, localized_column};
+use crate::localization::{bind_search_placeholder, localized_column};
 use crate::shell::Shell;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 
@@ -27,7 +27,8 @@ use super::detail_links::{
 };
 use super::factory_cells::FactoryCells;
 use super::grid_cells::{
-    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell, collection_grid,
+    CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
+    collection_grid_with_selection_and_demand,
 };
 use super::library_fields::{
     COLLECTION_GRID_MAX_CARD_WIDTH, item_at_from_item, opaque_artwork, track_field,
@@ -36,8 +37,7 @@ use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionReq
 use super::route_shell::LibraryToolbarProjection;
 use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width_with_inset;
-
-const PLAYLIST_ENTRY_REORDER_COLUMN_WIDTH: i32 = 30;
+use super::track_selection::PlaylistEntrySelection;
 
 #[derive(Default)]
 struct PlaylistEntryOrderLane(std::cell::Cell<u64>);
@@ -194,6 +194,8 @@ fn playlist_entry_collection(
         .borrow()
         .library_list(LibraryListKey::PlaylistTracks);
     let playing = TrackRowPlayingIndicator::new();
+    let selection = PlaylistEntrySelection::new(model.clone());
+    shell.set_current_playlist_entry_selection(selection.clone());
     let selected_source = shell
         .selected_library()
         .as_deref()
@@ -225,9 +227,10 @@ fn playlist_entry_collection(
                 model.clone(),
                 playlist,
                 playing.clone(),
+                selection.clone(),
             )),
             LibraryLayout::Grid | LibraryLayout::Detail => LibraryPresentationProjection::Grid(
-                playlist_entry_grid(&shell, model.clone(), playlist),
+                playlist_entry_grid(&shell, model.clone(), playlist, selection.clone()),
             ),
         }),
     )
@@ -238,6 +241,7 @@ fn playlist_entry_table(
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
     playing: TrackRowPlayingIndicator,
+    selection: PlaylistEntrySelection,
 ) -> CollectionTableProjection {
     let fields = shell
         .settings
@@ -253,17 +257,14 @@ fn playlist_entry_table(
         LibraryListKey::PlaylistTracks,
         model.list_model(),
         &fields,
-        vec![(
-            playlist_entry_reorder_column(shell, playlist),
-            PLAYLIST_ENTRY_REORDER_COLUMN_WIDTH,
-        )],
+        Vec::new(),
         move |field| playlist_entry_column(&column_shell, field, playlist, playing.clone()),
         playlist_entry_column_width,
         false,
         Some(Box::new(move |position, _: PlaylistEntryRow| {
             activate_model.activate(position, queue.clone());
         })),
-        None,
+        Some(selection.selection_model()),
         route_column_view_initial_width_with_inset(
             shell,
             super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET,
@@ -307,7 +308,7 @@ fn playlist_entry_number_column(
         let current = Rc::new(RefCell::new(None));
         let cell = track_row_index_cell("");
         install_playlist_entry_context(&cell, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&cell, &setup_shell, playlist, Rc::clone(&current));
+        install_playlist_entry_drag(&cell, &setup_shell, playlist, Rc::clone(&current));
         item.set_child(Some(&cell));
         setup_cells.insert(item, PlaylistEntryNumberCell { cell, current });
     });
@@ -374,7 +375,7 @@ fn playlist_entry_image_column(
         let cover = crate::shell::cover::ArtworkTile::new(width);
         let widget = cover.widget();
         install_playlist_entry_context(&widget, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&widget, &setup_shell, playlist, Rc::clone(&current));
+        install_playlist_entry_drag(&widget, &setup_shell, playlist, Rc::clone(&current));
         item.set_child(Some(&widget));
         setup_cells.insert(item, PlaylistEntryImageCell { cover, current });
     });
@@ -447,7 +448,6 @@ fn playlist_entry_favorite_column(
         let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
         let button = favorite_icon_button("Favorite track");
         install_playlist_entry_context(&button, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&button, &setup_shell, playlist, Rc::clone(&current));
         let favorite_current = Rc::clone(&current);
         setup_shell.register_dynamic_favorite_button(
             Rc::new(move || {
@@ -564,7 +564,7 @@ fn playlist_entry_title_column(
         root.append(&cover.widget());
         root.append(&labels);
         install_playlist_entry_context(&root, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&root, &setup_shell, playlist, Rc::clone(&current));
+        install_playlist_entry_drag(&root, &setup_shell, playlist, Rc::clone(&current));
         item.set_child(Some(&root));
         setup_cells.insert(
             item,
@@ -686,7 +686,7 @@ fn playlist_entry_text_column(
             DetailLinkBinding::new(&label, &setup_shell)
         });
         install_playlist_entry_context(&label, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&label, &setup_shell, playlist, Rc::clone(&current));
+        install_playlist_entry_drag(&label, &setup_shell, playlist, Rc::clone(&current));
         item.set_child(Some(&label));
         setup_cells.insert(
             item,
@@ -783,12 +783,47 @@ fn install_playlist_entry_context(
     );
 }
 
-fn install_playlist_entry_drop(
+fn install_playlist_entry_drag(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
     playlist: PlaylistKey,
     current: Rc<RefCell<Option<PlaylistEntryRow>>>,
 ) {
+    let drag_source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
+        .build();
+    let drag_shell = Rc::downgrade(shell);
+    let drag_current = Rc::clone(&current);
+    drag_source.connect_prepare(move |_, _, _| {
+        let shell = drag_shell.upgrade()?;
+        let entry = drag_current.borrow().clone()?;
+        let selection = shell
+            .current_playlist_entry_selection(entry.playlist_entry_key)
+            .or_else(|| {
+                shell
+                    .current_playlist_entry_selection_owner()
+                    .map(|selection| {
+                        selection.single_entry(entry.playlist_entry_key, entry.track_key)
+                    })
+            })?;
+        let mut providers = Vec::new();
+        if selection.entries.len() == 1 {
+            providers.push(gtk::gdk::ContentProvider::for_value(
+                &entry.playlist_entry_key.raw().to_value(),
+            ));
+        }
+        if !selection.tracks.tracks.is_empty() {
+            let payload = gtk::glib::BoxedAnyObject::new(selection.tracks);
+            providers.push(gtk::gdk::ContentProvider::for_value(&payload.to_value()));
+        }
+        match providers.as_slice() {
+            [] => None,
+            [provider] => Some(provider.clone()),
+            providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
+        }
+    });
+    target.add_controller(drag_source);
+
     let operations = shell.selected_source_operations();
     let target_widget = target.as_ref().clone();
     let weak_target = target_widget.downgrade();
@@ -817,73 +852,6 @@ fn install_playlist_entry_drop(
     target.add_controller(drop_target);
 }
 
-fn playlist_entry_reorder_column(
-    shell: &Rc<Shell>,
-    playlist: PlaylistKey,
-) -> gtk::ColumnViewColumn {
-    let factory = gtk::SignalListItemFactory::new();
-    let cells = FactoryCells::<Rc<RefCell<Option<PlaylistEntryRow>>>>::new();
-    let setup_shell = Rc::clone(shell);
-    let setup_cells = cells.clone();
-    factory.connect_setup(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let current = Rc::new(RefCell::new(None::<PlaylistEntryRow>));
-        let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-        drag.add_css_class("dim-label");
-        bind_widget_tooltip(&drag, "Drag to reorder");
-        drag.set_width_request(PLAYLIST_ENTRY_REORDER_COLUMN_WIDTH);
-        drag.set_halign(gtk::Align::Center);
-        let drag_source = gtk::DragSource::builder()
-            .actions(gtk::gdk::DragAction::MOVE)
-            .build();
-        let drag_current = Rc::clone(&current);
-        drag_source.connect_prepare(move |_, _, _| {
-            let entry = drag_current.borrow().as_ref()?.playlist_entry_key;
-            Some(gtk::gdk::ContentProvider::for_value(
-                &entry.raw().to_value(),
-            ))
-        });
-        drag.add_controller(drag_source);
-        install_playlist_entry_context(&drag, &setup_shell, playlist, Rc::clone(&current));
-        install_playlist_entry_drop(&drag, &setup_shell, playlist, Rc::clone(&current));
-        item.set_child(Some(&drag));
-        setup_cells.insert(item, current);
-    });
-    let bind_cells = cells.clone();
-    connect_sparse_bind(&factory, move |item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        let entry = item_at_from_item::<PlaylistEntryRow>(item);
-        let Some(entry) = entry else {
-            return;
-        };
-        if let Some(current) = bind_cells.get(item) {
-            current.replace(Some(entry));
-        }
-    });
-    let unbind_cells = cells.clone();
-    factory.connect_unbind(move |_, item| {
-        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-            return;
-        };
-        if let Some(current) = unbind_cells.get(item) {
-            current.take();
-        }
-    });
-    let teardown_cells = cells.clone();
-    factory.connect_teardown(move |_, item| {
-        if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-            teardown_cells.remove(item);
-        }
-    });
-    let column = gtk::ColumnViewColumn::new(Some(""), Some(factory));
-    column.set_fixed_width(PLAYLIST_ENTRY_REORDER_COLUMN_WIDTH);
-    column
-}
-
 struct PlaylistEntryGridCell {
     body: CollectionGridCardCell,
     shell: Rc<Shell>,
@@ -898,6 +866,7 @@ impl PlaylistEntryGridCell {
         body.set_download_badge(shell.download_badge(true));
         let current = Rc::new(RefCell::new(None));
         install_playlist_entry_context(&body.card, &shell, playlist, Rc::clone(&current));
+        install_playlist_entry_drag(&body.card, &shell, playlist, Rc::clone(&current));
         Self {
             body,
             shell,
@@ -976,6 +945,7 @@ fn playlist_entry_grid(
     shell: &Rc<Shell>,
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
+    selection: PlaylistEntrySelection,
 ) -> CollectionGridProjection {
     let fields = shell
         .settings
@@ -986,11 +956,13 @@ fn playlist_entry_grid(
     let cell_shell = Rc::clone(shell);
     let activate_model = model.clone();
     let queue = shell.products.playback.queue.clone();
-    collection_grid(
+    collection_grid_with_selection_and_demand(
         model.list_model(),
+        Some(selection.selection_model()),
         &fields,
         move |fields| PlaylistEntryGridCell::new(Rc::clone(&cell_shell), fields, playlist),
         move |position, _: PlaylistEntryRow| activate_model.activate(position, queue.clone()),
+        |_| {},
     )
 }
 

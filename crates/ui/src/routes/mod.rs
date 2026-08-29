@@ -31,6 +31,7 @@ pub(crate) mod sparse_model;
 mod table_links;
 mod table_sizing;
 mod track_model;
+pub(crate) mod track_selection;
 
 pub(crate) use album_detail::AlbumCollectionOrder;
 pub(crate) use artist::{

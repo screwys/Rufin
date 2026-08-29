@@ -53,8 +53,8 @@ pub use loudness::{
 };
 pub use lyrics::LyricsCacheRow;
 pub use playlists::{
-    PlaylistEntryOrder, PlaylistEntryRow, PlaylistEntrySort, PlaylistGenreLink, PlaylistRow,
-    PlaylistSort,
+    PlaylistDestination, PlaylistEntryOrder, PlaylistEntryRow, PlaylistEntrySort,
+    PlaylistGenreLink, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
     QueueCompactOccurrence, QueueMedia, QueuePageRow, QueueProvenance, QueueRepeatMode,

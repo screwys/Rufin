@@ -453,6 +453,32 @@ impl SidebarSettings {
         self.pins.len() != previous_len
     }
 
+    pub fn reorder_pin(&mut self, moved: &SidebarPin, target: &SidebarPin, after: bool) -> bool {
+        if moved == target {
+            return false;
+        }
+        let Some(moved_index) = self.pins.iter().position(|pin| pin == moved) else {
+            return false;
+        };
+        let mut reordered = self.pins.clone();
+        let moved = reordered.remove(moved_index);
+        let Some(target_index) = reordered.iter().position(|pin| pin == target) else {
+            return false;
+        };
+        reordered.insert(target_index + usize::from(after), moved);
+        if reordered == self.pins {
+            return false;
+        }
+        self.pins = reordered;
+        true
+    }
+
+    pub fn pin_drop_after(&self, moved: &SidebarPin, target: &SidebarPin) -> Option<bool> {
+        let moved_index = self.pins.iter().position(|pin| pin == moved)?;
+        let target_index = self.pins.iter().position(|pin| pin == target)?;
+        (moved_index != target_index).then_some(moved_index < target_index)
+    }
+
     pub fn import_playlist_pins_once(
         &mut self,
         source_id: SourceId,
@@ -1170,5 +1196,53 @@ pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
             LibraryField::Genre,
             LibraryField::Duration,
         ],
+    }
+}
+
+#[cfg(test)]
+mod sidebar_pin_tests {
+    use super::*;
+
+    fn pin(id: &str) -> SidebarPin {
+        SidebarPin::Playlist {
+            source_id: SourceId::new("test:source"),
+            playlist_id: id.to_string(),
+        }
+    }
+
+    #[test]
+    fn reorder_pin_places_relative_to_the_target_and_ignores_no_ops() {
+        let first = pin("first");
+        let second = pin("second");
+        let third = pin("third");
+        let mut settings = SidebarSettings {
+            pins: vec![first.clone(), second.clone(), third.clone()],
+            ..SidebarSettings::default()
+        };
+
+        assert!(settings.reorder_pin(&first, &second, true));
+        assert_eq!(
+            settings.pins,
+            [second.clone(), first.clone(), third.clone()]
+        );
+        assert!(settings.reorder_pin(&third, &second, false));
+        assert_eq!(settings.pins, [third, second.clone(), first]);
+        assert!(!settings.reorder_pin(&second, &second, false));
+    }
+
+    #[test]
+    fn pin_drop_direction_follows_the_existing_order() {
+        let first = pin("first");
+        let second = pin("second");
+        let third = pin("third");
+        let settings = SidebarSettings {
+            pins: vec![first.clone(), second.clone(), third.clone()],
+            ..SidebarSettings::default()
+        };
+
+        assert_eq!(settings.pin_drop_after(&first, &second), Some(true));
+        assert_eq!(settings.pin_drop_after(&third, &second), Some(false));
+        assert_eq!(settings.pin_drop_after(&second, &second), None);
+        assert_eq!(settings.pin_drop_after(&pin("missing"), &second), None);
     }
 }

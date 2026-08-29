@@ -1,6 +1,7 @@
 //! Owns Playback's one compact occurrence order and traversal behavior.
 //! Canonical Queue rows and media facts remain in Library SQLite.
 
+use std::collections::HashSet;
 use std::fmt;
 use std::sync::Arc;
 
@@ -438,6 +439,63 @@ impl Sequence {
         Some(removed)
     }
 
+    pub fn remove_many(&mut self, occurrences: &[OccurrenceId]) -> bool {
+        let removed = occurrences.iter().collect::<HashSet<_>>();
+        if removed.is_empty()
+            || !self
+                .entries
+                .iter()
+                .any(|entry| removed.contains(&entry.occurrence))
+        {
+            return false;
+        }
+        let selected = self.selected().map(|entry| entry.occurrence.clone());
+        let selected_index = self.selected_index;
+        let selected_removed = selected
+            .as_ref()
+            .is_some_and(|selected| removed.contains(selected));
+        let replacement = selected_index.and_then(|selected_index| {
+            self.entries
+                .iter()
+                .skip(selected_index + 1)
+                .find(|entry| !removed.contains(&entry.occurrence))
+                .or_else(|| {
+                    (self.repeat_mode == RepeatMode::All)
+                        .then(|| {
+                            self.entries
+                                .iter()
+                                .find(|entry| !removed.contains(&entry.occurrence))
+                        })
+                        .flatten()
+                })
+                .map(|entry| entry.occurrence.clone())
+        });
+        self.entries
+            .retain(|entry| !removed.contains(&entry.occurrence));
+        let mut canonical = self.entries.iter_mut().collect::<Vec<_>>();
+        canonical.sort_by_key(|entry| entry.canonical_position);
+        for (position, entry) in canonical.into_iter().enumerate() {
+            entry.canonical_position = position;
+        }
+        if !self.shuffle_enabled {
+            self.entries.sort_by_key(|entry| entry.canonical_position);
+        }
+        self.selected_index = if selected_removed {
+            replacement
+                .as_ref()
+                .and_then(|replacement| self.occurrence_index(replacement))
+        } else {
+            selected
+                .as_ref()
+                .and_then(|selected| self.occurrence_index(selected))
+        };
+        if selected_removed {
+            self.progress_millis = 0;
+        }
+        self.bump_revision();
+        true
+    }
+
     pub fn reorder(&mut self, occurrence: &OccurrenceId, target: &QueueReorderTarget) -> bool {
         let Some(old_position) = self
             .occurrence(occurrence)
@@ -774,6 +832,33 @@ mod tests {
             sequence.selected().expect("wrapped successor").track_key,
             Some(track(1))
         );
+    }
+
+    #[test]
+    fn removing_occurrences_as_one_edit_preserves_order_and_selects_one_successor() {
+        let mut sequence = Sequence::new(source(1));
+        sequence
+            .apply_batch(
+                Batch::new(vec![manual(1), manual(2), manual(3), manual(4), manual(5)]),
+                Placement::Replace { anchor_index: 2 },
+            )
+            .expect("queue Tracks");
+        let removed = [
+            occurrence_for_track(&sequence, 2),
+            occurrence_for_track(&sequence, 3),
+            occurrence_for_track(&sequence, 5),
+        ];
+
+        assert!(sequence.remove_many(&removed));
+        assert_eq!(
+            canonical_tracks(&sequence),
+            [Some(track(1)), Some(track(4))]
+        );
+        assert_eq!(
+            sequence.selected().and_then(|entry| entry.track_key),
+            Some(track(4))
+        );
+        assert!(!sequence.remove_many(&removed));
     }
 
     #[test]

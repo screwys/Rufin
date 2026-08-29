@@ -81,6 +81,18 @@ impl TrackCollectionModel {
         Rc::clone(&self.0.sparse)
     }
 
+    pub(crate) fn order(&self) -> Arc<[TrackKey]> {
+        self.0.sparse.order()
+    }
+
+    pub(crate) fn source_key(&self) -> SourceKey {
+        self.0.source_key
+    }
+
+    pub(crate) fn source_session_epoch(&self) -> SourceSessionEpoch {
+        self.0.source_session_epoch
+    }
+
     pub(crate) fn source_is_empty(&self) -> bool {
         self.0.sparse.len() == 0
     }

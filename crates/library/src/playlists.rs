@@ -63,6 +63,12 @@ pub struct PlaylistRow {
     pub genres: Vec<PlaylistGenreLink>,
 }
 
+#[derive(Clone, Debug, FromRow, PartialEq)]
+pub struct PlaylistDestination {
+    pub playlist_key: PlaylistKey,
+    pub name: String,
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaylistGenreLink {
     pub genre_key: crate::GenreKey,
@@ -135,6 +141,31 @@ fn playlist_entry_order(rows: Vec<(PlaylistEntryKey, Option<TrackKey>)>) -> Play
 }
 
 impl Database {
+    pub async fn playlist_destinations(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistDestination>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = sqlx::query_as::<_, PlaylistDestination>(
+            "SELECT playlist.playlist_key,playlist.name FROM playlists playlist
+             WHERE playlist.source_key=?1
+               AND (?2 IS NULL OR EXISTS (
+                 SELECT 1 FROM playlist_entries entry
+                 JOIN track_folders scope USING(track_key)
+                 WHERE entry.playlist_key=playlist.playlist_key AND scope.folder_key=?2
+               ))
+             ORDER BY playlist.sort_text,playlist.playlist_key",
+        )
+        .bind(source)
+        .bind(folder)
+        .fetch_all(&mut *connection)
+        .await;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result?)
+    }
+
     pub async fn playlist_route_page(
         &self,
         source: SourceKey,

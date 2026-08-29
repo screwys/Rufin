@@ -13,6 +13,8 @@ use crate::shell::actions::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
 const NATIVE_MENU_SELECTION_CLASS: &str = "rufin-menu-selection";
 const NATIVE_MENU_SELECTED_CLASS: &str = "rufin-menu-selected";
 const NATIVE_MENU_PARENT_GRAB_CLASS: &str = "rufin-menu-parent-grab";
+const CONTEXT_MENU_MAX_WIDTH: i32 = 230;
+const CONTEXT_MENU_CASCADE_GAP: i32 = 8;
 pub(crate) const CONTEXT_MENU_HOVER_OWNER_CLASS: &str = "context-menu-hover-owner";
 pub(crate) const CONTEXT_MENU_HOVER_HELD_CLASS: &str = "context-menu-hover-held";
 
@@ -75,8 +77,16 @@ pub(crate) struct ContextMenuSurface {
     menu: gio::Menu,
     popover: gtk::PopoverMenu,
     actions: gio::SimpleActionGroup,
+    position: Option<(f64, f64)>,
     entries: RefCell<Vec<ContextMenuEntry<gio::MenuItem>>>,
-    custom_children: RefCell<Vec<(String, gtk::Widget)>>,
+    custom_children: RefCell<Vec<ContextMenuCustomChild>>,
+}
+
+struct ContextMenuCustomChild {
+    setting: Option<ContextMenuItem>,
+    id: String,
+    widget: gtk::Widget,
+    primary_click: Option<Rc<dyn Fn()>>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -98,6 +108,7 @@ impl ContextMenuSurface {
             popover: context_popover(target, position, &menu),
             menu,
             actions: gio::SimpleActionGroup::new(),
+            position,
             entries: RefCell::new(Vec::new()),
             custom_children: RefCell::new(Vec::new()),
         }
@@ -125,7 +136,12 @@ impl ContextMenuSurface {
             .push(ContextMenuEntry::Fixed(item));
         self.custom_children
             .borrow_mut()
-            .push((id.to_string(), widget.as_ref().clone()));
+            .push(ContextMenuCustomChild {
+                setting: None,
+                id: id.to_string(),
+                widget: widget.as_ref().clone(),
+                primary_click: None,
+            });
     }
 
     pub(crate) fn append_configurable_action(
@@ -161,6 +177,30 @@ impl ContextMenuSurface {
             .push(ContextMenuEntry::Configurable(setting, item));
     }
 
+    pub(crate) fn append_configurable_widget_submenu(
+        &self,
+        setting: ContextMenuItem,
+        label: &str,
+        id: &str,
+        widget: &impl IsA<gtk::Widget>,
+        icon_name: &str,
+        primary_click: impl Fn() + 'static,
+    ) {
+        let submenu = gio::Menu::new();
+        let custom = gio::MenuItem::new(None, None);
+        custom.set_attribute_value("custom", Some(&id.to_variant()));
+        submenu.append_item(&custom);
+        self.append_configurable_submenu(setting, label, &submenu, icon_name);
+        self.custom_children
+            .borrow_mut()
+            .push(ContextMenuCustomChild {
+                setting: Some(setting),
+                id: id.to_string(),
+                widget: widget.as_ref().clone(),
+                primary_click: Some(Rc::new(primary_click)),
+            });
+    }
+
     pub(crate) fn add_action(&self, name: &str, run: impl Fn() + 'static) {
         self.add_action_enabled(name, true, run);
     }
@@ -182,8 +222,28 @@ impl ContextMenuSurface {
         for item in resolve_context_menu_entries(self.entries.into_inner(), settings) {
             self.menu.append_item(&item);
         }
-        for (id, child) in self.custom_children.into_inner() {
-            debug_assert!(self.popover.add_child(&child, &id));
+        if context_menu_needs_sliding_submenus(&self.popover, &self.target, self.position) {
+            self.popover.set_flags(gtk::PopoverMenuFlags::empty());
+        }
+        for child in self
+            .custom_children
+            .into_inner()
+            .into_iter()
+            .filter(|child| child.setting.is_none_or(|item| settings.is_visible(item)))
+        {
+            match (
+                add_native_menu_child(&self.popover, &child.widget, &child.id),
+                child.primary_click,
+            ) {
+                (Ok(Some(owner)), Some(primary_click)) => {
+                    install_native_submenu_primary_click(&owner, &self.popover, primary_click);
+                }
+                (Ok(_), _) => {}
+                (Err(()), _) => tracing::error!(
+                    custom_child = child.id,
+                    "context menu custom child has no matching menu placeholder"
+                ),
+            }
         }
         if self.menu.n_items() == 0 {
             self.popover.unparent();
@@ -284,7 +344,10 @@ fn resolve_context_menu_entries<T>(
 
 #[cfg(test)]
 mod context_menu_tests {
-    use super::{ContextMenuEntry, go_to_context_submenu, resolve_context_menu_entries};
+    use super::{
+        ContextMenuEntry, context_menu_has_submenu_side, go_to_context_submenu,
+        resolve_context_menu_entries,
+    };
     use crate::settings::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
     use gio::prelude::MenuModelExt;
     use glib::prelude::IsA;
@@ -355,27 +418,32 @@ mod context_menu_tests {
     }
 
     #[test]
-    fn go_to_submenu_keeps_all_artist_and_album_destinations() {
+    fn side_submenus_require_one_complete_contiguous_side() {
+        assert!(context_menu_has_submenu_side(988, 494.0, 276, 301));
+        assert!(context_menu_has_submenu_side(600, 50.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(600, 300.0, 276, 301));
+        assert!(!context_menu_has_submenu_side(490, 245.0, 276, 230));
+    }
+
+    #[test]
+    fn go_to_submenu_flattens_named_artists_and_keeps_album_destination() {
         let menu = go_to_context_submenu(
             "track",
             &["First Artist".to_string(), "Second Artist".to_string()],
             true,
         );
-        assert_eq!(menu.n_items(), 2);
+        assert_eq!(menu.n_items(), 3);
+        assert_eq!(menu_label(&menu, 0).as_deref(), Some("Go to First Artist"));
+        assert_eq!(menu_action(&menu, 0).as_deref(), Some("track.go-artist-0"));
+        assert_eq!(menu_label(&menu, 1).as_deref(), Some("Go to Second Artist"));
+        assert_eq!(menu_action(&menu, 1).as_deref(), Some("track.go-artist-1"));
+        assert_eq!(menu_action(&menu, 2).as_deref(), Some("track.go-album"));
+    }
 
-        let artists = menu
-            .item_link(0, "submenu")
-            .expect("multiple artists submenu");
-        assert_eq!(artists.n_items(), 2);
-        assert_eq!(
-            menu_action(&artists, 0).as_deref(),
-            Some("track.go-artist-0")
-        );
-        assert_eq!(
-            menu_action(&artists, 1).as_deref(),
-            Some("track.go-artist-1")
-        );
-        assert_eq!(menu_action(&menu, 1).as_deref(), Some("track.go-album"));
+    fn menu_label(model: &impl IsA<gio::MenuModel>, index: i32) -> Option<String> {
+        model
+            .item_attribute_value(index, "label", Some(glib::VariantTy::STRING))
+            .and_then(|value| value.str().map(str::to_string))
     }
 
     fn menu_action(model: &impl IsA<gio::MenuModel>, index: i32) -> Option<String> {
@@ -419,26 +487,17 @@ pub(crate) fn go_to_context_submenu(
     has_album: bool,
 ) -> gio::Menu {
     let menu = gio::Menu::new();
-    match artist_names {
-        [] => {}
-        [_] => append_menu_action(
+    for (index, artist_name) in artist_names.iter().enumerate() {
+        append_menu_action(
             &menu,
-            msgid("Go to Artist"),
-            &format!("{group}.go-artist"),
+            &format!("{} {artist_name}", tr("Go to")),
+            &if artist_names.len() == 1 {
+                format!("{group}.go-artist")
+            } else {
+                format!("{group}.go-artist-{index}")
+            },
             ARTIST_ICON,
-        ),
-        _ => {
-            let artists = gio::Menu::new();
-            for (index, artist_name) in artist_names.iter().enumerate() {
-                artists.append(
-                    Some(artist_name),
-                    Some(&format!("{group}.go-artist-{index}")),
-                );
-            }
-            let item = gio::MenuItem::new_submenu(Some(&tr("Go to Artist")), &artists);
-            item.set_icon(&gio::ThemedIcon::new(ARTIST_ICON));
-            menu.append_item(&item);
-        }
+        );
     }
     if has_album {
         append_menu_action(
@@ -478,6 +537,63 @@ pub(crate) fn keep_parent_grab_for_dropdown(dropdown: &gtk::DropDown) {
 pub(crate) fn popdown_native_menu(popover: &gtk::PopoverMenu) {
     popdown_nested_native_menus_from(popover.upcast_ref());
     popover.popdown();
+}
+
+fn add_native_menu_child(
+    popover: &gtk::PopoverMenu,
+    child: &gtk::Widget,
+    id: &str,
+) -> Result<Option<gtk::Widget>, ()> {
+    if let Some(owner) = add_nested_native_menu_child_from(popover.upcast_ref(), child, id) {
+        return Ok(Some(owner));
+    }
+    popover.add_child(child, id).then_some(None).ok_or(())
+}
+
+fn add_nested_native_menu_child_from(
+    container: &gtk::Widget,
+    child: &gtk::Widget,
+    id: &str,
+) -> Option<gtk::Widget> {
+    let mut widget = container.first_child();
+    while let Some(current) = widget {
+        widget = current.next_sibling();
+        if current.type_().name() == "GtkModelButton"
+            && let Some(nested) = current
+                .property::<Option<gtk::Popover>>("popover")
+                .and_then(|popover| popover.downcast::<gtk::PopoverMenu>().ok())
+        {
+            if nested.add_child(child, id) {
+                return Some(current);
+            }
+            if let Some(owner) = add_nested_native_menu_child_from(nested.upcast_ref(), child, id) {
+                return Some(owner);
+            }
+        }
+        if let Some(owner) = add_nested_native_menu_child_from(&current, child, id) {
+            return Some(owner);
+        }
+    }
+    None
+}
+
+fn install_native_submenu_primary_click(
+    owner: &gtk::Widget,
+    popover: &gtk::PopoverMenu,
+    run: Rc<dyn Fn()>,
+) {
+    let click = gtk::GestureClick::new();
+    click.set_button(1);
+    click.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let popover = popover.downgrade();
+    click.connect_pressed(move |gesture, _, _, _| {
+        gesture.set_state(gtk::EventSequenceState::Claimed);
+        if let Some(popover) = popover.upgrade() {
+            popdown_native_menu(&popover);
+        }
+        run();
+    });
+    owner.add_controller(click);
 }
 
 pub(crate) fn popdown_on_anchor_unmap(
@@ -526,8 +642,9 @@ fn keep_parent_grab_for_nested_native_menus_from(container: &gtk::Widget) {
                 .property::<Option<gtk::Popover>>("popover")
                 .and_then(|popover| popover.downcast::<gtk::PopoverMenu>().ok())
         {
-            // GTK can lose the parent's input grab when an autohide child closes.
+            // Keep the parent menu's modal grab while its native child is open.
             nested_popover.set_autohide(false);
+            nested_popover.set_width_request(CONTEXT_MENU_MAX_WIDTH);
             if !widget.has_css_class(NATIVE_MENU_PARENT_GRAB_CLASS) {
                 widget.add_css_class(NATIVE_MENU_PARENT_GRAB_CLASS);
                 let nested_popover = nested_popover.downgrade();
@@ -652,11 +769,79 @@ fn context_popover(
     popover.set_autohide(true);
     popover.set_has_arrow(false);
     popover.set_position(gtk::PositionType::Bottom);
+    popover.set_width_request(CONTEXT_MENU_MAX_WIDTH);
     popover.set_parent(target);
     if let Some((x, y)) = position {
         popover.set_pointing_to(Some(&gtk::gdk::Rectangle::new(x as i32, y as i32, 1, 1)));
     }
     popover
+}
+
+fn context_menu_needs_sliding_submenus(
+    popover: &gtk::PopoverMenu,
+    target: &gtk::Widget,
+    position: Option<(f64, f64)>,
+) -> bool {
+    let Some((anchor_x, window_width)) = context_menu_anchor(target, position) else {
+        return false;
+    };
+    let root_width = popover
+        .measure(gtk::Orientation::Horizontal, -1)
+        .1
+        .max(CONTEXT_MENU_MAX_WIDTH);
+    let submenu_width = widest_nested_menu_width(popover.upcast_ref());
+    submenu_width > 0
+        && !context_menu_has_submenu_side(
+            window_width,
+            anchor_x,
+            root_width,
+            submenu_width.max(CONTEXT_MENU_MAX_WIDTH),
+        )
+}
+
+fn context_menu_anchor(target: &gtk::Widget, position: Option<(f64, f64)>) -> Option<(f32, i32)> {
+    let (x, y) = position?;
+    let root = target.root()?;
+    let point = target.compute_point(&root, &gtk::graphene::Point::new(x as f32, y as f32))?;
+    Some((point.x(), root.width()))
+}
+
+fn widest_nested_menu_width(container: &gtk::Widget) -> i32 {
+    let mut widest = 0;
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.type_().name() == "GtkModelButton"
+            && let Some(nested) = widget
+                .property::<Option<gtk::Popover>>("popover")
+                .and_then(|popover| popover.downcast::<gtk::PopoverMenu>().ok())
+        {
+            widest = widest.max(
+                nested
+                    .measure(gtk::Orientation::Horizontal, -1)
+                    .1
+                    .max(CONTEXT_MENU_MAX_WIDTH),
+            );
+        }
+        widest = widest.max(widest_nested_menu_width(&widget));
+    }
+    widest
+}
+
+fn context_menu_has_submenu_side(
+    window_width: i32,
+    anchor_x: f32,
+    root_width: i32,
+    submenu_width: i32,
+) -> bool {
+    if window_width <= 0 || root_width <= 0 || submenu_width <= 0 {
+        return false;
+    }
+    let root_x =
+        (anchor_x.round() as i32 - root_width / 2).clamp(0, (window_width - root_width).max(0));
+    let left = root_x;
+    let right = (window_width - root_x - root_width).max(0);
+    left.max(right) >= submenu_width + CONTEXT_MENU_CASCADE_GAP
 }
 
 pub(crate) fn install_context_menu_openers(target: &impl IsA<gtk::Widget>, open: ContextMenuOpen) {

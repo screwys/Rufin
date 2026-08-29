@@ -7,16 +7,24 @@ use adw::prelude::*;
 use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use library::QueuePageRow;
-use localization::tr;
+use localization::{msgid, tr};
 use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest, QueueReorderTarget};
 
 use crate::favorites::{favorite_icon_button, set_favorite_button_active};
-use crate::interactions::install_context_menu_openers;
+use crate::interactions::{ContextMenuSurface, install_context_menu_openers};
 use crate::layout::allocation_owner;
-use crate::routes::collection_context::present_queue_track_context_menu;
+use crate::routes::collection_context::{
+    install_track_selection_download_actions, present_queue_track_context_menu,
+};
 use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
+use crate::routes::playlist_picker::{
+    append_context_menu_picker_selection, context_menu_can_add_to_playlist,
+};
 use crate::routes::route::Route;
+use crate::routes::track_selection::TrackSelectionSnapshot;
+use crate::settings::ContextMenuItem;
 use crate::shell::Shell;
+use crate::shell::actions::{PLAY_ICON, REMOVE_ICON};
 use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
 use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
@@ -99,6 +107,7 @@ impl QueueFullscreenColumnWidgets {
 pub(crate) struct QueueState {
     rows: RefCell<Vec<QueuePageRow>>,
     model: gio::ListStore,
+    selection: RefCell<Option<gtk::MultiSelection>>,
     filter: RefCell<String>,
     generation: Cell<u64>,
     running: Cell<Option<u64>>,
@@ -109,9 +118,11 @@ pub(crate) struct QueueState {
 
 impl QueueState {
     pub(crate) fn new() -> Self {
+        let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         Self {
             rows: RefCell::new(Vec::new()),
-            model: gio::ListStore::new::<glib::BoxedAnyObject>(),
+            model,
+            selection: RefCell::new(None),
             filter: RefCell::new(String::new()),
             generation: Cell::new(0),
             running: Cell::new(None),
@@ -132,6 +143,15 @@ impl QueueState {
         self.cancellation
             .replace(Some((generation, cancellation.clone())));
         (generation, cancellation)
+    }
+
+    fn selection_model(&self) -> gtk::MultiSelection {
+        if let Some(selection) = self.selection.borrow().as_ref() {
+            return selection.clone();
+        }
+        let selection = gtk::MultiSelection::new(Some(self.model.clone()));
+        self.selection.replace(Some(selection.clone()));
+        selection
     }
 
     fn accept(&self, generation: u64, rows: Vec<QueuePageRow>) -> bool {
@@ -236,6 +256,87 @@ impl QueueState {
         self.model.remove_all();
         self.current.borrow_mut().take();
     }
+
+    fn selected_rows_for(
+        &self,
+        shell: &Shell,
+        clicked: &OccurrenceId,
+    ) -> Option<QueueSelectionSnapshot> {
+        let positions = self.selection.borrow().as_ref()?.selection();
+        let rows = queue_rows_at_positions(&self.rows.borrow(), &positions);
+        (rows.len() > 1 && rows.iter().any(|row| row.object_id == clicked.as_str()))
+            .then(|| QueueSelectionSnapshot::new(shell, rows))
+    }
+
+    fn dragged_rows_for(
+        &self,
+        shell: &Shell,
+        clicked: &OccurrenceId,
+    ) -> Option<QueueSelectionSnapshot> {
+        self.selected_rows_for(shell, clicked).or_else(|| {
+            self.rows
+                .borrow()
+                .iter()
+                .find(|row| row.object_id == clicked.as_str())
+                .cloned()
+                .map(|row| QueueSelectionSnapshot::new(shell, vec![row]))
+        })
+    }
+
+    pub(crate) fn selected_tracks(&self, shell: &Shell) -> Option<TrackSelectionSnapshot> {
+        let positions = self.selection.borrow().as_ref()?.selection();
+        let rows = queue_rows_at_positions(&self.rows.borrow(), &positions);
+        (!rows.is_empty())
+            .then(|| QueueSelectionSnapshot::new(shell, rows))
+            .and_then(|selection| selection.tracks)
+    }
+}
+
+#[derive(Clone)]
+struct QueueSelectionSnapshot {
+    occurrences: Arc<[OccurrenceId]>,
+    tracks: Option<TrackSelectionSnapshot>,
+}
+
+impl QueueSelectionSnapshot {
+    fn new(shell: &Shell, rows: Vec<QueuePageRow>) -> Self {
+        let occurrences = rows
+            .iter()
+            .map(|row| OccurrenceId::new(row.object_id.clone()))
+            .collect::<Vec<_>>()
+            .into();
+        let tracks = shell.selected_library().as_deref().and_then(|selected| {
+            let tracks = rows
+                .iter()
+                .filter_map(|row| row.track_key)
+                .collect::<Vec<_>>();
+            (!tracks.is_empty()).then(|| TrackSelectionSnapshot {
+                source_key: selected.source_key,
+                source_session_epoch: selected.source_session_epoch,
+                tracks: tracks.into(),
+            })
+        });
+        Self {
+            occurrences,
+            tracks,
+        }
+    }
+}
+
+fn queue_rows_at_positions(rows: &[QueuePageRow], positions: &gtk::Bitset) -> Vec<QueuePageRow> {
+    let Some((iter, first)) = gtk::BitsetIter::init_first(positions) else {
+        return Vec::new();
+    };
+    queue_rows_for_indexes(rows, std::iter::once(first).chain(iter))
+}
+
+fn queue_rows_for_indexes(
+    rows: &[QueuePageRow],
+    positions: impl Iterator<Item = u32>,
+) -> Vec<QueuePageRow> {
+    positions
+        .filter_map(|position| rows.get(position as usize).cloned())
+        .collect()
 }
 
 impl Drop for QueueState {
@@ -281,10 +382,12 @@ impl Shell {
         }
         let current_changed = queue.update_current(current);
         let reorderable = queue.filter.borrow().trim().is_empty();
+        let selection = queue.selection_model();
         render_panel(
             self,
             &self.right_panel.queue_panel,
             &queue.model,
+            &selection,
             false,
             current_changed,
             reorderable,
@@ -294,6 +397,7 @@ impl Shell {
                 self,
                 &self.player_view.fullscreen_player.queue_panel,
                 &queue.model,
+                &selection,
                 true,
                 current_changed,
                 reorderable,
@@ -413,6 +517,7 @@ fn render_panel(
     shell: &Rc<Shell>,
     panel: &gtk::Box,
     model: &gio::ListStore,
+    selection: &gtk::MultiSelection,
     fullscreen: bool,
     reveal_current: bool,
     reorderable: bool,
@@ -492,8 +597,7 @@ fn render_panel(
             };
             drag_bindings.borrow_mut().remove(&(item.as_ptr() as usize));
         });
-        let selection = gtk::NoSelection::new(Some(model.clone()));
-        let list = gtk::ListView::new(Some(selection), Some(factory));
+        let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("queue-list");
         list.set_vscroll_policy(gtk::ScrollablePolicy::Minimum);
         let activate = shell.products.playback.queue.clone();
@@ -729,18 +833,35 @@ fn queue_row(
     };
     root.append(&content);
 
-    if reorderable {
-        let source = gtk::DragSource::builder()
-            .actions(gtk::gdk::DragAction::MOVE)
-            .build();
-        let source_binding = Rc::clone(&drag_binding);
-        source.connect_prepare(move |_, _, _| {
-            let occurrence = source_binding.occurrence()?;
-            Some(gtk::gdk::ContentProvider::for_value(
+    let source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
+        .build();
+    let source_binding = Rc::clone(&drag_binding);
+    let source_shell = Rc::downgrade(shell);
+    source.connect_prepare(move |_, _, _| {
+        let shell = source_shell.upgrade()?;
+        let occurrence = source_binding.occurrence()?;
+        let selection = shell
+            .selected_queue()?
+            .dragged_rows_for(&shell, &occurrence)?;
+        let mut providers = Vec::new();
+        if reorderable && selection.occurrences.len() == 1 {
+            providers.push(gtk::gdk::ContentProvider::for_value(
                 &occurrence.to_string().to_value(),
-            ))
-        });
-        root.add_controller(source);
+            ));
+        }
+        if let Some(tracks) = selection.tracks {
+            let payload = glib::BoxedAnyObject::new(tracks);
+            providers.push(gtk::gdk::ContentProvider::for_value(&payload.to_value()));
+        }
+        match providers.as_slice() {
+            [] => None,
+            [provider] => Some(provider.clone()),
+            providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
+        }
+    });
+    root.add_controller(source);
+    if reorderable {
         let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
         let queue = shell.products.playback.queue.clone();
         let root_for_drop = root.downgrade();
@@ -772,6 +893,13 @@ fn queue_row(
     install_context_menu_openers(
         &root,
         Rc::new(move |target, position| {
+            if let Some(selection) = context_shell
+                .selected_queue()
+                .and_then(|queue| queue.selected_rows_for(&context_shell, &context_occurrence))
+            {
+                present_queue_selection_context_menu(target, &context_shell, selection, position);
+                return;
+            }
             present_queue_track_context_menu(
                 target,
                 &context_shell,
@@ -784,6 +912,36 @@ fn queue_row(
         }),
     );
     root.upcast()
+}
+
+fn present_queue_selection_context_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    selection: QueueSelectionSnapshot,
+    position: Option<(f64, f64)>,
+) {
+    let surface = ContextMenuSurface::new(target, "queue-selection", position);
+    surface.append_fixed_action(msgid("Remove from Queue"), "remove-from-queue", REMOVE_ICON);
+    surface.append_configurable_action(ContextMenuItem::Play, msgid("Play"), "play", PLAY_ICON);
+    if let Some(tracks) = selection.tracks.as_ref() {
+        if context_menu_can_add_to_playlist(shell) {
+            append_context_menu_picker_selection(&surface, shell, tracks.clone());
+        }
+        install_track_selection_download_actions(&surface, shell, tracks.clone());
+    }
+    let queue = shell.products.playback.queue.clone();
+    let remove = Arc::clone(&selection.occurrences);
+    surface.add_action("remove-from-queue", move || {
+        queue.remove_many(remove.to_vec())
+    });
+    let queue = shell.products.playback.queue.clone();
+    let play = selection.occurrences.first().cloned();
+    surface.add_action_enabled("play", play.is_some(), move || {
+        if let Some(play) = play.as_ref() {
+            queue.activate(play.clone());
+        }
+    });
+    surface.popup(&shell.settings.current.borrow().context_menu);
 }
 
 fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
@@ -1232,6 +1390,28 @@ mod tests {
             binding
                 .reorder_request(OccurrenceId::new("dragged"), false)
                 .is_none()
+        );
+    }
+
+    #[test]
+    fn queue_selection_preserves_occurrence_order_and_repeated_tracks() {
+        let mut first = row("one", "One");
+        let mut second = row("two", "Two");
+        let mut third = row("three", "Three");
+        first.track_key = Some(library::TrackKey::from_raw(7));
+        second.track_key = Some(library::TrackKey::from_raw(7));
+        third.track_key = Some(library::TrackKey::from_raw(9));
+
+        let selected = queue_rows_for_indexes(&[first, second, third], [0, 1].into_iter());
+        assert_eq!(
+            selected
+                .iter()
+                .map(|row| (row.object_id.as_str(), row.track_key))
+                .collect::<Vec<_>>(),
+            [
+                ("one", Some(library::TrackKey::from_raw(7))),
+                ("two", Some(library::TrackKey::from_raw(7))),
+            ]
         );
     }
 

@@ -1,10 +1,12 @@
 use std::{
     cell::{Cell, RefCell},
+    collections::HashMap,
     rc::Rc,
     sync::Arc,
     time::{SystemTime, UNIX_EPOCH},
 };
 
+use crate::downloads::{OperationFeedback, OperationFeedbackKind};
 use crate::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
     keep_parent_grab_for_nested_native_menus, popdown_native_menu, replace_native_menu_checkmarks,
@@ -20,6 +22,7 @@ use crate::routes::collection_context::{
 use crate::routes::collections::PlaybackTarget;
 use crate::routes::library_fields::{playlist_artwork, smart_playlist_display_name};
 use crate::routes::route::{CollectionCategory, Route};
+use crate::routes::track_selection::{TrackSelectionSnapshot, track_drag_payload};
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
@@ -45,6 +48,8 @@ const MOUSE_FORWARD_BUTTON: u32 = 9;
 const COMPACT_RAIL_LABEL_WIDTH: i32 = COMPACT_RAIL_WIDTH - 16;
 const COMPACT_RAIL_LABEL_WIDTH_CHARS: i32 = 8;
 const NAV_SELECTED_CLASS: &str = "selected";
+const SIDEBAR_PINS_HEADING_CLASS: &str = "sidebar-pins-heading";
+const SIDEBAR_SPACER_CLASS: &str = "sidebar-spacer";
 const NAV_ROUTE_HOME_CLASS: &str = "nav-route-home";
 const NAV_ROUTE_SEARCH_CLASS: &str = "nav-route-search";
 const LEFT_OPENING_PRIMARY_MENU_CLASS: &str = "left-opening-primary-menu";
@@ -289,8 +294,29 @@ impl Shell {
             })
             .is_some()
         {
-            self.rebuild_sidebar_navigation();
+            let _ = request_sidebar_pins(self);
         }
+    }
+
+    fn reorder_sidebar_pin(self: &Rc<Self>, moved: &SidebarPin, target: &SidebarPin) -> bool {
+        let Some(after) = self
+            .settings
+            .current
+            .borrow()
+            .sidebar
+            .pin_drop_after(moved, target)
+        else {
+            return false;
+        };
+        let changed = self
+            .update_app_settings("Pins order", |settings| {
+                settings.sidebar.reorder_pin(moved, target, after)
+            })
+            .is_some();
+        if changed {
+            reorder_current_sidebar_pin_projection(self, moved, target, after);
+        }
+        changed
     }
 }
 
@@ -393,6 +419,7 @@ fn clear_box(container: &gtk::Box) {
 
 fn sidebar_spacer() -> gtk::Box {
     let spacer = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    spacer.add_css_class(SIDEBAR_SPACER_CLASS);
     spacer.set_vexpand(true);
     spacer
 }
@@ -873,6 +900,32 @@ struct SidebarPinIdentity {
 }
 
 impl SidebarPinItem {
+    fn stored_pin(&self, source_id: &sources::SourceId) -> SidebarPin {
+        match self {
+            Self::Album(album) => SidebarPin::Album {
+                source_id: source_id.clone(),
+                album_id: album.object_id.clone(),
+            },
+            Self::Artist(artist, album_artist) => SidebarPin::Artist {
+                source_id: source_id.clone(),
+                artist_id: artist.object_id.clone(),
+                album_artist: *album_artist,
+            },
+            Self::Genre(genre) => SidebarPin::Genre {
+                source_id: source_id.clone(),
+                genre_id: genre.object_id.clone(),
+            },
+            Self::Playlist(playlist) => SidebarPin::Playlist {
+                source_id: source_id.clone(),
+                playlist_id: playlist.object_id.clone(),
+            },
+            Self::SmartPlaylist(playlist) => SidebarPin::SmartPlaylist {
+                source_id: source_id.clone(),
+                playlist_id: playlist.object_id.clone(),
+            },
+        }
+    }
+
     fn title(&self) -> String {
         match self {
             Self::Album(album) => album.title.clone(),
@@ -1019,7 +1072,7 @@ fn append_sidebar_pins(shell: &Rc<Shell>) {
     }
 
     let heading = gtk::Label::new(Some(&tr("Pins")));
-    heading.add_css_class("sidebar-pins-heading");
+    heading.add_css_class(SIDEBAR_PINS_HEADING_CLASS);
     heading.set_xalign(0.0);
     shell.navigation_view.normal_nav_pins.append(&heading);
 
@@ -1083,6 +1136,15 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
     if shell.navigation.pin_identity.borrow().as_ref() == Some(&identity) {
         return shell.navigation.pin_cancellation.borrow().is_none();
     }
+    let can_reconcile_current =
+        shell
+            .navigation
+            .pin_identity
+            .borrow()
+            .as_ref()
+            .is_some_and(|current| {
+                current.source == identity.source && current.folder == identity.folder
+            });
     if let Some(cancellation) = shell.navigation.pin_cancellation.borrow_mut().take() {
         cancellation.cancel();
     }
@@ -1092,8 +1154,17 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
         .navigation
         .pin_identity
         .replace(Some(identity.clone()));
-    shell.navigation.pin_items.borrow_mut().clear();
+    if can_reconcile_current {
+        let retained = {
+            let mut items = shell.navigation.pin_items.borrow_mut();
+            items.retain(|item| pins.contains(&item.stored_pin(&source_id)));
+            items.clone()
+        };
+        reconcile_sidebar_pin_widgets(shell, &retained);
+    }
     if pins.is_empty() {
+        shell.navigation.pin_items.borrow_mut().clear();
+        reconcile_sidebar_pin_widgets(shell, &[]);
         return true;
     }
     let cancellation = library::ReadCancellation::new();
@@ -1205,8 +1276,8 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
         shell.navigation.pin_cancellation.borrow_mut().take();
         match items {
             Some(items) => {
-                shell.navigation.pin_items.replace(items);
-                rebuild_navigation(&shell);
+                shell.navigation.pin_items.replace(items.clone());
+                reconcile_sidebar_pin_widgets(&shell, &items);
             }
             None => {
                 shell.navigation.pin_identity.borrow_mut().take();
@@ -1233,6 +1304,200 @@ pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
 
 fn sidebar_pin_items(shell: &Shell) -> Vec<SidebarPinItem> {
     shell.navigation.pin_items.borrow().clone()
+}
+
+fn reorder_current_sidebar_pin_projection(
+    shell: &Rc<Shell>,
+    moved: &SidebarPin,
+    target: &SidebarPin,
+    after: bool,
+) {
+    let Some(selected) = shell.selected_library().as_deref().cloned() else {
+        return;
+    };
+    let source_id = selected.artwork.source_id;
+    let desired = shell
+        .settings
+        .current
+        .borrow()
+        .sidebar
+        .pins
+        .iter()
+        .filter(|pin| pin.source_id() == &source_id)
+        .cloned()
+        .collect::<Vec<_>>();
+    let (moved_key, target_key) = {
+        let mut items = shell.navigation.pin_items.borrow_mut();
+        let Some(moved_index) = items
+            .iter()
+            .position(|item| item.stored_pin(&source_id) == *moved)
+        else {
+            return;
+        };
+        let moved_item = items.remove(moved_index);
+        let Some(target_index) = items
+            .iter()
+            .position(|item| item.stored_pin(&source_id) == *target)
+        else {
+            return;
+        };
+        let target_key = sidebar_pin_route_key(&items[target_index].route());
+        let moved_key = sidebar_pin_route_key(&moved_item.route());
+        items.insert(target_index + usize::from(after), moved_item);
+        (moved_key, target_key)
+    };
+    if let Some(identity) = shell.navigation.pin_identity.borrow_mut().as_mut() {
+        identity.pins = desired;
+    }
+    if let (Some(moved_key), Some(target_key)) = (moved_key, target_key) {
+        reorder_sidebar_pin_widget(
+            &shell.navigation_view.normal_nav_pins,
+            &moved_key,
+            &target_key,
+            after,
+        );
+        reorder_sidebar_pin_widget(
+            &shell.navigation_view.compact_nav,
+            &moved_key,
+            &target_key,
+            after,
+        );
+    }
+}
+
+fn reorder_sidebar_pin_widget(
+    container: &gtk::Box,
+    moved_key: &str,
+    target_key: &str,
+    after: bool,
+) {
+    let widgets = keyed_sidebar_pin_widgets(container);
+    let (Some(moved), Some(target)) = (widgets.get(moved_key), widgets.get(target_key)) else {
+        return;
+    };
+    let previous = if after {
+        Some(target.clone())
+    } else {
+        let mut previous = target.prev_sibling();
+        if previous.as_ref() == Some(moved) {
+            previous = moved.prev_sibling();
+        }
+        previous
+    };
+    container.reorder_child_after(moved, previous.as_ref());
+}
+
+fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
+    if items.is_empty() {
+        clear_box(&shell.navigation_view.normal_nav_pins);
+        remove_sidebar_pin_widgets(&shell.navigation_view.compact_nav);
+        update_navigation_selection(shell.as_ref());
+        update_sidebar_pin_playback(shell.as_ref());
+        return;
+    }
+    let prefer_server_playlist_covers = shell
+        .settings
+        .current
+        .borrow()
+        .prefer_server_playlist_covers;
+    let desired_keys = items
+        .iter()
+        .filter_map(|item| sidebar_pin_route_key(&item.route()))
+        .collect::<Vec<_>>();
+
+    let normal = &shell.navigation_view.normal_nav_pins;
+    let heading = normal
+        .first_child()
+        .filter(|child| child.has_css_class(SIDEBAR_PINS_HEADING_CLASS))
+        .unwrap_or_else(|| {
+            let heading = gtk::Label::new(Some(&tr("Pins")));
+            heading.add_css_class(SIDEBAR_PINS_HEADING_CLASS);
+            heading.set_xalign(0.0);
+            normal.prepend(&heading);
+            heading.upcast()
+        });
+    let mut normal_widgets = keyed_sidebar_pin_widgets(normal);
+    remove_obsolete_pin_widgets(normal, &normal_widgets, &desired_keys);
+    let mut previous = Some(heading);
+    for item in items {
+        let Some(key) = sidebar_pin_route_key(&item.route()) else {
+            continue;
+        };
+        let widget = normal_widgets.remove(&key).unwrap_or_else(|| {
+            sidebar_pin_row(shell, item.clone(), prefer_server_playlist_covers).upcast()
+        });
+        if widget.parent().is_some() {
+            normal.reorder_child_after(&widget, previous.as_ref());
+        } else {
+            normal.insert_child_after(&widget, previous.as_ref());
+        }
+        previous = Some(widget);
+    }
+
+    let compact = &shell.navigation_view.compact_nav;
+    let mut compact_widgets = keyed_sidebar_pin_widgets(compact);
+    remove_obsolete_pin_widgets(compact, &compact_widgets, &desired_keys);
+    let mut previous = compact_pin_anchor(compact);
+    for item in items {
+        let Some(key) = sidebar_pin_route_key(&item.route()) else {
+            continue;
+        };
+        let widget = compact_widgets.remove(&key).unwrap_or_else(|| {
+            compact_sidebar_pin(shell, item.clone(), prefer_server_playlist_covers).upcast()
+        });
+        if widget.parent().is_some() {
+            compact.reorder_child_after(&widget, previous.as_ref());
+        } else {
+            compact.insert_child_after(&widget, previous.as_ref());
+        }
+        previous = Some(widget);
+    }
+    update_navigation_selection(shell.as_ref());
+    update_sidebar_pin_playback(shell.as_ref());
+}
+
+fn keyed_sidebar_pin_widgets(container: &gtk::Box) -> HashMap<String, gtk::Widget> {
+    let mut widgets = HashMap::new();
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.has_css_class(SIDEBAR_PIN_ROW_CLASS) {
+            widgets.insert(widget.widget_name().to_string(), widget);
+        }
+    }
+    widgets
+}
+
+fn remove_obsolete_pin_widgets(
+    container: &gtk::Box,
+    widgets: &HashMap<String, gtk::Widget>,
+    desired_keys: &[String],
+) {
+    for (key, widget) in widgets {
+        if !desired_keys.contains(key) {
+            container.remove(widget);
+        }
+    }
+}
+
+fn remove_sidebar_pin_widgets(container: &gtk::Box) {
+    for widget in keyed_sidebar_pin_widgets(container).into_values() {
+        container.remove(&widget);
+    }
+}
+
+fn compact_pin_anchor(container: &gtk::Box) -> Option<gtk::Widget> {
+    let mut anchor = None;
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if widget.has_css_class(SIDEBAR_PIN_ROW_CLASS) || widget.has_css_class(SIDEBAR_SPACER_CLASS)
+        {
+            break;
+        }
+        anchor = Some(widget);
+    }
+    anchor
 }
 
 fn sidebar_pin_row(
@@ -1297,6 +1562,8 @@ fn sidebar_pin_row(
     activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
+    install_sidebar_pin_reorder(&row, shell, &pin);
+    install_playlist_pin_drop(&row, shell, &pin);
 
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 1);
     controls.add_css_class("sidebar-pin-controls");
@@ -1388,6 +1655,8 @@ fn compact_sidebar_pin(
     activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
+    install_sidebar_pin_reorder(&row, shell, &pin);
+    install_playlist_pin_drop(&row, shell, &pin);
 
     let (controls, play) = cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
     play.add_css_class("compact-sidebar-pin-play");
@@ -1409,6 +1678,200 @@ fn compact_sidebar_pin(
         }),
     );
     row
+}
+
+fn install_sidebar_pin_reorder(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    pin: &SidebarPinItem,
+) {
+    let Some(source_id) = shell
+        .selected_library()
+        .as_deref()
+        .map(|selected| selected.artwork.source_id.clone())
+    else {
+        return;
+    };
+    let pin = pin.stored_pin(&source_id);
+    let payload = sidebar_pin_drag_variant(&pin);
+    let drag = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::MOVE)
+        .build();
+    drag.connect_prepare(move |_, _, _| {
+        Some(gtk::gdk::ContentProvider::for_value(&payload.to_value()))
+    });
+    let drag_target = target.as_ref().downgrade();
+    drag.connect_drag_begin(move |source, _| {
+        let Some(target) = drag_target.upgrade() else {
+            return;
+        };
+        source.set_icon(Some(&gtk::WidgetPaintable::new(Some(&target))), 0, 0);
+    });
+    target.add_controller(drag);
+
+    let drop = gtk::DropTarget::new(glib::Variant::static_type(), gtk::gdk::DragAction::MOVE);
+    let weak_target = target.as_ref().downgrade();
+    let enter_target = weak_target.clone();
+    drop.connect_enter(move |_, _, _| {
+        if let Some(target) = enter_target.upgrade() {
+            target.add_css_class("sidebar-pin-reorder-target");
+        }
+        gtk::gdk::DragAction::MOVE
+    });
+    let leave_target = weak_target.clone();
+    drop.connect_leave(move |_| {
+        if let Some(target) = leave_target.upgrade() {
+            target.remove_css_class("sidebar-pin-reorder-target");
+        }
+    });
+    let shell = Rc::downgrade(shell);
+    drop.connect_drop(move |_, value, _, _| {
+        let Some(target) = weak_target.upgrade() else {
+            return false;
+        };
+        target.remove_css_class("sidebar-pin-reorder-target");
+        let Some(moved) = sidebar_pin_from_drag_value(value) else {
+            return false;
+        };
+        let Some(shell) = shell.upgrade() else {
+            return false;
+        };
+        shell.reorder_sidebar_pin(&moved, &pin)
+    });
+    target.add_controller(drop);
+}
+
+fn sidebar_pin_drag_variant(pin: &SidebarPin) -> glib::Variant {
+    let (kind, source_id, object_id, album_artist) = match pin {
+        SidebarPin::Album {
+            source_id,
+            album_id,
+        } => (0_u8, source_id, album_id, false),
+        SidebarPin::Artist {
+            source_id,
+            artist_id,
+            album_artist,
+        } => (1, source_id, artist_id, *album_artist),
+        SidebarPin::Genre {
+            source_id,
+            genre_id,
+        } => (2, source_id, genre_id, false),
+        SidebarPin::Playlist {
+            source_id,
+            playlist_id,
+        } => (3, source_id, playlist_id, false),
+        SidebarPin::SmartPlaylist {
+            source_id,
+            playlist_id,
+        } => (4, source_id, playlist_id, false),
+    };
+    (kind, source_id.to_string(), object_id.clone(), album_artist).to_variant()
+}
+
+fn sidebar_pin_from_drag_value(value: &glib::Value) -> Option<SidebarPin> {
+    let variant = value.get::<glib::Variant>().ok()?;
+    let (kind, source_id, object_id, album_artist) = variant.get::<(u8, String, String, bool)>()?;
+    let source_id = sources::SourceId::new(source_id);
+    match kind {
+        0 => Some(SidebarPin::Album {
+            source_id,
+            album_id: object_id,
+        }),
+        1 => Some(SidebarPin::Artist {
+            source_id,
+            artist_id: object_id,
+            album_artist,
+        }),
+        2 => Some(SidebarPin::Genre {
+            source_id,
+            genre_id: object_id,
+        }),
+        3 => Some(SidebarPin::Playlist {
+            source_id,
+            playlist_id: object_id,
+        }),
+        4 => Some(SidebarPin::SmartPlaylist {
+            source_id,
+            playlist_id: object_id,
+        }),
+        _ => None,
+    }
+}
+
+fn install_playlist_pin_drop(
+    target: &impl IsA<gtk::Widget>,
+    shell: &Rc<Shell>,
+    pin: &SidebarPinItem,
+) {
+    let SidebarPinItem::Playlist(playlist) = pin else {
+        return;
+    };
+    let playlist = playlist.clone();
+    let weak_target = target.as_ref().downgrade();
+    let drop_target = gtk::DropTarget::new(
+        glib::BoxedAnyObject::static_type(),
+        gtk::gdk::DragAction::COPY,
+    );
+    let enter_target = weak_target.clone();
+    drop_target.connect_enter(move |_, _, _| {
+        if let Some(target) = enter_target.upgrade() {
+            target.add_css_class("playlist-pin-drop-target");
+        }
+        gtk::gdk::DragAction::COPY
+    });
+    let leave_target = weak_target.clone();
+    drop_target.connect_leave(move |_| {
+        if let Some(target) = leave_target.upgrade() {
+            target.remove_css_class("playlist-pin-drop-target");
+        }
+    });
+    let shell = Rc::downgrade(shell);
+    drop_target.connect_drop(move |_, value, _, _| {
+        if let Some(target) = weak_target.upgrade() {
+            target.remove_css_class("playlist-pin-drop-target");
+        }
+        let Some(shell) = shell.upgrade() else {
+            return false;
+        };
+        let Some(payload) = track_drag_payload(value) else {
+            return false;
+        };
+        add_selection_to_playlist_pin(&shell, &playlist, payload)
+    });
+    target.add_controller(drop_target);
+}
+
+fn add_selection_to_playlist_pin(
+    shell: &Rc<Shell>,
+    playlist: &PlaylistRow,
+    selection: TrackSelectionSnapshot,
+) -> bool {
+    if !selection.is_current(shell) {
+        return false;
+    }
+    let Some(selected) = shell.selected_library().as_deref().cloned() else {
+        return false;
+    };
+    let skip_duplicates = !selected.playlist_tracks_can_repeat;
+    let Some(operations) = shell.selected_source_operations() else {
+        return false;
+    };
+    let scheduled = operations.add_playlist_tracks(
+        playlist.playlist_key,
+        selection.tracks.to_vec(),
+        skip_duplicates,
+    );
+    if scheduled == 0 {
+        return false;
+    }
+    shell.show_operation_feedback(&OperationFeedback {
+        subject: selection.download_subject(),
+        item_count: scheduled,
+        kind: OperationFeedbackKind::PlaylistAdded {
+            destination: playlist.name.clone(),
+        },
+    });
+    true
 }
 
 fn install_sidebar_pin_double_click(

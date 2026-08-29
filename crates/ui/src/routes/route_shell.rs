@@ -5,6 +5,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::glib;
+use playback::QueuePlacement;
 
 use crate::layout::{
     configure_fill_width_clip, large_popup_content_height, large_popup_content_width,
@@ -15,6 +16,9 @@ use crate::localization::{
 };
 use crate::player::{select_next_audio_output, select_previous_audio_output};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
+use crate::routes::collection_context::download_track_selection;
+use crate::routes::playlist_picker::present_playlist_picker_selection;
+use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::shell::Shell;
 use crate::shell::actions::{ADD_ICON, MORE_ICON, sort_order_icon, toggle_mute_shortcut};
 use crate::{
@@ -47,6 +51,13 @@ pub(crate) struct LibraryPageShellOptions {
     pub(crate) search: gtk::SearchEntry,
     pub(crate) has_visible_results: Rc<dyn Fn() -> bool>,
     pub(crate) content: gtk::Widget,
+}
+
+#[derive(Clone, Copy)]
+enum SelectionShortcut {
+    Play(QueuePlacement),
+    AddToPlaylist,
+    Download,
 }
 
 #[derive(Clone)]
@@ -273,6 +284,13 @@ impl Shell {
         let shell = Rc::clone(self);
         key.connect_key_pressed(move |_, key, _, state| {
             let current_focus = GtkWindowExt::focus(&shell.chrome.window);
+            if shell.route_keyboard_available()
+                && !focus_blocks_selection_shortcut(current_focus.as_ref())
+                && let Some(shortcut) = selection_shortcut(key, state)
+                && shell.run_selection_shortcut(shortcut, current_focus.as_ref())
+            {
+                return glib::Propagation::Stop;
+            }
             if key_has_no_shortcut_modifiers(state) {
                 if key == gtk::gdk::Key::space
                     && shell.playback_keyboard_available()
@@ -355,6 +373,41 @@ impl Shell {
         });
         self.chrome.window.add_controller(key);
     }
+
+    fn run_selection_shortcut(
+        self: &Rc<Self>,
+        shortcut: SelectionShortcut,
+        focus: Option<&gtk::Widget>,
+    ) -> bool {
+        let Some(selection) = self.focused_track_selection(focus) else {
+            return false;
+        };
+        match shortcut {
+            SelectionShortcut::Play(placement) => selection.play(self, placement),
+            SelectionShortcut::AddToPlaylist => present_playlist_picker_selection(self, selection),
+            SelectionShortcut::Download => {
+                return download_track_selection(self, selection);
+            }
+        }
+        true
+    }
+
+    fn focused_track_selection(
+        &self,
+        focus: Option<&gtk::Widget>,
+    ) -> Option<TrackSelectionSnapshot> {
+        let queue_focused = focus.is_some_and(|focus| {
+            focus.is_ancestor(&self.right_panel.queue_panel)
+                || focus.is_ancestor(&self.player_view.fullscreen_player.queue_panel)
+        });
+        if queue_focused {
+            return self
+                .selected_queue()
+                .and_then(|queue| queue.selected_tracks(self));
+        }
+        self.current_route_track_selection_snapshot()
+    }
+
     pub(crate) fn library_toolbar_projection(
         self: &Rc<Self>,
         key: LibraryListKey,
@@ -863,6 +916,45 @@ fn key_has_audio_output_modifiers(state: gtk::gdk::ModifierType) -> bool {
     state & shortcut_modifiers == expected
 }
 
+fn selection_shortcut(
+    key: gtk::gdk::Key,
+    state: gtk::gdk::ModifierType,
+) -> Option<SelectionShortcut> {
+    #[cfg(target_os = "macos")]
+    let primary = gtk::gdk::ModifierType::META_MASK;
+    #[cfg(not(target_os = "macos"))]
+    let primary = gtk::gdk::ModifierType::CONTROL_MASK;
+    let shortcut_modifiers = gtk::gdk::ModifierType::SHIFT_MASK
+        | gtk::gdk::ModifierType::ALT_MASK
+        | gtk::gdk::ModifierType::CONTROL_MASK
+        | gtk::gdk::ModifierType::SUPER_MASK
+        | gtk::gdk::ModifierType::HYPER_MASK
+        | gtk::gdk::ModifierType::META_MASK;
+    let modifiers = state & shortcut_modifiers;
+    let enter = matches!(key, gtk::gdk::Key::Return | gtk::gdk::Key::KP_Enter);
+    if enter && modifiers.is_empty() {
+        return Some(SelectionShortcut::Play(QueuePlacement::Now));
+    }
+    if enter && modifiers == primary {
+        return Some(SelectionShortcut::Play(QueuePlacement::Next));
+    }
+    let primary_shift = primary | gtk::gdk::ModifierType::SHIFT_MASK;
+    if enter && modifiers == primary_shift {
+        return Some(SelectionShortcut::Play(QueuePlacement::Last));
+    }
+    if modifiers != primary_shift {
+        return None;
+    }
+    match key
+        .to_unicode()
+        .map(|character| character.to_ascii_lowercase())
+    {
+        Some('p') => Some(SelectionShortcut::AddToPlaylist),
+        Some('d') => Some(SelectionShortcut::Download),
+        _ => None,
+    }
+}
+
 fn page_navigation_direction(key: gtk::gdk::Key) -> Option<gtk::DirectionType> {
     match key {
         gtk::gdk::Key::Up => Some(gtk::DirectionType::Up),
@@ -874,6 +966,10 @@ fn page_navigation_direction(key: gtk::gdk::Key) -> Option<gtk::DirectionType> {
 }
 
 fn focus_blocks_playback_shortcut(focus: Option<&gtk::Widget>) -> bool {
+    focus.is_some_and(|focus| focus_is_text_input(focus) || focus_is_in_dialog(focus))
+}
+
+fn focus_blocks_selection_shortcut(focus: Option<&gtk::Widget>) -> bool {
     focus.is_some_and(|focus| focus_is_text_input(focus) || focus_is_in_dialog(focus))
 }
 
@@ -1034,7 +1130,10 @@ mod tests {
 
     use adw::prelude::*;
 
-    use super::{next_row_grid_layout, toolbar_layout, weak_target_callback};
+    use super::{
+        SelectionShortcut, next_row_grid_layout, selection_shortcut, toolbar_layout,
+        weak_target_callback,
+    };
     use crate::LibraryLayout;
 
     #[test]
@@ -1085,5 +1184,29 @@ mod tests {
             next_row_grid_layout(LibraryLayout::Grid),
             LibraryLayout::Row
         );
+    }
+
+    #[test]
+    fn selection_shortcuts_require_exact_platform_modifiers_and_leave_text_inputs_alone() {
+        #[cfg(target_os = "macos")]
+        let primary = gtk::gdk::ModifierType::META_MASK;
+        #[cfg(not(target_os = "macos"))]
+        let primary = gtk::gdk::ModifierType::CONTROL_MASK;
+        assert!(matches!(
+            selection_shortcut(gtk::gdk::Key::Return, gtk::gdk::ModifierType::empty()),
+            Some(SelectionShortcut::Play(playback::QueuePlacement::Now))
+        ));
+        assert!(matches!(
+            selection_shortcut(gtk::gdk::Key::Return, primary),
+            Some(SelectionShortcut::Play(playback::QueuePlacement::Next))
+        ));
+        assert!(matches!(
+            selection_shortcut(
+                gtk::gdk::Key::p,
+                primary | gtk::gdk::ModifierType::SHIFT_MASK
+            ),
+            Some(SelectionShortcut::AddToPlaylist)
+        ));
+        assert!(selection_shortcut(gtk::gdk::Key::p, primary).is_none());
     }
 }

@@ -146,6 +146,7 @@ pub enum SessionEffect {
 pub enum SessionCommand {
     Activate(OccurrenceId),
     Remove(OccurrenceId),
+    RemoveMany(Vec<OccurrenceId>),
     Reorder {
         occurrence: OccurrenceId,
         target: crate::QueueReorderTarget,
@@ -599,6 +600,7 @@ impl PlaybackSession {
         match command {
             SessionCommand::Activate(occurrence) => Ok(self.activate(&occurrence, sample)),
             SessionCommand::Remove(occurrence) => Ok(self.remove(&occurrence, sample)),
+            SessionCommand::RemoveMany(occurrences) => Ok(self.remove_many(&occurrences, sample)),
             SessionCommand::Reorder { occurrence, target } => {
                 Ok(self.reorder(&occurrence, &target))
             }
@@ -1051,6 +1053,48 @@ impl PlaybackSession {
             self.finish_current(RunEndReason::ManualSkip, sample, &mut update.effects);
         }
         self.sequence.remove(occurrence);
+        if removing_current {
+            self.begin_selected_run(&mut update.effects);
+            if !removing_current_run && self.sequence.selected().is_none() {
+                update.effects.push(SessionEffect::CurrentMediaChanged);
+            }
+        } else {
+            self.replan_next_if_changed(&mut update.effects);
+        }
+        update
+    }
+
+    fn remove_many(&mut self, occurrences: &[OccurrenceId], sample: &ClockSample) -> SessionUpdate {
+        let removing_current = self.sequence.selected().is_some_and(|entry| {
+            occurrences
+                .iter()
+                .any(|occurrence| occurrence == &entry.occurrence)
+        });
+        let removing_current_run = removing_current && self.current_run.is_some();
+        if !occurrences
+            .iter()
+            .any(|occurrence| self.sequence.occurrence(occurrence).is_some())
+        {
+            return SessionUpdate::default();
+        }
+        let mut update = SessionUpdate::structural();
+        self.pending_replacement = None;
+        if self.auto_dj_in_flight.as_ref().is_some_and(|key| {
+            occurrences
+                .iter()
+                .any(|occurrence| occurrence == &key.seed_occurrence)
+        }) {
+            self.auto_dj_in_flight = None;
+        }
+        if removing_current {
+            if let Some(run) = self.current_run.as_ref() {
+                update
+                    .effects
+                    .push(SessionEffect::Backend(BackendCommand::Stop { run: run.id }));
+            }
+            self.finish_current(RunEndReason::ManualSkip, sample, &mut update.effects);
+        }
+        self.sequence.remove_many(occurrences);
         if removing_current {
             self.begin_selected_run(&mut update.effects);
             if !removing_current_run && self.sequence.selected().is_none() {

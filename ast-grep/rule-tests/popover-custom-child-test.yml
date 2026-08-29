@@ -1,0 +1,17 @@
+id: popover-custom-child-registration-must-not-assert
+valid:
+  - |
+      fn register(popover: Popover, child: Widget, id: &str) {
+          if !popover.add_child(&child, id) {
+              tracing::error!(id, "missing custom child placeholder");
+          }
+      }
+invalid:
+  - |
+      fn register(popover: Popover, child: Widget, id: &str) {
+          debug_assert!(popover.add_child(&child, id));
+      }
+  - |
+      fn register(popover: Popover, child: Widget, id: &str) {
+          assert!(popover.add_child(&child, id));
+      }

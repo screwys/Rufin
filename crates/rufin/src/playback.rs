@@ -919,6 +919,9 @@ impl QueueCommandPort for PlaybackOwner {
     fn remove(&self, occurrence: OccurrenceId) {
         self.send(SessionCommand::Remove(occurrence));
     }
+    fn remove_many(&self, occurrences: Vec<OccurrenceId>) {
+        self.send(SessionCommand::RemoveMany(occurrences));
+    }
     fn activate(&self, occurrence: OccurrenceId) {
         self.send(SessionCommand::Activate(occurrence));
     }

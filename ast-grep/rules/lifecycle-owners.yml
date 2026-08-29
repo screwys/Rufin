@@ -73,6 +73,19 @@ constraints:
   CONNECT:
     regex: ^connect_
 ---
+id: popover-custom-child-registration-must-not-assert
+language: Rust
+severity: error
+message: GtkPopoverMenu custom-child lookup is fallible; handle a missing placeholder without panicking in the GTK callback.
+rule:
+  any:
+    - all:
+        - pattern: debug_assert!($$$ARGS)
+        - regex: \.add_child\s*\(
+    - all:
+        - pattern: assert!($$$ARGS)
+        - regex: \.add_child\s*\(
+---
 id: visualizer-lane-must-be-bounded
 language: Rust
 severity: error

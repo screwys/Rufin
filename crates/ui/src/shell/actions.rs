@@ -741,6 +741,14 @@ fn show_shortcuts_dialog(shell: &Shell) {
     let dialog = adw::ShortcutsDialog::builder()
         .title(tr("Keyboard Shortcuts"))
         .build();
+    dialog.connect_map(|dialog| {
+        let dialog = dialog.downgrade();
+        glib::idle_add_local_once(move || {
+            if let Some(dialog) = dialog.upgrade() {
+                replace_pointer_shortcut_labels(dialog.upcast_ref());
+            }
+        });
+    });
 
     let section = adw::ShortcutsSection::new(Some(&tr("General")));
     section.add(adw::ShortcutsItem::from_action(
@@ -828,6 +836,62 @@ fn show_shortcuts_dialog(shell: &Shell) {
         &tr("Auto DJ"),
         "win.toggle-auto-dj",
     ));
+    dialog.add(section);
+
+    let section = adw::ShortcutsSection::new(Some(&tr("Selection")));
+    #[cfg(target_os = "macos")]
+    section.add(adw::ShortcutsItem::new(
+        &tr("Multi-selection"),
+        "<Meta>Pointer_Button1",
+    ));
+    #[cfg(not(target_os = "macos"))]
+    section.add(adw::ShortcutsItem::new(
+        &tr("Multi-selection"),
+        "<Control>Pointer_Button1",
+    ));
+    section.add(adw::ShortcutsItem::new(
+        &tr("Range selection"),
+        "<Shift>Pointer_Button1",
+    ));
+    #[cfg(target_os = "macos")]
+    {
+        section.add(adw::ShortcutsItem::new(&tr("Select all"), "<Meta>a"));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Play"),
+            "Return Pointer_Button1&Pointer_Button1",
+        ));
+        section.add(adw::ShortcutsItem::new(&tr("Play Next"), "<Meta>Return"));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Play Later"),
+            "<Meta><Shift>Return",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Add to Playlist"),
+            "<Meta><Shift>p",
+        ));
+        section.add(adw::ShortcutsItem::new(&tr("Download"), "<Meta><Shift>d"));
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        section.add(adw::ShortcutsItem::new(&tr("Select all"), "<Control>a"));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Play"),
+            "Return Pointer_Button1&Pointer_Button1",
+        ));
+        section.add(adw::ShortcutsItem::new(&tr("Play Next"), "<Control>Return"));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Play Later"),
+            "<Control><Shift>Return",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Add to Playlist"),
+            "<Control><Shift>p",
+        ));
+        section.add(adw::ShortcutsItem::new(
+            &tr("Download"),
+            "<Control><Shift>d",
+        ));
+    }
     dialog.add(section);
 
     let section = adw::ShortcutsSection::new(Some(&tr("Audio")));
@@ -946,6 +1010,34 @@ fn show_shortcuts_dialog(shell: &Shell) {
     dialog.add(section);
 
     present_light_dismiss_dialog(&dialog, &shell.chrome.window);
+}
+
+fn replace_pointer_shortcut_labels(container: &gtk::Widget) {
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if let Ok(label) = widget.clone().downcast::<adw::ShortcutLabel>() {
+            if label.accelerator().contains("Pointer_Button1") {
+                replace_pointer_keycaps(label.upcast_ref());
+            }
+        }
+        replace_pointer_shortcut_labels(&widget);
+    }
+}
+
+fn replace_pointer_keycaps(container: &gtk::Widget) {
+    let mut child = container.first_child();
+    while let Some(widget) = child {
+        child = widget.next_sibling();
+        if let Ok(label) = widget.clone().downcast::<gtk::Label>()
+            && label.has_css_class("keycap")
+            && label.text().contains("Pointer")
+            && label.text().contains("Button1")
+        {
+            label.set_text("🖱");
+        }
+        replace_pointer_keycaps(&widget);
+    }
 }
 
 fn show_about_dialog(shell: &Shell) {

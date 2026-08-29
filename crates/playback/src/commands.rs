@@ -84,6 +84,26 @@ impl LoadedPlayRequest {
         })
     }
 
+    pub fn manual(
+        source_key: SourceKey,
+        source_session_epoch: SourceSessionEpoch,
+        order: Arc<[TrackKey]>,
+        anchor: PlaybackMedia,
+        placement: QueuePlacement,
+    ) -> Option<Self> {
+        let anchor_key = anchor.track_key?;
+        (order.first() == Some(&anchor_key)).then(|| Self {
+            source_key,
+            source_session_epoch,
+            order,
+            anchor,
+            anchor_index: 0,
+            placement,
+            origin: QueueOrigin::Manual,
+            shuffled_start: false,
+        })
+    }
+
     #[allow(clippy::too_many_arguments)]
     pub fn context(
         source_key: SourceKey,
@@ -242,6 +262,7 @@ impl RadioPlayRequest {
 pub trait QueueCommandPort: Send + Sync {
     fn play_loaded(&self, request: LoadedPlayRequest);
     fn remove(&self, occurrence: OccurrenceId);
+    fn remove_many(&self, occurrences: Vec<OccurrenceId>);
     fn activate(&self, occurrence: OccurrenceId);
     fn move_after_current(&self, occurrence: OccurrenceId);
     fn reorder(&self, request: QueueReorderRequest);

@@ -44,6 +44,7 @@ use super::table_sizing::{
     route_column_view_initial_width,
 };
 use super::track_model::TrackCollectionModel;
+use super::track_selection::{TrackSelection, install_track_drag_source};
 use crate::runtime::SelectedLibrary;
 use downloads::DownloadSubject;
 
@@ -765,6 +766,8 @@ pub(crate) fn track_collection_projection(
     content_inset: i32,
 ) -> LibraryCollectionProjection {
     let shell = Rc::clone(shell);
+    let selection = TrackSelection::new(model.clone());
+    shell.register_current_route_track_selection_owner(selection.clone());
     let play_model = model.clone();
     let play_queue = shell.products.playback.queue.clone();
     let play_context_id = context_id.clone();
@@ -787,6 +790,7 @@ pub(crate) fn track_collection_projection(
                 model.clone(),
                 key,
                 Rc::clone(&play_from_collection),
+                selection.clone(),
             )),
             LibraryLayout::Row | LibraryLayout::Detail => {
                 LibraryPresentationProjection::Row(track_table(
@@ -798,6 +802,7 @@ pub(crate) fn track_collection_projection(
                         context_id: context_id.clone(),
                         content_inset,
                     },
+                    selection.clone(),
                 ))
             }
         }),
@@ -865,6 +870,7 @@ pub(crate) fn track_grid(
     model: TrackCollectionModel,
     key: LibraryListKey,
     play_from_collection: Rc<dyn Fn(u32)>,
+    selection: TrackSelection,
 ) -> CollectionGridProjection {
     let fields = shell
         .settings
@@ -889,10 +895,19 @@ pub(crate) fn track_grid(
     let cell_play = Rc::clone(&play_from_collection);
     let activate = Rc::clone(&play_from_collection);
     let demand = Rc::clone(&sparse);
-    collection_grid_with_demand(
+    super::grid_cells::collection_grid_with_selection_and_demand(
         sparse.list_model(),
+        Some(selection.selection_model()),
         &fields,
-        move |fields| TrackGridCell::new(&cell_shell, fields, Rc::clone(&cell_play), field.clone()),
+        move |fields| {
+            TrackGridCell::new(
+                &cell_shell,
+                fields,
+                Rc::clone(&cell_play),
+                field.clone(),
+                Some(selection.clone()),
+            )
+        },
         move |position, _: TrackRow| activate(position),
         move |position| demand.demand_positions([position as usize]),
     )
@@ -926,6 +941,7 @@ where
         route_column_view_initial_width(shell),
     )
 }
+
 pub(crate) fn artist_table<M>(
     shell: &Rc<Shell>,
     model: M,
@@ -1045,7 +1061,7 @@ pub(super) fn dynamic_collection_table<T, M>(
     width_for_field: impl Fn(LibraryField) -> i32 + 'static,
     single_click_activate: bool,
     activate: Option<Box<dyn Fn(u32, T)>>,
-    selection: Option<gtk::SingleSelection>,
+    selection: Option<gtk::SelectionModel>,
     initial_width: i32,
 ) -> CollectionTableProjection
 where
@@ -1087,7 +1103,7 @@ fn collection_table_with_width<T, M>(
     initial_width: i32,
     single_click_activate: bool,
     activate: Option<Box<dyn Fn(u32, T)>>,
-    selection: Option<gtk::SingleSelection>,
+    selection: Option<gtk::SelectionModel>,
 ) -> (
     gtk::ColumnView,
     ColumnViewWidthFit,
@@ -1101,7 +1117,7 @@ where
         let selection = gtk::SingleSelection::new(Some(model.clone()));
         selection.set_autoselect(false);
         selection.set_can_unselect(true);
-        selection
+        selection.upcast()
     });
     let table = gtk::ColumnView::new(Some(selection.clone()));
     table.add_css_class("track-table");
@@ -1151,11 +1167,11 @@ where
             return glib::Propagation::Stop;
         };
         if let Some(position) = item_navigation_entry_position(
-            navigation_selection.selected(),
+            selected_position(&navigation_selection),
             model.n_items(),
             direction,
         ) {
-            navigation_selection.set_selected(position);
+            navigation_selection.select_item(position, true);
             navigation_table.scroll_to(position, None, gtk::ListScrollFlags::FOCUS, None);
             navigation_table.grab_focus();
         }
@@ -1188,11 +1204,8 @@ pub(crate) fn track_table(
     model: TrackCollectionModel,
     key: LibraryListKey,
     options: TrackTableOptions,
+    selection: TrackSelection,
 ) -> CollectionTableProjection {
-    let selection = gtk::SingleSelection::new(Some(model.list_model()));
-    selection.set_autoselect(false);
-    selection.set_can_unselect(true);
-    selection.set_selected(gtk::INVALID_LIST_POSITION);
     let playing_indicator = TrackRowPlayingIndicator::new();
     let playing_state = TrackTablePlayingState::new(&model, playing_indicator.clone());
     let source_id = shell
@@ -1246,6 +1259,8 @@ pub(crate) fn track_table(
     });
     let column_shell = Rc::clone(shell);
     let column_playing_indicator = playing_indicator;
+    let column_selection = selection.clone();
+    let selection_model = selection.selection_model();
     let table = dynamic_collection_table(
         shell,
         key,
@@ -1253,7 +1268,7 @@ pub(crate) fn track_table(
         &fields,
         Vec::new(),
         move |field| {
-            if key == LibraryListKey::History && field == LibraryField::LastPlayed {
+            let column = if key == LibraryListKey::History && field == LibraryField::LastPlayed {
                 track_position_text_column(
                     &column_shell,
                     field.title(),
@@ -1269,16 +1284,51 @@ pub(crate) fn track_table(
                 )
             } else {
                 track_column_for_key(&column_shell, key, field, &column_playing_indicator)
+            };
+            if field != LibraryField::Favorite {
+                install_track_column_drag_source(&column, column_selection.clone());
             }
+            column
         },
         move |field| track_column_fit_width(key, field),
         false,
         Some(activate),
-        Some(selection),
+        Some(selection_model),
         column_view_initial_width(shell, options.content_inset),
     );
     table.table.add_css_class("track-list");
     table
+}
+
+fn install_track_column_drag_source(column: &gtk::ColumnViewColumn, selection: TrackSelection) {
+    let Some(factory) = column
+        .factory()
+        .and_then(|factory| factory.downcast::<gtk::SignalListItemFactory>().ok())
+    else {
+        return;
+    };
+    factory.connect_setup(move |_, item| {
+        let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let Some(child) = item.child() else {
+            return;
+        };
+        let item = item.downgrade();
+        install_track_drag_source(&child, selection.clone(), move || {
+            let item = item.upgrade()?;
+            item_at_from_item::<TrackRow>(&item).map(|track| track.track_key)
+        });
+    });
+}
+
+fn selected_position(selection: &gtk::SelectionModel) -> u32 {
+    let positions = selection.selection();
+    if positions.is_empty() {
+        gtk::INVALID_LIST_POSITION
+    } else {
+        positions.minimum()
+    }
 }
 pub(crate) fn set_library_table_content_height(
     scroller: &gtk::ScrolledWindow,

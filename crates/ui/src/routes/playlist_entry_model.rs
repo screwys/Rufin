@@ -86,6 +86,28 @@ impl PlaylistEntryModel {
         self.inner.sparse.list_model()
     }
 
+    pub(crate) fn order(&self) -> Arc<[PlaylistEntryKey]> {
+        self.inner.sparse.order()
+    }
+
+    pub(crate) fn source_key(&self) -> SourceKey {
+        self.inner.source_key
+    }
+
+    pub(crate) fn source_session_epoch(&self) -> SourceSessionEpoch {
+        self.inner.source_session_epoch
+    }
+
+    pub(crate) fn playlist_key(&self) -> PlaylistKey {
+        self.inner.playlist_key
+    }
+
+    pub(crate) fn track_key_at_position(&self, position: usize) -> Option<library::TrackKey> {
+        let positions = self.inner.track_positions.borrow();
+        let track = positions.binary_search(&position).ok()?;
+        self.inner.tracks.borrow().get(track).copied()
+    }
+
     pub(crate) fn source_is_empty(&self) -> bool {
         self.inner.sparse.len() == 0
     }

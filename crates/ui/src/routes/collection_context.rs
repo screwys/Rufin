@@ -10,8 +10,8 @@ use playback::{PlaybackMedia, QueuePlacement, RadioPlayRequest};
 use crate::SidebarPin;
 use crate::favorites::{FAVORITE_ADD_ICON, FAVORITE_REMOVE_ICON};
 use crate::interactions::{
-    ADD_TO_PLAYLIST_ICON, ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON,
-    go_to_context_submenu, install_context_menu_openers, radio_context_submenu,
+    ContextMenuSurface, DOWNLOAD_ICON, GO_TO_ICON, RADIO_ICON, go_to_context_submenu,
+    install_context_menu_openers, radio_context_submenu,
 };
 use crate::player::state::current_playback_track;
 use crate::preferences::dialogs::SmartPlaylistChange;
@@ -27,9 +27,11 @@ use localization::msgid;
 
 use super::collections::{CollectionPlay, PlaybackTarget};
 use super::playlist_picker::{
-    PlaylistTrackSource, context_menu_can_add_to_playlist, install_context_menu_picker_action,
+    PlaylistTrackSource, append_context_menu_picker, append_context_menu_picker_selection,
+    context_menu_can_add_to_playlist,
 };
 use super::route::Route;
+use super::track_selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 
 const EDIT_METADATA_ICON: &str = "rufin-document-edit-symbolic";
 
@@ -128,7 +130,16 @@ pub(crate) fn install_current_track_context_menu(
         target,
         Rc::new(move |target, position| {
             if let Some(track) = current_playback_track(shell.selected_playback().as_deref()) {
-                present_track_context_menu(target, &shell, track, position);
+                present_track_menu(
+                    target,
+                    &shell,
+                    track.into(),
+                    position,
+                    None,
+                    None,
+                    None,
+                    false,
+                );
             }
         }),
     );
@@ -149,7 +160,16 @@ pub(crate) fn present_track_context_menu<T: Into<TrackContext>>(
     track: T,
     position: Option<(f64, f64)>,
 ) {
-    present_track_menu(target, shell, track.into(), position, None, None, None);
+    present_track_menu(
+        target,
+        shell,
+        track.into(),
+        position,
+        None,
+        None,
+        None,
+        true,
+    );
 }
 
 pub(crate) fn present_playlist_entry_context_menu(
@@ -160,6 +180,10 @@ pub(crate) fn present_playlist_entry_context_menu(
     track: TrackRow,
     position: Option<(f64, f64)>,
 ) {
+    if let Some(selection) = shell.current_playlist_entry_selection(entry) {
+        present_playlist_entry_selection_menu(target, shell, selection, position);
+        return;
+    }
     present_track_menu(
         target,
         shell,
@@ -168,6 +192,7 @@ pub(crate) fn present_playlist_entry_context_menu(
         None,
         None,
         Some((playlist, entry)),
+        false,
     );
 }
 
@@ -195,6 +220,7 @@ pub(crate) fn present_queue_track_context_menu(
         None,
         Some(occurrence),
         None,
+        false,
     );
 }
 
@@ -212,6 +238,7 @@ pub(crate) fn present_track_context_menu_above<T: Into<TrackContext>>(
         Some(gtk::PositionType::Top),
         None,
         None,
+        false,
     );
 }
 
@@ -223,18 +250,23 @@ fn present_track_menu(
     popover_position: Option<gtk::PositionType>,
     queue_occurrence: Option<playback::OccurrenceId>,
     playlist_entry: Option<(library::PlaylistKey, library::PlaylistEntryKey)>,
+    route_selection: bool,
 ) {
-    let surface = ContextMenuSurface::new(
-        target,
-        if queue_occurrence.is_some() {
-            "queue"
-        } else if playlist_entry.is_some() {
-            "playlist-entry"
-        } else {
-            "track"
-        },
-        position,
-    );
+    if route_selection
+        && let Some(key) = track.key
+        && let Some(selection) = shell.current_route_track_selection(key)
+    {
+        present_track_selection_menu(target, shell, selection, position);
+        return;
+    }
+    let action_group = if queue_occurrence.is_some() {
+        "queue"
+    } else if playlist_entry.is_some() {
+        "playlist-entry"
+    } else {
+        "track"
+    };
+    let surface = ContextMenuSurface::new(target, action_group, position);
     if queue_occurrence.is_some() {
         surface.append_fixed_action(
             msgid("Remove from Queue"),
@@ -243,19 +275,18 @@ fn present_track_menu(
         );
     }
     append_play_actions(&surface);
-    if track.key.is_some() {
+    if let Some(key) = track.key {
         surface.append_configurable_submenu(
             ContextMenuItem::PlayRadio,
             msgid("Track radio"),
-            &radio_context_submenu("track"),
+            &radio_context_submenu(action_group),
             RADIO_ICON,
         );
         if context_menu_can_add_to_playlist(shell) {
-            surface.append_configurable_action(
-                ContextMenuItem::AddToPlaylist,
-                msgid("Add to Playlist"),
-                "add-to-playlist",
-                ADD_TO_PLAYLIST_ICON,
+            append_context_menu_picker(
+                &surface,
+                shell,
+                PlaylistTrackSource::new(PlaybackTarget::Track(key)),
             );
         }
         surface.append_configurable_action(
@@ -290,7 +321,7 @@ fn present_track_menu(
         surface.append_configurable_submenu(
             ContextMenuItem::GoTo,
             msgid("Go to"),
-            &go_to_context_submenu("track", &artist_names, track.album.is_some()),
+            &go_to_context_submenu(action_group, &artist_names, track.album.is_some()),
             GO_TO_ICON,
         );
     }
@@ -307,13 +338,6 @@ fn present_track_menu(
     if let Some(key) = track.key {
         let playback = PlaybackTarget::Track(key);
         install_download_actions(&surface, shell, &playback, track.is_downloaded);
-        if context_menu_can_add_to_playlist(shell) {
-            install_context_menu_picker_action(
-                &surface,
-                shell,
-                PlaylistTrackSource::new(playback.clone()),
-            );
-        }
         if queue_occurrence.is_none() {
             install_loaded_actions(&surface, shell, playback, false, None);
         }
@@ -368,7 +392,7 @@ fn present_track_menu(
         surface.add_action("remove-from-queue", move || queue.remove(remove.clone()));
         let queue = shell.products.playback.queue.clone();
         let activate = occurrence.clone();
-        surface.add_action("play-now", move || queue.activate(activate.clone()));
+        surface.add_action("play", move || queue.activate(activate.clone()));
         let queue = shell.products.playback.queue.clone();
         let next = occurrence.clone();
         surface.add_action("play-next", move || queue.move_after_current(next.clone()));
@@ -397,6 +421,134 @@ fn present_track_menu(
     surface.popup(&shell.settings.current.borrow().context_menu);
 }
 
+fn present_track_selection_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    selection: TrackSelectionSnapshot,
+    position: Option<(f64, f64)>,
+) {
+    let surface = ContextMenuSurface::new(target, "track-selection", position);
+    append_track_selection_actions(&surface, shell, selection);
+    surface.popup(&shell.settings.current.borrow().context_menu);
+}
+
+fn present_playlist_entry_selection_menu(
+    target: &gtk::Widget,
+    shell: &Rc<Shell>,
+    selection: PlaylistEntrySelectionSnapshot,
+    position: Option<(f64, f64)>,
+) {
+    let surface = ContextMenuSurface::new(target, "playlist-entry-selection", position);
+    surface.append_fixed_action(
+        msgid("Remove from Playlist"),
+        "remove-from-playlist",
+        REMOVE_ICON,
+    );
+    append_track_selection_actions(&surface, shell, selection.tracks.clone());
+    let operations = shell.selected_source_operations();
+    surface.add_action("remove-from-playlist", move || {
+        if let Some(operations) = operations.as_ref() {
+            operations.remove_playlist_entries(selection.playlist, selection.entries.to_vec());
+        }
+    });
+    surface.popup(&shell.settings.current.borrow().context_menu);
+}
+
+fn append_track_selection_actions(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    selection: TrackSelectionSnapshot,
+) {
+    if selection.tracks.is_empty() {
+        return;
+    }
+    append_play_actions(&surface);
+    if context_menu_can_add_to_playlist(shell) {
+        append_context_menu_picker_selection(&surface, shell, selection.clone());
+    }
+    install_track_selection_download_actions(&surface, shell, selection.clone());
+    for (action, placement) in [
+        ("play", QueuePlacement::Now),
+        ("play-next", QueuePlacement::Next),
+        ("play-last", QueuePlacement::Last),
+    ] {
+        let shell = Rc::clone(shell);
+        let selection = selection.clone();
+        surface.add_action(action, move || selection.play(&shell, placement));
+    }
+}
+
+pub(crate) fn install_track_selection_download_actions(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    selection: TrackSelectionSnapshot,
+) {
+    if downloadable_selection_library(shell, &selection).is_none() {
+        return;
+    }
+    surface.append_configurable_action(
+        ContextMenuItem::Download,
+        msgid("Download"),
+        "download",
+        DOWNLOAD_ICON,
+    );
+    surface.append_configurable_action(
+        ContextMenuItem::Download,
+        msgid("Remove Downloads"),
+        "remove-downloads",
+        TRASH_ICON,
+    );
+    let download_shell = Rc::clone(shell);
+    let download_selection = selection.clone();
+    surface.add_action("download", move || {
+        download_track_selection(&download_shell, download_selection.clone());
+    });
+    let remove_shell = Rc::clone(shell);
+    surface.add_action("remove-downloads", move || {
+        if !selection.is_current(&remove_shell) {
+            return;
+        }
+        let Some(selected) = remove_shell.selected_library().as_deref().cloned() else {
+            return;
+        };
+        remove_shell.products.downloads.remove(
+            selected.artwork.source_id,
+            selection.tracks.to_vec(),
+            true,
+        );
+    });
+}
+
+pub(crate) fn download_track_selection(
+    shell: &Rc<Shell>,
+    selection: TrackSelectionSnapshot,
+) -> bool {
+    let Some(selected) = downloadable_selection_library(shell, &selection) else {
+        return false;
+    };
+    shell.products.downloads.download(
+        selected.artwork.source_id,
+        selection.download_subject(),
+        selection.tracks.to_vec(),
+    );
+    true
+}
+
+fn downloadable_selection_library(
+    shell: &Shell,
+    selection: &TrackSelectionSnapshot,
+) -> Option<crate::runtime::SelectedLibrary> {
+    let selected = shell.selected_library().as_deref().cloned()?;
+    let remote = shell
+        .source
+        .configured
+        .borrow()
+        .sources
+        .iter()
+        .any(|source| source.id == selected.artwork.source_id && source.kind != "local");
+    (remote && selection.is_current(shell)).then_some(selected)
+}
+
 pub(crate) fn present_album_context_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
@@ -420,11 +572,10 @@ pub(crate) fn present_album_context_menu(
         RADIO_ICON,
     );
     if context_menu_can_add_to_playlist(shell) {
-        surface.append_configurable_action(
-            ContextMenuItem::AddToPlaylist,
-            msgid("Add to Playlist"),
-            "add-to-playlist",
-            ADD_TO_PLAYLIST_ICON,
+        append_context_menu_picker(
+            &surface,
+            shell,
+            PlaylistTrackSource::new(PlaybackTarget::Album(album.album_key)),
         );
     }
     append_favorite_action(&surface, favorite);
@@ -462,13 +613,6 @@ pub(crate) fn present_album_context_menu(
         album.track_count > 0 && album.downloaded_count == album.track_count,
     );
     install_loaded_actions(&surface, shell, playback, true, play);
-    if context_menu_can_add_to_playlist(shell) {
-        install_context_menu_picker_action(
-            &surface,
-            shell,
-            PlaylistTrackSource::new(PlaybackTarget::Album(album.album_key)),
-        );
-    }
     install_radio_actions(&surface, shell, RadioSeed::Album(album.album_key));
     add_favorite_action(
         &surface,
@@ -531,11 +675,14 @@ pub(crate) fn present_artist_context_menu(
         RADIO_ICON,
     );
     if context_menu_can_add_to_playlist(shell) {
-        surface.append_configurable_action(
-            ContextMenuItem::AddToPlaylist,
-            msgid("Add to Playlist"),
-            "add-to-playlist",
-            ADD_TO_PLAYLIST_ICON,
+        append_context_menu_picker(
+            &surface,
+            shell,
+            PlaylistTrackSource::new(if album_artist {
+                PlaybackTarget::AlbumArtist(artist.artist_key)
+            } else {
+                PlaybackTarget::Artist(artist.artist_key)
+            }),
         );
     }
     append_favorite_action(&surface, favorite);
@@ -572,17 +719,6 @@ pub(crate) fn present_artist_context_menu(
         artist.track_count > 0 && artist.downloaded_count == artist.track_count,
     );
     install_loaded_actions(&surface, shell, playback, true, play);
-    if context_menu_can_add_to_playlist(shell) {
-        install_context_menu_picker_action(
-            &surface,
-            shell,
-            PlaylistTrackSource::new(if album_artist {
-                PlaybackTarget::AlbumArtist(artist.artist_key)
-            } else {
-                PlaybackTarget::Artist(artist.artist_key)
-            }),
-        );
-    }
     install_radio_actions(
         &surface,
         shell,
@@ -679,13 +815,7 @@ pub(crate) fn present_mood_context_menu(
     );
     install_loaded_actions(&surface, shell, playback.clone(), true, play);
     if context_menu_can_add_to_playlist(shell) {
-        surface.append_configurable_action(
-            ContextMenuItem::AddToPlaylist,
-            msgid("Add to Playlist"),
-            "add-to-playlist",
-            ADD_TO_PLAYLIST_ICON,
-        );
-        install_context_menu_picker_action(&surface, shell, PlaylistTrackSource::new(playback));
+        append_context_menu_picker(&surface, shell, PlaylistTrackSource::new(playback));
     }
     surface.popup(&shell.settings.current.borrow().context_menu);
 }

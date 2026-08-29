@@ -748,7 +748,7 @@ fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
                 ),
                 _ => DetailLinks::text(&track_field(track, field)),
             });
-            let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field);
+            let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
             cell.bind(0, track);
             cell.widget()
         }

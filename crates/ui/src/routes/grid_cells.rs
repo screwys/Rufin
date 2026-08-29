@@ -29,6 +29,7 @@ use super::library_fields::{
 use super::route::Route;
 use super::route_shell::restore_single_click_activation_on_primary_press;
 use super::sparse_model::{bind_sparse_item, unbind_sparse_item};
+use super::track_selection::{TrackSelection, install_track_drag_source};
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
     track_count > 0 && downloaded_count == track_count
@@ -278,10 +279,32 @@ where
     Demand: Fn(u32) + 'static,
     M: IsA<gio::ListModel> + Clone + 'static,
 {
-    let selection = gtk::SingleSelection::new(Some(model.clone()));
-    selection.set_autoselect(false);
-    selection.set_can_unselect(true);
-    selection.set_selected(gtk::INVALID_LIST_POSITION);
+    collection_grid_with_selection_and_demand(model, None, fields, make_cell, activate, demand)
+}
+
+pub(super) fn collection_grid_with_selection_and_demand<T, Cell, Make, Activate, Demand, M>(
+    model: M,
+    selection: Option<gtk::SelectionModel>,
+    fields: &[LibraryField],
+    make_cell: Make,
+    activate: Activate,
+    demand: Demand,
+) -> CollectionGridProjection
+where
+    T: Clone + 'static,
+    Cell: ReusableCollectionGridCell<T>,
+    Make: Fn(&[LibraryField]) -> Cell + 'static,
+    Activate: Fn(u32, T) + 'static,
+    Demand: Fn(u32) + 'static,
+    M: IsA<gio::ListModel> + Clone + 'static,
+{
+    let selection = selection.unwrap_or_else(|| {
+        let selection = gtk::SingleSelection::new(Some(model.clone()));
+        selection.set_autoselect(false);
+        selection.set_can_unselect(true);
+        selection.set_selected(gtk::INVALID_LIST_POSITION);
+        selection.upcast()
+    });
     let factory = gtk::SignalListItemFactory::new();
     let cells = Rc::new(RefCell::new(HashMap::<usize, Cell>::new()));
     let fields = Rc::new(RefCell::new(fields.to_vec()));
@@ -410,11 +433,11 @@ where
             return glib::Propagation::Stop;
         };
         if let Some(position) = item_navigation_entry_position(
-            navigation_selection.selected(),
+            selected_position(&navigation_selection),
             model.n_items(),
             direction,
         ) {
-            navigation_selection.set_selected(position);
+            navigation_selection.select_item(position, true);
             navigation_grid.scroll_to(position, gtk::ListScrollFlags::FOCUS, None);
             navigation_grid.grab_focus();
         }
@@ -434,6 +457,15 @@ where
             }
         }),
         cache_bound,
+    }
+}
+
+fn selected_position(selection: &gtk::SelectionModel) -> u32 {
+    let positions = selection.selection();
+    if positions.is_empty() {
+        gtk::INVALID_LIST_POSITION
+    } else {
+        positions.minimum()
     }
 }
 
@@ -469,6 +501,7 @@ impl TrackGridCell {
         fields: &[LibraryField],
         play: Rc<dyn Fn(u32)>,
         field: Rc<dyn Fn(u32, &TrackRow, LibraryField) -> DetailLinks>,
+        selection: Option<TrackSelection>,
     ) -> Self {
         let current = Rc::new(RefCell::new(None::<TrackRow>));
         let position = Rc::new(Cell::new(0));
@@ -550,6 +583,12 @@ impl TrackGridCell {
         controls.connect_hover(&overlay);
         let framed = cards::square_cover_frame(&overlay, &controls.transport);
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
+        if let Some(selection) = selection {
+            let drag_current = Rc::clone(&current);
+            install_track_drag_source(&body.card, selection, move || {
+                drag_current.borrow().as_ref().map(|track| track.track_key)
+            });
+        }
         body.set_download_badge(shell.download_badge(false));
         let context_shell = Rc::downgrade(shell);
         let context_current = Rc::clone(&current);

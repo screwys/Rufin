@@ -3,6 +3,57 @@ use library::{FavoriteTarget, PlaylistEntrySort, PlaylistSort, ReadCancellation}
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn playlist_destinations_are_title_ordered_and_folder_scoped() {
+    let fixture = fixture().await;
+    let zulu = fixture
+        .database
+        .create_playlist(fixture.source, "Zulu", &[fixture.tracks[0]])
+        .await
+        .expect("create Zulu Playlist")
+        .expect("Track exists");
+    let alpha = fixture
+        .database
+        .create_playlist(fixture.source, "Alpha", &[fixture.tracks[1]])
+        .await
+        .expect("create Alpha Playlist")
+        .expect("Track exists");
+    let mut raw = connection(&fixture.path).await;
+    let folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES (?1,'destination-folder','Destination Folder','destination folder','destination folder') RETURNING folder_key")
+        .bind(fixture.source)
+        .fetch_one(&mut raw)
+        .await
+        .expect("insert destination folder");
+    sqlx::query("INSERT INTO track_folders(track_key,folder_key,position) VALUES (?1,?2,1)")
+        .bind(fixture.tracks[0])
+        .bind(folder)
+        .execute(&mut raw)
+        .await
+        .expect("scope Zulu Playlist Track");
+    drop(raw);
+
+    let cancellation = ReadCancellation::new();
+    let all = fixture
+        .database
+        .playlist_destinations(fixture.source, None, &cancellation)
+        .await
+        .expect("all Playlist destinations");
+    assert_eq!(
+        all.iter()
+            .map(|destination| (destination.playlist_key, destination.name.as_str()))
+            .collect::<Vec<_>>(),
+        [(alpha, "Alpha"), (zulu, "Zulu")]
+    );
+    let scoped = fixture
+        .database
+        .playlist_destinations(fixture.source, Some(folder), &cancellation)
+        .await
+        .expect("folder-scoped Playlist destinations");
+    assert_eq!(scoped.len(), 1);
+    assert_eq!(scoped[0].playlist_key, zulu);
+    assert_eq!(scoped[0].name, "Zulu");
+}
+
+#[tokio::test]
 async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
     let fixture = fixture().await;
     let playlist = fixture
