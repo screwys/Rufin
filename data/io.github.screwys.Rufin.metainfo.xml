@@ -20,56 +20,67 @@
   <description>
     <p>Enjoy your music library, either a server or local folders; with a powerful all-in-one music player.</p>
     <ul>
-      <li>First-class Jellyfin, Navidrome/OpenSubsonic integration; you can download tracks, or set up rules to automatically download tracks, fully usable offline</li>
-      <li>First-class local music library integration; you can combine multiple folders for a single listening session, fully enjoy built-in music server benefits like activity/history with your local library</li>
-      <li>Built-in Last.fm, Libre.fm, and ListenBrainz scrobbling</li>
-      <li>Discord Rich Presence</li>
-      <li>Automatic lyrics/cover art lookup</li>
-      <li>Advanced lyrics settings such as multiple Japanese reading formats</li>
-      <li>Smart playlists that support multiple combinations</li>
-      <li>Built-in metadata editor with search</li>
+      <li>Powerful transition and loudness normalization implementation</li>
+      <li>Auto DJ with server or app-matched recommendations and random play filters</li>
+      <li>Built-in Last.fm, Libre.fm, ListenBrainz and Discord Rich presence integrations</li>
+      <li>Remote tracks are downloadable with automatic download rules and playable while offline</li>
+      <li>Casting and audio device selection support</li>
+      <li>Advanced smart playlist support with in app activity recording and multiple rule combinations</li>
+      <li>Automatic lyrics/cover/metadata lookups</li>
+      <li>Built-in metadata editor with search and bulk edits</li>
+      <li>Advanced lyric settings with Japanese readings, karaoke mode, offset editor and automatic saving</li>
+      <li>Extensive customization support and keyboard shortcuts catalog</li>
+      <li>Broad codec support including separable CUE tracks</li>
     </ul>
   </description>
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/Rufin.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Browse all tracks</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/tracks_page.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/albums_page.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/albums.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/album_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
-      <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/visualizer.png</image>
+      <caption>Browse genres</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/genres.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Create smart playlists</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/smart_playlists.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Customize the appearance</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/appearance_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/customize_display.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/download_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/download_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
-      <caption>Customize the layout</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/layout_settings.png</image>
+      <caption>View keyboard shortcuts</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/keyboard_shortcuts.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Use the fullscreen player</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/main/data/screenshots/visualizer.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
