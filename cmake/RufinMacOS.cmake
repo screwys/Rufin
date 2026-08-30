@@ -205,8 +205,10 @@ install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/gtk-4.0/"
   DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/gtk-4.0")
 install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/Adwaita/"
   DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/Adwaita")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/AdwaitaLegacy/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/AdwaitaLegacy")
+if(IS_DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/AdwaitaLegacy")
+  install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/AdwaitaLegacy/"
+    DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/AdwaitaLegacy")
+endif()
 install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/hicolor/"
   DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/hicolor")
 install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/mime/"
