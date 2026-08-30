@@ -113,7 +113,6 @@ install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/hicolor/"
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/"
   DESTINATION share/icons/hicolor)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/mime/" DESTINATION share/mime)
-install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/themes/" DESTINATION share/themes)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/licenses/" DESTINATION share/licenses)
 foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
   get_filename_component(RUFIN_LOCALE "${RUFIN_PO_FILE}" NAME_WE)
