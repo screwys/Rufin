@@ -801,6 +801,7 @@ impl Source {
         database: &Database,
         source: library::SourceKey,
         track_key: library::TrackKey,
+        sidecar: bool,
     ) -> bool {
         let Ok(Some(track)) = database
             .track_rows(source, &[track_key], &library::ReadCancellation::new())
@@ -821,7 +822,11 @@ impl Source {
                 };
                 (!matches!(self.implementation, Implementation::OpenSubsonic(_))
                     || self.mapped_metadata_ready().await)
-                    && crate::local::embedded_lyrics_writable(&path)
+                    && if sidecar {
+                        path.parent().is_some_and(std::path::Path::is_dir)
+                    } else {
+                        crate::local::embedded_lyrics_writable(&path)
+                    }
             }
         }
     }
@@ -832,6 +837,7 @@ impl Source {
         source: library::SourceKey,
         track_key: library::TrackKey,
         lyrics: &str,
+        sidecar: bool,
     ) -> Result<(), crate::SourceMetadataError> {
         let track = database
             .track_rows(source, &[track_key], &library::ReadCancellation::new())
@@ -847,25 +853,16 @@ impl Source {
                 .write_lyrics(&track.object_id, lyrics)
                 .await
                 .map_err(|error| crate::SourceMetadataError::Write(error.to_string())),
-            Implementation::Local(local) => {
-                let path = self
-                    .write_file_lyrics(database, source, &track, lyrics)
-                    .await?;
-                local
-                    .publish_paths(database, source, self.source_id.as_str(), &[path], None)
+            Implementation::Local(_) => {
+                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
                     .await
-                    .map(|_| ())
-                    .map_err(|error| {
-                        crate::SourceMetadataError::SavedRefreshFailed(error.to_string())
-                    })
             }
             Implementation::OpenSubsonic(_) => {
                 if !self.mapped_metadata_ready().await {
                     return Err(crate::SourceMetadataError::Unavailable);
                 }
-                self.write_file_lyrics(database, source, &track, lyrics)
+                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
                     .await
-                    .map(|_| ())
             }
         }
     }
@@ -882,13 +879,19 @@ impl Source {
         source: library::SourceKey,
         track: &library::TrackRow,
         lyrics: &str,
-    ) -> Result<PathBuf, crate::SourceMetadataError> {
+        sidecar: bool,
+    ) -> Result<(), crate::SourceMetadataError> {
         let (path, _) = self.metadata_file_target(database, source, track).await?;
+        if sidecar {
+            if !path.parent().is_some_and(std::path::Path::is_dir) {
+                return Err(crate::SourceMetadataError::Unavailable);
+            }
+            return crate::local::metadata::write_sidecar_lyrics(&path, lyrics);
+        }
         if !crate::local::embedded_lyrics_writable(&path) {
             return Err(crate::SourceMetadataError::Unavailable);
         }
-        crate::local::write_embedded_lyrics(&path, lyrics)?;
-        Ok(path)
+        crate::local::write_embedded_lyrics(&path, lyrics)
     }
 
     pub async fn read_track_metadata(
@@ -1635,13 +1638,19 @@ impl Source {
         source: library::SourceKey,
         name: &str,
         tracks: &[library::TrackKey],
-    ) -> SourceResult<(bool, Option<ScanOutcome>)> {
+    ) -> SourceResult<(bool, Option<ScanOutcome>, Option<String>)> {
         if matches!(&self.implementation, Implementation::Local(_)) {
-            let changed = database
-                .create_playlist(source, name, tracks)
-                .await?
-                .is_some();
-            return Ok((changed, None));
+            let playlist = database.create_playlist(source, name, tracks).await?;
+            let object_id = match playlist {
+                Some(playlist) => database
+                    .playlist_rows(source, &[playlist], None, &library::ReadCancellation::new())
+                    .await?
+                    .into_iter()
+                    .next()
+                    .map(|row| row.object_id),
+                None => None,
+            };
+            return Ok((object_id.is_some(), None, object_id));
         }
         let mut pages = tracks.chunks(PROVIDER_PLAYLIST_PAGE);
         let first_ids = match pages.next() {
@@ -1669,9 +1678,10 @@ impl Source {
                 Implementation::Local(_) => unreachable!(),
             }
         }
-        self.accept_playlist_change(database, Some(playlist), None)
-            .await
-            .map(|outcome| (true, Some(outcome)))
+        let outcome = self
+            .accept_playlist_change(database, Some(playlist.clone()), None)
+            .await?;
+        Ok((true, Some(outcome), Some(playlist)))
     }
 
     pub async fn rename_playlist(

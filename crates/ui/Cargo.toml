@@ -23,6 +23,7 @@ library.workspace = true
 localization.workspace = true
 lyrics.workspace = true
 playback.workspace = true
+pulldown-cmark.workspace = true
 secrets.workspace = true
 serde.workspace = true
 sources.workspace = true

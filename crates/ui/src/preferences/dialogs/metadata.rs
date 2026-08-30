@@ -131,49 +131,6 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
     });
 }
 
-pub(crate) fn ensure_track_metadata_available(
-    shell: &Rc<Shell>,
-    track: library::TrackKey,
-    on_ready: Rc<dyn Fn()>,
-) {
-    let Some(selected) = shell.selected_library().as_deref().cloned() else {
-        return;
-    };
-    let receiver = selected.operations.track_metadata(track);
-    let shell = Rc::downgrade(shell);
-    gtk::glib::spawn_future_local(async move {
-        let result = receiver
-            .recv()
-            .await
-            .unwrap_or(Err(SourceMetadataError::Unavailable));
-        let Some(shell) = shell.upgrade() else { return };
-        if !selected_metadata_source_is_current(&shell, &selected) {
-            return;
-        }
-        match result {
-            Ok(_) => on_ready(),
-            Err(SourceMetadataError::LocalAccessRequired { source_path }) => {
-                let retry_shell = Rc::downgrade(&shell);
-                let retry_ready = Rc::clone(&on_ready);
-                present_local_access_recovery(
-                    &shell,
-                    selected,
-                    &source_path,
-                    Rc::new(move || {
-                        if let Some(shell) = retry_shell.upgrade() {
-                            ensure_track_metadata_available(&shell, track, Rc::clone(&retry_ready));
-                        }
-                    }),
-                );
-            }
-            Err(SourceMetadataError::Unavailable) => {
-                shell.show_feedback_toast(tr(msgid("Metadata editing is no longer available")))
-            }
-            Err(error) => shell.show_feedback_toast(error.to_string()),
-        }
-    });
-}
-
 fn present_metadata_error(shell: &Rc<Shell>, message: &str) {
     let dialog = adw::Dialog::builder()
         .title(tr("Edit metadata"))

@@ -454,18 +454,18 @@ _build-dmg identity="development":
 
     repo_root="$PWD"
     build_identity="{{ identity }}"
+    cargo_args=(build --locked --release -p rufin)
     case "$build_identity" in
         development)
             app_id="io.github.screwys.Rufin.Devel"
             bundle_name="Rufin.Devel"
             display_name="Rufin (Development)"
-            cargo_features=(--features development)
+            cargo_args+=(--features development)
             ;;
         stable)
             app_id="io.github.screwys.Rufin"
             bundle_name="Rufin"
             display_name="Rufin"
-            cargo_features=()
             ;;
         *)
             echo "macOS build identity must be 'development' or 'stable'." >&2
@@ -635,7 +635,7 @@ _build-dmg identity="development":
 
     MACOSX_DEPLOYMENT_TARGET="$deployment_target" \
         CARGO_TARGET_DIR="$target_dir" \
-        cargo build --locked --release -p rufin "${cargo_features[@]}"
+        cargo "${cargo_args[@]}"
     cp "$target_dir/release/rufin" "$app_path/Contents/MacOS/rufin"
     cp -L "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
     cp -L "$pixbuf_query_loaders" \
@@ -887,20 +887,20 @@ _build-windows identity="development":
 
     repo_root="$PWD"
     build_identity="{{ identity }}"
+    cargo_args=(build --locked --release -p rufin --bin rufin)
     case "$build_identity" in
         development)
             app_id="io.github.screwys.Rufin.Devel"
             desktop_file="data/io.github.screwys.Rufin.Devel.desktop"
             display_name="Rufin (Development)"
             project_name="Rufin.Devel"
-            cargo_features=(--features development)
+            cargo_args+=(--features development)
             ;;
         stable)
             app_id="io.github.screwys.Rufin"
             desktop_file="data/io.github.screwys.Rufin.desktop"
             display_name="Rufin"
             project_name="Rufin"
-            cargo_features=()
             ;;
         *)
             echo "Windows build identity must be 'development' or 'stable'." >&2
@@ -923,7 +923,7 @@ _build-windows identity="development":
     work_installer="$output_dir/${project_name}-${version}-setup.exe"
     rm -f "$work_installer"
     CARGO_TARGET_DIR="$target_dir" \
-        cargo build --locked --release -p rufin --bin rufin "${cargo_features[@]}"
+        cargo "${cargo_args[@]}"
     if [[ "$build_identity" == stable ]]; then
         CARGO_TARGET_DIR="$target_dir" \
             cargo build --locked --release -p windows-updater --bin rufin-update-helper

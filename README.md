@@ -1,18 +1,18 @@
 <h1>
   Rufin
   <a href="Cargo.toml"><img alt="Rust 1.95+" src="https://img.shields.io/badge/rust-1.95%2B-f74c00?logo=rust"></a>
-  <a href="LICENSE"><img alt="License: GPL-3.0-or-later" src="https://img.shields.io/badge/license-GPL--3.0--or--later-blue.svg"></a>
+  <a href="LICENSE"><img alt="License: GPL-3.0+" src="https://img.shields.io/badge/license-GPL--3.0%2B-blue.svg"></a>
   <a href="https://gitlab.gnome.org/GNOME/libadwaita/"><img alt="GTK 4 libadwaita" src="https://img.shields.io/badge/GTK%204-libadwaita-3584E4?logo=gnome&amp;logoColor=white&amp;labelColor=2E3436"></a>
   <a href="https://flathub.org/apps/io.github.screwys.Rufin"><img alt="Flathub installs" src="https://img.shields.io/flathub/downloads/io.github.screwys.Rufin?logo=flathub&amp;label=flathub&amp;color=4A86CF"></a>
   <a href="https://aur.archlinux.org/packages/rufin-bin"><img alt="AUR version" src="https://img.shields.io/aur/version/rufin-bin?logo=archlinux&amp;label=AUR&amp;color=1793D1"></a>
-  <a href="https://search.nixos.org/packages?channel=unstable&query=rufin"><img alt="Nixpkgs version" src="https://repology.org/badge/version-for-repo/nix_unstable/rufin.svg?header=Nixpkgs"></a>
+  <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
 <img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player written in Rust, available on [multiple platforms](#installation). It can play music from your Jellyfin, Navidrome/OpenSubsonic flavor servers and local folders; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
-![Rufin](data/screenshots/Rufin.png)
+![Rufin](data/screenshots/Rufin_full.png)
 
 # Features
 
@@ -34,14 +34,17 @@
 ## 📚 Library
 
 - First-class Jellyfin, Navidrome/OpenSubsonic and local music library support
+- Drag songs from your queue or lists to playlists, or select multiple of them with your keyboard batch operations
 - Combine multiple local folders in a single listening session
 - Download tracks manually or through automatic rules, then keep using the same remote library while offline
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
 - Metadata editing for supported servers and local formats; bulk editing and `Identify` available with auto-fill
 - Automatic metadata, artwork and lyrics caching
+- Extensive lyrics settings
 - Easy rating support, with an option to enable visual-only partial stars for OpenSubsonic
 - Virtualized, smooth to scroll pages
 - EBU R128 tag writing option for local folders
+- Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
 
 ## 🌍️ Discovery
 
@@ -50,7 +53,7 @@
 - Dedicated Search, Folders and History pages
 - Moods browsing and mood/BPM-based smart playlists for Navidrome, Subsonic and local libraries
 - Synchronized lyrics with built-in search and adjustable offset
-- Furigana and Romaji lyrics overlays, translation preference and word-by-word karaoke support
+- Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
 
 ## 🔌 Integrations
 
@@ -66,25 +69,23 @@
 - Fully usable across different window sizes, including a separate compact layout 
 - Adjustable sidebars with separate presets for different window sizes
 - Configurable layouts, context menus and GTK menus
-- Keyboard shortcuts for playback, navigation and library browsing
+- Extensive keyboard shortcuts catalog
 - Automatic updates for Windows and macOS builds
 - Easy built-in log viewing and exporting (privacy-conscious)
 - Type to search for routes
 - Can run in the background or set to launch minimized
 - System tray integration
-- 
+
 # Screenshots
 
-
-![Tracks page](data/screenshots/tracks_page.png)
-![Albums page](data/screenshots/albums_page.png)
-![Artist details](data/screenshots/artist_detail.png)
-![Album details](data/screenshots/album_detail.png)
-![Fullscreen player](data/screenshots/visualizer.png)
-![Customize display](data/screenshots/customize_display.png)
-![Download settings](data/screenshots/download_settings.png)
-![Playback settings](data/screenshots/playback_settings.png)
-![Layout settings](data/screenshots/layout_settings.png)
+| | | | |
+|:---:|:---:|:---:|:---:|
+| ![Home](data/screenshots/Rufin.png) | ![Albums](data/screenshots/albums.png) | ![Artist details](data/screenshots/artist_detail.png) | ![Album details](data/screenshots/album_detail.png) |
+| **Home** | **Albums** | **Artist details** | **Album details** |
+| ![Genres](data/screenshots/genres.png) | ![Smart playlists](data/screenshots/smart_playlists.png) | ![Appearance settings](data/screenshots/appearance_settings.png) | ![Customize display](data/screenshots/customize_display.png) |
+| **Genres** | **Smart playlists** | **Appearance settings** | **Customize display** |
+| ![Download settings](data/screenshots/download_settings.png) | ![Playback settings](data/screenshots/playback_settings.png) | ![Keyboard shortcuts](data/screenshots/keyboard_shortcuts.png) | ![Fullscreen player](data/screenshots/visualizer.png) |
+| **Download settings** | **Playback settings** | **Keyboard shortcuts** | **Fullscreen player** |
 
 # Installation
 

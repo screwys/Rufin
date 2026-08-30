@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-28 16:54+0000\n"
+"PO-Revision-Date: 2026-08-29 11:10+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -120,6 +120,12 @@ msgstr ""
 "Dadurch wirst du abgemeldet und deine gespeicherten Zugangsdaten, "
 "einschließlich API-Schlüsseln, werden gelöscht. Der App-Cache bleibt "
 "erhalten."
+
+msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
@@ -272,6 +278,11 @@ msgstr "Erscheint auf"
 msgid "Application name"
 msgstr "Anwendungsname"
 
+#, fuzzy
+#| msgid "Template"
+msgid "Apply Template"
+msgstr "Vorlage"
+
 msgid "Artist / Album"
 msgstr "Künstler / Album"
 
@@ -402,6 +413,9 @@ msgstr "Abgerufene Songtexte für diesen Titel löschen"
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
 
+msgid "Clearing queue also clears the current song"
+msgstr ""
+
 msgid "Close Window"
 msgstr "Fenster schließen"
 
@@ -418,6 +432,11 @@ msgid "Club"
 msgstr "Klub"
 
 msgid "Collapse sidebar"
+msgstr "Seitenleiste einklappen"
+
+#, fuzzy
+#| msgid "Collapse sidebar"
+msgid "Collapse/expand sidebar"
 msgstr "Seitenleiste einklappen"
 
 msgid "Collection"
@@ -443,6 +462,9 @@ msgstr "Kommentar"
 
 msgid "Compact"
 msgstr "Kompakt"
+
+msgid "Confirm"
+msgstr ""
 
 msgid "Connect"
 msgstr "Verbinden"
@@ -558,6 +580,11 @@ msgstr "Diagnoseprotokoll gespeichert"
 msgid "Diagnostic log"
 msgstr "Diagnoseprotokoll"
 
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
+
 msgid "Disable private mode"
 msgstr "Privaten Modus deaktivieren"
 
@@ -635,6 +662,11 @@ msgstr "Metadaten bearbeiten"
 
 msgid "Edit"
 msgstr "Bearbeiten"
+
+#, fuzzy
+#| msgid "Genre tracks"
+msgid "Embed in track"
+msgstr "Genre-Titel"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "EBU-R128-Analyse aktivieren?"
@@ -987,7 +1019,7 @@ msgid "Lock metadata"
 msgstr "Metadaten sperren"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Protokolle wurden kopiert"
 
 msgid "Loudness normalization"
 msgstr "Lautstärkenormalisierung"
@@ -1000,6 +1032,11 @@ msgstr "Liedtext-Zeitversatz (ms)"
 
 msgid "Lyrics settings"
 msgstr "Liedtexteinstellungen"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics storage"
+msgstr "Liedtexte geladen"
 
 msgid "Lyrics"
 msgstr "Songtexte"
@@ -1070,10 +1107,8 @@ msgstr "Anbieter nach oben verschieben"
 msgid "Move up"
 msgstr "Nach oben verschieben"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Auswahl"
+msgstr "Mehrfachauswahl"
 
 msgid "Multiple values"
 msgstr "Mehrere Werte"
@@ -1126,10 +1161,8 @@ msgstr "Navidrome"
 msgid "Navigate page items"
 msgstr "Seitenelemente navigieren"
 
-#, fuzzy
-#| msgid "Type to search"
 msgid "Navigate to Search"
-msgstr "Tippen zum Suchen"
+msgstr "Zur Suche wechseln"
 
 msgid "Navigation"
 msgstr "Navigation"
@@ -1181,15 +1214,11 @@ msgstr "Noch keine Alben von diesem Künstler"
 msgid "No cached server path yet"
 msgstr "Kein Server-Pfad zwischengespeichert"
 
-#, fuzzy
-#| msgid "No favorites yet"
 msgid "No favorite albums yet"
-msgstr "Noch keine Favoriten"
+msgstr "Noch keine Lieblingsalben"
 
-#, fuzzy
-#| msgid "No favorites yet"
 msgid "No favorite artists yet"
-msgstr "Noch keine Favoriten"
+msgstr "Noch keine Lieblingskünstler"
 
 msgid "No favorites yet"
 msgstr "Noch keine Favoriten"
@@ -1523,10 +1552,8 @@ msgstr "Rufin beenden"
 msgid "Quit"
 msgstr "Beenden"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Auswahl"
+msgstr "Bereichsauswahl"
 
 msgid "Rating"
 msgstr "Bewertung"
@@ -1621,6 +1648,11 @@ msgstr "Entfernen"
 msgid "Removed from favorites"
 msgstr "Aus Favoriten entfernt"
 
+#, fuzzy
+#| msgid "Remove from Pins"
+msgid "Removed from"
+msgstr "Aus den angehefteten Elementen entfernen"
+
 msgid "Rename Playlist"
 msgstr "Playlist umbenennen"
 
@@ -1687,6 +1719,16 @@ msgstr "Zuordnung speichern"
 msgid "Save Server Settings"
 msgstr "Servereinstellungen speichern"
 
+#, fuzzy
+#| msgid "Saves lyrics to your source"
+msgid "Save action saves the lyrics directly to your source"
+msgstr "Speichert Liedtexte in deiner Quelle"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Save lyrics automatically"
+msgstr "Die Suche startet automatisch"
+
 msgid "Save to rescan"
 msgstr "Zum erneuten Scannen speichern"
 
@@ -1719,6 +1761,11 @@ msgstr "Songtext-Suche"
 
 msgid "Search current folder"
 msgstr "Aktuellen Ordner durchsuchen"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search in page"
+msgstr "Erneut suchen"
 
 msgid "Search is unavailable"
 msgstr "Suche ist nicht verfügbar"
@@ -1780,8 +1827,6 @@ msgstr "Musikordner auswählen"
 msgid "Select Source"
 msgstr "Quelle auswählen"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Alle auswählen"
 
@@ -1963,10 +2008,10 @@ msgid "Support"
 msgstr "Support"
 
 msgid "Switch Search/Favorites tabs"
-msgstr ""
+msgstr "Zwischen „Suche“ und „Favoriten“ wechseln"
 
 msgid "Switch between layouts"
-msgstr ""
+msgstr "Zwischen Layouts wechseln"
 
 msgid "Switching library..."
 msgstr "Bibliothek wird gewechselt..."
@@ -2084,9 +2129,6 @@ msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
-
-msgid "Use Template"
-msgstr "Vorlage verwenden"
 
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
@@ -2208,6 +2250,9 @@ msgstr "kbps"
 msgid "range"
 msgstr "Bereich"
 
+msgid "separate .lrc file"
+msgstr ""
+
 msgid "to"
 msgstr "bis"
 
@@ -2257,6 +2302,9 @@ msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
+#~ msgid "Use Template"
+#~ msgstr "Vorlage verwenden"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Zum Künstler springen"
 
@@ -2280,9 +2328,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "In den Infobereich minimieren"

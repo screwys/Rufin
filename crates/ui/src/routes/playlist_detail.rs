@@ -237,8 +237,13 @@ impl Shell {
                 let playlist = owner
                     .saved_key()
                     .expect("saved Playlist membership has one Playlist key");
-                let entries =
-                    Rc::new(self.playlist_entries_view(&selected, playlist, order, first_rows));
+                let entries = Rc::new(self.playlist_entries_view(
+                    &selected,
+                    playlist,
+                    owner.name().to_string(),
+                    order,
+                    first_rows,
+                ));
                 let navigation = entries.item_navigation();
                 let widget = entries.widget();
                 let database = Arc::clone(&selected.database);

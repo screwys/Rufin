@@ -708,7 +708,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             "en",
             "Latn",
             [1; 32],
-            true,
+            "source",
             &cancel,
         )
         .await
@@ -724,7 +724,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
             "en",
             "Latn",
             [1; 32],
-            false,
+            "external",
             &cancel,
         )
         .await
@@ -741,7 +741,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
                 "en",
                 "Latn",
                 [2; 32],
-                true,
+                "source",
                 &cancel
             )
             .await
@@ -773,7 +773,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
                 "",
                 "",
                 [2; 32],
-                true,
+                "source",
                 &cancel
             )
             .await

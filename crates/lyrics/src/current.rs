@@ -125,6 +125,7 @@ struct LyricsWriteTarget {
     track_key: TrackKey,
     content: String,
     media_id: CurrentMediaId,
+    sidecar: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -237,10 +238,16 @@ impl LyricsService {
     fn check_write_access(self: &Arc<Self>, key: DocumentKey, context: LyricsContext) {
         let service = Arc::clone(self);
         self.runtime.spawn(async move {
+            let sidecar = service
+                .state
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner())
+                .settings
+                .save_lyrics_as_sidecar;
             let writable = match (context.source.as_ref(), key.track_key) {
                 (Some(source), Some(track)) => {
                     source
-                        .lyrics_writable(&context.database, key.source_key, track)
+                        .lyrics_writable(&context.database, key.source_key, track, sidecar)
                         .await
                 }
                 _ => false,
@@ -250,6 +257,9 @@ impl LyricsService {
                     .state
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if state.settings.save_lyrics_as_sidecar != sidecar {
+                    return;
+                }
                 let Some(current) = state.current.as_mut().filter(|current| current.key == key)
                 else {
                     return;
@@ -501,33 +511,8 @@ impl LyricsService {
         use_cache: bool,
     ) {
         let mut fallback = None;
-        if !resolution.cue_track
-            && let Some(input) = resolution.local.as_ref()
-        {
-            let path = input.audio_path.clone();
-            let document = tokio::task::spawn_blocking(move || embedded_lyrics_from_audio(&path))
-                .await
-                .ok()
-                .flatten();
-            if let Some(document) = document
-                && self
-                    .resolve_candidate(
-                        request,
-                        &key,
-                        &resolution,
-                        &cancelled,
-                        &mut fallback,
-                        document,
-                    )
-                    .await
-            {
-                return;
-            }
-        }
-        if !self.current_request_active(request, &key, &cancelled) {
-            return;
-        }
-        if let Some(input) = resolution.local.take() {
+        if let Some(input) = resolution.local.as_ref() {
+            let input = input.clone();
             let document = tokio::task::spawn_blocking(move || local_sidecar_lyrics(&input))
                 .await
                 .ok()
@@ -550,62 +535,27 @@ impl LyricsService {
         if !self.current_request_active(request, &key, &cancelled) {
             return;
         }
-
-        if use_cache {
-            let cached = if let Some(track_key) = key.track_key {
-                let (role, language, script) = key.cache_key(&resolution.plan);
-                let cancellation = ReadCancellation::new();
-                self.database
-                    .lyrics_cache_for_role(
-                        key.source_key,
-                        track_key,
-                        &role,
-                        &language,
-                        &script,
-                        resolution.input.digest,
-                        resolution.plan.prefers_server(),
-                        &cancellation,
-                    )
+        if !resolution.cue_track
+            && let Some(input) = resolution.local.take()
+        {
+            let document =
+                tokio::task::spawn_blocking(move || embedded_lyrics_from_audio(&input.audio_path))
                     .await
                     .ok()
-                    .flatten()
-            } else {
-                None
-            };
-            if let Some(cached) = cached {
-                let authority = cached.authority.clone();
-                let candidate = cached_bundle(&cached)
-                    .and_then(lyrics_with_displayable_content)
-                    .filter(|document| {
-                        cached_lyrics_allowed(document, &resolution.plan, resolution.cue_track)
-                    });
-                if let Some(document) = candidate {
-                    if acquisition_complete(&document, &resolution.plan) {
-                        self.accept_bundle(request, &key, Arc::new(document));
-                        return;
-                    }
-                    if prefer_fallback(&mut fallback, document, &resolution.plan) {
-                        self.show_fallback(request, &key, fallback.as_ref().expect("fallback"));
-                    }
-                } else {
-                    if !self.current_request_active(request, &key, &cancelled) {
-                        return;
-                    }
-                    if let Some(track_key) = key.track_key {
-                        let (role, language, script) = key.cache_key(&resolution.plan);
-                        let _ = self
-                            .database
-                            .remove_lyrics_cache(
-                                key.source_key,
-                                track_key,
-                                &authority,
-                                &role,
-                                &language,
-                                &script,
-                            )
-                            .await;
-                    }
-                }
+                    .flatten();
+            if let Some(document) = document
+                && self
+                    .resolve_candidate(
+                        request,
+                        &key,
+                        &resolution,
+                        &cancelled,
+                        &mut fallback,
+                        document,
+                    )
+                    .await
+            {
+                return;
             }
         }
         if !self.current_request_active(request, &key, &cancelled) {
@@ -613,6 +563,23 @@ impl LyricsService {
         }
 
         for authority in acquisition_order(resolution.plan.prefers_server()) {
+            if use_cache
+                && self
+                    .resolve_cached_candidate(
+                        request,
+                        &key,
+                        &resolution,
+                        &cancelled,
+                        &mut fallback,
+                        authority,
+                    )
+                    .await
+            {
+                return;
+            }
+            if !self.current_request_active(request, &key, &cancelled) {
+                return;
+            }
             let complete = match authority {
                 LyricsAuthority::Source => {
                     self.resolve_source_candidate(
@@ -659,6 +626,68 @@ impl LyricsService {
         if self.current_request_active(request, &key, &cancelled) {
             self.finish_current(request, &key, None);
         }
+    }
+
+    async fn resolve_cached_candidate(
+        self: &Arc<Self>,
+        request: u64,
+        key: &DocumentKey,
+        resolution: &CurrentResolution,
+        cancelled: &AtomicBool,
+        fallback: &mut Option<LyricsBundle>,
+        authority: LyricsAuthority,
+    ) -> bool {
+        let Some(track_key) = key.track_key else {
+            return false;
+        };
+        let (role, language, script) = key.cache_key(&resolution.plan);
+        let authority = match authority {
+            LyricsAuthority::Source => "source",
+            LyricsAuthority::External => "external",
+        };
+        let cached = self
+            .database
+            .lyrics_cache_for_role(
+                key.source_key,
+                track_key,
+                &role,
+                &language,
+                &script,
+                resolution.input.digest,
+                authority,
+                &ReadCancellation::new(),
+            )
+            .await
+            .ok()
+            .flatten();
+        let Some(cached) = cached else {
+            return false;
+        };
+        let candidate = cached_bundle(&cached)
+            .and_then(lyrics_with_displayable_content)
+            .filter(|document| {
+                document.origin != LyricsOrigin::Local
+                    && cached_lyrics_allowed(document, &resolution.plan, resolution.cue_track)
+            });
+        if let Some(document) = candidate {
+            return self
+                .resolve_candidate(request, key, resolution, cancelled, fallback, document)
+                .await;
+        }
+        if self.current_request_active(request, key, cancelled) {
+            let _ = self
+                .database
+                .remove_lyrics_cache(
+                    key.source_key,
+                    track_key,
+                    authority,
+                    &role,
+                    &language,
+                    &script,
+                )
+                .await;
+        }
+        false
     }
 
     async fn resolve_source_candidate(
@@ -780,32 +809,34 @@ impl LyricsService {
         let write_target = matches!(document.origin, LyricsOrigin::External(_))
             .then(|| self.fetched_lyrics_write_target(request, key, &document))
             .flatten();
-        match cache_write(key, plan, &document) {
-            Ok((authority, role, language, script, payload, updated_at)) => {
-                if let Some(track_key) = key.track_key
-                    && let Err(error) = self
-                        .database
-                        .write_lyrics_cache(
-                            key.source_key,
-                            track_key,
-                            &authority,
-                            &role,
-                            &language,
-                            &script,
-                            input.digest,
-                            &payload,
-                            updated_at,
-                        )
-                        .await
-                {
-                    warn!(%error, "could not save lyrics cache");
+        if document.origin != LyricsOrigin::Local {
+            match cache_write(key, plan, &document) {
+                Ok((authority, role, language, script, payload, updated_at)) => {
+                    if let Some(track_key) = key.track_key
+                        && let Err(error) = self
+                            .database
+                            .write_lyrics_cache(
+                                key.source_key,
+                                track_key,
+                                &authority,
+                                &role,
+                                &language,
+                                &script,
+                                input.digest,
+                                &payload,
+                                updated_at,
+                            )
+                            .await
+                    {
+                        warn!(%error, "could not save lyrics cache");
+                    }
                 }
+                Err(error) => warn!(%error, "could not encode lyrics cache"),
             }
-            Err(error) => warn!(%error, "could not encode lyrics cache"),
         }
         self.accept_bundle(request, key, Arc::new(document));
         if let Some(target) = write_target {
-            self.queue_fetched_lyrics_write(target);
+            self.queue_lyrics_write(target);
         }
     }
 
@@ -827,7 +858,7 @@ impl LyricsService {
             else {
                 return None;
             };
-            if !state.settings.save_fetched_lyrics {
+            if !state.settings.save_lyrics_to_source || !state.settings.save_lyrics_automatically {
                 return None;
             }
             let (Some(source), Some(track_key)) = (current.context.source.clone(), key.track_key)
@@ -844,11 +875,24 @@ impl LyricsService {
                 track_key,
                 content: lyrics_to_lrc_text(document, 0),
                 media_id: current.context.media.id.clone(),
+                sidecar: state.settings.save_lyrics_as_sidecar,
             })
         }
     }
 
-    async fn write_fetched_lyrics(&self, target: LyricsWriteTarget) {
+    async fn write_lyrics_to_source(&self, target: LyricsWriteTarget) {
+        if !target
+            .source
+            .lyrics_writable(
+                &target.database,
+                target.source_key,
+                target.track_key,
+                target.sidecar,
+            )
+            .await
+        {
+            return;
+        }
         let Ok(_permit) = self.write_lane.acquire().await else {
             return;
         };
@@ -859,21 +903,23 @@ impl LyricsService {
                 target.source_key,
                 target.track_key,
                 &target.content,
+                target.sidecar,
             )
             .await
         {
-            warn!(%error, "could not save fetched lyrics");
+            warn!(%error, "could not save lyrics to source");
             self.publish(LyricsEvent::SourceSaveFailed {
                 media_id: target.media_id,
                 error,
             });
+            return;
         }
     }
 
-    fn queue_fetched_lyrics_write(self: &Arc<Self>, target: LyricsWriteTarget) {
+    fn queue_lyrics_write(self: &Arc<Self>, target: LyricsWriteTarget) {
         let service = Arc::clone(self);
         self.runtime.spawn(async move {
-            service.write_fetched_lyrics(target).await;
+            service.write_lyrics_to_source(target).await;
         });
     }
 
@@ -1084,13 +1130,14 @@ impl LyricsService {
         self: &Arc<Self>,
         media_id: CurrentMediaId,
         result: LyricsSearchResult,
-        path: PathBuf,
+        path: Option<PathBuf>,
     ) {
         let Some((request, key, input, plan)) = self.begin_external_document(&media_id, &result)
         else {
             return;
         };
         let service = Arc::clone(self);
+        let save_to_source = path.is_none();
         let _task = self.runtime.spawn(async move {
             let save_plan = plan.clone();
             let saved = tokio::task::spawn_blocking(move || {
@@ -1107,13 +1154,23 @@ impl LyricsService {
                 let Some(document) = bundle.selected_document(&selection) else {
                     return Ok(None);
                 };
-                let path = save_current_lyrics(document, 0, path)?;
-                Ok(Some((path, bundle)))
+                let source_content = save_to_source.then(|| lyrics_to_lrc_text(document, 0));
+                let path = path
+                    .map(|path| save_current_lyrics(document, 0, path))
+                    .transpose()?;
+                Ok(Some((path, bundle, source_content)))
             })
             .await;
             match saved {
-                Ok(Ok(Some((path, document)))) => {
+                Ok(Ok(Some((path, document, source_content)))) => {
                     let document = Arc::new(document);
+                    if let Some(content) = source_content {
+                        if service.matches_current(request, &key) {
+                            service.accept_bundle(request, &key, Arc::clone(&document));
+                        }
+                        service.update_lyrics_text(media_id, content);
+                        return;
+                    }
                     if let (
                         Some(track_key),
                         Ok((authority, role, language, script, payload, updated_at)),
@@ -1141,9 +1198,11 @@ impl LyricsService {
                         service.accept_bundle(request, &key, Arc::clone(&document));
                     }
                     if let Some(target) = write_target {
-                        service.queue_fetched_lyrics_write(target);
+                        service.queue_lyrics_write(target);
                     }
-                    service.publish(LyricsEvent::Saved { media_id, path });
+                    if let Some(path) = path {
+                        service.publish(LyricsEvent::Saved { media_id, path });
+                    }
                 }
                 Ok(Ok(None) | Err(_)) | Err(_) => service.finish_current(request, &key, None),
             }
@@ -1204,7 +1263,12 @@ impl LyricsService {
         Some((prepared.0, prepared.1, prepared.2, prepared.3))
     }
 
-    fn save_current(self: &Arc<Self>, media_id: CurrentMediaId, offset_millis: i64, path: PathBuf) {
+    fn save_current(
+        self: &Arc<Self>,
+        media_id: CurrentMediaId,
+        offset_millis: i64,
+        path: Option<PathBuf>,
+    ) {
         let document = {
             let state = self
                 .state
@@ -1217,6 +1281,10 @@ impl LyricsService {
                 .and_then(|current| current.document.clone())
         };
         let Some(document) = document else {
+            return;
+        };
+        let Some(path) = path else {
+            self.update_lyrics_text(media_id, lyrics_to_lrc_text(&document, offset_millis));
             return;
         };
         let service = Arc::clone(self);
@@ -1261,23 +1329,26 @@ impl LyricsService {
             let plan = state
                 .settings
                 .configured_lyrics_plan(state.private_mode, &key.track_object_id);
+            let sidecar = state.settings.save_lyrics_as_sidecar;
             cancel_current_work(&mut state);
             let request = self.next_request.fetch_add(1, Ordering::AcqRel);
             if let Some(current) = state.current.as_mut() {
                 current.request = request;
                 current.loading = false;
             }
-            (request, key, input, plan, source, database, track_key)
+            (
+                request, track_key, input, plan, source, database, key, sidecar,
+            )
         };
         let service = Arc::clone(self);
-        let (request, key, input, plan, source, database, track_key) = prepared;
+        let (request, track_key, input, plan, source, database, key, sidecar) = prepared;
         let content = lyrics_to_lrc_text(document, 0);
         let _task = self.runtime.spawn(async move {
             let Ok(_permit) = service.write_lane.acquire().await else {
                 return;
             };
             match source
-                .write_lyrics(&database, key.source_key, track_key, &content)
+                .write_lyrics(&database, key.source_key, track_key, &content, sidecar)
                 .await
             {
                 Ok(()) => match source.refresh_written_lyrics().await {
@@ -1347,11 +1418,20 @@ impl LyricsHandle {
     }
 
     pub fn save_result(&self, media_id: CurrentMediaId, result: LyricsSearchResult, path: PathBuf) {
-        self.service.save_result(media_id, result, path);
+        self.service.save_result(media_id, result, Some(path));
+    }
+
+    pub fn save_result_to_source(&self, media_id: CurrentMediaId, result: LyricsSearchResult) {
+        self.service.save_result(media_id, result, None);
     }
 
     pub fn save_current(&self, media_id: CurrentMediaId, offset_millis: i64, path: PathBuf) {
-        self.service.save_current(media_id, offset_millis, path);
+        self.service
+            .save_current(media_id, offset_millis, Some(path));
+    }
+
+    pub fn save_current_to_source(&self, media_id: CurrentMediaId, offset_millis: i64) {
+        self.service.save_current(media_id, offset_millis, None);
     }
 
     pub fn update_lyrics_text(&self, media_id: CurrentMediaId, text: String) {

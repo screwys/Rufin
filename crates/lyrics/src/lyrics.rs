@@ -583,6 +583,8 @@ struct NeteaseLyricsResponse {
     tlyric: Option<NeteaseLyricsBody>,
     #[serde(default)]
     yrc: Option<NeteaseLyricsBody>,
+    #[serde(default)]
+    romalrc: Option<NeteaseLyricsBody>,
 }
 #[derive(Debug, Deserialize)]
 struct NeteaseLyricsBody {
@@ -1186,6 +1188,23 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
             agents: Vec::new(),
         });
     }
+    if let Some(content) = response
+        .romalrc
+        .and_then(|body| body.lyric)
+        .filter(|lyrics| !lyrics.trim().is_empty())
+    {
+        documents.push(LyricsDocument {
+            role: LyricsRole::Pronunciation,
+            language: None,
+            offset_millis: 0,
+            lines: content
+                .lines()
+                .filter_map(lyric_line_from_text)
+                .filter(|line| provider_line_has_content(ExternalLyricsProvider::Netease, line))
+                .collect(),
+            agents: Vec::new(),
+        });
+    }
     lyrics_with_displayable_content(Lyrics::from_documents(
         LyricsOrigin::External(ExternalLyricsProvider::Netease),
         documents,
@@ -1201,6 +1220,7 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, Stri
         pairs.append_pair("lv", "-1");
         pairs.append_pair("tv", "-1");
         pairs.append_pair("yv", "-1");
+        pairs.append_pair("rv", "-1");
     }
     let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric lookup")?;
     let response = serde_json::from_str::<NeteaseLyricsResponse>(&body)
@@ -1213,6 +1233,11 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, Stri
             .map_or(0, str::len),
         lrc_bytes = response
             .lrc
+            .as_ref()
+            .and_then(|body| body.lyric.as_deref())
+            .map_or(0, str::len),
+        romalrc_bytes = response
+            .romalrc
             .as_ref()
             .and_then(|body| body.lyric.as_deref())
             .map_or(0, str::len),
@@ -1988,7 +2013,7 @@ pub struct LocalLyricsInput {
 }
 
 pub(crate) fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
-    for path in local_sidecar_candidates(&input.audio_path, Some(&input.title), input.cue_track) {
+    for path in local_sidecar_candidates(input) {
         if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
             return Some(lyrics);
         }
@@ -2016,53 +2041,26 @@ fn lyrics_from_sidecar_file(path: &Path) -> Option<Lyrics> {
     let content = read_text_file_bounded(path, LOCAL_LYRICS_MAX_BYTES).ok()?;
     lyrics_from_local_text(&content)
 }
-fn local_sidecar_candidates(
-    audio_path: &Path,
-    title: Option<&str>,
-    cue_track: bool,
-) -> Vec<PathBuf> {
+fn local_sidecar_candidates(input: &LocalLyricsInput) -> Vec<PathBuf> {
     let mut paths = Vec::new();
-    if !cue_track {
-        paths.push(audio_path.with_extension("lrc"));
+    if !input.cue_track {
+        paths.push(input.audio_path.with_extension("lrc"));
+        paths.push(input.audio_path.with_extension("LRC"));
     }
-    if let Some(path) = title_matched_lrc(audio_path.parent(), title)
-        && !paths.iter().any(|candidate| candidate == &path)
-    {
-        paths.push(path);
+    if let Some(parent) = input.audio_path.parent().filter(|_| {
+        let title = Path::new(&input.title);
+        title.components().count() == 1 && title.file_name().is_some()
+    }) {
+        for path in [
+            parent.join(format!("{}.lrc", input.title)),
+            parent.join(format!("{}.LRC", input.title)),
+        ] {
+            if !paths.iter().any(|candidate| candidate == &path) {
+                paths.push(path);
+            }
+        }
     }
     paths
-}
-fn title_matched_lrc(parent: Option<&Path>, title: Option<&str>) -> Option<PathBuf> {
-    let parent = parent?;
-    let title_key = normalized_lyrics_name(title?);
-    if title_key.is_empty() {
-        return None;
-    }
-    let mut matches = fs::read_dir(parent)
-        .ok()?
-        .filter_map(Result::ok)
-        .map(|entry| entry.path())
-        .filter(|path| {
-            path.is_file()
-                && path
-                    .extension()
-                    .and_then(|extension| extension.to_str())
-                    .is_some_and(|extension| extension.eq_ignore_ascii_case("lrc"))
-                && path
-                    .file_stem()
-                    .and_then(|stem| stem.to_str())
-                    .is_some_and(|stem| normalized_lyrics_name(stem) == title_key)
-        })
-        .collect::<Vec<_>>();
-    matches.sort();
-    matches.into_iter().next()
-}
-fn normalized_lyrics_name(value: &str) -> String {
-    value
-        .chars()
-        .flat_map(char::to_lowercase)
-        .filter(|character| character.is_alphanumeric())
-        .collect()
 }
 fn read_response_text_bounded(
     response: reqwest::blocking::Response,
@@ -2122,6 +2120,25 @@ mod tests {
     use super::*;
 
     #[test]
+    fn local_sidecar_candidates_are_bounded_and_prefer_the_audio_stem() {
+        let input = LocalLyricsInput {
+            audio_path: PathBuf::from("/music/01 - Track.flac"),
+            title: "Track".to_string(),
+            cue_track: false,
+        };
+
+        assert_eq!(
+            local_sidecar_candidates(&input),
+            vec![
+                PathBuf::from("/music/01 - Track.lrc"),
+                PathBuf::from("/music/01 - Track.LRC"),
+                PathBuf::from("/music/Track.lrc"),
+                PathBuf::from("/music/Track.LRC"),
+            ]
+        );
+    }
+
+    #[test]
     fn enhanced_lrc_preserves_unicode_word_ranges_and_round_trips() {
         let content = "[00:01.000]<00:01.100>君と <00:01.600>blue";
         let lyrics = lyrics_from_text_content(LyricsOrigin::Local, content);
@@ -2171,5 +2188,27 @@ mod tests {
         assert_eq!(document.lines[0].end_millis, Some(2_000));
         assert_eq!(document.lines[0].cue_lines[0].cues.len(), 2);
         assert!(document.has_word_timing());
+    }
+
+    #[test]
+    fn netease_romalrc_becomes_a_pronunciation_document() {
+        let response = serde_json::from_str::<NeteaseLyricsResponse>(
+            r#"{
+                "lrc":{"lyric":"[00:01.00]あの娘たぶんいいひと"},
+                "romalrc":{"lyric":"[00:01.00]ano ko tabun ii hito"}
+            }"#,
+        )
+        .expect("NetEase response");
+        let lyrics = lyrics_from_netease_response(response).expect("lyrics");
+        let original = lyrics
+            .selected_document(&crate::Settings::default())
+            .expect("original lyrics");
+        let pronunciation = lyrics
+            .pronunciation_for(original)
+            .expect("pronunciation lyrics");
+
+        assert_eq!(original.lines[0].text, "あの娘たぶんいいひと");
+        assert_eq!(pronunciation.lines[0].text, "ano ko tabun ii hito");
+        assert_eq!(pronunciation.lines[0].start_millis, Some(1_000));
     }
 }

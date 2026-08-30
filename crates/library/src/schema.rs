@@ -7,7 +7,7 @@ use sqlx::{Connection, Sqlite, SqliteConnection, Transaction};
 use crate::{LibraryError, LibraryResult};
 
 pub(crate) const APPLICATION_ID: i64 = 1_381_320_270;
-pub(crate) const SCHEMA_VERSION: i64 = 42;
+pub(crate) const SCHEMA_VERSION: i64 = 43;
 pub(crate) const LAST_LEGACY_SCHEMA_VERSION: i64 = 40;
 const FIRST_LEGACY_SCHEMA_VERSION: i64 = 32;
 const FIRST_CURRENT_FORMAT_SCHEMA_VERSION: i64 = 41;
@@ -20,6 +20,7 @@ const MEDIA_STATE_SCHEMA_VERSION: i64 = 38;
 const USER_RATINGS_SCHEMA_VERSION: i64 = 39;
 const CATALOG_OWNERS_SCHEMA_VERSION: i64 = 41;
 const REPLAY_GAIN_SCHEMA_VERSION: i64 = 42;
+const PLAYLIST_POSITION_SCHEMA_VERSION: i64 = 43;
 
 struct SchemaMigration {
     from_version: i64,
@@ -61,10 +62,16 @@ const LEGACY_MIGRATIONS: &[SchemaMigration] = &[
     },
 ];
 
-const CURRENT_MIGRATIONS: &[SchemaMigration] = &[SchemaMigration {
-    from_version: CATALOG_OWNERS_SCHEMA_VERSION,
-    to_version: REPLAY_GAIN_SCHEMA_VERSION,
-}];
+const CURRENT_MIGRATIONS: &[SchemaMigration] = &[
+    SchemaMigration {
+        from_version: CATALOG_OWNERS_SCHEMA_VERSION,
+        to_version: REPLAY_GAIN_SCHEMA_VERSION,
+    },
+    SchemaMigration {
+        from_version: REPLAY_GAIN_SCHEMA_VERSION,
+        to_version: PLAYLIST_POSITION_SCHEMA_VERSION,
+    },
+];
 
 pub(crate) const TABLES: &[&str] = &[
     "sources",
@@ -102,7 +109,7 @@ pub(crate) const TABLES: &[&str] = &[
 const FRESH_SCHEMA: &str = r###"
 BEGIN IMMEDIATE;
 PRAGMA application_id = 1381320270;
-PRAGMA user_version = 42;
+PRAGMA user_version = 43;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -340,10 +347,12 @@ CREATE TABLE playlists (
     normalized_name TEXT NOT NULL,
     sort_text TEXT NOT NULL,
     artwork_binding BLOB,
+    position INTEGER NOT NULL CHECK (position >= 0),
     UNIQUE (source_key, ownership, object_id)
 ) STRICT;
 CREATE INDEX playlists_order_idx ON playlists(source_key, ownership, sort_text, playlist_key);
 CREATE INDEX playlists_title_idx ON playlists(source_key, sort_text, playlist_key);
+CREATE UNIQUE INDEX playlists_position_idx ON playlists(source_key, position);
 CREATE INDEX playlists_artwork_idx ON playlists(source_key, artwork_binding)
     WHERE artwork_binding IS NOT NULL;
 
@@ -688,6 +697,7 @@ async fn upgrade_current_format(
             })?;
         match user_version {
             CATALOG_OWNERS_SCHEMA_VERSION => migrate_schema_41(connection).await?,
+            REPLAY_GAIN_SCHEMA_VERSION => migrate_schema_42(connection).await?,
             _ => {
                 return Err(LibraryError::InvalidStore(format!(
                     "schema migration is not implemented for version {user_version}"
@@ -726,6 +736,24 @@ COMMIT;
     )
     .execute(connection)
     .await?;
+    Ok(())
+}
+
+async fn migrate_schema_42(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    sqlx::raw_sql(
+        r###"BEGIN IMMEDIATE;
+ALTER TABLE playlists ADD COLUMN position INTEGER NOT NULL DEFAULT 0 CHECK (position >= 0);
+UPDATE playlists AS playlist SET position=(
+    SELECT count(*) FROM playlists AS preceding
+    WHERE preceding.source_key=playlist.source_key
+      AND (preceding.sort_text<playlist.sort_text OR
+           (preceding.sort_text=playlist.sort_text AND preceding.playlist_key<playlist.playlist_key))
+);
+CREATE UNIQUE INDEX playlists_position_idx ON playlists(source_key, position);
+PRAGMA user_version = 43;
+COMMIT;
+"###,
+    ).execute(connection).await?;
     Ok(())
 }
 

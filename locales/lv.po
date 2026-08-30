@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 00:23+0000\n"
+"PO-Revision-Date: 2026-08-29 20:00+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Latvian <https://hosted.weblate.org/projects/rufin/app/lv/>\n"
 "Language: lv\n"
@@ -121,6 +121,12 @@ msgid ""
 msgstr ""
 "Šī darbība izrakstinās jūs un dzēsīs jūsu sensitīvos datus, ieskaitot API "
 "atslēgas. Jūsu lietotnes kešatmiņa netiks skarta."
+
+msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
@@ -274,6 +280,9 @@ msgstr "Parādās ierakstos"
 msgid "Application name"
 msgstr "Lietotnes nosaukums"
 
+msgid "Apply Template"
+msgstr "Lietot veidni"
+
 msgid "Artist / Album"
 msgstr "Izpildītājs / Albums"
 
@@ -405,6 +414,9 @@ msgstr "Notīrīt ielādētos tekstus šai dziesmai"
 msgid "Clear queue"
 msgstr "Notīrīt rindu"
 
+msgid "Clearing queue also clears the current song"
+msgstr ""
+
 msgid "Close Window"
 msgstr "Aizvērt logu"
 
@@ -421,6 +433,11 @@ msgid "Club"
 msgstr "Klubs"
 
 msgid "Collapse sidebar"
+msgstr "Sakļaut sānu paneli"
+
+#, fuzzy
+#| msgid "Collapse sidebar"
+msgid "Collapse/expand sidebar"
 msgstr "Sakļaut sānu paneli"
 
 msgid "Collection"
@@ -446,6 +463,9 @@ msgstr "Komentārs"
 
 msgid "Compact"
 msgstr "Kompakts"
+
+msgid "Confirm"
+msgstr ""
 
 msgid "Connect"
 msgstr "Savienot"
@@ -561,6 +581,9 @@ msgstr "Diagnostikas žurnāls saglabāts"
 msgid "Diagnostic log"
 msgstr "Diagnostikas žurnāls"
 
+msgid "Direction"
+msgstr "Virziens"
+
 msgid "Disable private mode"
 msgstr "Atslēgt privāto režīmu"
 
@@ -638,6 +661,11 @@ msgstr "Rediģēt metadatus"
 
 msgid "Edit"
 msgstr "Rediģēt"
+
+#, fuzzy
+#| msgid "Genre tracks"
+msgid "Embed in track"
+msgstr "Žanra dziesmas"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Ieslēgt EBU R128 analīzi?"
@@ -988,7 +1016,7 @@ msgid "Lock metadata"
 msgstr "Bloķēt metadatus"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Žurnāls ir kopēts"
 
 msgid "Loudness normalization"
 msgstr "Skaļuma normalizācija"
@@ -1001,6 +1029,11 @@ msgstr "Teksta nobīde (ms)"
 
 msgid "Lyrics settings"
 msgstr "Tekstu iestatījumi"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics storage"
+msgstr "Teksti ir ielādēti"
 
 msgid "Lyrics"
 msgstr "Teksti"
@@ -1071,10 +1104,8 @@ msgstr "Pārvietot pakalpojumu uz augšu"
 msgid "Move up"
 msgstr "Pārvietot augšup"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Atlasīšana"
+msgstr "Vairāku elementu atlase"
 
 msgid "Multiple values"
 msgstr "Vairākas vērtības"
@@ -1515,10 +1546,8 @@ msgstr "Iziet no Rufin"
 msgid "Quit"
 msgstr "Iziet"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Atlasīšana"
+msgstr "Diapazona atlase"
 
 msgid "Rating"
 msgstr "Vērtējums"
@@ -1613,6 +1642,9 @@ msgstr "Noņemt"
 msgid "Removed from favorites"
 msgstr "Noņemts no izlases"
 
+msgid "Removed from"
+msgstr "Noņemts no"
+
 msgid "Rename Playlist"
 msgstr "Pārdēvēt atskaņošanas sarakstu"
 
@@ -1679,6 +1711,16 @@ msgstr "Saglabāt kartēšanu"
 msgid "Save Server Settings"
 msgstr "Saglabāt servera iestatījumus"
 
+#, fuzzy
+#| msgid "Saves lyrics to your source"
+msgid "Save action saves the lyrics directly to your source"
+msgstr "Saglabāt tekstus avotā"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Save lyrics automatically"
+msgstr "Meklēšana tiks automātiski uzsākta"
+
 msgid "Save to rescan"
 msgstr "Saglabāt, lai atkārtoti skenētu"
 
@@ -1711,6 +1753,11 @@ msgstr "Meklēt tekstus"
 
 msgid "Search current folder"
 msgstr "Meklēt pašreizējā mapē"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search in page"
+msgstr "Meklēt vēlreiz"
 
 msgid "Search is unavailable"
 msgstr "Meklēšana nav pieejama"
@@ -1772,8 +1819,6 @@ msgstr "Izvēlēties mūzikas mapi"
 msgid "Select Source"
 msgstr "Izvēlēties avotu"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Atlasīt visu"
 
@@ -2077,9 +2122,6 @@ msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
 
-msgid "Use Template"
-msgstr "Izmantot veidni"
-
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
 
@@ -2199,6 +2241,9 @@ msgstr "kbit/s"
 msgid "range"
 msgstr "diapazons"
 
+msgid "separate .lrc file"
+msgstr ""
+
 msgid "to"
 msgstr "uz"
 
@@ -2256,6 +2301,9 @@ msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
 
+#~ msgid "Use Template"
+#~ msgstr "Izmantot veidni"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Pāriet uz Izpildītāju"
 
@@ -2279,9 +2327,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Iziet uz sistēmas joslu"

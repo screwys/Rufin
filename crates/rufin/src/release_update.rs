@@ -1,6 +1,6 @@
 //! Cached release history and platform-owned updates.
 //!
-//! Flathub is the single release-history source. Rufin caches the complete
+//! GitHub Releases is the single release-history source. Rufin caches the complete
 //! presentation, refreshes it at most every six hours, and keeps one-time
 //! notification receipts separate from persistent update availability.
 
@@ -10,7 +10,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use async_channel::Sender;
 use serde::{Deserialize, Serialize};
@@ -20,9 +20,8 @@ use ui::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdatePort}
 use self::install::{InstallOutcome, ReleaseInstaller};
 use crate::settings::SettingsFile;
 
-const FLATHUB_APPSTREAM_URL: &str = "https://flathub.org/api/v2/appstream/io.github.screwys.Rufin";
+const GITHUB_RELEASES_URL: &str = "https://api.github.com/repos/screwys/Rufin/releases?per_page=5";
 const RELEASE_CHECK_TIMEOUT: Duration = Duration::from_secs(10);
-const RELEASE_REFRESH_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct FetchedReleaseUpdate {
@@ -31,7 +30,6 @@ struct FetchedReleaseUpdate {
 
 #[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 struct ReleaseCache {
-    checked_at_unix: u64,
     notes: Vec<ReleaseNote>,
 }
 
@@ -110,51 +108,6 @@ impl ReleaseUpdateOwner {
             .is_some_and(ReleaseInstaller::supports_automatic_updates)
     }
 
-    fn publish_cached_history(&self, automatically_update: bool) {
-        let settings = self.settings.load();
-        let cache = mutex_lock(&self.cache).clone();
-        let installed_version = mutex_lock(&self.effective_installed_version).clone();
-        let automatic_update = automatically_update
-            .then(|| {
-                reserve_automatic_update(
-                    &cache,
-                    &settings.ui,
-                    self.installer.as_ref(),
-                    &installed_version,
-                    self.automatic_update_blocked_version.as_deref(),
-                    &self.update_in_flight,
-                )
-            })
-            .flatten();
-        let history = release_history(
-            &cache,
-            self.installer.is_some(),
-            self.automatic_updates_supported(),
-            &installed_version,
-        );
-        let notification_version = release_notification_version(
-            &cache,
-            &settings.ui,
-            &installed_version,
-            self.update_in_flight.load(Ordering::Acquire),
-        );
-        let _ = self.events.try_send(ReleaseUpdate::Refreshed {
-            history,
-            notification_version,
-        });
-        if let Some((installer, version)) = automatic_update {
-            run_update(
-                self.settings.clone(),
-                self.runtime.clone(),
-                self.events.clone(),
-                Arc::clone(&self.effective_installed_version),
-                Arc::clone(&self.update_in_flight),
-                installer,
-                version,
-            );
-        }
-    }
-
     fn publish_previous_update_result(&self) {
         let Some(result) = mutex_lock(&self.previous_update_result).take() else {
             return;
@@ -177,14 +130,6 @@ impl ReleaseUpdateOwner {
                 .store(true, Ordering::Release);
         }
 
-        let now = unix_now();
-        if release_cache_is_fresh(&mutex_lock(&self.cache), now) {
-            self.publish_cached_history(
-                self.automatic_update_requested
-                    .swap(false, Ordering::AcqRel),
-            );
-            return;
-        }
         if self.refresh_in_flight.swap(true, Ordering::AcqRel) {
             return;
         }
@@ -205,20 +150,20 @@ impl ReleaseUpdateOwner {
         let automatic_update_blocked_version = self.automatic_update_blocked_version.clone();
         let runtime = self.runtime.clone();
         self.runtime.spawn(async move {
-            let fetched = match tokio::task::spawn_blocking(fetch_flathub_release_update).await {
+            let fetched = match tokio::task::spawn_blocking(fetch_github_release_update).await {
                 Ok(Ok(update)) => update,
                 Ok(Err(error)) => {
-                    debug!(%error, "failed to check Flathub release history");
+                    debug!(%error, "failed to check GitHub release history");
                     None
                 }
                 Err(error) => {
-                    debug!(%error, "Flathub release check task failed");
+                    debug!(%error, "GitHub release check task failed");
                     None
                 }
             };
             let refreshed = {
                 let previous = mutex_lock(&cache).clone();
-                release_cache_after_check(previous, fetched, unix_now())
+                release_cache_after_check(previous, fetched)
             };
             if let Err(error) = write_release_cache(&cache_path, &refreshed) {
                 debug!(%error, path = %cache_path.display(), "could not cache release history");
@@ -362,12 +307,6 @@ fn mutex_lock<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
         .unwrap_or_else(std::sync::PoisonError::into_inner)
 }
 
-fn unix_now() -> u64 {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_secs())
-}
-
 fn previous_update_feedback(
     result: install::PreviousUpdateResult,
     installed_version: &str,
@@ -408,31 +347,15 @@ fn previous_update_blocks_automatic(
         && !release_version_is_newer(installed_version, result.version())
 }
 
-fn release_cache_is_fresh(cache: &ReleaseCache, now: u64) -> bool {
-    !cache.notes.is_empty()
-        && cache.checked_at_unix != 0
-        && cache.checked_at_unix <= now
-        && now.saturating_sub(cache.checked_at_unix) < RELEASE_REFRESH_INTERVAL.as_secs()
-}
-
 fn release_cache_after_check(
     previous: ReleaseCache,
     fetched: Option<FetchedReleaseUpdate>,
-    checked_at_unix: u64,
 ) -> ReleaseCache {
     match fetched {
         Some(fetched) => ReleaseCache {
-            checked_at_unix,
             notes: fetched.notes,
         },
-        None => ReleaseCache {
-            checked_at_unix: if previous.notes.is_empty() {
-                0
-            } else {
-                checked_at_unix
-            },
-            ..previous
-        },
+        None => previous,
     }
 }
 
@@ -527,25 +450,27 @@ fn write_release_cache(path: &Path, cache: &ReleaseCache) -> Result<(), String> 
     fs::rename(&temporary, path).map_err(|error| error.to_string())
 }
 
-fn fetch_flathub_release_update() -> Result<Option<FetchedReleaseUpdate>, String> {
+fn fetch_github_release_update() -> Result<Option<FetchedReleaseUpdate>, String> {
     let client = reqwest::blocking::Client::builder()
         .timeout(RELEASE_CHECK_TIMEOUT)
         .user_agent(format!("Rufin/{}", env!("CARGO_PKG_VERSION")))
         .build()
         .map_err(|error| error.to_string())?;
     debug!(
-        service = "flathub",
+        service = "github",
         method = "GET",
-        public_url = FLATHUB_APPSTREAM_URL,
+        public_url = GITHUB_RELEASES_URL,
         "sending remote request"
     );
     let started = Instant::now();
     let response = client
-        .get(FLATHUB_APPSTREAM_URL)
+        .get(GITHUB_RELEASES_URL)
+        .header("Accept", "application/vnd.github+json")
+        .header("X-GitHub-Api-Version", "2022-11-28")
         .send()
         .map_err(|error| error.to_string())?;
     debug!(
-        service = "flathub",
+        service = "github",
         method = "GET",
         status = response.status().as_u16(),
         elapsed_ms = started.elapsed().as_millis(),
@@ -556,65 +481,55 @@ fn fetch_flathub_release_update() -> Result<Option<FetchedReleaseUpdate>, String
         .map_err(|error| error.to_string())?
         .json::<serde_json::Value>()
         .map_err(|error| error.to_string())?;
-    Ok(release_update_from_flathub_json(&value))
+    Ok(release_update_from_github_json(&value))
 }
 
-fn release_update_from_flathub_json(value: &serde_json::Value) -> Option<FetchedReleaseUpdate> {
-    let notes: Vec<_> = value
-        .get("releases")?
+fn release_update_from_github_json(value: &serde_json::Value) -> Option<FetchedReleaseUpdate> {
+    let mut notes: Vec<_> = value
         .as_array()?
         .iter()
-        .filter_map(release_note_from_flathub_json)
-        .take(5)
+        .filter(|release| {
+            !release
+                .get("draft")
+                .and_then(serde_json::Value::as_bool)
+                .unwrap_or(false)
+                && !release
+                    .get("prerelease")
+                    .and_then(serde_json::Value::as_bool)
+                    .unwrap_or(false)
+        })
+        .filter_map(release_note_from_github_json)
         .collect();
+    notes.sort_by(|left, right| {
+        release_version_parts(&right.version).cmp(&release_version_parts(&left.version))
+    });
+    notes.truncate(5);
     notes.first()?;
     Some(FetchedReleaseUpdate { notes })
 }
 
-fn release_note_from_flathub_json(value: &serde_json::Value) -> Option<ReleaseNote> {
-    let version = value.get("version")?.as_str()?.trim();
+fn release_note_from_github_json(value: &serde_json::Value) -> Option<ReleaseNote> {
+    let tag = value.get("tag_name")?.as_str()?.trim();
+    let version = tag.strip_prefix('v').unwrap_or(tag).trim();
     if version.is_empty() {
         return None;
     }
-    let description = value
-        .get("description")
+    let published_at = value.get("published_at")?.as_str()?.trim();
+    let date = published_at.get(..10).unwrap_or(published_at).to_string();
+    let url = value.get("html_url")?.as_str()?.trim();
+    if url.is_empty() {
+        return None;
+    }
+    let body = value
+        .get("body")
         .and_then(serde_json::Value::as_str)
         .unwrap_or_default();
     Some(ReleaseNote {
         version: version.to_string(),
-        date: flathub_release_date(value),
-        summary: tag_texts(description, "p").into_iter().next(),
-        items: tag_texts(description, "li"),
+        date,
+        url: url.to_string(),
+        body: body.to_string(),
     })
-}
-
-fn flathub_release_date(value: &serde_json::Value) -> String {
-    value
-        .get("date")
-        .and_then(serde_json::Value::as_str)
-        .filter(|date| !date.trim().is_empty())
-        .map(|date| date.trim().to_string())
-        .or_else(|| {
-            value
-                .get("timestamp")
-                .and_then(serde_json::Value::as_str)
-                .and_then(|timestamp| timestamp.parse::<i64>().ok())
-                .map(unix_timestamp_date)
-        })
-        .unwrap_or_default()
-}
-
-fn unix_timestamp_date(timestamp: i64) -> String {
-    glib::DateTime::from_unix_utc(timestamp)
-        .map(|date| {
-            format!(
-                "{:04}-{:02}-{:02}",
-                date.year(),
-                date.month(),
-                date.day_of_month()
-            )
-        })
-        .unwrap_or_default()
 }
 
 fn release_check_allowed(settings: &ui::Settings) -> bool {
@@ -703,58 +618,15 @@ fn release_version_parts(version: &str) -> Option<Vec<u64>> {
         .ok()
 }
 
-fn tag_texts(text: &str, tag: &str) -> Vec<String> {
-    let mut values = Vec::new();
-    let mut rest = text;
-    let open = format!("<{tag}>");
-    let close = format!("</{tag}>");
-    while let Some(start) = rest.find(&open) {
-        rest = rest.get(start + open.len()..).unwrap_or_default();
-        let Some(end) = rest.find(&close) else {
-            break;
-        };
-        let value = xml_text(&strip_xml_tags(rest.get(..end).unwrap_or_default()));
-        if !value.is_empty() {
-            values.push(value);
-        }
-        rest = rest.get(end + close.len()..).unwrap_or_default();
-    }
-    values
-}
-
-fn strip_xml_tags(text: &str) -> String {
-    let mut output = String::with_capacity(text.len());
-    let mut in_tag = false;
-    for ch in text.chars() {
-        match ch {
-            '<' => in_tag = true,
-            '>' => in_tag = false,
-            _ if !in_tag => output.push(ch),
-            _ => {}
-        }
-    }
-    output
-}
-
-fn xml_text(text: &str) -> String {
-    text.trim()
-        .replace("&amp;", "&")
-        .replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&apos;", "'")
-}
-
 #[cfg(test)]
 mod tests {
     use super::install::PreviousUpdateResult;
     use super::{
-        FetchedReleaseUpdate, RELEASE_REFRESH_INTERVAL, ReleaseCache, automatic_update_target,
+        FetchedReleaseUpdate, ReleaseCache, automatic_update_target,
         mark_release_notification_seen, previous_update_blocks_automatic, previous_update_feedback,
-        read_release_cache, release_cache_after_check, release_cache_is_fresh,
-        release_check_allowed, release_history, release_notification_due,
-        release_notification_version, release_update_available, release_update_from_flathub_json,
-        release_version_is_newer, write_release_cache,
+        read_release_cache, release_cache_after_check, release_check_allowed, release_history,
+        release_notification_due, release_notification_version, release_update_available,
+        release_update_from_github_json, release_version_is_newer, write_release_cache,
     };
     use crate::settings::SettingsFile;
     use ui::runtime::{ReleaseNote, ReleaseUpdate};
@@ -763,61 +635,34 @@ mod tests {
         ReleaseNote {
             version: version.to_string(),
             date: String::new(),
-            summary: None,
-            items: Vec::new(),
+            url: format!("https://github.com/screwys/Rufin/releases/tag/v{version}"),
+            body: String::new(),
         }
     }
 
     #[test]
-    fn failed_checks_retain_cached_history_and_advance_the_interval() {
+    fn failed_checks_retain_cached_history() {
         let cache = ReleaseCache {
-            checked_at_unix: 10,
             notes: vec![note("2.0.0")],
         };
 
-        let checked = release_cache_after_check(cache.clone(), None, 20);
+        let checked = release_cache_after_check(cache.clone(), None);
 
-        assert_eq!(checked.notes, cache.notes);
-        assert_eq!(checked.checked_at_unix, 20);
-        assert!(release_cache_is_fresh(&checked, 21));
-        assert!(!release_cache_is_fresh(&checked, 19));
-    }
-
-    #[test]
-    fn failed_first_check_leaves_empty_history_retryable() {
-        let checked = release_cache_after_check(ReleaseCache::default(), None, 20);
-
-        assert_eq!(checked.checked_at_unix, 0);
-        assert!(checked.notes.is_empty());
-        assert!(!release_cache_is_fresh(&checked, 21));
-    }
-
-    #[test]
-    fn cached_history_expires_at_the_exact_six_hour_boundary() {
-        let cache = ReleaseCache {
-            checked_at_unix: 10,
-            notes: vec![note("2.0.0")],
-        };
-        let boundary = 10 + RELEASE_REFRESH_INTERVAL.as_secs();
-
-        assert!(release_cache_is_fresh(&cache, boundary - 1));
-        assert!(!release_cache_is_fresh(&cache, boundary));
+        assert_eq!(checked, cache);
     }
 
     #[test]
     fn successful_checks_replace_the_cached_snapshot() {
         let previous = ReleaseCache {
-            checked_at_unix: 10,
             notes: vec![note("1.0.0")],
         };
         let fetched = FetchedReleaseUpdate {
             notes: vec![note("2.0.0")],
         };
 
-        let checked = release_cache_after_check(previous, Some(fetched), 20);
+        let checked = release_cache_after_check(previous, Some(fetched));
 
         assert_eq!(checked.notes, vec![note("2.0.0")]);
-        assert_eq!(checked.checked_at_unix, 20);
     }
 
     #[test]
@@ -825,12 +670,11 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary release cache");
         let path = directory.path().join("releases.json");
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![ReleaseNote {
                 version: "2.0.0".to_string(),
                 date: "2026-01-02".to_string(),
-                summary: Some("Summary".to_string()),
-                items: vec!["Item".to_string()],
+                url: "https://github.com/screwys/Rufin/releases/tag/v2.0.0".to_string(),
+                body: "Summary\n\n- Item".to_string(),
             }],
         };
 
@@ -845,7 +689,6 @@ mod tests {
     #[test]
     fn update_availability_requires_a_supported_owner_and_newest_row() {
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0"), note("1.0.0")],
         };
 
@@ -871,7 +714,6 @@ mod tests {
     #[test]
     fn automatic_update_requires_opt_in_owner_support_and_an_unblocked_target() {
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0")],
         };
         let mut settings = ui::Settings {
@@ -923,7 +765,6 @@ mod tests {
         );
         assert!(!previous_update_blocks_automatic(&installed, "2.0.0"));
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0")],
         };
         assert_eq!(
@@ -961,7 +802,6 @@ mod tests {
     #[test]
     fn an_update_in_flight_owns_feedback_instead_of_the_release_toast() {
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0")],
         };
         let settings = ui::Settings::default();
@@ -1008,7 +848,6 @@ mod tests {
     #[test]
     fn notification_preferences_do_not_remove_update_availability() {
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0")],
         };
         let mut settings = ui::Settings {
@@ -1045,41 +884,80 @@ mod tests {
     }
 
     #[test]
-    fn flathub_appstream_json_keeps_the_existing_visual_fields() {
-        let value = serde_json::json!({
-            "releases": [
-                {
-                    "version": "2.0.0",
-                    "timestamp": "1782604800",
-                    "description": "<p>Summary &amp; context.</p><ul><li>First item</li></ul><ul><li>Second item</li></ul>"
-                },
-                {
-                    "version": "1.0.0",
-                    "date": "2026-01-01",
-                    "description": "<p>Older item</p>"
-                }
-            ]
-        });
+    fn github_json_keeps_complete_stable_release_bodies() {
+        let value = serde_json::json!([
+            {
+                "tag_name": "v1.0.0",
+                "published_at": "2026-01-01T00:00:00Z",
+                "html_url": "https://github.com/screwys/Rufin/releases/tag/v1.0.0",
+                "draft": false,
+                "prerelease": false,
+                "body": "Older item"
+            },
+            {
+                "tag_name": "v2.0.0",
+                "published_at": "2026-06-28T12:34:56Z",
+                "html_url": "https://github.com/screwys/Rufin/releases/tag/v2.0.0",
+                "draft": false,
+                "prerelease": false,
+                "body": "Summary & context.\n\n## Changelog\n\n- First item by @someone in #123"
+            },
+            {
+                "tag_name": "v2.1.0-beta.1",
+                "published_at": "2026-07-01T12:34:56Z",
+                "html_url": "https://github.com/screwys/Rufin/releases/tag/v2.1.0-beta.1",
+                "draft": false,
+                "prerelease": true,
+                "body": "Preview"
+            }
+        ]);
 
         assert_eq!(
-            release_update_from_flathub_json(&value),
+            release_update_from_github_json(&value),
             Some(FetchedReleaseUpdate {
                 notes: vec![
                     ReleaseNote {
                         version: "2.0.0".to_string(),
                         date: "2026-06-28".to_string(),
-                        summary: Some("Summary & context.".to_string()),
-                        items: vec!["First item".to_string(), "Second item".to_string()],
+                        url: "https://github.com/screwys/Rufin/releases/tag/v2.0.0".to_string(),
+                        body:
+                            "Summary & context.\n\n## Changelog\n\n- First item by @someone in #123"
+                                .to_string(),
                     },
                     ReleaseNote {
                         version: "1.0.0".to_string(),
                         date: "2026-01-01".to_string(),
-                        summary: Some("Older item".to_string()),
-                        items: Vec::new(),
+                        url: "https://github.com/screwys/Rufin/releases/tag/v1.0.0".to_string(),
+                        body: "Older item".to_string(),
                     }
                 ],
             })
         );
+    }
+
+    #[test]
+    fn github_history_keeps_only_the_five_newest_releases() {
+        let releases = (1..=6)
+            .map(|version| {
+                serde_json::json!({
+                    "tag_name": format!("v1.0.{version}"),
+                    "published_at": "2026-06-28T12:34:56Z",
+                    "html_url": format!(
+                        "https://github.com/screwys/Rufin/releases/tag/v1.0.{version}"
+                    ),
+                    "draft": false,
+                    "prerelease": false,
+                    "body": format!("Release {version}")
+                })
+            })
+            .collect::<Vec<_>>();
+
+        let history = release_update_from_github_json(&serde_json::Value::Array(releases))
+            .expect("release history");
+
+        assert_eq!(history.notes.len(), 5);
+        assert_eq!(history.notes[0].version, "1.0.6");
+        assert_eq!(history.notes[4].version, "1.0.2");
     }
 
     #[test]
@@ -1112,7 +990,6 @@ mod tests {
         let settings =
             SettingsFile::open(directory.path().join("settings.json")).expect("open settings");
         let cache = ReleaseCache {
-            checked_at_unix: 20,
             notes: vec![note("2.0.0")],
         };
 

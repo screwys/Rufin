@@ -977,9 +977,12 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
-        let (publication, catalog_changed) = match outcome {
-            ScanOutcome::Changed(publication) => (publication, true),
-            ScanOutcome::ArtworkChanged(publication) => (publication, false),
+        let (publication, catalog_changed, change) = match outcome {
+            ScanOutcome::Changed(publication) => (publication, true, change),
+            ScanOutcome::PlaylistsChanged(publication) => {
+                (publication, true, CatalogChange::Playlists)
+            }
+            ScanOutcome::ArtworkChanged(publication) => (publication, false, change),
             ScanOutcome::Identical(_) | ScanOutcome::Stale | ScanOutcome::Failed => return,
         };
         if let Some(slot) = self
@@ -1821,12 +1824,35 @@ impl SelectedSourcePort for ActiveSource {
         });
     }
 
-    fn create_playlist(&self, name: String, tracks: Vec<TrackKey>) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .create_playlist(&selected.database, selected.source_key, &name, &tracks)
-                .await
+    fn create_playlist(
+        &self,
+        name: String,
+        tracks: Vec<TrackKey>,
+    ) -> Receiver<Result<Option<String>, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_selected(move |owner, selected| async move {
+            let result = match selected.source.as_ref().cloned() {
+                Some(source) => {
+                    source
+                        .create_playlist(&selected.database, selected.source_key, &name, &tracks)
+                        .await
+                }
+                None => Err(SourceError::InvalidRequest("Source is unavailable")),
+            };
+            match result {
+                Ok((changed, outcome, object_id)) => {
+                    owner
+                        .accept_playlist_result(&selected, Ok((changed, outcome)))
+                        .await;
+                    let _ = sender.send(Ok(object_id)).await;
+                }
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error.to_string());
+                    let _ = sender.send(Err(error.to_string())).await;
+                }
+            }
         });
+        receiver
     }
 
     fn rename_playlist(&self, playlist: PlaylistKey, name: String) {
@@ -2524,6 +2550,7 @@ async fn acquire_required_catalog(
         .map_err(string_error)?
     {
         ScanOutcome::Changed(publication)
+        | ScanOutcome::PlaylistsChanged(publication)
         | ScanOutcome::ArtworkChanged(publication)
         | ScanOutcome::Identical(publication) => Ok(publication),
         ScanOutcome::Stale | ScanOutcome::Failed => {

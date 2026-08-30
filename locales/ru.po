@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 00:23+0000\n"
+"PO-Revision-Date: 2026-08-29 20:00+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -123,6 +123,12 @@ msgid ""
 msgstr ""
 "Это завершит вашу сессию и очистит ваши конфиденциальные данные, включая "
 "ключи API. Кэш приложения при этом не будет затронут."
+
+msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
@@ -279,6 +285,9 @@ msgstr "Появляется в"
 msgid "Application name"
 msgstr "Название приложения"
 
+msgid "Apply Template"
+msgstr "Применить шаблон"
+
 msgid "Artist / Album"
 msgstr "Исполнитель / Альбом"
 
@@ -410,6 +419,9 @@ msgstr "Удалить загруженные тексты песен для э�
 msgid "Clear queue"
 msgstr "Очистить очередь"
 
+msgid "Clearing queue also clears the current song"
+msgstr ""
+
 msgid "Close Window"
 msgstr "Закрыть окно"
 
@@ -426,6 +438,11 @@ msgid "Club"
 msgstr "Клубная"
 
 msgid "Collapse sidebar"
+msgstr "Свернуть боковую панель"
+
+#, fuzzy
+#| msgid "Collapse sidebar"
+msgid "Collapse/expand sidebar"
 msgstr "Свернуть боковую панель"
 
 msgid "Collection"
@@ -451,6 +468,9 @@ msgstr "Комментарий"
 
 msgid "Compact"
 msgstr "Компактный"
+
+msgid "Confirm"
+msgstr ""
 
 msgid "Connect"
 msgstr "Подключить"
@@ -566,6 +586,9 @@ msgstr "Журнал диагностики сохранен"
 msgid "Diagnostic log"
 msgstr "Журнал диагностики"
 
+msgid "Direction"
+msgstr "Направление"
+
 msgid "Disable private mode"
 msgstr "Отключить приватный режим"
 
@@ -643,6 +666,11 @@ msgstr "Редактировать метаданные"
 
 msgid "Edit"
 msgstr "Редактировать"
+
+#, fuzzy
+#| msgid "Genre tracks"
+msgid "Embed in track"
+msgstr "Треки по жанрам"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Включить анализ EBU R128?"
@@ -995,7 +1023,7 @@ msgid "Lock metadata"
 msgstr "Заблокировать метаданные"
 
 msgid "Logs are copied"
-msgstr ""
+msgstr "Журналы скопированы"
 
 msgid "Loudness normalization"
 msgstr "Нормализация громкости"
@@ -1008,6 +1036,11 @@ msgstr "Смещение текста (мс)"
 
 msgid "Lyrics settings"
 msgstr "Настройки текстов"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics storage"
+msgstr "Текст песни загружен"
 
 msgid "Lyrics"
 msgstr "Текст песни"
@@ -1078,10 +1111,8 @@ msgstr "Переместить провайдера вверх"
 msgid "Move up"
 msgstr "Переместить вверх"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Multi-selection"
-msgstr "Выбор"
+msgstr "Множественный выбор"
 
 msgid "Multiple values"
 msgstr "Несколько значений"
@@ -1524,10 +1555,8 @@ msgstr "Закрыть Rufin"
 msgid "Quit"
 msgstr "Выход"
 
-#, fuzzy
-#| msgid "Selection"
 msgid "Range selection"
-msgstr "Выбор"
+msgstr "Выбор диапазона"
 
 msgid "Rating"
 msgstr "Оценка"
@@ -1622,6 +1651,9 @@ msgstr "Удалить"
 msgid "Removed from favorites"
 msgstr "Удалено из избранного"
 
+msgid "Removed from"
+msgstr "Удалено из"
+
 msgid "Rename Playlist"
 msgstr "Переименовать плейлист"
 
@@ -1688,6 +1720,16 @@ msgstr "Сохранить Сопоставления"
 msgid "Save Server Settings"
 msgstr "Сохранить Настройки Сервера"
 
+#, fuzzy
+#| msgid "Saves lyrics to your source"
+msgid "Save action saves the lyrics directly to your source"
+msgstr "Сохраняет текст песни в источнике"
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Save lyrics automatically"
+msgstr "Поиск начнётся автоматически"
+
 msgid "Save to rescan"
 msgstr "Сохранить для повторного сканирования"
 
@@ -1720,6 +1762,11 @@ msgstr "Поиск текстов песен"
 
 msgid "Search current folder"
 msgstr "Поиск в текущей папке"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search in page"
+msgstr "Повторить поиск"
 
 msgid "Search is unavailable"
 msgstr "Поиск недоступен"
@@ -1781,8 +1828,6 @@ msgstr "Выбрать папку с музыкой"
 msgid "Select Source"
 msgstr "Выбрать Источник"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select all"
 msgstr "Выбрать всё"
 
@@ -2089,9 +2134,6 @@ msgstr "Использовать Мгновенный Микс Jellyfin для �
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
-msgid "Use Template"
-msgstr "Использовать шаблон"
-
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
 
@@ -2213,6 +2255,9 @@ msgstr "кбит/с"
 msgid "range"
 msgstr "диапазон"
 
+msgid "separate .lrc file"
+msgstr ""
+
 msgid "to"
 msgstr "до"
 
@@ -2270,6 +2315,9 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
+#~ msgid "Use Template"
+#~ msgstr "Использовать шаблон"
+
 #~ msgid "Go to Artist"
 #~ msgstr "Перейти к исполнителю"
 
@@ -2296,9 +2344,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "AirPlay and Sound Settings..."
 #~ msgstr "Настройки AirPlay и звука..."
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Свернуть в трей"

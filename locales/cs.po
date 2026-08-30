@@ -118,6 +118,12 @@ msgstr ""
 "vaší aplikace zůstane nedotčena."
 
 msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
+
+msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
 msgstr ""
@@ -269,6 +275,11 @@ msgstr "Objevuje se v"
 msgid "Application name"
 msgstr "Název aplikace"
 
+#, fuzzy
+#| msgid "Slate"
+msgid "Apply Template"
+msgstr "Šedá"
+
 msgid "Artist / Album"
 msgstr "Interpret / Album"
 
@@ -404,6 +415,9 @@ msgstr "Vymazat načtený text pro tuto skladbu"
 msgid "Clear queue"
 msgstr "Vymazat frontu"
 
+msgid "Clearing queue also clears the current song"
+msgstr ""
+
 msgid "Close Window"
 msgstr "Zavřít okno"
 
@@ -420,6 +434,11 @@ msgid "Club"
 msgstr "Klubová hudba"
 
 msgid "Collapse sidebar"
+msgstr "Sbalit postranní panel"
+
+#, fuzzy
+#| msgid "Collapse sidebar"
+msgid "Collapse/expand sidebar"
 msgstr "Sbalit postranní panel"
 
 msgid "Collection"
@@ -445,6 +464,9 @@ msgstr "Komentář"
 
 msgid "Compact"
 msgstr "Kompaktní"
+
+msgid "Confirm"
+msgstr ""
 
 msgid "Connect"
 msgstr "Připojit"
@@ -562,6 +584,11 @@ msgstr "Diagnostický protokol uložen"
 msgid "Diagnostic log"
 msgstr "Diagnostický protokol"
 
+#, fuzzy
+#| msgid "DirectSound"
+msgid "Direction"
+msgstr "DirectSound"
+
 msgid "Disable private mode"
 msgstr "Vypnout soukromý režim"
 
@@ -645,6 +672,11 @@ msgstr "Upravit metadata"
 
 msgid "Edit"
 msgstr "Upravit"
+
+#, fuzzy
+#| msgid "Genre tracks"
+msgid "Embed in track"
+msgstr "Skladby žánru"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
@@ -1010,6 +1042,11 @@ msgstr "Posun textu skladby (ms)"
 
 msgid "Lyrics settings"
 msgstr "Nastavení textu skladeb"
+
+#, fuzzy
+#| msgid "Lyrics loaded"
+msgid "Lyrics storage"
+msgstr "Texty skladeb načteny"
 
 msgid "Lyrics"
 msgstr "Text skladby"
@@ -1637,6 +1674,11 @@ msgstr "Odebrat"
 msgid "Removed from favorites"
 msgstr "Odebrat z oblíbených"
 
+#, fuzzy
+#| msgid "Remove from Pins"
+msgid "Removed from"
+msgstr "Odepnout"
+
 msgid "Rename Playlist"
 msgstr "Přejmenovat Playlist"
 
@@ -1703,6 +1745,14 @@ msgstr "Uložit mapování"
 msgid "Save Server Settings"
 msgstr "Uložit nastavení serveru"
 
+msgid "Save action saves the lyrics directly to your source"
+msgstr ""
+
+#, fuzzy
+#| msgid "Searching will start automatically"
+msgid "Save lyrics automatically"
+msgstr "Vyhledávání se spustí automaticky"
+
 msgid "Save to rescan"
 msgstr "Uložit pro opětovné naskenování"
 
@@ -1737,6 +1787,11 @@ msgstr "Hledat Texty"
 #| msgid "Search preferences"
 msgid "Search current folder"
 msgstr "Možnosti vyhledávání"
+
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search in page"
+msgstr "Hledat znovu"
 
 #, fuzzy
 #| msgid "This isn't available"
@@ -2111,9 +2166,6 @@ msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
 
-msgid "Use Template"
-msgstr ""
-
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
 
@@ -2233,6 +2285,9 @@ msgstr "kbps"
 msgid "range"
 msgstr "rozsah"
 
+msgid "separate .lrc file"
+msgstr ""
+
 msgid "to"
 msgstr "až"
 
@@ -2310,9 +2365,6 @@ msgstr[2] "Před {count} roky"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
-
-#~ msgid "DirectSound"
-#~ msgstr "DirectSound"
 
 #~ msgid "Exit to tray"
 #~ msgstr "Ukončit do systémové lišty"

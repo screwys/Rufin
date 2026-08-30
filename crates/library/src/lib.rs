@@ -26,7 +26,7 @@ pub use activity::{
     CalendarActivityPeriod, CalendarActivitySummary, ListenDeliveryTarget, ListenWrite,
     PendingListenDelivery,
 };
-pub use artwork::LocalAlbumArtworkInput;
+pub use artwork::{LocalAlbumArtworkInput, RepresentativeArtworkScope};
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
@@ -37,7 +37,7 @@ pub use db::{Database, ReadCancellation};
 pub use favorites::FavoriteTarget;
 pub use home::{
     HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage, HomeProviderSection,
-    HomeSectionRows, HomeShowcaseRow, HomeTrackRow,
+    HomeSectionRows, HomeTrackRow,
 };
 pub use keys::{
     AlbumDetailRouteKey, AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey,

@@ -646,7 +646,7 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
 }
 
 #[tokio::test]
-async fn download_access_coexists_with_and_precedes_mapping_access() {
+async fn removed_local_access_reconciles_the_exact_queue_fallback() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture
@@ -696,6 +696,16 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
         )
         .await
         .expect("download access");
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET media_uri=NULL WHERE track_key=?1")
+        .bind(track.track_key)
+        .execute(&mut raw)
+        .await
+        .expect("make provider resolve the source stream");
+    sqlx::query("INSERT INTO queue_occurrences(source_key,object_id,position,traversal_position,provenance_kind,track_key,track_object_id,fallback_media_uri) VALUES(?1,'download-removal',0,0,'manual',?2,?3,'file:///validated/download.flac')")
+        .bind(fixture.source).bind(track.track_key).bind(&track.object_id)
+        .execute(&mut raw).await.expect("persist downloaded Queue fallback");
+    drop(raw);
 
     let preferred = fixture
         .database
@@ -739,6 +749,18 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
         .expect("mapping remains");
     assert_eq!(fallback.local_access_file_key, mapping);
     assert_eq!(fallback.origin, LocalAccessOrigin::Mapping);
+    let mut raw = connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, Option<String>>(
+            "SELECT fallback_media_uri FROM queue_occurrences WHERE source_key=?1 AND object_id='download-removal'",
+        )
+        .bind(fixture.source)
+        .fetch_one(&mut raw)
+        .await
+        .expect("mapped Queue fallback"),
+        Some("file:///validated/mapping.flac".to_string())
+    );
+    drop(raw);
     assert!(
         !fixture
             .database
@@ -747,6 +769,20 @@ async fn download_access_coexists_with_and_precedes_mapping_access() {
             .expect("badge after Download deletion")[0]
             .is_downloaded
     );
+    assert!(
+        fixture
+            .database
+            .remove_local_access(fixture.source, mapping)
+            .await
+            .expect("remove mapping access")
+    );
+    let media = fixture
+        .database
+        .queue_media_for_occurrence(fixture.source, "download-removal")
+        .await
+        .expect("resolve provider Queue media")
+        .expect("provider Queue media");
+    assert_eq!(media.media_uri, None);
 }
 
 #[tokio::test]
@@ -796,6 +832,58 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
         SmartPlaylistRuleField::Played
     );
     assert_eq!(rows[2].definition.sort_field, SmartPlaylistSort::SkipCount);
+}
+
+#[tokio::test]
+async fn smart_playlist_reordering_preserves_unique_positions() {
+    let fixture = fixture().await;
+    let definition = SmartPlaylistDefinition::default();
+    let first = fixture
+        .database
+        .create_smart_playlist(fixture.source, "First", &definition)
+        .await
+        .expect("create first Smart Playlist");
+    let second = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Second", &definition)
+        .await
+        .expect("create second Smart Playlist");
+    let third = fixture
+        .database
+        .create_smart_playlist(fixture.source, "Third", &definition)
+        .await
+        .expect("create third Smart Playlist");
+
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, first)
+            .await
+            .expect("move Smart Playlist upward")
+    );
+    assert!(
+        fixture
+            .database
+            .move_smart_playlist(fixture.source, third, second)
+            .await
+            .expect("move Smart Playlist downward")
+    );
+    assert_eq!(
+        fixture
+            .database
+            .smart_playlist_route_page(
+                fixture.source,
+                None,
+                SmartPlaylistListSort::Position,
+                false,
+                0,
+                &ReadCancellation::new(),
+            )
+            .await
+            .expect("read reordered Smart Playlists")
+            .0,
+        [first, second, third]
+    );
 }
 
 #[tokio::test]
@@ -1103,7 +1191,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     let initial_home = fixture
         .database
-        .home_page(fixture.source, None, 0, &cancel)
+        .home_page(fixture.source, None, 0, 0, &cancel)
         .await
         .expect("initial bounded Home page");
     assert!(initial_home.most_played.tracks.is_empty());
@@ -1118,27 +1206,38 @@ async fn home_search_and_radio_results_stay_bounded() {
             .len(),
         1
     );
-    let alternate_showcase = fixture
+    let alternate_showcase_home = fixture
         .database
-        .home_page(fixture.source, None, 1, &cancel)
+        .home_page(fixture.source, None, 1, 0, &cancel)
         .await
-        .expect("alternate launch Home page")
+        .expect("alternate Showcase Home page");
+    assert_eq!(initial_home.explore, alternate_showcase_home.explore);
+    let alternate_showcase = alternate_showcase_home
         .showcase
         .expect("alternate Showcase");
-    assert!(matches!(
-        initial_home.showcase,
-        Some(library::HomeShowcaseRow::Album(_))
-    ));
-    assert!(matches!(
-        alternate_showcase,
-        library::HomeShowcaseRow::Track(_)
-    ));
+    assert_eq!(
+        initial_home
+            .showcase
+            .as_ref()
+            .expect("initial Showcase")
+            .album
+            .album_key,
+        fixture.albums[0]
+    );
+    assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
+    let alternate_explore_home = fixture
+        .database
+        .home_page(fixture.source, None, 0, 2, &cancel)
+        .await
+        .expect("alternate Explore Home page");
+    assert_eq!(initial_home.showcase, alternate_explore_home.showcase);
+    assert_ne!(initial_home.explore, alternate_explore_home.explore);
     let mut raw = connection(&fixture.path).await;
     sqlx::query("UPDATE albums SET date_added=NULL,first_seen_at=CASE album_key WHEN ?1 THEN 200 ELSE 100 END")
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
     let newly_added = fixture
         .database
-        .home_page(fixture.source, None, 0, &cancel)
+        .home_page(fixture.source, None, 0, 0, &cancel)
         .await
         .expect("bounded Home Albums")
         .newly_added
@@ -1153,7 +1252,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, &cancel)
+            .home_page(fixture.source, None, 0, 0, &cancel)
             .await
             .expect("released Albums require a release fact")
             .recently_released
@@ -1166,7 +1265,7 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, &cancel)
+            .home_page(fixture.source, None, 0, 0, &cancel)
             .await
             .expect("bounded Home Genres")
             .genres

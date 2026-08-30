@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
@@ -15,6 +15,8 @@ use sources::SourceId;
 
 use crate::shell::Shell;
 
+const OPERATION_FEEDBACK_DURATION: Duration = Duration::from_secs(3);
+
 struct DownloadBadgeBinding {
     image: glib::WeakRef<gtk::Image>,
     downloaded: Cell<bool>,
@@ -24,6 +26,7 @@ pub(crate) enum OperationFeedbackKind {
     DownloadStarted,
     DownloadQueued,
     PlaylistAdded { destination: String },
+    PlaylistRemoved { destination: String },
 }
 
 pub(crate) struct OperationFeedback {
@@ -38,6 +41,7 @@ pub(crate) struct DownloadsState {
     queue_refresh: RefCell<Option<Weak<dyn Fn()>>>,
     feedback_generation: Rc<Cell<u64>>,
     feedback_opens_queue: Cell<bool>,
+    feedback_action: RefCell<Option<Box<dyn FnOnce()>>>,
     badges: Rc<RefCell<HashMap<usize, DownloadBadgeBinding>>>,
 }
 
@@ -121,6 +125,22 @@ impl Shell {
     }
 
     pub(crate) fn show_operation_feedback(self: &Rc<Self>, feedback: &OperationFeedback) {
+        self.show_operation_feedback_with_action(feedback, None);
+    }
+
+    pub(crate) fn show_undoable_operation_feedback(
+        self: &Rc<Self>,
+        feedback: &OperationFeedback,
+        undo: impl Fn() + 'static,
+    ) {
+        self.show_operation_feedback_with_action(feedback, Some(Box::new(undo)));
+    }
+
+    fn show_operation_feedback_with_action(
+        self: &Rc<Self>,
+        feedback: &OperationFeedback,
+        action: Option<Box<dyn FnOnce()>>,
+    ) {
         crate::preferences::dialogs::release_notes::dismiss_release_notification(self);
         let title = self.download_subject_title(&feedback.subject);
         let count = track_count_text(feedback.item_count as u64);
@@ -138,14 +158,20 @@ impl Shell {
         self.chrome.operation_feedback_title.set_text(&title);
         self.chrome.operation_feedback_subtitle.set_visible(true);
         self.chrome.operation_feedback_subtitle.set_text(&subtitle);
-        self.downloads.feedback_opens_queue.set(matches!(
+        let opens_queue = matches!(
             feedback.kind,
             OperationFeedbackKind::DownloadStarted | OperationFeedbackKind::DownloadQueued
-        ));
+        );
+        self.downloads.feedback_opens_queue.set(opens_queue);
+        self.chrome.operation_feedback_action.set_label(&tr("Undo"));
+        self.chrome
+            .operation_feedback_action
+            .set_visible(action.is_some());
+        self.downloads.feedback_action.replace(action);
         self.present_download_feedback();
     }
 
-    fn show_download_notice(&self, message: &str) {
+    fn show_download_notice(self: &Rc<Self>, message: &str) {
         self.chrome
             .operation_feedback
             .add_css_class("operation-feedback-notice");
@@ -153,18 +179,23 @@ impl Shell {
         self.chrome.operation_feedback_title.set_text(message);
         self.chrome.operation_feedback_subtitle.set_visible(false);
         self.downloads.feedback_opens_queue.set(false);
+        self.chrome.operation_feedback_action.set_visible(false);
+        self.downloads.feedback_action.borrow_mut().take();
         self.present_download_feedback();
     }
 
-    fn present_download_feedback(&self) {
+    fn present_download_feedback(self: &Rc<Self>) {
         let generation = self.downloads.feedback_generation.get().wrapping_add(1);
         self.downloads.feedback_generation.set(generation);
         self.chrome.operation_feedback.set_visible(true);
-        let card = self.chrome.operation_feedback.clone();
-        let active_generation = Rc::clone(&self.downloads.feedback_generation);
-        glib::timeout_add_local_once(Duration::from_secs(5), move || {
-            if active_generation.get() == generation {
-                card.set_visible(false);
+        let shell = Rc::downgrade(self);
+        glib::timeout_add_local_once(OPERATION_FEEDBACK_DURATION, move || {
+            let Some(shell) = shell.upgrade() else {
+                return;
+            };
+            if shell.downloads.feedback_generation.get() == generation {
+                shell.chrome.operation_feedback.set_visible(false);
+                shell.downloads.feedback_action.borrow_mut().take();
             }
         });
     }
@@ -190,7 +221,11 @@ impl Shell {
         }
     }
 
-    pub(crate) fn download_source_artwork(self: &Rc<Self>, size: i32) -> gtk::Widget {
+    pub(crate) fn download_subject_artwork(
+        self: &Rc<Self>,
+        subject: &DownloadSubject,
+        size: i32,
+    ) -> gtk::Widget {
         let projection = self.cover_group_projection_for_artwork(&[], size, size);
         let widget = projection.widget();
         let Some(selected) = self.selected_library().as_deref().cloned() else {
@@ -198,19 +233,30 @@ impl Shell {
         };
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
-        let cancellation = library::ReadCancellation::new();
+        let folder = selected.music_folder_key;
+        let subject = subject.clone();
+        let prefer_server_playlist_covers =
+            self.settings.current.borrow().prefer_server_playlist_covers;
         let task = selected.runtime.spawn(async move {
-            database
-                .artwork_preparation_page(source, None, 4, &cancellation)
-                .await
+            download_subject_artwork_bindings(
+                &database,
+                source,
+                folder,
+                &subject,
+                prefer_server_playlist_covers,
+            )
+            .await
         });
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let Some(shell) = shell.upgrade() else { return };
-            let Some(page) = task.await.ok().and_then(Result::ok) else {
+            let Some(bindings) = task.await.ok().and_then(Result::ok) else {
                 return;
             };
-            let bindings = page
+            if bindings.is_empty() {
+                return;
+            }
+            let bindings = bindings
                 .iter()
                 .map(|binding| ArtworkBinding::opaque(binding))
                 .collect::<Vec<_>>();
@@ -219,23 +265,23 @@ impl Shell {
         widget
     }
 
-    pub(crate) fn download_subject_artwork(
-        self: &Rc<Self>,
-        subject: &DownloadSubject,
-        size: i32,
-    ) -> gtk::Widget {
-        let _ = subject;
-        self.download_source_artwork(size)
-    }
-
     pub(crate) fn connect_operation_feedback(self: &Rc<Self>) {
-        let close_card = self.chrome.operation_feedback.clone();
-        let close_generation = Rc::clone(&self.downloads.feedback_generation);
+        let action_shell = Rc::downgrade(self);
         self.chrome
-            .operation_feedback_close
+            .operation_feedback_action
             .connect_clicked(move |_| {
-                close_generation.set(close_generation.get().wrapping_add(1));
-                close_card.set_visible(false);
+                let Some(shell) = action_shell.upgrade() else {
+                    return;
+                };
+                shell
+                    .downloads
+                    .feedback_generation
+                    .set(shell.downloads.feedback_generation.get().wrapping_add(1));
+                shell.chrome.operation_feedback.set_visible(false);
+                let action = shell.downloads.feedback_action.borrow_mut().take();
+                if let Some(action) = action {
+                    action();
+                }
             });
 
         let click = gtk::GestureClick::new();
@@ -248,6 +294,7 @@ impl Shell {
                 crate::preferences::present_downloads_preferences_dialog(&shell);
             }
             shell.chrome.operation_feedback.set_visible(false);
+            shell.downloads.feedback_action.borrow_mut().take();
         });
         self.chrome.operation_feedback.add_controller(click);
     }
@@ -320,6 +367,115 @@ impl Shell {
     }
 }
 
+async fn download_subject_artwork_bindings(
+    database: &library::Database,
+    source: library::SourceKey,
+    folder: Option<library::FolderKey>,
+    subject: &DownloadSubject,
+    prefer_server_playlist_covers: bool,
+) -> library::LibraryResult<Vec<Vec<u8>>> {
+    let cancellation = library::ReadCancellation::new();
+    let mut bindings = match subject {
+        DownloadSubject::Rule(rule) => {
+            let scope = match rule {
+                downloads::DownloadRule::EntireLibrary => {
+                    library::RepresentativeArtworkScope::AllTracks
+                }
+                downloads::DownloadRule::Favorites => {
+                    library::RepresentativeArtworkScope::FavoriteTracks
+                }
+                downloads::DownloadRule::AllPlaylists => {
+                    library::RepresentativeArtworkScope::PlaylistTracks
+                }
+                downloads::DownloadRule::LatestFiveAlbums => {
+                    library::RepresentativeArtworkScope::LatestAlbums(5)
+                }
+            };
+            database
+                .representative_artwork_page(source, folder, scope, 4, &cancellation)
+                .await?
+        }
+        DownloadSubject::Track(key) => database
+            .track_rows(source, &[*key], &cancellation)
+            .await?
+            .pop()
+            .and_then(|row| row.artwork_binding)
+            .into_iter()
+            .collect(),
+        DownloadSubject::Album(key) => database
+            .album_rows(source, &[*key], folder, &cancellation)
+            .await?
+            .pop()
+            .and_then(|row| row.artwork_binding)
+            .into_iter()
+            .collect(),
+        DownloadSubject::Artist(key) => database
+            .artist_rows(source, &[*key], false, folder, &cancellation)
+            .await?
+            .pop()
+            .and_then(|row| row.artwork_binding)
+            .into_iter()
+            .collect(),
+        DownloadSubject::Genre(key) => database
+            .genre_rows(source, &[*key], folder, &cancellation)
+            .await?
+            .pop()
+            .map(|row| {
+                row.artwork_binding
+                    .into_iter()
+                    .chain(row.representative_artwork)
+                    .take(4)
+                    .collect()
+            })
+            .unwrap_or_default(),
+        DownloadSubject::Mood(key) => database
+            .mood_rows(source, &[*key], folder, &cancellation)
+            .await?
+            .pop()
+            .map(|row| row.representative_artwork)
+            .unwrap_or_default(),
+        DownloadSubject::Playlist(key) => database
+            .playlist_rows(source, &[*key], folder, &cancellation)
+            .await?
+            .pop()
+            .map(|row| {
+                if prefer_server_playlist_covers {
+                    row.artwork_binding
+                        .into_iter()
+                        .chain(row.representative_artwork)
+                        .take(4)
+                        .collect()
+                } else if row.representative_artwork.is_empty() {
+                    row.artwork_binding.into_iter().collect()
+                } else {
+                    row.representative_artwork
+                }
+            })
+            .unwrap_or_default(),
+        DownloadSubject::SmartPlaylist(key) => {
+            let now = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs()
+                .try_into()
+                .unwrap_or(i64::MAX);
+            database
+                .smart_playlist_rows(source, &[*key], folder, now, &cancellation)
+                .await?
+                .pop()
+                .map(|row| row.artwork_bindings)
+                .unwrap_or_default()
+        }
+        DownloadSubject::Prepared { .. } => Vec::new(),
+    };
+    if bindings.is_empty() {
+        bindings = database
+            .artwork_preparation_page(source, None, 4, &cancellation)
+            .await?;
+    }
+    Ok(bindings)
+}
+
 fn reorder_queue_items(
     jobs: &mut Vec<DownloadQueueItem>,
     job_id: &str,
@@ -354,6 +510,9 @@ fn operation_feedback_subtitle(kind: &OperationFeedbackKind, count: &str) -> Str
         }
         OperationFeedbackKind::PlaylistAdded { destination } => {
             format!("{} {destination} · {count}", tr("Added to"))
+        }
+        OperationFeedbackKind::PlaylistRemoved { destination } => {
+            format!("{} {destination} · {count}", tr("Removed from"))
         }
     }
 }

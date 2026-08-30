@@ -43,7 +43,7 @@ const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 pub(crate) struct PreferencesState {
     pub(crate) dialog: RefCell<Option<gtk::glib::WeakRef<adw::Dialog>>>,
     pub(crate) release_history: RefCell<crate::runtime::ReleaseHistory>,
-    pub(crate) release_history_list: RefCell<Option<gtk::glib::WeakRef<gtk::Box>>>,
+    pub(crate) release_history_view: RefCell<Option<gtk::glib::WeakRef<gtk::Box>>>,
     pub(crate) release_notification_toast: RefCell<Option<adw::Toast>>,
     pub(crate) release_updating: RefCell<Option<String>>,
 }

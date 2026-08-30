@@ -754,3 +754,77 @@ async fn deleting_one_source_playlist_preserves_other_playlist_entries() {
         1
     );
 }
+
+#[tokio::test]
+async fn identical_playlist_point_update_is_not_a_catalog_change() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    let ScanOutcome::Changed(initial) =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
+    else {
+        panic!("initial catalog must publish");
+    };
+
+    let mut point = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Playlist point scan");
+    point.begin_batch().await.unwrap();
+    point
+        .write_playlist(
+            "playlist-one",
+            "Playlist One",
+            "playlist one",
+            "playlist one",
+            None,
+        )
+        .await
+        .unwrap();
+    point
+        .write_playlist_entry("playlist-one", "entry-track-one", "track-one", 0)
+        .await
+        .unwrap();
+    point
+        .write_playlist_entry("playlist-one", "entry-track-two", "track-two", 1)
+        .await
+        .unwrap();
+    point.finish_batch().await.unwrap();
+
+    let ScanOutcome::Identical(replayed) = point.finish().await.unwrap() else {
+        panic!("an identical Playlist readback must be ignored");
+    };
+    assert_eq!(replayed.catalog_revision, initial.catalog_revision);
+}
+
+#[tokio::test]
+async fn playlist_point_update_preserves_playlist_scope() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+
+    let mut point = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Playlist point scan");
+    point.begin_batch().await.unwrap();
+    point
+        .write_playlist(
+            "playlist-one",
+            "Playlist One",
+            "playlist one",
+            "playlist one",
+            None,
+        )
+        .await
+        .unwrap();
+    point
+        .write_playlist_entry("playlist-one", "entry-track-two", "track-two", 0)
+        .await
+        .unwrap();
+    point.finish_batch().await.unwrap();
+
+    assert!(matches!(
+        point.finish().await.unwrap(),
+        ScanOutcome::PlaylistsChanged(_)
+    ));
+}

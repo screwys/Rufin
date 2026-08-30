@@ -1,6 +1,7 @@
 //! Atomic metadata reads and writes for exact Local or mapped-Local files.
 
 use std::fs;
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
@@ -180,6 +181,32 @@ pub(super) fn write_embedded_lyrics(path: &Path, lyrics: &str) -> Result<(), Sou
         set_embedded_lyrics(tag, key, lyrics);
     })?;
     commit_batch(vec![prepared])
+}
+
+pub(crate) fn write_sidecar_lyrics(
+    audio_path: &Path,
+    lyrics: &str,
+) -> Result<(), SourceMetadataError> {
+    let path = audio_path.with_extension("lrc");
+    let parent = path.parent().ok_or(SourceMetadataError::Unavailable)?;
+    let mut temporary = tempfile::NamedTempFile::new_in(parent).map_err(write_error)?;
+    temporary
+        .write_all(lyrics.as_bytes())
+        .map_err(write_error)?;
+    if let Ok(permissions) = fs::metadata(&path)
+        .or_else(|_| fs::metadata(audio_path))
+        .map(|metadata| metadata.permissions())
+    {
+        temporary
+            .as_file()
+            .set_permissions(permissions)
+            .map_err(write_error)?;
+    }
+    temporary.as_file().sync_all().map_err(write_error)?;
+    temporary
+        .persist(&path)
+        .map_err(|error| write_error(error.error))?;
+    sync_parent(parent)
 }
 
 fn set_embedded_lyrics(tag: &mut Tag, key: ItemKey, lyrics: &str) {
@@ -582,6 +609,23 @@ mod tests {
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "first");
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "updated");
         assert_eq!(id3.get_string(ItemKey::UnsyncLyrics), Some("updated"));
+    }
+
+    #[test]
+    fn sidecar_lyrics_replace_the_neighbor_without_changing_audio() {
+        let directory = tempfile::tempdir().expect("metadata directory");
+        let path = directory.path().join("track.wav");
+        let audio = silent_wav();
+        fs::write(&path, &audio).expect("write WAV");
+
+        write_sidecar_lyrics(&path, "[00:01.000]First").expect("write sidecar");
+        write_sidecar_lyrics(&path, "[00:02.000]Updated").expect("replace sidecar");
+
+        assert_eq!(
+            fs::read_to_string(directory.path().join("track.lrc")).expect("read sidecar"),
+            "[00:02.000]Updated"
+        );
+        assert_eq!(fs::read(path).expect("read WAV"), audio);
     }
 
     #[test]

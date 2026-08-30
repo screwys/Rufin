@@ -35,8 +35,15 @@ const DOWNLOAD_QUALITIES: [StreamQuality; 5] = [
 
 struct DownloadQueuesView {
     queue: gtk::glib::WeakRef<adw::PreferencesGroup>,
-    rendered_rows: Rc<RefCell<Vec<gtk::Widget>>>,
+    rendered_rows: Rc<RefCell<Vec<DownloadQueueRow>>>,
     refresh: Rc<dyn Fn()>,
+}
+
+struct DownloadQueueRow {
+    row: adw::ActionRow,
+    job: Option<downloads::DownloadQueueItem>,
+    up: Option<gtk::Button>,
+    down: Option<gtk::Button>,
 }
 
 impl DownloadQueuesView {
@@ -50,7 +57,7 @@ impl Drop for DownloadQueuesView {
         let rows = self.rendered_rows.take();
         if let Some(queue) = self.queue.upgrade() {
             for row in rows {
-                queue.remove(&row);
+                queue.remove(&row.row);
             }
         }
     }
@@ -675,7 +682,7 @@ fn add_download_queue(
     source_id: &sources::SourceId,
     pause_downloads: &gtk::Button,
 ) -> gtk::Widget {
-    let queue_rows = Rc::new(std::cell::RefCell::new(Vec::<gtk::Widget>::new()));
+    let queue_rows = Rc::new(std::cell::RefCell::new(Vec::<DownloadQueueRow>::new()));
     let rendered_rows = Rc::clone(&queue_rows);
     let weak_shell = Rc::downgrade(shell);
     let weak_queue = queue.downgrade();
@@ -704,9 +711,6 @@ fn add_download_queue(
         ) else {
             return;
         };
-        for row in queue_rows.borrow_mut().drain(..) {
-            queue.remove(&row);
-        }
         let snapshot = shell
             .downloads
             .snapshots
@@ -723,13 +727,55 @@ fn add_download_queue(
         pause_downloads.set_icon_name(icon);
         pause_downloads.set_tooltip_text(Some(&label));
         pause_downloads.update_property(&[gtk::accessible::Property::Label(&label)]);
+        {
+            let mut rows = queue_rows.borrow_mut();
+            let same_jobs = rows.len() == snapshot.jobs.len()
+                && rows.iter().zip(snapshot.jobs.iter()).all(|(row, job)| {
+                    row.job.as_ref().is_some_and(|rendered| {
+                        rendered.id == job.id
+                            && rendered.source_id == job.source_id
+                            && rendered.subject == job.subject
+                    })
+                });
+            if same_jobs && !rows.is_empty() {
+                for (index, (rendered, job)) in
+                    rows.iter_mut().zip(snapshot.jobs.iter()).enumerate()
+                {
+                    rendered
+                        .row
+                        .set_subtitle(&download_queue_item_subtitle(job));
+                    if let Some(up) = &rendered.up {
+                        up.set_sensitive(index > 0);
+                    }
+                    if let Some(down) = &rendered.down {
+                        down.set_sensitive(index + 1 < snapshot.jobs.len());
+                    }
+                    rendered.job = Some(job.clone());
+                }
+                return;
+            }
+            if snapshot.jobs.is_empty()
+                && rows.len() == 1
+                && rows.first().is_some_and(|row| row.job.is_none())
+            {
+                return;
+            }
+            for row in rows.drain(..) {
+                queue.remove(&row.row);
+            }
+        }
         if snapshot.jobs.is_empty() {
             let row = adw::ActionRow::builder()
                 .title(tr("Nothing queued"))
                 .build();
             row.set_focusable(true);
             queue.add(&row);
-            queue_rows.borrow_mut().push(row.upcast());
+            queue_rows.borrow_mut().push(DownloadQueueRow {
+                row,
+                job: None,
+                up: None,
+                down: None,
+            });
             return;
         }
         for (index, job) in snapshot.jobs.iter().enumerate() {
@@ -849,7 +895,12 @@ fn add_download_queue(
             row.add_controller(drop_target);
 
             queue.add(&row);
-            queue_rows.borrow_mut().push(row.upcast());
+            queue_rows.borrow_mut().push(DownloadQueueRow {
+                row,
+                job: Some(job.clone()),
+                up: Some(up),
+                down: Some(down),
+            });
         }
     });
     let view = DownloadQueuesView {
@@ -862,7 +913,7 @@ fn add_download_queue(
     let focus = rendered_rows
         .borrow()
         .first()
-        .cloned()
+        .map(|row| row.row.clone().upcast())
         .expect("the download queue always renders one row");
     let view = Rc::new(std::cell::RefCell::new(Some(view)));
     let view_for_root = Rc::clone(&view);
@@ -1138,7 +1189,7 @@ mod download_queue_lifecycle_tests {
     use std::cell::{Cell, RefCell};
     use std::rc::Rc;
 
-    use super::DownloadQueuesView;
+    use super::{DownloadQueueRow, DownloadQueuesView};
     use crate::downloads::DownloadsState;
 
     struct RowDropProbe(Rc<Cell<usize>>);
@@ -1157,7 +1208,7 @@ mod download_queue_lifecycle_tests {
             .map(|_| RowDropProbe(Rc::clone(&dropped_rows)))
             .collect::<Vec<_>>();
         let refresh_count_for_view = Rc::clone(&refresh_count);
-        let rendered_rows = Rc::new(RefCell::new(Vec::<gtk::Widget>::new()));
+        let rendered_rows = Rc::new(RefCell::new(Vec::<DownloadQueueRow>::new()));
         let weak_rendered_rows = Rc::downgrade(&rendered_rows);
         let rendered_rows_for_view = Rc::clone(&rendered_rows);
         let refresh: Rc<dyn Fn()> = Rc::new(move || {

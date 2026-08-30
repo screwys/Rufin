@@ -1,6 +1,6 @@
 [Desktop Entry]
 Name=Rufin (Development)
-Comment=Native music player development build
+Comment=Rufin development build
 Exec=false
 Icon=io.github.screwys.Rufin.Devel
 Terminal=false

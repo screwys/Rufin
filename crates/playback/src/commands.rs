@@ -266,7 +266,7 @@ pub trait QueueCommandPort: Send + Sync {
     fn activate(&self, occurrence: OccurrenceId);
     fn move_after_current(&self, occurrence: OccurrenceId);
     fn reorder(&self, request: QueueReorderRequest);
-    fn clear(&self);
+    fn clear(&self, include_current: bool);
 }
 
 pub trait RadioCommandPort: Send + Sync {

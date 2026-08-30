@@ -5,10 +5,20 @@ use futures_util::TryStreamExt;
 use sqlx::{Connection, FromRow, QueryBuilder, Sqlite};
 use std::path::{Path, PathBuf};
 
-use crate::{AlbumKey, Database, LibraryError, LibraryResult, ReadCancellation, SourceKey};
+use crate::{
+    AlbumKey, Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, SourceKey,
+};
 
 const ARTWORK_PAGE_LIMIT: usize = 128;
 const ARTWORK_BINDING_BYTES: usize = 256 * 1024;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RepresentativeArtworkScope {
+    AllTracks,
+    FavoriteTracks,
+    PlaylistTracks,
+    LatestAlbums(usize),
+}
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct LocalAlbumArtworkInput {
@@ -33,6 +43,44 @@ struct LocalAlbumArtworkScalar {
 }
 
 impl Database {
+    pub async fn representative_artwork_page(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        scope: RepresentativeArtworkScope,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<Vec<u8>>> {
+        let limit = limit.clamp(1, ARTWORK_PAGE_LIMIT) as i64;
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT COALESCE(album.artwork_binding,track.artwork_binding) binding
+             FROM tracks track LEFT JOIN albums album USING(album_key)
+             WHERE track.source_key=",
+        );
+        query.push_bind(source);
+        match scope {
+            RepresentativeArtworkScope::AllTracks => {}
+            RepresentativeArtworkScope::FavoriteTracks => {
+                query.push(" AND COALESCE(track.user_favorite,track.source_favorite)=1");
+            }
+            RepresentativeArtworkScope::PlaylistTracks => {
+                query.push(" AND EXISTS (SELECT 1 FROM playlist_entries entry WHERE entry.track_key=track.track_key)");
+            }
+            RepresentativeArtworkScope::LatestAlbums(album_limit) => {
+                query.push(" AND track.album_key IN (SELECT latest.album_key FROM albums latest WHERE latest.source_key=").push_bind(source).push(" ORDER BY latest.date_added DESC NULLS LAST,latest.album_key LIMIT ").push_bind(album_limit.clamp(1, 100) as i64).push(")");
+            }
+        };
+        query.push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders folder_scope WHERE folder_scope.track_key=track.track_key AND folder_scope.folder_key=").push_bind(folder).push(")) AND COALESCE(album.artwork_binding,track.artwork_binding) IS NOT NULL GROUP BY binding ORDER BY min(track.sort_text),min(track.track_key) LIMIT ").push_bind(limit);
+        let bindings = query
+            .build_query_scalar::<Vec<u8>>()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(bindings)
+    }
+
     pub async fn write_album_artwork_bindings(
         &self,
         source: SourceKey,

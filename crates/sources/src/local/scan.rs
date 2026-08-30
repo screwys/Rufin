@@ -406,7 +406,7 @@ async fn stage_exact_cue(
     path: &Path,
     retain_unreadable: bool,
 ) -> SourceResult<usize> {
-    let (state, dependencies, tracks, retain) = match read_cue(path) {
+    let (state, dependencies, tracks, retain, dependencies_observed) = match read_cue(path) {
         CueRead::Accepted(sheet) => {
             let dependencies = sheet
                 .files
@@ -414,18 +414,26 @@ async fn stage_exact_cue(
                 .map(|file| file.path.to_string_lossy().into_owned())
                 .collect::<Vec<_>>();
             let tracks = read_cue_tracks(&mut media::Worker::default(), path, sheet);
+            let dependencies_observed = tracks.is_some();
             let state = if tracks.is_some() {
                 library::LocalFileState::Accepted
             } else {
                 library::LocalFileState::Unreadable
             };
             let retain = retain_unreadable && tracks.is_none();
-            (state, dependencies, tracks.unwrap_or_default(), retain)
+            (
+                state,
+                dependencies,
+                tracks.unwrap_or_default(),
+                retain,
+                dependencies_observed,
+            )
         }
         CueRead::Rejected => (
             library::LocalFileState::Rejected,
             Vec::new(),
             Vec::new(),
+            false,
             false,
         ),
         CueRead::Unreadable => (
@@ -437,6 +445,7 @@ async fn stage_exact_cue(
             },
             Vec::new(),
             retain_unreadable,
+            false,
         ),
     };
     let accepted = tracks.len();
@@ -460,6 +469,25 @@ async fn stage_exact_cue(
         )?],
     )
     .await?;
+    if dependencies_observed {
+        for page in dependencies.chunks(LOCAL_BATCH_SIZE) {
+            let observations = page
+                .iter()
+                .map(PathBuf::from)
+                .filter(|path| path.is_file() && roots.iter().any(|root| path.starts_with(root)))
+                .map(|path| {
+                    file_observation(
+                        roots,
+                        &path,
+                        library::LocalFileKind::Media,
+                        library::LocalFileState::Observed,
+                        &[],
+                    )
+                })
+                .collect::<SourceResult<Vec<_>>>()?;
+            persist_observations(scan, observations).await?;
+        }
+    }
     scan.finish_batch().await?;
     Ok(accepted)
 }

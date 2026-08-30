@@ -91,6 +91,12 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This will overwrite your lyrics file with what Rufin fetched, it may be a "
+"better experience to use a dedicated program or plugin to fetch lyrics "
+"instead."
+msgstr ""
+
+msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
 msgstr ""
@@ -234,6 +240,9 @@ msgstr ""
 msgid "Application name"
 msgstr ""
 
+msgid "Apply Template"
+msgstr ""
+
 msgid "Artist / Album"
 msgstr ""
 
@@ -363,6 +372,9 @@ msgstr ""
 msgid "Clear queue"
 msgstr ""
 
+msgid "Clearing queue also clears the current song"
+msgstr ""
+
 msgid "Close Window"
 msgstr ""
 
@@ -379,6 +391,9 @@ msgid "Club"
 msgstr ""
 
 msgid "Collapse sidebar"
+msgstr ""
+
+msgid "Collapse/expand sidebar"
 msgstr ""
 
 msgid "Collection"
@@ -403,6 +418,9 @@ msgid "Comment"
 msgstr ""
 
 msgid "Compact"
+msgstr ""
+
+msgid "Confirm"
 msgstr ""
 
 msgid "Connect"
@@ -522,6 +540,9 @@ msgstr ""
 msgid "Diagnostic log"
 msgstr ""
 
+msgid "Direction"
+msgstr ""
+
 msgid "Disable private mode"
 msgstr ""
 
@@ -598,6 +619,9 @@ msgid "Edit metadata"
 msgstr ""
 
 msgid "Edit"
+msgstr ""
+
+msgid "Embed in track"
 msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
@@ -955,6 +979,9 @@ msgid "Lyrics offset (ms)"
 msgstr ""
 
 msgid "Lyrics settings"
+msgstr ""
+
+msgid "Lyrics storage"
 msgstr ""
 
 msgid "Lyrics"
@@ -1561,6 +1588,9 @@ msgstr ""
 msgid "Removed from favorites"
 msgstr ""
 
+msgid "Removed from"
+msgstr ""
+
 msgid "Rename Playlist"
 msgstr ""
 
@@ -1627,6 +1657,12 @@ msgstr ""
 msgid "Save Server Settings"
 msgstr ""
 
+msgid "Save action saves the lyrics directly to your source"
+msgstr ""
+
+msgid "Save lyrics automatically"
+msgstr ""
+
 msgid "Save to rescan"
 msgstr ""
 
@@ -1658,6 +1694,9 @@ msgid "Search Lyrics"
 msgstr ""
 
 msgid "Search current folder"
+msgstr ""
+
+msgid "Search in page"
 msgstr ""
 
 msgid "Search is unavailable"
@@ -2025,9 +2064,6 @@ msgstr ""
 msgid "Use Rufin data folder"
 msgstr ""
 
-msgid "Use Template"
-msgstr ""
-
 msgid "Use a number above zero"
 msgstr ""
 
@@ -2143,6 +2179,9 @@ msgid "kbps"
 msgstr ""
 
 msgid "range"
+msgstr ""
+
+msgid "separate .lrc file"
 msgstr ""
 
 msgid "to"

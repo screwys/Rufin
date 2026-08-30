@@ -1,6 +1,5 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
-use std::sync::Arc;
 
 use adw::prelude::*;
 use app_identity::DISPLAY_NAME;
@@ -152,7 +151,7 @@ pub fn build(
     let preferences = PreferencesState {
         dialog: RefCell::new(None),
         release_history: RefCell::new(release_history),
-        release_history_list: RefCell::new(None),
+        release_history_view: RefCell::new(None),
         release_notification_toast: RefCell::new(None),
         release_updating: RefCell::new(None),
     };
@@ -328,6 +327,17 @@ pub fn build(
     app_content_overlay.set_child(Some(&app_content_stack));
     app_content_overlay.add_overlay(&fullscreen_player.root);
     app_content_overlay.set_measure_overlay(&fullscreen_player.root, false);
+    let fullscreen_overlay = fullscreen_player.root.clone();
+    app_content_overlay.connect_get_child_position(move |overlay, child| {
+        if child != &fullscreen_overlay {
+            return None;
+        }
+        // The main child already has this layout pass's allocation; the overlay's cached size may
+        // still describe the preceding startup pass.
+        let content = overlay.child()?;
+        let (width, height) = (content.width(), content.height());
+        (width > 0 && height > 0).then(|| gtk::gdk::Rectangle::new(0, 0, width, height))
+    });
 
     app_root.append(&app_content_overlay);
     app_root.append(&player_controls.root);
@@ -396,11 +406,11 @@ pub fn build(
     operation_feedback_text.append(&operation_feedback_title);
     operation_feedback_text.append(&operation_feedback_subtitle);
     operation_feedback.append(&operation_feedback_text);
-    let operation_feedback_close = gtk::Button::from_icon_name("rufin-window-close-symbolic");
-    operation_feedback_close.add_css_class("flat");
-    operation_feedback_close.set_valign(gtk::Align::Center);
-    operation_feedback_close.set_tooltip_text(Some(&tr("Close")));
-    operation_feedback.append(&operation_feedback_close);
+    let operation_feedback_action = gtk::Button::with_label(&tr("Undo"));
+    operation_feedback_action.add_css_class("flat");
+    operation_feedback_action.set_valign(gtk::Align::Center);
+    operation_feedback_action.set_visible(false);
+    operation_feedback.append(&operation_feedback_action);
     app_root_overlay.add_overlay(&operation_feedback);
     app_root_overlay.set_measure_overlay(&operation_feedback, false);
     app_root_overlay.add_overlay(&startup_loading_host);
@@ -436,7 +446,7 @@ pub fn build(
         operation_feedback_artwork,
         operation_feedback_title,
         operation_feedback_subtitle,
-        operation_feedback_close,
+        operation_feedback_action,
         root_stack,
         app_root_overlay,
         app_content_stack,
@@ -482,13 +492,13 @@ pub fn build(
         visualizer,
     };
 
+    let home_variation_seed = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |elapsed| elapsed.as_nanos() as i64);
     let shell = Rc::new(Shell {
         quitting,
-        home_variation: Cell::new(
-            std::time::SystemTime::now()
-                .duration_since(std::time::UNIX_EPOCH)
-                .map_or(0, |elapsed| elapsed.as_nanos() as i64),
-        ),
+        home_showcase_variation: Cell::new(home_variation_seed),
+        home_explore_variation: Cell::new(home_variation_seed),
         diagnostics,
         appearance,
         settings: settings_state,
@@ -514,17 +524,6 @@ pub fn build(
     });
 
     shell.connect_operation_feedback();
-    {
-        let release_updates = Arc::clone(&shell.products.release_updates);
-        let was_active = Cell::new(shell.chrome.window.is_active());
-        shell.chrome.window.connect_is_active_notify(move |window| {
-            let active = window.is_active();
-            let previous = was_active.replace(active);
-            if active && !previous {
-                release_updates.check();
-            }
-        });
-    }
     let normal_header = normal_sidebar_header(
         &shell,
         &shell.chrome.window_controls.start_width_reservation(),

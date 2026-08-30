@@ -47,7 +47,8 @@ impl Shell {
 
 pub(crate) struct Shell {
     pub(crate) quitting: Rc<Cell<bool>>,
-    pub(crate) home_variation: Cell<i64>,
+    pub(crate) home_showcase_variation: Cell<i64>,
+    pub(crate) home_explore_variation: Cell<i64>,
     pub(crate) diagnostics: DiagnosticsHandle,
     pub(crate) appearance: crate::application::style::ApplicationAppearance,
     pub(crate) settings: SettingsState,

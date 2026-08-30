@@ -45,10 +45,10 @@ fn prepare(args: Vec<String>) -> Result<()> {
         return Err("release notes are required".into());
     }
 
-    prepare_version(&version, notes)
+    prepare_version(&version, notes, false)
 }
 
-fn prepare_version(version: &str, notes: &str) -> Result<()> {
+fn prepare_version(version: &str, notes: &str, preserve_release_entry: bool) -> Result<()> {
     let root = repo_root()?;
     env::set_current_dir(&root)?;
     let release_date = match env::var("RELEASE_DATE") {
@@ -59,7 +59,7 @@ fn prepare_version(version: &str, notes: &str) -> Result<()> {
     replace_workspace_version(version)?;
     update_rpm_spec_version(version)?;
     run_command("cargo", ["update", "--workspace", "--offline"])?;
-    update_metainfo_release(version, &release_date, notes)?;
+    update_metainfo_release(version, &release_date, notes, preserve_release_entry)?;
     update_issue_template_versions(version)?;
 
     Ok(())
@@ -233,7 +233,7 @@ fn create_tag(mut args: Vec<String>) -> Result<()> {
         return Ok(());
     }
 
-    prepare_version(&plain_version, &summary)?;
+    prepare_version(&plain_version, &summary, replace_tag)?;
     generate::flatpak_sources(false)?;
     verify_nix_flake()?;
     if !working_tree_clean()? {
@@ -543,6 +543,14 @@ where
 
     if !wrote_entry {
         return Err("release notes contain no public changelog entries".into());
+    }
+
+    if let Some((_, contributors)) = generated_body.split_once("## New Contributors")
+        && let Some((contributors, _)) = contributors.split_once("**Full Changelog**")
+    {
+        notes.push_str("\n## New Contributors");
+        notes.push_str(contributors.trim_end());
+        notes.push('\n');
     }
 
     notes.push_str(&format!(
@@ -864,9 +872,24 @@ fn replace_workspace_version_in_toml(input: &str, version: &str) -> Result<Strin
     }
 }
 
-fn update_metainfo_release(version: &str, release_date: &str, notes: &str) -> Result<()> {
+fn update_metainfo_release(
+    version: &str,
+    release_date: &str,
+    notes: &str,
+    preserve_existing: bool,
+) -> Result<()> {
     let path = PathBuf::from("data/io.github.screwys.Rufin.metainfo.xml");
     let input = read_to_string(&path)?;
+    if preserve_existing {
+        let existing_version = first_metainfo_release_version(&input)?;
+        if existing_version != version {
+            return Err(format!(
+                "cannot replace {version} while MetaInfo starts with {existing_version}"
+            )
+            .into());
+        }
+        return Ok(());
+    }
     let without_existing = remove_existing_release_entries(&input, version);
     let entry = format_metainfo_release(version, release_date, notes);
     let Some(index) = without_existing.find("  <releases>\n") else {

@@ -26,10 +26,11 @@ use super::library_fields::{
     COLLECTION_GRID_CARD_MARGIN, COLLECTION_GRID_MAX_CARD_WIDTH, COLLECTION_GRID_MIN_CARD_WIDTH,
     album_field, artist_field, grid_title_with_label, item_at, item_at_from_item, opaque_artwork,
 };
+use super::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
 use super::route::Route;
 use super::route_shell::restore_single_click_activation_on_primary_press;
 use super::sparse_model::{bind_sparse_item, unbind_sparse_item};
-use super::track_selection::{TrackSelection, install_track_drag_source};
+use super::track_selection::TrackSelection;
 
 fn collection_is_downloaded(track_count: i64, downloaded_count: i64) -> bool {
     track_count > 0 && downloaded_count == track_count
@@ -581,12 +582,17 @@ impl TrackGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         if let Some(selection) = selection {
             let drag_current = Rc::clone(&current);
-            install_track_drag_source(&body.card, selection, move || {
-                drag_current.borrow().as_ref().map(|track| track.track_key)
+            let drag_artwork = cover.drag_paintable_source();
+            install_compact_playlist_drag_source(&body.card, &drag_artwork, move || {
+                let current = drag_current.borrow();
+                let track = current.as_ref()?;
+                let source =
+                    PlaylistTrackSource::selection(selection.dragged_tracks_for(track.track_key));
+                Some((source, track.title.clone()))
             });
         }
         body.set_download_badge(shell.download_badge(false));
@@ -612,6 +618,10 @@ impl TrackGridCell {
             position,
             field,
         }
+    }
+
+    pub(super) fn drag_paintable_source(&self) -> gtk::Picture {
+        self.cover.drag_paintable_source()
     }
 }
 
@@ -758,7 +768,7 @@ impl AlbumGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         body.set_download_badge(shell.download_badge(true));
         let context_shell = Rc::downgrade(shell);
@@ -789,6 +799,10 @@ impl AlbumGridCell {
             favorite,
             current,
         }
+    }
+
+    pub(super) fn drag_paintable_source(&self) -> gtk::Picture {
+        self.cover.drag_paintable_source()
     }
 }
 
@@ -892,7 +906,7 @@ impl ArtistGridCell {
         );
         controls.add_to_overlay(&overlay);
         controls.connect_hover(&overlay);
-        let framed = cards::square_cover_frame(&overlay, &controls.transport);
+        let framed = cards::square_cover_frame(&overlay, Some(&controls.transport));
         let body = CollectionGridCardCell::new(shell, fields, framed.upcast());
         body.set_download_badge(shell.download_badge(true));
         let context_shell = Rc::downgrade(shell);

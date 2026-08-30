@@ -64,6 +64,27 @@ jobs:
             done
           }
 
+          only_updates_flathub_commit() {
+            local path="packaging/flatpak/io.github.screwys.Rufin.flathub.json"
+            local filter
+            local base_manifest
+            local head_manifest
+            filter='walk(
+              if type == "object"
+                and .type? == "git"
+                and .url? == "https://github.com/screwys/Rufin.git"
+                and has("tag")
+              then del(.commit)
+              else .
+              end
+            )'
+            git cat-file -e "${merge_base}:${path}" || return 1
+            git cat-file -e "${HEAD_SHA}:${path}" || return 1
+            base_manifest="$(git show "${merge_base}:${path}" | jq -cS "$filter")"
+            head_manifest="$(git show "${HEAD_SHA}:${path}" | jq -cS "$filter")"
+            [[ "$base_manifest" == "$head_manifest" ]]
+          }
+
           build_container_image=false
           check_workflows=false
           use_current_nix=false
@@ -88,6 +109,12 @@ jobs:
             printf '  %q\n' "${changed_paths[@]}"
 
             for path in "${changed_paths[@]}"; do
+              if [[ "$path" == "packaging/flatpak/io.github.screwys.Rufin.flathub.json" ]] \
+                && only_updates_flathub_commit; then
+                echo "Skipping release builders for the Flathub commit pointer update."
+                continue
+              fi
+
               case "$path" in
                 LICENSE|data|data/*|locales/*|*.md|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
                   continue
@@ -140,6 +167,9 @@ jobs:
                   ;;
                 crates/xtask/src/install.rs)
                   add_jobs workspace aur_bin aur_git flatpak nix rpm
+                  ;;
+                crates/xtask/src/rpm.rs)
+                  add_jobs rpm
                   ;;
                 crates/xtask/src/verify.rs)
                   add_jobs workspace
@@ -374,7 +404,7 @@ jobs:
           version: v0.17.0
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
           prefix-key: v2-rust
@@ -456,7 +486,7 @@ jobs:
           echo "Using $xcode_app with macOS SDK $sdk_version."
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
           prefix-key: v1-rust
@@ -519,7 +549,7 @@ jobs:
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
 
       - name: Restore Rust build cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"

@@ -20,56 +20,67 @@
   <description>
     <p>Enjoy your music library, either a server or local folders; with a powerful all-in-one music player.</p>
     <ul>
-      <li>First-class Jellyfin, Navidrome/OpenSubsonic integration; you can download tracks, or set up rules to automatically download tracks, fully usable offline</li>
-      <li>First-class local music library integration; you can combine multiple folders for a single listening session, fully enjoy built-in music server benefits like activity/history with your local library</li>
-      <li>Built-in Last.fm, Libre.fm, and ListenBrainz scrobbling</li>
-      <li>Discord Rich Presence</li>
-      <li>Automatic lyrics/cover art lookup</li>
-      <li>Advanced lyrics settings such as multiple Japanese reading formats</li>
-      <li>Smart playlists that support multiple combinations</li>
-      <li>Built-in metadata editor with search</li>
+      <li>Powerful transition and loudness normalization implementation</li>
+      <li>Auto DJ with server or app-matched recommendations and random play filters</li>
+      <li>Built-in Last.fm, Libre.fm, ListenBrainz and Discord Rich presence integrations</li>
+      <li>Remote tracks are downloadable with automatic download rules and playable while offline</li>
+      <li>Casting and audio device selection support</li>
+      <li>Advanced smart playlist support with in app activity recording and multiple rule combinations</li>
+      <li>Automatic lyrics/cover/metadata lookups</li>
+      <li>Built-in metadata editor with search and bulk edits</li>
+      <li>Advanced lyric settings with Japanese readings, karaoke mode, offset editor and automatic saving</li>
+      <li>Extensive customization support and keyboard shortcuts catalog</li>
+      <li>Broad codec support including separable CUE tracks</li>
     </ul>
   </description>
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/Rufin.png</image>
-    </screenshot>
-    <screenshot>
-      <caption>Browse all tracks</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/tracks_page.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/albums_page.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/albums.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/album_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
-      <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/visualizer.png</image>
+      <caption>Browse genres</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/genres.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Create smart playlists</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/smart_playlists.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Customize the appearance</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/appearance_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/customize_display.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/download_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/download_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
-      <caption>Customize the layout</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.13.1/data/screenshots/layout_settings.png</image>
+      <caption>View keyboard shortcuts</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/keyboard_shortcuts.png</image>
+    </screenshot>
+    <screenshot>
+      <caption>Use the fullscreen player</caption>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/visualizer.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -80,6 +91,80 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.14.0" date="2026-08-29">
+      <description>
+        <p>Been a while! Even though we added several features just after the previous release, this release had to wait because of a some pretty important changes. We now use sqlx instead of rustqlite, and this migration also made us do a partial library rewrite. There are a lot of exciting features and bug fixes in this release but first, let's thank @Commenter25 for providing Rufin a new icon! We also got a lot of new contributors; I'm thankful to them and to the people who tested our new features before the new release. The most time on this release was spent on app performance and UX: I also made some pragmatic choices for the sake of performance, one of them being removing row columns to be resizeable. This is definitely the biggest release ever, even the highlights list is quite big:</p>
+        <ul>
+          <li>Onboarding is made faster. Artwork is now cached in background and local folder scan is made 3x~ times faster.</li>
+        </ul>
+        <ul>
+          <li>You can now drag songs or select multiple of them; move them into a playlist in the pins, download, or play them all!</li>
+        </ul>
+        <ul>
+          <li>Rufin can cast with UPnP or Chromecast. You can control relay settings or network interface you want to cast from under Privacy &amp; Security.</li>
+        </ul>
+        <ul>
+          <li>Rating is now supported for all sources. Jellyfin natively supports 1-10 range; for OpenSubsonic and local folders which have ratings in 0-5 range we have a setting, where you can save partial ratings in Rufin and upload rounded up ratings as metadata. You can also configure rating menu to appear directly in the now playing bar.</li>
+        </ul>
+        <ul>
+          <li>Karaoke mode is made available for all sources, and we now have more power-user settings for lyrics; you can change edit lyrics inside the app including being able to preview changes with offsets, change font family and font sizes, make the save button directly to save to your source or let Rufin do automatically save fetched lyrics to your source as embeds or separate .lrc files.</li>
+        </ul>
+        <ul>
+          <li>You can configure playback speed and pitch from the new playback settings menu.</li>
+        </ul>
+        <ul>
+          <li>You can now put visualizer in the sidebar! You can also combine it with lyrics, to use it as a background. Visualizer animations are also updated.</li>
+        </ul>
+        <ul>
+          <li>New Smart Playlist templates for weekly, monthly, and yearly Most Played songs. You can also configure these further, these are still dynamic like all smart playlists.</li>
+        </ul>
+        <ul>
+          <li>Favorites route has Tracks/Artists/Albums tabs added.</li>
+        </ul>
+        <ul>
+          <li>A broad range of new keyboard shortcuts are added; from navigation to to various audio and queue settings. Shortcuts are also categorized.</li>
+        </ul>
+        <ul>
+          <li>In addition to the app icon change, icons we use in app are also changed. All of these icons are also bundled with Rufin for consistency on all installations.</li>
+        </ul>
+        <ul>
+          <li>Added API key login support for OpenSubsonic servers.</li>
+        </ul>
+        <ul>
+          <li>Rufin now selects Pipewire instead of PulseAudio if you have it available.</li>
+        </ul>
+        <ul>
+          <li>MacOS/Windows lose the menu and search icons that are put on the tray, and instead get them inside the app window so that they are accessible in fullscreen.</li>
+        </ul>
+        <ul>
+          <li>Polished overall widget spacing.</li>
+        </ul>
+        <ul>
+          <li>Compact sidebar also supports pins now.</li>
+        </ul>
+        <ul>
+          <li>Fixed a bug where repeatedly clicking on the same lyrics row could stop the playback.</li>
+        </ul>
+        <ul>
+          <li>Added Chezh and Traditional Chinese translations.</li>
+        </ul>
+        <ul>
+          <li>Added missing flake dependencies.</li>
+        </ul>
+        <ul>
+          <li>Fixed several bugs with repeat one state, most critical one being it seeking ahead at song start on its own.</li>
+        </ul>
+        <ul>
+          <li>Fixed a bug with text not wrapping correctly in fullscreen player for small window sizes.</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with right clicking to metadata lines at the bottom bar crashing the app.</li>
+        </ul>
+        <ul>
+          <li>Fixed an edge case where if a currently playing downloaded song was removed and tried to play again after listening another song in the queue it would not play.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.13.1" date="2026-08-11">
       <description>
         <p>A quick patch release.</p>
@@ -136,7 +221,7 @@
           <li>Fixed a visual bug: Gapless preload was leaking in visually, when song was about to finish, next song duration was shown before the next song started playing.</li>
         </ul>
         <ul>
-          <li>Fixed an issue with Jellyfin artist metadata editing: it now confirms that edit is successfuly completed.</li>
+          <li>Fixed an issue with Jellyfin artist metadata editing: it now confirms that edit is successfully completed.</li>
         </ul>
         <ul>
           <li>Special thanks to @fenbyte for testing MacOS integration and suggesting various improvements/fixes; and @k2helix for Windows installer/app window behavior debugging!</li>
@@ -206,7 +291,7 @@
     </release>
     <release version="0.11.1" date="2026-07-30">
       <description>
-        <p>This is a patch release that adresses a regression with local library media formats.</p>
+        <p>This is a patch release that addresses a regression with local library media formats.</p>
         <ul>
           <li>Expanded the supported file formats. Now all the simple media formats are supported, plus MKA/WMA.</li>
         </ul>
@@ -234,7 +319,7 @@
       <description>
         <p>Download functionality and fully offline usage is here! You can now quickly download tracks, albums or full artist discography directly from the context menu; you can also select a pre-defined download option such as Favorites, Newly Added, or the whole library, and Rufin would automatically download based on these.</p>
         <ul>
-          <li>Adressed the likely the biggest remaining UX gap, by adding a Pins menu on sidebar. You can now pin playlists, smart playlists, artists or albums to sidebar directly from the context menu.</li>
+          <li>Addressed the likely the biggest remaining UX gap, by adding a Pins menu on sidebar. You can now pin playlists, smart playlists, artists or albums to sidebar directly from the context menu.</li>
         </ul>
         <ul>
           <li>Since the preferences menu grew quite a lot, it deserved a search button, so this was added as well.</li>
@@ -319,7 +404,7 @@
       <description>
         <p>Rufin is now officially available on Nixpkgs! This is a big release with the number of backend and UI fixes that are added. A lot of `hacks` we had for separate elements are now gotten ridden of and live under coherent models. Plus a new &quot;Moods&quot; page on sidebar for Navidrome/Subsonic and local libraries.</p>
         <ul>
-          <li>Adressed an issue about Rufin leaving libraries stale. Rufin now talks to Jellyfin's own `LibraryChanged` web socket, and has `notify` dependency added for local file system changes. Navidrome/Subsonic do a light refresh once every few minutes</li>
+          <li>Addressed an issue about Rufin leaving libraries stale. Rufin now talks to Jellyfin's own `LibraryChanged` web socket, and has `notify` dependency added for local file system changes. Navidrome/Subsonic do a light refresh once every few minutes</li>
         </ul>
         <ul>
           <li>Content width and height, grid cards and scrollbar got another polishing pass. Now scrollbar is strictly on right edge, it does not appear on top of content, and also allows more space for the page content</li>
@@ -452,7 +537,7 @@
           <li>Audio output names now use actual device names. You can also change your audio device directly with a button on the bottom, without needing to navigate to preferences</li>
         </ul>
         <ul>
-          <li>Adressed an issue with Jellyfin servers where rarely on cold launches there could be 4-6s delay to play the first song</li>
+          <li>Addressed an issue with Jellyfin servers where rarely on cold launches there could be 4-6s delay to play the first song</li>
         </ul>
         <ul>
           <li>Album/artist pages can now show navidrome server links as well</li>

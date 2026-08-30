@@ -10,7 +10,9 @@ use library::QueuePageRow;
 use localization::{msgid, tr};
 use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest, QueueReorderTarget};
 
-use crate::favorites::{favorite_icon_button, set_favorite_button_active};
+use crate::favorites::{
+    FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, row_favorite_icon_button, set_favorite_button_active,
+};
 use crate::interactions::{ContextMenuSurface, install_context_menu_openers};
 use crate::layout::allocation_owner;
 use crate::routes::collection_context::{
@@ -18,7 +20,8 @@ use crate::routes::collection_context::{
 };
 use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
 use crate::routes::playlist_picker::{
-    append_context_menu_picker_selection, context_menu_can_add_to_playlist,
+    PlaylistDragPreviewBinding, PlaylistTrackSource, append_context_menu_picker_selection,
+    context_menu_can_add_to_playlist, playlist_drag_content_provider,
 };
 use crate::routes::route::Route;
 use crate::routes::track_selection::TrackSelectionSnapshot;
@@ -30,8 +33,6 @@ use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
 const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
-const QUEUE_OVERLAY_SCROLLBAR_WIDTH: i32 = 9;
-const QUEUE_SIDEBAR_END_INSET: i32 = WINDOW_CHROME_MARGIN_END + QUEUE_OVERLAY_SCROLLBAR_WIDTH;
 const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
 const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
@@ -39,7 +40,7 @@ const QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH: i32 = 572;
 const QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH: i32 = 652;
 const QUEUE_DURATION_COLUMN_WIDTH: i32 = 82;
 const QUEUE_YEAR_COLUMN_WIDTH: i32 = 64;
-const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = 64;
+const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = FAVORITE_COLUMN_WIDTH;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QueueFullscreenColumnMode {
@@ -51,6 +52,11 @@ enum QueueFullscreenColumnMode {
 struct QueueFullscreenColumnWidgets {
     album: gtk::Widget,
     year: gtk::Widget,
+}
+
+struct QueueRowContent {
+    widget: gtk::Widget,
+    artwork: gtk::Picture,
 }
 
 #[derive(Default)]
@@ -292,6 +298,15 @@ impl QueueState {
             .then(|| QueueSelectionSnapshot::new(shell, rows))
             .and_then(|selection| selection.tracks)
     }
+
+    pub(crate) fn selected_occurrences(&self) -> Option<Arc<[OccurrenceId]>> {
+        let positions = self.selection.borrow().as_ref()?.selection();
+        let occurrences = queue_rows_at_positions(&self.rows.borrow(), &positions)
+            .into_iter()
+            .map(|row| OccurrenceId::new(row.object_id))
+            .collect::<Vec<_>>();
+        (!occurrences.is_empty()).then(|| occurrences.into())
+    }
 }
 
 #[derive(Clone)]
@@ -350,6 +365,11 @@ impl Drop for QueueState {
 }
 
 impl Shell {
+    pub(crate) fn clear_queue(&self) {
+        let include_current = self.settings.current.borrow().clear_queue_includes_current;
+        self.products.playback.queue.clear(include_current);
+    }
+
     pub(crate) fn schedule_queue_panel_render(self: &Rc<Self>) {
         let Some(queue) = self.selected_queue() else {
             return;
@@ -818,7 +838,7 @@ fn queue_row(
     root.set_valign(gtk::Align::Center);
     root.set_focusable(true);
     if !fullscreen {
-        root.set_margin_end(QUEUE_SIDEBAR_END_INSET);
+        root.set_margin_end(WINDOW_CHROME_MARGIN_END);
     }
     if current == Some(&occurrence) {
         root.add_css_class("queue-row-current");
@@ -828,24 +848,39 @@ fn queue_row(
         row.title, row.artist
     ))]);
 
-    let content: gtk::Widget = if fullscreen {
+    let content = if fullscreen {
         fullscreen_queue_content(shell, row)
     } else {
         sidebar_queue_content(shell, row)
     };
-    root.append(&content);
+    root.append(&content.widget);
 
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
+    let preview = PlaylistDragPreviewBinding::default();
+    preview.connect(&source);
+    let drag_preview = preview.clone();
+    let weak_artwork = content.artwork.downgrade();
     let source_binding = Rc::clone(&drag_binding);
     let source_shell = Rc::downgrade(shell);
     source.connect_prepare(move |_, _, _| {
+        drag_preview.clear();
         let shell = source_shell.upgrade()?;
         let occurrence = source_binding.occurrence()?;
-        let selection = shell
-            .selected_queue()?
-            .dragged_rows_for(&shell, &occurrence)?;
+        let queue = shell.selected_queue()?;
+        let selection = queue.dragged_rows_for(&shell, &occurrence)?;
+        let title = queue
+            .rows
+            .borrow()
+            .iter()
+            .find(|row| row.object_id == occurrence.as_str())?
+            .title
+            .clone();
+        let artwork = weak_artwork
+            .upgrade()
+            .and_then(|artwork| artwork.paintable());
+        drag_preview.prepare(title, artwork);
         let mut providers = Vec::new();
         if reorderable && selection.occurrences.len() == 1 {
             providers.push(gtk::gdk::ContentProvider::for_value(
@@ -853,8 +888,9 @@ fn queue_row(
             ));
         }
         if let Some(tracks) = selection.tracks {
-            let payload = glib::BoxedAnyObject::new(tracks);
-            providers.push(gtk::gdk::ContentProvider::for_value(&payload.to_value()));
+            providers.push(playlist_drag_content_provider(
+                PlaylistTrackSource::selection(tracks),
+            ));
         }
         match providers.as_slice() {
             [] => None,
@@ -949,7 +985,7 @@ fn present_queue_selection_context_menu(
     surface.popup(&shell.settings.current.borrow().context_menu);
 }
 
-fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
+fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> QueueRowContent {
     let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
     content.set_hexpand(true);
     let cover = ArtworkTile::new(50);
@@ -962,6 +998,7 @@ fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
         50,
         THUMB_COVER_SIZE,
     );
+    let artwork = cover.drag_paintable_source();
     content.append(&cover.widget());
     let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
     labels.set_hexpand(true);
@@ -985,10 +1022,13 @@ fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
     year.set_width_chars(4);
     year.set_halign(gtk::Align::End);
     content.append(&year);
-    content.upcast()
+    QueueRowContent {
+        widget: content.upcast(),
+        artwork,
+    }
 }
 
-fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widget {
+fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> QueueRowContent {
     let columns = fullscreen_queue_row_box();
     let cover = ArtworkTile::new(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
     shell.bind_artwork_tile(
@@ -1000,6 +1040,7 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
         QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH,
         THUMB_COVER_SIZE,
     );
+    let artwork = cover.drag_paintable_source();
     columns.append(&cover.widget());
 
     let identity = gtk::Box::new(gtk::Orientation::Vertical, 2);
@@ -1039,7 +1080,7 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
     let favorite_cell = gtk::CenterBox::new();
     favorite_cell.add_css_class("queue-favorite-cell");
     favorite_cell.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
-    let favorite = favorite_icon_button("Favorite");
+    let favorite = row_favorite_icon_button("Favorite");
     favorite.add_css_class("queue-favorite-button");
     set_favorite_button_active(&favorite, row.favorite.unwrap_or(false));
     if let Some(key) = row.track_key {
@@ -1057,13 +1098,16 @@ fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> gtk::Widge
     favorite_cell.set_center_widget(Some(&favorite));
     columns.append(&favorite_cell);
 
-    fullscreen_queue_column_owner(
-        &columns,
-        QueueFullscreenColumnWidgets {
-            album: album.upcast(),
-            year: year.upcast(),
-        },
-    )
+    QueueRowContent {
+        widget: fullscreen_queue_column_owner(
+            &columns,
+            QueueFullscreenColumnWidgets {
+                album: album.upcast(),
+                year: year.upcast(),
+            },
+        ),
+        artwork,
+    }
 }
 
 fn queue_link_label(text: &str) -> gtk::Label {
@@ -1154,7 +1198,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     if !fullscreen {
         let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
         header.add_css_class("queue-header");
-        header.set_margin_end(QUEUE_SIDEBAR_END_INSET);
+        header.set_margin_end(WINDOW_CHROME_MARGIN_END);
         let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
         spacer.set_width_request(50);
         header.append(&spacer);
@@ -1191,7 +1235,7 @@ fn queue_header_row(fullscreen: bool) -> gtk::Widget {
     let year = gtk::Label::new(Some(&tr("Year").to_uppercase()));
     year.add_css_class("muted");
     year.set_width_request(QUEUE_YEAR_COLUMN_WIDTH);
-    let favorite = gtk::Image::from_icon_name("rufin-non-starred-symbolic");
+    let favorite = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
     favorite.add_css_class("muted");
     favorite.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
     header.append(&spacer);
@@ -1270,11 +1314,15 @@ pub(crate) fn connect_queue_panel_controls(shell: &Rc<Shell>) {
             }
             sidebar_shell.request_queue_page();
         });
-    let queue = shell.products.playback.queue.clone();
+    let clear_shell = Rc::downgrade(shell);
     shell
         .right_panel
         .queue_clear_button
-        .connect_clicked(move |_| queue.clear());
+        .connect_clicked(move |_| {
+            if let Some(shell) = clear_shell.upgrade() {
+                shell.clear_queue();
+            }
+        });
 }
 
 #[cfg(test)]
