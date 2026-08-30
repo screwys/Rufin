@@ -68,6 +68,9 @@ target/rpm/xtask install linux \
   --prefix /usr
 
 %find_lang rufin
+find "%{buildroot}%{_datadir}/icons/hicolor" -type f -print \
+  | sed "s#^%{buildroot}##" \
+  | LC_ALL=C sort >> rufin.lang
 
 %check
 desktop-file-validate data/io.github.screwys.Rufin.desktop
@@ -83,12 +86,6 @@ appstreamcli validate --no-net data/io.github.screwys.Rufin.metainfo.xml
 %{_datadir}/rufin/japanese-readings.dic
 %{_datadir}/applications/io.github.screwys.Rufin.desktop
 %{_metainfodir}/io.github.screwys.Rufin.metainfo.xml
-%{_datadir}/icons/hicolor/512x512/apps/*.png
-%{_datadir}/icons/hicolor/64x64/apps/*.png
-%{_datadir}/icons/hicolor/scalable/actions/*.svg
-%{_datadir}/icons/hicolor/scalable/apps/*.svg
-%{_datadir}/icons/hicolor/scalable/status/*.svg
-%{_datadir}/icons/hicolor/symbolic/apps/*.svg
 
 %changelog
 * Fri Jul 17 2026 screwy <screwygit@proton.me> - 0.9.0-1
