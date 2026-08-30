@@ -192,7 +192,7 @@ newer, and GStreamer 1.26 or newer.
 
 ```bash
 sudo pacman -S --needed \
-  base-devel rust cargo just pkgconf gettext gtk4 libadwaita \
+  base-devel rust cargo cmake ninja just pkgconf gettext gtk4 libadwaita \
   gstreamer gst-plugins-base gst-plugins-good gst-plugins-bad \
   gst-plugins-ugly gst-libav
 ```
@@ -201,7 +201,7 @@ sudo pacman -S --needed \
 
 ```bash
 sudo dnf install \
-  gcc rust cargo just pkgconf-pkg-config gettext gtk4-devel \
+  rust cargo cmake ninja-build just pkgconf-pkg-config gettext gtk4-devel \
   libadwaita-devel gstreamer1-devel gstreamer1-plugins-base-devel \
   gstreamer1-plugins-base gstreamer1-plugins-good \
   gstreamer1-plugins-bad-free gstreamer1-plugins-bad-free-extras \
@@ -227,8 +227,8 @@ pacman -S --needed base-devel git \
 
 ```bash
 brew install \
-  rust just pkgconf gettext gtk4 libadwaita gstreamer \
-  dylibbundler librsvg game-music-emu libopenmpt libsoup meson ninja openssl@3 wavpack
+  rust cmake just pkgconf gettext gtk4 libadwaita gstreamer \
+  librsvg game-music-emu libopenmpt libsoup meson ninja openssl@3 wavpack
 ```
 
 **Building:** After you installed dependencies for your operating system, you can build and run:

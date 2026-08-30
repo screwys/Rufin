@@ -14,6 +14,8 @@ on:
       - .github/workflows/nix.yml
       - Cargo.lock
       - Cargo.toml
+      - CMakeLists.txt
+      - cmake/**
       - crates/**
       - flake.lock
       - flake.nix

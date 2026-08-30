@@ -114,7 +114,7 @@ jobs:
             desktop-file-utils \
             gnupg \
             "${dependencies[@]}"
-          for command in appstreamcli bsdtar cargo desktop-file-validate git gpg makepkg msgfmt pkg-config rustc strip tar zstd; do
+          for command in appstreamcli bsdtar cargo cmake desktop-file-validate git gpg makepkg msgfmt ninja pkg-config rustc strip tar zstd; do
             command -v "$command"
           done
 
@@ -175,11 +175,16 @@ jobs:
             export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
             cd '$source_dir'
             CARGO_TARGET_DIR='$target_dir' \
-              cargo build --frozen --release -p rufin -p xtask
-            '$target_dir/release/xtask' install linux \
-              --binary '$target_dir/release/rufin' \
-              --destdir '$staging' \
-              --prefix /usr
+              cmake \
+                -S . \
+                -B build-cmake \
+                -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX=/usr \
+                -DRUFIN_BUILD_IDENTITY=stable \
+                -DRUFIN_CARGO_FROZEN=ON
+            CARGO_TARGET_DIR='$target_dir' cmake --build build-cmake --target rufin
+            DESTDIR='$staging' cmake --install build-cmake
           "
 
           strip --strip-unneeded "$staging/usr/bin/rufin"
@@ -187,7 +192,8 @@ jobs:
           runuser -u builder -- bash -lc "
             export PATH=/usr/local/sbin:/usr/local/bin:/usr/bin:/bin
             cd '$source_dir'
-            '$target_dir/release/xtask' verify package-layout '$staging' /usr
+            CARGO_TARGET_DIR='$target_dir' \
+              cargo run --frozen -p xtask -- verify package-layout '$staging' /usr
           "
           commit_time="$(runuser -u builder -- git -C "$source_dir" show -s --format=%ct HEAD)"
           tar \
@@ -299,7 +305,7 @@ jobs:
             desktop-file-utils \
             gnupg \
             "${dependencies[@]}"
-          for command in appstreamcli bsdtar cargo desktop-file-validate git gpg makepkg msgfmt pkg-config rustc strip tar zstd; do
+          for command in appstreamcli bsdtar cargo cmake desktop-file-validate git gpg makepkg msgfmt ninja pkg-config rustc strip tar zstd; do
             command -v "$command"
           done
 

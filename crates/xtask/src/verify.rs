@@ -5,7 +5,6 @@ use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
 
 use crate::Result;
-use crate::install::linux_payload;
 use crate::process::{
     command_stdout, ensure_command, path_to_slash, read_to_string, repo_root, run_command,
     temp_path,
@@ -38,6 +37,7 @@ fn package_layout(args: Vec<String>) -> Result<()> {
 
     let root = trim_root(&args[0]);
     let prefix = trim_prefix(args.get(1).map(String::as_str).unwrap_or("/usr"));
+    let mut windows_package = false;
 
     if prefix.is_empty() {
         let unix_bin = package_path(&root, &prefix, "bin/rufin");
@@ -46,6 +46,7 @@ fn package_layout(args: Vec<String>) -> Result<()> {
             return Err(format!("missing executable under {}", args[0]).into());
         }
         if windows_bin.is_file() {
+            windows_package = true;
             require_file(&package_path(
                 &root,
                 &prefix,
@@ -62,12 +63,37 @@ fn package_layout(args: Vec<String>) -> Result<()> {
         require_file(&package_path(&root, &prefix, "bin/rufin"))?;
     }
 
-    let repo = repo_root()?;
-    for file in linux_payload(&repo)? {
+    for path in [
+        "share/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png",
+        "share/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg",
+        "share/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
+        "share/licenses/rufin/japanese-readings.LICENSE",
+        "share/rufin/japanese-readings.dic",
+    ] {
+        require_file(&package_path(&root, &prefix, path))?;
+    }
+    if !windows_package {
+        for path in [
+            "share/applications/io.github.screwys.Rufin.desktop",
+            "share/metainfo/io.github.screwys.Rufin.metainfo.xml",
+        ] {
+            require_file(&package_path(&root, &prefix, path))?;
+        }
+    }
+
+    for entry in fs::read_dir(repo_root()?.join("locales"))? {
+        let path = entry?.path();
+        if path.extension() != Some(OsStr::new("po")) {
+            continue;
+        }
+        let language = path
+            .file_stem()
+            .and_then(OsStr::to_str)
+            .ok_or_else(|| format!("invalid locale filename: {}", path.display()))?;
         require_file(&package_path(
             &root,
             &prefix,
-            &path_to_slash(file.destination()),
+            &format!("share/locale/{language}/LC_MESSAGES/rufin.mo"),
         ))?;
     }
 

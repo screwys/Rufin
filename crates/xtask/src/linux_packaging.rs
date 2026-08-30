@@ -55,7 +55,8 @@ const ARCH_DEPENDENCIES: &[&str] = &[
     "hicolor-icon-theme",
     "libadwaita",
 ];
-const ARCH_GIT_BUILD_DEPENDENCIES: &[&str] = &["cargo", "gettext", "git", "pkgconf"];
+const ARCH_GIT_BUILD_DEPENDENCIES: &[&str] =
+    &["cargo", "cmake", "gettext", "git", "ninja", "pkgconf"];
 
 pub(crate) fn command(args: Vec<String>) -> Result<()> {
     let Some(check) = parse_check_flag(

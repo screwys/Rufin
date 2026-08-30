@@ -4,7 +4,6 @@ use std::env;
 use std::error::Error;
 
 mod generate;
-mod install;
 mod linux_packaging;
 mod media;
 mod process;
@@ -30,7 +29,6 @@ fn run() -> Result<()> {
 
     match args.remove(0).as_str() {
         "generate" => generate::run(args),
-        "install" => install::run(args),
         "release" => release::run(args),
         "verify" => verify::run(args),
         "-h" | "--help" => {
@@ -50,7 +48,6 @@ fn print_usage() {
   cargo run --locked -p xtask -- generate linux-packaging [--check]
   cargo run --locked -p xtask -- generate media-verification-files OUTPUT
   cargo run --locked -p xtask -- generate rpm-srpm TAG --output PATH
-  cargo run --locked -p xtask -- install linux --binary PATH --destdir PATH [--prefix PATH]
   cargo run --locked -p xtask -- release prepare VERSION SUMMARY
   cargo run --locked -p xtask -- release create-tag [--base TAG] [--dry-run] [--replace] [--skip-flathub] VERSION SUMMARY
   cargo run --locked -p xtask -- release update-flathub-manifest [--manifest PATH] TAG

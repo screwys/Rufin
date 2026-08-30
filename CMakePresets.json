@@ -1,0 +1,81 @@
+{
+  "version": 6,
+  "cmakeMinimumRequired": {
+    "major": 3,
+    "minor": 25,
+    "patch": 0
+  },
+  "configurePresets": [
+    {
+      "name": "development",
+      "displayName": "Rufin development",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.local/build/cmake/development",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Debug",
+        "RUFIN_BUILD_IDENTITY": "development",
+        "RUFIN_VALIDATE_DEVELOPMENT_RUNTIME": "ON"
+      }
+    },
+    {
+      "name": "release",
+      "displayName": "Rufin release",
+      "generator": "Ninja",
+      "binaryDir": "${sourceDir}/.local/build/cmake/release",
+      "cacheVariables": {
+        "CMAKE_BUILD_TYPE": "Release",
+        "RUFIN_BUILD_IDENTITY": "stable",
+        "RUFIN_VALIDATE_DEVELOPMENT_RUNTIME": "OFF"
+      }
+    },
+    {
+      "name": "development-container",
+      "inherits": "development",
+      "displayName": "Rufin development container",
+      "binaryDir": "${sourceDir}/.local/build/cmake/development-container"
+    },
+    {
+      "name": "development-package",
+      "inherits": "development",
+      "displayName": "Rufin development package",
+      "binaryDir": "${sourceDir}/.local/build/cmake/development-package",
+      "cacheVariables": {
+        "RUFIN_ENABLE_PACKAGING": "ON"
+      }
+    },
+    {
+      "name": "release-package",
+      "inherits": "release",
+      "displayName": "Rufin release package",
+      "binaryDir": "${sourceDir}/.local/build/cmake/release-package",
+      "cacheVariables": {
+        "RUFIN_ENABLE_PACKAGING": "ON"
+      }
+    }
+  ],
+  "buildPresets": [
+    {
+      "name": "development",
+      "configurePreset": "development",
+      "targets": ["rufin"]
+    },
+    {
+      "name": "release",
+      "configurePreset": "release",
+      "targets": ["rufin"]
+    },
+    {
+      "name": "development-container",
+      "configurePreset": "development-container",
+      "targets": ["rufin"]
+    },
+    {
+      "name": "development-package",
+      "configurePreset": "development-package"
+    },
+    {
+      "name": "release-package",
+      "configurePreset": "release-package"
+    }
+  ]
+}

@@ -119,24 +119,6 @@ pub(crate) fn write_string(path: &Path, contents: &str) -> Result<()> {
         .map_err(|err| format!("failed to write {}: {err}", path.display()).into())
 }
 
-pub(crate) fn collect_files_relative(
-    root: &Path,
-    current: &Path,
-    output: &mut Vec<PathBuf>,
-) -> io::Result<()> {
-    for entry in fs::read_dir(current)? {
-        let entry = entry?;
-        let path = entry.path();
-        if path.is_dir() {
-            collect_files_relative(root, &path, output)?;
-        } else if path.is_file() {
-            let relative = path.strip_prefix(root).map_err(io::Error::other)?;
-            output.push(relative.to_path_buf());
-        }
-    }
-    Ok(())
-}
-
 pub(crate) fn collect_files_with_extension(
     root: &Path,
     current: &Path,

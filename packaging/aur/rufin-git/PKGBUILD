@@ -26,8 +26,10 @@ depends=(
 )
 makedepends=(
   'cargo'
+  'cmake'
   'gettext'
   'git'
+  'ninja'
   'pkgconf'
 )
 # Generated Linux package dependencies end.
@@ -59,14 +61,19 @@ build() {
   cd Rufin || return
 
   export CARGO_TARGET_DIR=target
-  cargo build --frozen --release -p rufin -p xtask
+  cmake \
+    -S . \
+    -B build-cmake \
+    -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DRUFIN_BUILD_IDENTITY=stable \
+    -DRUFIN_CARGO_FROZEN=ON
+  cmake --build build-cmake --target rufin
 }
 
 package() {
   cd Rufin || return
 
-  target/release/xtask install linux \
-    --binary target/release/rufin \
-    --destdir "$pkgdir" \
-    --prefix /usr
+  DESTDIR="$pkgdir" cmake --install build-cmake
 }

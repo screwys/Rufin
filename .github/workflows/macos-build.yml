@@ -85,7 +85,7 @@ jobs:
           fi
           brew install \
             adwaita-icon-theme \
-            dylibbundler \
+            cmake \
             gettext \
             game-music-emu \
             gstreamer \

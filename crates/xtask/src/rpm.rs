@@ -352,15 +352,13 @@ fn verify_source_inputs(root: &Path, spec: &str, source_ref: &str, version: &str
 
 fn verify_spec_linux_install(spec: &str) -> Result<()> {
     for marker in [
-        "target/rpm/xtask install linux",
-        "--binary target/rpm/rufin",
-        "--destdir %{buildroot}",
-        "--prefix /usr",
+        "%cmake -G Ninja",
+        "-DRUFIN_CARGO_PROFILE=rpm",
+        "%cmake_build --target rufin",
+        "%cmake_install",
     ] {
         if !spec.contains(marker) {
-            return Err(
-                format!("RPM spec does not use the Linux payload installer: {marker}").into(),
-            );
+            return Err(format!("RPM spec does not use the CMake build: {marker}").into());
         }
     }
     Ok(())
@@ -485,8 +483,10 @@ mod tests {
     }
 
     #[test]
-    fn rpm_spec_uses_the_linux_payload_installer() {
-        let spec = "target/rpm/xtask install linux \\\n+                    --binary target/rpm/rufin \\\n+                    --destdir %{buildroot} \\\n+                    --prefix /usr\n";
+    fn rpm_spec_uses_the_cmake_build() {
+        let spec = "%cmake -G Ninja -DRUFIN_CARGO_PROFILE=rpm\n\
+                    %cmake_build --target rufin\n\
+                    %cmake_install\n";
         verify_spec_linux_install(spec).unwrap();
         assert!(verify_spec_linux_install("Source0: Rufin.tar.xz\n").is_err());
     }

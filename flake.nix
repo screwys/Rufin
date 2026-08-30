@@ -33,8 +33,10 @@
               fileset = lib.fileset.unions [
                 ./Cargo.lock
                 ./Cargo.toml
+                ./CMakeLists.txt
                 ./LICENSE
                 ./README.md
+                ./cmake
                 ./crates
                 ./data/icons/hicolor
                 ./data/icons/rufin-icons.gresource.xml
@@ -53,7 +55,9 @@
             strictDeps = true;
 
             nativeBuildInputs = with pkgs; [
+              cmake
               gettext
+              ninja
               pkg-config
               wrapGAppsHook4
             ];
@@ -77,30 +81,30 @@
               ]);
             # Generated Linux package dependencies end.
 
-            cargoBuildFlags = [
-              "-p"
-              "rufin"
-              "-p"
-              "xtask"
-            ];
-
             doCheck = false;
 
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
+            buildPhase = ''
+              runHook preBuild
+
+              cmake \
+                -S . \
+                -B build-cmake \
+                -G Ninja \
+                -DCMAKE_BUILD_TYPE=Release \
+                -DCMAKE_INSTALL_PREFIX="$out" \
+                -DRUFIN_BUILD_IDENTITY=stable \
+                -DRUFIN_CARGO_FROZEN=ON
+              cmake --build build-cmake --target rufin
+
+              runHook postBuild
+            '';
+
             installPhase = ''
               runHook preInstall
 
-              rufin_binary="$(find target -type f -path "*/$cargoBuildType/rufin" -perm -0100 -print -quit)"
-              xtask_binary="$(find target -type f -path "*/$cargoBuildType/xtask" -perm -0100 -print -quit)"
-              if [ -z "$rufin_binary" ] || [ -z "$xtask_binary" ]; then
-                echo "The Rufin or xtask build output is missing." >&2
-                exit 1
-              fi
-              "$xtask_binary" install linux \
-                --binary "$rufin_binary" \
-                --destdir "$out" \
-                --prefix /
+              cmake --install build-cmake
               substituteInPlace "$out/share/applications/io.github.screwys.Rufin.desktop" \
                 --replace-fail "Exec=rufin" "Exec=$out/bin/rufin"
 
@@ -152,6 +156,7 @@
                 cargo-deny
                 cargo-nextest
                 clippy
+                cmake
                 debugedit
                 desktop-file-utils
                 fakeroot
@@ -161,6 +166,7 @@
                 just
                 jq
                 libarchive
+                ninja
                 pacman
                 pkg-config
                 rustc

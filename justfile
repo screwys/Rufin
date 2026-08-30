@@ -24,45 +24,10 @@ build target="" architecture="":
     fi
 
 _build:
-    @target_dir="${CARGO_TARGET_DIR:-$PWD/target}"; \
-    artifact_root="${RUFIN_ARTIFACT_ROOT:-$PWD/.local/artifacts}"; \
-    missing_gstreamer=(); \
-    if command -v gst-inspect-1.0 >/dev/null 2>&1; then \
-        if ! gst-inspect-1.0 --exists playbin3 >/dev/null 2>&1 \
-            && ! gst-inspect-1.0 --exists playbin >/dev/null 2>&1; then \
-            missing_gstreamer+=("playbin3 or playbin"); \
-        fi; \
-        audio_sink=autoaudiosink; \
-        if [[ "$(uname -s)" == Darwin ]]; then audio_sink=osxaudiosink; fi; \
-        for element in audioconvert audioresample "$audio_sink" equalizer-nbands scaletempo souphttpsrc; do \
-            if ! gst-inspect-1.0 --exists "$element" >/dev/null 2>&1; then \
-                missing_gstreamer+=("$element"); \
-            fi; \
-        done; \
-    else \
-        missing_gstreamer+=(gst-inspect-1.0); \
-    fi; \
-    if (( ${#missing_gstreamer[@]} > 0 )); then \
-        printf -v missing_gstreamer_list '%s, ' "${missing_gstreamer[@]}"; \
-        missing_gstreamer_list="${missing_gstreamer_list%, }"; \
-        echo "Warning: You are missing one or more basic GStreamer dependencies: $missing_gstreamer_list." >&2; \
-        printf 'Continue with the build? [Y/n] ' >&2; \
-        if ! IFS= read -r reply; then \
-            reply=n; \
-        fi; \
-        case "$reply" in \
-            ""|y|Y|yes|YES|Yes) ;; \
-            *) echo "Build cancelled." >&2; exit 1 ;; \
-        esac; \
-    fi; \
-    executable=rufin; \
-    if [[ "$(rustc -vV | sed -n 's/^host: //p')" == *-windows-* ]]; then \
-        executable=rufin.exe; \
-    fi; \
-    artifact="$artifact_root/$executable"; \
-    mkdir -p "$artifact_root"; \
-    CARGO_TARGET_DIR="$target_dir" cargo build --locked -p rufin --features development; \
-    cp "$target_dir/debug/$executable" "$artifact"
+    @preset=development; \
+    if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then preset=development-container; fi; \
+    cmake --preset "$preset"; \
+    cmake --build --preset "$preset"
 
 _build-arch:
     #!/usr/bin/env bash
@@ -296,6 +261,7 @@ _check-deps:
     @cargo run --locked -p xtask -- generate linux-packaging --check
 
 _check-all:
+    @just _check-cmake
     @cargo run --locked -p xtask -- generate flatpak-sources --check
     @cargo run --locked -p xtask -- generate i18n-template --check
     @cargo run --locked -p xtask -- generate linux-packaging --check
@@ -308,6 +274,11 @@ _check-all:
     @just _lint
     @just _test
     @cargo deny --locked check -D unmatched-skip
+
+_check-cmake:
+    @preset=development; \
+    if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then preset=development-container; fi; \
+    cmake --preset "$preset"
 
 setup-macos-signing:
     #!/usr/bin/env bash
@@ -364,6 +335,12 @@ debug *args:
         shift; \
         flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \
     else \
+        cmake --preset development; \
+        cmake --build --preset development; \
+        executable="$PWD/.local/build/cmake/development/bin/rufin"; \
+        if [[ "$(rustc -vV | sed -n 's/^host: //p')" == *-windows-* ]]; then \
+            executable="${executable}.exe"; \
+        fi; \
         if [[ "$(uname -s)" == Darwin ]]; then \
             brew_prefix="$(brew --prefix)"; \
             export GIO_MODULE_DIR="${brew_prefix}/lib/gio/modules"; \
@@ -372,8 +349,6 @@ debug *args:
             if [[ -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
                 just setup-macos-signing; \
             fi; \
-            target_dir="${CARGO_TARGET_DIR:-$PWD/target}"; \
-            cargo build --locked -p rufin --features development; \
             signing_args=( \
                 --force \
                 --sign "${RUFIN_MACOS_SIGN_IDENTITY:-Rufin Development}" \
@@ -383,17 +358,15 @@ debug *args:
             fi; \
             codesign "${signing_args[@]}" \
                 --identifier io.github.screwys.Rufin.Devel \
-                "$target_dir/debug/rufin"; \
-            RUST_LOG="${RUST_LOG:-debug}" "$target_dir/debug/rufin" "$@"; \
+                "$executable"; \
+            RUST_LOG="${RUST_LOG:-debug}" "$executable" "$@"; \
         elif [[ "$(uname -s)" == Linux ]]; then \
             data_home="${XDG_DATA_HOME:-${HOME:?}/.local/share}"; \
-            target_dir="${CARGO_TARGET_DIR:-$PWD/target}"; \
-            cargo build --locked -p rufin --features development; \
             mkdir -p "$data_home/applications"; \
             desktop-file-install \
                 --dir="$data_home/applications" \
                 --set-key=Exec \
-                --set-value="$target_dir/debug/rufin" \
+                --set-value="$executable" \
                 data/io.github.screwys.Rufin.Devel.desktop; \
             install -Dm0644 \
                 data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg \
@@ -401,10 +374,9 @@ debug *args:
             if command -v update-desktop-database >/dev/null 2>&1; then \
                 update-desktop-database "$data_home/applications"; \
             fi; \
-            RUST_LOG="${RUST_LOG:-debug}" "$target_dir/debug/rufin" "$@"; \
+            RUST_LOG="${RUST_LOG:-debug}" "$executable" "$@"; \
         else \
-            RUST_LOG="${RUST_LOG:-debug}" \
-                cargo run --locked -p rufin --features development -- "$@"; \
+            RUST_LOG="${RUST_LOG:-debug}" "$executable" "$@"; \
         fi; \
     fi
 
@@ -449,382 +421,17 @@ _deps:
     @cargo run --locked -p xtask -- generate linux-packaging
 
 _build-dmg identity="development":
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    repo_root="$PWD"
-    build_identity="{{ identity }}"
-    cargo_args=(build --locked --release -p rufin)
-    case "$build_identity" in
-        development)
-            app_id="io.github.screwys.Rufin.Devel"
-            bundle_name="Rufin.Devel"
-            display_name="Rufin (Development)"
-            cargo_args+=(--features development)
-            ;;
-        stable)
-            app_id="io.github.screwys.Rufin"
-            bundle_name="Rufin"
-            display_name="Rufin"
-            ;;
-        *)
-            echo "macOS build identity must be 'development' or 'stable'." >&2
-            exit 2
-            ;;
-    esac
-    if [[ "$build_identity" == stable \
-        && ( -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" \
-            || "${RUFIN_MACOS_SIGN_IDENTITY}" == "-" ) ]]; then
-        echo "Stable macOS builds require RUFIN_MACOS_SIGN_IDENTITY." >&2
-        exit 1
-    fi
-    if [[ "$build_identity" == development \
-        && -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then
-        just setup-macos-signing
-    fi
-    signing_args=(
-        --force
-        --sign "${RUFIN_MACOS_SIGN_IDENTITY:-Rufin Development}"
-    )
-    if [[ -n "${RUFIN_MACOS_SIGN_KEYCHAIN:-}" ]]; then
-        signing_args+=(--keychain "$RUFIN_MACOS_SIGN_KEYCHAIN")
-    fi
-    artifact_root="${RUFIN_ARTIFACT_ROOT:-${repo_root}/.local/artifacts}"
-    work_root="${repo_root}/.local/build/macos"
-    target_dir="${CARGO_TARGET_DIR:-${work_root}/target}"
-    app_path="${work_root}/${bundle_name}.app"
-    dmg_root="${work_root}/dmg"
-    dmg_path="${RUFIN_DMG_ARTIFACT:-${artifact_root}/${bundle_name}.dmg}"
-
-    mkdir -p "$work_root"
-    mkdir -p "$(dirname "$dmg_path")"
-
-    mach_o_dependencies() {
-        otool -L "$1" \
-            | sed -n 's/^[[:space:]][[:space:]]*\([^[:space:]]*\).*/\1/p'
-    }
-
-    mach_o_install_name() {
-        otool -D "$1" 2>/dev/null \
-            | sed -n '2s/^[[:space:]]*//p'
-    }
-
-    mach_o_rpaths() {
-        otool -l "$1" \
-            | awk '
-                $1 == "cmd" && $2 == "LC_RPATH" {
-                    reading_rpath = 1
-                    next
-                }
-                reading_rpath && $1 == "path" {
-                    print $2
-                    reading_rpath = 0
-                }
-            '
-    }
-
-    prepare_mach_o_for_bundle() {
-        local bundled_file="$1"
-        local architectures
-        local bundled_mode
-        local thin_file
-        local rpath
-
-        architectures="$(lipo -archs "$bundled_file")"
-        if [[ "$architectures" != "$package_arch" ]]; then
-            thin_file="${bundled_file}.rufin-thin"
-            bundled_mode="$(stat -f '%Lp' "$bundled_file")"
-            lipo "$bundled_file" -thin "$package_arch" -output "$thin_file"
-            chmod "$bundled_mode" "$thin_file"
-            mv "$thin_file" "$bundled_file"
-        fi
-
-        while IFS= read -r rpath; do
-            while mach_o_rpaths "$bundled_file" | grep -Fx "$rpath" >/dev/null; do
-                install_name_tool -delete_rpath "$rpath" "$bundled_file"
-            done
-            install_name_tool -add_rpath "$rpath" "$bundled_file"
-        done < <(mach_o_rpaths "$bundled_file" | LC_ALL=C sort -u)
-    }
-
-    brew_prefix="$(brew --prefix)"
-    gstreamer_plugins="$(pkg-config --variable=pluginsdir gstreamer-1.0)"
-    pixbuf_loaders="$(pkg-config --variable=gdk_pixbuf_moduledir gdk-pixbuf-2.0)"
-    pixbuf_query_loaders="$(pkg-config --variable=gdk_pixbuf_query_loaders gdk-pixbuf-2.0)"
-    test -x "$pixbuf_query_loaders"
-    plugin_scanner_dir="$(pkg-config --variable=pluginscannerdir gstreamer-1.0)"
-    plugin_scanner="${plugin_scanner_dir}/gst-plugin-scanner"
-    libsoup_libdir="$(pkg-config --variable=libdir libsoup-3.0)"
-    libsoup_library="${libsoup_libdir}/libsoup-3.0.0.dylib"
-    libsoup_bundle_input="${work_root}/libsoup-3.0.0.dylib"
-
-    gstreamer_version="$(pkg-config --modversion gstreamer-1.0)"
-    wavpack_source_archive="$work_root/gst-plugins-good-${gstreamer_version}.tar.xz"
-    wavpack_source_checksum="${wavpack_source_archive}.sha256sum"
-    wavpack_source_dir="$work_root/gst-plugins-good-${gstreamer_version}"
-    wavpack_build_dir="$work_root/gst-plugins-good-build"
-    wavpack_source_url="https://gstreamer.freedesktop.org/src/gst-plugins-good"
-
-    curl --fail --location --silent --show-error --retry 3 \
-        "$wavpack_source_url/$(basename "$wavpack_source_archive")" \
-        --output "$wavpack_source_archive"
-    curl --fail --location --silent --show-error --retry 3 \
-        "$wavpack_source_url/$(basename "$wavpack_source_checksum")" \
-        --output "$wavpack_source_checksum"
-    (
-        cd "$work_root"
-        shasum -a 256 --check "$(basename "$wavpack_source_checksum")"
-    )
-    rm -rf "$wavpack_source_dir" "$wavpack_build_dir"
-    tar -xJf "$wavpack_source_archive" -C "$work_root"
-    meson setup \
-        "$wavpack_build_dir" \
-        "$wavpack_source_dir" \
-        -Dauto_features=disabled \
-        -Dwavpack=enabled \
-        --buildtype=release
-    meson compile -C "$wavpack_build_dir" gstwavpack
-    wavpack_plugin="$wavpack_build_dir/ext/wavpack/libgstwavpack.dylib"
-
-    extra_audio_source_archive="$work_root/gst-plugins-bad-${gstreamer_version}.tar.xz"
-    extra_audio_source_checksum="${extra_audio_source_archive}.sha256sum"
-    extra_audio_source_dir="$work_root/gst-plugins-bad-${gstreamer_version}"
-    extra_audio_build_dir="$work_root/gst-plugins-bad-build"
-    extra_audio_source_url="https://gstreamer.freedesktop.org/src/gst-plugins-bad"
-
-    curl --fail --location --silent --show-error --retry 3 \
-        "$extra_audio_source_url/$(basename "$extra_audio_source_archive")" \
-        --output "$extra_audio_source_archive"
-    curl --fail --location --silent --show-error --retry 3 \
-        "$extra_audio_source_url/$(basename "$extra_audio_source_checksum")" \
-        --output "$extra_audio_source_checksum"
-    (
-        cd "$work_root"
-        shasum -a 256 --check "$(basename "$extra_audio_source_checksum")"
-    )
-    rm -rf "$extra_audio_source_dir" "$extra_audio_build_dir"
-    tar -xJf "$extra_audio_source_archive" -C "$work_root"
-    gme_prefix="$(brew --prefix game-music-emu)"
-    openmpt_prefix="$(brew --prefix libopenmpt)"
-    CFLAGS="-I${gme_prefix}/include ${CFLAGS:-}" \
-    LDFLAGS="-L${gme_prefix}/lib ${LDFLAGS:-}" \
-    PKG_CONFIG_PATH="${openmpt_prefix}/lib/pkgconfig:${PKG_CONFIG_PATH:-}" \
-        meson setup \
-        "$extra_audio_build_dir" \
-        "$extra_audio_source_dir" \
-        -Dauto_features=disabled \
-        -Dgme=enabled \
-        -Dopenmpt=enabled \
-        --buildtype=release
-    meson compile -C "$extra_audio_build_dir" gstgme gstopenmpt
-    gme_plugin="$extra_audio_build_dir/ext/gme/libgstgme.dylib"
-    openmpt_plugin="$extra_audio_build_dir/ext/openmpt/libgstopenmpt.dylib"
-
-    version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "${repo_root}/Cargo.toml" | head -n 1)"
-    deployment_target="${MACOSX_DEPLOYMENT_TARGET:-15.0}"
-    package_arch="$(uname -m)"
-
-    rm -rf "$app_path" "$dmg_root"
-    mkdir -p \
-        "$app_path/Contents/Frameworks" \
-        "$app_path/Contents/MacOS" \
-        "$app_path/Contents/Resources/lib/gdk-pixbuf-2.0/loaders" \
-        "$app_path/Contents/Resources/lib/gio/modules" \
-        "$app_path/Contents/Resources/lib/gstreamer-1.0" \
-        "$app_path/Contents/Resources/share"
-
-    MACOSX_DEPLOYMENT_TARGET="$deployment_target" \
-        CARGO_TARGET_DIR="$target_dir" \
-        cargo "${cargo_args[@]}"
-    cp "$target_dir/release/rufin" "$app_path/Contents/MacOS/rufin"
-    cp -L "$plugin_scanner" "$app_path/Contents/MacOS/gst-plugin-scanner"
-    cp -L "$pixbuf_query_loaders" \
-        "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
-    chmod +x "$app_path/Contents/MacOS/"*
-    sed \
-        -e "s/@VERSION@/${version}/g" \
-        -e "s/@MINIMUM_SYSTEM_VERSION@/${deployment_target}/g" \
-        -e "s/@BUNDLE_IDENTIFIER@/${app_id}/g" \
-        -e "s/@BUNDLE_NAME@/${bundle_name}/g" \
-        -e "s/@DISPLAY_NAME@/${display_name}/g" \
-        "${repo_root}/packaging/macos/Info.plist.in" \
-        >"$app_path/Contents/Info.plist"
-
-    copy_directory() {
-        local source_path="$1"
-        local destination_path="$2"
-        if [[ -d "$source_path" ]]; then
-            mkdir -p "$destination_path"
-            cp -R -L "$source_path"/. "$destination_path"/
-        fi
-    }
-
-    gstreamer_plugin_names=(
-        libgstaiff.dylib
-        libgstalaw.dylib
-        libgstapetag.dylib
-        libgstasf.dylib
-        libgstaudioconvert.dylib
-        libgstaudiofx.dylib
-        libgstaudioparsers.dylib
-        libgstaudioresample.dylib
-        libgstautodetect.dylib
-        libgstcoreelements.dylib
-        libgstequalizer.dylib
-        libgstfdkaac.dylib
-        libgstflac.dylib
-        libgstid3demux.dylib
-        libgstisomp4.dylib
-        libgstlevel.dylib
-        libgstlibav.dylib
-        libgstmatroska.dylib
-        libgstmpg123.dylib
-        libgstmusepack.dylib
-        libgstmulaw.dylib
-        libgstogg.dylib
-        libgstopus.dylib
-        libgstopusparse.dylib
-        libgstosxaudio.dylib
-        libgstpbtypes.dylib
-        libgstplayback.dylib
-        libgstreplaygain.dylib
-        libgstsoup.dylib
-        libgstspeex.dylib
-        libgsttypefindfunctions.dylib
-        libgstvolume.dylib
-        libgstvorbis.dylib
-        libgstwavparse.dylib
-    )
-    for plugin_name in "${gstreamer_plugin_names[@]}"; do
-        plugin_path="$gstreamer_plugins/$plugin_name"
-        cp -L "$plugin_path" \
-            "$app_path/Contents/Resources/lib/gstreamer-1.0/$plugin_name"
-    done
-    cp -L "$wavpack_plugin" \
-        "$app_path/Contents/Resources/lib/gstreamer-1.0/libgstwavpack.dylib"
-    cp -L "$gme_plugin" \
-        "$app_path/Contents/Resources/lib/gstreamer-1.0/libgstgme.dylib"
-    cp -L "$openmpt_plugin" \
-        "$app_path/Contents/Resources/lib/gstreamer-1.0/libgstopenmpt.dylib"
-    cp -L "$libsoup_library" "$libsoup_bundle_input"
-    copy_directory "$pixbuf_loaders" \
-        "$app_path/Contents/Resources/lib/gdk-pixbuf-2.0/loaders"
-    copy_directory "${brew_prefix}/lib/gio/modules" \
-        "$app_path/Contents/Resources/lib/gio/modules"
-    copy_directory "${brew_prefix}/share/glib-2.0/schemas" \
-        "$app_path/Contents/Resources/share/glib-2.0/schemas"
-    copy_directory "${brew_prefix}/share/gstreamer-1.0" \
-        "$app_path/Contents/Resources/share/gstreamer-1.0"
-    copy_directory "${brew_prefix}/share/gtk-4.0" \
-        "$app_path/Contents/Resources/share/gtk-4.0"
-    copy_directory "${brew_prefix}/share/icons/Adwaita" \
-        "$app_path/Contents/Resources/share/icons/Adwaita"
-    copy_directory "${brew_prefix}/share/icons/AdwaitaLegacy" \
-        "$app_path/Contents/Resources/share/icons/AdwaitaLegacy"
-    copy_directory "${brew_prefix}/share/icons/hicolor" \
-        "$app_path/Contents/Resources/share/icons/hicolor"
-    copy_directory "${brew_prefix}/share/mime" \
-        "$app_path/Contents/Resources/share/mime"
-
-    mkdir -p \
-        "$app_path/Contents/Resources/share/rufin" \
-        "$app_path/Contents/Resources/share/licenses/rufin"
-    cp "${repo_root}/data/japanese-readings.dic" \
-        "$app_path/Contents/Resources/share/rufin/japanese-readings.dic"
-    cp "${repo_root}/data/japanese-readings.LICENSE" \
-        "$app_path/Contents/Resources/share/licenses/rufin/japanese-readings.LICENSE"
-    cp "${repo_root}/LICENSE" "$app_path/Contents/Resources/LICENSE"
-
-    for po_file in "${repo_root}"/locales/*.po; do
-        language="$(basename "$po_file" .po)"
-        copy_directory \
-            "${brew_prefix}/share/locale/${language}" \
-            "$app_path/Contents/Resources/share/locale/${language}"
-        locale_dir="$app_path/Contents/Resources/share/locale/${language}/LC_MESSAGES"
-        mkdir -p "$locale_dir"
-        msgfmt --check "$po_file" -o "$locale_dir/rufin.mo"
-    done
-
-    glib-compile-schemas "$app_path/Contents/Resources/share/glib-2.0/schemas"
-    gio-querymodules "$app_path/Contents/Resources/lib/gio/modules"
-
-    iconset="$work_root/Rufin.iconset"
-    rm -rf "$iconset"
-    mkdir -p "$iconset"
-    icon_source="${repo_root}/data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg"
-    for icon_size in 16 32 128 256 512; do
-        rsvg-convert -w "$icon_size" -h "$icon_size" "$icon_source" \
-            >"$iconset/icon_${icon_size}x${icon_size}.png"
-        doubled_size=$((icon_size * 2))
-        rsvg-convert -w "$doubled_size" -h "$doubled_size" "$icon_source" \
-            >"$iconset/icon_${icon_size}x${icon_size}@2x.png"
-    done
-    iconutil -c icns "$iconset" -o "$app_path/Contents/Resources/Rufin.icns"
-
-    files_to_fix=(
-        "$libsoup_bundle_input"
-        "$app_path/Contents/MacOS/rufin"
-        "$app_path/Contents/MacOS/gdk-pixbuf-query-loaders"
-        "$app_path/Contents/MacOS/gst-plugin-scanner"
-    )
-    while IFS= read -r -d '' module_path; do
-        files_to_fix+=("$module_path")
-    done < <(
-        find \
-            "$app_path/Contents/Resources/lib/gdk-pixbuf-2.0/loaders" \
-            "$app_path/Contents/Resources/lib/gio/modules" \
-            "$app_path/Contents/Resources/lib/gstreamer-1.0" \
-            -type f \( -name '*.dylib' -o -name '*.so' \) -print0
-    )
-
-    dependency_sources="$work_root/dependency-sources"
-    rm -rf "$dependency_sources"
-    mkdir -p "$dependency_sources"
-    while IFS= read -r -d '' dependency; do
-        ln -s "$dependency" "$dependency_sources/$(basename "$dependency")"
-    done < <(find -L "${brew_prefix}/lib" -maxdepth 1 -type f -name '*.dylib' -print0)
-
-    dylib_args=(-od -b -d "$app_path/Contents/Frameworks" -p '@executable_path/../Frameworks/')
-    for file_to_fix in "${files_to_fix[@]}"; do
-        dylib_args+=(-x "$file_to_fix")
-    done
-    dylibbundler "${dylib_args[@]}" -s "$dependency_sources" -ns
-    cp "$libsoup_bundle_input" \
-        "$app_path/Contents/Frameworks/libsoup-3.0.0.dylib"
-
-    bundled_rufin_binary="$app_path/Contents/MacOS/rufin"
-    if ! mach_o_rpaths "$bundled_rufin_binary" | grep -Fx '/usr/lib/swift' >/dev/null; then
-        install_name_tool -add_rpath '/usr/lib/swift' "$bundled_rufin_binary"
-    fi
-
-    while IFS= read -r -d '' bundled_file; do
-        if file "$bundled_file" | grep -q 'Mach-O'; then
-            prepare_mach_o_for_bundle "$bundled_file"
-            if [[ "$bundled_file" != "$bundled_rufin_binary" ]]; then
-                codesign "${signing_args[@]}" "$bundled_file"
-            fi
-            install_name="$(mach_o_install_name "$bundled_file" || true)"
-            external_dependencies="$(mach_o_dependencies "$bundled_file" \
-                | grep -vFx "$install_name" \
-                | grep '^/' \
-                | grep -Ev '^(/usr/lib/|/System/Library/)' || true)"
-            if [[ -n "$external_dependencies" ]]; then
-                echo "$external_dependencies" >&2
-                echo "External library path remains in ${bundled_file}." >&2
-                exit 1
-            fi
-        fi
-    done < <(find "$app_path/Contents" -type f -print0)
-    codesign "${signing_args[@]}" --identifier "$app_id" "$app_path"
-    codesign --verify --deep --strict "$app_path"
-
-    mkdir -p "$dmg_root"
-    ditto "$app_path" "$dmg_root/${bundle_name}.app"
-    ln -s /Applications "$dmg_root/Applications"
-    hdiutil create -volname "$bundle_name" -srcfolder "$dmg_root" -ov -format UDZO "$dmg_path"
-
-    echo "Built ${dmg_path}"
-
+    @build_identity="{{ identity }}"; \
+    case "$build_identity" in \
+        development) preset=development-package ;; \
+        stable) preset=release-package ;; \
+        *) echo "macOS build identity must be 'development' or 'stable'." >&2; exit 2 ;; \
+    esac; \
+    if [[ "$build_identity" == development && -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
+        just setup-macos-signing; \
+    fi; \
+    cmake --preset "$preset"; \
+    cmake --build --preset "$preset" --target rufin-dmg
 _build-flatpak:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -882,256 +489,11 @@ _build-flatpak:
     echo "Built ${bundle_path}"
 
 _build-windows identity="development":
-    #!/usr/bin/env bash
-    set -euo pipefail
-
-    repo_root="$PWD"
-    build_identity="{{ identity }}"
-    cargo_args=(build --locked --release -p rufin --bin rufin)
-    case "$build_identity" in
-        development)
-            app_id="io.github.screwys.Rufin.Devel"
-            desktop_file="data/io.github.screwys.Rufin.Devel.desktop"
-            display_name="Rufin (Development)"
-            project_name="Rufin.Devel"
-            cargo_args+=(--features development)
-            ;;
-        stable)
-            app_id="io.github.screwys.Rufin"
-            desktop_file="data/io.github.screwys.Rufin.desktop"
-            display_name="Rufin"
-            project_name="Rufin"
-            ;;
-        *)
-            echo "Windows build identity must be 'development' or 'stable'." >&2
-            exit 2
-            ;;
-    esac
-    artifact_root="${RUFIN_ARTIFACT_ROOT:-${repo_root}/.local/artifacts}"
-    work_root="${repo_root}/.local/build/windows"
-    target_dir="${CARGO_TARGET_DIR:-${work_root}/target}"
-    stage_dir="${work_root}/${project_name}"
-    output_dir="${work_root}/output"
-
-    version="$(sed -n 's/^version = "\([^"]*\)"/\1/p' "$repo_root/Cargo.toml" | head -n 1)"
-    version_base="${version%%-*}"
-    IFS=. read -r version_major version_minor version_patch <<<"$version_base"
-    version_quad="${version_major:-0}.${version_minor:-0}.${version_patch:-0}.0"
-
-    mkdir -p "$artifact_root" "$output_dir"
-    installer="$artifact_root/${project_name}-${version}-setup.exe"
-    work_installer="$output_dir/${project_name}-${version}-setup.exe"
-    rm -f "$work_installer"
-    CARGO_TARGET_DIR="$target_dir" \
-        cargo "${cargo_args[@]}"
-    if [[ "$build_identity" == stable ]]; then
-        CARGO_TARGET_DIR="$target_dir" \
-            cargo build --locked --release -p windows-updater --bin rufin-update-helper
-    fi
-
-    runtime_prefix="$MINGW_PREFIX"
-    binary="$target_dir/release/rufin.exe"
-
-    copy_file() {
-        local source_path="$1"
-        local destination_path="$2"
-        if [[ -f "$source_path" || -L "$source_path" ]]; then
-            mkdir -p "$(dirname "$destination_path")"
-            cp -L "$source_path" "$destination_path"
-        fi
-    }
-
-    copy_directory() {
-        local source_path="$1"
-        local destination_path="$2"
-        if [[ -d "$source_path" ]]; then
-            mkdir -p "$destination_path"
-            cp -R -L "$source_path"/. "$destination_path"/
-        fi
-    }
-
-    objdump_command="$runtime_prefix/bin/objdump.exe"
-    msgfmt_command="$runtime_prefix/bin/msgfmt.exe"
-    schema_command="$runtime_prefix/bin/glib-compile-schemas.exe"
-    icon_cache_command="$runtime_prefix/bin/gtk4-update-icon-cache.exe"
-
-    copy_dependency_closure() {
-        local dependency_root="$1"
-        local dependency_destination="$2"
-        local dependency_owner dependency_output dependency_name dependency_source
-        local dependency_index=0
-        local -a dependency_queue=()
-        mapfile -d '' dependency_queue < <(
-            find "$dependency_root" -type f \( -iname '*.dll' -o -iname '*.exe' \) -print0
-        )
-        while (( dependency_index < ${#dependency_queue[@]} )); do
-            dependency_owner="${dependency_queue[$dependency_index]}"
-            dependency_index=$((dependency_index + 1))
-            dependency_output="$("$objdump_command" -p "$dependency_owner")"
-            while IFS= read -r dependency_name; do
-                [[ -n "$dependency_name" ]] || continue
-                if find "$dependency_destination" \
-                    -maxdepth 1 \
-                    -type f \
-                    -iname "$dependency_name" \
-                    -print \
-                    -quit | grep -q .; then
-                    continue
-                fi
-                dependency_source="$(
-                    find "$runtime_prefix/bin" \
-                        -maxdepth 1 \
-                        -type f \
-                        -iname "$dependency_name" \
-                        -print \
-                        -quit 2>/dev/null || true
-                )"
-                [[ -n "$dependency_source" ]] || continue
-                cp -L "$dependency_source" "$dependency_destination/$(basename "$dependency_source")"
-                dependency_queue+=("$dependency_destination/$(basename "$dependency_source")")
-            done < <(
-                sed -n 's/^[[:space:]]*DLL Name:[[:space:]]*//p' <<<"$dependency_output" \
-                    | tr -d '\r'
-            )
-        done
-    }
-
-    rm -rf "$stage_dir"
-    app_bin="$stage_dir/bin"
-    app_share="$stage_dir/share"
-    mkdir -p "$app_bin"
-    cp "$binary" "$app_bin/rufin.exe"
-    copy_file "$repo_root/LICENSE" "$stage_dir/LICENSE"
-    copy_file "$repo_root/packaging/windows/assets/rufin.ico" "$stage_dir/rufin.ico"
-    copy_file \
-        "$repo_root/data/japanese-readings.dic" \
-        "$app_share/rufin/japanese-readings.dic"
-    copy_file \
-        "$repo_root/data/japanese-readings.LICENSE" \
-        "$app_share/licenses/rufin/japanese-readings.LICENSE"
-    copy_file \
-        "$repo_root/$desktop_file" \
-        "$app_share/applications/${app_id}.desktop"
-    copy_file \
-        "$repo_root/data/io.github.screwys.Rufin.metainfo.xml" \
-        "$app_share/metainfo/io.github.screwys.Rufin.metainfo.xml"
-
-    for helper in gspawn-win64-helper.exe gspawn-win64-helper-console.exe; do
-        copy_file "$runtime_prefix/bin/$helper" "$app_bin/$helper"
-    done
-
-    gstreamer_plugins="$stage_dir/lib/gstreamer-1.0"
-    mkdir -p "$gstreamer_plugins"
-    gstreamer_plugin_names=(
-        libgstaiff.dll
-        libgstalaw.dll
-        libgstapetag.dll
-        libgstasf.dll
-        libgstaudioconvert.dll
-        libgstaudiofx.dll
-        libgstaudioparsers.dll
-        libgstaudioresample.dll
-        libgstautodetect.dll
-        libgstcoreelements.dll
-        libgstdirectsound.dll
-        libgstequalizer.dll
-        libgstfdkaac.dll
-        libgstflac.dll
-        libgstgme.dll
-        libgstid3demux.dll
-        libgstisomp4.dll
-        libgstlevel.dll
-        libgstlibav.dll
-        libgstmatroska.dll
-        libgstmpg123.dll
-        libgstmusepack.dll
-        libgstmulaw.dll
-        libgstogg.dll
-        libgstopenmpt.dll
-        libgstopus.dll
-        libgstopusparse.dll
-        libgstpbtypes.dll
-        libgstplayback.dll
-        libgstreplaygain.dll
-        libgstsoup.dll
-        libgstspeex.dll
-        libgsttypefindfunctions.dll
-        libgstvolume.dll
-        libgstvorbis.dll
-        libgstwasapi.dll
-        libgstwavpack.dll
-        libgstwavparse.dll
-    )
-    for plugin_name in "${gstreamer_plugin_names[@]}"; do
-        cp -L \
-            "$runtime_prefix/lib/gstreamer-1.0/$plugin_name" \
-            "$gstreamer_plugins/$plugin_name"
-    done
-
-    copy_directory "$runtime_prefix/lib/gdk-pixbuf-2.0" "$stage_dir/lib/gdk-pixbuf-2.0"
-    copy_directory "$runtime_prefix/lib/gio/modules" "$stage_dir/lib/gio/modules"
-    copy_directory \
-        "$runtime_prefix/libexec/gstreamer-1.0" \
-        "$stage_dir/libexec/gstreamer-1.0"
-    find "$stage_dir/lib" -type f -name '*.dll.a' -delete
-    copy_dependency_closure "$stage_dir" "$app_bin"
-
-    if [[ "$build_identity" == stable ]]; then
-        update_helper="$target_dir/release/rufin-update-helper.exe"
-        updater_dir="$stage_dir/updater/$version"
-        mkdir -p "$updater_dir"
-        cp "$update_helper" "$updater_dir/rufin-update-helper.exe"
-        printf 'rufin-update-helper:%s\n' "$version" \
-            >"$updater_dir/rufin-update-helper.complete"
-        copy_dependency_closure "$updater_dir" "$updater_dir"
-    fi
-
-    copy_directory "$runtime_prefix/share/glib-2.0/schemas" "$app_share/glib-2.0/schemas"
-    copy_directory "$runtime_prefix/share/gstreamer-1.0" "$app_share/gstreamer-1.0"
-    copy_directory "$runtime_prefix/share/gtk-4.0" "$app_share/gtk-4.0"
-    copy_directory "$runtime_prefix/share/icons/Adwaita" "$app_share/icons/Adwaita"
-    copy_directory "$runtime_prefix/share/icons/AdwaitaLegacy" "$app_share/icons/AdwaitaLegacy"
-    copy_directory "$runtime_prefix/share/icons/hicolor" "$app_share/icons/hicolor"
-    copy_directory "$repo_root/data/icons/hicolor" "$app_share/icons/hicolor"
-    copy_directory "$runtime_prefix/share/mime" "$app_share/mime"
-    copy_directory "$runtime_prefix/share/themes" "$app_share/themes"
-    copy_directory "$runtime_prefix/share/licenses" "$app_share/licenses"
-
-    for po_file in "$repo_root"/locales/*.po; do
-        language="$(basename "$po_file" .po)"
-        copy_directory \
-            "$runtime_prefix/share/locale/$language" \
-            "$app_share/locale/$language"
-        locale_dir="$app_share/locale/$language/LC_MESSAGES"
-        mkdir -p "$locale_dir"
-        "$msgfmt_command" --check "$po_file" -o "$locale_dir/rufin.mo"
-    done
-    "$schema_command" "$app_share/glib-2.0/schemas"
-
-    hicolor_dir="$app_share/icons/hicolor"
-    rm -f "$hicolor_dir/icon-theme.cache"
-    "$icon_cache_command" -q -t -f "$hicolor_dir"
-
-    settings_dir="$stage_dir/etc/gtk-4.0"
-    mkdir -p "$settings_dir"
-    printf '%s\n' '[Settings]' 'gtk-font-name=Segoe UI 9' >"$settings_dir/settings.ini"
-
-    stage_argument="$(cygpath -w "$stage_dir")"
-    stage_files_argument="${stage_argument}\\*"
-    output_argument="$(cygpath -w "$output_dir")"
-    asset_argument="$(cygpath -w "$repo_root/packaging/windows/assets")"
-
-    MSYS2_ARG_CONV_EXCL='/D' makensis \
-        "/DRUFIN_STAGE_DIR=${stage_argument}" \
-        "/DRUFIN_STAGE_FILES=${stage_files_argument}" \
-        "/DRUFIN_OUTPUT_DIR=${output_argument}" \
-        "/DRUFIN_ASSET_DIR=${asset_argument}" \
-        "/DRUFIN_APP_ID=${app_id}" \
-        "/DRUFIN_DISPLAY_NAME=${display_name}" \
-        "/DRUFIN_PROJECT_NAME=${project_name}" \
-        "/DRUFIN_VERSION=${version}" \
-        "/DRUFIN_VERSION_QUAD=${version_quad}" \
-        "$repo_root/packaging/windows/rufin.nsi"
-
-    cp "$work_installer" "$installer"
-    echo "Built ${installer}"
+    @build_identity="{{ identity }}"; \
+    case "$build_identity" in \
+        development) preset=development-package ;; \
+        stable) preset=release-package ;; \
+        *) echo "Windows build identity must be 'development' or 'stable'." >&2; exit 2 ;; \
+    esac; \
+    cmake --preset "$preset"; \
+    cmake --build --preset "$preset" --target rufin-installer

@@ -9,6 +9,9 @@ on:
       - .cargo/**
       - Cargo.lock
       - Cargo.toml
+      - CMakeLists.txt
+      - CMakePresets.json
+      - cmake/**
       - crates/**
       - flake.lock
       - flake.nix
@@ -147,6 +150,15 @@ jobs:
                 .github/workflows/aur-build.yml)
                   add_jobs aur_bin aur_git
                   ;;
+                cmake/RufinMacOS*)
+                  add_jobs macos
+                  ;;
+                cmake/RufinWindows*)
+                  add_jobs windows
+                  ;;
+                CMakeLists.txt|CMakePresets.json|cmake/*)
+                  add_jobs workspace aur_bin aur_git flatpak macos nix rpm windows
+                  ;;
                 .github/workflows/rpm-source.yml|packaging/rpm/*)
                   add_jobs rpm
                   ;;
@@ -164,9 +176,6 @@ jobs:
                   ;;
                 crates/windows-updater/*)
                   add_jobs windows
-                  ;;
-                crates/xtask/src/install.rs)
-                  add_jobs workspace aur_bin aur_git flatpak nix rpm
                   ;;
                 crates/xtask/src/rpm.rs)
                   add_jobs rpm

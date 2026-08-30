@@ -14,9 +14,8 @@ BuildRequires:  appstream
 BuildRequires:  cargo-rpm-macros
 BuildRequires:  cmake
 BuildRequires:  desktop-file-utils
-BuildRequires:  gcc
 BuildRequires:  gettext
-BuildRequires:  make
+BuildRequires:  ninja-build
 BuildRequires:  perl-interpreter
 BuildRequires:  pkgconfig(gdk-pixbuf-2.0)
 BuildRequires:  pkgconfig(glib-2.0)
@@ -48,9 +47,13 @@ Navidrome, and local music libraries.
 # aws-lc-sys omits CFLAGS from one compiler probe, so pair Fedora's hardened
 # linker flags with the PIE compile flag that probe still needs.
 LDFLAGS="%{build_ldflags} -fPIE" \
-  %{__cargo} build %{__cargo_common_opts} --profile rpm \
-    --package rufin \
-    --package xtask
+  %cmake -G Ninja \
+    -DCMAKE_BUILD_TYPE=Release \
+    -DCMAKE_INSTALL_PREFIX=/usr \
+    -DRUFIN_BUILD_IDENTITY=stable \
+    -DRUFIN_CARGO_FROZEN=ON \
+    -DRUFIN_CARGO_PROFILE=rpm
+LDFLAGS="%{build_ldflags} -fPIE" %cmake_build --target rufin
 CARGO_HOME=.cargo RUSTC_BOOTSTRAP=1 cargo tree \
   -Zavoid-dev-deps \
   --package rufin \
@@ -62,10 +65,7 @@ CARGO_HOME=.cargo RUSTC_BOOTSTRAP=1 cargo tree \
 %cargo_vendor_manifest
 
 %install
-target/rpm/xtask install linux \
-  --binary target/rpm/rufin \
-  --destdir %{buildroot} \
-  --prefix /usr
+DESTDIR=%{buildroot} %cmake_install
 
 %find_lang rufin
 find "%{buildroot}%{_datadir}/icons/hicolor" -type f -print \
