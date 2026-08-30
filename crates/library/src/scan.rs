@@ -1092,7 +1092,7 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_folders VALUES (?1, ?2, ?3, ?4, ?5)")
+            sqlx::query("INSERT INTO temp.scan_folders VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,artwork_binding=COALESCE(excluded.artwork_binding,scan_folders.artwork_binding)")
                 .bind(object_id)
                 .bind(name)
                 .bind(normalized_name)
@@ -1132,7 +1132,7 @@ impl Scan {
 
     pub async fn write_track_folders(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
         self.write_links_batch(
-            "INSERT INTO temp.scan_track_folders(owner_id,related_id,position) ",
+            "INSERT OR IGNORE INTO temp.scan_track_folders(owner_id,related_id,position) ",
             links,
         )
         .await
@@ -1155,7 +1155,7 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_playlists VALUES (?1, ?2, ?3, ?4, ?5)")
+            sqlx::query("INSERT INTO temp.scan_playlists VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,artwork_binding=COALESCE(excluded.artwork_binding,scan_playlists.artwork_binding)")
                 .bind(object_id)
                 .bind(name)
                 .bind(normalized_name)
@@ -1187,7 +1187,7 @@ impl Scan {
             track_id.as_bytes(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_playlist_entries VALUES (?1, ?2, ?3, ?4)")
+            sqlx::query("INSERT INTO temp.scan_playlist_entries VALUES (?1, ?2, ?3, ?4) ON CONFLICT DO NOTHING")
                 .bind(playlist_id)
                 .bind(object_id)
                 .bind(track_id)

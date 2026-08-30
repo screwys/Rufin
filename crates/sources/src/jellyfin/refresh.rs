@@ -1,5 +1,7 @@
 //! Streams Jellyfin catalog pages directly into Library Scan staging.
 
+use std::collections::HashSet;
+
 use library::Scan;
 
 use super::*;
@@ -16,6 +18,12 @@ impl JellyfinSource {
                 "Audio",
                 "PlayCount,SortName",
                 library::HomeEntryKind::Track,
+            ),
+            crate::SourceHomeSection::NewlyAdded => (
+                "newly-added",
+                "MusicAlbum",
+                "DateCreated,SortName",
+                library::HomeEntryKind::Album,
             ),
             crate::SourceHomeSection::RecentlyPlayed => (
                 "recently-played",
@@ -403,6 +411,7 @@ impl JellyfinSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let mut pages = PageState::default();
+        let mut seen = HashSet::new();
         loop {
             check_cancelled(cancelled)?;
             let page = self
@@ -412,6 +421,9 @@ impl JellyfinSource {
             let finished = pages.advance(count, page.total_record_count)?;
             for item in page.items {
                 let playlist = playlist_from_item(item);
+                if !seen.insert(playlist.id.clone()) {
+                    continue;
+                }
                 let artwork = playlist
                     .image_ref
                     .as_ref()
@@ -441,76 +453,16 @@ impl JellyfinSource {
     }
 
     async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
-        for (section_id, item_type, sort_by, kind) in [
-            (
-                "most-played",
-                "Audio",
-                "PlayCount,SortName",
-                library::HomeEntryKind::Track,
-            ),
-            (
-                "newly-added",
-                "MusicAlbum",
-                "DateCreated,SortName",
-                library::HomeEntryKind::Album,
-            ),
-            (
-                "recently-played",
-                "Audio",
-                "DatePlayed,SortName",
-                library::HomeEntryKind::Track,
-            ),
-            (
-                "recently-released",
-                "MusicAlbum",
-                "ProductionYear,PremiereDate,SortName",
-                library::HomeEntryKind::Album,
-            ),
+        for section in [
+            crate::SourceHomeSection::MostPlayed,
+            crate::SourceHomeSection::NewlyAdded,
+            crate::SourceHomeSection::RecentlyPlayed,
+            crate::SourceHomeSection::RecentlyReleased,
         ] {
-            let page = self
-                .item_page_sorted(item_type, 0, 24, sort_by, "Descending")
-                .await?;
+            let entries = self.home_section(section).await?;
             scan.begin_batch().await?;
-            for (position, item) in page.items.into_iter().enumerate() {
-                let (entity_object_id, title, subtitle, artwork_binding) = match kind {
-                    library::HomeEntryKind::Track => {
-                        let track = track_from_item(item);
-                        (
-                            track.id,
-                            track.title,
-                            track.artist,
-                            track
-                                .image_ref
-                                .as_ref()
-                                .map(serde_json::to_vec)
-                                .transpose()?,
-                        )
-                    }
-                    library::HomeEntryKind::Album => {
-                        let album = album_from_item(item);
-                        (
-                            album.id,
-                            album.title,
-                            album.artist,
-                            album
-                                .image_ref
-                                .as_ref()
-                                .map(serde_json::to_vec)
-                                .transpose()?,
-                        )
-                    }
-                    _ => unreachable!(),
-                };
-                scan.write_home_entry(&library::HomeEntryInput {
-                    section_id: section_id.to_string(),
-                    position: position as i64,
-                    kind,
-                    entity_object_id,
-                    title,
-                    subtitle,
-                    artwork_binding,
-                })
-                .await?;
+            for entry in entries {
+                scan.write_home_entry(&entry).await?;
             }
             scan.finish_batch().await?;
         }
@@ -551,8 +503,13 @@ impl PageState {
 }
 
 #[cfg(test)]
-mod paging_tests {
+mod tests {
     use super::PageState;
+
+    use crate::jellyfin::{JellyfinSource, JellyfinSourceConfig};
+    use library::{Scan, ScanOutcome};
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
     fn playlist_pages_continue_when_the_reported_total_grows() {
@@ -562,6 +519,104 @@ mod paging_tests {
         assert!(!pages.advance(1, Some(3)).expect("grown total"));
         assert_eq!(pages.offset(), 2);
         assert!(pages.advance(1, Some(3)).expect("final page"));
+    }
+
+    #[tokio::test]
+    async fn newly_added_home_keeps_the_jellyfin_provider_query() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/Items"))
+            .and(query_param("IncludeItemTypes", "MusicAlbum"))
+            .and(query_param("SortBy", "DateCreated,SortName"))
+            .and(query_param("SortOrder", "Descending"))
+            .and(query_param("StartIndex", "0"))
+            .and(query_param("Limit", "24"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Items": [{ "Id": "album-one", "Name": "New Album" }],
+                "TotalRecordCount": 1
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server-one".to_string()),
+                user_id: "user-one".to_string(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "secret-token".to_string(),
+            "device-one".to_string(),
+        )
+        .expect("Jellyfin source");
+
+        let entries = source
+            .home_section(crate::SourceHomeSection::NewlyAdded)
+            .await
+            .expect("Jellyfin Newly Added");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].section_id, "newly-added");
+        assert_eq!(entries[0].title, "New Album");
+    }
+
+    #[tokio::test]
+    async fn overlapping_playlist_pages_stage_each_identity_once() {
+        let server = MockServer::start().await;
+        for offset in ["0", "1"] {
+            Mock::given(method("GET"))
+                .and(path("/Items"))
+                .and(query_param("IncludeItemTypes", "Playlist"))
+                .and(query_param("StartIndex", offset))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "Items": [{ "Id": "playlist-one", "Name": "Playlist One" }],
+                    "TotalRecordCount": 2
+                })))
+                .expect(1)
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path("/Playlists/playlist-one/Items"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Items": [],
+                "TotalRecordCount": 0
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server-one".to_string()),
+                user_id: "user-one".to_string(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "secret-token".to_string(),
+            "device-one".to_string(),
+        )
+        .expect("Jellyfin source");
+        let directory = tempfile::tempdir().expect("Library directory");
+        let database = library::Database::open(directory.path().join("library.sqlite3"))
+            .await
+            .expect("Library database");
+        let mut scan = Scan::begin(&database, "jellyfin:test", "Jellyfin", "jellyfin", None)
+            .await
+            .expect("begin Scan");
+
+        source
+            .stage_playlists(&mut scan, &|_| {}, &|| false)
+            .await
+            .expect("stage overlapping Playlist pages");
+
+        assert!(matches!(
+            scan.finish().await.expect("publish Playlists"),
+            ScanOutcome::Changed(_)
+        ));
     }
 }
 

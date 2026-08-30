@@ -202,6 +202,27 @@ impl WaveformOwner {
         self.start_decode(request, key, input);
     }
 
+    pub(crate) fn remove_source_cache(&self, source: SourceKey) -> std::io::Result<()> {
+        if self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .as_ref()
+            .is_some_and(|current| current.key.source_key == source)
+        {
+            self.clear();
+        }
+        let directory = self
+            .cache_root
+            .join(CACHE_DIRECTORY)
+            .join(source.to_string());
+        match fs::remove_dir_all(directory) {
+            Ok(()) => Ok(()),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(()),
+            Err(error) => Err(error),
+        }
+    }
+
     fn clear(&self) {
         self.next_request.fetch_add(1, Ordering::AcqRel);
         self.current
@@ -394,4 +415,34 @@ fn is_dsd(value: &str) -> bool {
         .split(|character: char| !character.is_ascii_alphanumeric())
         .filter(|part| !part.is_empty())
         .any(|part| matches!(part, "dsf" | "dff" | "dsdiff") || part.starts_with("dsd"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn removing_one_source_cache_preserves_other_waveforms() {
+        let directory = tempfile::tempdir().expect("Waveform cache directory");
+        let first = directory.path().join(CACHE_DIRECTORY).join("1");
+        let second = directory.path().join(CACHE_DIRECTORY).join("2");
+        fs::create_dir_all(&first).expect("first source cache");
+        fs::create_dir_all(&second).expect("second source cache");
+        fs::write(first.join("track.json"), b"waveform").expect("first waveform");
+        fs::write(second.join("track.json"), b"waveform").expect("second waveform");
+        let (events, _) = async_channel::unbounded();
+        let owner = WaveformOwner::new(
+            tokio::runtime::Handle::current(),
+            events,
+            directory.path().to_path_buf(),
+            true,
+        );
+
+        owner
+            .remove_source_cache(SourceKey::from_raw(1))
+            .expect("remove first source Waveforms");
+
+        assert!(!first.exists());
+        assert!(second.exists());
+    }
 }

@@ -288,6 +288,7 @@ pub enum SourceCollection {
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum SourceHomeSection {
     MostPlayed,
+    NewlyAdded,
     RecentlyPlayed,
     RecentlyReleased,
 }

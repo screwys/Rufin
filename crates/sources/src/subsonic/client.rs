@@ -2,7 +2,7 @@ use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
 use serde::{
-    Deserialize, Serialize,
+    Deserialize, Deserializer, Serialize,
     de::{self, DeserializeOwned, IntoDeserializer, Visitor},
 };
 use std::fmt;
@@ -1438,7 +1438,7 @@ pub(super) struct SubsonicAlbum {
     pub(super) display_artist: Option<String>,
     #[serde(default, rename = "artistId")]
     pub(super) artist_id: Option<SubsonicId>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub(super) artists: Vec<SubsonicArtistRef>,
     #[serde(default, rename = "coverArt")]
     pub(super) cover_art: Option<SubsonicId>,
@@ -1456,9 +1456,9 @@ pub(super) struct SubsonicAlbum {
     pub(super) user_rating: Option<u32>,
     #[serde(default)]
     pub(super) genre: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub(super) genres: Vec<GenreName>,
-    #[serde(default, rename = "releaseTypes")]
+    #[serde(default, rename = "releaseTypes", deserialize_with = "null_default")]
     pub(super) release_types: Vec<String>,
     #[serde(default, rename = "isCompilation")]
     pub(super) is_compilation: Option<bool>,
@@ -1484,9 +1484,9 @@ pub(super) struct SubsonicSong {
     pub(super) display_artist: Option<String>,
     #[serde(default, rename = "artistId")]
     pub(super) artist_id: Option<SubsonicId>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub(super) artists: Vec<SubsonicArtistRef>,
-    #[serde(default, rename = "albumArtists")]
+    #[serde(default, rename = "albumArtists", deserialize_with = "null_default")]
     pub(super) album_artists: Vec<SubsonicArtistRef>,
     #[serde(default, rename = "coverArt")]
     pub(super) cover_art: Option<SubsonicId>,
@@ -1508,9 +1508,9 @@ pub(super) struct SubsonicSong {
     pub(super) genre: Option<String>,
     #[serde(default)]
     pub(super) comment: Option<String>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub(super) genres: Vec<GenreName>,
-    #[serde(default)]
+    #[serde(default, deserialize_with = "null_default")]
     pub(super) moods: Vec<String>,
     #[serde(default)]
     pub(super) bpm: Option<u32>,
@@ -1527,7 +1527,7 @@ pub(super) struct SubsonicSong {
     #[serde(default, rename = "musicBrainzId")]
     pub(super) musicbrainz_recording_id: Option<String>,
     #[serde(default, rename = "replayGain")]
-    pub(super) replay_gain: SubsonicReplayGain,
+    pub(super) replay_gain: Option<SubsonicReplayGain>,
 }
 #[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct SubsonicReplayGain {
@@ -1539,6 +1539,14 @@ pub(super) struct SubsonicReplayGain {
     pub(super) track_peak: Option<f64>,
     #[serde(default, rename = "albumPeak")]
     pub(super) album_peak: Option<f64>,
+}
+
+fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
+where
+    D: Deserializer<'de>,
+    T: Deserialize<'de> + Default,
+{
+    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct SubsonicArtist {
@@ -1677,10 +1685,35 @@ mod tests {
         }))
         .expect("OpenSubsonic song");
 
-        assert_eq!(song.replay_gain.track_gain, Some(-4.25));
-        assert_eq!(song.replay_gain.album_gain, Some(-3.5));
-        assert_eq!(song.replay_gain.track_peak, Some(0.91));
-        assert_eq!(song.replay_gain.album_peak, Some(0.95));
+        let replay_gain = song.replay_gain.expect("ReplayGain");
+        assert_eq!(replay_gain.track_gain, Some(-4.25));
+        assert_eq!(replay_gain.album_gain, Some(-3.5));
+        assert_eq!(replay_gain.track_peak, Some(0.91));
+        assert_eq!(replay_gain.album_peak, Some(0.95));
+    }
+
+    #[test]
+    fn opensubsonic_song_accepts_absent_optional_metadata() {
+        for value in [
+            serde_json::json!({ "id": "track-one" }),
+            serde_json::json!({
+                "id": "track-one",
+                "artists": null,
+                "albumArtists": null,
+                "genres": null,
+                "moods": null,
+                "replayGain": null
+            }),
+        ] {
+            let song = serde_json::from_value::<SubsonicSong>(value)
+                .expect("OpenSubsonic song without optional metadata");
+
+            assert!(song.artists.is_empty());
+            assert!(song.album_artists.is_empty());
+            assert!(song.genres.is_empty());
+            assert!(song.moods.is_empty());
+            assert!(song.replay_gain.is_none());
+        }
     }
 
     #[tokio::test]

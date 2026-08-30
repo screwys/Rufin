@@ -444,6 +444,7 @@ pub(super) fn album_from_dto(source: &SubsonicSource, album: SubsonicAlbum) -> A
     }
 }
 pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Track {
+    let replay_gain = song.replay_gain.unwrap_or_default();
     let raw_id = raw_id_string(&song.id);
     let album_id = song
         .album_id
@@ -501,10 +502,10 @@ pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Tra
         comment: song.comment.filter(|value| !value.trim().is_empty()),
         skip_count: None,
         bpm: song.bpm.and_then(bpm_from_u32),
-        replay_gain_track_db: finite(song.replay_gain.track_gain),
-        replay_gain_track_peak: positive_finite(song.replay_gain.track_peak),
-        replay_gain_album_db: finite(song.replay_gain.album_gain),
-        replay_gain_album_peak: positive_finite(song.replay_gain.album_peak),
+        replay_gain_track_db: finite(replay_gain.track_gain),
+        replay_gain_track_peak: positive_finite(replay_gain.track_peak),
+        replay_gain_album_db: finite(replay_gain.album_gain),
+        replay_gain_album_peak: positive_finite(replay_gain.album_peak),
         relations: TrackRelations {
             artists: artist_credits,
             album_artists: album_artist_credits,

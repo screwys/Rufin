@@ -1190,10 +1190,34 @@ impl SourcePort for SourceOwner {
                 })
                 .await;
             let input = source_setup_input(input, &owner.shared.settings.load().jellyfin_device_id);
+            let mut persisted_source_id = None;
             let result = async {
                 let connected = Source::connect(input).await.map_err(string_error)?;
                 let (configuration, source, credential) = connected.into_parts();
                 let source = Arc::new(source);
+                if !owner.shared.acquisition_is_current(&cancelled) {
+                    return Ok(());
+                }
+                let credential_ref = credential
+                    .as_ref()
+                    .map(|_| fresh_credential_ref())
+                    .transpose()?;
+                let configured = ConfiguredSource {
+                    configuration: configuration.clone(),
+                    credential_ref,
+                    music_folder_id: None,
+                    local_access: None,
+                    enable_half_stars: false,
+                };
+                owner.persist_connected_source(&configured, credential)?;
+                persisted_source_id = Some(configuration.source_id.clone());
+                owner
+                    .shared
+                    .send(SourceEvent::Configured(configured_sources(
+                        &owner.shared.settings.load(),
+                        owner.shared.selected().as_deref(),
+                    )))
+                    .await;
                 let events = owner.shared.outputs.events.clone();
                 let progress = move |value: SourceReadProgress| {
                     let _ = events.try_send(SourceEvent::Operation(SourceOperation::Adding {
@@ -1211,19 +1235,6 @@ impl SourcePort for SourceOwner {
                 if !owner.shared.acquisition_is_current(&cancelled) {
                     return Ok(());
                 }
-                let credential_ref = credential
-                    .as_ref()
-                    .map(|_| fresh_credential_ref())
-                    .transpose()?;
-                let configured = ConfiguredSource {
-                    configuration: configuration.clone(),
-                    credential_ref,
-                    music_folder_id: None,
-                    local_access: None,
-                    enable_half_stars: false,
-                };
-                let commit_owner = owner.clone();
-                let committed = configured.clone();
                 owner
                     .install_selected(
                         configured,
@@ -1231,7 +1242,7 @@ impl SourcePort for SourceOwner {
                         publication,
                         false,
                         Arc::clone(&cancelled),
-                        move || commit_owner.persist_connected_source(&committed, credential),
+                        || Ok(()),
                     )
                     .await
             }
@@ -1241,7 +1252,7 @@ impl SourcePort for SourceOwner {
             {
                 owner
                     .publish_operation(SourceOperation::Failed {
-                        source_id: None,
+                        source_id: persisted_source_id,
                         message: error,
                         add_form: true,
                     })
@@ -1542,23 +1553,35 @@ impl SourcePort for SourceOwner {
                 .iter()
                 .find(|item| item.configuration.source_id == source_id)
                 .cloned();
-            if owner
+            let selected = owner
                 .shared
                 .selected()
-                .is_some_and(|selected| selected.source_id() == &source_id)
-            {
+                .filter(|selected| selected.source_id() == &source_id);
+            let playback = owner.shared.playback().ok();
+            if selected.is_some() {
                 owner.release_selected(true).await;
+                if let Some(playback) = playback.as_ref() {
+                    playback.stop_for_source_switch();
+                }
             }
-            if let Some(cached) = owner
+            owner.shared.downloads.clear(source_id.clone(), false);
+            let cached = owner
                 .shared
                 .database
                 .cached_source(source_id.as_str(), &ReadCancellation::new())
                 .await
                 .ok()
-                .flatten()
-            {
-                owner.shared.downloads.clear(source_id.clone(), false);
+                .flatten();
+            if let Some(cached) = cached {
+                if let Some(playback) = playback.as_ref()
+                    && let Err(error) = playback.remove_waveform_cache(cached.source)
+                {
+                    owner.shared.warn_nonfatal(&error);
+                }
                 let _ = owner.shared.database.remove_source(cached.source).await;
+            }
+            if let Err(error) = owner.shared.artwork.invalidate_source(&source_id) {
+                owner.shared.warn_nonfatal(&error.to_string());
             }
             if let Some(reference) = configured.and_then(|item| item.credential_ref) {
                 let _ = delete_provider_secret(&owner.shared.secrets, &reference);
@@ -1660,6 +1683,7 @@ impl SelectedSourcePort for ActiveSource {
                                 .map(|entry| entry.section_id.as_str())
                                 .unwrap_or(match section {
                                     sources::SourceHomeSection::MostPlayed => "most-played",
+                                    sources::SourceHomeSection::NewlyAdded => "newly-added",
                                     sources::SourceHomeSection::RecentlyPlayed => "recently-played",
                                     sources::SourceHomeSection::RecentlyReleased => {
                                         "recently-released"

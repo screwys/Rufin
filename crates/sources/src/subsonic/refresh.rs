@@ -58,6 +58,7 @@ impl SubsonicSource {
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         let (section_id, list_type, extra) = match section {
             crate::SourceHomeSection::MostPlayed => ("most-played", "frequent", Vec::new()),
+            crate::SourceHomeSection::NewlyAdded => ("newly-added", "newest", Vec::new()),
             crate::SourceHomeSection::RecentlyPlayed => ("recently-played", "recent", Vec::new()),
             crate::SourceHomeSection::RecentlyReleased => (
                 "recently-released",
@@ -352,40 +353,16 @@ impl SubsonicSource {
     }
 
     async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
-        for (section_id, list_type, extra) in [
-            ("most-played", "frequent", Vec::new()),
-            ("newly-added", "newest", Vec::new()),
-            ("recently-played", "recent", Vec::new()),
-            (
-                "recently-released",
-                "byYear",
-                vec![
-                    ("fromYear", current_year().to_string()),
-                    ("toYear", "0".to_string()),
-                ],
-            ),
+        for section in [
+            crate::SourceHomeSection::MostPlayed,
+            crate::SourceHomeSection::NewlyAdded,
+            crate::SourceHomeSection::RecentlyPlayed,
+            crate::SourceHomeSection::RecentlyReleased,
         ] {
-            let mut query = vec![("type", list_type.to_string()), ("size", "24".to_string())];
-            query.extend(extra);
-            let body: AlbumListBody = self.get_json("getAlbumList2", &query).await?;
+            let entries = self.home_section(section).await?;
             scan.begin_batch().await?;
-            for (position, dto) in body.album_list.album.into_iter().enumerate() {
-                let album = album_from_dto(self, dto);
-                let artwork_binding = album
-                    .image_ref
-                    .as_ref()
-                    .map(serde_json::to_vec)
-                    .transpose()?;
-                scan.write_home_entry(&library::HomeEntryInput {
-                    section_id: section_id.to_string(),
-                    position: position as i64,
-                    kind: library::HomeEntryKind::Album,
-                    entity_object_id: album.id,
-                    title: album.title,
-                    subtitle: album.artist,
-                    artwork_binding,
-                })
-                .await?;
+            for entry in entries {
+                scan.write_home_entry(&entry).await?;
             }
             scan.finish_batch().await?;
         }
@@ -479,6 +456,11 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
 #[cfg(test)]
 mod tests {
     use super::{ScanStatus, completed_freshness};
+    use crate::subsonic::{
+        SubsonicAuthentication, SubsonicFlavor, SubsonicSource, SubsonicSourceConfig,
+    };
+    use wiremock::matchers::{method, path, query_param};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     fn status(count: i64, last_scan: &str) -> ScanStatus {
         ScanStatus {
@@ -508,5 +490,46 @@ mod tests {
         let mut scanning = status(41, "2026-08-27T00:01:00Z");
         scanning.scanning = true;
         assert_eq!(completed_freshness(scanning), None);
+    }
+
+    #[tokio::test]
+    async fn newly_added_home_keeps_the_opensubsonic_provider_query() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/getAlbumList2.view"))
+            .and(query_param("type", "newest"))
+            .and(query_param("size", "24"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": {
+                    "status": "ok",
+                    "albumList2": {
+                        "album": [{ "id": "album-one", "name": "New Album" }]
+                    }
+                }
+            })))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::Password,
+            },
+            "salt:token".to_string(),
+        )
+        .expect("OpenSubsonic source");
+
+        let entries = source
+            .home_section(crate::SourceHomeSection::NewlyAdded)
+            .await
+            .expect("OpenSubsonic Newly Added");
+
+        assert_eq!(entries.len(), 1);
+        assert_eq!(entries[0].section_id, "newly-added");
+        assert_eq!(entries[0].title, "New Album");
     }
 }

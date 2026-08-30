@@ -250,6 +250,9 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
     scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
         .await
         .expect("stage track folder");
+    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
+        .await
+        .expect("coalesce repeated track folder");
     scan.write_playlist_entry(
         "playlist-one",
         &format!("entry-{object_id}"),
@@ -794,6 +797,42 @@ async fn identical_playlist_point_update_is_not_a_catalog_change() {
         panic!("an identical Playlist readback must be ignored");
     };
     assert_eq!(replayed.catalog_revision, initial.catalog_revision);
+}
+
+#[tokio::test]
+async fn repeated_source_playlist_and_folder_observations_coalesce() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    let mut scan = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Scan");
+
+    for _ in 0..2 {
+        scan.begin_batch().await.expect("begin repeated batch");
+        scan.write_folder("folder-one", "Music", "music", "music", None)
+            .await
+            .expect("stage repeated folder");
+        scan.write_playlist(
+            "playlist-one",
+            "Playlist One",
+            "playlist one",
+            "playlist one",
+            None,
+        )
+        .await
+        .expect("stage repeated playlist");
+        scan.write_playlist_entry("playlist-one", "entry-one", "track-one", 0)
+            .await
+            .expect("stage repeated playlist entry");
+        scan.finish_batch().await.expect("finish repeated batch");
+    }
+
+    assert!(matches!(
+        scan.finish().await.expect("publish repeated observations"),
+        ScanOutcome::Changed(_)
+    ));
 }
 
 #[tokio::test]

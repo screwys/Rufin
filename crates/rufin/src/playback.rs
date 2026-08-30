@@ -337,6 +337,12 @@ impl PlaybackOwner {
         PlaybackCutover
     }
 
+    pub(crate) fn remove_waveform_cache(&self, source: library::SourceKey) -> Result<(), String> {
+        self.waveform
+            .remove_source_cache(source)
+            .map_err(|error| error.to_string())
+    }
+
     fn take_active(&self) -> Option<ActivePlayback> {
         let active = self.active.lock().unwrap_or_else(|p| p.into_inner()).take();
         self.loudness.cancel();
