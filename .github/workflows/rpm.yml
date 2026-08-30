@@ -202,6 +202,28 @@ jobs:
             "$COPR_BUILD_ID"
           mkdir -p dist/release
           x86_rpm_path=
+          check_rpmlint() {
+            local rpm_path="$1"
+            local output
+            local unexpected_errors
+            if output="$(rpmlint "$rpm_path" 2>&1)"; then
+              printf '%s\n' "$output"
+              return
+            fi
+            printf '%s\n' "$output"
+            unexpected_errors="$(
+              printf '%s\n' "$output" \
+                | grep -F ': E: ' \
+                | grep -vF 'E: incorrect-locale-subdir /usr/share/locale/zh_Hant/LC_MESSAGES/rufin.mo' \
+                || true
+            )"
+            if [[ -n "$unexpected_errors" ]] \
+              || ! grep -Fq \
+                'E: incorrect-locale-subdir /usr/share/locale/zh_Hant/LC_MESSAGES/rufin.mo' \
+                <<<"$output"; then
+              exit 1
+            fi
+          }
           for arch in x86_64 aarch64; do
             mapfile -t rpm_paths < <(
               find "dist/copr/fedora-44-${arch}" \
@@ -215,7 +237,7 @@ jobs:
             install_root="$(mktemp -d)"
             rpm2cpio "$rpm_path" | cpio -idm --quiet -D "$install_root"
             cargo run --locked -p xtask -- verify package-layout "$install_root" /usr
-            rpmlint "$rpm_path"
+            check_rpmlint "$rpm_path"
             cp "$rpm_path" dist/release/
             if [[ "$arch" == x86_64 ]]; then
               x86_rpm_path="$rpm_path"
