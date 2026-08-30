@@ -66,7 +66,7 @@ playback-cast = { path = "crates/playback-cast" }
 pulldown-cmark = { version = "0.13.0", default-features = false }
 scrobbling = { path = "crates/scrobbling" }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
-roxmltree = "0.20.0"
+roxmltree = "0.21.0"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 rustix = { version = "1.1.4", features = ["fs"] }
 rustfft = "6.2.0"
