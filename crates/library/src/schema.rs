@@ -7,7 +7,7 @@ use sqlx::{Connection, Sqlite, SqliteConnection, Transaction};
 use crate::{LibraryError, LibraryResult};
 
 pub(crate) const APPLICATION_ID: i64 = 1_381_320_270;
-pub(crate) const SCHEMA_VERSION: i64 = 43;
+pub(crate) const SCHEMA_VERSION: i64 = 44;
 pub(crate) const LAST_LEGACY_SCHEMA_VERSION: i64 = 40;
 const FIRST_LEGACY_SCHEMA_VERSION: i64 = 32;
 const FIRST_CURRENT_FORMAT_SCHEMA_VERSION: i64 = 41;
@@ -21,6 +21,7 @@ const USER_RATINGS_SCHEMA_VERSION: i64 = 39;
 const CATALOG_OWNERS_SCHEMA_VERSION: i64 = 41;
 const REPLAY_GAIN_SCHEMA_VERSION: i64 = 42;
 const PLAYLIST_POSITION_SCHEMA_VERSION: i64 = 43;
+const TRACK_FOLDER_SET_SCHEMA_VERSION: i64 = 44;
 
 struct SchemaMigration {
     from_version: i64,
@@ -71,6 +72,10 @@ const CURRENT_MIGRATIONS: &[SchemaMigration] = &[
         from_version: REPLAY_GAIN_SCHEMA_VERSION,
         to_version: PLAYLIST_POSITION_SCHEMA_VERSION,
     },
+    SchemaMigration {
+        from_version: PLAYLIST_POSITION_SCHEMA_VERSION,
+        to_version: TRACK_FOLDER_SET_SCHEMA_VERSION,
+    },
 ];
 
 pub(crate) const TABLES: &[&str] = &[
@@ -109,7 +114,7 @@ pub(crate) const TABLES: &[&str] = &[
 const FRESH_SCHEMA: &str = r###"
 BEGIN IMMEDIATE;
 PRAGMA application_id = 1381320270;
-PRAGMA user_version = 43;
+PRAGMA user_version = 44;
 
 CREATE TABLE sources (
     source_key INTEGER PRIMARY KEY,
@@ -324,9 +329,7 @@ CREATE INDEX track_moods_mood_idx ON track_moods(mood_key, track_key);
 CREATE TABLE track_folders (
     track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
     folder_key INTEGER NOT NULL REFERENCES folders ON DELETE CASCADE,
-    position INTEGER NOT NULL CHECK (position >= 0),
-    PRIMARY KEY (track_key, position),
-    UNIQUE (track_key, folder_key)
+    PRIMARY KEY (track_key, folder_key)
 ) STRICT;
 CREATE INDEX track_folders_folder_idx ON track_folders(folder_key, track_key);
 
@@ -698,6 +701,7 @@ async fn upgrade_current_format(
         match user_version {
             CATALOG_OWNERS_SCHEMA_VERSION => migrate_schema_41(connection).await?,
             REPLAY_GAIN_SCHEMA_VERSION => migrate_schema_42(connection).await?,
+            PLAYLIST_POSITION_SCHEMA_VERSION => migrate_schema_43(connection).await?,
             _ => {
                 return Err(LibraryError::InvalidStore(format!(
                     "schema migration is not implemented for version {user_version}"
@@ -754,6 +758,29 @@ PRAGMA user_version = 43;
 COMMIT;
 "###,
     ).execute(connection).await?;
+    Ok(())
+}
+
+async fn migrate_schema_43(connection: &mut SqliteConnection) -> LibraryResult<()> {
+    sqlx::raw_sql(
+        r###"BEGIN IMMEDIATE;
+DROP INDEX track_folders_folder_idx;
+ALTER TABLE track_folders RENAME TO old_track_folders;
+CREATE TABLE track_folders (
+    track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
+    folder_key INTEGER NOT NULL REFERENCES folders ON DELETE CASCADE,
+    PRIMARY KEY (track_key, folder_key)
+) STRICT;
+INSERT INTO track_folders(track_key,folder_key)
+SELECT DISTINCT track_key,folder_key FROM old_track_folders;
+DROP TABLE old_track_folders;
+CREATE INDEX track_folders_folder_idx ON track_folders(folder_key, track_key);
+PRAGMA user_version = 44;
+COMMIT;
+"###,
+    )
+    .execute(connection)
+    .await?;
     Ok(())
 }
 

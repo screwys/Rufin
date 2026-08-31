@@ -75,45 +75,64 @@ impl SubsonicSource {
         self.navidrome_library
     }
 
-    pub(super) async fn stage_navidrome_library(
+    pub(super) async fn stage_navidrome_core(
         &self,
         scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        self.stage_navidrome_pages::<NavidromeAlbum>(
-            "album",
-            SourceReadStage::Albums,
-            scan,
-            progress,
-            cancelled,
-            |scan, album| Box::pin(stage_album(scan, album_from_navidrome(self, album))),
-        )
-        .await?;
-        self.stage_navidrome_pages::<NavidromeTrack>(
-            "song",
-            SourceReadStage::Tracks,
-            scan,
-            progress,
-            cancelled,
-            |scan, track| {
-                Box::pin(stage_navidrome_track(
-                    scan,
-                    track_from_navidrome(self, track),
-                ))
-            },
-        )
-        .await?;
-        self.stage_navidrome_pages::<NavidromeArtist>(
-            "artist",
-            SourceReadStage::Artists,
-            scan,
-            progress,
-            cancelled,
-            |scan, artist| Box::pin(stage_artist(scan, artist_from_navidrome(self, artist))),
-        )
-        .await?;
+        let albums_complete = self
+            .stage_navidrome_pages::<NavidromeAlbum>(
+                "album",
+                SourceReadStage::Albums,
+                scan,
+                progress,
+                cancelled,
+                |scan, album| Box::pin(stage_album(scan, album_from_navidrome(self, album))),
+            )
+            .await?;
+        let tracks_complete = self
+            .stage_navidrome_pages::<NavidromeTrack>(
+                "song",
+                SourceReadStage::Tracks,
+                scan,
+                progress,
+                cancelled,
+                |scan, track| {
+                    Box::pin(stage_navidrome_track(
+                        scan,
+                        track_from_navidrome(self, track),
+                    ))
+                },
+            )
+            .await?;
 
+        if !albums_complete || !tracks_complete {
+            scan.retain_incomplete_catalog().await?;
+            scan.retain_folders().await?;
+        }
+        Ok(())
+    }
+
+    pub(super) async fn stage_navidrome_artists(
+        &self,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let complete = self
+            .stage_navidrome_pages::<NavidromeArtist>(
+                "artist",
+                SourceReadStage::Artists,
+                scan,
+                progress,
+                cancelled,
+                |scan, artist| Box::pin(stage_artist(scan, artist_from_navidrome(self, artist))),
+            )
+            .await?;
+        if !complete {
+            scan.retain_enrichment().await?;
+        }
         Ok(())
     }
 
@@ -130,7 +149,7 @@ impl SubsonicSource {
         ) -> Pin<
             Box<dyn Future<Output = library::LibraryResult<()>> + Send + 'scan>,
         >,
-    ) -> SourceResult<()>
+    ) -> SourceResult<bool>
     where
         T: Send,
     {
@@ -140,14 +159,15 @@ impl SubsonicSource {
             total: None,
         });
         let mut offset = 0;
+        let mut complete = true;
         loop {
             if cancelled() {
                 return Err(SourceError::Cancelled);
             }
-            let page = self.navidrome_page(endpoint, offset).await?;
-            let page_len = page.len();
+            let (page, page_complete, page_len) = self.navidrome_page(endpoint, offset).await?;
+            complete &= page_complete;
             if page_len == 0 {
-                return Ok(());
+                return Ok(complete);
             }
             offset = offset.checked_add(page_len).ok_or_else(|| {
                 SourceError::Other(format!("Navidrome {endpoint} offset overflowed"))
@@ -163,7 +183,7 @@ impl SubsonicSource {
                 total: None,
             });
             if page_len < NAVIDROME_PAGE_SIZE {
-                return Ok(());
+                return Ok(complete);
             }
         }
     }
@@ -172,21 +192,27 @@ impl SubsonicSource {
         &self,
         kind: &str,
         offset: usize,
-    ) -> SourceResult<Vec<T>> {
+    ) -> SourceResult<(Vec<T>, bool, usize)> {
         let end = offset.checked_add(NAVIDROME_PAGE_SIZE).ok_or_else(|| {
             SourceError::Other("Navidrome library page offset overflowed".to_string())
         })?;
-        self.navidrome_json(
-            kind,
-            &[
-                ("_start", offset.to_string()),
-                ("_end", end.to_string()),
-                ("_sort", "id".to_string()),
-                ("_order", "ASC".to_string()),
-                ("missing", "false".to_string()),
-            ],
-        )
-        .await
+        let value = self
+            .navidrome_json::<serde_json::Value>(
+                kind,
+                &[
+                    ("_start", offset.to_string()),
+                    ("_end", end.to_string()),
+                    ("_sort", "id".to_string()),
+                    ("_order", "ASC".to_string()),
+                    ("missing", "false".to_string()),
+                ],
+            )
+            .await?;
+        let items = crate::remote_http::take_json_array(value, &[])?;
+        let count = items.len();
+        let (items, complete) =
+            crate::remote_http::decode_json_items(items, "Navidrome", "private library");
+        Ok((items, complete, count))
     }
 
     async fn navidrome_json<T: DeserializeOwned>(
@@ -255,7 +281,7 @@ async fn stage_navidrome_track(scan: &mut Scan, track: Track) -> library::Librar
     scan.write_track_folders(
         &folders
             .iter()
-            .map(|folder| library::ScanLink::new(&track_id, folder, 0))
+            .map(|folder| (track_id.as_str(), folder.as_str()))
             .collect::<Vec<_>>(),
     )
     .await
@@ -952,17 +978,19 @@ mod tests {
             .mount(&server)
             .await;
         let source = navidrome_source_with_token(&server, "token-a");
-        let first = source
+        let (first, first_complete, first_count) = source
             .navidrome_page::<NavidromeArtist>("artist", 0)
             .await
             .expect("first Navidrome artist page");
-        let second = source
+        let (second, second_complete, second_count) = source
             .navidrome_page::<NavidromeArtist>("artist", NAVIDROME_PAGE_SIZE)
             .await
             .expect("second Navidrome artist page");
 
         assert_eq!(first.len(), NAVIDROME_PAGE_SIZE);
         assert_eq!(second.len(), 1);
+        assert!(first_complete && second_complete);
+        assert_eq!((first_count, second_count), (NAVIDROME_PAGE_SIZE, 1));
     }
 
     #[tokio::test]
@@ -1080,9 +1108,13 @@ mod tests {
             .expect("Music Folder");
         scan.finish_batch().await.expect("finish Folder batch");
         source
-            .stage_navidrome_library(&mut scan, &|_| {}, &|| false)
+            .stage_navidrome_core(&mut scan, &|_| {}, &|| false)
             .await
             .expect("private Navidrome library");
+        source
+            .stage_navidrome_artists(&mut scan, &|_| {}, &|| false)
+            .await
+            .expect("private Navidrome Artists");
         scan.finish().await.expect("publish Navidrome Scan");
         let cancellation = library::ReadCancellation::new();
         let source_key = database
@@ -1189,7 +1221,7 @@ mod tests {
             .await;
         let source = navidrome_source_with_token(&server, "token-a");
 
-        let mut first = source
+        let (mut first, _, _) = source
             .navidrome_page::<NavidromeTrack>("song", 0)
             .await
             .expect("first Navidrome page");

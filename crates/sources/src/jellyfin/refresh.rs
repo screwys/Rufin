@@ -38,10 +38,11 @@ impl JellyfinSource {
                 library::HomeEntryKind::Album,
             ),
         };
-        let page = self
+        let (raw, _) = self
             .item_page_sorted(item_type, 0, 24, sort_by, "Descending")
             .await?;
-        page.items
+        let items = complete_jellyfin_items(raw, "Home")?;
+        items
             .into_iter()
             .enumerate()
             .map(|(position, item)| {
@@ -172,15 +173,11 @@ impl JellyfinSource {
         let ancestors = self.get_json::<Vec<JellyfinItem>>(url).await?;
         scan.begin_batch().await?;
         let mut folders = Vec::new();
-        for (position, folder) in ancestors
-            .into_iter()
-            .filter(|item| {
-                item.collection_type
-                    .as_deref()
-                    .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
-            })
-            .enumerate()
-        {
+        for folder in ancestors.into_iter().filter(|item| {
+            item.collection_type
+                .as_deref()
+                .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
+        }) {
             let Some(name) = folder.name else { continue };
             let folder_id = jellyfin_id("music-folder", &folder.id);
             let artwork = primary_image_ref("music-folder", &folder.id, &folder.image_tags)
@@ -195,15 +192,13 @@ impl JellyfinSource {
                 artwork.as_deref(),
             )
             .await?;
-            folders.push((folder_id, position as i64));
+            folders.push(folder_id);
         }
         let track_id = jellyfin_id("track", raw_track_id);
         scan.write_track_folders(
             &folders
                 .iter()
-                .map(|(folder_id, position)| {
-                    library::ScanLink::new(&track_id, folder_id, *position)
-                })
+                .map(|folder_id| (track_id.as_str(), folder_id.as_str()))
                 .collect::<Vec<_>>(),
         )
         .await?;
@@ -217,16 +212,76 @@ impl JellyfinSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
+        if let Err(error) = self.stage_core(scan, progress, cancelled).await {
+            crate::source::retain_remote_failure(
+                error,
+                "Jellyfin",
+                "catalog",
+                scan.retain_incomplete_catalog(),
+            )
+            .await?;
+        }
+
+        scan.reset_folders().await?;
+        if let Err(error) = self.stage_folders(scan, cancelled).await {
+            crate::source::retain_remote_failure(
+                error,
+                "Jellyfin",
+                "Folders",
+                scan.retain_folders(),
+            )
+            .await?;
+        }
+
+        if let Err(error) = self.stage_enrichment(scan, progress, cancelled).await {
+            crate::source::retain_remote_failure(
+                error,
+                "Jellyfin",
+                "enrichment",
+                scan.retain_enrichment(),
+            )
+            .await?;
+        }
+
+        scan.reset_playlists().await?;
+        if let Err(error) = self.stage_playlists(scan, progress, cancelled).await {
+            crate::source::retain_remote_failure(
+                error,
+                "Jellyfin",
+                "Playlists",
+                scan.retain_playlists(),
+            )
+            .await?;
+        }
+
+        scan.reset_home().await?;
+        if let Err(error) = self.stage_home(scan).await {
+            crate::source::retain_remote_failure(error, "Jellyfin", "Home", scan.retain_home())
+                .await?;
+        }
+        progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
+        Ok(())
+    }
+
+    async fn stage_core(
+        &self,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let mut complete = true;
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let (raw, total) = self
                 .item_page("MusicAlbum", pages.offset(), COLLECTION_PAGE_SIZE)
                 .await?;
-            let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
+            let count = raw.len();
+            let finished = pages.advance(count, total)?;
+            let (items, page_complete) = jellyfin_items(raw, "Albums");
+            complete &= page_complete;
             scan.begin_batch().await?;
-            for item in page.items {
+            for item in items {
                 stage_album(scan, album_from_item(item)).await?;
             }
             scan.finish_batch().await?;
@@ -240,22 +295,18 @@ impl JellyfinSource {
             }
         }
 
-        let folders = self.stage_music_folders(scan, cancelled).await?;
-        for (folder_position, folder_id) in folders.iter().enumerate() {
-            self.stage_music_folder_memberships(scan, folder_id, folder_position as i64, cancelled)
-                .await?;
-        }
-
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let (raw, total) = self
                 .item_page("Audio", pages.offset(), COLLECTION_PAGE_SIZE)
                 .await?;
-            let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
+            let count = raw.len();
+            let finished = pages.advance(count, total)?;
+            let (items, page_complete) = jellyfin_items(raw, "Tracks");
+            complete &= page_complete;
             scan.begin_batch().await?;
-            for item in page.items {
+            for item in items {
                 stage_track(scan, track_from_item(item)).await?;
             }
             scan.finish_batch().await?;
@@ -269,17 +320,45 @@ impl JellyfinSource {
             }
         }
 
+        if !complete {
+            scan.retain_incomplete_catalog().await?;
+        }
+        Ok(())
+    }
+
+    async fn stage_folders(
+        &self,
+        scan: &mut Scan,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let folders = self.stage_music_folders(scan, cancelled).await?;
+        for folder_id in &folders {
+            self.stage_music_folder_memberships(scan, folder_id, cancelled)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn stage_enrichment(
+        &self,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        let mut complete = true;
         for path in ["Artists", "Artists/AlbumArtists"] {
             let mut pages = PageState::default();
             loop {
                 check_cancelled(cancelled)?;
-                let page = self
+                let (raw, total) = self
                     .people_page(path, pages.offset(), COLLECTION_PAGE_SIZE)
                     .await?;
-                let count = page.items.len();
-                let finished = pages.advance(count, page.total_record_count)?;
+                let count = raw.len();
+                let finished = pages.advance(count, total)?;
+                let (items, page_complete) = jellyfin_items(raw, "Artists");
+                complete &= page_complete;
                 scan.begin_batch().await?;
-                for item in page.items {
+                for item in items {
                     stage_artist(scan, artist_from_item(item)).await?;
                 }
                 scan.finish_batch().await?;
@@ -297,13 +376,15 @@ impl JellyfinSource {
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let (raw, total) = self
                 .music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
                 .await?;
-            let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
+            let count = raw.len();
+            let finished = pages.advance(count, total)?;
+            let (items, page_complete) = jellyfin_items(raw, "Genres");
+            complete &= page_complete;
             scan.begin_batch().await?;
-            for item in page.items {
+            for item in items {
                 stage_genre(scan, genre_from_item(item)).await?;
             }
             scan.finish_batch().await?;
@@ -317,9 +398,9 @@ impl JellyfinSource {
             }
         }
 
-        self.stage_playlists(scan, progress, cancelled).await?;
-        self.stage_home(scan).await?;
-        progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
+        if !complete {
+            scan.retain_enrichment().await?;
+        }
         Ok(())
     }
 
@@ -332,10 +413,12 @@ impl JellyfinSource {
         let mut url = endpoint(&self.base_url, &format!("Users/{}/Views", self.user_id))?;
         url.query_pairs_mut()
             .append_pair("IncludeExternalContent", "false");
-        let response = self.get_json::<ItemQueryResult>(url).await?;
+        let value = self.get_json::<serde_json::Value>(url).await?;
+        let raw = crate::remote_http::take_json_array(value, &["Items"])?;
+        let items = complete_jellyfin_items(raw, "Folders")?;
         let mut folders = Vec::new();
         scan.begin_batch().await?;
-        for item in response.items.into_iter().filter(|item| {
+        for item in items.into_iter().filter(|item| {
             item.collection_type
                 .as_deref()
                 .is_some_and(|kind| kind.eq_ignore_ascii_case("music"))
@@ -364,7 +447,6 @@ impl JellyfinSource {
         &self,
         scan: &mut Scan,
         folder_id: &str,
-        folder_position: i64,
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         let raw_folder_id = raw_item_id(folder_id).to_string();
@@ -381,19 +463,24 @@ impl JellyfinSource {
                 .append_pair("Limit", &COLLECTION_PAGE_SIZE.to_string())
                 .append_pair("SortBy", "SortName")
                 .append_pair("SortOrder", "Ascending");
-            let page = self.get_json::<ItemQueryResult>(url).await?;
-            let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
+            let value = self.get_json::<serde_json::Value>(url).await?;
+            let total = value
+                .get("TotalRecordCount")
+                .and_then(serde_json::Value::as_u64)
+                .and_then(|value| usize::try_from(value).ok());
+            let raw = crate::remote_http::take_json_array(value, &["Items"])?;
+            let count = raw.len();
+            let finished = pages.advance(count, total)?;
+            let items = complete_jellyfin_items(raw, "Folder Tracks")?;
             scan.begin_batch().await?;
-            let track_ids = page
-                .items
+            let track_ids = items
                 .into_iter()
                 .map(|item| jellyfin_id("track", &item.id))
                 .collect::<Vec<_>>();
             scan.write_track_folders(
                 &track_ids
                     .iter()
-                    .map(|track_id| library::ScanLink::new(track_id, folder_id, folder_position))
+                    .map(|track_id| (track_id.as_str(), folder_id))
                     .collect::<Vec<_>>(),
             )
             .await?;
@@ -414,12 +501,13 @@ impl JellyfinSource {
         let mut seen = HashSet::new();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let (raw, total) = self
                 .item_page("Playlist", pages.offset(), COLLECTION_PAGE_SIZE)
                 .await?;
-            let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
-            for item in page.items {
+            let count = raw.len();
+            let finished = pages.advance(count, total)?;
+            let items = complete_jellyfin_items(raw, "Playlists")?;
+            for item in items {
                 let playlist = playlist_from_item(item);
                 if !seen.insert(playlist.id.clone()) {
                     continue;
@@ -470,6 +558,27 @@ impl JellyfinSource {
     }
 }
 
+fn jellyfin_items(
+    raw: Vec<serde_json::Value>,
+    collection: &'static str,
+) -> (Vec<JellyfinItem>, bool) {
+    crate::remote_http::decode_json_items(raw, "Jellyfin", collection)
+}
+
+fn complete_jellyfin_items(
+    raw: Vec<serde_json::Value>,
+    collection: &'static str,
+) -> SourceResult<Vec<JellyfinItem>> {
+    let (items, complete) = jellyfin_items(raw, collection);
+    if complete {
+        Ok(items)
+    } else {
+        Err(SourceError::Other(format!(
+            "Jellyfin {collection} response contains an unreadable item"
+        )))
+    }
+}
+
 #[derive(Default)]
 pub(super) struct PageState {
     offset: usize,
@@ -487,6 +596,11 @@ impl PageState {
 
     pub(super) fn advance(&mut self, count: usize, total: Option<usize>) -> SourceResult<bool> {
         if count == 0 {
+            if total.is_some_and(|total| self.offset < total) {
+                return Err(SourceError::Other(
+                    "Jellyfin collection ended before its reported total".to_string(),
+                ));
+            }
             return Ok(true);
         }
         self.offset = self
@@ -519,6 +633,13 @@ mod tests {
         assert!(!pages.advance(1, Some(3)).expect("grown total"));
         assert_eq!(pages.offset(), 2);
         assert!(pages.advance(1, Some(3)).expect("final page"));
+    }
+
+    #[test]
+    fn collection_does_not_accept_an_early_empty_page() {
+        let mut pages = PageState::default();
+        assert!(!pages.advance(2, Some(3)).expect("first page"));
+        assert!(pages.advance(0, Some(3)).is_err());
     }
 
     #[tokio::test]
