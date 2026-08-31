@@ -22,8 +22,6 @@ use std::process::Command;
 use std::process::ExitCode;
 #[cfg(target_os = "macos")]
 use std::{fs, path::Path};
-#[cfg(target_os = "windows")]
-use tracing::error;
 use tracing::info;
 
 fn main() -> ExitCode {
@@ -52,12 +50,7 @@ fn main() -> ExitCode {
 
     let bootstrap = move || app::runtime_inputs(diagnostics, !updated_restart);
     if updated_restart {
-        ui::run_application_after_update(bootstrap, || {
-            #[cfg(target_os = "windows")]
-            if let Err(report_error) = windows_updater::report_updated_restart_visible() {
-                error!(%report_error, "could not acknowledge the reopened Rufin window");
-            }
-        })
+        ui::run_application_after_update(bootstrap, || {})
     } else {
         ui::run_application(bootstrap)
     }
