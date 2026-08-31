@@ -57,7 +57,6 @@ fn package_layout(args: Vec<String>) -> Result<()> {
                 &prefix,
                 "share/icons/hicolor/icon-theme.cache",
             ))?;
-            verify_windows_updater(&root, &prefix, env!("CARGO_PKG_VERSION"))?;
         }
     } else {
         require_file(&package_path(&root, &prefix, "bin/rufin"))?;
@@ -97,26 +96,6 @@ fn package_layout(args: Vec<String>) -> Result<()> {
         ))?;
     }
 
-    Ok(())
-}
-
-fn verify_windows_updater(root: &str, prefix: &str, version: &str) -> Result<()> {
-    let updater = package_path(
-        root,
-        prefix,
-        &format!("updater/{version}/rufin-update-helper.exe"),
-    );
-    require_file(&updater)?;
-    let sentinel = package_path(
-        root,
-        prefix,
-        &format!("updater/{version}/rufin-update-helper.complete"),
-    );
-    require_file(&sentinel)?;
-    let sentinel_contents = fs::read_to_string(&sentinel)?;
-    if sentinel_contents != format!("rufin-update-helper:{version}\n") {
-        return Err(format!("invalid update helper sentinel: {}", sentinel.display()).into());
-    }
     Ok(())
 }
 

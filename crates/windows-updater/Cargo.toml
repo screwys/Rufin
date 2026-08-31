@@ -14,10 +14,6 @@ publish.workspace = true
 name = "windows_updater"
 path = "src/lib.rs"
 
-[[bin]]
-name = "rufin-update-helper"
-path = "src/bin/rufin-update-helper.rs"
-
 [dependencies]
 app-identity.workspace = true
 directories.workspace = true
@@ -28,7 +24,6 @@ thiserror.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 reqwest = { workspace = true, features = ["blocking", "json"] }
 sha2.workspace = true
-winsafe.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true

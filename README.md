@@ -140,15 +140,9 @@ You might want to use github repo for profile as well, since it takes more than 
 
 Download the .exe from [GitHub Releases](https://github.com/screwys/Rufin/releases/latest).
 
-Rufin is also available via Scoop:
-
-```powershell
-scoop bucket add screwys https://github.com/screwys/scoop-bucket
-scoop install screwys/rufin
-```
-
-Both have opt-in **Automatic updates** in General preferences to have Rufin install an available Windows
-update when the app starts. Alternatively, you can click `Update` button in Version History on the latest release.
+The installer has opt-in **Automatic updates** in General preferences to have Rufin install an
+available Windows update when the app starts. Alternatively, you can click `Update` button in
+Version History on the latest release.
 
 ## macOS
 

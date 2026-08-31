@@ -67,7 +67,8 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "GPL-3.0-or-later"
 
 Var LegacyInstallDir
 Var LegacyInstallOwned
-Var InstallChannel
+Var UpdateMode
+Var UpdateWaitAttempts
 Var PurgeCache
 Var PurgeCacheCheckbox
 
@@ -138,26 +139,33 @@ ${LABEL}_not_running:
 Function .onInit
     StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
     StrCpy $LegacyInstallOwned 0
-    StrCpy $InstallChannel "direct"
+    StrCpy $UpdateMode 0
+    StrCpy $UpdateWaitAttempts 0
     ${GetParameters} $0
     ClearErrors
-    ${GetOptions} $0 "/RUFINCHANNEL=" $1
-    IfErrors update_channel_done
-    StrCpy $InstallChannel $1
-    StrCmp $InstallChannel "direct" update_channel_done
-    StrCmp $InstallChannel "scoop" update_channel_done
-    StrCmp $InstallChannel "winget" update_channel_done
-    IfSilent invalid_channel_silent invalid_channel_message
+    ${GetOptions} $0 "/RUFINUPDATE=" $1
+    IfErrors update_mode_done
+    StrCmp $1 "1" update_mode_value_valid invalid_update_mode
 
-invalid_channel_message:
+update_mode_value_valid:
+    IfSilent update_mode_enabled invalid_update_mode
+
+invalid_update_mode:
+    IfSilent invalid_update_mode_silent invalid_update_mode_message
+
+invalid_update_mode_message:
     MessageBox MB_OK|MB_ICONSTOP \
-        "The ${RUFIN_DISPLAY_NAME} update channel must be direct, scoop, or winget."
+        "The ${RUFIN_DISPLAY_NAME} automatic update option is invalid."
 
-invalid_channel_silent:
+invalid_update_mode_silent:
     SetErrorLevel 3
     Abort
 
-update_channel_done:
+update_mode_enabled:
+    StrCpy $UpdateMode 1
+
+update_mode_done:
+    ClearErrors
     ReadRegStr $LegacyInstallDir HKCU "Software\${RUFIN_PROJECT_NAME}" "InstallDir"
     StrCmp $LegacyInstallDir "" legacy_install_done
     GetFullPathName $LegacyInstallDir "$LegacyInstallDir"
@@ -174,6 +182,27 @@ legacy_install_owned:
 legacy_install_done:
 FunctionEnd
 
+Function .onInstSuccess
+    StrCmp $UpdateMode 1 0 update_launch_done
+    SetOutPath "$INSTDIR"
+    ClearErrors
+    Exec '"$INSTDIR\bin\rufin.exe"'
+    IfErrors 0 update_launch_done
+    SetErrorLevel 6
+
+update_launch_done:
+FunctionEnd
+
+Function .onInstFailed
+    StrCmp $UpdateMode 1 0 update_failure_done
+    !insertmacro RequireRufinClosed \
+        "$INSTDIR\bin\rufin.exe" update_failure_bin update_failure_done
+    SetOutPath "$INSTDIR"
+    Exec '"$INSTDIR\bin\rufin.exe"'
+
+update_failure_done:
+FunctionEnd
+
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}/LICENSE"
 !insertmacro MUI_PAGE_COMPONENTS
@@ -188,6 +217,8 @@ UninstPage custom un.CachePageCreate un.CachePageLeave
 
 Section "${RUFIN_DISPLAY_NAME}" RufinSection
     SectionIn RO
+
+runtime_check:
     !insertmacro RequireRufinClosed "$INSTDIR\bin\rufin.exe" current_bin runtime_is_running
     !insertmacro RequireRufinClosed "$INSTDIR\rufin.exe" current_root runtime_is_running
     StrCmp $LegacyInstallOwned 1 0 runtime_not_running
@@ -198,6 +229,18 @@ Section "${RUFIN_DISPLAY_NAME}" RufinSection
     Goto runtime_not_running
 
 runtime_is_running:
+    StrCmp $UpdateMode 1 runtime_wait
+    IfSilent runtime_silent_abort runtime_show_running
+
+runtime_wait:
+    IntOp $UpdateWaitAttempts $UpdateWaitAttempts + 1
+    IntCmp $UpdateWaitAttempts 150 runtime_wait_exhausted runtime_wait_more runtime_wait_exhausted
+
+runtime_wait_more:
+    Sleep 100
+    Goto runtime_check
+
+runtime_wait_exhausted:
     IfSilent runtime_silent_abort runtime_show_running
 
 runtime_show_running:
@@ -223,11 +266,6 @@ runtime_not_running:
     IfErrors runtime_cleanup_failed
     SetOutPath "$INSTDIR"
     File /r "${RUFIN_STAGE_FILES}"
-    FileOpen $0 "$INSTDIR\update-channel" w
-    IfErrors install_write_failed
-    FileWrite $0 "$InstallChannel$\r$\n"
-    FileClose $0
-    IfErrors install_write_failed
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     IfErrors install_write_failed
     Goto install_written
