@@ -9,7 +9,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 #[cfg(target_os = "windows")]
-use std::io::{BufRead, BufReader};
+use std::io::BufRead;
 #[cfg(target_os = "windows")]
 use std::os::windows::process::CommandExt;
 #[cfg(target_os = "windows")]
