@@ -61,7 +61,7 @@ pub use queue::{
     QueueRestore,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
-pub use scan::{CachedSource, Freshness, Publication, Scan, ScanLink, ScanOutcome};
+pub use scan::{CachedSource, Freshness, Publication, Scan, ScanOutcome};
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,

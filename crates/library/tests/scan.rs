@@ -174,6 +174,9 @@ async fn write_small_catalog(
     scan.write_folder("folder-one", "Folder One", "folder one", "folder one", None)
         .await
         .expect("stage folder");
+    scan.write_folder("folder-two", "Folder Two", "folder two", "folder two", None)
+        .await
+        .expect("stage second folder");
     scan.write_playlist(
         "playlist-one",
         "Playlist One",
@@ -247,10 +250,10 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
     )
     .await
     .expect("stage track relations");
-    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
+    scan.write_track_folders(&[(object_id, "folder-one"), (object_id, "folder-two")])
         .await
-        .expect("stage track folder");
-    scan.write_track_folders(&[library::ScanLink::new(object_id, "folder-one", 0)])
+        .expect("stage track folders");
+    scan.write_track_folders(&[(object_id, "folder-one")])
         .await
         .expect("coalesce repeated track folder");
     scan.write_playlist_entry(
@@ -446,6 +449,150 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     .expect("read artwork digest after Genre change");
     assert_ne!(artwork_after, artwork_before);
     assert_eq!(artwork_change.artwork_digest.as_slice(), artwork_after);
+}
+
+#[tokio::test]
+async fn incomplete_remote_surfaces_retain_the_accepted_snapshot_without_a_revision() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    let ScanOutcome::Changed(first) =
+        write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await
+    else {
+        panic!("first scan must publish");
+    };
+    let rejected_freshness = Freshness::new(b"fresh-two".to_vec()).expect("freshness");
+    let mut scan = Scan::begin(
+        &database,
+        "source-one",
+        "Source One",
+        "source one",
+        Some(rejected_freshness.clone()),
+    )
+    .await
+    .expect("begin incomplete refresh");
+    scan.retain_incomplete_catalog()
+        .await
+        .expect("retain catalog");
+    scan.retain_folders().await.expect("retain Folders");
+    scan.retain_enrichment().await.expect("retain enrichment");
+    scan.retain_playlists().await.expect("retain Playlists");
+    scan.retain_home().await.expect("retain Home");
+
+    assert_eq!(
+        scan.finish().await.expect("finish retained refresh"),
+        ScanOutcome::Identical(first)
+    );
+    assert_eq!(
+        Scan::accept_freshness(
+            &database,
+            "source-one",
+            &rejected_freshness,
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("check rejected freshness"),
+        None,
+        "an incomplete refresh must remain retryable"
+    );
+    let mut reader = connection(&path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT track.object_id,folder.object_id
+             FROM track_folders relation
+             JOIN tracks track USING(track_key)
+             JOIN folders folder USING(folder_key)
+             WHERE track.object_id='track-one'
+             ORDER BY folder.object_id",
+        )
+        .fetch_all(&mut reader)
+        .await
+        .expect("read retained memberships"),
+        [
+            ("track-one".to_string(), "folder-one".to_string()),
+            ("track-one".to_string(), "folder-two".to_string()),
+        ]
+    );
+}
+
+#[tokio::test]
+async fn unavailable_related_surfaces_do_not_reject_a_playable_track() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    let mut scan = Scan::begin(&database, "source-one", "Source One", "source one", None)
+        .await
+        .expect("begin scan");
+    scan.write_track(
+        "track-one",
+        Some("unreadable-album"),
+        "Track One",
+        "track one",
+        "Album",
+        "Artist",
+        "track one",
+        180_000,
+        1,
+        1,
+        None,
+        None,
+        None,
+        None,
+        Some("FLAC"),
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        false,
+        None,
+        None,
+        None,
+        None,
+        None,
+        None,
+        [1; 32],
+    )
+    .await
+    .expect("stage playable Track");
+    scan.write_track_folders(&[("track-one", "unavailable-folder")])
+        .await
+        .expect("ignore unavailable Folder relation");
+    scan.write_home_entry(&library::HomeEntryInput {
+        section_id: "newly-added".to_string(),
+        position: 0,
+        kind: library::HomeEntryKind::Album,
+        entity_object_id: "unreadable-album".to_string(),
+        title: "Album".to_string(),
+        subtitle: "Artist".to_string(),
+        artwork_binding: None,
+    })
+    .await
+    .expect("ignore unavailable Home relation");
+    scan.discard_unresolved_remote_relations()
+        .await
+        .expect("discard unavailable remote relations");
+    assert!(matches!(
+        scan.finish().await.expect("publish Track"),
+        ScanOutcome::Changed(_)
+    ));
+
+    let mut reader = connection(&path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64, i64)>(
+            "SELECT
+                 (SELECT count(*) FROM tracks WHERE object_id='track-one' AND album_key IS NULL),
+                 (SELECT count(*) FROM track_folders),
+                 (SELECT count(*) FROM home_entries)"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("read accepted Track"),
+        (1, 0, 0)
+    );
 }
 
 #[tokio::test]
