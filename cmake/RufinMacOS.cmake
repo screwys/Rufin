@@ -13,6 +13,44 @@ find_program(RUFIN_LIPO lipo REQUIRED)
 find_program(RUFIN_MESON meson REQUIRED)
 find_program(RUFIN_RSVG_CONVERT rsvg-convert REQUIRED)
 
+function(rufin_macos_install_file source destination)
+  get_filename_component(RUFIN_COPY_DESTINATION_DIR "${destination}" DIRECTORY)
+  set(RUFIN_COPY_SOURCE "${source}")
+  set(RUFIN_COPY_DESTINATION "${destination}")
+  set(RUFIN_COPY_CODE [=[
+file(MAKE_DIRECTORY
+  "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@RUFIN_COPY_DESTINATION_DIR@")
+execute_process(
+  COMMAND "@CMAKE_COMMAND@" -E copy_if_different
+    "@RUFIN_COPY_SOURCE@"
+    "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@RUFIN_COPY_DESTINATION@"
+  COMMAND_ERROR_IS_FATAL ANY
+)
+]=])
+  string(CONFIGURE "${RUFIN_COPY_CODE}" RUFIN_COPY_CODE @ONLY)
+  install(CODE "${RUFIN_COPY_CODE}")
+endfunction()
+
+function(rufin_macos_install_directory source destination)
+  if(NOT IS_DIRECTORY "${source}")
+    return()
+  endif()
+  set(RUFIN_COPY_SOURCE "${source}")
+  set(RUFIN_COPY_DESTINATION "${destination}")
+  set(RUFIN_COPY_CODE [=[
+file(MAKE_DIRECTORY
+  "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@RUFIN_COPY_DESTINATION@")
+execute_process(
+  COMMAND "@CMAKE_COMMAND@" -E copy_directory
+    "@RUFIN_COPY_SOURCE@"
+    "$ENV{DESTDIR}${CMAKE_INSTALL_PREFIX}/@RUFIN_COPY_DESTINATION@"
+  COMMAND_ERROR_IS_FATAL ANY
+)
+]=])
+  string(CONFIGURE "${RUFIN_COPY_CODE}" RUFIN_COPY_CODE @ONLY)
+  install(CODE "${RUFIN_COPY_CODE}")
+endfunction()
+
 pkg_check_modules(RUFIN_PIXBUF REQUIRED gdk-pixbuf-2.0)
 pkg_check_modules(RUFIN_SOUP REQUIRED libsoup-3.0)
 pkg_get_variable(RUFIN_GSTREAMER_PLUGIN_DIR gstreamer-1.0 pluginsdir)
@@ -183,42 +221,42 @@ install(FILES "${CMAKE_CURRENT_BINARY_DIR}/Info.plist" DESTINATION "${RUFIN_MACO
 install(FILES "${RUFIN_MACOS_ICON}"
   DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources")
 install(FILES LICENSE DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources")
-install(PROGRAMS
+foreach(RUFIN_MACOS_EXECUTABLE
   "${RUFIN_GSTREAMER_SCANNER_DIR}/gst-plugin-scanner"
-  "${RUFIN_PIXBUF_QUERY_LOADERS}"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/MacOS")
-install(FILES
+  "${RUFIN_PIXBUF_QUERY_LOADERS}")
+  get_filename_component(RUFIN_MACOS_EXECUTABLE_NAME "${RUFIN_MACOS_EXECUTABLE}" NAME)
+  rufin_macos_install_file("${RUFIN_MACOS_EXECUTABLE}"
+    "${RUFIN_MACOS_CONTENTS}/MacOS/${RUFIN_MACOS_EXECUTABLE_NAME}")
+endforeach()
+foreach(RUFIN_MACOS_PLUGIN
   ${RUFIN_MACOS_PLUGIN_FILES}
   "${RUFIN_WAVPACK_PLUGIN}"
   "${RUFIN_GME_PLUGIN}"
-  "${RUFIN_OPENMPT_PLUGIN}"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/lib/gstreamer-1.0")
-install(DIRECTORY "${RUFIN_PIXBUF_MODULE_DIR}/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/lib/gdk-pixbuf-2.0/loaders")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/lib/gio/modules/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/lib/gio/modules")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/glib-2.0/schemas/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/glib-2.0/schemas")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/gstreamer-1.0/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/gstreamer-1.0")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/gtk-4.0/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/gtk-4.0")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/Adwaita/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/Adwaita")
-if(IS_DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/AdwaitaLegacy")
-  install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/AdwaitaLegacy/"
-    DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/AdwaitaLegacy")
-endif()
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/icons/hicolor/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/icons/hicolor")
-install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/mime/"
-  DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/mime")
+  "${RUFIN_OPENMPT_PLUGIN}")
+  get_filename_component(RUFIN_MACOS_PLUGIN_NAME "${RUFIN_MACOS_PLUGIN}" NAME)
+  rufin_macos_install_file("${RUFIN_MACOS_PLUGIN}"
+    "${RUFIN_MACOS_CONTENTS}/Resources/lib/gstreamer-1.0/${RUFIN_MACOS_PLUGIN_NAME}")
+endforeach()
+rufin_macos_install_directory("${RUFIN_PIXBUF_MODULE_DIR}"
+  "${RUFIN_MACOS_CONTENTS}/Resources/lib/gdk-pixbuf-2.0/loaders")
+foreach(RUFIN_MACOS_RUNTIME_DIRECTORY
+  "lib/gio/modules"
+  "share/glib-2.0/schemas"
+  "share/gstreamer-1.0"
+  "share/gtk-4.0"
+  "share/icons/Adwaita"
+  "share/icons/AdwaitaLegacy"
+  "share/icons/hicolor"
+  "share/mime")
+  rufin_macos_install_directory(
+    "${RUFIN_BREW_PREFIX}/${RUFIN_MACOS_RUNTIME_DIRECTORY}"
+    "${RUFIN_MACOS_CONTENTS}/Resources/${RUFIN_MACOS_RUNTIME_DIRECTORY}")
+endforeach()
 foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
   get_filename_component(RUFIN_LOCALE "${RUFIN_PO_FILE}" NAME_WE)
-  if(EXISTS "${RUFIN_BREW_PREFIX}/share/locale/${RUFIN_LOCALE}")
-    install(DIRECTORY "${RUFIN_BREW_PREFIX}/share/locale/${RUFIN_LOCALE}/"
-      DESTINATION "${RUFIN_MACOS_CONTENTS}/Resources/share/locale/${RUFIN_LOCALE}")
-  endif()
+  rufin_macos_install_directory(
+    "${RUFIN_BREW_PREFIX}/share/locale/${RUFIN_LOCALE}"
+    "${RUFIN_MACOS_CONTENTS}/Resources/share/locale/${RUFIN_LOCALE}")
 endforeach()
 
 set(RUFIN_MACOS_BREW_PREFIX "${RUFIN_BREW_PREFIX}")
