@@ -4,22 +4,21 @@ default:
     @just --list
 
 build target="" architecture="":
-    @if [[ "{{ target }}" == "arch" && -z "{{ architecture }}" ]]; then \
+    @if [[ -z "{{ target }}" && -z "{{ architecture }}" ]]; then \
+        case "$(uname -s)" in \
+            Darwin|CYGWIN*|MINGW*|MSYS*) just _build-native-package ;; \
+            *) scripts/container run default none just _build ;; \
+        esac; \
+    elif [[ "{{ target }}" == "arch" && -z "{{ architecture }}" ]]; then \
         scripts/container run default none just _build-arch; \
-    elif [[ "{{ target }}" == "dmg" && -z "{{ architecture }}" ]]; then \
-        just _build-dmg; \
     elif [[ "{{ target }}" == "rpm" ]]; then \
         scripts/container run packaging engine \
             just _build-rpm "{{ architecture }}"; \
     elif [[ "{{ target }}" == "flatpak" && -z "{{ architecture }}" ]]; then \
         scripts/container run packaging sandbox env FLATPAK_BWRAP=/usr/bin/bwrap \
             just _build-flatpak; \
-    elif [[ "{{ target }}" == "windows" && -z "{{ architecture }}" ]]; then \
-        just _build-windows; \
-    elif [[ -z "{{ target }}" && -z "{{ architecture }}" ]]; then \
-        scripts/container run default none just _build; \
     else \
-        echo "usage: just build [arch|dmg|flatpak|windows|rpm [arm]]" >&2; \
+        echo "usage: just build [arch|flatpak|rpm [arm]]" >&2; \
         exit 2; \
     fi
 
@@ -420,18 +419,19 @@ deps:
 _deps:
     @cargo run --locked -p xtask -- generate linux-packaging
 
-_build-dmg identity="development":
+_build-native-package identity="development":
     @build_identity="{{ identity }}"; \
     case "$build_identity" in \
         development) preset=development-package ;; \
         stable) preset=release-package ;; \
-        *) echo "macOS build identity must be 'development' or 'stable'." >&2; exit 2 ;; \
+        *) echo "Native package identity must be 'development' or 'stable'." >&2; exit 2 ;; \
     esac; \
-    if [[ "$build_identity" == development && -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
+    if [[ "$(uname -s)" == Darwin && "$build_identity" == development \
+        && -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
         just setup-macos-signing; \
     fi; \
     cmake --preset "$preset"; \
-    cmake --build --preset "$preset" --target rufin-dmg
+    cmake --build --preset "$preset" --target rufin-native-package
 _build-flatpak:
     #!/usr/bin/env bash
     set -euo pipefail
@@ -487,13 +487,3 @@ _build-flatpak:
     cp "$work_bundle_path" "$temporary_bundle_path"
     mv -f "$temporary_bundle_path" "$bundle_path"
     echo "Built ${bundle_path}"
-
-_build-windows identity="development":
-    @build_identity="{{ identity }}"; \
-    case "$build_identity" in \
-        development) preset=development-package ;; \
-        stable) preset=release-package ;; \
-        *) echo "Windows build identity must be 'development' or 'stable'." >&2; exit 2 ;; \
-    esac; \
-    cmake --preset "$preset"; \
-    cmake --build --preset "$preset" --target rufin-installer

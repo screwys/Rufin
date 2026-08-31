@@ -240,12 +240,12 @@ just debug
 
 Local builds are shown as `Rufin (Development)` and use the isolated `Rufin.Devel` application
 identity. The first macOS `just debug` or
-`just build dmg` automatically creates the persistent local `Rufin Development` signing identity. The first signing operation may ask for access to the certificate's private
+`just build` automatically creates the persistent local `Rufin Development` signing identity on macOS. The first signing operation may ask for access to the certificate's private
 key; **Always Allow** should keep this one-time.
 
-On macOS, `just build dmg` creates `.local/artifacts/Rufin.Devel.dmg` for installation and
+On macOS, `just build` creates `.local/artifacts/Rufin.Devel.dmg` for installation and
 platform behavior testing.
-On Windows, `just build windows` creates the isolated versioned
+On Windows, `just build` creates the isolated versioned
 `.local/artifacts/Rufin.Devel-*-setup.exe` installer.
 
 Testing, Nix, and container controls are documented in

@@ -209,7 +209,7 @@ jobs:
           export PATH="${gettext_prefix}/bin:$PATH"
           RUFIN_ARTIFACT_ROOT="$PWD/dist" \
             RUFIN_DMG_ARTIFACT="$PWD/dist/Rufin-macos-${{ matrix.architecture }}.dmg" \
-            just _build-dmg stable
+            just _build-native-package stable
 
       - name: Remove code-signing keychain
         if: always()

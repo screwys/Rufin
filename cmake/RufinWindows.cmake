@@ -189,3 +189,4 @@ add_custom_target(rufin-installer
   USES_TERMINAL
   VERBATIM
 )
+add_custom_target(rufin-native-package DEPENDS rufin-installer)

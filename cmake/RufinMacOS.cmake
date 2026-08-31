@@ -311,3 +311,4 @@ add_custom_target(rufin-dmg
   USES_TERMINAL
   VERBATIM
 )
+add_custom_target(rufin-native-package DEPENDS rufin-dmg)

@@ -69,13 +69,11 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 ## Development commands
 
 ```bash
-just build # builds the app
+just build # builds the native binary, macOS disk image, or Windows installer
 just build arch # builds the Arch package
-just build dmg # builds the isolated macOS development disk image on macOS
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64
 just build rpm arm # builds Fedora RPMs for AArch64
-just build windows # builds the isolated Windows development installer
 just clean # clears Rufin build state while keeping finished artifacts
 just debug # runs the development app on the host
 just fmt # formats Rust code

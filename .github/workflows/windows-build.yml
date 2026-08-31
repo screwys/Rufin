@@ -116,7 +116,7 @@ jobs:
           if [[ -n "$RELEASE_TAG" ]]; then
             build_identity=stable
           fi
-          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-windows "$build_identity"
+          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package "$build_identity"
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
