@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-29 14:45+0000\n"
+"PO-Revision-Date: 2026-09-01 01:15+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -123,6 +123,9 @@ msgid ""
 "better experience to use a dedicated program or plugin to fetch lyrics "
 "instead."
 msgstr ""
+"See kirjutab su laulusõnade faili üle Rufini poolt alla laaditud sisuga; "
+"võib-olla oleks parem kasutada laulusõnade allalaadimiseks selleks mõeldud "
+"programmi või lisamoodulit."
 
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
@@ -273,10 +276,8 @@ msgstr "Esineb"
 msgid "Application name"
 msgstr "Rakenduse nimi"
 
-#, fuzzy
-#| msgid "Template"
 msgid "Apply Template"
-msgstr "Mall"
+msgstr "Rakenda mall"
 
 msgid "Artist / Album"
 msgstr "Esitaja / Album"
@@ -409,7 +410,7 @@ msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
 
 msgid "Clearing queue also clears the current song"
-msgstr ""
+msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
 
 msgid "Close Window"
 msgstr "Sulge aken"
@@ -429,10 +430,8 @@ msgstr "Klubimuusika"
 msgid "Collapse sidebar"
 msgstr "Ahenda külgriba"
 
-#, fuzzy
-#| msgid "Collapse sidebar"
 msgid "Collapse/expand sidebar"
-msgstr "Ahenda külgriba"
+msgstr "Ahenda/laienda külgriba"
 
 msgid "Collection"
 msgstr "Kogu"
@@ -459,7 +458,7 @@ msgid "Compact"
 msgstr "Kompaktne"
 
 msgid "Confirm"
-msgstr ""
+msgstr "Kinnita"
 
 msgid "Connect"
 msgstr "Ühenda"
@@ -575,10 +574,8 @@ msgstr "Diagnostikalogi on salvestatud"
 msgid "Diagnostic log"
 msgstr "Diagnostikalogi"
 
-#, fuzzy
-#| msgid "DirectSound"
 msgid "Direction"
-msgstr "DirectSound"
+msgstr "Suund"
 
 msgid "Disable private mode"
 msgstr "Lülita privaatne režiim välja"
@@ -658,10 +655,8 @@ msgstr "Muuda metateavet"
 msgid "Edit"
 msgstr "Muuda"
 
-#, fuzzy
-#| msgid "Genre tracks"
 msgid "Embed in track"
-msgstr "Žanri lood"
+msgstr "Lõimi loo sisse"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Kas lülitad EBU R128 analüüsi sisse?"
@@ -1026,10 +1021,8 @@ msgstr "Laulusõnade nihe (msek)"
 msgid "Lyrics settings"
 msgstr "Laulusõnade seadistused"
 
-#, fuzzy
-#| msgid "Lyrics loaded"
 msgid "Lyrics storage"
-msgstr "Laulusõnad on laaditud"
+msgstr "Laulusõnade andmeruum"
 
 msgid "Lyrics"
 msgstr "Laulusõnad"
@@ -1707,15 +1700,11 @@ msgstr "Salvesta vastendus"
 msgid "Save Server Settings"
 msgstr "Salvesta serveri seadistused"
 
-#, fuzzy
-#| msgid "Saves lyrics to your source"
 msgid "Save action saves the lyrics directly to your source"
-msgstr "Salvestab laulusõnad sinu andmeallikasse"
+msgstr "Salvestamine talletab laulusõnad sinu andmeallikasse"
 
-#, fuzzy
-#| msgid "Searching will start automatically"
 msgid "Save lyrics automatically"
-msgstr "Otsing algab automaatselt"
+msgstr "Salvesta laulusõnad automaatselt"
 
 msgid "Save to rescan"
 msgstr "Salvestatud uuesti skaneerimiseks"
@@ -1750,10 +1739,8 @@ msgstr "Otsi laulusõnu"
 msgid "Search current folder"
 msgstr "Otsi sellest kaustas"
 
-#, fuzzy
-#| msgid "Search Again"
 msgid "Search in page"
-msgstr "Otsi uuesti"
+msgstr "Otsi lehelt"
 
 msgid "Search is unavailable"
 msgstr "Otsing pole saadaval"
@@ -2241,7 +2228,7 @@ msgid "range"
 msgstr "vahemik on"
 
 msgid "separate .lrc file"
-msgstr ""
+msgstr "eraldi .lrc fail"
 
 msgid "to"
 msgstr "kuni"
