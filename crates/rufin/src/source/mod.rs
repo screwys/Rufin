@@ -60,7 +60,7 @@ pub(crate) struct SelectedSourceState {
     pub(crate) music_folders: Arc<[FolderRow]>,
     pub(crate) album_count: usize,
     pub(crate) track_count: usize,
-    pub(crate) mapped_count: usize,
+    pub(crate) formula_match_count: usize,
     pub(crate) sample_source_path: Option<String>,
 }
 
@@ -606,12 +606,20 @@ impl SourceOwner {
             .source_counts(publication.source, &cancellation)
             .await
             .map_err(string_error)?;
-        let mapped_count = self
-            .shared
-            .database
-            .mapping_access_count(publication.source, &cancellation)
-            .await
-            .map_err(string_error)?;
+        let formula_match_count = match configured.local_access.as_ref() {
+            Some(access) => self
+                .shared
+                .database
+                .mapping_formula_match_count(
+                    publication.source,
+                    access.root_path.to_string_lossy().as_ref(),
+                    access.server_prefix.as_deref(),
+                    &cancellation,
+                )
+                .await
+                .map_err(string_error)?,
+            None => 0,
+        };
         let sample_source_path = self
             .shared
             .database
@@ -635,7 +643,7 @@ impl SourceOwner {
             music_folders: folders,
             album_count,
             track_count,
-            mapped_count,
+            formula_match_count,
             sample_source_path,
         });
         let session = ActiveSource::new(&self.shared, &selected);
@@ -1081,7 +1089,7 @@ impl SourceOwner {
     async fn publish_mapping_count(
         &self,
         selected: &SelectedSourceState,
-        mapped_count: usize,
+        formula_match_count: usize,
     ) -> Result<(), String> {
         let current = {
             let mut slots = self
@@ -1096,7 +1104,7 @@ impl SourceOwner {
                 return Ok(());
             };
             let mut replacement = (*slot.current).clone();
-            replacement.mapped_count = mapped_count;
+            replacement.formula_match_count = formula_match_count;
             slot.current = Arc::new(replacement);
             Arc::clone(&slot.current)
         };
@@ -1411,7 +1419,11 @@ impl SourcePort for SourceOwner {
         });
     }
 
-    fn save_local_access(&self, input: SourceLocalAccess) -> Receiver<Result<(), String>> {
+    fn save_local_access(
+        &self,
+        input: SourceLocalAccess,
+        wait_until_mapped: bool,
+    ) -> Receiver<Result<(), String>> {
         let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         let owner = self.clone();
@@ -1426,7 +1438,7 @@ impl SourcePort for SourceOwner {
                     .source
                     .as_ref()
                     .ok_or_else(source_access_unavailable)?;
-                source
+                let root_path = source
                     .apply_local_mapping(
                         &selected.database,
                         selected.source_key,
@@ -1446,52 +1458,71 @@ impl SourcePort for SourceOwner {
                         .find(|configured| configured.configuration.source_id == input.source_id)
                         .ok_or_else(|| "the mapped source is no longer configured".to_string())?;
                     configured.local_access = Some(SavedLocalAccess {
-                        root_path: input.root_path.clone(),
+                        root_path: root_path.clone(),
                         server_prefix: input.server_prefix.clone(),
                         local_prefix: input.local_prefix.clone(),
                     });
                     Ok(())
                 })?;
-                let mapped_count = selected
+                let formula_match_count = selected
                     .database
-                    .mapping_access_count(selected.source_key, &ReadCancellation::new())
+                    .mapping_formula_match_count(
+                        selected.source_key,
+                        root_path.to_string_lossy().as_ref(),
+                        input.server_prefix.as_deref(),
+                        &ReadCancellation::new(),
+                    )
                     .await
                     .map_err(string_error)?;
-                owner.publish_mapping_count(&selected, mapped_count).await?;
-                Ok(())
+                owner
+                    .publish_mapping_count(&selected, formula_match_count)
+                    .await?;
+                Ok((formula_match_count, root_path))
             }
             .await;
-            let succeeded = result.is_ok();
-            let _ = sender.send(result).await;
-            if !succeeded || cancelled.load(Ordering::Acquire) {
-                return;
-            }
-            let Some(selected) = owner.shared.selected().filter(|selected| {
-                selected.source_id() == &input.source_id && !cancelled.load(Ordering::Acquire)
-            }) else {
-                return;
-            };
-            let Some(source) = selected.source.as_ref() else {
-                return;
-            };
-            match source
-                .complete_local_mapping(
-                    &selected.database,
-                    selected.source_key,
-                    &input.root_path,
-                    input.server_prefix.as_deref(),
-                    input.local_prefix.as_deref(),
-                    Arc::clone(&cancelled),
-                )
-                .await
-            {
-                Ok(mapped_count) if !cancelled.load(Ordering::Acquire) => {
-                    if let Err(error) = owner.publish_mapping_count(&selected, mapped_count).await {
-                        warn!(%error, "could not publish completed Local mapping");
-                    }
+            let (formula_match_count, root_path) = match result {
+                Ok(completed) => completed,
+                Err(error) => {
+                    let _ = sender.send(Err(error)).await;
+                    return;
                 }
-                Ok(_) | Err(SourceError::Cancelled) => {}
-                Err(error) => warn!(%error, "background Local mapping did not complete"),
+            };
+            if !wait_until_mapped {
+                let _ = sender.send(Ok(())).await;
+            }
+            let completion: Result<(), String> = async {
+                if cancelled.load(Ordering::Acquire) {
+                    return Err("Local file mapping was cancelled".to_string());
+                }
+                let selected = owner
+                    .shared
+                    .selected()
+                    .filter(|selected| selected.source_id() == &input.source_id)
+                    .ok_or_else(|| "the mapped source is no longer selected".to_string())?;
+                let source = selected
+                    .source
+                    .as_ref()
+                    .ok_or_else(source_access_unavailable)?;
+                source
+                    .complete_local_mapping(
+                        &selected.database,
+                        selected.source_key,
+                        &root_path,
+                        input.server_prefix.as_deref(),
+                        input.local_prefix.as_deref(),
+                        Arc::clone(&cancelled),
+                    )
+                    .await
+                    .map_err(string_error)?;
+                owner
+                    .publish_mapping_count(&selected, formula_match_count)
+                    .await
+            }
+            .await;
+            if wait_until_mapped {
+                let _ = sender.send(completion).await;
+            } else if let Err(error) = completion {
+                warn!(%error, "background Local mapping did not complete");
             }
         });
         receiver
@@ -1516,7 +1547,7 @@ impl SourcePort for SourceOwner {
                     .as_mut()
                 {
                     let mut replacement = (*slot.current).clone();
-                    replacement.mapped_count = 0;
+                    replacement.formula_match_count = 0;
                     slot.current = Arc::new(replacement);
                 }
                 let _ = owner.shared.playback().and_then(|playback| {
@@ -2662,21 +2693,10 @@ fn configured_sources(
                 access,
                 status: selected
                     .filter(|selected| selected.source_id() == &configured.configuration.source_id)
-                    .map(|selected| {
-                        let metadata = configured.local_access.as_ref().is_some_and(|access| {
-                            access.server_prefix.is_none() && access.local_prefix.is_none()
-                        });
-                        LocalAccessStatus {
-                            total_track_count: selected.track_count,
-                            direct_match_count: 0,
-                            prefix_match_count: if metadata { 0 } else { selected.mapped_count },
-                            metadata_match_count: if metadata { selected.mapped_count } else { 0 },
-                            unmatched_count: selected
-                                .track_count
-                                .saturating_sub(selected.mapped_count),
-                            sample_source_path: selected.sample_source_path.clone(),
-                            sample_local_path: None,
-                        }
+                    .map(|selected| LocalAccessStatus {
+                        total_track_count: selected.track_count,
+                        matched_track_count: selected.formula_match_count,
+                        sample_source_path: selected.sample_source_path.clone(),
                     })
                     .unwrap_or_default(),
                 selected_music_folder_name: selected

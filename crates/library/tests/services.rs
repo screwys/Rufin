@@ -665,6 +665,41 @@ async fn local_mapping_selects_one_exact_or_representative_track_without_a_libra
 }
 
 #[tokio::test]
+async fn local_mapping_counts_formula_coverage_without_probing_local_files() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query(
+        "UPDATE tracks SET source_path=CASE track_key
+           WHEN ?1 THEN '/music/Artist/Album/Track.flac'
+           ELSE 'Other/Album/Track.flac' END
+         WHERE source_key=?2",
+    )
+    .bind(fixture.tracks[0])
+    .bind(fixture.source)
+    .execute(&mut raw)
+    .await
+    .expect("install provider source paths");
+
+    assert_eq!(
+        fixture
+            .database
+            .mapping_formula_match_count(fixture.source, "/local/music", Some("/music"), &cancel)
+            .await
+            .expect("count prefixed paths"),
+        1
+    );
+    assert_eq!(
+        fixture
+            .database
+            .mapping_formula_match_count(fixture.source, "/local/music", None, &cancel)
+            .await
+            .expect("count relative paths"),
+        fixture.tracks.len().saturating_sub(1)
+    );
+}
+
+#[tokio::test]
 async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();

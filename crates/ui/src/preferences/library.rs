@@ -7,7 +7,7 @@ use downloads::{DownloadQueueState, DownloadRule};
 use gtk::gio;
 use playback::StreamQuality;
 
-use localization::{msgid, tr};
+use localization::{msgid, tr, trn_with};
 
 use super::{
     PreferencesNavigationControls,
@@ -1031,13 +1031,13 @@ fn local_mapping_status(summary: Option<&SourceLocalAccessSummary>) -> String {
     if status.total_track_count == 0 {
         return tr("Saved, sync to preview matches");
     }
-    format!(
-        "{}: {} direct, {} prefix, {} metadata, {} unmatched",
-        tr("Local file mapping"),
-        status.direct_match_count,
-        status.prefix_match_count,
-        status.metadata_match_count,
-        status.unmatched_count
+    let matched = status.matched_track_count.to_string();
+    let total = status.total_track_count.to_string();
+    trn_with(
+        "Local file mapping: {matched} of {total} server path matches",
+        "Local file mapping: {matched} of {total} server paths match",
+        status.total_track_count as u64,
+        &[("matched", matched.as_str()), ("total", total.as_str())],
     )
 }
 

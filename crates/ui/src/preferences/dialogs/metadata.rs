@@ -1,5 +1,5 @@
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::{HashMap, HashSet},
     rc::Rc,
 };
@@ -178,23 +178,33 @@ fn present_local_access_recovery(
     let builder = crate::ui_resource::builder(resource);
     crate::ui_resource::objects!(builder, resource, {
         recovery_dialog: adw::Dialog,
-        recovery_toolbar: adw::ToolbarView,
+        recovery_content: gtk::Box,
     });
     recovery_dialog.set_content_width(large_popup_content_width(EDITOR_WIDTH));
+    let retry_requested = Rc::new(Cell::new(false));
+    recovery_dialog.connect_closed({
+        let retry_requested = Rc::clone(&retry_requested);
+        move |_| {
+            if retry_requested.replace(false) {
+                let on_success = Rc::clone(&on_success);
+                gtk::glib::idle_add_local_once(move || on_success());
+            }
+        }
+    });
     let close = recovery_dialog.downgrade();
     let retry: Rc<dyn Fn()> = Rc::new(move || {
+        retry_requested.set(true);
         if let Some(dialog) = close.upgrade() {
             dialog.close();
         }
-        on_success();
     });
-    let form = crate::preferences::source::local_access::metadata_local_access_recovery_form(
+    crate::preferences::source::local_access::mount_metadata_local_access_mapping(
         shell,
         source_path,
         &selected,
+        &recovery_content,
         retry,
     );
-    recovery_toolbar.set_content(Some(&form));
     shell.present_selected_dialog(&recovery_dialog);
 }
 

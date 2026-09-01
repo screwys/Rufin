@@ -202,13 +202,29 @@ impl Database {
         ))
     }
 
-    pub async fn mapping_access_count(
+    pub async fn mapping_formula_match_count(
         &self,
         source: SourceKey,
+        root: &str,
+        server_prefix: Option<&str>,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<usize> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let count=sqlx::query_scalar::<_,i64>("SELECT count(DISTINCT track_object_id) FROM local_access_files WHERE source_key=?1 AND origin='mapping' AND track_object_id IS NOT NULL").bind(source).fetch_one(&mut *connection).await?;
+        let count = sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM tracks
+             WHERE source_key=?1 AND source_path IS NOT NULL AND (
+               (?2 IS NOT NULL AND substr(source_path,1,length(?2))=?2)
+               OR (?2 IS NULL AND (
+                 (substr(source_path,1,1)<>'/' AND substr(source_path,2,1)<>':' AND substr(source_path,1,2)<>char(92)||char(92))
+                 OR substr(source_path,1,length(?3))=?3
+               ))
+             )",
+        )
+        .bind(source)
+        .bind(server_prefix)
+        .bind(root)
+        .fetch_one(&mut *connection)
+        .await?;
         Database::clear_progress(&mut connection).await?;
         Ok(usize::try_from(count).unwrap_or_default())
     }
@@ -264,24 +280,6 @@ impl Database {
         .await;
         Database::clear_progress(&mut connection).await?;
         Ok(path?)
-    }
-
-    pub async fn mapping_track_object(
-        &self,
-        source: SourceKey,
-        title: &str,
-        album: &str,
-        artist: &str,
-        disc_number: i64,
-        track_number: i64,
-        duration_millis: i64,
-        cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<String>> {
-        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result=sqlx::query_scalar("SELECT object_id FROM tracks WHERE source_key=?1 AND normalized_search IS NOT NULL AND lower(title)=lower(?2) AND lower(display_album)=lower(?3) AND lower(display_artist)=lower(?4) AND disc_number=?5 AND track_number=?6 AND abs(duration_millis-?7)<=2000 ORDER BY track_key LIMIT 1")
-            .bind(source).bind(title).bind(album).bind(artist).bind(disc_number).bind(track_number).bind(duration_millis).fetch_optional(&mut *connection).await;
-        Database::clear_progress(&mut connection).await?;
-        Ok(result?)
     }
 
     pub async fn local_file_page(

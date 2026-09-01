@@ -42,6 +42,22 @@
             <property name="title-widget"><object class="AdwWindowTitle" id="recovery_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
           </object>
         </child>
+        <property name="content">
+          <object class="AdwClamp">
+            <property name="maximum-size">650</property>
+            <property name="tightening-threshold">520</property>
+            <property name="margin-top">8</property>
+            <property name="margin-bottom">18</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="child">
+              <object class="GtkBox" id="recovery_content">
+                <property name="orientation">vertical</property>
+                <property name="spacing">12</property>
+              </object>
+            </property>
+          </object>
+        </property>
       </object>
     </property>
   </object>

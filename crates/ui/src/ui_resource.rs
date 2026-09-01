@@ -120,8 +120,6 @@ pub(crate) const LOCAL_SETUP_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/local_setup.ui";
 pub(crate) const MANAGE_SERVER_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/manage_server.ui";
-pub(crate) const METADATA_RECOVERY_RESOURCE: &str =
-    "/io/github/screwys/Rufin/ui/preferences/source/metadata_recovery.ui";
 pub(crate) const SERVER_ACTIONS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/server_actions.ui";
 pub(crate) const SETUP_SCAFFOLD_RESOURCE: &str =
@@ -205,7 +203,6 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     CREDENTIAL_HOST_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     MANAGE_SERVER_RESOURCE,
-    METADATA_RECOVERY_RESOURCE,
     SERVER_ACTIONS_RESOURCE,
     NAVIGATION_RESOURCE,
     SHELL_ROOT_RESOURCE,
