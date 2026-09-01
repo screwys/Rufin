@@ -48,15 +48,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-msgstr[1] ""
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr "感謝您使用 Rufin！如果遇到問題或有任何建議，請在 GitHub 上建立 issue。"
@@ -96,15 +87,6 @@ msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
 msgstr ""
-
-msgid ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-msgstr[1] ""
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -339,9 +321,6 @@ msgstr[0] "套用變更到 {count} 個曲目"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
-
-msgid "Checking..."
-msgstr "檢查中..."
 
 msgid "Choose a local music folder"
 msgstr "選擇本地音樂資料夾"
@@ -715,9 +694,6 @@ msgstr "最愛"
 msgid "Featured genres"
 msgstr ""
 
-msgid "File path replacement"
-msgstr ""
-
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 
@@ -966,8 +942,9 @@ msgstr ""
 msgid "Local file mapping is no longer available"
 msgstr ""
 
-msgid "Local file mapping"
-msgstr ""
+msgid "Local file mapping: {matched} of {total} server path matches"
+msgid_plural "Local file mapping: {matched} of {total} server paths match"
+msgstr[0] ""
 
 msgid "Local library"
 msgstr "本地媒體庫"
@@ -1014,6 +991,9 @@ msgid "Manage"
 msgstr "管理"
 
 msgid "Mapped Local Path"
+msgstr ""
+
+msgid "Mapped local file not found"
 msgstr ""
 
 msgid "Maximum year"
@@ -1619,9 +1599,6 @@ msgstr "從播放清單中移除"
 msgid "Remove from Queue"
 msgstr "從佇列中移除"
 
-msgid "Remove prefix"
-msgstr "移除前綴"
-
 msgid "Remove rule"
 msgstr "移除規則"
 
@@ -1713,6 +1690,10 @@ msgstr "儲存"
 
 msgid "Saved Sources"
 msgstr ""
+
+msgid "Saved mapping. {matched} of {total} server path matches"
+msgid_plural "Saved mapping. {matched} of {total} server paths match"
+msgstr[0] ""
 
 msgid "Saved to"
 msgstr "儲存至"
@@ -1842,9 +1823,6 @@ msgstr ""
 
 msgid "Server lyrics are off in private mode"
 msgstr "在無痕模式中伺服器歌詞會被關閉"
-
-msgid "Server path"
-msgstr ""
 
 msgid "Server prefix doesn't match"
 msgstr ""
@@ -2272,6 +2250,12 @@ msgstr[0] "{count} 週之前"
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
+
+#~ msgid "Checking..."
+#~ msgstr "檢查中..."
+
+#~ msgid "Remove prefix"
+#~ msgstr "移除前綴"
 
 #~ msgid "Loading folders..."
 #~ msgstr "資料夾載入中..."
