@@ -377,7 +377,6 @@ impl Shell {
         content.set_halign(gtk::Align::Fill);
         content.set_width_request(1);
         content.set_margin_top(ROUTE_TOP_MARGIN);
-        content.set_margin_bottom(36);
 
         let mut slots = std::collections::HashMap::new();
         for block in HomeBlockKind::all() {
