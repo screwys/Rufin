@@ -39,15 +39,15 @@
                 <property name="valign">center</property>
                 <style><class name="linked"/><class name="preference-selection-buttons"/></style>
                 <child>
-                  <object class="GtkToggleButton" id="embed">
-                    <property name="label" translatable="yes">Embed in track</property>
+                  <object class="GtkToggleButton" id="sidecar">
+                    <property name="label" translatable="yes">Separate .lrc file</property>
                     <style><class name="preference-selection-button"/></style>
                   </object>
                 </child>
                 <child>
-                  <object class="GtkToggleButton" id="sidecar">
-                    <property name="label" translatable="yes">separate .lrc file</property>
-                    <property name="group">embed</property>
+                  <object class="GtkToggleButton" id="embed">
+                    <property name="label" translatable="yes">Embed in track</property>
+                    <property name="group">sidecar</property>
                     <style><class name="preference-selection-button"/></style>
                   </object>
                 </child>

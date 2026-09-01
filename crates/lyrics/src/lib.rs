@@ -82,7 +82,7 @@ pub struct Settings {
     pub save_lyrics_to_source: bool,
     #[serde(default, alias = "save_fetched_lyrics")]
     pub save_lyrics_automatically: bool,
-    #[serde(default)]
+    #[serde(default = "default_true")]
     pub save_lyrics_as_sidecar: bool,
     #[serde(default)]
     pub lyrics_provider_settings_version: u8,
@@ -114,7 +114,7 @@ impl Default for Settings {
             prefer_server_lyrics: true,
             save_lyrics_to_source: false,
             save_lyrics_automatically: false,
-            save_lyrics_as_sidecar: false,
+            save_lyrics_as_sidecar: true,
             lyrics_provider_settings_version: LYRICS_PROVIDER_SETTINGS_VERSION,
             suppressed_auto_lyrics_track_ids: Vec::new(),
             prefer_translations: false,
@@ -910,6 +910,7 @@ mod tests {
         assert!(!settings.external_lyrics_enabled);
         assert!(!settings.karaoke_mode);
         assert!(settings.prefer_server_lyrics);
+        assert!(settings.save_lyrics_as_sidecar);
         assert_eq!(
             settings.external_lyrics_providers,
             vec![
