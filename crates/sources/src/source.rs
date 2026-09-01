@@ -21,29 +21,6 @@ const PROVIDER_PLAYLIST_PAGE: usize = 256;
 
 pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
 
-pub(crate) async fn retain_remote_failure(
-    error: SourceError,
-    provider: &'static str,
-    surface: &'static str,
-    retention: impl std::future::Future<Output = library::LibraryResult<()>>,
-) -> SourceResult<()> {
-    report_remote_failure(error, provider, surface)?;
-    retention.await?;
-    Ok(())
-}
-
-pub(crate) fn report_remote_failure(
-    error: SourceError,
-    provider: &'static str,
-    surface: &'static str,
-) -> SourceResult<()> {
-    if matches!(&error, SourceError::Cancelled | SourceError::Library(_)) {
-        return Err(error);
-    }
-    tracing::warn!(%error, provider, surface, "source refresh retained accepted data");
-    Ok(())
-}
-
 pub struct SelectedFeed {
     source: Arc<Source>,
     database: Arc<Database>,
@@ -612,13 +589,7 @@ impl Source {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: Arc<AtomicBool>,
     ) -> SourceResult<ScanOutcome> {
-        let freshness = match self.freshness().await {
-            Ok(freshness) => freshness,
-            Err(error) => {
-                tracing::warn!(%error, "source freshness is unavailable; continuing forced refresh");
-                None
-            }
-        };
+        let freshness = self.freshness().await?;
         let reuse_local = matches!(&self.implementation, Implementation::Local(_));
         self.refresh(
             database,
@@ -658,14 +629,12 @@ impl Source {
             Implementation::Jellyfin(source) => {
                 source
                     .stage_catalog(&mut scan, progress, &cancelled_fn)
-                    .await?;
-                scan.discard_unresolved_remote_relations().await?;
+                    .await?
             }
             Implementation::OpenSubsonic(source) => {
                 source
                     .stage_catalog(&mut scan, progress, &cancelled_fn)
-                    .await?;
-                scan.discard_unresolved_remote_relations().await?;
+                    .await?
             }
         }
         let outcome = scan.finish().await?;
@@ -2609,8 +2578,6 @@ pub(crate) fn edited_source_name(requested: &str, current: &str) -> String {
 #[cfg(test)]
 mod refresh_laws {
     use super::*;
-    use wiremock::matchers::{method, path, query_param};
-    use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[tokio::test]
     async fn unsupported_freshness_never_widens_to_a_catalog_acquisition() {
@@ -2658,102 +2625,6 @@ mod refresh_laws {
                 .expect("cached source")
                 .is_none()
         );
-    }
-
-    #[tokio::test]
-    async fn forced_refresh_admits_authenticated_source_when_catalog_surfaces_are_unavailable() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/rest/getScanStatus.view"))
-            .respond_with(ResponseTemplate::new(404))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/getMusicFolders.view"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "subsonic-response": {"status": "ok", "musicFolders": {"musicFolder": []}}
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/getAlbumList2.view"))
-            .and(query_param("type", "alphabeticalByName"))
-            .respond_with(ResponseTemplate::new(500))
-            .expect(1)
-            .mount(&server)
-            .await;
-        for list_type in ["frequent", "newest", "recent", "byYear"] {
-            Mock::given(method("GET"))
-                .and(path("/rest/getAlbumList2.view"))
-                .and(query_param("type", list_type))
-                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "subsonic-response": {"status": "ok", "albumList2": {"album": []}}
-                })))
-                .expect(1)
-                .mount(&server)
-                .await;
-        }
-        Mock::given(method("GET"))
-            .and(path("/rest/search3.view"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "subsonic-response": {"status": "ok", "searchResult3": {"song": [], "artist": []}}
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/getGenres.view"))
-            .respond_with(ResponseTemplate::new(500))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/rest/getPlaylists.view"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "subsonic-response": {"status": "ok", "playlists": {"playlist": []}}
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-
-        let directory = tempfile::tempdir().expect("Store directory");
-        let database = Database::open(directory.path().join("library.sqlite"))
-            .await
-            .expect("Database");
-        let source = Source::open(
-            SourceConfiguration {
-                source_id: SourceId::new("subsonic:test"),
-                kind: "subsonic".to_string(),
-                name: "Subsonic".to_string(),
-                provider_payload: serde_json::json!({
-                    "version": 1,
-                    "base_url": server.uri(),
-                    "username": "listener",
-                    "trust_invalid_cert": false,
-                    "navidrome_library_version": 0,
-                    "authentication": "password"
-                })
-                .to_string(),
-            },
-            Some("salt:token".to_string()),
-            None,
-        )
-        .expect("open Subsonic source");
-
-        assert!(matches!(
-            source
-                .manual_refresh(
-                    &database,
-                    "Subsonic",
-                    &|_| {},
-                    Arc::new(AtomicBool::new(false)),
-                )
-                .await
-                .expect("forced refresh"),
-            ScanOutcome::Changed(_)
-        ));
     }
 
     #[test]

@@ -61,6 +61,24 @@ pub enum ScanOutcome {
     Failed,
 }
 
+/// One relation fact in a bounded Scan page.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ScanLink<'a> {
+    pub owner_id: &'a str,
+    pub related_id: &'a str,
+    pub position: i64,
+}
+
+impl<'a> ScanLink<'a> {
+    pub const fn new(owner_id: &'a str, related_id: &'a str, position: i64) -> Self {
+        Self {
+            owner_id,
+            related_id,
+            position,
+        }
+    }
+}
+
 /// One bounded, connection-owned source scan.
 pub struct Scan {
     database: Database,
@@ -197,10 +215,6 @@ impl Scan {
         scan.point_update = true;
         scan.local_point_update = source_id == "local:server:library";
         Ok(scan)
-    }
-
-    pub fn discard_freshness(&mut self) {
-        self.freshness = None;
     }
 
     pub async fn remove_track(&mut self, object_id: &str) -> LibraryResult<()> {
@@ -895,7 +909,7 @@ impl Scan {
             row.push_bind(path);
         });
         self.stage(requested.build()).await?;
-        self.retain_tracks_where(
+        self.retain_local_tracks_where(
             "track.media_uri IN (SELECT 'file://'||path FROM temp.scan_retained_paths)",
             None,
         )
@@ -911,10 +925,10 @@ impl Scan {
         predicate: &'static str,
         value: &str,
     ) -> LibraryResult<()> {
-        self.retain_tracks_where(predicate, Some(value)).await
+        self.retain_local_tracks_where(predicate, Some(value)).await
     }
 
-    async fn retain_tracks_where(
+    async fn retain_local_tracks_where(
         &mut self,
         predicate: &'static str,
         value: Option<&str>,
@@ -951,7 +965,7 @@ impl Scan {
                 "INSERT OR IGNORE INTO temp.scan_track_moods SELECT track.object_id,mood.object_id,relation.position FROM track_moods relation JOIN tracks track USING(track_key) JOIN moods mood USING(mood_key) WHERE track.source_key=?1 AND {predicate}"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_track_folders SELECT track.object_id,folder.object_id FROM track_folders relation JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key) WHERE track.source_key=?1 AND {predicate}"
+                "INSERT OR IGNORE INTO temp.scan_track_folders SELECT track.object_id,folder.object_id,relation.position FROM track_folders relation JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key) WHERE track.source_key=?1 AND {predicate}"
             ),
             format!(
                 "INSERT OR IGNORE INTO temp.scan_album_artists SELECT DISTINCT album.object_id,artist.object_id,relation.position FROM album_artists relation JOIN albums album USING(album_key) JOIN artists artist USING(artist_key) JOIN tracks track USING(album_key) WHERE track.source_key=?1 AND {predicate}"
@@ -970,110 +984,6 @@ impl Scan {
             } else {
                 self.stage(query).await?;
             }
-        }
-        Ok(())
-    }
-
-    pub async fn retain_incomplete_catalog(&mut self) -> LibraryResult<()> {
-        self.discard_freshness();
-        let Some(source_key) = self.existing_source_key else {
-            return Ok(());
-        };
-        self.stage(sqlx::query(
-            "DELETE FROM temp.scan_removals WHERE entity_kind IN ('retain-track','retain-album')",
-        ))
-        .await?;
-        self.stage(sqlx::query("INSERT INTO temp.scan_removals(entity_kind,object_id) SELECT 'retain-track',track.object_id FROM tracks track WHERE track.source_key=?1 AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=track.object_id)").bind(source_key)).await?;
-        self.stage(sqlx::query("INSERT INTO temp.scan_removals(entity_kind,object_id) SELECT 'retain-album',album.object_id FROM albums album WHERE album.source_key=?1 AND NOT EXISTS(SELECT 1 FROM temp.scan_albums staged WHERE staged.object_id=album.object_id)").bind(source_key)).await?;
-        self.retain_tracks_where(
-            "track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-track')",
-            None,
-        )
-        .await?;
-        for sql in [
-            "INSERT OR IGNORE INTO temp.scan_artists SELECT DISTINCT artist.object_id,artist.name,artist.normalized_name,artist.sort_text,artist.musicbrainz_artist_id,artist.artwork_binding,artist.source_favorite,artist.source_rating FROM artists artist JOIN album_artists relation USING(artist_key) JOIN albums album USING(album_key) WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "INSERT OR IGNORE INTO temp.scan_genres SELECT DISTINCT genre.object_id,genre.name,genre.normalized_name,genre.sort_text,genre.artwork_binding FROM genres genre JOIN album_genres relation USING(genre_key) JOIN albums album USING(album_key) WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "INSERT OR IGNORE INTO temp.scan_album_artists SELECT album.object_id,artist.object_id,relation.position FROM album_artists relation JOIN albums album USING(album_key) JOIN artists artist USING(artist_key) WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "INSERT OR IGNORE INTO temp.scan_album_genres SELECT album.object_id,genre.object_id,relation.position FROM album_genres relation JOIN albums album USING(album_key) JOIN genres genre USING(genre_key) WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "INSERT OR IGNORE INTO temp.scan_album_release_types SELECT album.object_id,relation.release_type,relation.position FROM album_release_types relation JOIN albums album USING(album_key) WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "INSERT OR IGNORE INTO temp.scan_albums(object_id,title,normalized_title,display_artist,sort_text,year,release_date,date_added,musicbrainz_release_id,musicbrainz_release_group_id,is_compilation,artwork_binding,favorite,rating,first_seen_at,source_loudness_analysis_key,loudness_analysis_key) SELECT album.object_id,album.title,album.normalized_title,album.display_artist,album.sort_text,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.artwork_binding,album.source_favorite,album.source_rating,album.first_seen_at,album.source_loudness_analysis_key,album.loudness_analysis_key FROM albums album WHERE album.source_key=?1 AND album.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-            "UPDATE temp.scan_tracks AS staged SET source_integrated_lufs=(SELECT measurement.integrated_lufs FROM tracks track JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.origin='source' WHERE track.source_key=?1 AND track.object_id=staged.object_id),source_true_peak=(SELECT measurement.true_peak FROM tracks track JOIN loudness_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key AND measurement.origin='source' WHERE track.source_key=?1 AND track.object_id=staged.object_id),source_replay_gain_db=(SELECT measurement.gain_db FROM tracks track JOIN replay_gain_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND track.object_id=staged.object_id),source_replay_gain_peak=(SELECT measurement.peak FROM tracks track JOIN replay_gain_measurements measurement ON measurement.source_key=track.source_key AND measurement.entity_kind='track' AND measurement.entity_key=track.track_key WHERE track.source_key=?1 AND track.object_id=staged.object_id) WHERE staged.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-track')",
-            "UPDATE temp.scan_albums AS staged SET source_integrated_lufs=(SELECT measurement.integrated_lufs FROM albums album JOIN loudness_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key AND measurement.origin='source' WHERE album.source_key=?1 AND album.object_id=staged.object_id),source_true_peak=(SELECT measurement.true_peak FROM albums album JOIN loudness_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key AND measurement.origin='source' WHERE album.source_key=?1 AND album.object_id=staged.object_id),source_replay_gain_db=(SELECT measurement.gain_db FROM albums album JOIN replay_gain_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key WHERE album.source_key=?1 AND album.object_id=staged.object_id),source_replay_gain_peak=(SELECT measurement.peak FROM albums album JOIN replay_gain_measurements measurement ON measurement.source_key=album.source_key AND measurement.entity_kind='album' AND measurement.entity_key=album.album_key WHERE album.source_key=?1 AND album.object_id=staged.object_id) WHERE staged.object_id IN(SELECT object_id FROM temp.scan_removals WHERE entity_kind='retain-album')",
-        ] {
-            self.stage(sqlx::query(sql).bind(source_key)).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn reset_folders(&mut self) -> LibraryResult<()> {
-        self.stage(sqlx::query("DELETE FROM temp.scan_track_folders"))
-            .await?;
-        self.stage(sqlx::query("DELETE FROM temp.scan_folders"))
-            .await
-    }
-
-    pub async fn retain_folders(&mut self) -> LibraryResult<()> {
-        self.discard_freshness();
-        self.reset_folders().await?;
-        let Some(source_key) = self.existing_source_key else {
-            return Ok(());
-        };
-        self.stage(sqlx::query("INSERT INTO temp.scan_folders SELECT folder.object_id,folder.name,folder.normalized_name,folder.sort_text,folder.artwork_binding FROM folders folder WHERE folder.source_key=?1").bind(source_key)).await?;
-        self.stage(sqlx::query("INSERT INTO temp.scan_track_folders SELECT track.object_id,folder.object_id FROM track_folders relation JOIN tracks track USING(track_key) JOIN temp.scan_tracks staged ON staged.object_id=track.object_id JOIN folders folder USING(folder_key) WHERE track.source_key=?1").bind(source_key)).await
-    }
-
-    pub async fn retain_enrichment(&mut self) -> LibraryResult<()> {
-        self.discard_freshness();
-        let Some(source_key) = self.existing_source_key else {
-            return Ok(());
-        };
-        for sql in [
-            "INSERT OR IGNORE INTO temp.scan_artists SELECT artist.object_id,artist.name,artist.normalized_name,artist.sort_text,artist.musicbrainz_artist_id,artist.artwork_binding,artist.source_favorite,artist.source_rating FROM artists artist WHERE artist.source_key=?1",
-            "INSERT OR IGNORE INTO temp.scan_genres SELECT genre.object_id,genre.name,genre.normalized_name,genre.sort_text,genre.artwork_binding FROM genres genre WHERE genre.source_key=?1",
-        ] {
-            self.stage(sqlx::query(sql).bind(source_key)).await?;
-        }
-        Ok(())
-    }
-
-    pub async fn reset_playlists(&mut self) -> LibraryResult<()> {
-        self.stage(sqlx::query("DELETE FROM temp.scan_playlist_entries"))
-            .await?;
-        self.stage(sqlx::query("DELETE FROM temp.scan_playlists"))
-            .await
-    }
-
-    pub async fn retain_playlists(&mut self) -> LibraryResult<()> {
-        self.discard_freshness();
-        self.reset_playlists().await?;
-        let Some(source_key) = self.existing_source_key else {
-            return Ok(());
-        };
-        self.stage(sqlx::query("INSERT INTO temp.scan_playlists SELECT playlist.object_id,playlist.name,playlist.normalized_name,playlist.sort_text,playlist.artwork_binding FROM playlists playlist WHERE playlist.source_key=?1 AND playlist.ownership='source'").bind(source_key)).await?;
-        self.stage(sqlx::query("INSERT INTO temp.scan_playlist_entries SELECT playlist.object_id,entry.object_id,entry.track_object_id,entry.position FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.source_key=?1 AND playlist.ownership='source'").bind(source_key)).await
-    }
-
-    pub async fn reset_home(&mut self) -> LibraryResult<()> {
-        self.stage(sqlx::query("DELETE FROM temp.scan_home_entries"))
-            .await
-    }
-
-    pub async fn retain_home(&mut self) -> LibraryResult<()> {
-        self.discard_freshness();
-        self.reset_home().await?;
-        let Some(source_key) = self.existing_source_key else {
-            return Ok(());
-        };
-        self.stage(sqlx::query("WITH retained AS (SELECT entry.section_id,entry.position,entry.entity_kind,CASE entry.entity_kind WHEN 'track' THEN (SELECT object_id FROM tracks WHERE source_key=?1 AND track_key=entry.entity_key) WHEN 'album' THEN (SELECT object_id FROM albums WHERE source_key=?1 AND album_key=entry.entity_key) WHEN 'artist' THEN (SELECT object_id FROM artists WHERE source_key=?1 AND artist_key=entry.entity_key) WHEN 'playlist' THEN (SELECT object_id FROM playlists WHERE source_key=?1 AND playlist_key=entry.entity_key) END entity_object_id,entry.title,entry.subtitle,entry.artwork_binding FROM home_entries entry WHERE entry.source_key=?1) INSERT INTO temp.scan_home_entries SELECT section_id,position,entity_kind,entity_object_id,title,subtitle,artwork_binding FROM retained WHERE entity_object_id IS NOT NULL").bind(source_key)).await
-    }
-
-    pub async fn discard_unresolved_remote_relations(&mut self) -> LibraryResult<()> {
-        for sql in [
-            "UPDATE temp.scan_tracks SET album_object_id=NULL WHERE album_object_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM temp.scan_albums album WHERE album.object_id=scan_tracks.album_object_id)",
-            "DELETE FROM temp.scan_track_folders WHERE NOT EXISTS(SELECT 1 FROM temp.scan_tracks track WHERE track.object_id=scan_track_folders.owner_id) OR NOT EXISTS(SELECT 1 FROM temp.scan_folders folder WHERE folder.object_id=scan_track_folders.related_id)",
-            "DELETE FROM temp.scan_home_entries WHERE (entity_kind='track' AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks WHERE object_id=entity_object_id)) OR (entity_kind='album' AND NOT EXISTS(SELECT 1 FROM temp.scan_albums WHERE object_id=entity_object_id)) OR (entity_kind='artist' AND NOT EXISTS(SELECT 1 FROM temp.scan_artists WHERE object_id=entity_object_id)) OR (entity_kind='playlist' AND NOT EXISTS(SELECT 1 FROM temp.scan_playlists WHERE object_id=entity_object_id))",
-        ] {
-            self.stage(sqlx::query(sql)).await?;
         }
         Ok(())
     }
@@ -1220,22 +1130,12 @@ impl Scan {
             .await
     }
 
-    pub async fn write_track_folders(&mut self, links: &[(&str, &str)]) -> LibraryResult<()> {
-        for (track, folder) in links {
-            self.require_id("Track", track)?;
-            self.require_id("Folder", folder)?;
-            self.require_row_bytes(&[track.as_bytes(), folder.as_bytes()])?;
-        }
-        for page in links.chunks(128) {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "INSERT OR IGNORE INTO temp.scan_track_folders(owner_id,related_id) ",
-            );
-            query.push_values(page, |mut row, (track, folder)| {
-                row.push_bind(*track).push_bind(*folder);
-            });
-            self.stage(query.build()).await?;
-        }
-        Ok(())
+    pub async fn write_track_folders(&mut self, links: &[ScanLink<'_>]) -> LibraryResult<()> {
+        self.write_links_batch(
+            "INSERT OR IGNORE INTO temp.scan_track_folders(owner_id,related_id,position) ",
+            links,
+        )
+        .await
     }
 
     pub async fn write_playlist(
@@ -1600,6 +1500,37 @@ impl Scan {
             if let Some(connection) = writer.as_mut() {
                 drop_staging(connection).await?;
             }
+        }
+        Ok(())
+    }
+
+    async fn write_links_batch(
+        &mut self,
+        prefix: &'static str,
+        links: &[ScanLink<'_>],
+    ) -> LibraryResult<()> {
+        if links.is_empty() {
+            return Ok(());
+        }
+        for link in links {
+            self.require_id("link owner", link.owner_id)?;
+            self.require_id("link target", link.related_id)?;
+            if link.position < 0 {
+                self.failed = true;
+                return Err(LibraryError::InvalidScan(
+                    "link position cannot be negative".to_string(),
+                ));
+            }
+            self.require_row_bytes(&[link.owner_id.as_bytes(), link.related_id.as_bytes()])?;
+        }
+        for page in links.chunks(128) {
+            let mut query = QueryBuilder::<Sqlite>::new(prefix);
+            query.push_values(page, |mut row, link| {
+                row.push_bind(link.owner_id)
+                    .push_bind(link.related_id)
+                    .push_bind(link.position);
+            });
+            self.stage(query.build()).await?;
         }
         Ok(())
     }
@@ -2026,7 +1957,8 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
          ) STRICT;
          CREATE TEMP TABLE scan_track_folders(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
-             PRIMARY KEY(owner_id, related_id)
+             position INTEGER NOT NULL,
+             PRIMARY KEY(owner_id, position), UNIQUE(owner_id, related_id)
          ) STRICT;
          CREATE TEMP TABLE scan_album_release_types(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
@@ -2269,12 +2201,9 @@ const RELATION_DIGEST_QUERIES: &[(&str, &str)] = &[
     ),
     (
         "track_folders",
-        "WITH ranked AS (
-             SELECT owner_id,related_id,
-                    row_number() OVER(PARTITION BY owner_id ORDER BY related_id)-1 position
-             FROM temp.scan_track_folders
-         ) SELECT * FROM ranked WHERE (owner_id,position)>(?1,?2)
-           ORDER BY owner_id,position LIMIT ?3",
+        "SELECT * FROM temp.scan_track_folders
+         WHERE (owner_id, position) > (?1, ?2)
+         ORDER BY owner_id, position LIMIT ?3",
     ),
     (
         "album_release_types",
@@ -2658,8 +2587,8 @@ async fn staged_non_playlist_catalog_changed(
             "SELECT track.object_id,mood.object_id,link.position FROM track_moods link JOIN tracks track USING(track_key) JOIN moods mood USING(mood_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
         ),
         (
-            "SELECT owner_id,related_id FROM temp.scan_track_folders",
-            "SELECT track.object_id,folder.object_id FROM track_folders link JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
+            "SELECT owner_id,related_id,position FROM temp.scan_track_folders",
+            "SELECT track.object_id,folder.object_id,link.position FROM track_folders link JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
         ),
         (
             "SELECT owner_id,related_id,position FROM temp.scan_album_release_types",
@@ -3232,8 +3161,8 @@ async fn publish_links(
          FROM temp.scan_track_moods AS link
          JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
          JOIN moods AS mood ON mood.source_key=?1 AND mood.object_id=link.related_id",
-        "INSERT INTO track_folders(track_key, folder_key)
-         SELECT track.track_key, folder.folder_key
+        "INSERT INTO track_folders(track_key, folder_key, position)
+         SELECT track.track_key, folder.folder_key, link.position
          FROM temp.scan_track_folders AS link
          JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
          JOIN folders AS folder ON folder.source_key=?1 AND folder.object_id=link.related_id",

@@ -178,7 +178,7 @@ pub async fn fixture() -> Fixture {
         scan.write_track_relations(&[(&id, artist)], &[(&id, "genre")], &[(&id, "mood")])
             .await
             .expect("stage Track relations");
-        scan.write_track_folders(&[(&id, "folder")])
+        scan.write_track_folders(&[library::ScanLink::new(&id, "folder", 0)])
             .await
             .expect("stage Track Folder");
     }

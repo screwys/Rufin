@@ -622,8 +622,8 @@ async fn salvage_relationships(
         ),
         (
             "track folders",
-            "INSERT INTO track_folders(track_key, folder_key)
-             SELECT DISTINCT track.track_key, folder.folder_key
+            "INSERT INTO track_folders(track_key, folder_key, position)
+             SELECT track.track_key, folder.folder_key, relation.key
              FROM legacy.tracks AS item
              JOIN legacy.source_libraries AS library USING (library_id)
              JOIN sources AS source ON source.object_id=library.source_id

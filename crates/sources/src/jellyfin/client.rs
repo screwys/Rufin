@@ -717,7 +717,7 @@ impl JellyfinSource {
         include_types: &str,
         offset: usize,
         limit: usize,
-    ) -> SourceResult<(Vec<serde_json::Value>, Option<usize>)> {
+    ) -> SourceResult<ItemQueryResult> {
         self.item_page_sorted(include_types, offset, limit, "SortName", "Ascending")
             .await
     }
@@ -729,7 +729,7 @@ impl JellyfinSource {
         limit: usize,
         sort_by: &str,
         sort_order: &str,
-    ) -> SourceResult<(Vec<serde_json::Value>, Option<usize>)> {
+    ) -> SourceResult<ItemQueryResult> {
         let fields = match include_types {
             "MusicAlbum" => ALBUM_FIELDS,
             "Audio" => TRACK_FIELDS,
@@ -747,7 +747,7 @@ impl JellyfinSource {
             .append_pair("SortBy", sort_by)
             .append_pair("SortOrder", sort_order);
 
-        self.raw_item_page(url).await
+        self.get_json::<ItemQueryResult>(url).await
     }
 
     pub(super) async fn people_page(
@@ -755,7 +755,7 @@ impl JellyfinSource {
         path: &str,
         offset: usize,
         limit: usize,
-    ) -> SourceResult<(Vec<serde_json::Value>, Option<usize>)> {
+    ) -> SourceResult<ItemQueryResult> {
         let mut url = endpoint(&self.base_url, path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
@@ -766,14 +766,14 @@ impl JellyfinSource {
                 "ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds",
             );
 
-        self.raw_item_page(url).await
+        self.get_json::<ItemQueryResult>(url).await
     }
 
     pub(super) async fn music_genre_page(
         &self,
         offset: usize,
         limit: usize,
-    ) -> SourceResult<(Vec<serde_json::Value>, Option<usize>)> {
+    ) -> SourceResult<ItemQueryResult> {
         let mut url = endpoint(&self.base_url, "MusicGenres")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
@@ -786,20 +786,7 @@ impl JellyfinSource {
             )
             .append_pair("SortBy", "SortName");
 
-        self.raw_item_page(url).await
-    }
-
-    async fn raw_item_page(
-        &self,
-        url: Url,
-    ) -> SourceResult<(Vec<serde_json::Value>, Option<usize>)> {
-        let value = self.get_json::<serde_json::Value>(url).await?;
-        let total = value
-            .get("TotalRecordCount")
-            .and_then(serde_json::Value::as_u64)
-            .and_then(|value| usize::try_from(value).ok());
-        let items = crate::remote_http::take_json_array(value, &["Items"])?;
-        Ok((items, total))
+        self.get_json::<ItemQueryResult>(url).await
     }
 
     pub(super) async fn get_json<T: DeserializeOwned>(&self, url: Url) -> SourceResult<T> {

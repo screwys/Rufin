@@ -1,7 +1,6 @@
 use crate::{ImageBytes, SourceError, SourceResult};
 use reqwest::{Client, StatusCode, header};
 use serde::de::DeserializeOwned;
-use serde::de::IntoDeserializer;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::{Duration, Instant};
 use tracing::{debug, warn};
@@ -112,60 +111,6 @@ fn deserialize_json<T: DeserializeOwned>(
             error.inner()
         ))
     })
-}
-
-pub(crate) fn take_json_array(
-    mut value: serde_json::Value,
-    path: &[&str],
-) -> SourceResult<Vec<serde_json::Value>> {
-    for key in path {
-        value = match value {
-            serde_json::Value::Object(mut object) => {
-                object.remove(*key).unwrap_or(serde_json::Value::Null)
-            }
-            serde_json::Value::Null => serde_json::Value::Null,
-            _ => {
-                return Err(SourceError::Other(format!(
-                    "remote collection {} is not an object",
-                    path.join(".")
-                )));
-            }
-        };
-    }
-    match value {
-        serde_json::Value::Array(items) => Ok(items),
-        serde_json::Value::Null => Ok(Vec::new()),
-        _ => Err(SourceError::Other(format!(
-            "remote collection {} is not an array",
-            path.join(".")
-        ))),
-    }
-}
-
-pub(crate) fn decode_json_items<T: DeserializeOwned>(
-    items: Vec<serde_json::Value>,
-    provider: &'static str,
-    collection: &'static str,
-) -> (Vec<T>, bool) {
-    let mut decoded = Vec::with_capacity(items.len());
-    let mut complete = true;
-    for (index, item) in items.into_iter().enumerate() {
-        match serde_path_to_error::deserialize::<_, T>(item.into_deserializer()) {
-            Ok(item) => decoded.push(item),
-            Err(error) => {
-                complete = false;
-                tracing::warn!(
-                    provider,
-                    collection,
-                    index,
-                    field = %error.path(),
-                    error = %error.inner(),
-                    "remote collection item was retained from accepted data"
-                );
-            }
-        }
-    }
-    (decoded, complete)
 }
 
 pub async fn unit(request: reqwest::RequestBuilder, policy: RemoteHttpPolicy) -> SourceResult<()> {
@@ -410,30 +355,6 @@ mod tests {
         max_bytes: 3,
         context: "test response",
     };
-
-    #[test]
-    fn collection_items_decode_independently() {
-        #[derive(Deserialize)]
-        struct Item {
-            id: String,
-        }
-
-        let (items, complete) = decode_json_items::<Item>(
-            vec![
-                serde_json::json!({"id": "one"}),
-                serde_json::json!({"id": null}),
-                serde_json::json!({"id": "two"}),
-            ],
-            "test",
-            "items",
-        );
-
-        assert_eq!(
-            items.into_iter().map(|item| item.id).collect::<Vec<_>>(),
-            ["one", "two"]
-        );
-        assert!(!complete);
-    }
     const POLICY: RemoteHttpPolicy = RemoteHttpPolicy {
         service: "test-server",
         auth_context: "Test server returned",
