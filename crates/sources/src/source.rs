@@ -2758,6 +2758,7 @@ mod refresh_laws {
         std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
         std::fs::write(&track, b"media").expect("write Track");
         let canonical_root = root.path().canonicalize().expect("canonical music root");
+        let canonical_track = track.canonicalize().expect("canonical Track");
 
         assert_eq!(
             mapped_local_path(
@@ -2766,7 +2767,7 @@ mod refresh_laws {
                 None,
                 "/srv/navidrome/music/Artist/Album/Track.flac",
             ),
-            Some(track.canonicalize().expect("canonical Track"))
+            Some(canonical_track.clone())
         );
         assert_eq!(
             match_local_access_sample(
@@ -2784,11 +2785,11 @@ mod refresh_laws {
                 None,
                 "/media/music/Artist/Album/Track.flac",
             ),
-            Some(track.clone())
+            Some(canonical_track.clone())
         );
         assert_eq!(
             project_local_access_path(&canonical_root, None, None, "Artist/Album/Track.flac",),
-            Some(track)
+            Some(canonical_track)
         );
         assert_eq!(
             match_local_access_sample(&canonical_root, None, None, "Artist/Album/Track.flac",),
