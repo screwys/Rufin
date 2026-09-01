@@ -1,7 +1,7 @@
-id: search-route-must-not-retain-presentation-arrays
+id: search-keeps-only-active-presentation
 language: Rust
 severity: error
-message: Search retains result models, but only one active collection and toolbar presentation.
+message: Search may retain three result models, but only the selected tab may retain a collection view and toolbar.
 rule:
   all:
     - kind: field_declaration
@@ -13,10 +13,10 @@ rule:
           }
         stopBy: end
 ---
-id: search-collection-must-not-register-route-callbacks
+id: search-registers-now-playing-once
 language: Rust
 severity: error
-message: Search now-playing registration is route-owned and must not be recreated with a category presentation.
+message: Register Search now-playing updates once for the route, not again whenever the selected category view is rebuilt.
 rule:
   all:
     - pattern: $SHELL.register_current_route_track_selection($$$ARGS)

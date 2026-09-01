@@ -1,4 +1,4 @@
-id: search-route-must-not-retain-presentation-arrays
+id: search-keeps-only-active-presentation
 valid:
   - |
       struct SearchRouteProjection {
@@ -17,7 +17,7 @@ invalid:
           toolbars: [LibraryToolbarProjection; 3],
       }
 ---
-id: search-collection-must-not-register-route-callbacks
+id: search-registers-now-playing-once
 valid:
   - |
       fn search_collection(shell: &Rc<Shell>) -> LibraryCollectionProjection {

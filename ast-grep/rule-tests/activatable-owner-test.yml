@@ -1,4 +1,4 @@
-id: activatable-widget-signal-must-not-own-row
+id: activatable-row-does-not-retain-itself
 valid:
   - |
       fn connect(row: ActionRow, button: Button) {

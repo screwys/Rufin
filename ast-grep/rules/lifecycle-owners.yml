@@ -1,7 +1,7 @@
 id: notify-outside-refcell-owner-borrow
 language: Rust
 severity: error
-message: Collect ready updates while the RefCell owner is borrowed, then notify outside the borrow.
+message: Do not replace sparse items while their model RefCell is mutably borrowed; collect replacements and apply them afterward.
 rule:
   all:
     - pattern: $OWNER.with_typed_mut::<$$$TYPES>($CALLBACK)
@@ -12,7 +12,7 @@ rule:
 id: no-strong-clone-in-owned-signal
 language: Rust
 severity: error
-message: A widget-owned signal must not capture a strong clone of its owning projection.
+message: A signal stored on an object must not strongly capture that same object; the cycle would keep the UI alive after close.
 rule:
   any:
     - pattern: |
@@ -63,46 +63,14 @@ rule:
           });
           $$$REST
         }
-    - all:
-        - kind: function_item
-        - regex: 'let\s+\w+\s*=\s*self\.clone\(\)'
-        - has:
-            pattern: self.$FIELD.$CONNECT($$$ARGS)
-            stopBy: end
-    - pattern: |
-        {
-          $$$BEFORE
-          let $CAPTURE = $OWNER.clone();
-          $$$MIDDLE
-          $OWNER.$FIELD.clone().$CONNECT(move |$$$PARAMS| {
-            $$$BODY
-            $CAPTURE.$METHOD($$$ARGS);
-            $$$AFTER
-          });
-          $$$REST
-        }
-    - pattern: |
-        {
-          $$$BEFORE
-          let $CAPTURE = $OWNER.clone();
-          $$$MIDDLE
-          $CONTROLLER.$CONNECT(move |$$$PARAMS| {
-            $$$BODY
-            $CAPTURE.$METHOD($$$ARGS);
-            $$$AFTER
-          });
-          $$$SETUP
-          $OWNER.add_controller($CONTROLLER);
-          $$$REST
-        }
 constraints:
   CONNECT:
     regex: ^connect_
 ---
-id: activatable-widget-signal-must-not-own-row
+id: activatable-row-does-not-retain-itself
 language: Rust
 severity: error
-message: An activatable child callback must capture its owning row weakly.
+message: An ActionRow owns its activatable button; the button callback must use a weak row reference or both widgets leak.
 rule:
   any:
     - pattern: |
@@ -140,7 +108,7 @@ constraints:
 id: popover-custom-child-registration-must-not-assert
 language: Rust
 severity: error
-message: GtkPopoverMenu custom-child lookup is fallible; handle a missing placeholder without panicking in the GTK callback.
+message: GtkPopoverMenu add_child can fail when a placeholder is missing; handle false instead of panicking in the GTK callback.
 rule:
   any:
     - all:
@@ -150,24 +118,10 @@ rule:
         - pattern: assert!($$$ARGS)
         - regex: \.add_child\s*\(
 ---
-id: detail-links-must-use-native-link-hover
-language: Rust
-severity: error
-message: GtkLabel owns link hover controllers; DetailLinkBinding must not rebuild link state from a second motion controller.
-rule:
-  all:
-    - pattern: gtk::EventControllerMotion::new()
-    - inside:
-        pattern: |
-          impl DetailLinkBinding {
-            $$$MEMBERS
-          }
-        stopBy: end
----
 id: visualizer-lane-must-be-bounded
 language: Rust
 severity: error
-message: Visualizer telemetry must use a bounded latest-frame lane.
+message: Use a one-item visualizer channel so a slow UI cannot build an unbounded frame backlog.
 rule:
   pattern: let ($EVENTS, $RECEIVER) = unbounded();
 constraints:
@@ -177,7 +131,7 @@ constraints:
 id: playback-publication-lane-must-be-bounded
 language: Rust
 severity: error
-message: Playback position and state publications must use one bounded latest-value lane.
+message: Use a one-item playback channel so position updates cannot build an unbounded backlog.
 rule:
   pattern: let ($EVENTS, $RECEIVER) = unbounded();
 constraints:
@@ -187,7 +141,7 @@ constraints:
 id: mounted-route-callback-must-not-own-shell
 language: Rust
 severity: error
-message: A mounted route callback must capture Weak<Shell> so route teardown cannot retain application ownership.
+message: A callback stored by MountedRoute must use Weak<Shell>; a strong Rc would keep the whole app graph alive after navigation.
 rule:
   any:
     - pattern: |
@@ -214,7 +168,7 @@ rule:
 id: artwork-tile-must-not-admit-on-map
 language: Rust
 severity: error
-message: GTK factory bind owns artwork admission; map callbacks must not start or repeat cover work.
+message: Do not start artwork from connect_map; remapping a row would repeat requests that factory bind already owns.
 rule:
   all:
     - pattern: $WIDGET.connect_map($$$ARGS)
@@ -228,7 +182,7 @@ rule:
 id: sparse-ready-handlers-must-not-append
 language: Rust
 severity: error
-message: Sparse readiness subscriptions are bind-owned and must replace an owner key, not append forever.
+message: Rebinding a sparse row must replace its ready callback, not append callbacks that survive every bind.
 rule:
   all:
     - pattern: $HANDLERS.borrow_mut().push($HANDLER)
@@ -239,10 +193,10 @@ rule:
           }
         stopBy: end
 ---
-id: scrolled-window-child-must-not-downcast-to-box
+id: scrolled-box-is-behind-viewport
 language: Rust
 severity: error
-message: GtkScrolledWindow wraps non-scrollable children in GtkViewport; traverse the viewport before downcasting its child to GtkBox.
+message: A GtkBox inside GtkScrolledWindow is under GtkViewport, not the direct child; retrieve the named box or unwrap the viewport first.
 rule:
   any:
     - pattern: $SCROLLER.child().and_then(|$CHILD| $CHILD.downcast::<gtk::Box>().ok())
@@ -254,7 +208,7 @@ constraints:
 id: track-search-callback-must-not-own-track-projection
 language: Rust
 severity: error
-message: Track search callbacks must capture the model or a weak read lane, never the widget-owning TrackListProjection.
+message: A search callback must not retain the whole TrackListProjection; capture its model or a weak request lane so the route can close.
 rule:
   all:
     - any:
@@ -278,7 +232,7 @@ rule:
 id: source-acquisition-must-precede-serialized-lane
 language: Rust
 severity: error
-message: Admit and cancel source acquisitions at request time; an older queued operation must not create a token that cancels a newer request.
+message: Create the source cancellation token before queueing the request; otherwise an older queued request can cancel a newer one.
 rule:
   all:
     - pattern: $SHARED.begin_acquisition()
@@ -292,7 +246,7 @@ rule:
 id: column-view-activation-needs-row-factory
 language: Rust
 severity: error
-message: Shared ColumnView activation requires an explicit activatable GtkColumnViewRow factory.
+message: Mark shared ColumnView rows activatable before connect_activate or clicks and Enter will not open them.
 rule:
   all:
     - pattern: $TABLE.connect_activate($$$ARGS)

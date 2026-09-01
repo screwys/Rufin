@@ -1,4 +1,4 @@
-id: scrolled-window-child-must-not-downcast-to-box
+id: scrolled-box-is-behind-viewport
 valid:
   - |
       fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
