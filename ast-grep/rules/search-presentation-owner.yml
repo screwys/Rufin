@@ -1,0 +1,28 @@
+id: search-route-must-not-retain-presentation-arrays
+language: Rust
+severity: error
+message: Search retains result models, but only one active collection and toolbar presentation.
+rule:
+  all:
+    - kind: field_declaration
+    - regex: ':\s*\[(LibraryCollectionProjection|LibraryToolbarProjection)\s*;'
+    - inside:
+        pattern: |
+          struct SearchRouteProjection {
+            $$$FIELDS
+          }
+        stopBy: end
+---
+id: search-collection-must-not-register-route-callbacks
+language: Rust
+severity: error
+message: Search now-playing registration is route-owned and must not be recreated with a category presentation.
+rule:
+  all:
+    - pattern: $SHELL.register_current_route_track_selection($$$ARGS)
+    - inside:
+        pattern: |
+          fn search_collection($$$PARAMS) -> LibraryCollectionProjection {
+            $$$BODY
+          }
+        stopBy: end

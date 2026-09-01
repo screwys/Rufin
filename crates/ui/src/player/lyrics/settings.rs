@@ -9,10 +9,7 @@ use lyrics::ExternalLyricsProvider;
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::shell::Shell;
 
-#[derive(Clone)]
-pub(crate) struct LyricsSettingsDialog {
-    pub(crate) dialog: adw::PreferencesDialog,
-}
+use super::{lyrics_popup_content_height, lyrics_popup_content_width};
 
 pub(crate) fn connect_lyrics_settings_controls(shell: &Rc<Shell>) {
     let Some(lyrics) = shell.selected_lyrics() else {
@@ -32,80 +29,65 @@ fn present_lyrics_settings_dialog(shell: &Rc<Shell>) {
     let Some(lyrics) = shell.selected_lyrics() else {
         return;
     };
-    if let Some(settings_dialog) = lyrics.settings_dialog.borrow().as_ref() {
-        settings_dialog.dialog.present(Some(&shell.chrome.window));
+    if let Some(settings_dialog) = lyrics.settings_dialog.upgrade() {
+        settings_dialog.present(Some(&shell.chrome.window));
         return;
     }
     drop(lyrics);
 
-    let page = build_lyrics_settings(shell);
-    let dialog = adw::PreferencesDialog::builder()
-        .title(tr("Lyrics settings"))
-        .search_enabled(false)
-        .content_width(500)
-        .content_height(600)
-        .build();
+    let (dialog, page) = build_lyrics_settings(shell);
     dialog.add(&page);
-    let settings_dialog = LyricsSettingsDialog {
-        dialog: dialog.clone(),
-    };
     if let Some(lyrics) = shell.selected_lyrics() {
-        lyrics.settings_dialog.replace(Some(settings_dialog));
+        lyrics.settings_dialog.set(Some(&dialog));
     }
-
-    let close_shell = Rc::clone(shell);
-    dialog.connect_closed(move |_| {
-        if let Some(lyrics) = close_shell.selected_lyrics() {
-            lyrics.settings_dialog.borrow_mut().take();
-        }
-    });
     present_light_dismiss_dialog(&dialog, &shell.chrome.window);
 }
 
-fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
+fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesDialog, adw::PreferencesPage) {
     let settings = shell.settings.current.borrow().lyrics.clone();
-    let page = adw::PreferencesPage::builder()
-        .title(tr("Lyrics settings"))
-        .icon_name("rufin-applications-system-symbolic")
-        .build();
+    let resource = crate::ui_resource::LYRICS_SETTINGS_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        dialog: adw::PreferencesDialog,
+        page: adw::PreferencesPage,
+        sources: adw::PreferencesGroup,
+        external: adw::SwitchRow,
+        prefer_server: adw::SwitchRow,
+        save_to_source: adw::SwitchRow,
+        save_automatically: adw::ActionRow,
+        automatic_toggle: gtk::Switch,
+        storage: adw::ActionRow,
+        embed: gtk::ToggleButton,
+        sidecar: gtk::ToggleButton,
+        translations: adw::SwitchRow,
+        language_row: adw::ComboRow,
+        furigana: adw::SwitchRow,
+        romanization: adw::SwitchRow,
+        karaoke: adw::SwitchRow,
+        theme_accent: gtk::Box,
+        color_button: gtk::Button,
+        font: adw::ComboRow,
+        size: adw::SpinRow,
+        size_adjustment: gtk::Adjustment,
+    });
 
-    let sources = adw::PreferencesGroup::builder()
-        .title(tr("Sources"))
-        .build();
-    let external = switch_row(
-        msgid("External lyric lookup"),
-        settings.external_lyrics_enabled,
-    );
-    sources.add(&external);
-
-    let prefer_server = switch_row(msgid("Prefer server lyrics"), settings.prefer_server_lyrics);
+    dialog.set_content_width(lyrics_popup_content_width());
+    dialog.set_content_height(lyrics_popup_content_height(shell.chrome.window.height()));
+    external.set_active(settings.external_lyrics_enabled);
+    prefer_server.set_active(settings.prefer_server_lyrics);
     prefer_server.set_sensitive(settings.external_lyrics_enabled);
     let prefer_server_shell = Rc::clone(shell);
     prefer_server.connect_active_notify(move |row| {
-        prefer_server_shell.set_prefer_server_lyrics(row.is_active());
+        prefer_server_shell.set_lyrics_setting(
+            "lyrics search setting",
+            false,
+            row.is_active(),
+            |settings| &mut settings.prefer_server_lyrics,
+        );
     });
-    sources.add(&prefer_server);
 
-    let save_to_source = switch_row(
-        msgid("Saves lyrics to your source"),
-        settings.save_lyrics_to_source,
-    );
-    save_to_source.set_subtitle(&tr(msgid(
-        "Save action saves the lyrics directly to your source",
-    )));
-    sources.add(&save_to_source);
-
-    let save_automatically = adw::ActionRow::builder()
-        .title(tr(msgid("Save lyrics automatically")))
-        .build();
-    let automatic_toggle = gtk::Switch::builder()
-        .active(settings.save_lyrics_automatically)
-        .valign(gtk::Align::Center)
-        .build();
-    automatic_toggle.set_can_target(false);
-    automatic_toggle.set_focusable(false);
-    save_automatically.add_suffix(&automatic_toggle);
-    save_automatically.set_activatable(true);
+    save_to_source.set_active(settings.save_lyrics_to_source);
+    automatic_toggle.set_active(settings.save_lyrics_automatically);
     save_automatically.set_visible(settings.save_lyrics_to_source);
     save_automatically.set_sensitive(settings.external_lyrics_enabled);
     let automatic_shell = Rc::clone(shell);
@@ -146,33 +128,22 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
             },
         );
     });
-    sources.add(&save_automatically);
-
-    let storage = adw::ActionRow::builder()
-        .title(tr(msgid("Lyrics storage")))
-        .build();
-    let storage_choices = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    storage_choices.add_css_class("linked");
-    storage_choices.add_css_class("preference-selection-buttons");
-    storage_choices.set_valign(gtk::Align::Center);
-    let embed = gtk::ToggleButton::with_label(&tr(msgid("Embed in track")));
-    let sidecar = gtk::ToggleButton::with_label(&tr(msgid("separate .lrc file")));
-    embed.add_css_class("preference-selection-button");
-    sidecar.add_css_class("preference-selection-button");
-    sidecar.set_group(Some(&embed));
     embed.set_active(!settings.save_lyrics_as_sidecar);
     sidecar.set_active(settings.save_lyrics_as_sidecar);
-    storage_choices.append(&embed);
-    storage_choices.append(&sidecar);
-    storage.add_suffix(&storage_choices);
     storage.set_visible(
         settings.save_lyrics_to_source && selected_source_uses_local_lyrics_storage(shell),
     );
     let storage_shell = Rc::clone(shell);
     sidecar.connect_toggled(move |button| {
-        storage_shell.set_save_lyrics_as_sidecar(button.is_active());
+        if storage_shell.set_lyrics_setting(
+            "lyrics storage setting",
+            false,
+            button.is_active(),
+            |settings| &mut settings.save_lyrics_as_sidecar,
+        ) {
+            storage_shell.products.lyrics.refresh_write_access();
+        }
     });
-    sources.add(&storage);
 
     let save_shell = Rc::clone(shell);
     let automatic_row = save_automatically.clone();
@@ -198,7 +169,12 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let external_prefer_server = prefer_server.clone();
     let external_save_automatically = save_automatically.clone();
     external.connect_active_notify(move |row| {
-        if !external_shell.set_external_lyrics_enabled(row.is_active()) {
+        if !external_shell.set_lyrics_setting(
+            "lyrics setting",
+            false,
+            row.is_active(),
+            |settings| &mut settings.external_lyrics_enabled,
+        ) {
             return;
         }
         external_prefer_server.set_sensitive(row.is_active());
@@ -208,13 +184,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
         };
         populate_provider_rows(&external_shell, &sources, &external_provider_rows);
     });
-    page.add(&sources);
-
-    let language_and_readings = adw::PreferencesGroup::builder()
-        .title(tr("Language and readings"))
-        .build();
-    let translations = switch_row(msgid("Prefer translations"), settings.prefer_translations);
-    language_and_readings.add(&translations);
+    translations.set_active(settings.prefer_translations);
 
     let translation_languages = Rc::new(
         language_options()
@@ -227,14 +197,11 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
         .map(|option| option.title.as_str())
         .collect::<Vec<_>>();
     let language_model = gtk::StringList::new(&language_titles);
-    let language_row = adw::ComboRow::builder()
-        .title(tr("Translation language"))
-        .model(&language_model)
-        .selected(language_option_index(
-            translation_languages.as_ref(),
-            &settings.preferred_translation_language,
-        ))
-        .build();
+    language_row.set_model(Some(&language_model));
+    language_row.set_selected(language_option_index(
+        translation_languages.as_ref(),
+        &settings.preferred_translation_language,
+    ));
     language_row.set_sensitive(settings.prefer_translations);
     let language_shell = Rc::clone(shell);
     let translation_languages_for_row = Rc::clone(&translation_languages);
@@ -242,64 +209,57 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
         let Some(language) = translation_languages_for_row.get(row.selected() as usize) else {
             return;
         };
-        language_shell.set_preferred_lyrics_translation_language(&language.id);
+        language_shell.set_lyrics_setting(
+            "lyrics translation language",
+            false,
+            language.id.clone(),
+            |settings| &mut settings.preferred_translation_language,
+        );
     });
-    language_and_readings.add(&language_row);
     let translations_shell = Rc::clone(shell);
     let translations_language_row = language_row.clone();
     translations.connect_active_notify(move |row| {
-        if translations_shell.set_prefer_lyrics_translations(row.is_active()) {
+        if translations_shell.set_lyrics_setting(
+            "lyrics translation setting",
+            false,
+            row.is_active(),
+            |settings| &mut settings.prefer_translations,
+        ) {
             translations_language_row.set_sensitive(row.is_active());
         }
     });
 
-    let furigana = reading_switch_row(msgid("Furigana"), settings.show_furigana);
+    furigana.set_active(settings.show_furigana);
     let furigana_shell = Rc::clone(shell);
     furigana.connect_active_notify(move |row| {
-        furigana_shell.set_lyrics_furigana(row.is_active());
+        furigana_shell.set_lyrics_setting(
+            "lyrics furigana setting",
+            true,
+            row.is_active(),
+            |settings| &mut settings.show_furigana,
+        );
     });
-    language_and_readings.add(&furigana);
 
-    let romanization = reading_switch_row(msgid("Romaji"), settings.show_romanization);
+    romanization.set_active(settings.show_romanization);
     let romanization_shell = Rc::clone(shell);
     romanization.connect_active_notify(move |row| {
-        romanization_shell.set_lyrics_romanization(row.is_active());
+        romanization_shell.set_lyrics_setting(
+            "lyrics Romaji setting",
+            true,
+            row.is_active(),
+            |settings| &mut settings.show_romanization,
+        );
     });
-    language_and_readings.add(&romanization);
-    page.add(&language_and_readings);
-
-    let playback = adw::PreferencesGroup::builder()
-        .title(tr("Karaoke Playback"))
-        .build();
-    let karaoke = adw::SwitchRow::builder()
-        .title(tr(msgid("Karaoke mode")))
-        .subtitle(tr(msgid(
-            "Uses available karaoke lyrics or fetches them from the internet",
-        )))
-        .active(settings.karaoke_mode)
-        .build();
+    karaoke.set_active(settings.karaoke_mode);
     let karaoke_shell = Rc::clone(shell);
     karaoke.connect_active_notify(move |row| {
-        karaoke_shell.set_lyrics_karaoke_mode(row.is_active());
+        karaoke_shell.set_lyrics_setting(
+            "lyrics karaoke setting",
+            true,
+            row.is_active(),
+            |settings| &mut settings.karaoke_mode,
+        );
     });
-    playback.add(&karaoke);
-    let highlight_color = adw::ActionRow::builder()
-        .title(tr("Karaoke highlight color"))
-        .subtitle(tr("Color for the active word during playback"))
-        .build();
-    let theme_accent = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    theme_accent.add_css_class("lyrics-theme-accent-probe");
-    theme_accent.set_opacity(0.0);
-    theme_accent.set_can_target(false);
-    let preview = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    preview.add_css_class("lyrics-highlight-swatch");
-    let color_button = gtk::Button::builder()
-        .child(&preview)
-        .css_classes(["flat"])
-        .width_request(32)
-        .height_request(32)
-        .valign(gtk::Align::Center)
-        .build();
     let color_shell = Rc::clone(shell);
     let default_accent = theme_accent.clone();
     color_button.connect_clicked(move |_| {
@@ -320,31 +280,18 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
             default_accent.clone().upcast(),
         );
     });
-    highlight_color.add_suffix(&theme_accent);
-    highlight_color.add_suffix(&color_button);
-    highlight_color.set_activatable_widget(Some(&color_button));
-    playback.add(&highlight_color);
-    page.add(&playback);
-
-    let typography = adw::PreferencesGroup::builder()
-        .title(tr("Typography"))
-        .build();
     let font_families = Rc::new(system_font_families(&shell.chrome.window));
     let mut font_titles = vec![tr("Default")];
     font_titles.extend(font_families.iter().cloned());
     let font_title_refs = font_titles.iter().map(String::as_str).collect::<Vec<_>>();
-    let font = adw::ComboRow::builder()
-        .title(tr("Font family"))
-        .enable_search(true)
-        .model(&gtk::StringList::new(&font_title_refs))
-        .selected(
-            settings
-                .lyrics_font_family
-                .as_ref()
-                .and_then(|selected| font_families.iter().position(|family| family == selected))
-                .map_or(0, |index| index as u32 + 1),
-        )
-        .build();
+    font.set_model(Some(&gtk::StringList::new(&font_title_refs)));
+    font.set_selected(
+        settings
+            .lyrics_font_family
+            .as_ref()
+            .and_then(|selected| font_families.iter().position(|family| family == selected))
+            .map_or(0, |index| index as u32 + 1),
+    );
     let font_shell = Rc::clone(shell);
     let selected_families = Rc::clone(&font_families);
     font.connect_selected_notify(move |row| {
@@ -353,29 +300,30 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> adw::PreferencesPage {
             .checked_sub(1)
             .and_then(|index| selected_families.get(index as usize))
             .cloned();
-        font_shell.set_lyrics_font_family(family);
+        if font_shell.set_lyrics_setting("lyrics font family", false, family, |settings| {
+            &mut settings.lyrics_font_family
+        }) {
+            font_shell
+                .appearance
+                .apply(&font_shell.settings.current.borrow());
+        }
     });
-    typography.add(&font);
-    let size = adw::SpinRow::builder()
-        .title(tr("Font size (px)"))
-        .adjustment(
-            &gtk::Adjustment::builder()
-                .lower(12.0)
-                .upper(28.0)
-                .step_increment(1.0)
-                .value(f64::from(settings.lyrics_font_size.unwrap_or(19)))
-                .build(),
-        )
-        .digits(0)
-        .build();
+    size_adjustment.set_value(f64::from(settings.lyrics_font_size.unwrap_or(19)));
     let size_shell = Rc::clone(shell);
     size.connect_value_notify(move |row| {
         let size = row.value().round() as u16;
-        size_shell.set_lyrics_font_size((size != 19).then_some(size));
+        if size_shell.set_lyrics_setting(
+            "lyrics font size",
+            false,
+            (size != 19).then_some(size),
+            |settings| &mut settings.lyrics_font_size,
+        ) {
+            size_shell
+                .appearance
+                .apply(&size_shell.settings.current.borrow());
+        }
     });
-    typography.add(&size);
-    page.add(&typography);
-    page
+    (dialog, page)
 }
 
 fn selected_source_uses_local_lyrics_storage(shell: &Shell) -> bool {
@@ -547,21 +495,6 @@ fn populate_provider_rows(
     }
 }
 
-fn switch_row(title: &str, active: bool) -> adw::SwitchRow {
-    adw::SwitchRow::builder()
-        .title(tr(title))
-        .active(active)
-        .build()
-}
-
-fn reading_switch_row(title: &str, active: bool) -> adw::SwitchRow {
-    adw::SwitchRow::builder()
-        .title(tr(title))
-        .subtitle(tr(msgid("Increases memory usage")))
-        .active(active)
-        .build()
-}
-
 fn system_font_families(widget: &impl IsA<gtk::Widget>) -> Vec<String> {
     let Some(font_map) = widget.pango_context().font_map() else {
         return Vec::new();
@@ -583,41 +516,25 @@ fn present_lyrics_color_chooser(
     initial: gtk::gdk::RGBA,
     default_probe: gtk::Widget,
 ) {
+    let resource = crate::ui_resource::LYRICS_COLOR_CHOOSER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        dialog: adw::Window,
+        cancel: gtk::Button,
+        default: gtk::Button,
+        select: gtk::Button,
+        body: gtk::Box,
+    });
     let chooser = Rc::new(RefCell::new(lyrics_color_chooser(&initial)));
-
-    let cancel = gtk::Button::with_label(&tr("Cancel"));
-    let default = gtk::Button::with_label(&tr("Default"));
-    let select = gtk::Button::with_label(&tr("Save"));
-    select.add_css_class("suggested-action");
-    let header = adw::HeaderBar::new();
-    header.set_show_start_title_buttons(false);
-    header.set_show_end_title_buttons(false);
-    header.set_title_widget(Some(&adw::WindowTitle::new(
-        &tr("Karaoke highlight color"),
-        "",
-    )));
-    header.pack_start(&cancel);
-    header.pack_end(&select);
-    header.pack_end(&default);
-
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    body.set_vexpand(true);
     body.append(&*chooser.borrow());
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&body));
-    let dialog = adw::Window::builder()
-        .title(tr("Karaoke highlight color"))
-        .default_width(520)
-        .default_height(420)
-        .modal(true)
-        .resizable(false)
-        .transient_for(parent)
-        .content(&toolbar)
-        .build();
+    dialog.set_transient_for(Some(parent));
 
-    let close = dialog.clone();
-    cancel.connect_clicked(move |_| close.close());
+    let close = dialog.downgrade();
+    cancel.connect_clicked(move |_| {
+        if let Some(close) = close.upgrade() {
+            close.close();
+        }
+    });
     let default_chooser = Rc::clone(&chooser);
     let default_body = body.clone();
     default.connect_clicked(move |_| {
@@ -626,12 +543,24 @@ fn present_lyrics_color_chooser(
         default_body.append(&replacement);
         default_chooser.replace(replacement);
     });
-    let shell = Rc::clone(shell);
-    let close = dialog.clone();
+    let shell = Rc::downgrade(shell);
+    let close = dialog.downgrade();
     select.connect_clicked(move |_| {
+        let Some(shell) = shell.upgrade() else {
+            return;
+        };
         let color = chooser.borrow().rgba();
-        shell.set_lyrics_highlight_color(Some(rgba_hex(&color)));
-        close.close();
+        if shell.set_lyrics_setting(
+            "lyrics highlight color",
+            true,
+            Some(rgba_hex(&color)),
+            |settings| &mut settings.lyrics_highlight_color,
+        ) {
+            shell.appearance.apply(&shell.settings.current.borrow());
+        }
+        if let Some(close) = close.upgrade() {
+            close.close();
+        }
     });
     dialog.present();
 }
@@ -665,26 +594,6 @@ fn small_icon_button(icon: &str, label: &str) -> gtk::Button {
 }
 
 impl Shell {
-    pub(crate) fn set_external_lyrics_enabled(self: &Rc<Self>, enabled: bool) -> bool {
-        self.update_lyrics_settings("lyrics setting", false, |settings| {
-            if settings.external_lyrics_enabled == enabled {
-                return false;
-            }
-            settings.external_lyrics_enabled = enabled;
-            true
-        })
-    }
-
-    pub(crate) fn set_prefer_server_lyrics(self: &Rc<Self>, enabled: bool) {
-        self.update_lyrics_settings("lyrics search setting", false, |settings| {
-            if settings.prefer_server_lyrics == enabled {
-                return false;
-            }
-            settings.prefer_server_lyrics = enabled;
-            true
-        });
-    }
-
     pub(crate) fn set_save_lyrics_to_source(self: &Rc<Self>, enabled: bool) -> bool {
         self.update_lyrics_settings("save lyrics destination setting", false, |settings| {
             if settings.save_lyrics_to_source == enabled {
@@ -699,27 +608,12 @@ impl Shell {
     }
 
     pub(crate) fn set_save_lyrics_automatically(self: &Rc<Self>, enabled: bool) -> bool {
-        self.update_lyrics_settings("automatic lyrics save setting", false, |settings| {
-            if settings.save_lyrics_automatically == enabled {
-                return false;
-            }
-            settings.save_lyrics_automatically = enabled;
-            true
-        })
-    }
-
-    pub(crate) fn set_save_lyrics_as_sidecar(self: &Rc<Self>, sidecar: bool) -> bool {
-        let changed = self.update_lyrics_settings("lyrics storage setting", false, |settings| {
-            if settings.save_lyrics_as_sidecar == sidecar {
-                return false;
-            }
-            settings.save_lyrics_as_sidecar = sidecar;
-            true
-        });
-        if changed {
-            self.products.lyrics.refresh_write_access();
-        }
-        changed
+        self.set_lyrics_setting(
+            "automatic lyrics save setting",
+            false,
+            enabled,
+            |settings| &mut settings.save_lyrics_automatically,
+        )
     }
 
     pub(crate) fn set_external_lyrics_provider_enabled(
@@ -764,97 +658,6 @@ impl Shell {
         })
     }
 
-    pub(crate) fn set_prefer_lyrics_translations(self: &Rc<Self>, enabled: bool) -> bool {
-        self.update_lyrics_settings("lyrics translation setting", false, |settings| {
-            if settings.prefer_translations == enabled {
-                return false;
-            }
-            settings.prefer_translations = enabled;
-            true
-        })
-    }
-
-    pub(crate) fn set_preferred_lyrics_translation_language(self: &Rc<Self>, language: &str) {
-        let language = language.to_string();
-        self.update_lyrics_settings("lyrics translation language", false, move |settings| {
-            if settings.preferred_translation_language == language {
-                return false;
-            }
-            settings.preferred_translation_language = language;
-            true
-        });
-    }
-
-    pub(crate) fn set_lyrics_furigana(self: &Rc<Self>, enabled: bool) {
-        self.update_lyrics_settings("lyrics furigana setting", true, |settings| {
-            if settings.show_furigana == enabled {
-                return false;
-            }
-            settings.show_furigana = enabled;
-            true
-        });
-    }
-
-    pub(crate) fn set_lyrics_romanization(self: &Rc<Self>, enabled: bool) {
-        self.update_lyrics_settings("lyrics Romaji setting", true, |settings| {
-            if settings.show_romanization == enabled {
-                return false;
-            }
-            settings.show_romanization = enabled;
-            true
-        });
-    }
-
-    pub(crate) fn set_lyrics_karaoke_mode(self: &Rc<Self>, enabled: bool) {
-        self.update_lyrics_settings("lyrics karaoke setting", true, |settings| {
-            if settings.karaoke_mode == enabled {
-                return false;
-            }
-            settings.karaoke_mode = enabled;
-            true
-        });
-    }
-
-    pub(crate) fn set_lyrics_highlight_color(self: &Rc<Self>, color: Option<String>) {
-        if self.update_lyrics_settings("lyrics highlight color", true, |settings| {
-            if settings.lyrics_highlight_color == color {
-                return false;
-            }
-            settings.lyrics_highlight_color = color;
-            true
-        }) {
-            self.apply_lyrics_appearance();
-        }
-    }
-
-    pub(crate) fn set_lyrics_font_family(self: &Rc<Self>, family: Option<String>) {
-        if self.update_lyrics_settings("lyrics font family", false, |settings| {
-            if settings.lyrics_font_family == family {
-                return false;
-            }
-            settings.lyrics_font_family = family;
-            true
-        }) {
-            self.apply_lyrics_appearance();
-        }
-    }
-
-    pub(crate) fn set_lyrics_font_size(self: &Rc<Self>, size: Option<u16>) {
-        if self.update_lyrics_settings("lyrics font size", false, |settings| {
-            if settings.lyrics_font_size == size {
-                return false;
-            }
-            settings.lyrics_font_size = size;
-            true
-        }) {
-            self.apply_lyrics_appearance();
-        }
-    }
-
-    fn apply_lyrics_appearance(&self) {
-        self.appearance.apply(&self.settings.current.borrow());
-    }
-
     fn update_lyrics_settings(
         self: &Rc<Self>,
         warning_action: &'static str,
@@ -871,5 +674,23 @@ impl Shell {
             self.render_lyrics_presentation();
         }
         true
+    }
+
+    fn set_lyrics_setting<T: PartialEq>(
+        self: &Rc<Self>,
+        warning_action: &'static str,
+        rerender_lyrics: bool,
+        value: T,
+        field: impl FnOnce(&mut lyrics::Settings) -> &mut T,
+    ) -> bool {
+        let updated = self
+            .set_app_setting(warning_action, value, |settings| {
+                field(&mut settings.lyrics)
+            })
+            .is_some();
+        if updated && rerender_lyrics {
+            self.render_lyrics_presentation();
+        }
+        updated
     }
 }

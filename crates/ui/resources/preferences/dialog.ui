@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwToolbarView" id="toolbar"/>
+
+  <object class="AdwViewStack" id="stack">
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+  </object>
+  <object class="AdwViewSwitcher" id="switcher">
+    <property name="policy">wide</property>
+    <property name="stack">stack</property>
+  </object>
+  <object class="GtkCenterBox" id="bottom_tab_bar">
+    <property name="visible">false</property>
+    <property name="hexpand">true</property>
+    <style><class name="preferences-bottom-tab-bar"/></style>
+    <property name="center-widget">
+      <object class="AdwViewSwitcher" id="bottom_switcher">
+        <property name="policy">narrow</property>
+        <property name="stack">stack</property>
+        <property name="halign">center</property>
+        <property name="valign">center</property>
+        <style><class name="preferences-bottom-switcher"/></style>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkCenterBox" id="switcher_bar">
+    <property name="hexpand">true</property>
+    <style>
+      <class name="preferences-tab-bar"/>
+    </style>
+    <property name="start-widget">
+      <object class="GtkBox" id="top_start_controls">
+        <property name="spacing">4</property>
+        <child>
+          <object class="GtkToggleButton" id="search_button">
+            <property name="icon-name">rufin-system-search-symbolic</property>
+            <property name="tooltip-text" translatable="yes">Search</property>
+            <style>
+              <class name="flat"/>
+              <class name="preferences-search-button"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="back">
+            <property name="visible">false</property>
+            <property name="icon-name">rufin-go-previous-symbolic</property>
+            <style>
+              <class name="flat"/>
+              <class name="preferences-nested-back"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </property>
+    <property name="center-widget">switcher</property>
+    <property name="end-widget">
+      <object class="GtkButton" id="close_button">
+        <property name="icon-name">rufin-window-close-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Close</property>
+        <style>
+          <class name="flat"/>
+          <class name="preferences-dialog-close"/>
+        </style>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkSearchBar" id="search_bar">
+    <property name="child">
+      <object class="GtkSearchEntry" id="search_entry">
+        <property name="hexpand">true</property>
+        <property name="placeholder-text" translatable="yes">Search preferences</property>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkStack" id="content_stack">
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <property name="transition-type">crossfade</property>
+  </object>
+  <object class="AdwPreferencesPage" id="search_results">
+    <child>
+      <object class="AdwPreferencesGroup" id="search_results_group"/>
+    </child>
+  </object>
+</interface>

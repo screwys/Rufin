@@ -1214,7 +1214,7 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, albums) = database
+        let (_, _, albums) = database
             .album_route_page(
                 source_key,
                 None,
@@ -1222,6 +1222,7 @@ mod tests {
                 "Updated Album",
                 library::AlbumSort::Title,
                 false,
+                library::RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
@@ -1246,6 +1247,7 @@ mod tests {
                     "",
                     library::TrackSort::Title,
                     false,
+                    library::RouteSeedWindow::top(),
                     &cancellation,
                 )
                 .await

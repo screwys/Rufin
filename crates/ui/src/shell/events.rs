@@ -9,7 +9,7 @@ use localization::tr;
 use tracing::warn;
 
 use crate::player::fullscreen::{FullscreenPlaybackRefresh, fullscreen_playback_refresh};
-use crate::player::state::current_playback_media_id;
+use crate::player::state::{NowPlayingPresentation, current_playback_media_id};
 use crate::player::{now_playing_notification_can_send, now_playing_notification_should_withdraw};
 use crate::preferences::dialogs::release_notes::apply_release_update;
 use crate::preferences::source::source_progress_text;
@@ -739,19 +739,28 @@ fn finish_playback_projection(
             != Some(next_player.transport.position_millis);
     let fullscreen_refresh = fullscreen_playback_refresh(previous_player.as_ref(), &next_player);
     let static_playback_changed = matches!(fullscreen_refresh, FullscreenPlaybackRefresh::Static);
+    let now_playing =
+        static_playback_changed.then(|| NowPlayingPresentation::new(Some(&next_player)));
     let position_only =
         bottom_player_can_update_position_only(previous_player.as_ref(), &next_player);
     let media_controls_static_changed =
         media_controls_static_state_changed(previous_player.as_ref(), &next_player);
+    let previous_queue_current = previous_player
+        .as_ref()
+        .and_then(|player| player.queue.current_occurrence.as_ref());
+    let next_queue_current = next_player.queue.current_occurrence.as_ref();
+    let current_needs_page = previous_queue_current != next_queue_current
+        && shell
+            .selected_queue()
+            .as_deref()
+            .is_some_and(|queue| queue.needs_page_for_current(next_queue_current));
     let queue_panel_changed = queue_panel_refresh_needed(
         queue_page_changed,
-        previous_player
-            .as_ref()
-            .and_then(|player| player.queue.current_occurrence.as_ref()),
-        next_player.queue.current_occurrence.as_ref(),
+        previous_queue_current,
+        next_queue_current,
     );
 
-    if queue_panel_changed && shell.selected_queue().is_some() {
+    if (queue_page_changed || current_needs_page) && shell.selected_queue().is_some() {
         shell.request_queue_page();
     }
 
@@ -761,15 +770,14 @@ fn finish_playback_projection(
         shell.refresh_current_route_now_playing_selections();
         update_sidebar_pin_playback(shell);
     }
-    if static_playback_changed {
+    if let Some(now_playing) = now_playing.as_ref() {
         shell.sync_bottom_player_favorite();
+        shell.update_bottom_player_with(&next_player, now_playing);
     }
     shell.maybe_clear_player_seek_preview(&next_player, media_changed);
-    if static_playback_changed {
-        shell.update_bottom_player();
-    } else if position_only {
+    if position_only {
         shell.update_bottom_player_position();
-    } else {
+    } else if !static_playback_changed {
         shell.update_bottom_player_transport();
     }
 
@@ -811,9 +819,8 @@ fn finish_playback_projection(
     {
         shell.notify_now_playing(Some(&next_player));
     }
-    match fullscreen_refresh {
-        FullscreenPlaybackRefresh::Static => shell.update_fullscreen_player(),
-        FullscreenPlaybackRefresh::Visualizer | FullscreenPlaybackRefresh::None => {}
+    if let Some(now_playing) = now_playing.as_ref() {
+        shell.update_fullscreen_player_with(now_playing);
     }
     if fullscreen_refresh != FullscreenPlaybackRefresh::None {
         shell.sync_visualizer_state();
@@ -833,7 +840,7 @@ fn finish_playback_projection(
             media_controls_discontinuity,
         );
     }
-    if queue_panel_changed {
+    if queue_panel_changed && !current_needs_page {
         shell.schedule_queue_panel_render();
     }
 }

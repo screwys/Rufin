@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkBox" id="root">
+    <property name="orientation">vertical</property><property name="spacing">14</property>
+    <property name="hexpand">true</property><property name="vexpand">true</property><property name="width-request">1</property>
+    <style><class name="equalizer-surface"/></style>
+    <child>
+      <object class="GtkFlowBox" id="header">
+        <property name="column-spacing">10</property><property name="row-spacing">6</property>
+        <property name="halign">center</property><property name="valign">center</property>
+        <property name="selection-mode">none</property><property name="max-children-per-line">3</property>
+        <style><class name="equalizer-surface-header"/></style>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property><property name="spacing">8</property><property name="valign">center</property>
+            <child><object class="GtkLabel" id="enabled_label"><property name="label" translatable="yes">Enable equalizer</property><property name="valign">center</property></object></child>
+            <child><object class="GtkSwitch" id="enabled"><property name="valign">center</property></object></child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property><property name="spacing">8</property><property name="valign">center</property>
+            <child><object class="GtkLabel" id="preset_label"><property name="label" translatable="yes">Preset</property><property name="valign">center</property></object></child>
+            <child><object class="GtkBox" id="preset_host"><property name="orientation">horizontal</property><property name="valign">center</property></object></child>
+          </object>
+        </child>
+        <child><object class="GtkButton" id="reset_button"><property name="label" translatable="yes">Reset</property><style><class name="destructive-action"/></style></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="band_row">
+        <property name="orientation">horizontal</property><property name="spacing">0</property>
+        <property name="halign">fill</property><property name="valign">fill</property>
+        <property name="hexpand">true</property><property name="vexpand">true</property>
+        <property name="width-request">1</property><property name="margin-bottom">6</property>
+        <child>
+          <object class="AdwClamp">
+            <property name="maximum-size">658</property><property name="tightening-threshold">560</property>
+            <property name="hexpand">true</property><property name="vexpand">true</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property><property name="spacing">16</property>
+                <property name="halign">fill</property><property name="valign">fill</property>
+                <property name="hexpand">true</property><property name="vexpand">true</property><property name="width-request">1</property>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property><property name="spacing">0</property><property name="width-request">48</property><property name="valign">fill</property><property name="vexpand">true</property>
+                    <style><class name="equalizer-surface-levels"/></style>
+                    <child><object class="GtkLabel"><property name="label">12 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">6 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">0 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">-6 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">-12 dB</property><property name="xalign">0</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="height-request">50</property></object></child>
+                  </object>
+                </child>
+                <child><object class="GtkBox" id="bands"><property name="orientation">horizontal</property><property name="spacing">8</property><property name="homogeneous">true</property><property name="width-request">1</property><property name="halign">fill</property><property name="valign">fill</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="equalizer-surface-bands"/></style></object></child>
+                <child>
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property><property name="spacing">0</property><property name="width-request">48</property><property name="valign">fill</property><property name="vexpand">true</property>
+                    <style><class name="equalizer-surface-levels"/></style>
+                    <child><object class="GtkLabel"><property name="label">12 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">6 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">0 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">-6 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="vexpand">true</property></object></child>
+                    <child><object class="GtkLabel"><property name="label">-12 dB</property><property name="xalign">1</property><style><class name="muted"/><class name="equalizer-surface-level-label"/></style></object></child>
+                    <child><object class="GtkBox"><property name="orientation">vertical</property><property name="height-request">50</property></object></child>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

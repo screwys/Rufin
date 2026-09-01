@@ -22,7 +22,7 @@ use tracing::{debug, warn};
 use super::Shell;
 use super::navigation::update_navigation_selection;
 use super::route_position::{
-    RoutePositionKey, RoutePositionMemory, restore_route_position_before_snapshot,
+    RoutePositionKey, RoutePositionMemory, prepare_route_position_before_snapshot,
 };
 use crate::routes::route::{CollectionCategory, Route};
 use crate::routes::route_layout::{primary_route_scroll_adjustment, route_boundary};
@@ -36,6 +36,8 @@ use crate::routes::{
 use crate::{LibraryListKey, LibraryListSettings};
 
 const SLOW_ROUTE_RENDER_MS: u64 = 250;
+
+type RouteTiming = Option<Instant>;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct RouteCurrentTrackContext {
@@ -145,9 +147,26 @@ fn route_is_current(
 pub(crate) type RouteCurrentTrackSelection = Rc<dyn Fn(Option<&RouteCurrentTrack>) -> bool>;
 pub(crate) type MountedRouteResume = Rc<dyn Fn()>;
 pub(crate) type MountedRouteCommand = Rc<dyn Fn()>;
+pub(crate) type MountedRouteSearchProvider = Rc<dyn Fn() -> Option<MountedRouteSearchTarget>>;
 pub(crate) type MountedFavoriteSettlement = Rc<dyn Fn(crate::runtime::FavoriteSettlement)>;
 pub(crate) type MountedHomePageApply = Rc<dyn Fn(library::HomePage)>;
 pub(crate) type MountedRouteItemNavigation = Rc<dyn Fn(gtk::DirectionType) -> glib::Propagation>;
+
+#[derive(Clone)]
+pub(crate) struct MountedRouteSearchTarget {
+    pub(crate) search: gtk::SearchEntry,
+    pub(crate) focus: Option<MountedRouteCommand>,
+}
+
+impl MountedRouteSearchTarget {
+    pub(crate) fn focus(&self) {
+        if let Some(focus) = &self.focus {
+            focus();
+        } else {
+            self.search.grab_focus();
+        }
+    }
+}
 
 pub(crate) fn item_navigation_entry_position(
     current: u32,
@@ -345,28 +364,15 @@ mod latest_mounted_route_read_tests {
 
 pub(crate) struct RouteViewport {
     pub(super) route_host: gtk::Stack,
+    route_loading: gtk::Box,
+    route_cover_generation: Cell<u64>,
     mounted_route: RefCell<Option<MountedRouteEntry>>,
     position_memory: RefCell<RoutePositionMemory>,
     current_track_selections: RefCell<Vec<RouteCurrentTrackSelection>>,
     track_selections: RefCell<Vec<TrackSelection>>,
     playlist_entry_selection: RefCell<Option<PlaylistEntrySelection>>,
-    pub(crate) route_search: RefCell<Option<gtk::SearchEntry>>,
-    pub(crate) route_search_focus: RefCell<Option<Rc<dyn Fn()>>>,
-    pub(crate) route_layout_cycle: RefCell<Option<MountedRouteCommand>>,
-    pub(crate) route_tab_cycle: RefCell<Option<MountedRouteCommand>>,
     order_read_generation: Cell<u64>,
     order_cancellation: RefCell<Option<(u64, library::ReadCancellation)>>,
-}
-
-#[derive(Default)]
-struct RouteActivationContext {
-    current_track_selections: Vec<RouteCurrentTrackSelection>,
-    track_selections: Vec<TrackSelection>,
-    playlist_entry_selection: Option<PlaylistEntrySelection>,
-    route_search: Option<gtk::SearchEntry>,
-    route_search_focus: Option<Rc<dyn Fn()>>,
-    route_layout_cycle: Option<MountedRouteCommand>,
-    route_tab_cycle: Option<MountedRouteCommand>,
 }
 
 struct MountedRouteEntry {
@@ -378,18 +384,16 @@ struct MountedRouteEntry {
 }
 
 impl RouteViewport {
-    pub(super) fn new(route_host: gtk::Stack) -> Self {
+    pub(super) fn new(route_host: gtk::Stack, route_loading: gtk::Box) -> Self {
         Self {
             route_host,
+            route_loading,
+            route_cover_generation: Cell::new(0),
             mounted_route: RefCell::new(None),
             position_memory: RefCell::new(RoutePositionMemory::default()),
             current_track_selections: RefCell::new(Vec::new()),
             track_selections: RefCell::new(Vec::new()),
             playlist_entry_selection: RefCell::new(None),
-            route_search: RefCell::new(None),
-            route_search_focus: RefCell::new(None),
-            route_layout_cycle: RefCell::new(None),
-            route_tab_cycle: RefCell::new(None),
             order_read_generation: Cell::new(0),
             order_cancellation: RefCell::new(None),
         }
@@ -402,6 +406,10 @@ pub(crate) struct MountedRoute {
     resume: MountedRouteResume,
     catalog_refresh: MountedRouteResume,
     item_navigation: Option<MountedRouteItemNavigation>,
+    search: Option<MountedRouteSearchProvider>,
+    layout_cycle: Option<MountedRouteCommand>,
+    tab_cycle: Option<MountedRouteCommand>,
+    initial_demand: MountedRouteResume,
     favorite_settlement: Option<MountedFavoriteSettlement>,
     home_page_apply: Option<MountedHomePageApply>,
 }
@@ -413,6 +421,10 @@ impl MountedRoute {
             catalog_refresh: Rc::clone(&resume),
             resume,
             item_navigation: None,
+            search: None,
+            layout_cycle: None,
+            tab_cycle: None,
+            initial_demand: Rc::new(|| {}),
             favorite_settlement: None,
             home_page_apply: None,
         }
@@ -432,6 +444,36 @@ impl MountedRoute {
         item_navigation: MountedRouteItemNavigation,
     ) -> Self {
         self.item_navigation = Some(item_navigation);
+        self
+    }
+
+    pub(crate) fn with_search(mut self, search: gtk::SearchEntry) -> Self {
+        self.search = Some(Rc::new(move || {
+            Some(MountedRouteSearchTarget {
+                search: search.clone(),
+                focus: None,
+            })
+        }));
+        self
+    }
+
+    pub(crate) fn with_search_provider(mut self, search: MountedRouteSearchProvider) -> Self {
+        self.search = Some(search);
+        self
+    }
+
+    pub(crate) fn with_layout_cycle(mut self, cycle: MountedRouteCommand) -> Self {
+        self.layout_cycle = Some(cycle);
+        self
+    }
+
+    pub(crate) fn with_tab_cycle(mut self, cycle: MountedRouteCommand) -> Self {
+        self.tab_cycle = Some(cycle);
+        self
+    }
+
+    pub(crate) fn with_initial_demand(mut self, resume: MountedRouteResume) -> Self {
+        self.initial_demand = resume;
         self
     }
 
@@ -471,6 +513,26 @@ impl MountedRoute {
         } else {
             glib::Propagation::Stop
         }
+    }
+
+    fn search(&self) -> Option<MountedRouteSearchTarget> {
+        self.search.as_ref().and_then(|search| search())
+    }
+
+    fn cycle_layout(&self) {
+        if let Some(cycle) = &self.layout_cycle {
+            cycle();
+        }
+    }
+
+    fn cycle_tabs(&self) {
+        if let Some(cycle) = &self.tab_cycle {
+            cycle();
+        }
+    }
+
+    fn resume_initial_demand(&self) {
+        (self.initial_demand)();
     }
 }
 
@@ -529,46 +591,116 @@ impl RouteStack {
 }
 
 impl Shell {
+    fn queue_prepared_route<T, E, F, Fut, B>(
+        self: &Rc<Self>,
+        selected: crate::runtime::SelectedLibrary,
+        route: Route,
+        render_started: RouteTiming,
+        context: &'static str,
+        load: F,
+        build: B,
+    ) where
+        T: Send + 'static,
+        E: std::fmt::Display + Send + 'static,
+        F: FnOnce(library::RouteSeedWindow, library::ReadCancellation) -> Fut + 'static,
+        Fut: Future<Output = Result<T, E>> + Send + 'static,
+        B: FnOnce(Rc<Shell>, T, crate::runtime::SelectedLibrary) -> MountedRoute + 'static,
+    {
+        let source = selected.source_key;
+        let epoch = selected.source_session_epoch;
+        let source_id = selected.artwork.source_id.clone();
+        let mounted_relative = self
+            .route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .filter(|entry| entry.route == route)
+            .and_then(|entry| entry.scroll_adjustment.as_ref())
+            .map(|adjustment| {
+                let scrollable = (adjustment.upper() - adjustment.page_size()).max(0.0);
+                if scrollable <= f64::EPSILON {
+                    0.0
+                } else {
+                    (adjustment.value() / scrollable).clamp(0.0, 1.0)
+                }
+            });
+        let relative = mounted_relative.or_else(|| {
+            self.route_viewport
+                .position_memory
+                .borrow_mut()
+                .restore(&RoutePositionKey::new(route.clone()))
+                .map(|position| position.relative())
+        });
+        let window = relative.map_or_else(library::RouteSeedWindow::top, |relative| {
+            library::RouteSeedWindow::relative(relative)
+        });
+        let (generation, cancellation) = self.begin_root_order_read();
+        let task = selected.runtime.spawn(load(window, cancellation));
+        let shell = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let Some(shell) = shell.upgrade() else { return };
+            let result = task.await;
+            if !shell.finish_root_order_read(generation) {
+                return;
+            }
+            let prepared = match result {
+                Ok(Ok(prepared)) => Some(prepared),
+                Ok(Err(error)) => {
+                    warn!(%error, ?route, context, "failed to prepare route");
+                    None
+                }
+                Err(error) => {
+                    warn!(%error, ?route, context, "route preparation task failed");
+                    None
+                }
+            };
+            if !route_is_current(&shell, &route, source, epoch) {
+                return;
+            }
+            let Some(prepared) = prepared else {
+                shell.replace_mounted_route(route, Some(source_id), render_started, || {
+                    MountedRoute::static_widget(
+                        shell.route_empty_view(localization::msgid("Nothing here yet")),
+                    )
+                });
+                return;
+            };
+            let build_shell = Rc::clone(&shell);
+            shell.replace_mounted_route(route, Some(source_id), render_started, move || {
+                build(build_shell, prepared, selected)
+            });
+        });
+    }
+
     fn queue_home_route(
         self: &Rc<Self>,
         selected: crate::runtime::SelectedLibrary,
         route: Route,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
         let showcase_variation = self.home_showcase_variation.get();
         let explore_variation = self.home_explore_variation.get();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .home_page(
-                    source,
-                    folder,
-                    showcase_variation,
-                    explore_variation,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(home)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.home_route(selected, home)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Home route",
+            move |_window, cancellation| async move {
+                database
+                    .home_page(
+                        source,
+                        folder,
+                        showcase_variation,
+                        explore_variation,
+                        &cancellation,
+                    )
+                    .await
+            },
+            |shell, home, selected| shell.home_route(selected, home),
+        );
     }
 
     pub(crate) fn refresh_mounted_home(self: &Rc<Self>) {
@@ -637,17 +769,23 @@ impl Shell {
         }
     }
 
+    pub(crate) fn current_route_search(&self) -> Option<MountedRouteSearchTarget> {
+        self.route_viewport
+            .mounted_route
+            .borrow()
+            .as_ref()
+            .and_then(|entry| entry.view.search())
+    }
+
     pub(crate) fn cycle_current_route_layout(&self) {
-        let cycle = self.route_viewport.route_layout_cycle.borrow().clone();
-        if let Some(cycle) = cycle {
-            cycle();
+        if let Some(entry) = self.route_viewport.mounted_route.borrow().as_ref() {
+            entry.view.cycle_layout();
         }
     }
 
     pub(crate) fn cycle_current_route_tabs(&self) {
-        let cycle = self.route_viewport.route_tab_cycle.borrow().clone();
-        if let Some(cycle) = cycle {
-            cycle();
+        if let Some(entry) = self.route_viewport.mounted_route.borrow().as_ref() {
+            entry.view.cycle_tabs();
         }
     }
 
@@ -848,12 +986,16 @@ impl Shell {
             .as_ref()
             .is_some_and(|entry| entry.route == route);
         if !force && mounted_current {
+            self.cancel_root_order_read();
+            self.cancel_route_loading();
             return;
         }
 
-        let render_started = Instant::now();
+        self.cancel_route_loading();
+        self.show_route_loading();
+        let render_started = tracing::enabled!(tracing::Level::DEBUG).then(Instant::now);
         let Some(selected) = self.selected_library().as_deref().cloned() else {
-            self.replace_mounted_route(route, None, render_started, 0, || {
+            self.replace_mounted_route(route, None, render_started, || {
                 MountedRoute::static_widget(
                     self.route_empty_view(localization::msgid("Nothing here yet")),
                 )
@@ -866,7 +1008,7 @@ impl Shell {
                 self.queue_home_route(selected, route, render_started);
             }
             Route::Search => {
-                self.replace_mounted_route(route, source_id, render_started, 0, || {
+                self.replace_mounted_route(route, source_id, render_started, || {
                     self.search_route(&selected)
                 });
             }
@@ -887,9 +1029,31 @@ impl Shell {
                 );
             }
             Route::Folders { path } => {
-                self.replace_mounted_route(route, source_id, render_started, 0, || {
-                    self.folders_route(path, &selected)
-                });
+                let settings = self
+                    .settings
+                    .current
+                    .borrow()
+                    .library_list(LibraryListKey::Tracks);
+                let load_selected = selected.clone();
+                let load_path = path.clone();
+                self.queue_prepared_route(
+                    selected,
+                    route,
+                    render_started,
+                    "Folder route",
+                    move |_window, cancellation| async move {
+                        Ok::<_, std::convert::Infallible>(
+                            crate::routes::folders::prepare_folder_route(
+                                &load_selected,
+                                &load_path,
+                                &settings,
+                                &cancellation,
+                            )
+                            .await,
+                        )
+                    },
+                    move |shell, prepared, selected| shell.folders_route(path, &selected, prepared),
+                );
             }
             Route::Albums => {
                 let settings = self
@@ -1089,73 +1253,48 @@ impl Shell {
         route: Route,
         settings: LibraryListSettings,
         favorites_only: bool,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let runtime = selected.runtime.clone();
-        let task = runtime.spawn(async move {
-            database
-                .track_route_page(
-                    source_key,
-                    folder,
-                    favorites_only,
-                    "",
-                    settings.sort_key.track_sort(),
-                    settings.descending,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let page = match task.await {
-                Ok(Ok(page)) => page,
-                Ok(Err(error)) => {
-                    warn!(%error, ?route, "failed to read Track route order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, ?route, "Track route order task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_selected = selected;
-            let build_shell = Rc::clone(&shell);
-            let library::TrackRoutePage { order, first_rows } = page;
-            shell.replace_mounted_route(
-                route.clone(),
-                Some(source_id),
-                render_started,
-                0,
-                move || match route {
+        let build_route = route.clone();
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Track route",
+            move |window, cancellation| async move {
+                database
+                    .track_route_page(
+                        source_key,
+                        folder,
+                        favorites_only,
+                        "",
+                        settings.sort_key.track_sort(),
+                        settings.descending,
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            move |shell, page, selected| {
+                let library::TrackRoutePage {
+                    order,
+                    first_row_position,
+                    first_rows,
+                } = page;
+                match build_route {
                     Route::Tracks => {
-                        build_shell.library_tracks_route(order, first_rows, build_selected)
+                        shell.library_tracks_route(order, first_row_position, first_rows, selected)
                     }
                     Route::Favorites => {
-                        build_shell.favorites_route(order, first_rows, build_selected)
+                        shell.favorites_route(order, first_row_position, first_rows, selected)
                     }
                     _ => unreachable!("root Track route owner"),
-                },
-            );
-        });
+                }
+            },
+        );
     }
 
     fn queue_album_detail_route(
@@ -1164,50 +1303,34 @@ impl Shell {
         route: Route,
         album: library::AlbumKey,
         _: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .album_detail(source_key, album, folder, &cancellation)
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let detail = match task.await {
-                Ok(Ok(detail)) => detail,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Album detail");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Album detail task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.album_detail_view(album, detail, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Album detail route",
+            move |window, cancellation| async move {
+                let detail = database
+                    .album_detail(source_key, album, folder, &cancellation)
+                    .await?;
+                let Some(detail) = detail else {
+                    return Ok::<_, library::LibraryError>((None, 0, Vec::new()));
+                };
+                let seed = window.range(detail.track_order.len());
+                let first_row_position = seed.start;
+                let first_rows = database
+                    .track_rows(source_key, &detail.track_order[seed], &cancellation)
+                    .await?;
+                Ok((Some(detail), first_row_position, first_rows))
+            },
+            move |shell, (detail, first_row_position, first_rows), selected| {
+                shell.album_detail_view(album, detail, first_row_position, first_rows, selected)
+            },
+        );
     }
 
     fn queue_album_route(
@@ -1216,82 +1339,79 @@ impl Shell {
         route: Route,
         settings: LibraryListSettings,
         favorites_only: bool,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
         let layout = settings.layout;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            if layout == crate::LibraryLayout::Detail {
-                database
-                    .album_detail_route_order(
-                        source_key,
-                        folder,
-                        favorites_only,
-                        "",
-                        settings.sort_key.album_sort(),
-                        settings.descending,
-                        &cancellation,
-                    )
-                    .await
-                    .map(|order| (AlbumCollectionOrder::Detail(order), Vec::new()))
-            } else {
-                let (order, first_rows) = database
-                    .album_route_page(
-                        source_key,
-                        folder,
-                        favorites_only,
-                        "",
-                        settings.sort_key.album_sort(),
-                        settings.descending,
-                        &cancellation,
-                    )
-                    .await?;
-                Ok((AlbumCollectionOrder::Rows(order), first_rows))
-            }
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Album route order");
-                    return;
+        let build_route = route.clone();
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Album route",
+            move |window, cancellation| async move {
+                if layout == crate::LibraryLayout::Detail {
+                    let order = database
+                        .album_detail_route_order(
+                            source_key,
+                            folder,
+                            favorites_only,
+                            "",
+                            settings.sort_key.album_sort(),
+                            settings.descending,
+                            &cancellation,
+                        )
+                        .await?;
+                    let seed = window.range(order.len());
+                    let first_row_position = seed.start;
+                    let keys = order[seed].to_vec();
+                    let (albums, tracks) = database
+                        .album_detail_route_rows(source_key, &keys, folder, &cancellation)
+                        .await?;
+                    let first_detail_rows =
+                        crate::routes::album_detail_rows_for_keys(keys, albums, tracks)
+                            .map_err(library::LibraryError::InvalidRequest)?;
+                    Ok::<_, library::LibraryError>((
+                        AlbumCollectionOrder::Detail(order),
+                        first_row_position,
+                        Vec::new(),
+                        first_detail_rows,
+                    ))
+                } else {
+                    let (order, first_row_position, first_rows) = database
+                        .album_route_page(
+                            source_key,
+                            folder,
+                            favorites_only,
+                            "",
+                            settings.sort_key.album_sort(),
+                            settings.descending,
+                            window,
+                            &cancellation,
+                        )
+                        .await?;
+                    Ok((
+                        AlbumCollectionOrder::Rows(order),
+                        first_row_position,
+                        first_rows,
+                        Vec::new(),
+                    ))
                 }
-                Err(error) => {
-                    warn!(%error, "Album route task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            let build_route = route.clone();
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_albums_route(
+            },
+            move |shell, (order, first_row_position, first_rows, first_detail_rows), selected| {
+                shell.library_albums_route(
                     build_route,
                     favorites_only,
                     order,
+                    first_row_position,
                     first_rows,
+                    first_detail_rows,
                     selected,
                 )
-            });
-        });
+            },
+        );
     }
 
     fn queue_artist_route(
@@ -1301,65 +1421,44 @@ impl Shell {
         album_artist: bool,
         settings: LibraryListSettings,
         favorites_only: bool,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .artist_route_page(
-                    source_key,
-                    folder,
-                    album_artist,
-                    favorites_only,
-                    "",
-                    settings.sort_key.artist_sort(),
-                    settings.descending,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Artist route order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Artist route task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            let build_route = route.clone();
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_artist_list_route(
+        let build_route = route.clone();
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Artist route",
+            move |window, cancellation| async move {
+                database
+                    .artist_route_page(
+                        source_key,
+                        folder,
+                        album_artist,
+                        favorites_only,
+                        "",
+                        settings.sort_key.artist_sort(),
+                        settings.descending,
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            move |shell, (order, first_row_position, first_rows), selected| {
+                shell.library_artist_list_route(
                     build_route,
                     album_artist,
                     favorites_only,
                     order,
+                    first_row_position,
                     first_rows,
                     selected,
                 )
-            });
-        });
+            },
+        );
     }
 
     fn queue_smart_playlist_detail_route(
@@ -1367,32 +1466,22 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         key: library::SmartPlaylistKey,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_smart_playlist_detail(&database, source, folder, key, &cancellation).await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(detail)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.smart_playlist_detail_route(key, detail, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Smart Playlist detail route",
+            move |window, cancellation| async move {
+                load_smart_playlist_detail(&database, source, folder, key, window, &cancellation)
+                    .await
+            },
+            move |shell, detail, selected| shell.smart_playlist_detail_route(key, detail, selected),
+        );
     }
 
     fn queue_playlist_detail_route(
@@ -1401,32 +1490,30 @@ impl Shell {
         route: Route,
         key: library::PlaylistKey,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_playlist_detail(&database, source, folder, key, &settings, &cancellation).await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(detail)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.playlist_detail_route(key, detail, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Playlist detail route",
+            move |window, cancellation| async move {
+                load_playlist_detail(
+                    &database,
+                    source,
+                    folder,
+                    key,
+                    &settings,
+                    window,
+                    &cancellation,
+                )
+                .await
+            },
+            move |shell, detail, selected| shell.playlist_detail_route(key, detail, selected),
+        );
     }
 
     fn queue_artist_overview_route(
@@ -1437,42 +1524,34 @@ impl Shell {
         album_artist: bool,
         track_settings: LibraryListSettings,
         album_settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_artist_overview(
-                &database,
-                source,
-                folder,
-                artist,
-                album_artist,
-                &track_settings,
-                &album_settings,
-                &cancellation,
-            )
-            .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(detail)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.artist_detail_view(artist, album_artist, detail, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Artist overview route",
+            move |window, cancellation| async move {
+                load_artist_overview(
+                    &database,
+                    source,
+                    folder,
+                    artist,
+                    album_artist,
+                    &track_settings,
+                    &album_settings,
+                    window,
+                    &cancellation,
+                )
+                .await
+            },
+            move |shell, detail, selected| {
+                shell.artist_detail_view(artist, album_artist, detail, selected)
+            },
+        );
     }
 
     fn queue_artist_discography_route(
@@ -1482,41 +1561,33 @@ impl Shell {
         artist: library::ArtistKey,
         album_artist: bool,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_artist_discography(
-                &database,
-                source,
-                folder,
-                artist,
-                album_artist,
-                &settings,
-                &cancellation,
-            )
-            .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(detail)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.artist_discography_view(artist, album_artist, detail, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Artist discography route",
+            move |window, cancellation| async move {
+                load_artist_discography(
+                    &database,
+                    source,
+                    folder,
+                    artist,
+                    album_artist,
+                    &settings,
+                    window,
+                    &cancellation,
+                )
+                .await
+            },
+            move |shell, detail, selected| {
+                shell.artist_discography_view(artist, album_artist, detail, selected)
+            },
+        );
     }
 
     fn queue_artist_tracks_route(
@@ -1527,46 +1598,38 @@ impl Shell {
         album_artist: bool,
         settings: LibraryListSettings,
         favorites_only: bool,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let epoch = selected.source_session_epoch;
-        let source_id = selected.artwork.source_id.clone();
-        let (generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_artist_tracks(
-                &database,
-                source,
-                folder,
-                artist,
-                album_artist,
-                &settings,
-                favorites_only,
-                &cancellation,
-            )
-            .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(generation) {
-                return;
-            }
-            let Ok(Ok(detail)) = task.await else { return };
-            if !route_is_current(&shell, &route, source, epoch) {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Artist tracks route",
+            move |window, cancellation| async move {
+                load_artist_tracks(
+                    &database,
+                    source,
+                    folder,
+                    artist,
+                    album_artist,
+                    &settings,
+                    favorites_only,
+                    window,
+                    &cancellation,
+                )
+                .await
+            },
+            move |shell, detail, selected| {
                 if favorites_only {
-                    build_shell.artist_favorite_tracks_view(artist, album_artist, detail, selected)
+                    shell.artist_favorite_tracks_view(artist, album_artist, detail, selected)
                 } else {
-                    build_shell.artist_tracks_view(artist, album_artist, detail, selected)
+                    shell.artist_tracks_view(artist, album_artist, detail, selected)
                 }
-            });
-        });
+            },
+        );
     }
 
     fn queue_named_detail_route(
@@ -1575,47 +1638,44 @@ impl Shell {
         route: Route,
         id: NamedDetailId,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            load_named_detail(&database, source, folder, id, &settings, &cancellation).await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (summary, page) = match task.await {
-                Ok(Ok(result)) => result,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read named detail route");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "named detail route task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            let library::TrackRoutePage { order, first_rows } = page;
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.named_detail_view(id, summary, order, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Named detail route",
+            move |window, cancellation| async move {
+                load_named_detail(
+                    &database,
+                    source,
+                    folder,
+                    id,
+                    &settings,
+                    window,
+                    &cancellation,
+                )
+                .await
+            },
+            move |shell, (summary, page), selected| {
+                let library::TrackRoutePage {
+                    order,
+                    first_row_position,
+                    first_rows,
+                } = page;
+                shell.named_detail_view(
+                    id,
+                    summary,
+                    order,
+                    first_row_position,
+                    first_rows,
+                    selected,
+                )
+            },
+        );
     }
 
     fn queue_playlist_route(
@@ -1623,55 +1683,33 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .playlist_route_page(
-                    source_key,
-                    folder,
-                    settings.sort_key.playlist_sort(),
-                    settings.descending,
-                    "",
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Playlist route order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Playlist route task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_playlists_route(order, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Playlist route",
+            move |window, cancellation| async move {
+                database
+                    .playlist_route_page(
+                        source_key,
+                        folder,
+                        settings.sort_key.playlist_sort(),
+                        settings.descending,
+                        "",
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            |shell, (order, first_row_position, first_rows), selected| {
+                shell.library_playlists_route(order, first_row_position, first_rows, selected)
+            },
+        );
     }
 
     fn queue_smart_playlist_route(
@@ -1679,110 +1717,66 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .smart_playlist_route_page(
-                    source_key,
-                    folder,
-                    settings.sort_key.smart_playlist_sort(),
-                    settings.descending,
-                    now,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Smart Playlist order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Smart Playlist task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_smart_playlists_route(order, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Smart Playlist route",
+            move |window, cancellation| async move {
+                database
+                    .smart_playlist_route_page(
+                        source_key,
+                        folder,
+                        settings.sort_key.smart_playlist_sort(),
+                        settings.descending,
+                        now,
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            |shell, (order, first_row_position, first_rows), selected| {
+                shell.library_smart_playlists_route(order, first_row_position, first_rows, selected)
+            },
+        );
     }
 
     fn queue_history_route(
         self: &Rc<Self>,
         selected: crate::runtime::SelectedLibrary,
         route: Route,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .history_track_page(source_key, folder, "", &cancellation)
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let page = match task.await {
-                Ok(Ok(page)) => page,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read History");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "History task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            let library::TrackRoutePage {
-                order: rows,
-                first_rows,
-            } = page;
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.history_route(rows, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "History route",
+            move |window, cancellation| async move {
+                database
+                    .history_track_page(source_key, folder, "", window, &cancellation)
+                    .await
+            },
+            |shell, page, selected| {
+                shell.history_route(
+                    page.order,
+                    page.first_row_position,
+                    page.first_rows,
+                    selected,
+                )
+            },
+        );
     }
 
     fn queue_genre_route(
@@ -1790,55 +1784,33 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .genre_route_page(
-                    source_key,
-                    folder,
-                    "",
-                    settings.sort_key.genre_sort(),
-                    settings.descending,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Genre order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Genre order task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_genres_route(order, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Genre route",
+            move |window, cancellation| async move {
+                database
+                    .genre_route_page(
+                        source_key,
+                        folder,
+                        "",
+                        settings.sort_key.genre_sort(),
+                        settings.descending,
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            |shell, (order, first_row_position, first_rows), selected| {
+                shell.library_genres_route(order, first_row_position, first_rows, selected)
+            },
+        );
     }
 
     fn queue_mood_route(
@@ -1846,55 +1818,33 @@ impl Shell {
         selected: crate::runtime::SelectedLibrary,
         route: Route,
         settings: LibraryListSettings,
-        render_started: Instant,
+        render_started: RouteTiming,
     ) {
         let database = Arc::clone(&selected.database);
         let source_key = selected.source_key;
-        let source_id = selected.artwork.source_id.clone();
-        let epoch = selected.source_session_epoch;
         let folder = selected.music_folder_key;
-        let (read_generation, cancellation) = self.begin_root_order_read();
-        let task = selected.runtime.spawn(async move {
-            database
-                .mood_route_page(
-                    source_key,
-                    folder,
-                    "",
-                    settings.sort_key.mood_sort(),
-                    settings.descending,
-                    &cancellation,
-                )
-                .await
-        });
-        let shell = Rc::downgrade(self);
-        glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else { return };
-            if !shell.finish_root_order_read(read_generation) {
-                return;
-            }
-            let (order, first_rows) = match task.await {
-                Ok(Ok(prepared)) => prepared,
-                Ok(Err(error)) => {
-                    warn!(%error, "failed to read Mood order");
-                    return;
-                }
-                Err(error) => {
-                    warn!(%error, "Mood order task failed");
-                    return;
-                }
-            };
-            if shell.navigation.routes.borrow().current() != &route
-                || !shell.selected_library().as_deref().is_some_and(|current| {
-                    current.source_key == source_key && current.source_session_epoch == epoch
-                })
-            {
-                return;
-            }
-            let build_shell = Rc::clone(&shell);
-            shell.replace_mounted_route(route, Some(source_id), render_started, 0, move || {
-                build_shell.library_moods_route(order, first_rows, selected)
-            });
-        });
+        self.queue_prepared_route(
+            selected,
+            route,
+            render_started,
+            "Mood route",
+            move |window, cancellation| async move {
+                database
+                    .mood_route_page(
+                        source_key,
+                        folder,
+                        "",
+                        settings.sort_key.mood_sort(),
+                        settings.descending,
+                        window,
+                        &cancellation,
+                    )
+                    .await
+            },
+            |shell, (order, first_row_position, first_rows), selected| {
+                shell.library_moods_route(order, first_row_position, first_rows, selected)
+            },
+        );
     }
 
     fn begin_root_order_read(&self) -> (u64, library::ReadCancellation) {
@@ -1944,23 +1894,22 @@ impl Shell {
         self: &Rc<Self>,
         route: Route,
         source_id: Option<SourceId>,
-        render_started: Instant,
-        projection_ms: u64,
+        render_started: RouteTiming,
         build: impl FnOnce() -> MountedRoute,
     ) {
-        let replacement_started = Instant::now();
+        let replacement_started = render_started.as_ref().map(|_| Instant::now());
         let previous = self.begin_mounted_route_replacement();
-        let model_started = Instant::now();
+        let route_loading_generation = self.begin_route_loading_gate();
+        let model_started = render_started.as_ref().map(|_| Instant::now());
         let view = build();
-        let model_ms = elapsed_ms(model_started);
+        let model_ms = model_started.map(elapsed_ms);
 
-        let mount_started = Instant::now();
+        let mount_started = render_started.as_ref().map(|_| Instant::now());
         let widget = view.widget();
         if let Some(previous) = previous {
             self.route_viewport.route_host.remove(&previous.surface);
             drop(previous);
         }
-        let teardown_ms = elapsed_ms(replacement_started).saturating_sub(model_ms);
         let scroll_adjustment = primary_route_scroll_adjustment(&widget);
         let position_key = source_id
             .filter(|_| scroll_adjustment.is_some())
@@ -1972,13 +1921,30 @@ impl Shell {
                 .restore(key)
         });
         let boundary = route_boundary(widget);
-        let surface = match (scroll_adjustment.as_ref(), restore_position) {
-            (Some(adjustment), Some(position)) => {
-                restore_route_position_before_snapshot(&boundary, adjustment, position)
-            }
-            _ => boundary,
-        };
-        let context = self.take_current_route_context();
+        let ready_shell = Rc::downgrade(self);
+        let ready_view = view.clone();
+        let surface = prepare_route_position_before_snapshot(
+            &boundary,
+            scroll_adjustment.as_ref(),
+            restore_position
+                .filter(|position| position.value > 0.0)
+                .map(|position| position.value),
+            move || {
+                ready_view.resume_initial_demand();
+                let Some(cover_generation) = route_loading_generation else {
+                    return;
+                };
+                if let Some(shell) = ready_shell.upgrade()
+                    && shell.route_viewport.route_cover_generation.get() == cover_generation
+                {
+                    shell.close_route_cover_registration(
+                        cover_generation,
+                        shell.route_viewport.route_host.upcast_ref(),
+                    );
+                    shell.try_finish_route_loading(cover_generation);
+                }
+            },
+        );
         self.route_viewport.route_host.add_child(&surface);
         let displaced = self
             .route_viewport
@@ -1991,20 +1957,67 @@ impl Shell {
                 scroll_adjustment,
             }));
         debug_assert!(displaced.is_none());
-        self.install_current_route_context(context);
         self.route_viewport.route_host.set_visible_child(&surface);
-        let mount_ms = elapsed_ms(mount_started);
-        let total_ms = elapsed_ms(render_started);
-        debug!(
-            ?route,
-            projection_ms, teardown_ms, model_ms, mount_ms, total_ms, "route render timing"
-        );
-        if total_ms >= SLOW_ROUTE_RENDER_MS {
-            warn!(
+        if let (
+            Some(render_started),
+            Some(replacement_started),
+            Some(model_ms),
+            Some(mount_started),
+        ) = (render_started, replacement_started, model_ms, mount_started)
+        {
+            let teardown_ms = elapsed_ms(replacement_started).saturating_sub(model_ms);
+            let mount_ms = elapsed_ms(mount_started);
+            let total_ms = elapsed_ms(render_started);
+            debug!(
                 ?route,
-                projection_ms, teardown_ms, model_ms, mount_ms, total_ms, "slow route render"
+                teardown_ms, model_ms, mount_ms, total_ms, "route render timing"
             );
+            if total_ms >= SLOW_ROUTE_RENDER_MS {
+                warn!(
+                    ?route,
+                    teardown_ms, model_ms, mount_ms, total_ms, "slow route render"
+                );
+            }
         }
+    }
+
+    fn show_route_loading(&self) {
+        if self.startup.route_revealed.get() && !self.source.login_screen_active() {
+            self.route_viewport.route_loading.set_visible(true);
+        }
+    }
+
+    fn begin_route_loading_gate(self: &Rc<Self>) -> Option<u64> {
+        if !self.startup.route_revealed.get() || self.source.login_screen_active() {
+            return None;
+        }
+        self.route_viewport.route_loading.set_visible(true);
+        let generation = self.begin_route_cover_prime();
+        self.route_viewport.route_cover_generation.set(generation);
+        Some(generation)
+    }
+
+    pub(in crate::shell) fn try_finish_route_loading(&self, cover_generation: u64) {
+        if self.route_viewport.route_cover_generation.get() == cover_generation
+            && self.route_cover_prime_ready(cover_generation)
+        {
+            self.finish_route_loading(cover_generation);
+        }
+    }
+
+    fn finish_route_loading(&self, cover_generation: u64) {
+        if self.route_viewport.route_cover_generation.get() != cover_generation {
+            return;
+        }
+        self.route_viewport.route_loading.set_visible(false);
+        self.route_viewport.route_cover_generation.set(0);
+        self.finish_route_cover_prime_gate();
+    }
+
+    fn cancel_route_loading(&self) {
+        self.route_viewport.route_cover_generation.set(0);
+        self.route_viewport.route_loading.set_visible(false);
+        self.finish_route_cover_prime_gate();
     }
 
     pub(crate) fn apply_favorite_settlement_to_mounted_route(
@@ -2046,65 +2059,19 @@ impl Shell {
                 previous.scroll_adjustment.as_ref(),
             )
         {
-            self.route_viewport
-                .position_memory
-                .borrow_mut()
-                .record(key.clone(), adjustment.value());
+            self.route_viewport.position_memory.borrow_mut().record(
+                key.clone(),
+                adjustment.value(),
+                adjustment.upper(),
+                adjustment.page_size(),
+            );
         }
         self.clear_favorite_controls();
-        self.clear_current_route_context();
+        self.clear_current_route_selections();
         previous
     }
 
-    fn take_current_route_context(&self) -> RouteActivationContext {
-        RouteActivationContext {
-            current_track_selections: std::mem::take(
-                &mut *self.route_viewport.current_track_selections.borrow_mut(),
-            ),
-            track_selections: std::mem::take(
-                &mut *self.route_viewport.track_selections.borrow_mut(),
-            ),
-            playlist_entry_selection: self
-                .route_viewport
-                .playlist_entry_selection
-                .borrow_mut()
-                .take(),
-            route_search: self.route_viewport.route_search.borrow_mut().take(),
-            route_search_focus: self.route_viewport.route_search_focus.borrow_mut().take(),
-            route_layout_cycle: self.route_viewport.route_layout_cycle.borrow_mut().take(),
-            route_tab_cycle: self.route_viewport.route_tab_cycle.borrow_mut().take(),
-        }
-    }
-
-    fn install_current_route_context(&self, context: RouteActivationContext) {
-        self.route_viewport
-            .current_track_selections
-            .replace(context.current_track_selections);
-        self.route_viewport
-            .track_selections
-            .replace(context.track_selections);
-        self.route_viewport
-            .playlist_entry_selection
-            .replace(context.playlist_entry_selection);
-        self.route_viewport
-            .route_search
-            .replace(context.route_search);
-        self.route_viewport
-            .route_search_focus
-            .replace(context.route_search_focus);
-        self.route_viewport
-            .route_layout_cycle
-            .replace(context.route_layout_cycle);
-        self.route_viewport
-            .route_tab_cycle
-            .replace(context.route_tab_cycle);
-    }
-
-    fn clear_current_route_context(&self) {
-        self.route_viewport.route_search.borrow_mut().take();
-        self.route_viewport.route_search_focus.borrow_mut().take();
-        self.route_viewport.route_layout_cycle.borrow_mut().take();
-        self.route_viewport.route_tab_cycle.borrow_mut().take();
+    fn clear_current_route_selections(&self) {
         self.route_viewport
             .current_track_selections
             .borrow_mut()
@@ -2117,6 +2084,7 @@ impl Shell {
     }
 
     pub(crate) fn clear_mounted_routes(&self) {
+        self.cancel_route_loading();
         let mounted_route = self.begin_mounted_route_replacement();
         if mounted_route.is_none() && self.route_viewport.route_host.first_child().is_none() {
             return;

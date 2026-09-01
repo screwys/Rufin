@@ -4,14 +4,13 @@ use super::search::{
     lyrics_search_result_has_content, submit_lyrics_search,
 };
 use super::view::{LyricsPane, LyricsPaneContent};
+use super::{lyrics_popup_content_height, lyrics_popup_content_width};
 use crate::player::state::{current_playback_media_id, current_playback_track_id};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::shell::Shell;
-use crate::shell::actions::icon_button;
 use adw::prelude::*;
 use gtk::glib;
-use localization::result_count_text;
-use localization::tr;
+use localization::{result_count_text, tr};
 use lyrics::{CurrentLyrics, CurrentLyricsContent, LyricsSearchResult, release_japanese_reader};
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
@@ -256,21 +255,21 @@ impl Shell {
         drop(projection);
         drop(lyrics);
 
-        let dialog = adw::Dialog::builder()
-            .title(tr("Edit Lyrics"))
-            .content_width(560)
-            .content_height(600)
-            .build();
-        let toolbar = adw::ToolbarView::new();
-        toolbar.add_top_bar(&adw::HeaderBar::new());
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        body.set_margin_top(16);
-        body.set_margin_bottom(16);
-        body.set_margin_start(16);
-        body.set_margin_end(16);
-        let editor = gtk::TextView::new();
-        editor.set_monospace(true);
-        editor.set_wrap_mode(gtk::WrapMode::WordChar);
+        let resource = crate::ui_resource::LYRICS_EDIT_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            dialog: adw::Dialog,
+            editor: gtk::TextView,
+            offset_decrease_100: gtk::Button,
+            offset_decrease_50: gtk::Button,
+            offset_entry: gtk::Entry,
+            offset_increase_50: gtk::Button,
+            offset_increase_100: gtk::Button,
+            cancel: gtk::Button,
+            save: gtk::Button,
+        });
+        dialog.set_content_width(lyrics_popup_content_width());
+        dialog.set_content_height(lyrics_popup_content_height(self.chrome.window.height()));
         let buffer = editor.buffer();
         buffer.create_tag(Some("line-time"), &[("foreground", &"#e8962c")]);
         buffer.create_tag(Some("word-time"), &[("foreground", &"#8ab4f8")]);
@@ -278,25 +277,7 @@ impl Shell {
         highlight_lrc_timestamps(&buffer);
 
         let offset = Rc::new(Cell::new(offset_millis));
-        let offset_controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        offset_controls.set_halign(gtk::Align::Center);
-        let offset_decrease_100 = gtk::Button::with_label("-100 ms");
-        let offset_decrease_50 = gtk::Button::with_label("-50 ms");
-        let offset_entry = gtk::Entry::new();
         offset_entry.set_text(&format!("{offset_millis} ms"));
-        gtk::prelude::EditableExt::set_alignment(&offset_entry, 0.5);
-        offset_entry.set_width_chars(6);
-        offset_entry.set_max_width_chars(9);
-        offset_entry.set_max_length(24);
-        offset_entry.set_tooltip_text(Some(&tr("Lyrics offset (ms)")));
-        let offset_increase_50 = gtk::Button::with_label("+50 ms");
-        let offset_increase_100 = gtk::Button::with_label("+100 ms");
-        offset_controls.append(&offset_decrease_100);
-        offset_controls.append(&offset_decrease_50);
-        offset_controls.append(&offset_entry);
-        offset_controls.append(&offset_increase_50);
-        offset_controls.append(&offset_increase_100);
-        body.append(&offset_controls);
 
         let apply_offset: Rc<dyn Fn(i64)> = Rc::new({
             let offset = Rc::clone(&offset);
@@ -360,27 +341,12 @@ impl Shell {
         });
         offset_entry.add_controller(offset_focus);
 
-        let scroller = gtk::ScrolledWindow::builder()
-            .child(&editor)
-            .vexpand(true)
-            .build();
-        body.append(&scroller);
-
-        let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        actions.set_halign(gtk::Align::End);
-        let cancel = gtk::Button::with_label(&tr("Cancel"));
-        let save = gtk::Button::with_label(&tr("Save"));
-        save.add_css_class("suggested-action");
-        actions.append(&cancel);
-        actions.append(&save);
-        body.append(&actions);
-        toolbar.set_content(Some(&body));
-        dialog.set_child(Some(&toolbar));
-
         let committed = Rc::new(Cell::new(false));
-        let close = dialog.clone();
+        let close = dialog.downgrade();
         cancel.connect_clicked(move |_| {
-            close.close();
+            if let Some(close) = close.upgrade() {
+                close.close();
+            }
         });
         let restore_shell = Rc::downgrade(self);
         let restore_committed = Rc::clone(&committed);
@@ -394,15 +360,21 @@ impl Shell {
                 shell.set_lyrics_offset_from_text(&offset_millis.to_string());
             }
         });
-        let save_for_text = save.clone();
+        let save_for_text = save.downgrade();
         buffer.connect_changed(move |buffer| {
             highlight_lrc_timestamps(buffer);
             let (start, end) = buffer.bounds();
-            save_for_text.set_sensitive(!buffer.text(&start, &end, false).trim().is_empty());
+            if let Some(save) = save_for_text.upgrade() {
+                save.set_sensitive(!buffer.text(&start, &end, false).trim().is_empty());
+            }
         });
         let shell = Rc::clone(self);
-        let close = dialog.clone();
+        let close = dialog.downgrade();
+        let buffer = buffer.downgrade();
         save.connect_clicked(move |_| {
+            let Some(buffer) = buffer.upgrade() else {
+                return;
+            };
             commit_offset();
             let (start, end) = buffer.bounds();
             let text = buffer.text(&start, &end, false).to_string();
@@ -411,7 +383,9 @@ impl Shell {
                 .products
                 .lyrics
                 .update_lyrics_text(media_id.clone(), text);
-            close.close();
+            if let Some(close) = close.upgrade() {
+                close.close();
+            }
         });
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
@@ -440,65 +414,34 @@ impl Shell {
             return;
         }
 
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        content.set_margin_top(16);
-        content.set_margin_bottom(16);
-        content.set_margin_start(16);
-        content.set_margin_end(16);
-        content.set_width_request(420);
-        content.set_height_request(500);
-
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        header.set_valign(gtk::Align::Center);
-        let title = gtk::Label::new(Some(&tr("Search Lyrics")));
-        title.add_css_class("title");
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-        header.append(&title);
-        let close_button = icon_button("rufin-window-close-symbolic", "Close");
-        header.append(&close_button);
-        content.append(&header);
-
-        let helper = gtk::Label::new(Some(&tr(
-            "Tap to the entry to load the lyrics and save in the app cache, click save only if you also want to save it in your music folder",
-        )));
-        helper.add_css_class("lyrics-search-helper");
-        helper.set_xalign(0.0);
-        helper.set_wrap(true);
-        content.append(&helper);
-
-        let artist_entry = gtk::Entry::new();
-        artist_entry.set_placeholder_text(Some(&tr("Artist")));
+        let resource = crate::ui_resource::LYRICS_SEARCH_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            dialog: adw::Dialog,
+            close_button: gtk::Button,
+            artist_entry: gtk::Entry,
+            title_entry: gtk::Entry,
+            status: gtk::Label,
+            list: gtk::ListBox,
+        });
+        dialog.set_content_width(lyrics_popup_content_width());
+        dialog.set_content_height(lyrics_popup_content_height(self.chrome.window.height()));
         artist_entry.set_text(&current.track.artist);
-        artist_entry.set_hexpand(true);
-        content.append(&artist_entry);
-
-        let title_entry = gtk::Entry::new();
-        title_entry.set_placeholder_text(Some(&tr("Song")));
         title_entry.set_text(&current.track.title);
-        title_entry.set_hexpand(true);
-        content.append(&title_entry);
-
-        let status = gtk::Label::new(Some(&tr("Ready")));
-        status.add_css_class("muted");
-        status.set_xalign(0.0);
-        status.set_wrap(true);
-        content.append(&status);
-
-        let list = gtk::ListBox::new();
-        list.add_css_class("boxed-list");
-        list.set_selection_mode(gtk::SelectionMode::None);
-        let scroller = gtk::ScrolledWindow::new();
-        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-        scroller.set_vexpand(true);
-        scroller.set_child(Some(&list));
-        content.append(&scroller);
-
-        let dialog = adw::Dialog::builder()
-            .content_width(520)
-            .content_height(560)
-            .child(&content)
-            .build();
+        for entry in [&artist_entry, &title_entry] {
+            entry.set_icon_sensitive(gtk::EntryIconPosition::Secondary, !entry.text().is_empty());
+            entry.connect_changed(|entry| {
+                entry.set_icon_sensitive(
+                    gtk::EntryIconPosition::Secondary,
+                    !entry.text().is_empty(),
+                );
+            });
+            entry.connect_icon_release(|entry, position| {
+                if position == gtk::EntryIconPosition::Secondary {
+                    entry.set_text("");
+                }
+            });
+        }
         let search_dialog = LyricsSearchDialog {
             dialog: dialog.clone(),
             media_id,
@@ -789,7 +732,7 @@ mod tests {
     use super::take_dirty_lyrics_pane;
 
     #[test]
-    fn hidden_lyrics_panes_keep_pending_content_without_rebuilding_on_every_open() {
+    fn hidden_lyrics_pane_keeps_pending_content_without_rebuilding_on_every_open() {
         let dirty = Cell::new(true);
 
         assert!(!take_dirty_lyrics_pane(&dirty, false));

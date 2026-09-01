@@ -8,7 +8,7 @@ use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
     Database, FolderKey, LibraryError, LibraryResult, PlaylistEntryKey, PlaylistKey,
-    ReadCancellation, SourceKey, TrackKey, TrackRow, tracks::load_track_rows,
+    ReadCancellation, RouteSeedWindow, SourceKey, TrackKey, TrackRow, tracks::load_track_rows,
 };
 
 const PLAYLIST_ROW_LIMIT: usize = 128;
@@ -175,23 +175,21 @@ impl Database {
         sort: PlaylistSort,
         descending: bool,
         filter: &str,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<PlaylistKey>, Vec<PlaylistRow>)> {
+    ) -> LibraryResult<(Vec<PlaylistKey>, usize, Vec<PlaylistRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let order =
             Self::load_playlist_order(&mut transaction, source, folder, sort, descending, filter)
                 .await?;
-        let first_rows = Self::load_playlist_rows(
-            &mut transaction,
-            source,
-            &order[..order.len().min(64)],
-            folder,
-        )
-        .await?;
+        let seed = window.range(order.len());
+        let first_row_position = seed.start;
+        let first_rows =
+            Self::load_playlist_rows(&mut transaction, source, &order[seed], folder).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((order, first_rows))
+        Ok((order, first_row_position, first_rows))
     }
 
     pub async fn playlist_key_by_object(

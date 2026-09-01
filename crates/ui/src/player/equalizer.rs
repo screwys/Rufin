@@ -8,11 +8,12 @@ use playback::{EQUALIZER_BAND_COUNT, EqualizerSettings};
 
 use localization::tr;
 
-const EQUALIZER_FALLBACK_COMMIT_DELAY_MS: u64 = 1_200;
-const EQUALIZER_SURFACE_SCROLL_FACTOR: f64 = 2.5;
+const EQUALIZER_FALLBACK_COMMIT_DELAY_MS: u64 = 200;
+const EQUALIZER_BAND_SPACING: i32 = 6;
+const EQUALIZER_LABEL_HEIGHT: i32 = 50;
 const CUSTOM_PRESET: &str = "Custom";
 
-pub(crate) fn equalizer_band_title(index: usize) -> String {
+fn equalizer_band_title(index: usize) -> String {
     const BANDS: [&str; EQUALIZER_BAND_COUNT] = [
         "60 Hz", "170 Hz", "310 Hz", "600 Hz", "1 kHz", "3 kHz", "6 kHz", "12 kHz", "14 kHz",
         "16 kHz",
@@ -20,7 +21,7 @@ pub(crate) fn equalizer_band_title(index: usize) -> String {
     BANDS.get(index).copied().unwrap_or("Band").to_string()
 }
 
-pub(crate) fn equalizer_band_label_parts(index: usize) -> (String, String) {
+fn equalizer_band_label_parts(index: usize) -> (String, String) {
     let title = equalizer_band_title(index);
     title
         .split_once(' ')
@@ -76,7 +77,7 @@ fn equalizer_preset_names() -> Vec<&'static str> {
         .collect()
 }
 
-pub(crate) fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String {
+fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String {
     if equalizer_preset_names()
         .iter()
         .any(|name| *name == equalizer.selected_preset)
@@ -87,14 +88,14 @@ pub(crate) fn equalizer_selected_preset(equalizer: &EqualizerSettings) -> String
     }
 }
 
-pub(crate) fn equalizer_preset_position(name: &str) -> u32 {
+fn equalizer_preset_position(name: &str) -> u32 {
     equalizer_preset_names()
         .iter()
         .position(|preset| *preset == name)
         .unwrap_or_default() as u32
 }
 
-pub(crate) fn equalizer_preset_name_at(position: u32) -> Option<String> {
+fn equalizer_preset_name_at(position: u32) -> Option<String> {
     equalizer_preset_names()
         .get(position as usize)
         .map(|name| (*name).to_string())
@@ -117,7 +118,7 @@ fn equalizer_preset_title(name: &str) -> String {
     }
 }
 
-pub(crate) fn equalizer_default_preset_bands(name: &str) -> Vec<f64> {
+fn equalizer_default_preset_bands(name: &str) -> Vec<f64> {
     if name == CUSTOM_PRESET {
         return vec![0.0; EQUALIZER_BAND_COUNT];
     }
@@ -127,7 +128,7 @@ pub(crate) fn equalizer_default_preset_bands(name: &str) -> Vec<f64> {
         .unwrap_or_else(|| vec![0.0; EQUALIZER_BAND_COUNT])
 }
 
-pub(crate) fn equalizer_preset_bands(name: &str) -> Vec<f64> {
+fn equalizer_preset_bands(name: &str) -> Vec<f64> {
     equalizer_default_preset_bands(name)
 }
 
@@ -140,16 +141,7 @@ fn equalizer_preset_model() -> gtk::StringList {
     gtk::StringList::new(&title_refs)
 }
 
-pub(crate) fn build_equalizer_preset_row(title: &str, selected: u32) -> adw::ComboRow {
-    let model = equalizer_preset_model();
-    adw::ComboRow::builder()
-        .title(tr(title))
-        .model(&model)
-        .selected(selected)
-        .build()
-}
-
-pub(crate) fn build_equalizer_preset_dropdown(selected: u32) -> gtk::DropDown {
+fn build_equalizer_preset_dropdown(selected: u32) -> gtk::DropDown {
     let model = equalizer_preset_model();
     gtk::DropDown::builder()
         .model(&model)
@@ -157,13 +149,211 @@ pub(crate) fn build_equalizer_preset_dropdown(selected: u32) -> gtk::DropDown {
         .build()
 }
 
-pub(crate) fn relocalize_equalizer_preset_dropdown(dropdown: &gtk::DropDown, selected: u32) {
-    let model = equalizer_preset_model();
-    dropdown.set_model(Some(&model));
-    dropdown.set_selected(selected);
+#[derive(Clone)]
+pub(crate) struct EqualizerSurface {
+    pub(crate) root: gtk::Box,
+    band_row: gtk::Box,
+    reset: gtk::Button,
+    controls: Rc<EqualizerControls>,
 }
 
-pub(crate) fn connect_equalizer_scale_commit(
+struct EqualizerControls {
+    enabled: gtk::Switch,
+    preset: gtk::DropDown,
+    scales: Vec<gtk::Scale>,
+    syncing: Rc<Cell<bool>>,
+}
+
+impl EqualizerSurface {
+    pub(crate) fn new(settings: &EqualizerSettings) -> Self {
+        let resource = crate::ui_resource::EQUALIZER_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            root: gtk::Box,
+            enabled: gtk::Switch,
+            preset_host: gtk::Box,
+            reset_button: gtk::Button,
+            band_row: gtk::Box,
+            bands: gtk::Box,
+        });
+        let preset = build_equalizer_preset_dropdown(0);
+        preset.set_valign(gtk::Align::Center);
+        preset_host.append(&preset);
+        let mut scales = Vec::with_capacity(EQUALIZER_BAND_COUNT);
+        for index in 0..EQUALIZER_BAND_COUNT {
+            let band = gtk::Box::new(gtk::Orientation::Vertical, EQUALIZER_BAND_SPACING);
+            band.set_width_request(1);
+            band.set_halign(gtk::Align::Fill);
+            band.set_valign(gtk::Align::Fill);
+            band.set_hexpand(true);
+            band.set_vexpand(true);
+            let scale = gtk::Scale::with_range(gtk::Orientation::Vertical, -12.0, 12.0, 0.5);
+            scale.add_css_class("equalizer-surface-scale");
+            scale.set_inverted(true);
+            scale.set_draw_value(false);
+            scale.set_width_request(1);
+            scale.set_halign(gtk::Align::Fill);
+            scale.set_valign(gtk::Align::Fill);
+            scale.set_hexpand(true);
+            scale.set_vexpand(true);
+            scale.set_tooltip_text(Some(&equalizer_band_title(index)));
+            super::playback_settings::install_scale_scroll_forwarding(&scale);
+            band.append(&scale);
+            band.append(&equalizer_band_label(index));
+            bands.append(&band);
+            scales.push(scale);
+        }
+        let surface = Self {
+            root,
+            band_row,
+            reset: reset_button,
+            controls: Rc::new(EqualizerControls {
+                enabled,
+                preset,
+                scales,
+                syncing: Rc::new(Cell::new(false)),
+            }),
+        };
+        surface.set_settings(settings);
+        surface
+    }
+
+    pub(crate) fn connect_changed(&self, changed: impl Fn(EqualizerSettings) + 'static) {
+        let changed: Rc<dyn Fn(EqualizerSettings)> = Rc::new(changed);
+
+        let switch_controls = Rc::downgrade(&self.controls);
+        let switch_changed = Rc::clone(&changed);
+        self.controls
+            .enabled
+            .connect_state_set(move |row, enabled| {
+                let Some(controls) = switch_controls.upgrade() else {
+                    return glib::Propagation::Proceed;
+                };
+                if controls.syncing.get() {
+                    return glib::Propagation::Proceed;
+                }
+                row.set_state(enabled);
+                let mut settings = controls.settings();
+                settings.enabled = enabled;
+                controls.set_settings(&settings);
+                switch_changed(settings);
+                glib::Propagation::Stop
+            });
+
+        let pending_update = Rc::new(RefCell::new(None::<glib::SourceId>));
+        let pointer_active = Rc::new(Cell::new(false));
+        let scale_controls = Rc::downgrade(&self.controls);
+        let scale_changed = Rc::clone(&changed);
+        let commit: Rc<dyn Fn()> = Rc::new(move || {
+            let Some(controls) = scale_controls.upgrade() else {
+                return;
+            };
+            let mut settings = controls.settings();
+            settings.selected_preset = CUSTOM_PRESET.to_string();
+            controls.set_settings(&settings);
+            scale_changed(settings);
+        });
+        for scale in &self.controls.scales {
+            connect_equalizer_scale_commit(
+                scale,
+                Rc::clone(&self.controls.syncing),
+                Rc::clone(&pending_update),
+                Rc::clone(&pointer_active),
+                Rc::clone(&commit),
+            );
+        }
+
+        let preset_controls = Rc::downgrade(&self.controls);
+        let preset_changed = Rc::clone(&changed);
+        self.controls
+            .preset
+            .connect_selected_notify(move |dropdown| {
+                let Some(controls) = preset_controls.upgrade() else {
+                    return;
+                };
+                if controls.syncing.get() {
+                    return;
+                }
+                let Some(preset) = equalizer_preset_name_at(dropdown.selected()) else {
+                    return;
+                };
+                let mut settings = controls.settings();
+                settings.enabled = true;
+                settings.selected_preset = preset.clone();
+                settings.bands = equalizer_preset_bands(&preset);
+                settings.sanitize();
+                controls.set_settings(&settings);
+                preset_changed(settings);
+            });
+
+        let reset_controls = Rc::downgrade(&self.controls);
+        self.reset.connect_clicked(move |_| {
+            let Some(controls) = reset_controls.upgrade() else {
+                return;
+            };
+            let mut settings = controls.settings();
+            settings.bands = equalizer_default_preset_bands(&settings.selected_preset);
+            settings.sanitize();
+            controls.set_settings(&settings);
+            changed(settings);
+        });
+    }
+
+    pub(crate) fn set_band_height_request(&self, height: i32) {
+        self.band_row.set_height_request(height);
+    }
+
+    pub(crate) fn set_settings(&self, settings: &EqualizerSettings) {
+        self.controls.set_settings(settings);
+    }
+}
+
+impl EqualizerControls {
+    fn set_settings(&self, settings: &EqualizerSettings) {
+        self.syncing.set(true);
+        self.enabled.set_active(settings.enabled);
+        self.preset
+            .set_selected(equalizer_preset_position(&equalizer_selected_preset(
+                settings,
+            )));
+        for (index, scale) in self.scales.iter().enumerate() {
+            scale.set_value(settings.bands.get(index).copied().unwrap_or(0.0));
+        }
+        self.syncing.set(false);
+    }
+
+    fn settings(&self) -> EqualizerSettings {
+        let mut settings = EqualizerSettings {
+            enabled: self.enabled.is_active(),
+            selected_preset: equalizer_preset_name_at(self.preset.selected())
+                .unwrap_or_else(|| CUSTOM_PRESET.to_string()),
+            bands: self.scales.iter().map(gtk::Scale::value).collect(),
+        };
+        settings.sanitize();
+        settings
+    }
+}
+
+fn equalizer_band_label(index: usize) -> gtk::Widget {
+    let (value, unit) = equalizer_band_label_parts(index);
+    let label = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    label.add_css_class("equalizer-surface-band-label");
+    label.set_height_request(EQUALIZER_LABEL_HEIGHT - EQUALIZER_BAND_SPACING);
+    label.set_halign(gtk::Align::Center);
+    label.set_valign(gtk::Align::Center);
+    for text in [value, unit] {
+        let row = gtk::Label::new(Some(&text));
+        row.add_css_class("muted");
+        row.set_xalign(0.5);
+        row.set_width_chars(1);
+        row.set_max_width_chars(4);
+        row.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        label.append(&row);
+    }
+    label.upcast()
+}
+
+fn connect_equalizer_scale_commit(
     scale: &gtk::Scale,
     guard: Rc<Cell<bool>>,
     pending_update: Rc<RefCell<Option<glib::SourceId>>>,
@@ -203,19 +393,11 @@ pub(crate) fn connect_equalizer_scale_commit(
         *pending_for_change.borrow_mut() = Some(source_id);
     });
 
-    let gesture = gtk::GestureClick::new();
-    gesture.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let events = gtk::EventControllerLegacy::new();
+    events.set_propagation_phase(gtk::PropagationPhase::Capture);
     let pending_for_press = Rc::clone(&pending_update);
     let pointer_for_press = Rc::clone(&pointer_active);
     let changed_for_press = Rc::clone(&changed);
-    gesture.connect_pressed(move |_, _, _, _| {
-        pointer_for_press.set(true);
-        changed_for_press.set(false);
-        if let Some(source_id) = pending_for_press.borrow_mut().take() {
-            source_id.remove();
-        }
-    });
-
     let finish_pointer_commit = {
         let guard = Rc::clone(&guard);
         let pending_update = Rc::clone(&pending_update);
@@ -233,60 +415,30 @@ pub(crate) fn connect_equalizer_scale_commit(
             }
         })
     };
-    let finish_for_release = Rc::clone(&finish_pointer_commit);
-    gesture.connect_released(move |_, _, _, _| finish_for_release());
-    gesture.connect_cancel(move |_, _| finish_pointer_commit());
-    scale.add_controller(gesture);
-}
-
-pub(crate) fn install_equalizer_scroll(scale: &gtk::Scale) {
-    let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
-    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let scale_weak = scale.downgrade();
-    controller.connect_scroll(move |controller, _, dy| {
-        if dy == 0.0 {
-            return gtk::glib::Propagation::Proceed;
+    events.connect_event(move |_, event| {
+        match event.event_type() {
+            gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin => {
+                pointer_for_press.set(true);
+                changed_for_press.set(false);
+                if let Some(source_id) = pending_for_press.borrow_mut().take() {
+                    source_id.remove();
+                }
+            }
+            gtk::gdk::EventType::ButtonRelease
+            | gtk::gdk::EventType::TouchEnd
+            | gtk::gdk::EventType::TouchCancel
+            | gtk::gdk::EventType::GrabBroken => finish_pointer_commit(),
+            _ => {}
         }
-
-        let Some(scale) = scale_weak.upgrade() else {
-            return gtk::glib::Propagation::Stop;
-        };
-        let scale_widget = scale.upcast::<gtk::Widget>();
-        scroll_parent_vertically(&scale_widget, dy, controller.unit());
-        gtk::glib::Propagation::Stop
+        glib::Propagation::Proceed
     });
-    scale.add_controller(controller);
-}
-
-fn scroll_parent_vertically(widget: &gtk::Widget, dy: f64, unit: gtk::gdk::ScrollUnit) {
-    let Some(scroller) = nearest_parent_scroller(widget) else {
-        return;
-    };
-    let adjustment = scroller.vadjustment();
-    let page_size = adjustment.page_size();
-    let multiplier = match unit {
-        gtk::gdk::ScrollUnit::Surface => EQUALIZER_SURFACE_SCROLL_FACTOR,
-        _ => page_size.powf(2.0 / 3.0),
-    };
-    let max_value = (adjustment.upper() - page_size).max(adjustment.lower());
-    let value = (adjustment.value() + dy * multiplier).clamp(adjustment.lower(), max_value);
-    adjustment.set_value(value);
-}
-
-fn nearest_parent_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
-    let mut parent = widget.parent();
-    while let Some(widget) = parent {
-        if let Ok(scroller) = widget.clone().downcast::<gtk::ScrolledWindow>() {
-            return Some(scroller);
-        }
-        parent = widget.parent();
-    }
-    None
+    scale.add_controller(events);
 }
 
 #[cfg(test)]
 mod tests {
-    use super::{EQUALIZER_BAND_COUNT, equalizer_presets};
+    use super::{EQUALIZER_BAND_COUNT, EqualizerSurface, equalizer_presets};
+    use gtk::prelude::*;
 
     #[test]
     fn equalizer_presets_cover_all_bands() {
@@ -294,5 +446,25 @@ mod tests {
             assert_eq!(bands.len(), EQUALIZER_BAND_COUNT);
             assert!(bands.iter().all(|gain| (-12.0..=12.0).contains(gain)));
         }
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn connected_equalizer_surface_releases_every_control() {
+        gtk::init().expect("GTK display");
+        crate::application::verify_interface_resources().expect("Rufin resources");
+        let surface = EqualizerSurface::new(&playback::EqualizerSettings::default());
+        surface.connect_changed(|_| {});
+        let root = surface.root.downgrade();
+        let controls = surface
+            .controls
+            .scales
+            .iter()
+            .map(gtk::prelude::ObjectExt::downgrade)
+            .collect::<Vec<_>>();
+        drop(surface);
+        while gtk::glib::MainContext::default().iteration(false) {}
+        assert!(root.upgrade().is_none());
+        assert!(controls.iter().all(|control| control.upgrade().is_none()));
     }
 }

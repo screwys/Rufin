@@ -1,0 +1,20 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinRecycledTextCell" parent="GtkBox">
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <child>
+      <object class="GtkLabel" id="label">
+        <property name="xalign">0</property>
+        <property name="halign">start</property>
+        <property name="hexpand">false</property>
+        <property name="width-chars">1</property>
+        <property name="wrap">false</property>
+        <property name="single-line-mode">true</property>
+        <property name="ellipsize">end</property>
+      </object>
+    </child>
+  </template>
+</interface>

@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="error_dialog">
+    <property name="title" translatable="yes">Edit metadata</property>
+    <style><class name="preferences"/></style>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">true</property>
+            <property name="title-widget"><object class="AdwWindowTitle" id="error_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkLabel" id="error_message">
+            <property name="halign">start</property>
+            <property name="wrap">true</property>
+            <property name="margin-start">24</property>
+            <property name="margin-end">24</property>
+            <property name="margin-top">18</property>
+            <property name="margin-bottom">24</property>
+            <style><class name="error"/></style>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwDialog" id="recovery_dialog">
+    <property name="title" translatable="yes">Edit metadata</property>
+    <style><class name="preferences"/></style>
+    <property name="child">
+      <object class="AdwToolbarView" id="recovery_toolbar">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">true</property>
+            <property name="title-widget"><object class="AdwWindowTitle" id="recovery_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwDialog" id="editor_dialog">
+    <property name="title" translatable="yes">Edit metadata</property>
+    <style><class name="preferences"/></style>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">true</property>
+            <property name="title-widget"><object class="AdwWindowTitle" id="editor_title"><property name="title" translatable="yes">Edit metadata</property></object></property>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <child>
+              <object class="GtkScrolledWindow" id="editor_scroller">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
+                <property name="propagate-natural-height">true</property>
+                <property name="vexpand">false</property>
+                <property name="child">
+                  <object class="AdwClamp">
+                    <property name="maximum-size">650</property>
+                    <property name="tightening-threshold">520</property>
+                    <property name="margin-top">1</property>
+                    <property name="margin-start">24</property>
+                    <property name="margin-end">24</property>
+                    <property name="child">
+                      <object class="GtkBox" id="fields">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">14</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkBox" id="identify_actions">
+                            <property name="orientation">horizontal</property>
+                            <property name="spacing">8</property>
+                            <property name="hexpand">true</property>
+                            <child>
+                              <object class="GtkLabel" id="identify_scope">
+                                <property name="visible">false</property>
+                                <property name="halign">start</property>
+                                <property name="hexpand">true</property>
+                                <style><class name="dim-label"/></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkBox" id="identify_spacer">
+                                <property name="orientation">horizontal</property>
+                                <property name="hexpand">true</property>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkButton" id="identify">
+                                <property name="label" translatable="yes">Identify</property>
+                                <style><class name="destructive-action"/></style>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="AdwClamp">
+                <property name="maximum-size">650</property>
+                <property name="margin-start">24</property>
+                <property name="margin-end">24</property>
+                <property name="margin-bottom">14</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <property name="spacing">8</property>
+                    <property name="hexpand">true</property>
+                    <child>
+                      <object class="GtkBox">
+                        <property name="orientation">horizontal</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkLabel" id="status">
+                            <property name="visible">false</property>
+                            <property name="halign">start</property>
+                            <property name="valign">center</property>
+                            <property name="hexpand">true</property>
+                            <property name="ellipsize">end</property>
+                            <style><class name="error"/></style>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+                    <child>
+                      <object class="GtkButton" id="save">
+                        <property name="label" translatable="yes">Save</property>
+                        <property name="sensitive">false</property>
+                        <style><class name="suggested-action"/></style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

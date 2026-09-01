@@ -412,7 +412,11 @@ impl Pipeline {
         &self,
         source: &SourceImages,
         request: &ArtworkRequest,
-    ) -> (ArtworkBindingIdentity, Option<Arc<DecodedImage>>) {
+    ) -> (
+        ArtworkBindingIdentity,
+        Vec<crate::DecodedImageIdentity>,
+        Option<Arc<DecodedImage>>,
+    ) {
         let mut state = lock_state(&self.shared);
         binding_identity_and_image_from_state(&mut state, source, request)
     }
@@ -503,10 +507,46 @@ fn binding_identity_and_image_from_state(
     state: &mut State,
     source: &SourceImages,
     request: &ArtworkRequest,
-) -> (ArtworkBindingIdentity, Option<Arc<DecodedImage>>) {
+) -> (
+    ArtworkBindingIdentity,
+    Vec<crate::DecodedImageIdentity>,
+    Option<Arc<DecodedImage>>,
+) {
     let identity = binding_identity_from_state(state, source, request);
+    let decoded_identities = decoded_identities_for_request(state, source, request);
     let ready = decoded_from_memory(state, source, request);
-    (identity, ready)
+    (identity, decoded_identities, ready)
+}
+
+fn decoded_identities_for_request(
+    state: &State,
+    source: &SourceImages,
+    request: &ArtworkRequest,
+) -> Vec<crate::DecodedImageIdentity> {
+    let source_epoch = source_epoch(state, &source.source_id);
+    request
+        .binding
+        .candidates()
+        .iter()
+        .filter(|candidate| !candidate.is_external() || request.external.allow_cached)
+        .map(|candidate| {
+            let external_epoch = candidate
+                .is_external()
+                .then_some(state.external_epoch)
+                .unwrap_or(0);
+            let family = decoded_candidate_family(
+                &source.source_id,
+                candidate,
+                source_epoch,
+                external_epoch,
+            );
+            crate::DecodedImageIdentity(decoded_key(
+                &family,
+                request.fetch_size,
+                request.render_size,
+            ))
+        })
+        .collect()
 }
 
 fn decoded_from_memory(

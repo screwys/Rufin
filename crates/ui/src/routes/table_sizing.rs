@@ -9,14 +9,12 @@ use crate::MIN_TABLE_COLUMN_WIDTH;
 use crate::shell::Shell;
 use crate::shell::layout::route_content_width;
 
-use super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET;
-
 const FITTED_TABLE_WIDTH_PADDING: i32 = 2;
 const TABLE_TARGET_WIDTH: i32 = 44;
 const TABLE_EXPAND_MIN_WIDTH: i32 = 140;
 
 pub(crate) fn route_column_view_initial_width(shell: &Shell) -> i32 {
-    route_column_view_initial_width_with_inset(shell, PRIMARY_ROUTE_HORIZONTAL_INSET)
+    route_column_view_initial_width_with_inset(shell, 0)
 }
 
 pub(crate) fn route_column_view_initial_width_with_inset(shell: &Shell, content_inset: i32) -> i32 {
@@ -37,6 +35,18 @@ fn vertical_scrollbar_width() -> i32 {
 }
 
 pub(crate) fn fitted_column_widths(base_widths: &[i32], available_width: i32) -> Vec<i32> {
+    let minimum_widths = base_widths
+        .iter()
+        .map(|width| (*width).clamp(MIN_TABLE_COLUMN_WIDTH, TABLE_TARGET_WIDTH))
+        .collect::<Vec<_>>();
+    fitted_column_widths_with_minimums(base_widths, &minimum_widths, available_width)
+}
+
+fn fitted_column_widths_with_minimums(
+    base_widths: &[i32],
+    minimum_widths: &[i32],
+    available_width: i32,
+) -> Vec<i32> {
     if base_widths.is_empty() {
         return Vec::new();
     }
@@ -49,10 +59,14 @@ pub(crate) fn fitted_column_widths(base_widths: &[i32], available_width: i32) ->
         return widths;
     }
 
-    let min_widths = base_widths
+    let min_widths = minimum_widths
         .iter()
-        .map(|width| (*width).clamp(MIN_TABLE_COLUMN_WIDTH, TABLE_TARGET_WIDTH))
+        .zip(base_widths)
+        .map(|(minimum, preferred)| (*minimum).clamp(1, (*preferred).max(1)))
         .collect::<Vec<_>>();
+    if min_widths.len() != base_widths.len() {
+        return fitted_column_widths(base_widths, available_width);
+    }
     let min_total = min_widths.iter().sum::<i32>();
     if min_total >= available_width {
         return proportional_column_widths(&min_widths, available_width);
@@ -282,14 +296,34 @@ fn fitted_table_available_width(
 }
 
 fn fit_preferred_column_widths(state: &ColumnViewWidthState) {
-    let preferred_widths = state
-        .columns
-        .borrow()
+    let columns = state.columns.borrow();
+    let preferred_widths = columns.iter().map(|(_, width)| *width).collect::<Vec<_>>();
+    let minimum_widths = columns
         .iter()
-        .map(|(_, width)| *width)
+        .map(|(column, preferred)| column_header_minimum_width(column, *preferred))
         .collect::<Vec<_>>();
-    let widths = fitted_column_widths(&preferred_widths, state.available_width.get());
+    drop(columns);
+    let widths = fitted_column_widths_with_minimums(
+        &preferred_widths,
+        &minimum_widths,
+        state.available_width.get(),
+    );
     apply_column_widths(state, &widths);
+}
+
+fn column_header_minimum_width(column: &gtk::ColumnViewColumn, preferred: i32) -> i32 {
+    let fallback = preferred.clamp(MIN_TABLE_COLUMN_WIDTH, TABLE_TARGET_WIDTH);
+    let header = column
+        .title()
+        .map(|title| compact_header_text_width(&title, MIN_TABLE_COLUMN_WIDTH))
+        .unwrap_or(MIN_TABLE_COLUMN_WIDTH)
+        .min(preferred.max(1));
+    fallback.max(header)
+}
+
+pub(crate) fn compact_header_text_width(header: &str, min_width: i32) -> i32 {
+    let width = header.chars().count().min(i32::MAX as usize / 8) as i32 * 8 + 20;
+    width.max(min_width)
 }
 
 fn apply_column_widths(state: &ColumnViewWidthState, widths: &[i32]) {
@@ -303,7 +337,24 @@ fn apply_column_widths(state: &ColumnViewWidthState, widths: &[i32]) {
 
 #[cfg(test)]
 mod tests {
-    use super::{fitted_table_available_width, scroller_vertical_scrollbar_width_for_fit};
+    use super::{
+        fitted_column_widths_with_minimums, fitted_table_available_width,
+        scroller_vertical_scrollbar_width_for_fit,
+    };
+
+    #[test]
+    fn flexible_content_yields_before_a_header_is_clipped() {
+        let widths = fitted_column_widths_with_minimums(
+            &[48, 292, 220, 148, 32],
+            &[44, 60, 60, 108, 32],
+            424,
+        );
+
+        assert_eq!(widths.iter().sum::<i32>(), 424);
+        assert!(widths[1] < 292);
+        assert!(widths[2] < 220);
+        assert!(widths[3] >= 108);
+    }
 
     #[test]
     fn scrollable_route_tables_use_overlay_scrollbar_width() {

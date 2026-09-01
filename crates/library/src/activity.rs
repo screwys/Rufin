@@ -5,7 +5,7 @@ use sqlx::{Connection, FromRow};
 
 use crate::{
     AlbumKey, ArtistKey, Database, GenreKey, LibraryError, LibraryResult, ListenKey,
-    ListenOutboxKey, ReadCancellation, SourceKey, TrackKey, TrackRoutePage,
+    ListenOutboxKey, ReadCancellation, RouteSeedWindow, SourceKey, TrackKey, TrackRoutePage,
     tracks::load_track_rows,
 };
 
@@ -210,6 +210,7 @@ impl Database {
         source: SourceKey,
         folder: Option<crate::FolderKey>,
         query: &str,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let query: String = query.trim().to_lowercase().chars().take(256).collect();
@@ -236,11 +237,16 @@ impl Database {
         .bind(HISTORY_LIMIT)
         .fetch_all(&mut *transaction)
         .await?;
-        let first_rows =
-            load_track_rows(&mut transaction, source, &order[..order.len().min(64)]).await?;
+        let seed = window.range(order.len());
+        let first_row_position = seed.start;
+        let first_rows = load_track_rows(&mut transaction, source, &order[seed]).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(TrackRoutePage { order, first_rows })
+        Ok(TrackRoutePage {
+            order,
+            first_row_position,
+            first_rows,
+        })
     }
 
     pub async fn calendar_activity_summary(

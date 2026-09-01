@@ -1,0 +1,202 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesPage" id="library_page">
+    <property name="title" translatable="yes">Library</property>
+    <property name="icon-name">rufin-library-music-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="servers_group">
+        <property name="title" translatable="yes">Servers</property>
+      </object>
+    </child>
+  </object>
+
+  <object class="AdwActionRow" id="empty_remote_row">
+    <property name="title" translatable="yes">No remote sources configured</property>
+    <property name="subtitle" translatable="yes">Jellyfin, Navidrome, or OpenSubsonic</property>
+  </object>
+
+  <object class="AdwPreferencesGroup" id="downloads_group">
+    <property name="title" translatable="yes">Downloads</property>
+    <property name="description" translatable="yes">Keep music available offline. Folder changes only affect new downloads</property>
+  </object>
+  <object class="AdwActionRow" id="download_folder_row">
+    <property name="title" translatable="yes">Download Folder</property>
+    <child type="suffix">
+      <object class="GtkButton" id="reset_folder">
+        <property name="icon-name">rufin-view-refresh-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Use Rufin data folder</property>
+        <property name="valign">center</property>
+        <style><class name="flat"/></style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkButton" id="choose_folder">
+        <property name="label" translatable="yes">Choose</property>
+        <property name="valign">center</property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwSwitchRow" id="downloaded_badge">
+    <property name="title" translatable="yes">Show downloaded badge</property>
+  </object>
+
+  <object class="AdwPreferencesRow" id="download_actions_row">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <property name="child">
+      <object class="GtkBox" id="download_action_buttons">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">0</property>
+        <property name="homogeneous">true</property>
+        <property name="halign">fill</property>
+        <property name="hexpand">true</property>
+        <property name="margin-top">6</property>
+        <property name="margin-bottom">6</property>
+        <property name="margin-start">8</property>
+        <property name="margin-end">8</property>
+        <child>
+          <object class="GtkButton" id="remove_all">
+            <property name="tooltip-text" translatable="yes">Remove all downloads</property>
+            <property name="halign">fill</property>
+            <property name="hexpand">true</property>
+            <style><class name="flat"/><class name="destructive-action"/></style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="halign">center</property>
+                <property name="valign">center</property>
+                <child><object class="GtkImage"><property name="icon-name">rufin-user-trash-symbolic</property></object></child>
+                <child>
+                  <object class="GtkLabel" id="remove_all_label">
+                    <property name="label" translatable="yes">Remove all downloads</property>
+                    <property name="ellipsize">end</property>
+                    <property name="width-chars">0</property>
+                    <property name="max-width-chars">18</property>
+                    <property name="wrap">true</property>
+                    <property name="wrap-mode">word-char</property>
+                    <property name="lines">2</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwPreferencesRow" id="download_queue_header">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">6</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">8</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <child>
+          <object class="GtkLabel" id="download_queue_label">
+            <property name="label" translatable="yes">Download Queue</property>
+            <property name="halign">start</property>
+            <style><class name="heading"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="pause_downloads">
+            <property name="icon-name">rufin-media-playback-pause-symbolic</property>
+            <property name="valign">center</property>
+            <property name="visible">false</property>
+            <style><class name="circular"/><class name="suggested-action"/><class name="download-queue-pause"/></style>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwPreferencesGroup" id="local_group">
+    <property name="title" translatable="yes">Local Folders</property>
+    <property name="description" translatable="yes">These folders are combined into the Local source and shown through folder browsing</property>
+  </object>
+  <object class="AdwActionRow" id="empty_local_row">
+    <property name="title" translatable="yes">No local folders configured</property>
+  </object>
+  <object class="AdwPreferencesRow" id="local_actions_row">
+    <property name="activatable">false</property>
+    <property name="selectable">false</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property>
+        <property name="spacing">0</property>
+        <property name="homogeneous">true</property>
+        <property name="halign">fill</property>
+        <property name="hexpand">true</property>
+        <property name="margin-top">6</property>
+        <property name="margin-bottom">6</property>
+        <property name="margin-start">8</property>
+        <property name="margin-end">8</property>
+        <child>
+          <object class="GtkButton" id="add_local">
+            <property name="tooltip-text" translatable="yes">Add a music folder</property>
+            <property name="halign">fill</property>
+            <property name="hexpand">true</property>
+            <style><class name="flat"/></style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="halign">center</property>
+                <property name="valign">center</property>
+                <child><object class="GtkImage"><property name="icon-name">rufin-folder-new-symbolic</property></object></child>
+                <child>
+                  <object class="GtkLabel" id="add_local_label">
+                    <property name="label" translatable="yes">Add a music folder</property>
+                    <property name="ellipsize">end</property>
+                    <property name="width-chars">0</property>
+                    <property name="max-width-chars">18</property>
+                    <property name="wrap">true</property>
+                    <property name="wrap-mode">word-char</property>
+                    <property name="lines">2</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="resync_local">
+            <property name="tooltip-text" translatable="yes">Resync Library</property>
+            <property name="halign">fill</property>
+            <property name="hexpand">true</property>
+            <style><class name="flat"/></style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="halign">center</property>
+                <property name="valign">center</property>
+                <child><object class="GtkImage"><property name="icon-name">rufin-view-refresh-symbolic</property></object></child>
+                <child>
+                  <object class="GtkLabel" id="resync_local_label">
+                    <property name="label" translatable="yes">Resync Library</property>
+                    <property name="ellipsize">end</property>
+                    <property name="width-chars">0</property>
+                    <property name="max-width-chars">18</property>
+                    <property name="wrap">true</property>
+                    <property name="wrap-mode">word-char</property>
+                    <property name="lines">2</property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

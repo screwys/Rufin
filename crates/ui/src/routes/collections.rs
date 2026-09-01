@@ -32,8 +32,8 @@ use super::grid_cells::{
     collection_grid_with_demand,
 };
 use super::library_fields::{
-    COLLECTION_GRID_CARD_GAP, column_width, compact_header_column_width, grid_label_with_label,
-    item_at, item_at_from_item, playlist_artwork, track_field,
+    column_width, compact_header_column_width, grid_label_with_label, item_at, item_at_from_item,
+    playlist_artwork, track_field,
 };
 use super::playlist_picker::install_track_drag_source;
 use super::route::Route;
@@ -500,7 +500,10 @@ impl LibraryCollectionProjection {
         margin_start: i32,
         margin_end: i32,
     ) -> gtk::Widget {
-        let active = self.presentation.borrow().widget();
+        let presentation = self.presentation.borrow();
+        let active = presentation.widget();
+        let row = matches!(&*presentation, LibraryPresentationProjection::Row(_));
+        drop(presentation);
         let previous_host = self.host.borrow().clone();
         match previous_host {
             LibraryCollectionHost::Embedded(root) => {
@@ -512,8 +515,8 @@ impl LibraryCollectionProjection {
                 scroller: previous, ..
             } => previous.set_child(None::<&gtk::Widget>),
         }
-        active.set_margin_start(margin_start);
-        active.set_margin_end(margin_end);
+        active.set_margin_start(if row { 0 } else { margin_start });
+        active.set_margin_end(if row { 0 } else { margin_end });
         scroller.set_child(Some(&active));
         self.presentation.borrow().attach_scroller(scroller);
         let allocation_only = matches!(
@@ -584,8 +587,9 @@ impl LibraryCollectionProjection {
                         margin_end,
                         ..
                     } => {
-                        widget.set_margin_start(margin_start);
-                        widget.set_margin_end(margin_end);
+                        let row = matches!(&presentation, LibraryPresentationProjection::Row(_));
+                        widget.set_margin_start(if row { 0 } else { margin_start });
+                        widget.set_margin_end(if row { 0 } else { margin_end });
                         scroller.set_child(Some(&widget));
                         presentation.attach_scroller(&scroller);
                     }
@@ -1582,15 +1586,6 @@ pub(super) fn track_grid_field_links(track: &TrackRow, field: LibraryField) -> D
         ),
         _ => DetailLinks::text(&track_field(track, field)),
     }
-}
-
-pub(super) fn collection_grid_card() -> gtk::Box {
-    let card = gtk::Box::new(gtk::Orientation::Vertical, COLLECTION_GRID_CARD_GAP);
-    card.set_hexpand(true);
-    card.set_vexpand(false);
-    card.set_halign(gtk::Align::Fill);
-    card.set_valign(gtk::Align::Start);
-    card
 }
 
 #[cfg(test)]

@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesGroup" id="group">
+    <property name="title" translatable="yes">Local library</property>
+    <property name="description" translatable="yes">Choose one or more folders to scan and play directly from this computer</property>
+    <child>
+      <object class="AdwActionRow" id="summary">
+        <property name="title" translatable="yes">Folders</property>
+        <child type="suffix">
+          <object class="GtkButton" id="add">
+            <property name="label" translatable="yes">Add folder</property>
+            <property name="valign">center</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkButton" id="connect">
+    <property name="valign">center</property>
+    <style><class name="pill-button"/><class name="pill"/><class name="suggested-action"/></style>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property><property name="spacing">6</property>
+        <child><object class="GtkImage"><property name="icon-name">rufin-folder-music-symbolic</property></object></child>
+        <child><object class="GtkLabel"><property name="label" translatable="yes">Connect</property></object></child>
+      </object>
+    </property>
+  </object>
+</interface>

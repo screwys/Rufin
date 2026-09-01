@@ -12,7 +12,7 @@ use localization::{msgid, tr};
 use super::{
     PreferencesNavigationControls,
     layout::button_row,
-    quality_selection_row,
+    quality_selection_row, row_action_content,
     source::{
         configured_source_display_name, configured_source_icon_name,
         configured_source_kind_display_name, half_stars_row,
@@ -33,34 +33,11 @@ const DOWNLOAD_QUALITIES: [StreamQuality; 5] = [
     StreamQuality::MaxBitrateKbps(128),
 ];
 
-struct DownloadQueuesView {
-    queue: gtk::glib::WeakRef<adw::PreferencesGroup>,
-    rendered_rows: Rc<RefCell<Vec<DownloadQueueRow>>>,
-    refresh: Rc<dyn Fn()>,
-}
-
 struct DownloadQueueRow {
     row: adw::ActionRow,
     job: Option<downloads::DownloadQueueItem>,
     up: Option<gtk::Button>,
     down: Option<gtk::Button>,
-}
-
-impl DownloadQueuesView {
-    fn refresh(&self) {
-        (self.refresh)();
-    }
-}
-
-impl Drop for DownloadQueuesView {
-    fn drop(&mut self) {
-        let rows = self.rendered_rows.take();
-        if let Some(queue) = self.queue.upgrade() {
-            for row in rows {
-                queue.remove(&row.row);
-            }
-        }
-    }
 }
 
 pub(super) fn library_page(
@@ -84,10 +61,10 @@ pub(super) fn library_page(
     navigation.push(&root);
     let shell_for_pop = Rc::clone(shell);
     navigation.connect_popped(move |_, _| {
-        shell_for_pop.clear_retained_add_server_form();
+        shell_for_pop.release_inactive_add_server_form();
     });
-    if open_add_server {
-        let page = shell.add_server_navigation_page(&navigation, dialog);
+    if open_add_server || shell.has_retained_add_server_form() {
+        let page = shell.add_server_navigation_page(dialog);
         navigation.push(&page);
         navigation_controls.set_nested_page_visible(true);
     }
@@ -101,10 +78,28 @@ fn library_sources_page(
     navigation_controls: &PreferencesNavigationControls,
     focus_download_queue: bool,
 ) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder()
-        .title(tr("Library"))
-        .icon_name("rufin-drive-multidisk-symbolic")
-        .build();
+    let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        library_page: adw::PreferencesPage,
+        servers_group: adw::PreferencesGroup,
+        empty_remote_row: adw::ActionRow,
+        downloads_group: adw::PreferencesGroup,
+        download_folder_row: adw::ActionRow,
+        reset_folder: gtk::Button,
+        choose_folder: gtk::Button,
+        downloaded_badge: adw::SwitchRow,
+        download_actions_row: adw::PreferencesRow,
+        download_action_buttons: gtk::Box,
+        remove_all: gtk::Button,
+        download_queue_header: adw::PreferencesRow,
+        pause_downloads: gtk::Button,
+        local_group: adw::PreferencesGroup,
+        empty_local_row: adw::ActionRow,
+        local_actions_row: adw::PreferencesRow,
+        add_local: gtk::Button,
+        resync_local: gtk::Button,
+    });
 
     let configured = shell.source.configured.borrow().clone();
     let local_source = configured
@@ -119,16 +114,8 @@ fn library_sources_page(
         .cloned()
         .collect::<Vec<_>>();
 
-    let servers_group = adw::PreferencesGroup::builder()
-        .title(tr("Servers"))
-        .build();
-
     if remote_sources.is_empty() {
-        let row = adw::ActionRow::builder()
-            .title(tr("No remote sources configured"))
-            .subtitle(tr("Jellyfin, Navidrome, or OpenSubsonic"))
-            .build();
-        servers_group.add(&row);
+        servers_group.add(&empty_remote_row);
     } else {
         for server in &remote_sources {
             let selected = configured.selected_source_id.as_ref() == Some(&server.id);
@@ -168,12 +155,15 @@ fn library_sources_page(
             row.add_suffix(&gtk::Image::from_icon_name("rufin-go-next-symbolic"));
             row.set_activatable(true);
             let settings_shell = Rc::clone(shell);
-            let navigation = navigation.clone();
+            let navigation = navigation.downgrade();
             let navigation_controls = navigation_controls.clone();
             let dialog = dialog.downgrade();
             let server = server.clone();
             row.connect_activated(move |_| {
                 let Some(dialog) = dialog.upgrade() else {
+                    return;
+                };
+                let Some(navigation) = navigation.upgrade() else {
                     return;
                 };
                 let navigation_controls_for_close = navigation_controls.clone();
@@ -196,19 +186,21 @@ fn library_sources_page(
 
     let add_server = button_row("Add server", "rufin-list-add-symbolic");
     let add_shell = Rc::clone(shell);
-    let add_navigation = navigation.clone();
+    let add_navigation = navigation.downgrade();
     let add_navigation_controls = navigation_controls.clone();
     let add_server_dialog = dialog.downgrade();
     add_server.connect_activated(move |_| {
         let Some(add_server_dialog) = add_server_dialog.upgrade() else {
             return;
         };
-        let page = add_shell.add_server_navigation_page(&add_navigation, &add_server_dialog);
+        let Some(add_navigation) = add_navigation.upgrade() else {
+            return;
+        };
+        let page = add_shell.add_server_navigation_page(&add_server_dialog);
         add_navigation.push(&page);
         add_navigation_controls.set_nested_page_visible(true);
     });
     servers_group.add(&add_server);
-    page.add(&servers_group);
 
     if let Some(server) = remote_sources
         .iter()
@@ -219,34 +211,17 @@ fn library_sources_page(
             .current
             .borrow()
             .download_settings(&server.id);
-        let downloads_group = adw::PreferencesGroup::builder()
-            .title(tr("Downloads"))
-            .description(tr(
-                "Keep music available offline. Folder changes only affect new downloads",
-            ))
-            .build();
-        let folder = adw::ActionRow::builder()
-            .title(tr("Download Folder"))
-            .subtitle(
-                download_settings
-                    .directory
-                    .as_deref()
-                    .map(|path| path.display().to_string())
-                    .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
-            )
-            .build();
-        let reset_folder = gtk::Button::from_icon_name("rufin-edit-clear-symbolic");
-        reset_folder.add_css_class("flat");
-        reset_folder.set_valign(gtk::Align::Center);
-        reset_folder.set_tooltip_text(Some(&tr("Use Rufin data folder")));
+        download_folder_row.set_subtitle(
+            &download_settings
+                .directory
+                .as_deref()
+                .map(|path| path.display().to_string())
+                .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
+        );
         reset_folder.set_visible(download_settings.directory.is_some());
-        folder.add_suffix(&reset_folder);
-        let choose_folder = gtk::Button::with_label(&tr("Choose"));
-        choose_folder.set_valign(gtk::Align::Center);
-        folder.add_suffix(&choose_folder);
         let choose_shell = Rc::clone(shell);
         let choose_source_id = server.id.clone();
-        let choose_row = folder.downgrade();
+        let choose_row = download_folder_row.downgrade();
         let choose_reset = reset_folder.downgrade();
         choose_folder.connect_clicked(move |_| {
             let shell = Rc::clone(&choose_shell);
@@ -291,9 +266,12 @@ fn library_sources_page(
         });
         let reset_shell = Rc::clone(shell);
         let reset_source_id = server.id.clone();
-        let reset_row = folder.downgrade();
-        let reset_button = reset_folder.clone();
+        let reset_row = download_folder_row.downgrade();
+        let reset_button = reset_folder.downgrade();
         reset_folder.connect_clicked(move |_| {
+            let Some(reset_button) = reset_button.upgrade() else {
+                return;
+            };
             if reset_shell
                 .update_app_settings("reset download folder", |settings| {
                     settings.set_download_directory(reset_source_id.clone(), None)
@@ -306,7 +284,7 @@ fn library_sources_page(
                 reset_button.set_visible(false);
             }
         });
-        downloads_group.add(&folder);
+        downloads_group.add(&download_folder_row);
 
         let quality_shell = Rc::clone(shell);
         let quality_source_id = server.id.clone();
@@ -332,10 +310,7 @@ fn library_sources_page(
             },
         );
         downloads_group.add(&quality);
-        let downloaded_badge = adw::SwitchRow::builder()
-            .title(tr("Show downloaded badge"))
-            .active(shell.settings.current.borrow().show_downloaded_badges)
-            .build();
+        downloaded_badge.set_active(shell.settings.current.borrow().show_downloaded_badges);
         let downloaded_badge_shell = Rc::clone(shell);
         downloaded_badge.connect_active_notify(move |row| {
             downloaded_badge_shell.set_downloaded_badges_visible(row.is_active());
@@ -349,11 +324,7 @@ fn library_sources_page(
             download_settings.rules,
         );
 
-        let actions_row = adw::PreferencesRow::new();
-        let actions = action_button_box();
-        actions.append(&add_rule);
-        let remove_all = row_action_button("Remove all downloads", "rufin-user-trash-symbolic");
-        remove_all.add_css_class("destructive-action");
+        download_action_buttons.prepend(&add_rule);
         let remove_shell = Rc::clone(shell);
         let source_id = server.id.clone();
         let preferences_dialog = dialog.downgrade();
@@ -363,29 +334,18 @@ fn library_sources_page(
             };
             confirm_remove_all_downloads(&remove_shell, &preferences_dialog, source_id.clone());
         });
-        actions.append(&remove_all);
-        actions_row.set_child(Some(&actions));
-        actions_row.set_activatable(false);
-        actions_row.set_selectable(false);
-        downloads_group.add(&actions_row);
+        downloads_group.add(&download_actions_row);
 
-        let (queue_header, pause_downloads) = download_queue_header();
-        downloads_group.add(&queue_header);
+        downloads_group.add(&download_queue_header);
         let queue_focus = add_download_queue(&downloads_group, shell, &server.id, &pause_downloads);
         if focus_download_queue {
             gtk::glib::idle_add_local_once(move || {
                 queue_focus.grab_focus();
             });
         }
-        page.add(&downloads_group);
+        library_page.add(&downloads_group);
     }
 
-    let local_group = adw::PreferencesGroup::builder()
-        .title(tr("Local Folders"))
-        .description(tr(
-            "These folders are combined into the Local source and shown through folder browsing",
-        ))
-        .build();
     if let Some(half_stars) = local_source
         .as_ref()
         .and_then(|source| half_stars_row(shell, source))
@@ -393,10 +353,7 @@ fn library_sources_page(
         local_group.add(&half_stars);
     }
     if configured.local_folders.is_empty() {
-        let row = adw::ActionRow::builder()
-            .title(tr("No local folders configured"))
-            .build();
-        local_group.add(&row);
+        local_group.add(&empty_local_row);
     } else {
         for folder in configured.local_folders.iter() {
             let row = adw::ActionRow::builder()
@@ -424,9 +381,6 @@ fn library_sources_page(
         }
     }
 
-    let local_actions = adw::PreferencesRow::new();
-    let action_buttons = action_button_box();
-    let add_local = row_action_button("Add a music folder", "rufin-folder-new-symbolic");
     let add_shell = Rc::clone(shell);
     let add_dialog = dialog.downgrade();
     add_local.connect_clicked(move |_| {
@@ -451,8 +405,6 @@ fn library_sources_page(
             dialog.close();
         });
     });
-    action_buttons.append(&add_local);
-    let resync_local = row_action_button("Resync Library", "rufin-view-refresh-symbolic");
     let local_source_id = local_source.map(|source| source.id);
     resync_local.set_sensitive(!configured.local_folders.is_empty() && local_source_id.is_some());
     let source = shell.products.source.clone();
@@ -465,14 +417,10 @@ fn library_sources_page(
             dialog.close();
         }
     });
-    action_buttons.append(&resync_local);
-    local_actions.set_child(Some(&action_buttons));
-    local_actions.set_activatable(false);
-    local_actions.set_selectable(false);
-    local_group.add(&local_actions);
-    page.add(&local_group);
+    local_group.add(&local_actions_row);
+    library_page.add(&local_group);
 
-    page
+    library_page
 }
 
 fn add_download_rules(
@@ -682,8 +630,8 @@ fn add_download_queue(
     source_id: &sources::SourceId,
     pause_downloads: &gtk::Button,
 ) -> gtk::Widget {
-    let queue_rows = Rc::new(std::cell::RefCell::new(Vec::<DownloadQueueRow>::new()));
-    let rendered_rows = Rc::clone(&queue_rows);
+    let queue_rows = Rc::new(RefCell::new(Vec::<DownloadQueueRow>::new()));
+    let focus_rows = Rc::clone(&queue_rows);
     let weak_shell = Rc::downgrade(shell);
     let weak_queue = queue.downgrade();
     let source_id = source_id.clone();
@@ -903,24 +851,15 @@ fn add_download_queue(
             });
         }
     });
-    let view = DownloadQueuesView {
-        queue: queue.downgrade(),
-        rendered_rows: Rc::clone(&rendered_rows),
-        refresh: Rc::clone(&refresh),
-    };
     shell.downloads.set_queue_refresh(&refresh);
-    view.refresh();
-    let focus = rendered_rows
+    refresh();
+    let focus = focus_rows
         .borrow()
         .first()
         .map(|row| row.row.clone().upcast())
         .expect("the download queue always renders one row");
-    let view = Rc::new(std::cell::RefCell::new(Some(view)));
-    let view_for_root = Rc::clone(&view);
-    queue.connect_root_notify(move |queue| {
-        if queue.root().is_none() {
-            view_for_root.borrow_mut().take();
-        }
+    queue.connect_root_notify(move |_| {
+        let _ = &refresh;
     });
     focus
 }
@@ -986,68 +925,6 @@ fn confirm_remove_all_downloads(
             }
         }
     });
-}
-
-fn action_button_box() -> gtk::Box {
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    actions.set_homogeneous(true);
-    actions.set_halign(gtk::Align::Fill);
-    actions.set_hexpand(true);
-    actions.set_margin_top(6);
-    actions.set_margin_bottom(6);
-    actions.set_margin_start(8);
-    actions.set_margin_end(8);
-    actions
-}
-
-fn row_action_button(title: &str, icon_name: &str) -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.set_halign(gtk::Align::Fill);
-    button.set_hexpand(true);
-    button.set_tooltip_text(Some(&tr(title)));
-    button.set_child(Some(&row_action_content(title, icon_name)));
-    button
-}
-
-fn row_action_content(title: &str, icon_name: &str) -> gtk::Box {
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    content.set_halign(gtk::Align::Center);
-    content.set_valign(gtk::Align::Center);
-    content.append(&gtk::Image::from_icon_name(icon_name));
-    let label = gtk::Label::new(Some(&tr(title)));
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_width_chars(0);
-    label.set_max_width_chars(18);
-    label.set_wrap(true);
-    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    label.set_lines(2);
-    content.append(&label);
-    content
-}
-
-fn download_queue_header() -> (adw::PreferencesRow, gtk::Button) {
-    let row = adw::PreferencesRow::new();
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    content.set_margin_top(12);
-    content.set_margin_bottom(8);
-    content.set_margin_start(12);
-    content.set_margin_end(12);
-    let label = gtk::Label::new(Some(&tr("Download Queue")));
-    label.add_css_class("heading");
-    label.set_halign(gtk::Align::Start);
-    content.append(&label);
-    let pause = gtk::Button::from_icon_name("rufin-media-playback-pause-symbolic");
-    pause.add_css_class("circular");
-    pause.add_css_class("suggested-action");
-    pause.add_css_class("download-queue-pause");
-    pause.set_valign(gtk::Align::Center);
-    pause.set_visible(false);
-    content.append(&pause);
-    row.set_child(Some(&content));
-    row.set_activatable(false);
-    row.set_selectable(false);
-    (row, pause)
 }
 
 fn confirm_remove_local_folder(shell: &Rc<Shell>, path: String, row: adw::ActionRow) {
@@ -1182,59 +1059,4 @@ fn download_quality_choices(limit_kbps: Option<u32>) -> Vec<StreamQuality> {
                 .is_none_or(|bitrate| limit_kbps.is_none_or(|limit| bitrate <= limit))
         })
         .collect()
-}
-
-#[cfg(test)]
-mod download_queue_lifecycle_tests {
-    use std::cell::{Cell, RefCell};
-    use std::rc::Rc;
-
-    use super::{DownloadQueueRow, DownloadQueuesView};
-    use crate::downloads::DownloadsState;
-
-    struct RowDropProbe(Rc<Cell<usize>>);
-
-    impl Drop for RowDropProbe {
-        fn drop(&mut self) {
-            self.0.set(self.0.get() + 1);
-        }
-    }
-
-    #[test]
-    fn closing_download_queues_view_releases_rows_and_shell_refresh_is_weak() {
-        let dropped_rows = Rc::new(Cell::new(0));
-        let refresh_count = Rc::new(Cell::new(0));
-        let rows = (0..3)
-            .map(|_| RowDropProbe(Rc::clone(&dropped_rows)))
-            .collect::<Vec<_>>();
-        let refresh_count_for_view = Rc::clone(&refresh_count);
-        let rendered_rows = Rc::new(RefCell::new(Vec::<DownloadQueueRow>::new()));
-        let weak_rendered_rows = Rc::downgrade(&rendered_rows);
-        let rendered_rows_for_view = Rc::clone(&rendered_rows);
-        let refresh: Rc<dyn Fn()> = Rc::new(move || {
-            assert_eq!(rows.len(), 3);
-            assert!(rendered_rows_for_view.borrow().is_empty());
-            refresh_count_for_view.set(refresh_count_for_view.get() + 1);
-        });
-        let view = DownloadQueuesView {
-            queue: gtk::glib::WeakRef::new(),
-            rendered_rows: Rc::clone(&rendered_rows),
-            refresh: Rc::clone(&refresh),
-        };
-        let shell_downloads = DownloadsState::default();
-        shell_downloads.set_queue_refresh(&refresh);
-        drop(refresh);
-        drop(rendered_rows);
-
-        shell_downloads.refresh_queue();
-        assert_eq!(refresh_count.get(), 1);
-        assert_eq!(dropped_rows.get(), 0);
-        assert!(weak_rendered_rows.upgrade().is_some());
-
-        drop(view);
-        assert_eq!(dropped_rows.get(), 3);
-        assert!(weak_rendered_rows.upgrade().is_none());
-        shell_downloads.refresh_queue();
-        assert_eq!(refresh_count.get(), 1);
-    }
 }

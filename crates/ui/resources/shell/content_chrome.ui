@@ -1,0 +1,79 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkOverlay" id="root">
+    <property name="hexpand">true</property><property name="vexpand">true</property>
+    <property name="child">
+      <object class="GtkPaned" id="right_split">
+        <property name="orientation">horizontal</property><property name="focusable">false</property><property name="wide-handle">true</property>
+        <property name="resize-start-child">false</property><property name="shrink-start-child">true</property>
+        <property name="resize-end-child">true</property><property name="shrink-end-child">false</property>
+        <property name="hexpand">true</property><property name="vexpand">true</property>
+        <style><class name="right-pane-split"/></style>
+        <property name="start-child">
+          <object class="GtkOverlay" id="main_well">
+            <property name="overflow">hidden</property><property name="width-request">1</property>
+            <property name="hexpand">true</property><property name="vexpand">true</property>
+            <property name="child">
+              <object class="AdwToolbarView" id="main_area">
+                <property name="width-request">1</property><property name="halign">fill</property><property name="valign">fill</property>
+                <property name="hexpand">true</property><property name="vexpand">true</property><property name="overflow">hidden</property>
+                <style><class name="main-area"/></style>
+                <property name="content">
+                  <object class="GtkStack" id="route_host">
+                    <property name="hhomogeneous">false</property><property name="vhomogeneous">false</property><property name="interpolate-size">false</property>
+                    <property name="transition-type">none</property><property name="transition-duration">0</property>
+                    <property name="width-request">1</property><property name="halign">fill</property>
+                    <property name="hexpand">true</property><property name="vexpand">true</property><property name="overflow">hidden</property>
+                    <style><class name="route-viewport"/></style>
+                  </object>
+                </property>
+              </object>
+            </property>
+            <child type="overlay">
+              <object class="GtkBox" id="route_loading">
+                <property name="visible">false</property>
+                <property name="orientation">vertical</property>
+                <property name="halign">fill</property><property name="valign">fill</property><property name="hexpand">true</property><property name="vexpand">true</property>
+                <property name="can-target">false</property>
+                <style><class name="main-area"/><class name="loading-page"/></style>
+                <child>
+                  <object class="AdwSpinner">
+                    <property name="halign">center</property><property name="valign">center</property>
+                    <property name="hexpand">true</property><property name="vexpand">true</property>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+        <property name="end-child">
+          <object class="GtkScrolledWindow" id="right_panel_slot">
+            <property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
+          </object>
+        </property>
+      </object>
+    </property>
+    <child type="overlay">
+      <object class="GtkBox" id="right_resize_handle">
+        <property name="orientation">vertical</property><property name="width-request">4</property>
+        <property name="halign">start</property><property name="valign">fill</property><property name="vexpand">true</property>
+        <property name="focusable">false</property><property name="visible">false</property>
+        <style><class name="right-sidebar-resize-handle"/></style>
+      </object>
+    </child>
+    <child type="overlay">
+      <object class="GtkButton" id="tiny_nav_button">
+        <property name="visible">false</property>
+        <property name="icon-name">rufin-sidebar-show-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Show sidebar</property>
+        <property name="halign">start</property><property name="valign">end</property>
+        <property name="margin-start">8</property><property name="margin-bottom">8</property>
+        <accessibility><property name="label" translatable="yes">Show sidebar</property></accessibility>
+        <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="tiny-sidebar-button"/></style>
+      </object>
+    </child>
+  </object>
+</interface>

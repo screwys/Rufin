@@ -63,6 +63,76 @@ rule:
           });
           $$$REST
         }
+    - all:
+        - kind: function_item
+        - regex: 'let\s+\w+\s*=\s*self\.clone\(\)'
+        - has:
+            pattern: self.$FIELD.$CONNECT($$$ARGS)
+            stopBy: end
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $OWNER.clone();
+          $$$MIDDLE
+          $OWNER.$FIELD.clone().$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $OWNER.clone();
+          $$$MIDDLE
+          $CONTROLLER.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$SETUP
+          $OWNER.add_controller($CONTROLLER);
+          $$$REST
+        }
+constraints:
+  CONNECT:
+    regex: ^connect_
+---
+id: activatable-widget-signal-must-not-own-row
+language: Rust
+severity: error
+message: An activatable child callback must capture its owning row weakly.
+rule:
+  any:
+    - pattern: |
+        {
+          $$$BEFORE
+          $ROW.set_activatable_widget(Some(&$BUTTON));
+          $$$MIDDLE
+          let $CAPTURE = $ROW.clone();
+          $$$SETUP
+          $BUTTON.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
+    - pattern: |
+        {
+          $$$BEFORE
+          let $CAPTURE = $ROW.clone();
+          $$$MIDDLE
+          $ROW.set_activatable_widget(Some(&$BUTTON));
+          $$$SETUP
+          $BUTTON.$CONNECT(move |$$$PARAMS| {
+            $$$BODY
+            $CAPTURE.$METHOD($$$ARGS);
+            $$$AFTER
+          });
+          $$$REST
+        }
 constraints:
   CONNECT:
     regex: ^connect_
@@ -168,6 +238,18 @@ rule:
             $$$MEMBERS
           }
         stopBy: end
+---
+id: scrolled-window-child-must-not-downcast-to-box
+language: Rust
+severity: error
+message: GtkScrolledWindow wraps non-scrollable children in GtkViewport; traverse the viewport before downcasting its child to GtkBox.
+rule:
+  any:
+    - pattern: $SCROLLER.child().and_then(|$CHILD| $CHILD.downcast::<gtk::Box>().ok())
+    - pattern: $SCROLLER.child().and_downcast::<gtk::Box>()
+constraints:
+  SCROLLER:
+    regex: scroller
 ---
 id: track-search-callback-must-not-own-track-projection
 language: Rust

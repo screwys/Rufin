@@ -17,9 +17,7 @@ use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::path::PathBuf;
-#[cfg(unix)]
-use std::process::Command;
-use std::process::ExitCode;
+use std::process::{Command, ExitCode};
 #[cfg(target_os = "macos")]
 use std::{fs, path::Path};
 use tracing::info;
@@ -44,15 +42,59 @@ fn main() -> ExitCode {
         }
         None => false,
     };
+    let settings = app::startup_settings();
+    if let Some(result) = restart_with_language(&settings.load().ui.language) {
+        return result;
+    }
+    if let Err(error) = localization::initialize() {
+        let _ = writeln!(io::stderr().lock(), "Could not initialize gettext: {error}");
+    }
     let _desktop_platform = desktop_integration::Platform::initialize();
     let diagnostics = diagnostics::Diagnostics::install(paths::state_dir());
     info!("starting Rufin native shell");
 
-    let bootstrap = move || app::runtime_inputs(diagnostics, !updated_restart);
+    let bootstrap = move || app::runtime_inputs(diagnostics, !updated_restart, settings);
     if updated_restart {
         ui::run_application_after_update(bootstrap, || {})
     } else {
         ui::run_application(bootstrap)
+    }
+}
+
+fn restart_with_language(saved_language: &str) -> Option<ExitCode> {
+    let language = localization::process_language(saved_language)?;
+    if env::var("LANGUAGE").ok().as_deref() == Some(language.as_str()) {
+        return None;
+    }
+    let executable = env::current_exe().ok()?;
+    let mut command = Command::new(executable);
+    command
+        .args(env::args_os().skip(1))
+        .env("LANGUAGE", language);
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::process::CommandExt as _;
+
+        let error = command.exec();
+        let _ = writeln!(
+            io::stderr().lock(),
+            "Could not select Rufin language: {error}"
+        );
+        Some(ExitCode::FAILURE)
+    }
+    #[cfg(not(unix))]
+    {
+        match command.spawn() {
+            Ok(_) => Some(ExitCode::SUCCESS),
+            Err(error) => {
+                let _ = writeln!(
+                    io::stderr().lock(),
+                    "Could not select Rufin language: {error}"
+                );
+                Some(ExitCode::FAILURE)
+            }
+        }
     }
 }
 

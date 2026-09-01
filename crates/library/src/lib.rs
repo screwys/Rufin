@@ -106,8 +106,56 @@ pub enum LibraryError {
 
 pub type LibraryResult<T> = Result<T, LibraryError>;
 
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct RouteSeedWindow {
+    relative: f64,
+    limit: usize,
+}
+
+impl RouteSeedWindow {
+    const LIMIT: usize = 64;
+
+    pub fn top() -> Self {
+        Self::new(0.0, Self::LIMIT)
+    }
+
+    pub fn relative(relative: f64) -> Self {
+        Self::new(relative, Self::LIMIT)
+    }
+
+    fn new(relative: f64, limit: usize) -> Self {
+        Self {
+            relative: if relative.is_finite() {
+                relative.clamp(0.0, 1.0)
+            } else {
+                0.0
+            },
+            limit: limit.max(1),
+        }
+    }
+
+    pub fn range(self, len: usize) -> std::ops::Range<usize> {
+        let position = ((len.saturating_sub(1)) as f64 * self.relative).round() as usize;
+        let start = position / self.limit * self.limit;
+        start.min(len)..start.saturating_add(self.limit).min(len)
+    }
+}
+
 impl LibraryError {
     pub fn is_store_path_io(&self) -> bool {
         matches!(self, Self::Io(_) | Self::Sqlite(sqlx::Error::Io(_)))
+    }
+}
+
+#[cfg(test)]
+mod route_seed_tests {
+    use super::RouteSeedWindow;
+
+    #[test]
+    fn restored_route_window_is_aligned_and_bounded() {
+        assert_eq!(RouteSeedWindow::top().range(1_000), 0..64);
+        assert_eq!(RouteSeedWindow::relative(0.5).range(1_000), 448..512);
+        assert_eq!(RouteSeedWindow::relative(1.0).range(1_000), 960..1_000);
+        assert_eq!(RouteSeedWindow::relative(0.5).range(0), 0..0);
     }
 }

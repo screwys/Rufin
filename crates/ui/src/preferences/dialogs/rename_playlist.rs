@@ -3,7 +3,6 @@ use std::rc::Rc;
 use crate::shell::Shell;
 use ::library::PlaylistKey;
 use adw::prelude::*;
-use localization::tr;
 
 impl Shell {
     pub(crate) fn rename_playlist_dialog(
@@ -24,25 +23,21 @@ impl Shell {
         current_name: String,
         rename: impl Fn(String) + 'static,
     ) {
-        let dialog = adw::AlertDialog::builder()
-            .heading(tr("Rename Playlist"))
-            .build();
-        dialog.add_response("cancel", &tr("Cancel"));
-        dialog.add_response("rename", &tr("Rename"));
-        dialog.set_default_response(Some("rename"));
-        dialog.set_response_appearance("rename", adw::ResponseAppearance::Suggested);
-        let entry = gtk::Entry::new();
-        entry.set_text(&current_name);
-        entry.set_activates_default(true);
-        dialog.set_extra_child(Some(&entry));
-        dialog.connect_response(None, move |_, response| {
+        let resource = crate::ui_resource::PLAYLIST_NAME_DIALOG_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            rename_dialog: adw::AlertDialog,
+            rename_entry: gtk::Entry,
+        });
+        rename_entry.set_text(&current_name);
+        rename_dialog.connect_response(None, move |_, response| {
             if response == "rename" {
-                let name = entry.text().trim().to_string();
+                let name = rename_entry.text().trim().to_string();
                 if !name.is_empty() {
                     rename(name);
                 }
             }
         });
-        self.present_selected_dialog(&dialog);
+        self.present_selected_dialog(&rename_dialog);
     }
 }

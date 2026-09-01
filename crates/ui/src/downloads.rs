@@ -300,7 +300,13 @@ impl Shell {
     }
 
     pub(crate) fn download_badge(self: &Rc<Self>, _collection: bool) -> gtk::Image {
-        let image = gtk::Image::from_icon_name("rufin-folder-download-symbolic");
+        let image = gtk::Image::new();
+        self.register_download_badge(&image);
+        image
+    }
+
+    pub(crate) fn register_download_badge(self: &Rc<Self>, image: &gtk::Image) {
+        image.set_icon_name(Some("rufin-folder-download-symbolic"));
         image.add_css_class("downloaded-badge");
         image.set_pixel_size(14);
         image.set_tooltip_text(Some(&tr("Downloaded")));
@@ -318,7 +324,6 @@ impl Shell {
             };
             badges.borrow_mut().remove(&identity);
         });
-        image
     }
 
     pub(crate) fn bind_download_badge(self: &Rc<Self>, image: &gtk::Image, downloaded: bool) {
@@ -343,12 +348,8 @@ impl Shell {
 
     pub(crate) fn set_downloaded_badges_visible(self: &Rc<Self>, visible: bool) {
         if self
-            .update_app_settings("downloaded badge setting", |settings| {
-                if settings.show_downloaded_badges == visible {
-                    return false;
-                }
-                settings.show_downloaded_badges = visible;
-                true
+            .set_app_setting("downloaded badge setting", visible, |settings| {
+                &mut settings.show_downloaded_badges
             })
             .is_some()
         {

@@ -1,0 +1,191 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <object class="GtkBox" id="root">
+    <property name="orientation">horizontal</property>
+    <property name="hexpand">true</property>
+    <property name="valign">center</property>
+    <style><class name="bottom-player"/></style>
+  </object>
+
+  <object class="GtkBox" id="now_playing">
+    <property name="orientation">horizontal</property>
+    <property name="hexpand">true</property>
+    <property name="width-request">1</property>
+    <property name="halign">fill</property>
+    <property name="valign">center</property>
+    <style><class name="player-now-playing"/></style>
+  </object>
+
+  <object class="GtkBox" id="identity">
+    <property name="orientation">vertical</property>
+    <property name="spacing">1</property>
+    <property name="hexpand">true</property>
+    <property name="width-request">1</property>
+    <property name="halign">fill</property>
+    <property name="valign">center</property>
+    <style><class name="player-identity"/></style>
+    <child>
+      <object class="GtkBox" id="title_row">
+        <property name="orientation">horizontal</property>
+        <property name="hexpand">true</property>
+        <property name="width-request">1</property>
+        <property name="halign">fill</property>
+        <property name="valign">center</property>
+        <style><class name="player-title-row"/></style>
+        <child>
+          <object class="GtkLabel" id="title">
+            <property name="xalign">0</property>
+            <property name="ellipsize">end</property>
+            <property name="single-line-mode">true</property>
+            <property name="lines">1</property>
+            <property name="width-chars">1</property>
+            <property name="halign">fill</property>
+            <property name="valign">center</property>
+            <property name="hexpand">false</property>
+            <property name="yalign">0.5</property>
+            <style><class name="player-link"/><class name="player-title"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="menu_button">
+            <property name="icon-name">rufin-player-more-symbolic</property>
+            <property name="valign">center</property>
+            <property name="sensitive">false</property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-title-menu-button"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="artist">
+        <property name="xalign">0</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <property name="lines">1</property>
+        <property name="width-chars">1</property>
+        <property name="halign">fill</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
+        <property name="yalign">0.5</property>
+        <style><class name="player-link"/><class name="player-primary"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="album">
+        <property name="xalign">0</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <property name="lines">1</property>
+        <property name="width-chars">1</property>
+        <property name="halign">fill</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
+        <property name="yalign">0.5</property>
+        <style><class name="player-link"/><class name="player-primary"/></style>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkBox" id="now_playing_wall">
+    <property name="orientation">horizontal</property>
+    <property name="hexpand">true</property>
+    <property name="width-request">1</property>
+    <property name="valign">center</property>
+    <property name="overflow">hidden</property>
+    <style><class name="player-now-playing-wall"/></style>
+  </object>
+
+  <object class="GtkBox" id="transport_slot">
+    <property name="orientation">horizontal</property>
+    <property name="halign">center</property>
+    <property name="valign">center</property>
+  </object>
+  <object class="GtkBox" id="transport">
+    <property name="orientation">vertical</property>
+    <property name="spacing">5</property>
+    <property name="valign">center</property>
+    <style><class name="player-transport"/></style>
+    <child>
+      <object class="GtkFixed" id="transport_buttons">
+        <property name="halign">center</property>
+        <property name="valign">center</property>
+        <style><class name="player-button-row"/></style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="progress_row">
+        <property name="orientation">horizontal</property>
+        <property name="halign">center</property>
+        <property name="valign">center</property>
+        <style><class name="player-progress-row"/></style>
+        <child>
+          <object class="GtkLabel" id="elapsed">
+            <property name="label">0:00</property>
+            <property name="width-chars">4</property>
+            <property name="xalign">1</property>
+            <style><class name="muted"/><class name="player-timestamp"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkStack" id="progress_stack">
+            <property name="hhomogeneous">false</property>
+            <property name="vhomogeneous">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="duration">
+            <property name="label">0:00</property>
+            <property name="width-chars">4</property>
+            <style><class name="muted"/><class name="player-timestamp"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkScale" id="progress">
+    <property name="orientation">horizontal</property>
+    <property name="draw-value">false</property>
+    <property name="adjustment">
+      <object class="GtkAdjustment">
+        <property name="lower">0</property>
+        <property name="upper">1</property>
+        <property name="step-increment">1</property>
+      </object>
+    </property>
+    <style><class name="player-progress"/></style>
+  </object>
+
+  <object class="GtkOverlay" id="actions">
+    <property name="halign">end</property><property name="valign">fill</property><property name="vexpand">true</property>
+    <property name="child">
+      <object class="GtkBox" id="action_buttons">
+        <property name="orientation">horizontal</property><property name="spacing">0</property>
+        <property name="halign">end</property><property name="valign">center</property>
+        <child>
+          <object class="GtkButton" id="output_button">
+            <property name="valign">center</property>
+            <property name="child"><object class="GtkImage" id="output_icon"><property name="icon-name">rufin-video-display-symbolic</property><style><class name="player-output-icon"/></style></object></property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-output-button"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkMenuButton" id="settings_button">
+            <property name="icon-name">rufin-preferences-system-symbolic</property><property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-settings-button"/></style>
+          </object>
+        </child>
+        <child><object class="GtkBox" id="volume_group"><property name="orientation">horizontal</property><property name="spacing">0</property><property name="valign">center</property></object></child>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkScale" id="volume">
+    <property name="orientation">horizontal</property><property name="hexpand">true</property><property name="halign">fill</property><property name="valign">center</property>
+    <property name="draw-value">false</property>
+    <property name="adjustment"><object class="GtkAdjustment"><property name="lower">0</property><property name="upper">1</property><property name="value">1</property><property name="step-increment">0.01</property><property name="page-increment">0.1</property></object></property>
+    <style><class name="volume-slider"/></style>
+  </object>
+</interface>

@@ -1,0 +1,213 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="dialog">
+    <property name="content-height">510</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="title-widget">
+              <object class="AdwWindowTitle" id="title"/>
+            </property>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkScrolledWindow" id="scroller">
+                <property name="hscrollbar-policy">never</property>
+                <property name="vscrollbar-policy">automatic</property>
+                <property name="max-content-height">510</property>
+                <property name="vexpand">true</property>
+                <property name="child">
+                  <object class="GtkBox" id="content">
+                    <property name="orientation">vertical</property>
+                    <property name="spacing">14</property>
+                    <property name="margin-top">4</property>
+                    <property name="margin-bottom">4</property>
+                    <property name="margin-start">4</property>
+                    <property name="margin-end">4</property>
+                    <child>
+                      <object class="GtkBox" id="template_control">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">4</property>
+                        <property name="visible">false</property>
+                        <child>
+                          <object class="GtkLabel" id="template_label">
+                            <property name="label" translatable="yes">Template</property>
+                            <property name="xalign">0</property>
+                            <style><class name="muted"/></style>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">horizontal</property>
+                            <property name="spacing">8</property>
+                            <child>
+                              <object class="GtkDropDown" id="template_dropdown">
+                                <property name="hexpand">true</property>
+                              </object>
+                            </child>
+                            <child><object class="GtkButton" id="apply_template"><property name="label" translatable="yes">Apply Template</property></object></child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child><object class="GtkEntry" id="name_entry"><property name="placeholder-text" translatable="yes">Playlist name</property></object></child>
+                    <child>
+                      <object class="GtkBox" id="settings">
+                        <property name="orientation">horizontal</property>
+                        <property name="spacing">8</property>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="sort_label">
+                                <property name="label" translatable="yes">Sort</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkDropDown" id="sort"/></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="direction_label">
+                                <property name="label" translatable="yes">Direction</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkCheckButton" id="descending"><property name="label" translatable="yes">Descending</property></object></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="activity_label">
+                                <property name="label" translatable="yes">Activity</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child><object class="GtkDropDown" id="activity_period"/></child>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkBox">
+                            <property name="orientation">vertical</property>
+                            <property name="spacing">4</property>
+                            <child>
+                              <object class="GtkLabel" id="limit_label">
+                                <property name="label" translatable="yes">Limit</property>
+                                <property name="xalign">0</property>
+                                <style><class name="muted"/></style>
+                              </object>
+                            </child>
+                            <child>
+                              <object class="GtkEntry" id="limit">
+                                <property name="placeholder-text" translatable="yes">No limit</property>
+                                <property name="width-chars">8</property>
+                              </object>
+                            </child>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkBox" id="rules">
+                        <property name="orientation">vertical</property>
+                        <property name="spacing">10</property>
+                        <property name="hexpand">true</property>
+                        <child>
+                          <object class="GtkFrame">
+                            <property name="hexpand">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">8</property>
+                                <property name="margin-top">10</property><property name="margin-bottom">10</property>
+                                <property name="margin-start">10</property><property name="margin-end">10</property>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="orientation">horizontal</property><property name="spacing">8</property><property name="hexpand">true</property>
+                                    <child><object class="GtkLabel"><property name="label" translatable="yes">All</property><property name="xalign">0</property><property name="hexpand">true</property></object></child>
+                                    <child>
+                                      <object class="GtkButton" id="match_all_add_rule">
+                                        <style><class name="pill-button"/><class name="pill"/></style>
+                                        <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><child><object class="GtkImage"><property name="icon-name">rufin-list-add-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Add Rule</property></object></child></object></property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child><object class="GtkBox" id="match_all_rules"><property name="orientation">vertical</property><property name="spacing">8</property></object></child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkFrame">
+                            <property name="hexpand">true</property>
+                            <property name="child">
+                              <object class="GtkBox">
+                                <property name="orientation">vertical</property>
+                                <property name="spacing">8</property>
+                                <property name="margin-top">10</property><property name="margin-bottom">10</property>
+                                <property name="margin-start">10</property><property name="margin-end">10</property>
+                                <child>
+                                  <object class="GtkBox">
+                                    <property name="orientation">horizontal</property><property name="spacing">8</property><property name="hexpand">true</property>
+                                    <child><object class="GtkLabel"><property name="label" translatable="yes">Any</property><property name="xalign">0</property><property name="hexpand">true</property></object></child>
+                                    <child>
+                                      <object class="GtkButton" id="match_any_add_rule">
+                                        <style><class name="pill-button"/><class name="pill"/></style>
+                                        <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><child><object class="GtkImage"><property name="icon-name">rufin-list-add-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Add Rule</property></object></child></object></property>
+                                      </object>
+                                    </child>
+                                  </object>
+                                </child>
+                                <child><object class="GtkBox" id="match_any_rules"><property name="orientation">vertical</property><property name="spacing">8</property></object></child>
+                              </object>
+                            </property>
+                          </object>
+                        </child>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="actions">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="halign">end</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">14</property>
+                <property name="margin-start">18</property>
+                <property name="margin-end">18</property>
+                <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+                <child>
+                  <object class="GtkButton" id="submit">
+                    <style><class name="suggested-action"/></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

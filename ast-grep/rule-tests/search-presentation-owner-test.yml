@@ -1,0 +1,31 @@
+id: search-route-must-not-retain-presentation-arrays
+valid:
+  - |
+      struct SearchRouteProjection {
+          models: [ListStore; 3],
+          active: RefCell<Option<SearchPresentation>>,
+      }
+invalid:
+  - |
+      struct SearchRouteProjection {
+          models: [ListStore; 3],
+          collections: [LibraryCollectionProjection; 3],
+      }
+  - |
+      struct SearchRouteProjection {
+          models: [ListStore; 3],
+          toolbars: [LibraryToolbarProjection; 3],
+      }
+---
+id: search-collection-must-not-register-route-callbacks
+valid:
+  - |
+      fn search_collection(shell: &Rc<Shell>) -> LibraryCollectionProjection {
+          LibraryCollectionProjection::new(shell)
+      }
+invalid:
+  - |
+      fn search_collection(shell: &Rc<Shell>) -> LibraryCollectionProjection {
+          shell.register_current_route_track_selection(Rc::new(|_| true));
+          LibraryCollectionProjection::new(shell)
+      }

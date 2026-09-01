@@ -5,42 +5,38 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use artwork::ArtworkBinding;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use library::QueuePageRow;
 use localization::{msgid, tr};
 use playback::{OccurrenceId, PlaybackMedia, QueueReorderRequest, QueueReorderTarget};
 
-use crate::favorites::{
-    FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, row_favorite_icon_button, set_favorite_button_active,
-};
+use crate::favorites::set_favorite_button_active;
 use crate::interactions::{ContextMenuSurface, install_context_menu_openers};
 use crate::layout::allocation_owner;
+use crate::localization::bind_widget_tooltip;
 use crate::routes::collection_context::{
     install_track_selection_download_actions, present_queue_track_context_menu,
 };
-use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
+use crate::routes::detail_links::DetailLinks;
 use crate::routes::playlist_picker::{
     PlaylistDragPreviewBinding, PlaylistTrackSource, append_context_menu_picker_selection,
     context_menu_can_add_to_playlist, playlist_drag_content_provider,
 };
 use crate::routes::route::Route;
 use crate::routes::track_selection::TrackSelectionSnapshot;
+use crate::routes::{RecycledArtworkCell, RecycledTextCell};
 use crate::settings::ContextMenuItem;
 use crate::shell::Shell;
 use crate::shell::actions::{PLAY_ICON, REMOVE_ICON};
-use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
+use crate::shell::cover::THUMB_COVER_SIZE;
 use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
 const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_ROW_HEIGHT: i32 = 58;
-const QUEUE_FULLSCREEN_COLUMN_SPACING: i32 = 16;
-const QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING: i32 = 12;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
 const QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH: i32 = 572;
 const QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH: i32 = 652;
-const QUEUE_DURATION_COLUMN_WIDTH: i32 = 82;
-const QUEUE_YEAR_COLUMN_WIDTH: i32 = 64;
-const QUEUE_FAVORITE_COLUMN_WIDTH: i32 = FAVORITE_COLUMN_WIDTH;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum QueueFullscreenColumnMode {
@@ -49,33 +45,319 @@ enum QueueFullscreenColumnMode {
     AlbumAndYear,
 }
 
-struct QueueFullscreenColumnWidgets {
-    album: gtk::Widget,
-    year: gtk::Widget,
+pub(super) struct QueueFullscreenColumnWidgets {
+    pub(super) album: gtk::Widget,
+    pub(super) year: gtk::Widget,
 }
 
-struct QueueRowContent {
-    widget: gtk::Widget,
-    artwork: gtk::Picture,
+crate::ui_resource::composite_box!(
+    pub(crate) QueueSidebarRow,
+    sidebar_row_imp,
+    "RufinQueueSidebarRow",
+    "/io/github/screwys/Rufin/ui/player/queue_sidebar_row.ui",
+    {
+        cover: crate::routes::RecycledArtworkCell,
+        title: gtk::Label,
+        artist: crate::routes::RecycledTextCell,
+        year: gtk::Label,
+    }
+);
+
+impl QueueSidebarRow {
+    fn for_item(shell: &Rc<Shell>, item: &gtk::ListItem) -> Self {
+        RecycledArtworkCell::ensure_type();
+        RecycledTextCell::ensure_type();
+        let row = Self::new();
+        row.set_margin_end(WINDOW_CHROME_MARGIN_END);
+        row.imp().cover.artwork().set_square_size(50);
+        row.imp().artist.enable_links(shell);
+        row.imp().artist.label().add_css_class("muted");
+        row.imp().artist.label().add_css_class("queue-link");
+        install_queue_row_interactions(
+            row.upcast_ref(),
+            shell,
+            item,
+            &row.imp().cover.artwork().drag_paintable_source(),
+        );
+        row
+    }
+
+    fn bind(&self, shell: &Rc<Shell>, row: &QueuePageRow, current: Option<&OccurrenceId>) {
+        bind_queue_row_root(self.upcast_ref(), row, current);
+        bind_queue_artwork(shell, &self.imp().cover, row);
+        self.imp().title.set_text(&row.title);
+        self.imp().artist.bind_links(DetailLinks::route(
+            &row.artist,
+            row.primary_artist_key.map(Route::ArtistDetail),
+        ));
+        self.imp().year.set_text(
+            row.year
+                .map(|year| year.to_string())
+                .as_deref()
+                .unwrap_or(""),
+        );
+    }
+
+    fn clear(&self, shell: &Rc<Shell>) {
+        clear_queue_row_root(self.upcast_ref());
+        shell.clear_artwork_tile(&self.imp().cover.artwork());
+        self.imp().title.set_text("");
+        self.imp().artist.clear();
+        self.imp().year.set_text("");
+    }
 }
 
-#[derive(Default)]
-struct QueueDragBinding {
-    occurrence: RefCell<Option<OccurrenceId>>,
+crate::ui_resource::composite_box!(
+    pub(crate) QueueFullscreenRow,
+    fullscreen_row_imp,
+    "RufinQueueFullscreenRow",
+    "/io/github/screwys/Rufin/ui/player/queue_fullscreen_row.ui",
+    {
+        cover: crate::routes::RecycledArtworkCell,
+        title: gtk::Label,
+        artist: crate::routes::RecycledTextCell,
+        album: gtk::Label,
+        duration: gtk::Label,
+        year: gtk::Label,
+        favorite: gtk::Button,
+    }
+);
+
+impl QueueFullscreenRow {
+    fn for_item(shell: &Rc<Shell>, item: &gtk::ListItem) -> Self {
+        RecycledArtworkCell::ensure_type();
+        RecycledTextCell::ensure_type();
+        let row = Self::new();
+        row.imp()
+            .cover
+            .artwork()
+            .set_square_size(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
+        row.imp().artist.enable_links(shell);
+        row.imp().artist.label().add_css_class("muted");
+        row.imp().artist.label().add_css_class("queue-link");
+        bind_widget_tooltip(&row.imp().favorite.get(), "Favorite");
+        install_queue_row_interactions(
+            row.upcast_ref(),
+            shell,
+            item,
+            &row.imp().cover.artwork().drag_paintable_source(),
+        );
+        let favorite_item = item.downgrade();
+        let favorite_shell = Rc::downgrade(shell);
+        row.imp().favorite.connect_clicked(move |button| {
+            let Some(shell) = favorite_shell.upgrade() else {
+                return;
+            };
+            let Some(row) = queue_row_from_item(&favorite_item) else {
+                return;
+            };
+            let Some(key) = row.track_key else {
+                return;
+            };
+            shell.set_favorite_with_feedback(
+                library::FavoriteTarget::Track(key),
+                !crate::favorites::favorite_button_is_active(button),
+                Some(button),
+            );
+        });
+        row
+    }
+
+    fn bind(&self, shell: &Rc<Shell>, row: &QueuePageRow, current: Option<&OccurrenceId>) {
+        bind_queue_row_root(self.upcast_ref(), row, current);
+        bind_queue_artwork(shell, &self.imp().cover, row);
+        self.imp().title.set_text(&row.title);
+        self.imp().artist.bind_links(DetailLinks::route(
+            &row.artist,
+            row.primary_artist_key.map(Route::ArtistDetail),
+        ));
+        self.imp().album.set_text(&row.album);
+        self.imp().duration.set_text(
+            &row.duration_millis
+                .map(|duration| crate::format_duration((duration.max(0) / 1_000) as u32))
+                .unwrap_or_default(),
+        );
+        self.imp().year.set_text(
+            row.year
+                .map(|year| year.to_string())
+                .as_deref()
+                .unwrap_or(""),
+        );
+        set_favorite_button_active(&self.imp().favorite, row.favorite.unwrap_or(false));
+        self.imp().favorite.set_sensitive(row.track_key.is_some());
+    }
+
+    fn clear(&self, shell: &Rc<Shell>) {
+        clear_queue_row_root(self.upcast_ref());
+        shell.clear_artwork_tile(&self.imp().cover.artwork());
+        self.imp().title.set_text("");
+        self.imp().artist.clear();
+        self.imp().album.set_text("");
+        self.imp().duration.set_text("");
+        self.imp().year.set_text("");
+        set_favorite_button_active(&self.imp().favorite, false);
+        self.imp().favorite.set_sensitive(false);
+    }
+
+    fn allocation_widget(&self) -> gtk::Widget {
+        fullscreen_queue_column_owner(
+            self.upcast_ref(),
+            QueueFullscreenColumnWidgets {
+                album: self.imp().album.get().upcast(),
+                year: self.imp().year.get().upcast(),
+            },
+        )
+    }
 }
 
-impl QueueDragBinding {
-    fn bind(&self, occurrence: OccurrenceId) {
-        self.occurrence.replace(Some(occurrence));
+fn bind_queue_row_root(root: &gtk::Widget, row: &QueuePageRow, current: Option<&OccurrenceId>) {
+    let occurrence = OccurrenceId::new(row.object_id.clone());
+    if current == Some(&occurrence) {
+        root.add_css_class("queue-row-current");
+    } else {
+        root.remove_css_class("queue-row-current");
     }
+    root.update_property(&[gtk::accessible::Property::Label(&format!(
+        "{} {}",
+        row.title, row.artist
+    ))]);
+}
 
-    fn clear(&self) {
-        self.occurrence.borrow_mut().take();
-    }
+fn clear_queue_row_root(root: &gtk::Widget) {
+    root.remove_css_class("queue-row-current");
+    root.update_property(&[gtk::accessible::Property::Label("")]);
+}
 
-    fn occurrence(&self) -> Option<OccurrenceId> {
-        self.occurrence.borrow().clone()
-    }
+fn bind_queue_artwork(shell: &Rc<Shell>, cover: &RecycledArtworkCell, row: &QueuePageRow) {
+    shell.bind_artwork_tile(
+        &cover.artwork(),
+        row.artwork_binding
+            .as_deref()
+            .map(ArtworkBinding::opaque)
+            .unwrap_or_default(),
+        50,
+        THUMB_COVER_SIZE,
+    );
+}
+
+fn queue_row_from_item(item: &glib::WeakRef<gtk::ListItem>) -> Option<QueuePageRow> {
+    item.upgrade()?
+        .item()?
+        .downcast::<glib::BoxedAnyObject>()
+        .ok()
+        .map(|object| object.borrow::<QueuePageRow>().clone())
+}
+
+fn install_queue_row_interactions(
+    root: &gtk::Widget,
+    shell: &Rc<Shell>,
+    item: &gtk::ListItem,
+    artwork: &gtk::Picture,
+) {
+    let source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
+        .build();
+    let preview = PlaylistDragPreviewBinding::default();
+    preview.connect(&source);
+    let drag_preview = preview.clone();
+    let weak_artwork = artwork.downgrade();
+    let source_item = item.downgrade();
+    let source_shell = Rc::downgrade(shell);
+    source.connect_prepare(move |_, _, _| {
+        drag_preview.clear();
+        let shell = source_shell.upgrade()?;
+        let row = queue_row_from_item(&source_item)?;
+        let occurrence = OccurrenceId::new(row.object_id.clone());
+        let selection = shell
+            .selected_queue()?
+            .dragged_rows_for(&shell, &occurrence)?;
+        let artwork = weak_artwork
+            .upgrade()
+            .and_then(|artwork| artwork.paintable());
+        drag_preview.prepare(row.title.clone(), artwork);
+        let reorderable = shell
+            .selected_queue()
+            .as_deref()
+            .is_some_and(|queue| queue.filter.borrow().trim().is_empty());
+        let mut providers = Vec::new();
+        if reorderable && selection.occurrences.len() == 1 {
+            providers.push(gtk::gdk::ContentProvider::for_value(
+                &occurrence.to_string().to_value(),
+            ));
+        }
+        if let Some(tracks) = selection.tracks {
+            providers.push(playlist_drag_content_provider(
+                PlaylistTrackSource::selection(tracks),
+            ));
+        }
+        match providers.as_slice() {
+            [] => None,
+            [provider] => Some(provider.clone()),
+            providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
+        }
+    });
+    root.add_controller(source);
+
+    let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+    let queue = shell.products.playback.queue.clone();
+    let drop_shell = Rc::downgrade(shell);
+    let target_item = item.downgrade();
+    drop.connect_drop(move |_, value, _, _| {
+        let Ok(object_id) = value.get::<String>() else {
+            return false;
+        };
+        let Some(shell) = drop_shell.upgrade() else {
+            return false;
+        };
+        let Some(state) = shell.selected_queue() else {
+            return false;
+        };
+        if !state.filter.borrow().trim().is_empty() {
+            return false;
+        }
+        let Some(target) =
+            queue_row_from_item(&target_item).map(|row| OccurrenceId::new(row.object_id))
+        else {
+            return false;
+        };
+        let Some(request) = state.reorder_request(OccurrenceId::new(object_id), target) else {
+            return false;
+        };
+        queue.reorder(request);
+        true
+    });
+    root.add_controller(drop);
+
+    let context_shell = Rc::downgrade(shell);
+    let context_item = item.downgrade();
+    install_context_menu_openers(
+        root,
+        Rc::new(move |target, position| {
+            let Some(shell) = context_shell.upgrade() else {
+                return;
+            };
+            let Some(row) = queue_row_from_item(&context_item) else {
+                return;
+            };
+            let occurrence = OccurrenceId::new(row.object_id.clone());
+            if let Some(selection) = shell
+                .selected_queue()
+                .and_then(|queue| queue.selected_rows_for(&shell, &occurrence))
+            {
+                present_queue_selection_context_menu(target, &shell, selection, position);
+                return;
+            }
+            present_queue_track_context_menu(
+                target,
+                &shell,
+                queue_playback_media(&row),
+                row.primary_artist_key,
+                &row.artist,
+                occurrence,
+                position,
+            );
+        }),
+    );
 }
 
 impl QueueFullscreenColumnWidgets {
@@ -229,6 +511,17 @@ impl QueueState {
         true
     }
 
+    pub(crate) fn needs_page_for_current(&self, current: Option<&OccurrenceId>) -> bool {
+        self.filter.borrow().trim().is_empty()
+            && current.is_some_and(|current| {
+                !self
+                    .rows
+                    .borrow()
+                    .iter()
+                    .any(|row| row.object_id == current.as_str())
+            })
+    }
+
     fn reorder_request(
         &self,
         occurrence: OccurrenceId,
@@ -252,17 +545,6 @@ impl QueueState {
                 QueueReorderTarget::Before(target)
             },
         })
-    }
-
-    fn invalidate(&self) {
-        self.generation.set(self.generation.get().wrapping_add(1));
-        self.running.set(None);
-        if let Some((_, cancellation)) = self.cancellation.borrow_mut().take() {
-            cancellation.cancel();
-        }
-        self.rows.borrow_mut().clear();
-        self.model.remove_all();
-        self.current.borrow_mut().take();
     }
 
     fn selected_rows_for(
@@ -393,6 +675,11 @@ impl Shell {
             .as_deref()
             .and_then(|player| player.queue.current_occurrence.clone());
         let Some(queue) = self.selected_queue() else {
+            self.right_panel.queue_header_host.set_visible(false);
+            self.player_view
+                .fullscreen_player
+                .queue_header
+                .set_visible(false);
             clear_queue_panel_children(&self.right_panel.queue_panel);
             clear_queue_panel_children(&self.player_view.fullscreen_player.queue_panel);
             return;
@@ -408,6 +695,7 @@ impl Shell {
         render_panel(
             self,
             &self.right_panel.queue_panel,
+            self.right_panel.queue_header_host.upcast_ref(),
             &queue.model,
             &selection,
             false,
@@ -418,6 +706,7 @@ impl Shell {
             render_panel(
                 self,
                 &self.player_view.fullscreen_player.queue_panel,
+                &self.player_view.fullscreen_player.queue_header,
                 &queue.model,
                 &selection,
                 true,
@@ -487,14 +776,7 @@ impl Shell {
                         restore_queue_scroll_later(&scroller, value);
                     }
                 } else {
-                    let current_row = shell.selected_queue().and_then(|queue| {
-                        let current = queue.current.borrow().clone()?;
-                        queue
-                            .rows
-                            .borrow()
-                            .iter()
-                            .position(|row| row.object_id == current.as_str())
-                    });
+                    let current_row = current_queue_row(&shell);
                     for scroller in [
                         queue_panel_scroller(&shell.right_panel.queue_panel),
                         queue_panel_scroller(&shell.player_view.fullscreen_player.queue_panel),
@@ -517,27 +799,14 @@ impl Shell {
             self.request_queue_page();
             return;
         };
-        let current_row = self.selected_queue().and_then(|queue| {
-            let current = queue.current.borrow().clone()?;
-            queue
-                .rows
-                .borrow()
-                .iter()
-                .position(|row| row.object_id == current.as_str())
-        });
-        reveal_queue_current_row(&scroller, current_row);
-    }
-
-    pub(crate) fn invalidate_queue_panel_render_state(&self) {
-        if let Some(queue) = self.selected_queue() {
-            queue.invalidate();
-        }
+        reveal_queue_current_row(&scroller, current_queue_row(self));
     }
 }
 
 fn render_panel(
     shell: &Rc<Shell>,
     panel: &gtk::Box,
+    header: &gtk::Widget,
     model: &gio::ListStore,
     selection: &gtk::MultiSelection,
     fullscreen: bool,
@@ -556,19 +825,26 @@ fn render_panel(
         stack
     } else {
         let factory = gtk::SignalListItemFactory::new();
-        let drag_bindings = Rc::new(RefCell::new(HashMap::<usize, Rc<QueueDragBinding>>::new()));
-        let setup_bindings = Rc::clone(&drag_bindings);
+        let setup_shell = Rc::downgrade(shell);
         factory.connect_setup(move |_, item| {
-            if let Some(item) = item.downcast_ref::<gtk::ListItem>() {
-                item.set_child(Some(&gtk::Box::new(gtk::Orientation::Vertical, 0)));
-                setup_bindings
-                    .borrow_mut()
-                    .insert(item.as_ptr() as usize, Rc::new(QueueDragBinding::default()));
+            let Some(shell) = setup_shell.upgrade() else {
+                return;
+            };
+            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
+                return;
+            };
+            if fullscreen {
+                let row = QueueFullscreenRow::for_item(&shell, item);
+                item.set_child(Some(&row.allocation_widget()));
+            } else {
+                item.set_child(Some(&QueueSidebarRow::for_item(&shell, item)));
             }
         });
-        let bind_shell = Rc::clone(shell);
-        let bind_bindings = Rc::clone(&drag_bindings);
+        let bind_shell = Rc::downgrade(shell);
         factory.connect_bind(move |_, item| {
+            let Some(shell) = bind_shell.upgrade() else {
+                return;
+            };
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
             };
@@ -579,45 +855,33 @@ fn render_panel(
                 return;
             };
             let row = object.borrow::<QueuePageRow>().clone();
-            let Some(binding) = bind_bindings
-                .borrow()
-                .get(&(item.as_ptr() as usize))
-                .cloned()
-            else {
-                return;
-            };
-            binding.bind(OccurrenceId::new(row.object_id.clone()));
-            let current = bind_shell
+            let current = shell
                 .selected_playback()
                 .as_deref()
                 .and_then(|player| player.queue.current_occurrence.clone());
-            let reorderable = bind_shell
-                .selected_queue()
-                .as_deref()
-                .is_some_and(|queue| queue.filter.borrow().trim().is_empty());
-            item.set_child(Some(&queue_row(
-                &bind_shell,
-                &row,
-                current.as_ref(),
-                fullscreen,
-                reorderable,
-                binding,
-            )));
-        });
-        let unbind_bindings = Rc::clone(&drag_bindings);
-        factory.connect_unbind(move |_, item| {
-            let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-                return;
-            };
-            if let Some(binding) = unbind_bindings.borrow().get(&(item.as_ptr() as usize)) {
-                binding.clear();
+            if fullscreen {
+                if let Some(row_view) = fullscreen_queue_row(item) {
+                    row_view.bind(&shell, &row, current.as_ref());
+                }
+            } else if let Some(row_view) = item.child().and_downcast::<QueueSidebarRow>() {
+                row_view.bind(&shell, &row, current.as_ref());
             }
         });
-        factory.connect_teardown(move |_, item| {
+        let unbind_shell = Rc::downgrade(shell);
+        factory.connect_unbind(move |_, item| {
+            let Some(shell) = unbind_shell.upgrade() else {
+                return;
+            };
             let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                 return;
             };
-            drag_bindings.borrow_mut().remove(&(item.as_ptr() as usize));
+            if fullscreen {
+                if let Some(row_view) = fullscreen_queue_row(item) {
+                    row_view.clear(&shell);
+                }
+            } else if let Some(row_view) = item.child().and_downcast::<QueueSidebarRow>() {
+                row_view.clear(&shell);
+            }
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("queue-list");
@@ -645,13 +909,7 @@ fn render_panel(
     };
 
     let has_rows = model.n_items() != 0;
-    clear_queue_panel_static_children(panel);
-    if has_rows {
-        panel.prepend(&queue_header_row(fullscreen));
-    }
-    if scroller.parent().is_none() {
-        panel.append(&scroller);
-    }
+    header.set_visible(has_rows);
     stack.set_visible_child_name(if has_rows { "list" } else { "empty" });
     if let Some(empty) = stack
         .child_by_name("empty")
@@ -663,30 +921,13 @@ fn render_panel(
             "No matching tracks"
         }));
     }
-    if let Some(list) = stack.child_by_name("list") {
-        let covered = queue_covered_extent(
-            !fullscreen && shell.lyrics.panel_visible.get(),
-            has_rows,
-            shell.right_panel.lyrics_surface.height_request(),
-        );
-        list.set_margin_bottom(covered);
-    }
     if has_rows && reveal_current {
-        let current = shell
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.queue.current_occurrence.clone());
-        let current_row = current.and_then(|current| {
-            shell.selected_queue().and_then(|queue| {
-                queue
-                    .rows
-                    .borrow()
-                    .iter()
-                    .position(|row| row.object_id == current.as_str())
-            })
-        });
-        reveal_queue_current_row_later(&scroller, current_row);
+        reveal_queue_current_row_later(&scroller, current_queue_row(shell));
     }
+}
+
+fn fullscreen_queue_row(item: &gtk::ListItem) -> Option<QueueFullscreenRow> {
+    item.child()?.first_child()?.downcast().ok()
 }
 
 fn new_queue_scroller() -> gtk::ScrolledWindow {
@@ -700,7 +941,7 @@ fn new_queue_scroller() -> gtk::ScrolledWindow {
 fn queue_panel_scroller(panel: &gtk::Box) -> Option<gtk::ScrolledWindow> {
     let mut child = panel.first_child();
     while let Some(widget) = child {
-        if let Ok(scroller) = widget.clone().downcast::<gtk::ScrolledWindow>() {
+        if let Some(scroller) = queue_scroller_in(&widget) {
             return Some(scroller);
         }
         child = widget.next_sibling();
@@ -708,14 +949,18 @@ fn queue_panel_scroller(panel: &gtk::Box) -> Option<gtk::ScrolledWindow> {
     None
 }
 
-fn clear_queue_panel_static_children(panel: &gtk::Box) {
-    let mut child = panel.first_child();
-    while let Some(widget) = child {
-        child = widget.next_sibling();
-        if !widget.is::<gtk::ScrolledWindow>() {
-            panel.remove(&widget);
-        }
+fn queue_scroller_in(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+    if let Ok(scroller) = widget.clone().downcast::<gtk::ScrolledWindow>() {
+        return Some(scroller);
     }
+    let mut child = widget.first_child();
+    while let Some(widget) = child {
+        if let Some(scroller) = queue_scroller_in(&widget) {
+            return Some(scroller);
+        }
+        child = widget.next_sibling();
+    }
+    None
 }
 
 fn reveal_queue_current_row_later(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) {
@@ -723,6 +968,17 @@ fn reveal_queue_current_row_later(scroller: &gtk::ScrolledWindow, current_row: O
     glib::idle_add_local_once(move || {
         reveal_queue_current_row(&scroller, current_row);
     });
+}
+
+fn current_queue_row(shell: &Shell) -> Option<usize> {
+    shell.selected_queue().and_then(|queue| {
+        let current = queue.current.borrow().clone()?;
+        queue
+            .rows
+            .borrow()
+            .iter()
+            .position(|row| row.object_id == current.as_str())
+    })
 }
 
 fn restore_queue_scroll_later(scroller: &gtk::ScrolledWindow, value: f64) {
@@ -735,52 +991,29 @@ fn restore_queue_scroll_later(scroller: &gtk::ScrolledWindow, value: f64) {
 }
 
 fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) -> bool {
-    let Some(current_row) = current_row else {
+    let Some(current_row) = current_row.and_then(|position| u32::try_from(position).ok()) else {
         return false;
     };
-    let adjustment = scroller.vadjustment();
-    let page_size = adjustment.page_size();
-    let Some(target) = queue_reveal_target(
-        current_row,
-        adjustment.value(),
-        page_size,
-        adjustment.lower(),
-        adjustment.upper(),
-    ) else {
+    if scroller.has_css_class("right-panel-scroller") {
+        let adjustment = scroller.vadjustment();
+        let row_center = f64::from(current_row) * f64::from(QUEUE_ROW_HEIGHT)
+            + f64::from(QUEUE_ROW_HEIGHT) / 2.0;
+        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        adjustment.set_value(
+            (row_center - adjustment.page_size() / 2.0).clamp(adjustment.lower(), maximum),
+        );
+        return true;
+    }
+    let Some(list) = scroller
+        .child()
+        .and_then(|child| child.downcast::<gtk::Stack>().ok())
+        .and_then(|stack| stack.child_by_name("list"))
+        .and_then(|child| child.downcast::<gtk::ListView>().ok())
+    else {
         return false;
     };
-    adjustment.set_value(target);
+    list.scroll_to(current_row, gtk::ListScrollFlags::NONE, None);
     true
-}
-
-fn queue_reveal_target(
-    current_row: usize,
-    value: f64,
-    page_size: f64,
-    lower: f64,
-    upper: f64,
-) -> Option<f64> {
-    if page_size <= 1.0 {
-        return None;
-    }
-    let row_top = current_row as f64 * f64::from(QUEUE_ROW_HEIGHT);
-    let row_bottom = row_top + f64::from(QUEUE_ROW_HEIGHT);
-    let comfort_top = value + page_size * 0.25;
-    let comfort_bottom = value + page_size * 0.70;
-    if row_top >= comfort_top && row_bottom <= comfort_bottom {
-        return None;
-    }
-    let target = row_top - page_size * 0.42;
-    let maximum = (upper - page_size).max(lower);
-    Some(target.clamp(lower, maximum))
-}
-
-fn queue_covered_extent(lyrics_visible: bool, has_rows: bool, requested: i32) -> i32 {
-    if lyrics_visible && has_rows {
-        requested.max(0)
-    } else {
-        0
-    }
 }
 
 fn changed_queue_positions(previous: &[QueuePageRow], next: &[QueuePageRow]) -> Vec<u32> {
@@ -821,140 +1054,6 @@ fn queue_order_rearranged(previous: &[QueuePageRow], next: &[QueuePageRow]) -> b
     previous == next
 }
 
-fn queue_row(
-    shell: &Rc<Shell>,
-    row: &QueuePageRow,
-    current: Option<&OccurrenceId>,
-    fullscreen: bool,
-    reorderable: bool,
-    drag_binding: Rc<QueueDragBinding>,
-) -> gtk::Widget {
-    let occurrence = OccurrenceId::new(row.object_id.clone());
-    let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    root.add_css_class("queue-row");
-    root.set_height_request(QUEUE_ROW_HEIGHT);
-    root.set_hexpand(true);
-    root.set_halign(gtk::Align::Fill);
-    root.set_valign(gtk::Align::Center);
-    root.set_focusable(true);
-    if !fullscreen {
-        root.set_margin_end(WINDOW_CHROME_MARGIN_END);
-    }
-    if current == Some(&occurrence) {
-        root.add_css_class("queue-row-current");
-    }
-    root.update_property(&[gtk::accessible::Property::Label(&format!(
-        "{} {}",
-        row.title, row.artist
-    ))]);
-
-    let content = if fullscreen {
-        fullscreen_queue_content(shell, row)
-    } else {
-        sidebar_queue_content(shell, row)
-    };
-    root.append(&content.widget);
-
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
-        .build();
-    let preview = PlaylistDragPreviewBinding::default();
-    preview.connect(&source);
-    let drag_preview = preview.clone();
-    let weak_artwork = content.artwork.downgrade();
-    let source_binding = Rc::clone(&drag_binding);
-    let source_shell = Rc::downgrade(shell);
-    source.connect_prepare(move |_, _, _| {
-        drag_preview.clear();
-        let shell = source_shell.upgrade()?;
-        let occurrence = source_binding.occurrence()?;
-        let queue = shell.selected_queue()?;
-        let selection = queue.dragged_rows_for(&shell, &occurrence)?;
-        let title = queue
-            .rows
-            .borrow()
-            .iter()
-            .find(|row| row.object_id == occurrence.as_str())?
-            .title
-            .clone();
-        let artwork = weak_artwork
-            .upgrade()
-            .and_then(|artwork| artwork.paintable());
-        drag_preview.prepare(title, artwork);
-        let mut providers = Vec::new();
-        if reorderable && selection.occurrences.len() == 1 {
-            providers.push(gtk::gdk::ContentProvider::for_value(
-                &occurrence.to_string().to_value(),
-            ));
-        }
-        if let Some(tracks) = selection.tracks {
-            providers.push(playlist_drag_content_provider(
-                PlaylistTrackSource::selection(tracks),
-            ));
-        }
-        match providers.as_slice() {
-            [] => None,
-            [provider] => Some(provider.clone()),
-            providers => Some(gtk::gdk::ContentProvider::new_union(providers)),
-        }
-    });
-    root.add_controller(source);
-    if reorderable {
-        let drop = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-        let queue = shell.products.playback.queue.clone();
-        let drop_shell = Rc::downgrade(shell);
-        let target_binding = Rc::clone(&drag_binding);
-        drop.connect_drop(move |_, value, _, _| {
-            let Ok(object_id) = value.get::<String>() else {
-                return false;
-            };
-            let Some(shell) = drop_shell.upgrade() else {
-                return false;
-            };
-            let Some(target) = target_binding.occurrence() else {
-                return false;
-            };
-            let Some(state) = shell.selected_queue() else {
-                return false;
-            };
-            let Some(request) = state.reorder_request(OccurrenceId::new(object_id), target) else {
-                return false;
-            };
-            queue.reorder(request);
-            true
-        });
-        root.add_controller(drop);
-    }
-
-    let context_shell = Rc::clone(shell);
-    let context = queue_playback_media(row);
-    let primary_artist = row.primary_artist_key;
-    let artist_name = row.artist.clone();
-    let context_occurrence = occurrence.clone();
-    install_context_menu_openers(
-        &root,
-        Rc::new(move |target, position| {
-            if let Some(selection) = context_shell
-                .selected_queue()
-                .and_then(|queue| queue.selected_rows_for(&context_shell, &context_occurrence))
-            {
-                present_queue_selection_context_menu(target, &context_shell, selection, position);
-                return;
-            }
-            present_queue_track_context_menu(
-                target,
-                &context_shell,
-                context.clone(),
-                primary_artist,
-                &artist_name,
-                context_occurrence.clone(),
-                position,
-            );
-        }),
-    );
-    root.upcast()
-}
-
 fn present_queue_selection_context_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
@@ -985,190 +1084,7 @@ fn present_queue_selection_context_menu(
     surface.popup(&shell.settings.current.borrow().context_menu);
 }
 
-fn sidebar_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> QueueRowContent {
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    content.set_hexpand(true);
-    let cover = ArtworkTile::new(50);
-    shell.bind_artwork_tile(
-        &cover,
-        row.artwork_binding
-            .as_deref()
-            .map(ArtworkBinding::opaque)
-            .unwrap_or_default(),
-        50,
-        THUMB_COVER_SIZE,
-    );
-    let artwork = cover.drag_paintable_source();
-    content.append(&cover.widget());
-    let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    labels.set_hexpand(true);
-    labels.set_valign(gtk::Align::Center);
-    let title = gtk::Label::new(Some(&row.title));
-    title.add_css_class("queue-title");
-    title.set_xalign(0.0);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let artist = queue_link_label(&row.artist);
-    DetailLinkBinding::new(&artist, shell).bind(DetailLinks::route(
-        &row.artist,
-        row.primary_artist_key.map(Route::ArtistDetail),
-    ));
-    labels.append(&title);
-    labels.append(&artist);
-    content.append(&labels);
-    let year = gtk::Label::new(row.year.map(|year| year.to_string()).as_deref());
-    year.add_css_class("muted");
-    year.add_css_class("queue-year");
-    year.set_xalign(1.0);
-    year.set_width_chars(4);
-    year.set_halign(gtk::Align::End);
-    content.append(&year);
-    QueueRowContent {
-        widget: content.upcast(),
-        artwork,
-    }
-}
-
-fn fullscreen_queue_content(shell: &Rc<Shell>, row: &QueuePageRow) -> QueueRowContent {
-    let columns = fullscreen_queue_row_box();
-    let cover = ArtworkTile::new(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
-    shell.bind_artwork_tile(
-        &cover,
-        row.artwork_binding
-            .as_deref()
-            .map(ArtworkBinding::opaque)
-            .unwrap_or_default(),
-        QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH,
-        THUMB_COVER_SIZE,
-    );
-    let artwork = cover.drag_paintable_source();
-    columns.append(&cover.widget());
-
-    let identity = gtk::Box::new(gtk::Orientation::Vertical, 2);
-    identity.set_width_request(1);
-    identity.set_hexpand(true);
-    identity.set_halign(gtk::Align::Fill);
-    identity.set_valign(gtk::Align::Center);
-    let title = gtk::Label::new(Some(&row.title));
-    title.add_css_class("queue-title");
-    title.set_xalign(0.0);
-    title.set_width_request(1);
-    title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let artist = queue_link_label(&row.artist);
-    artist.set_width_request(1);
-    DetailLinkBinding::new(&artist, shell).bind(DetailLinks::route(
-        &row.artist,
-        row.primary_artist_key.map(Route::ArtistDetail),
-    ));
-    identity.append(&title);
-    identity.append(&artist);
-    let album = fullscreen_queue_text_cell(&row.album);
-    let text_columns = fullscreen_queue_text_columns(&identity, &album);
-    let duration = fullscreen_queue_fixed_cell(
-        &row.duration_millis
-            .map(|duration| crate::format_duration((duration.max(0) / 1_000) as u32))
-            .unwrap_or_default(),
-        QUEUE_DURATION_COLUMN_WIDTH,
-    );
-    let year = fullscreen_queue_fixed_cell(
-        &row.year.map(|year| year.to_string()).unwrap_or_default(),
-        QUEUE_YEAR_COLUMN_WIDTH,
-    );
-    columns.append(&text_columns);
-    columns.append(&duration);
-    columns.append(&year);
-
-    let favorite_cell = gtk::CenterBox::new();
-    favorite_cell.add_css_class("queue-favorite-cell");
-    favorite_cell.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
-    let favorite = row_favorite_icon_button("Favorite");
-    favorite.add_css_class("queue-favorite-button");
-    set_favorite_button_active(&favorite, row.favorite.unwrap_or(false));
-    if let Some(key) = row.track_key {
-        let favorite_shell = Rc::clone(shell);
-        favorite.connect_clicked(move |button| {
-            favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Track(key),
-                !crate::favorites::favorite_button_is_active(button),
-                Some(button),
-            );
-        });
-    } else {
-        favorite.set_sensitive(false);
-    }
-    favorite_cell.set_center_widget(Some(&favorite));
-    columns.append(&favorite_cell);
-
-    QueueRowContent {
-        widget: fullscreen_queue_column_owner(
-            &columns,
-            QueueFullscreenColumnWidgets {
-                album: album.upcast(),
-                year: year.upcast(),
-            },
-        ),
-        artwork,
-    }
-}
-
-fn queue_link_label(text: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.add_css_class("queue-link");
-    label.set_xalign(0.0);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label
-}
-
-fn fullscreen_queue_row_box() -> gtk::Box {
-    let row = gtk::Box::new(
-        gtk::Orientation::Horizontal,
-        QUEUE_FULLSCREEN_COLUMN_SPACING,
-    );
-    row.set_margin_start(QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING / 2);
-    row.set_margin_end(QUEUE_FULLSCREEN_ROW_HORIZONTAL_PADDING / 2);
-    row.set_hexpand(true);
-    row.set_halign(gtk::Align::Fill);
-    row.set_valign(gtk::Align::Center);
-    row
-}
-
-fn fullscreen_queue_text_cell(text: &str) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.set_xalign(0.0);
-    label.set_width_request(1);
-    label.set_hexpand(true);
-    label.set_halign(gtk::Align::Fill);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label
-}
-
-fn fullscreen_queue_text_columns(
-    title: &impl IsA<gtk::Widget>,
-    album: &impl IsA<gtk::Widget>,
-) -> gtk::Box {
-    let columns = gtk::Box::new(
-        gtk::Orientation::Horizontal,
-        QUEUE_FULLSCREEN_COLUMN_SPACING,
-    );
-    columns.set_homogeneous(true);
-    columns.set_width_request(1);
-    columns.set_hexpand(true);
-    columns.set_halign(gtk::Align::Fill);
-    columns.append(title);
-    columns.append(album);
-    columns
-}
-
-fn fullscreen_queue_fixed_cell(text: &str, width: i32) -> gtk::Label {
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.set_xalign(0.5);
-    label.set_width_request(width);
-    label
-}
-
-fn fullscreen_queue_column_owner(
+pub(super) fn fullscreen_queue_column_owner(
     root: &gtk::Box,
     columns: QueueFullscreenColumnWidgets,
 ) -> gtk::Widget {
@@ -1192,64 +1108,6 @@ fn fullscreen_queue_column_mode(available_width: i32) -> QueueFullscreenColumnMo
     } else {
         QueueFullscreenColumnMode::TitleOnly
     }
-}
-
-fn queue_header_row(fullscreen: bool) -> gtk::Widget {
-    if !fullscreen {
-        let header = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        header.add_css_class("queue-header");
-        header.set_margin_end(WINDOW_CHROME_MARGIN_END);
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_width_request(50);
-        header.append(&spacer);
-        let title = gtk::Label::new(Some(&tr("Title").to_uppercase()));
-        title.add_css_class("muted");
-        title.set_xalign(0.0);
-        title.set_hexpand(true);
-        header.append(&title);
-        let year = gtk::Label::new(Some(&tr("Year").to_uppercase()));
-        year.add_css_class("muted");
-        year.add_css_class("queue-year");
-        year.set_xalign(1.0);
-        year.set_width_chars(4);
-        year.set_halign(gtk::Align::End);
-        header.append(&year);
-        return header.upcast();
-    }
-    let header = fullscreen_queue_row_box();
-    header.add_css_class("queue-header");
-    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_width_request(QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH);
-    let title = gtk::Label::new(Some(&tr("Title").to_uppercase()));
-    title.add_css_class("muted");
-    title.set_xalign(0.0);
-    title.set_width_request(1);
-    let album = gtk::Label::new(Some(&tr("Album").to_uppercase()));
-    album.add_css_class("muted");
-    album.set_xalign(0.0);
-    album.set_width_request(1);
-    let text_columns = fullscreen_queue_text_columns(&title, &album);
-    let duration = gtk::Image::from_icon_name("rufin-preferences-system-time-symbolic");
-    duration.add_css_class("muted");
-    duration.set_width_request(QUEUE_DURATION_COLUMN_WIDTH);
-    let year = gtk::Label::new(Some(&tr("Year").to_uppercase()));
-    year.add_css_class("muted");
-    year.set_width_request(QUEUE_YEAR_COLUMN_WIDTH);
-    let favorite = gtk::Image::from_icon_name(FAVORITE_ADD_ICON);
-    favorite.add_css_class("muted");
-    favorite.set_width_request(QUEUE_FAVORITE_COLUMN_WIDTH);
-    header.append(&spacer);
-    header.append(&text_columns);
-    header.append(&duration);
-    header.append(&year);
-    header.append(&favorite);
-    fullscreen_queue_column_owner(
-        &header,
-        QueueFullscreenColumnWidgets {
-            album: album.upcast(),
-            year: year.upcast(),
-        },
-    )
 }
 
 fn queue_playback_media(row: &QueuePageRow) -> PlaybackMedia {
@@ -1295,8 +1153,8 @@ fn queue_playback_media(row: &QueuePageRow) -> PlaybackMedia {
 }
 
 pub(crate) fn clear_queue_panel_children(panel: &gtk::Box) {
-    while let Some(child) = panel.first_child() {
-        panel.remove(&child);
+    if let Some(scroller) = queue_panel_scroller(panel) {
+        scroller.set_child(None::<&gtk::Widget>);
     }
 }
 
@@ -1382,17 +1240,6 @@ mod tests {
         next[1].favorite = Some(true);
         assert_eq!(changed_queue_positions(&previous, &next), [1]);
         assert!(changed_queue_positions(&next, &next).is_empty());
-    }
-
-    #[test]
-    fn queue_drag_binding_uses_the_current_recycled_row() {
-        let binding = QueueDragBinding::default();
-        binding.bind(OccurrenceId::new("old-target"));
-        assert_eq!(binding.occurrence(), Some(OccurrenceId::new("old-target")));
-        binding.bind(OccurrenceId::new("new-target"));
-        assert_eq!(binding.occurrence(), Some(OccurrenceId::new("new-target")));
-        binding.clear();
-        assert_eq!(binding.occurrence(), None);
     }
 
     #[test]
@@ -1497,20 +1344,15 @@ mod tests {
     }
 
     #[test]
-    fn lyrics_overlap_adds_one_queue_scroll_extent() {
-        assert_eq!(queue_covered_extent(true, true, 240), 240);
-        assert_eq!(queue_covered_extent(false, true, 240), 0);
-        assert_eq!(queue_covered_extent(true, false, 240), 0);
-        assert_eq!(queue_covered_extent(true, true, -1), 0);
-    }
-
-    #[test]
-    fn queue_current_reveal_prefers_comfort_band_when_possible() {
-        assert_eq!(queue_reveal_target(5, 0.0, 500.0, 0.0, 2_000.0), None);
-        let target = queue_reveal_target(20, 0.0, 500.0, 0.0, 2_000.0)
-            .expect("distant current row needs reveal");
-        assert!(target > 0.0);
-        assert!(target <= 1_500.0);
+    fn current_outside_the_unfiltered_page_needs_a_centered_read() {
+        let state = QueueState::new();
+        let (generation, _) = state.begin();
+        assert!(state.accept(generation, vec![row("one", "One"), row("two", "Two")]));
+        assert!(!state.needs_page_for_current(Some(&OccurrenceId::new("one"))));
+        assert!(state.needs_page_for_current(Some(&OccurrenceId::new("far"))));
+        state.filter.replace("filtered".to_string());
+        assert!(!state.needs_page_for_current(Some(&OccurrenceId::new("far"))));
+        assert!(!state.needs_page_for_current(None));
     }
 
     #[test]

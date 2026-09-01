@@ -1,0 +1,64 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <object class="GtkBox" id="wrapper">
+    <property name="homogeneous">true</property>
+    <property name="hexpand">true</property>
+    <style>
+      <class name="source-choice-list"/>
+    </style>
+    <child>
+      <object class="GtkButton" id="jellyfin_button">
+        <style><class name="flat"/><class name="source-choice-button"/></style>
+        <child>
+          <object class="GtkBox" id="jellyfin_content">
+            <property name="orientation">vertical</property>
+            <property name="halign">center</property>
+            <child><object class="GtkImage" id="jellyfin_icon"/></child>
+            <child><object class="GtkLabel" id="jellyfin_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="navidrome_button">
+        <style><class name="flat"/><class name="source-choice-button"/></style>
+        <child>
+          <object class="GtkBox" id="navidrome_content">
+            <property name="orientation">vertical</property>
+            <property name="halign">center</property>
+            <child><object class="GtkImage" id="navidrome_icon"/></child>
+            <child><object class="GtkLabel" id="navidrome_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="subsonic_button">
+        <style><class name="flat"/><class name="source-choice-button"/></style>
+        <child>
+          <object class="GtkBox" id="subsonic_content">
+            <property name="orientation">vertical</property>
+            <property name="halign">center</property>
+            <child><object class="GtkImage" id="subsonic_icon"/></child>
+            <child><object class="GtkLabel" id="subsonic_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="local_button">
+        <style><class name="flat"/><class name="source-choice-button"/></style>
+        <child>
+          <object class="GtkBox" id="local_content">
+            <property name="orientation">vertical</property>
+            <property name="halign">center</property>
+            <child><object class="GtkImage" id="local_icon"/></child>
+            <child><object class="GtkLabel" id="local_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

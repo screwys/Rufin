@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesPage" id="integrations_page">
+    <property name="title" translatable="yes">Integrations</property>
+    <property name="icon-name">rufin-network-workgroup-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="lastfm_group">
+        <property name="title" translatable="yes">Last.fm</property>
+        <child>
+          <object class="AdwSwitchRow" id="lastfm_enabled"><property name="title" translatable="yes">Last.fm scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="lastfm_api_help">
+            <property name="title" translatable="yes">API keys</property>
+            <property name="use-markup">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="lastfm_api_key">
+            <property name="title" translatable="yes">API key</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="lastfm_api_secret">
+            <property name="title" translatable="yes">Shared secret</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="lastfm_connection">
+            <property name="title" translatable="yes">Connection</property>
+            <child type="suffix">
+              <object class="GtkButton" id="lastfm_connect">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="lastfm_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="librefm_group">
+        <property name="title" translatable="yes">Libre.fm</property>
+        <property name="description" translatable="yes">If the page doesn't load, then Libre.fm blocks your IP range/VPN</property>
+        <child>
+          <object class="AdwSwitchRow" id="librefm_enabled"><property name="title" translatable="yes">Libre.fm scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="librefm_connection">
+            <property name="title" translatable="yes">Connection</property>
+            <child type="suffix">
+              <object class="GtkButton" id="librefm_connect">
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="librefm_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="listenbrainz_group">
+        <property name="title" translatable="yes">ListenBrainz</property>
+        <child>
+          <object class="AdwSwitchRow" id="listenbrainz_enabled"><property name="title" translatable="yes">ListenBrainz scrobbling</property></object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="listenbrainz_token_help">
+            <property name="title" translatable="yes">Get token</property>
+            <property name="use-markup">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="listenbrainz_token">
+            <property name="title" translatable="yes">User token</property>
+            <property name="show-apply-button">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="listenbrainz_now_playing"><property name="title" translatable="yes">Now playing updates</property></object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

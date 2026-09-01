@@ -14,6 +14,9 @@ use localization::{msgid, tr};
 use super::sparse_model::{SparseItem, SparseObjectItem};
 
 pub(crate) fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryField) {
+    if field == LibraryField::Duration {
+        widget.add_css_class("tabular-numeric");
+    }
     let class = match field {
         LibraryField::Year
         | LibraryField::UserRating
@@ -215,7 +218,6 @@ pub(crate) fn track_artwork_at_from_item(item: &gtk::ListItem) -> Option<Artwork
 pub(crate) fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
 }
-pub(crate) const COLLECTION_GRID_CARD_GAP: i32 = 2;
 pub(crate) const COLLECTION_GRID_CARD_MARGIN: i32 = 5;
 pub(crate) const COLLECTION_GRID_MIN_CARD_WIDTH: i32 = 128;
 pub(crate) const COLLECTION_GRID_MAX_CARD_WIDTH: i32 = 200;
@@ -239,25 +241,6 @@ pub(crate) fn grid_label_with_label(text: &str, css_class: &str) -> (gtk::Widget
 
     (label.clone().upcast(), label)
 }
-pub(crate) fn grid_title_with_label(text: &str, css_class: &str) -> (gtk::Widget, gtk::Label) {
-    let label = gtk::Label::new(Some(text));
-    if !css_class.is_empty() {
-        label.add_css_class(css_class);
-    }
-    label.set_xalign(0.0);
-    label.set_justify(gtk::Justification::Left);
-    label.set_wrap(false);
-    label.set_single_line_mode(true);
-    label.set_lines(1);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    configure_collection_grid_label(&label);
-    if !text.is_empty() {
-        label.set_tooltip_text(Some(text));
-    }
-
-    (label.clone().upcast(), label)
-}
-
 fn configure_collection_grid_label(label: &gtk::Label) {
     label.set_width_request(1);
     label.set_height_request(COLLECTION_GRID_LABEL_HEIGHT);
@@ -365,7 +348,7 @@ pub(crate) fn library_field_config_row(
                 return;
             };
             shell.update_library_list_settings(key, |settings| {
-                set_field_enabled(settings, key, field_set, field, check.is_active());
+                set_field_enabled(settings, field_set, field, check.is_active());
             });
             populate_library_field_rows_for_set(&shell, key, field_set, &group, &rows);
         });
@@ -402,22 +385,30 @@ pub(crate) fn library_field_config_row(
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::MOVE)
         .build();
-    let field_id = library_field_drag_id(field).to_string();
+    let field_position = available_fields_for_set(key, field_set)
+        .iter()
+        .position(|candidate| *candidate == field)
+        .expect("configured field is available") as u32;
     source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&field_id.to_value()))
+        Some(gtk::gdk::ContentProvider::for_value(
+            &field_position.to_value(),
+        ))
     });
     drag.add_controller(source);
 
-    let drop_target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
+    let drop_target = gtk::DropTarget::new(u32::static_type(), gtk::gdk::DragAction::MOVE);
     let shell = Rc::clone(shell);
     let group = group.downgrade();
     let rows = Rc::downgrade(rows);
     let row_for_drop = row.downgrade();
     drop_target.connect_drop(move |_, value, _, y| {
-        let Ok(source_id) = value.get::<String>() else {
+        let Ok(source_position) = value.get::<u32>() else {
             return false;
         };
-        let Some(source_field) = library_field_from_drag_id(&source_id) else {
+        let Some(source_field) = available_fields_for_set(key, field_set)
+            .get(source_position as usize)
+            .copied()
+        else {
             return false;
         };
         if source_field == field {
@@ -507,7 +498,6 @@ pub(crate) fn available_fields_for_set(
 }
 pub(crate) fn set_field_enabled(
     settings: &mut LibraryListSettings,
-    _key: LibraryListKey,
     field_set: LibraryFieldSet,
     field: LibraryField,
     enabled: bool,
@@ -587,58 +577,6 @@ pub(crate) fn row_field_is_usable(field: LibraryField) -> bool {
             | LibraryField::Favorite
     )
 }
-pub(crate) fn library_field_drag_id(field: LibraryField) -> &'static str {
-    match field {
-        LibraryField::RowIndex => "RowIndex",
-        LibraryField::Image => "Image",
-        LibraryField::Title => "Title",
-        LibraryField::TitleMerged => "TitleMerged",
-        LibraryField::Artist => "Artist",
-        LibraryField::AlbumArtist => "AlbumArtist",
-        LibraryField::Album => "Album",
-        LibraryField::Year => "Year",
-        LibraryField::ReleaseDate => "ReleaseDate",
-        LibraryField::DateAdded => "DateAdded",
-        LibraryField::LastPlayed => "LastPlayed",
-        LibraryField::PlayCount => "PlayCount",
-        LibraryField::UserRating => "UserRating",
-        LibraryField::Genre => "Genre",
-        LibraryField::Bpm => "Bpm",
-        LibraryField::TrackNumber => "TrackNumber",
-        LibraryField::DiscNumber => "DiscNumber",
-        LibraryField::SongCount => "SongCount",
-        LibraryField::AlbumCount => "AlbumCount",
-        LibraryField::Duration => "Duration",
-        LibraryField::Favorite => "Favorite",
-    }
-}
-pub(crate) fn library_field_from_drag_id(id: &str) -> Option<LibraryField> {
-    [
-        LibraryField::RowIndex,
-        LibraryField::Image,
-        LibraryField::Title,
-        LibraryField::TitleMerged,
-        LibraryField::Artist,
-        LibraryField::AlbumArtist,
-        LibraryField::Album,
-        LibraryField::Year,
-        LibraryField::ReleaseDate,
-        LibraryField::DateAdded,
-        LibraryField::LastPlayed,
-        LibraryField::PlayCount,
-        LibraryField::UserRating,
-        LibraryField::Genre,
-        LibraryField::Bpm,
-        LibraryField::TrackNumber,
-        LibraryField::DiscNumber,
-        LibraryField::SongCount,
-        LibraryField::AlbumCount,
-        LibraryField::Duration,
-        LibraryField::Favorite,
-    ]
-    .into_iter()
-    .find(|field| library_field_drag_id(*field) == id)
-}
 pub(crate) fn next_layout(key: LibraryListKey, layout: LibraryLayout) -> LibraryLayout {
     if key.supports_layout(LibraryLayout::Detail) {
         match layout {
@@ -691,8 +629,7 @@ pub(crate) fn play_count_column_width() -> i32 {
     compact_header_column_width(msgid("Plays"), 56)
 }
 pub(crate) fn compact_header_column_width(header: &str, min_width: i32) -> i32 {
-    let width = tr(header).chars().count().min(i32::MAX as usize / 8) as i32 * 8 + 20;
-    width.max(min_width)
+    super::table_sizing::compact_header_text_width(&tr(header), min_width)
 }
 fn count(value: i64) -> String {
     value.max(0).to_string()

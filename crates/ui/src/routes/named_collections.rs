@@ -5,6 +5,7 @@ use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::gio;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use library::{
     GenreKey, GenreRow, MoodKey, MoodRow, PlaylistKey, PlaylistRow, SmartPlaylistKey,
     SmartPlaylistRow,
@@ -12,7 +13,7 @@ use library::{
 use localization::{album_count_text, msgid, track_count_text};
 
 use crate::shell::Shell;
-use crate::shell::cover::{ArtworkTile, LARGE_COVER_SIZE, THUMB_COVER_SIZE};
+use crate::shell::cover::CoverGroupProjection;
 use crate::shell::route::{LatestMountedRouteRead, MountedRoute};
 use crate::{LibraryLayout, LibraryListKey, LibraryListSettings};
 
@@ -28,11 +29,12 @@ use super::columns::{artwork_column, column_fit_width, mapped_row_index_column, 
 use super::detail_links::DetailLinks;
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
-    collection_grid_cover_shell, collection_grid_with_demand,
+    collection_grid_with_demand, install_grid_context, install_grid_open, install_grid_play,
 };
 use super::library_fields::{
     item_at_from_item, playlist_artwork, playlist_field, smart_playlist_field,
 };
+use super::recycled_cells::{RecycledBadgedTextCell, list_cell};
 use super::route::Route;
 use super::route_shell::LibraryPageShellOptions;
 use super::sparse_model::{SparseRouteModel, connect_sparse_bind};
@@ -50,7 +52,7 @@ pub(super) struct NamedReadRequest {
 pub(super) type NamedOrderLoad<K, R> = Arc<
     dyn Fn(
             NamedReadRequest,
-        ) -> Pin<Box<dyn Future<Output = Result<(Vec<K>, Vec<R>), String>> + Send>>
+        ) -> Pin<Box<dyn Future<Output = Result<(Vec<K>, usize, Vec<R>), String>> + Send>>
         + Send
         + Sync,
 >;
@@ -59,6 +61,7 @@ impl Shell {
     pub(crate) fn library_genres_route(
         self: &Rc<Self>,
         order: Vec<GenreKey>,
+        first_row_position: usize,
         first_rows: Vec<GenreRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -88,6 +91,7 @@ impl Shell {
                         &request.query,
                         request.settings.sort_key.genre_sort(),
                         request.settings.descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
@@ -99,6 +103,7 @@ impl Shell {
             LibraryListKey::Genres,
             msgid("Nothing here yet"),
             order,
+            first_row_position,
             first_rows,
             |row: &GenreRow| row.genre_key,
             selected,
@@ -110,6 +115,7 @@ impl Shell {
     pub(crate) fn library_moods_route(
         self: &Rc<Self>,
         order: Vec<MoodKey>,
+        first_row_position: usize,
         first_rows: Vec<MoodRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -139,6 +145,7 @@ impl Shell {
                         &request.query,
                         request.settings.sort_key.mood_sort(),
                         request.settings.descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
@@ -150,6 +157,7 @@ impl Shell {
             LibraryListKey::Moods,
             msgid("Nothing here yet"),
             order,
+            first_row_position,
             first_rows,
             |row: &MoodRow| row.mood_key,
             selected,
@@ -165,6 +173,7 @@ impl Shell {
         key: LibraryListKey,
         empty_body: &'static str,
         order: Vec<K>,
+        first_row_position: usize,
         first_rows: Vec<R>,
         row_key: impl Fn(&R) -> K + 'static,
         selected: crate::runtime::SelectedLibrary,
@@ -177,7 +186,7 @@ impl Shell {
     {
         let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), row_load);
         let row_key = Rc::new(row_key);
-        sparse.seed_matching(first_rows, {
+        sparse.seed_matching_at(first_row_position, first_rows, {
             let row_key = Rc::clone(&row_key);
             move |row| row_key(row)
         });
@@ -203,7 +212,8 @@ impl Shell {
             let route = route.clone();
             let row_key = Rc::clone(&row_key);
             Rc::new(
-                move |request: NamedReadRequest, result: Result<(Vec<K>, Vec<R>), String>| {
+                move |request: NamedReadRequest,
+                      result: Result<(Vec<K>, usize, Vec<R>), String>| {
                     let Some(shell) = shell.upgrade() else {
                         return;
                     };
@@ -211,10 +221,14 @@ impl Shell {
                         return;
                     }
                     match result {
-                        Ok((order, first_rows)) => {
+                        Ok((order, first_row_position, first_rows)) => {
                             let row_key = Rc::clone(&row_key);
-                            if !sparse.replace_prepared(order, first_rows, move |row| row_key(row))
-                            {
+                            if !sparse.replace_prepared_at(
+                                order,
+                                first_row_position,
+                                first_rows,
+                                move |row| row_key(row),
+                            ) {
                                 tracing::warn!("rejected a mismatched prepared named page");
                                 return;
                             }
@@ -265,7 +279,12 @@ impl Shell {
                 });
             })
         };
-        MountedRoute::new(page.widget(), resume).with_item_navigation(content.item_navigation())
+        page.mounted_route(resume)
+            .with_item_navigation(content.item_navigation())
+            .with_initial_demand({
+                let sparse = Rc::clone(&sparse);
+                Rc::new(move || sparse.resume_initial_demand())
+            })
     }
 }
 
@@ -276,7 +295,6 @@ pub(super) trait NamedCollectionRow: Clone + PartialEq + 'static {
     fn route(&self) -> Route;
     fn artwork(&self, prefer_server_playlist_covers: bool) -> Vec<artwork::ArtworkBinding>;
     fn playback(&self) -> super::collections::PlaybackTarget;
-    fn mosaic(&self) -> bool;
     fn field(&self, field: LibraryField) -> String;
     fn downloaded(&self) -> bool;
     fn present_context(
@@ -340,9 +358,6 @@ impl NamedCollectionRow for GenreRow {
     fn playback(&self) -> super::collections::PlaybackTarget {
         super::collections::PlaybackTarget::Genre(self.genre_key)
     }
-    fn mosaic(&self) -> bool {
-        false
-    }
     fn downloaded(&self) -> bool {
         self.track_count > 0 && self.downloaded_count == self.track_count
     }
@@ -390,9 +405,6 @@ impl NamedCollectionRow for MoodRow {
     fn playback(&self) -> super::collections::PlaybackTarget {
         super::collections::PlaybackTarget::Mood(self.mood_key)
     }
-    fn mosaic(&self) -> bool {
-        true
-    }
     fn downloaded(&self) -> bool {
         self.track_count > 0 && self.downloaded_count == self.track_count
     }
@@ -429,9 +441,6 @@ impl NamedCollectionRow for PlaylistRow {
     }
     fn playback(&self) -> super::collections::PlaybackTarget {
         super::collections::PlaybackTarget::Playlist(self.playlist_key)
-    }
-    fn mosaic(&self) -> bool {
-        true
     }
     fn downloaded(&self) -> bool {
         self.track_count > 0 && self.downloaded_count == self.track_count
@@ -483,9 +492,6 @@ impl NamedCollectionRow for SmartPlaylistRow {
     }
     fn playback(&self) -> super::collections::PlaybackTarget {
         super::collections::PlaybackTarget::SmartPlaylist(self.smart_playlist_key)
-    }
-    fn mosaic(&self) -> bool {
-        true
     }
     fn downloaded(&self) -> bool {
         false
@@ -578,114 +584,54 @@ where
 struct NamedCollectionGridCell<T: NamedCollectionRow> {
     body: CollectionGridCardCell,
     shell: Rc<Shell>,
-    cover_stack: gtk::Stack,
-    single: ArtworkTile,
-    quadrants: Vec<ArtworkTile>,
+    cover: CoverGroupProjection,
     current: Rc<std::cell::RefCell<Option<T>>>,
 }
 
 impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
     fn new(shell: Rc<Shell>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(std::cell::RefCell::new(None::<T>));
-        let overlay = super::cards::elastic_cover_overlay();
-        let cover_button = collection_grid_cover_shell();
-        let cover_stack = gtk::Stack::new();
-        cover_stack.set_hexpand(true);
-        cover_stack.set_vexpand(true);
-        let single = ArtworkTile::new_elastic_square();
-        cover_stack.add_named(&single.widget(), Some("single"));
-        let mosaic = gtk::Grid::new();
-        mosaic.add_css_class("cover-tile");
-        mosaic.add_css_class("card");
-        mosaic.set_overflow(gtk::Overflow::Hidden);
-        mosaic.set_row_homogeneous(true);
-        mosaic.set_column_homogeneous(true);
-        mosaic.set_hexpand(true);
-        mosaic.set_vexpand(true);
-        let quadrants = (0..4)
-            .map(|index| {
-                let tile = ArtworkTile::new_elastic_square();
-                mosaic.attach(&tile.widget(), index % 2, index / 2, 1, 1);
-                tile
-            })
-            .collect::<Vec<_>>();
-        cover_stack.add_named(&mosaic, Some("mosaic"));
-        cover_button.set_child(Some(&cover_stack));
-        let open_shell = Rc::clone(&shell);
-        let open_item = Rc::clone(&current);
-        cover_button.connect_clicked(move |_| {
-            if let Some(item) = open_item.borrow().as_ref() {
-                open_shell.navigate(item.route());
-            }
+        let controls = super::cards::CollectionGridCoverView::without_favorite(msgid("Play"));
+        let cover_button = controls.imp().cover_button.get();
+        let cover = shell.elastic_cover_group_projection_for_artwork(
+            &[],
+            super::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH,
+        );
+        cover_button.set_child(Some(&cover.widget()));
+        install_grid_open(&shell, &current, &cover_button, |shell, item| {
+            shell.navigate(item.route());
         });
-        overlay.set_child(Some(&cover_button));
-
-        let mut controls = super::cards::cover_play_hover_controls(0, msgid("Play"));
-        let menu = controls.add_context_button();
-        let menu_shell = Rc::downgrade(&shell);
-        let menu_item = Rc::clone(&current);
-        let menu_target = overlay.downgrade();
-        menu.connect_clicked(move |_| {
-            let (Some(shell), Some(item), Some(target)) = (
-                menu_shell.upgrade(),
-                menu_item.borrow().as_ref().cloned(),
-                menu_target.upgrade(),
-            ) else {
-                return;
-            };
-            item.present_context(
-                target.upcast_ref(),
-                &shell,
-                super::cards::elastic_cover_context_point(&target),
-            );
-        });
-        for (button, placement) in [
-            (&controls.play, playback::QueuePlacement::Now),
-            (&controls.play_next, playback::QueuePlacement::Next),
-            (&controls.play_last, playback::QueuePlacement::Last),
-        ] {
-            let play_shell = Rc::clone(&shell);
-            let play_item = Rc::clone(&current);
-            button.connect_clicked(move |_| {
-                if let Some(item) = play_item.borrow().as_ref() {
-                    item.playback().play(
-                        &play_shell,
-                        placement,
-                        placement == playback::QueuePlacement::Now,
-                    );
-                }
-            });
-        }
-        controls.add_to_overlay(&overlay);
-        controls.connect_hover(&overlay);
-        let cover = super::cards::square_cover_frame(&overlay, Some(&controls.transport));
-        let body = CollectionGridCardCell::new(&shell, fields, cover.upcast());
+        let menu = controls.imp().menu.get();
+        let overlay = controls.imp().overlay.get();
+        install_grid_play(
+            &shell,
+            &current,
+            [
+                controls.imp().play.get(),
+                controls.imp().play_next.get(),
+                controls.imp().play_last.get(),
+            ],
+            |shell, item, placement| {
+                item.playback()
+                    .play(shell, placement, placement == playback::QueuePlacement::Now);
+            },
+        );
+        let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
         body.set_download_badge(shell.download_badge(true));
-        let menu_shell = Rc::clone(&shell);
-        let menu_item = Rc::clone(&current);
-        install_context_menu_openers(
+        install_grid_context(
+            &shell,
+            &current,
+            &menu,
+            &overlay,
             &body.card,
-            Rc::new(move |target, position| {
-                if let Some(item) = menu_item.borrow().as_ref() {
-                    item.present_context(target, &menu_shell, position);
-                }
-            }),
+            |target, shell, item, point| item.present_context(target, shell, point),
         );
         T::install_extra(body.card.upcast_ref(), &shell, Rc::clone(&current));
         Self {
             body,
             shell,
-            cover_stack,
-            single,
-            quadrants,
+            cover,
             current,
-        }
-    }
-
-    fn clear_artwork(&self) {
-        self.shell.clear_artwork_tile(&self.single);
-        for tile in &self.quadrants {
-            self.shell.clear_artwork_tile(tile);
         }
     }
 }
@@ -696,7 +642,6 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn bind(&self, _: u32, item: T) {
-        self.clear_artwork();
         let artwork = item.artwork(
             self.shell
                 .settings
@@ -704,25 +649,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
                 .borrow()
                 .prefer_server_playlist_covers,
         );
-        if item.mosaic() && artwork.len() > 1 {
-            for (index, tile) in self.quadrants.iter().enumerate() {
-                self.shell.bind_artwork_tile(
-                    tile,
-                    artwork[index % artwork.len()].clone(),
-                    super::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH / 2,
-                    THUMB_COVER_SIZE,
-                );
-            }
-            self.cover_stack.set_visible_child_name("mosaic");
-        } else {
-            self.shell.bind_artwork_tile(
-                &self.single,
-                artwork.into_iter().next().unwrap_or_default(),
-                super::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH,
-                LARGE_COVER_SIZE,
-            );
-            self.cover_stack.set_visible_child_name("single");
-        }
+        self.cover.replace(&self.shell, &artwork);
         self.body
             .bind(item.name(), |field| DetailLinks::text(&item.field(field)));
         self.body
@@ -731,7 +658,7 @@ impl<T: NamedCollectionRow> ReusableCollectionGridCell<T> for NamedCollectionGri
     }
 
     fn clear(&self) {
-        self.clear_artwork();
+        self.cover.clear(&self.shell);
         self.body.clear(&self.shell);
         self.current.take();
     }
@@ -811,19 +738,11 @@ fn named_collection_column<T: NamedCollectionRow>(
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                     return;
                 };
-                let row = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-                row.set_hexpand(true);
-                let label = gtk::Label::new(None);
-                label.set_xalign(0.0);
-                label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-                label.set_single_line_mode(true);
-                row.append(&label);
-                let downloaded = setup_shell.download_badge(true);
-                row.append(&downloaded);
+                let cell = RecycledBadgedTextCell::for_shell(&setup_shell);
                 let weak = item.downgrade();
                 let shell = Rc::clone(&setup_shell);
                 install_context_menu_openers(
-                    &row,
+                    &cell,
                     Rc::new(move |target, position| {
                         let Some(item) = weak.upgrade() else { return };
                         if let Some(value) = item_at_from_item::<T>(&item) {
@@ -831,55 +750,28 @@ fn named_collection_column<T: NamedCollectionRow>(
                         }
                     }),
                 );
-                item.set_child(Some(&row));
+                item.set_child(Some(&cell));
             });
             let bind_shell = Rc::clone(shell);
             connect_sparse_bind(&factory, move |item| {
                 let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
                     return;
                 };
+                let Some(cell) = list_cell::<RecycledBadgedTextCell>(item) else {
+                    return;
+                };
                 let Some(row) = item_at_from_item::<T>(item) else {
+                    cell.clear();
                     return;
                 };
-                let Some(row_widget) = item
-                    .child()
-                    .and_then(|child| child.downcast::<gtk::Box>().ok())
-                else {
-                    return;
-                };
-                let Some(label) = row_widget
-                    .first_child()
-                    .and_then(|child| child.downcast::<gtk::Label>().ok())
-                else {
-                    return;
-                };
-                let Some(downloaded) = label
-                    .next_sibling()
-                    .and_then(|child| child.downcast::<gtk::Image>().ok())
-                else {
-                    return;
-                };
-                label.set_text(row.name());
-                bind_shell.bind_download_badge(&downloaded, row.downloaded());
+                cell.label().set_text(row.name());
+                bind_shell.bind_download_badge(&cell.downloaded(), row.downloaded());
             });
             factory.connect_unbind(|_, item| {
-                let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
-                    return;
-                };
-                let Some(row) = item
-                    .child()
-                    .and_then(|child| child.downcast::<gtk::Box>().ok())
-                else {
-                    return;
-                };
-                if let Some(label) = row
-                    .first_child()
-                    .and_then(|child| child.downcast::<gtk::Label>().ok())
+                if let Some(item) = item.downcast_ref::<gtk::ListItem>()
+                    && let Some(cell) = list_cell::<RecycledBadgedTextCell>(item)
                 {
-                    label.set_text("");
-                    if let Some(downloaded) = label.next_sibling() {
-                        downloaded.set_visible(false);
-                    }
+                    cell.clear();
                 }
             });
             gtk::ColumnViewColumn::new(Some(field.title()), Some(factory))

@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesPage" id="appearance_page">
+    <property name="title" translatable="yes">Appearance</property>
+    <property name="icon-name">rufin-preferences-desktop-appearance-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="theme_group"><property name="title" translatable="yes">Theme</property></object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="seekbar_group">
+        <property name="title" translatable="yes">Seekbar</property>
+        <child>
+          <object class="AdwSwitchRow" id="waveform_row"><property name="title" translatable="yes">Waveform seekbar</property><property name="subtitle" translatable="yes">Generate and cache waveforms for the current track</property></object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="layout_group"><property name="title" translatable="yes">Layout</property></object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="sidebar_items_group">
+        <child>
+          <object class="AdwExpanderRow" id="sidebar_items">
+            <property name="title" translatable="yes">Sidebar Items</property>
+            <property name="expanded">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="home_blocks_group">
+        <child>
+          <object class="AdwExpanderRow" id="home_blocks">
+            <property name="title" translatable="yes">Home Blocks</property>
+            <property name="expanded">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="context_menus_group">
+        <child>
+          <object class="AdwExpanderRow" id="context_menus">
+            <property name="title" translatable="yes">Context Menus</property>
+            <property name="expanded">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+
+  <object class="AdwSwitchRow" id="lyrics_panel_row"><property name="title" translatable="yes">Show lyrics</property></object>
+  <object class="AdwSwitchRow" id="visualizer_panel_row"><property name="title" translatable="yes">Show visualizer</property></object>
+  <object class="AdwSwitchRow" id="bottom_bar_rating_row"><property name="title" translatable="yes">Show ratings in the bottom bar</property></object>
+  <object class="AdwSwitchRow" id="narrow_row"><property name="title" translatable="yes">Use different layout below a threshold width</property></object>
+  <object class="AdwSpinRow" id="threshold_row">
+    <property name="title" translatable="yes">Narrow layout threshold</property>
+    <property name="digits">0</property>
+    <property name="numeric">true</property>
+    <child type="suffix">
+      <object class="GtkLabel">
+        <property name="label">px</property>
+        <style>
+          <class name="dim-label"/>
+        </style>
+      </object>
+    </child>
+  </object>
+  <object class="AdwSwitchRow" id="sidebar_pins_row">
+    <property name="title" translatable="yes">Pins</property>
+    <property name="subtitle" translatable="yes">Fixed position</property>
+  </object>
+  <object class="AdwActionRow" id="context_menu_rating_row">
+    <property name="title" translatable="yes">Rating</property>
+    <child type="suffix">
+      <object class="GtkSwitch" id="context_menu_rating_visible">
+        <property name="valign">center</property>
+      </object>
+    </child>
+  </object>
+</interface>

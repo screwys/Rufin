@@ -20,8 +20,6 @@ const WINDOW_CHROME_MARGIN_START: i32 = 8;
 const WINDOW_DRAG_HANDLE_HEIGHT: i32 = ROUTE_TOP_MARGIN;
 const WINDOW_DRAG_HANDLE_MARGIN_START: i32 = 56;
 pub(super) const RIGHT_RESIZE_HANDLE_WIDTH: i32 = 4;
-pub(crate) const ROUTE_VIEWPORT_CLASS: &str = "route-viewport";
-
 pub(crate) struct WindowChrome {
     pub(crate) application: adw::Application,
     pub(crate) window: gtk::ApplicationWindow,
@@ -194,13 +192,18 @@ impl WindowControlLayout {
     pub(crate) fn set_compact_start_alignment(&self, compact: bool) {
         #[cfg(not(any(target_os = "windows", target_os = "macos")))]
         {
-            self.start_host.set_margin_start(if compact {
+            let start_empty = self.start.is_empty();
+            self.start_host.set_margin_start(if compact || start_empty {
                 0
             } else {
                 WINDOW_CHROME_MARGIN_START
             });
             self.start_alignment
-                .set_width_request(if compact { COMPACT_RAIL_WIDTH } else { -1 });
+                .set_width_request(if compact && !start_empty {
+                    COMPACT_RAIL_WIDTH
+                } else {
+                    -1
+                });
         }
 
         #[cfg(any(target_os = "windows", target_os = "macos"))]
@@ -315,122 +318,53 @@ fn hidden_control_reservation() -> gtk::Box {
     reservation
 }
 
-pub(super) struct MainAreaParts {
-    pub(super) root: adw::ToolbarView,
-    pub(super) route_host: gtk::Stack,
-}
-
 pub(super) struct ContentChromeParts {
     pub(super) root: gtk::Overlay,
+    pub(super) route_host: gtk::Stack,
+    pub(super) route_loading: gtk::Box,
     pub(super) right_split: gtk::Paned,
     pub(super) right_panel_slot: gtk::ScrolledWindow,
     pub(super) right_resize_handle: gtk::Box,
+    pub(super) tiny_nav_button: gtk::Button,
 }
 
-pub(super) fn build_main_area() -> MainAreaParts {
-    let root = adw::ToolbarView::new();
-    root.add_css_class("main-area");
-    root.set_hexpand(true);
-    root.set_vexpand(true);
-
-    let route_host = gtk::Stack::new();
-    route_host.add_css_class(ROUTE_VIEWPORT_CLASS);
-    route_host.set_hhomogeneous(false);
-    route_host.set_vhomogeneous(false);
-    route_host.set_interpolate_size(false);
-    route_host.set_transition_type(gtk::StackTransitionType::None);
-    route_host.set_transition_duration(0);
-    route_host.set_width_request(1);
-    route_host.set_halign(gtk::Align::Fill);
-    route_host.set_hexpand(true);
-    route_host.set_vexpand(true);
-    route_host.set_overflow(gtk::Overflow::Hidden);
-
-    root.set_content(Some(&route_host));
-
-    MainAreaParts { root, route_host }
-}
-
-pub(super) fn build_content_chrome(
-    main_area: &adw::ToolbarView,
-    right_panel: &gtk::Box,
-) -> ContentChromeParts {
-    let main_well = gtk::Overlay::new();
-    main_well.set_overflow(gtk::Overflow::Hidden);
-    main_well.set_width_request(1);
-    main_well.set_hexpand(true);
-    main_well.set_vexpand(true);
-    main_area.set_width_request(1);
-    main_area.set_halign(gtk::Align::Fill);
-    main_area.set_valign(gtk::Align::Fill);
-    main_area.set_overflow(gtk::Overflow::Hidden);
-    main_well.set_child(Some(main_area));
+pub(super) fn build_content_chrome(right_panel: &gtk::Box) -> ContentChromeParts {
+    let resource = crate::ui_resource::CONTENT_CHROME_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        root: gtk::Overlay,
+        main_well: gtk::Overlay,
+        route_host: gtk::Stack,
+        route_loading: gtk::Box,
+        right_split: gtk::Paned,
+        right_panel_slot: gtk::ScrolledWindow,
+        right_resize_handle: gtk::Box,
+        tiny_nav_button: gtk::Button,
+    });
     let drag_handle = top_window_drag_handle("window-drag-handle");
     main_well.add_overlay(&drag_handle);
     main_well.set_measure_overlay(&drag_handle, false);
+    main_well.set_measure_overlay(&route_loading, false);
 
-    let right_panel_slot = gtk::ScrolledWindow::new();
     configure_fill_width_clip(&right_panel_slot, gtk::PolicyType::Never);
-    right_panel_slot.set_propagate_natural_height(false);
-    right_panel_slot.set_hexpand(false);
-    right_panel_slot.set_vexpand(true);
     right_panel_slot.set_child(Some(right_panel));
 
-    let right_split = gtk::Paned::new(gtk::Orientation::Horizontal);
-    configure_right_split(&right_split);
-    right_split.set_start_child(Some(&main_well));
-    right_split.set_end_child(Some(&right_panel_slot));
-    right_split.set_hexpand(true);
-    right_split.set_vexpand(true);
-
-    let root = gtk::Overlay::new();
-    root.set_hexpand(true);
-    root.set_vexpand(true);
-    root.set_child(Some(&right_split));
-
-    let right_resize_handle = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    right_resize_handle.add_css_class("right-sidebar-resize-handle");
     right_resize_handle.set_width_request(RIGHT_RESIZE_HANDLE_WIDTH);
-    right_resize_handle.set_halign(gtk::Align::Start);
-    right_resize_handle.set_valign(gtk::Align::Fill);
-    right_resize_handle.set_vexpand(true);
-    right_resize_handle.set_focusable(false);
     right_resize_handle.set_cursor_from_name(Some("col-resize"));
     let resize_label = tr("Hold and drag to resize");
     right_resize_handle.update_property(&[gtk::accessible::Property::Label(&resize_label)]);
-    right_resize_handle.set_visible(false);
-    root.add_overlay(&right_resize_handle);
     root.set_measure_overlay(&right_resize_handle, false);
+    root.set_measure_overlay(&tiny_nav_button, false);
 
     ContentChromeParts {
         root,
+        route_host,
+        route_loading,
         right_split,
         right_panel_slot,
         right_resize_handle,
+        tiny_nav_button,
     }
-}
-
-fn configure_right_split(right_split: &gtk::Paned) {
-    right_split.add_css_class("right-pane-split");
-    right_split.set_focusable(false);
-    // Rufin owns the four-pixel input target. A non-wide GtkPaned adds a
-    // hidden six-pixel pointer gutter on both sides of its separator, which
-    // would leave a second resize owner underneath the shell gesture.
-    right_split.set_wide_handle(true);
-    // The shell sets an exact divider position for the allocation it is about
-    // to grant. Preserve that start position when GtkPaned receives its new
-    // width instead of applying GtkPaned's own parent-resize distribution to
-    // the already-resolved position.
-    right_split.set_resize_start_child(false);
-    right_split.set_shrink_start_child(true);
-    right_split.set_resize_end_child(true);
-    right_split.set_shrink_end_child(false);
-}
-
-pub(super) fn configure_primary_menu_button(button: &gtk::Button) {
-    let label = tr("Menu");
-    button.set_tooltip_text(Some(&label));
-    button.update_property(&[gtk::accessible::Property::Label(&label)]);
 }
 
 pub(crate) fn playback_window_title(title: Option<&str>, artist: Option<&str>) -> String {

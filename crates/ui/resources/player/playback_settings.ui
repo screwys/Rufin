@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkPopover" id="popover">
+    <property name="autohide">true</property>
+    <property name="position">top</property>
+    <style><class name="playback-settings-popover"/></style>
+    <property name="child">
+      <object class="GtkScrolledWindow">
+        <property name="hscrollbar-policy">never</property>
+        <property name="vscrollbar-policy">automatic</property>
+        <property name="min-content-width">400</property>
+        <property name="propagate-natural-width">false</property>
+        <property name="propagate-natural-height">true</property>
+        <property name="max-content-height">520</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="margin-top">2</property><property name="margin-bottom">2</property>
+            <property name="margin-start">2</property><property name="margin-end">2</property>
+            <property name="width-request">400</property>
+            <child><object class="AdwPreferencesGroup" id="settings_group"/></child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwActionRow" id="output_row">
+    <property name="title" translatable="yes">Audio output</property>
+  </object>
+  <object class="AdwSwitchRow" id="lyrics">
+    <property name="title" translatable="yes">Show lyrics</property>
+  </object>
+  <object class="AdwSwitchRow" id="visualizer">
+    <property name="title" translatable="yes">Show visualizer</property>
+  </object>
+</interface>

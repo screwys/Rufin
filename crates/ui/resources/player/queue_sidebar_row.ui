@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <template class="RufinQueueSidebarRow" parent="GtkBox">
+    <property name="spacing">8</property>
+    <property name="height-request">58</property>
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="valign">center</property>
+    <property name="focusable">true</property>
+    <style><class name="queue-row"/></style>
+    <child><object class="RufinRecycledArtworkCell" id="cover"/></child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">2</property>
+        <property name="hexpand">true</property>
+        <property name="valign">center</property>
+        <child>
+          <object class="GtkLabel" id="title">
+            <property name="xalign">0</property>
+            <property name="ellipsize">end</property>
+            <style><class name="queue-title"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="RufinRecycledTextCell" id="artist"/>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="year">
+        <property name="xalign">1</property>
+        <property name="width-chars">4</property>
+        <property name="halign">end</property>
+        <style><class name="muted"/><class name="queue-year"/></style>
+      </object>
+    </child>
+  </template>
+</interface>

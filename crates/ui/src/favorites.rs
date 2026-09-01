@@ -157,6 +157,15 @@ pub(crate) fn row_favorite_icon_button(label: &str) -> gtk::Button {
     button
 }
 
+pub(crate) fn column_favorite_icon_button(label: &str) -> gtk::Button {
+    let button = row_favorite_icon_button(label);
+    button.set_halign(gtk::Align::Start);
+    if let Some(image) = button.child().and_then(icon_image_from_widget) {
+        image.set_halign(gtk::Align::Start);
+    }
+    button
+}
+
 pub(crate) fn set_favorite_button_active(button: &gtk::Button, active: bool) {
     if active {
         button.add_css_class("active-toggle");

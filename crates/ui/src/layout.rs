@@ -3,6 +3,8 @@ use adw::prelude::*;
 const LARGE_POPUP_HEIGHT_PERCENT: i32 = 85;
 const LARGE_POPUP_WIDTH_NUMERATOR: i32 = 11;
 const LARGE_POPUP_WIDTH_DENOMINATOR: i32 = 10;
+pub(crate) const LARGE_POPUP_BASE_WIDTH: i32 = 700;
+pub(crate) const LARGE_POPUP_BASE_HEIGHT: i32 = 640;
 
 mod allocation_owner_imp {
     use std::{cell::RefCell, rc::Rc};

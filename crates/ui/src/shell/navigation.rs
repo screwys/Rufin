@@ -12,7 +12,6 @@ use crate::interactions::{
     keep_parent_grab_for_nested_native_menus, popdown_native_menu, replace_native_menu_checkmarks,
     show_native_menu_icons,
 };
-use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
 use crate::preferences::source::selector::source_submenu;
 use crate::routes::cards::cover_play_only_hover_controls;
 use crate::routes::collection_context::{
@@ -26,7 +25,6 @@ use crate::routes::route::{CollectionCategory, Route};
 use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::{SidebarPin, SidebarRouteItem, format_duration_units};
 use adw::prelude::*;
-use app_identity::DISPLAY_NAME;
 use artwork::ArtworkBinding;
 use gtk::{gio, glib};
 use library::{AlbumRow, ArtistRow, GenreRow, PlaylistRow, SmartPlaylistRow};
@@ -36,13 +34,11 @@ use tracing::warn;
 use super::{
     Shell,
     actions::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON, icon_button},
-    chrome,
     layout::{COMPACT_RAIL_WIDTH, ResolvedLeftSidebarMode},
     route::{RouteStack, route_current_track},
 };
-use localization::{msgid, tr};
+use localization::tr;
 
-const NORMAL_NAV_ICON_SIZE: i32 = 16;
 const COMPACT_NAV_ICON_SIZE: i32 = 24;
 const MOUSE_BACK_BUTTON: u32 = 8;
 const MOUSE_FORWARD_BUTTON: u32 = 9;
@@ -51,61 +47,12 @@ const COMPACT_RAIL_LABEL_WIDTH_CHARS: i32 = 8;
 const NAV_SELECTED_CLASS: &str = "selected";
 const SIDEBAR_PINS_HEADING_CLASS: &str = "sidebar-pins-heading";
 const SIDEBAR_SPACER_CLASS: &str = "sidebar-spacer";
-const NAV_ROUTE_HOME_CLASS: &str = "nav-route-home";
-const NAV_ROUTE_SEARCH_CLASS: &str = "nav-route-search";
 const LEFT_OPENING_PRIMARY_MENU_CLASS: &str = "left-opening-primary-menu";
-const NAV_ROUTE_FAVORITES_CLASS: &str = "nav-route-favorites";
-const NAV_ROUTE_HISTORY_CLASS: &str = "nav-route-history";
-const NAV_ROUTE_ALBUMS_CLASS: &str = "nav-route-albums";
-const NAV_ROUTE_TRACKS_CLASS: &str = "nav-route-tracks";
-const NAV_ROUTE_ARTISTS_CLASS: &str = "nav-route-artists";
-const NAV_ROUTE_ALBUM_ARTISTS_CLASS: &str = "nav-route-album-artists";
-const NAV_ROUTE_GENRES_CLASS: &str = "nav-route-genres";
-const NAV_ROUTE_MOODS_CLASS: &str = "nav-route-moods";
-const NAV_ROUTE_FOLDERS_CLASS: &str = "nav-route-folders";
-const NAV_ROUTE_PLAYLISTS_CLASS: &str = "nav-route-playlists";
-const NAV_ROUTE_SMART_PLAYLISTS_CLASS: &str = "nav-route-smart-playlists";
 const SIDEBAR_PIN_ROW_CLASS: &str = "sidebar-pin-row";
 const SIDEBAR_PIN_PLAYING_CLASS: &str = "playing";
 const SIDEBAR_PIN_COVER_SIZE: i32 = 40;
 const COMPACT_SIDEBAR_PIN_COVER_SIZE: i32 = 56;
 const PRIMARY_MENU_CLASS: &str = "rufin-primary-menu";
-const NAV_ROUTE_ICONS: [(&str, &str, Option<&str>); 13] = [
-    (NAV_ROUTE_HOME_CLASS, "rufin-home-symbolic", None),
-    (NAV_ROUTE_SEARCH_CLASS, "rufin-search-symbolic", None),
-    (
-        NAV_ROUTE_FAVORITES_CLASS,
-        "rufin-heart-outline-symbolic",
-        Some("rufin-heart-filled-symbolic"),
-    ),
-    (NAV_ROUTE_HISTORY_CLASS, "rufin-history-symbolic", None),
-    (NAV_ROUTE_ALBUMS_CLASS, "rufin-albums-symbolic", None),
-    (
-        NAV_ROUTE_TRACKS_CLASS,
-        "rufin-tracks-symbolic",
-        Some("rufin-tracks-selected-symbolic"),
-    ),
-    (NAV_ROUTE_ARTISTS_CLASS, "rufin-artists-symbolic", None),
-    (
-        NAV_ROUTE_ALBUM_ARTISTS_CLASS,
-        "rufin-album-artists-symbolic",
-        None,
-    ),
-    (NAV_ROUTE_GENRES_CLASS, "rufin-genres-symbolic", None),
-    (NAV_ROUTE_MOODS_CLASS, "rufin-moods-symbolic", None),
-    (
-        NAV_ROUTE_FOLDERS_CLASS,
-        "rufin-folders-symbolic",
-        Some("rufin-folders-selected-symbolic"),
-    ),
-    (NAV_ROUTE_PLAYLISTS_CLASS, "rufin-playlists-symbolic", None),
-    (
-        NAV_ROUTE_SMART_PLAYLISTS_CLASS,
-        "rufin-smart-playlists-symbolic",
-        None,
-    ),
-];
-
 pub(crate) struct NavigationState {
     pub(crate) routes: RefCell<RouteStack>,
     pub(crate) favorite_category: Cell<CollectionCategory>,
@@ -153,9 +100,18 @@ pub(crate) struct NavigationWidgets {
 
 pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
     let section = adw::SidebarSection::new();
-    for item in nav_items(shell) {
-        let sidebar_item = adw::SidebarItem::new(&tr(item.label));
-        sidebar_item.set_icon_name(Some(item.icon_name));
+    for entry in shell
+        .settings
+        .current
+        .borrow()
+        .sidebar
+        .route_items
+        .iter()
+        .filter(|entry| entry.visible)
+    {
+        let descriptor = entry.item.descriptor();
+        let sidebar_item = adw::SidebarItem::new(&tr(descriptor.title));
+        sidebar_item.set_icon_name(Some(descriptor.icon_name));
         section.append(sidebar_item);
     }
     shell.navigation_view.normal_nav_routes.append(section);
@@ -163,25 +119,24 @@ pub(super) fn build_normal_navigation(shell: &Rc<Shell>) {
 }
 
 pub(super) fn build_compact_navigation(shell: &Rc<Shell>) {
-    let top_reservation = shell.chrome.window_controls.compact_start_reservation();
-    let top_handle = chrome::window_drag_handle_with_child("sidebar-drag-handle", &top_reservation);
-    shell.navigation_view.compact_nav.append(&top_handle);
-    shell
-        .navigation_view
-        .compact_nav
-        .append(&primary_menu_button(
-            &shell.navigation_view.compact_main_menu.button,
-            &shell.navigation_view.compact_main_menu.popover,
-            shell,
-            true,
-        ));
-    for item in nav_items(shell) {
-        shell.navigation_view.compact_nav.append(&rail_button(
-            shell,
-            item.icon_name,
-            item.label,
-            item.route.clone(),
-        ));
+    primary_menu_button(
+        &shell.navigation_view.compact_main_menu.button,
+        &shell.navigation_view.compact_main_menu.popover,
+        shell,
+    );
+    for entry in shell
+        .settings
+        .current
+        .borrow()
+        .sidebar
+        .route_items
+        .iter()
+        .filter(|entry| entry.visible)
+    {
+        shell
+            .navigation_view
+            .compact_nav
+            .append(&rail_button(shell, entry.item));
     }
     append_compact_sidebar_pins(shell);
     shell.navigation_view.compact_nav.append(&sidebar_spacer());
@@ -201,7 +156,14 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
     }
     shell.navigation_view.normal_nav_routes.remove_all();
     clear_box(&shell.navigation_view.normal_nav_pins);
-    clear_box(&shell.navigation_view.compact_nav);
+    while let Some(widget) = shell
+        .navigation_view
+        .compact_main_menu
+        .button
+        .next_sibling()
+    {
+        shell.navigation_view.compact_nav.remove(&widget);
+    }
     build_normal_navigation(shell);
     build_compact_navigation(shell);
     update_navigation_selection(shell.as_ref());
@@ -396,14 +358,11 @@ fn sidebar_pin_context_matches(pin_context_id: &str, playback_context_id: &str) 
         }
 }
 
-pub(super) fn relocalize_primary_menu_button(
+fn initialize_primary_menu_button(
     button: &gtk::Button,
     popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
     shell: &Rc<Shell>,
-    compact: bool,
 ) {
-    chrome::configure_primary_menu_button(button);
-    button.set_child(Some(&sidebar_menu_content(compact)));
     let existing = popover_slot.borrow().clone();
     if let Some(popover) = existing.as_ref() {
         refresh_primary_menu(popover, shell);
@@ -423,35 +382,6 @@ fn sidebar_spacer() -> gtk::Box {
     spacer.add_css_class(SIDEBAR_SPACER_CLASS);
     spacer.set_vexpand(true);
     spacer
-}
-
-pub(super) fn normal_sidebar_header(
-    shell: &Rc<Shell>,
-    start_window_controls: &impl IsA<gtk::Widget>,
-) -> adw::HeaderBar {
-    let search = gtk::Button::from_icon_name("rufin-system-search-symbolic");
-    bind_widget_tooltip(&search, msgid("Search"));
-    let search_shell = Rc::clone(shell);
-    search.connect_clicked(move |_| search_shell.navigate(Route::Search));
-
-    let title = gtk::Label::new(Some(DISPLAY_NAME));
-    title.add_css_class("heading");
-
-    let menu = normal_primary_menu_button(
-        &shell.navigation_view.normal_main_menu.button,
-        &shell.navigation_view.normal_main_menu.popover,
-        shell,
-    );
-
-    let header = adw::HeaderBar::new();
-    header.add_css_class("flat");
-    header.set_show_start_title_buttons(false);
-    header.set_show_end_title_buttons(false);
-    header.pack_start(start_window_controls);
-    header.pack_start(&search);
-    header.set_title_widget(Some(&title));
-    header.pack_end(&menu);
-    header
 }
 
 fn update_pin_selection(container: &gtk::Box, active_route: &Route) -> bool {
@@ -477,38 +407,28 @@ fn update_pin_selection(container: &gtk::Box, active_route: &Route) -> bool {
 }
 
 fn update_native_route_selection(shell: &Shell, active_route: &Route, pin_is_selected: bool) {
-    let active_route_class = nav_route_class(active_route);
-    let items = nav_items(shell);
+    let settings = shell.settings.current.borrow();
+    let items = settings
+        .sidebar
+        .route_items
+        .iter()
+        .filter(|entry| entry.visible);
     let selected_index = if pin_is_selected {
         None
     } else {
         items
-            .iter()
-            .position(|item| {
-                active_route_class
-                    .is_some_and(|active| nav_route_class(&item.route) == Some(active))
-            })
+            .clone()
+            .position(|entry| entry.item.descriptor().root_route == *active_route)
             .map(|index| index as u32)
     };
-    for (index, nav_item) in items.iter().enumerate() {
+    for (index, entry) in items.enumerate() {
         if let Some(item) = shell.navigation_view.normal_nav_routes.item(index as u32) {
-            let icon_name = nav_route_class(&nav_item.route)
-                .and_then(|route_class| {
-                    NAV_ROUTE_ICONS.iter().find_map(
-                        |(class, normal_icon_name, selected_icon_name)| {
-                            (*class == route_class).then_some(
-                                if selected_index == Some(index as u32)
-                                    && route_class != NAV_ROUTE_FAVORITES_CLASS
-                                {
-                                    selected_icon_name.unwrap_or(normal_icon_name)
-                                } else {
-                                    *normal_icon_name
-                                },
-                            )
-                        },
-                    )
-                })
-                .unwrap_or(nav_item.icon_name);
+            let descriptor = entry.item.descriptor();
+            let icon_name = if selected_index == Some(index as u32) {
+                descriptor.selected_icon_name()
+            } else {
+                descriptor.icon_name
+            };
             item.set_icon_name(Some(icon_name));
         }
     }
@@ -537,27 +457,24 @@ pub(super) fn install_normal_navigation_activation(shell: &Rc<Shell>) {
 }
 
 fn update_button_navigation_selection(container: &gtk::Box, active_route: &Route) {
-    let active_route_class = nav_route_class(active_route);
     let mut child = container.first_child();
     while let Some(widget) = child {
         child = widget.next_sibling();
-        if !widget.has_css_class("nav-button") {
+        let Some(item) = SidebarRouteItem::from_stable_id(widget.widget_name().as_str()) else {
             continue;
-        }
-        let selected =
-            active_route_class.is_some_and(|route_class| widget.has_css_class(route_class));
+        };
+        let descriptor = item.descriptor();
+        let selected = descriptor.root_route == *active_route;
         if selected {
             widget.add_css_class(NAV_SELECTED_CLASS);
         } else {
             widget.remove_css_class(NAV_SELECTED_CLASS);
         }
-        if let (Some((normal_icon_name, selected_icon_name)), Some(icon)) =
-            (nav_route_icon_names(&widget), nav_button_icon(&widget))
-        {
+        if let Some(icon) = nav_button_icon(&widget) {
             icon.set_icon_name(Some(if selected {
-                selected_icon_name
+                descriptor.selected_icon_name()
             } else {
-                normal_icon_name
+                descriptor.icon_name
             }));
         }
     }
@@ -571,30 +488,12 @@ fn nav_button_icon(widget: &gtk::Widget) -> Option<gtk::Image> {
         .and_then(|child| child.downcast::<gtk::Image>().ok())
 }
 
-fn nav_route_icon_names(widget: &gtk::Widget) -> Option<(&'static str, &'static str)> {
-    NAV_ROUTE_ICONS
-        .into_iter()
-        .find_map(|(route_class, normal_icon_name, selected_icon_name)| {
-            widget.has_css_class(route_class).then_some((
-                normal_icon_name,
-                selected_icon_name.unwrap_or(normal_icon_name),
-            ))
-        })
-}
-
 fn primary_menu_button(
     button: &gtk::Button,
     popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
     shell: &Rc<Shell>,
-    compact: bool,
 ) -> gtk::Button {
-    button.add_css_class("primary-menu-button");
-    button.add_css_class("flat");
-    if compact {
-        button.add_css_class("nav-button");
-        button.add_css_class("rail-button");
-    }
-    relocalize_primary_menu_button(button, popover_slot, shell, compact);
+    initialize_primary_menu_button(button, popover_slot, shell);
     button.clone()
 }
 
@@ -617,14 +516,11 @@ fn update_primary_menu_popover(
     crate::interactions::popdown_on_anchor_unmap(button, &popover);
 }
 
-fn normal_primary_menu_button(
+pub(super) fn normal_primary_menu_button(
     button: &gtk::MenuButton,
     popover_slot: &RefCell<Option<gtk::PopoverMenu>>,
     shell: &Rc<Shell>,
 ) -> gtk::MenuButton {
-    button.set_icon_name("rufin-open-menu-symbolic");
-    bind_widget_tooltip(button, msgid("Menu"));
-    bind_widget_accessible_label(button, msgid("Menu"));
     if popover_slot.borrow().is_none() {
         let popover = primary_menu_popover(shell);
         let row_shell = Rc::downgrade(shell);
@@ -838,50 +734,6 @@ fn primary_menu_private_mode_label(shell: &Shell) -> String {
     } else {
         tr("Turn on private mode")
     }
-}
-
-fn sidebar_menu_content(compact: bool) -> gtk::Box {
-    let content = gtk::Box::new(
-        if compact {
-            gtk::Orientation::Vertical
-        } else {
-            gtk::Orientation::Horizontal
-        },
-        8,
-    );
-    content.set_halign(if compact {
-        gtk::Align::Center
-    } else {
-        gtk::Align::Start
-    });
-
-    let icon_size = if compact {
-        COMPACT_NAV_ICON_SIZE
-    } else {
-        NORMAL_NAV_ICON_SIZE
-    };
-    let icon = gtk::Image::from_icon_name("rufin-open-menu-symbolic");
-    icon.add_css_class("nav-icon");
-    icon.set_pixel_size(icon_size);
-    icon.set_size_request(icon_size, icon_size);
-    icon.set_halign(gtk::Align::Center);
-    icon.set_valign(gtk::Align::Center);
-    content.append(&icon);
-
-    if compact {
-        let text = gtk::Label::new(Some(&compact_sidebar_label_text("Menu")));
-        configure_rail_label(&text);
-        content.append(&text);
-    }
-
-    content
-}
-
-#[derive(Clone)]
-struct NavItem {
-    icon_name: &'static str,
-    label: &'static str,
-    route: Route,
 }
 
 #[derive(Clone)]
@@ -1625,9 +1477,12 @@ fn sidebar_pin_row(
     let controls_for_enter = controls.clone();
     motion.connect_enter(move |_, _, _| controls_for_enter.set_visible(true));
     let controls_for_leave = controls.clone();
-    let row_for_leave = row.clone();
+    let row_for_leave = row.downgrade();
     motion.connect_leave(move |_| {
-        if !row_for_leave.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS) {
+        if row_for_leave
+            .upgrade()
+            .is_some_and(|row| !row.has_css_class(CONTEXT_MENU_HOVER_HELD_CLASS))
+        {
             controls_for_leave.set_visible(false);
         }
     });
@@ -2038,19 +1893,6 @@ fn sidebar_pin_transport_button(
     button
 }
 
-fn nav_items(shell: &Shell) -> Vec<NavItem> {
-    shell
-        .settings
-        .current
-        .borrow()
-        .sidebar
-        .route_items
-        .iter()
-        .filter(|entry| entry.visible)
-        .map(|entry| nav_item(entry.item))
-        .collect()
-}
-
 fn sidebar_pin_route_key(route: &Route) -> Option<String> {
     match route {
         Route::AlbumDetail(id) => Some(format!("sidebar-pin-album:{id}")),
@@ -2078,106 +1920,36 @@ fn sidebar_route_at_position_in(
         .iter()
         .filter(|entry| entry.visible)
         .nth(position.checked_sub(1)?)?;
-    Some(nav_item(item.item).route)
+    Some(item.item.descriptor().root_route)
 }
 
-fn nav_item(item: SidebarRouteItem) -> NavItem {
-    match item {
-        SidebarRouteItem::Home => NavItem {
-            icon_name: "rufin-home-symbolic",
-            label: msgid("Home"),
-            route: Route::Home,
-        },
-        SidebarRouteItem::Search => NavItem {
-            icon_name: "rufin-search-symbolic",
-            label: msgid("Search"),
-            route: Route::Search,
-        },
-        SidebarRouteItem::Favorites => NavItem {
-            icon_name: "rufin-heart-outline-symbolic",
-            label: msgid("Favorites"),
-            route: Route::Favorites,
-        },
-        SidebarRouteItem::History => NavItem {
-            icon_name: "rufin-history-symbolic",
-            label: msgid("History"),
-            route: Route::History,
-        },
-        SidebarRouteItem::Albums => NavItem {
-            icon_name: "rufin-albums-symbolic",
-            label: msgid("Albums"),
-            route: Route::Albums,
-        },
-        SidebarRouteItem::Tracks => NavItem {
-            icon_name: "rufin-tracks-symbolic",
-            label: msgid("Tracks"),
-            route: Route::Tracks,
-        },
-        SidebarRouteItem::Artists => NavItem {
-            icon_name: "rufin-artists-symbolic",
-            label: msgid("Artists"),
-            route: Route::Artists,
-        },
-        SidebarRouteItem::AlbumArtists => NavItem {
-            icon_name: "rufin-album-artists-symbolic",
-            label: msgid("Album Artists"),
-            route: Route::AlbumArtists,
-        },
-        SidebarRouteItem::Genres => NavItem {
-            icon_name: "rufin-genres-symbolic",
-            label: msgid("Genres"),
-            route: Route::Genres,
-        },
-        SidebarRouteItem::Moods => NavItem {
-            icon_name: "rufin-moods-symbolic",
-            label: msgid("Moods"),
-            route: Route::Moods,
-        },
-        SidebarRouteItem::Folders => NavItem {
-            icon_name: "rufin-folders-symbolic",
-            label: msgid("Folders"),
-            route: Route::Folders { path: Vec::new() },
-        },
-        SidebarRouteItem::Playlists => NavItem {
-            icon_name: "rufin-playlists-symbolic",
-            label: msgid("Playlists"),
-            route: Route::Playlists,
-        },
-        SidebarRouteItem::SmartPlaylists => NavItem {
-            icon_name: "rufin-smart-playlists-symbolic",
-            label: msgid("Smart Playlists"),
-            route: Route::SmartPlaylists,
-        },
-    }
-}
-
-fn rail_button(shell: &Rc<Shell>, icon_name: &str, label: &str, route: Route) -> gtk::Button {
+fn rail_button(shell: &Rc<Shell>, item: SidebarRouteItem) -> gtk::Button {
+    let descriptor = item.descriptor();
     let button = gtk::Button::new();
     button.add_css_class("nav-button");
     button.add_css_class("flat");
-    if let Some(route_class) = nav_route_class(&route) {
-        button.add_css_class(route_class);
-    }
+    button.add_css_class(descriptor.css_class);
     button.add_css_class("rail-button");
-    let accessible_label = tr(label);
+    button.set_widget_name(descriptor.stable_id);
+    let accessible_label = tr(descriptor.title);
     button.update_property(&[gtk::accessible::Property::Label(&accessible_label)]);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 8);
     content.set_halign(gtk::Align::Center);
-    let icon_size = COMPACT_NAV_ICON_SIZE;
-    let icon = gtk::Image::from_icon_name(icon_name);
+    let icon = gtk::Image::from_icon_name(descriptor.icon_name);
     icon.add_css_class("nav-icon");
-    icon.set_pixel_size(icon_size);
-    icon.set_size_request(icon_size, icon_size);
+    icon.set_pixel_size(COMPACT_NAV_ICON_SIZE);
+    icon.set_size_request(COMPACT_NAV_ICON_SIZE, COMPACT_NAV_ICON_SIZE);
     icon.set_halign(gtk::Align::Center);
     icon.set_valign(gtk::Align::Center);
     content.append(&icon);
-    let text = gtk::Label::new(Some(&compact_sidebar_label_text(label)));
+    let text = gtk::Label::new(Some(&compact_sidebar_label_text(descriptor.title)));
     configure_rail_label(&text);
     content.append(&text);
     button.set_child(Some(&content));
 
     let shell = Rc::clone(shell);
+    let route = descriptor.root_route;
     button.connect_clicked(move |_| {
         if shell.navigation_view.split_view.is_collapsed() {
             shell.navigation_view.split_view.set_show_sidebar(false);
@@ -2187,7 +1959,7 @@ fn rail_button(shell: &Rc<Shell>, icon_name: &str, label: &str, route: Route) ->
     button
 }
 
-fn compact_sidebar_label_text(label: &str) -> String {
+pub(super) fn compact_sidebar_label_text(label: &str) -> String {
     let translated = tr(label);
     let compact = {
         let words = translated.split_whitespace().collect::<Vec<_>>();
@@ -2220,34 +1992,6 @@ fn configure_sidebar_entry_label(label: &gtk::Label) {
     label.set_ellipsize(gtk::pango::EllipsizeMode::End);
 }
 
-fn nav_route_class(route: &Route) -> Option<&'static str> {
-    match route {
-        Route::Home => Some(NAV_ROUTE_HOME_CLASS),
-        Route::Search => Some(NAV_ROUTE_SEARCH_CLASS),
-        Route::Favorites => Some(NAV_ROUTE_FAVORITES_CLASS),
-        Route::History => Some(NAV_ROUTE_HISTORY_CLASS),
-        Route::Albums | Route::AlbumDetail(_) => Some(NAV_ROUTE_ALBUMS_CLASS),
-        Route::Tracks => Some(NAV_ROUTE_TRACKS_CLASS),
-        Route::Artists
-        | Route::ArtistDetail(_)
-        | Route::ArtistDiscography(_)
-        | Route::ArtistTracks(_)
-        | Route::ArtistFavoriteTracks(_) => Some(NAV_ROUTE_ARTISTS_CLASS),
-        Route::AlbumArtists
-        | Route::AlbumArtistDetail(_)
-        | Route::AlbumArtistDiscography(_)
-        | Route::AlbumArtistTracks(_)
-        | Route::AlbumArtistFavoriteTracks(_) => Some(NAV_ROUTE_ALBUM_ARTISTS_CLASS),
-        Route::Genres | Route::GenreDetail(_) => Some(NAV_ROUTE_GENRES_CLASS),
-        Route::Moods | Route::MoodDetail(_) => Some(NAV_ROUTE_MOODS_CLASS),
-        Route::Folders { .. } => Some(NAV_ROUTE_FOLDERS_CLASS),
-        Route::Playlists | Route::PlaylistDetail(_) => Some(NAV_ROUTE_PLAYLISTS_CLASS),
-        Route::SmartPlaylists | Route::SmartPlaylistDetail(_) => {
-            Some(NAV_ROUTE_SMART_PLAYLISTS_CLASS)
-        }
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -2270,17 +2014,42 @@ mod tests {
     }
 
     #[test]
-    fn navigation_playlist_classes_keep_smart_playlists_separate() {
-        assert_eq!(
-            nav_route_class(&Route::PlaylistDetail(library::PlaylistKey::from_raw(1))),
-            Some(NAV_ROUTE_PLAYLISTS_CLASS)
-        );
-        assert_eq!(
-            nav_route_class(&Route::SmartPlaylistDetail(
-                library::SmartPlaylistKey::from_raw(1)
-            )),
-            Some(NAV_ROUTE_SMART_PLAYLISTS_CLASS)
-        );
+    fn descriptor_ids_preserve_sidebar_settings_serialization() {
+        for item in SidebarRouteItem::all() {
+            let value = serde_json::to_value(item).expect("sidebar item serializes");
+            assert_eq!(value.as_str(), Some(item.descriptor().stable_id));
+            assert_eq!(
+                serde_json::from_value::<SidebarRouteItem>(value)
+                    .expect("sidebar item deserializes"),
+                item
+            );
+        }
+    }
+
+    #[test]
+    fn nested_routes_leave_root_sidebar_items_unselected() {
+        let routes = [
+            Route::AlbumDetail(library::AlbumKey::from_raw(1)),
+            Route::ArtistDetail(library::ArtistKey::from_raw(1)),
+            Route::AlbumArtistTracks(library::ArtistKey::from_raw(1)),
+            Route::GenreDetail(library::GenreKey::from_raw(1)),
+            Route::MoodDetail(library::MoodKey::from_raw(1)),
+            Route::Folders {
+                path: vec![crate::routes::route::FolderPathItem {
+                    id: String::new(),
+                    name: String::new(),
+                }],
+            },
+            Route::PlaylistDetail(library::PlaylistKey::from_raw(1)),
+            Route::SmartPlaylistDetail(library::SmartPlaylistKey::from_raw(1)),
+        ];
+        for route in routes {
+            assert!(
+                SidebarRouteItem::all()
+                    .into_iter()
+                    .all(|item| item.descriptor().root_route != route)
+            );
+        }
     }
 
     #[test]

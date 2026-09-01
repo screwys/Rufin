@@ -20,6 +20,7 @@ pub(crate) struct TrackProjectionRequest {
 #[derive(Clone)]
 pub(crate) struct PreparedTrackProjection {
     pub(crate) order: Vec<TrackKey>,
+    pub(crate) first_row_position: usize,
     pub(crate) first_rows: Vec<TrackRow>,
     pub(crate) request: TrackProjectionRequest,
 }
@@ -43,6 +44,7 @@ impl TrackCollectionModel {
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
         order: Vec<TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<TrackRow>,
         settings: LibraryListSettings,
     ) -> Self {
@@ -59,7 +61,7 @@ impl TrackCollectionModel {
             },
         );
         let sparse = SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load);
-        sparse.seed_matching(first_rows, |row| row.track_key);
+        sparse.seed_matching_at(first_row_position, first_rows, |row| row.track_key);
         Self(Rc::new(TrackModelState {
             source_key,
             source_session_epoch,
@@ -132,9 +134,16 @@ impl TrackCollectionModel {
         if *self.0.request.borrow() != prepared.request {
             return false;
         }
-        self.0
-            .sparse
-            .replace_prepared(prepared.order, prepared.first_rows, |row| row.track_key)
+        self.0.sparse.replace_prepared_at(
+            prepared.order,
+            prepared.first_row_position,
+            prepared.first_rows,
+            |row| row.track_key,
+        )
+    }
+
+    pub(crate) fn resume_initial_demand(&self) {
+        self.0.sparse.resume_initial_demand();
     }
 
     pub(crate) fn ready(&self, position: u32) -> Option<Arc<TrackRow>> {

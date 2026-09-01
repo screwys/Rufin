@@ -9,7 +9,6 @@ use lyrics::{CurrentLyrics, CurrentLyricsContent, LyricsDocument, LyricsOrigin};
 
 use crate::player::lyrics::LyricsPane;
 use crate::player::lyrics::search::LyricsSearchDialog;
-use crate::player::lyrics::settings::LyricsSettingsDialog;
 use crate::player::state::{current_playback_media_id, current_playback_track_id};
 use crate::shell::Shell;
 
@@ -20,12 +19,11 @@ pub(crate) struct LyricsState {
 pub(crate) struct SelectedLyricsState {
     pub(crate) projection: RefCell<CurrentLyrics>,
     pub(crate) offset_millis: Cell<i64>,
-    pub(crate) timing_generation: Cell<u64>,
     pub(crate) timing_source: RefCell<Option<glib::SourceId>>,
     pub(crate) right_pane_dirty: Cell<bool>,
     pub(crate) fullscreen_pane_dirty: Cell<bool>,
     pub(crate) search_dialog: RefCell<Option<LyricsSearchDialog>>,
-    pub(crate) settings_dialog: RefCell<Option<LyricsSettingsDialog>>,
+    pub(crate) settings_dialog: gtk::glib::WeakRef<adw::PreferencesDialog>,
     pub(crate) right_pane: LyricsPane,
     pub(crate) fullscreen_pane: LyricsPane,
 }
@@ -33,6 +31,7 @@ pub(crate) struct SelectedLyricsState {
 impl SelectedLyricsState {
     pub(crate) fn new() -> Self {
         let right_pane = LyricsPane::new();
+        right_pane.use_right_panel_scrollbar();
         let fullscreen_pane = LyricsPane::new();
         fullscreen_pane
             .widget()
@@ -40,26 +39,13 @@ impl SelectedLyricsState {
         Self {
             projection: RefCell::new(CurrentLyrics::Cleared),
             offset_millis: Cell::new(0),
-            timing_generation: Cell::new(0),
             timing_source: RefCell::new(None),
             right_pane_dirty: Cell::new(true),
             fullscreen_pane_dirty: Cell::new(true),
             search_dialog: RefCell::new(None),
-            settings_dialog: RefCell::new(None),
+            settings_dialog: gtk::glib::WeakRef::new(),
             right_pane,
             fullscreen_pane,
-        }
-    }
-
-    pub(crate) fn close_dialogs(&self) {
-        if let Some(dialog) = self.search_dialog.borrow_mut().take() {
-            if let Some(source) = dialog.search_debounce_source.borrow_mut().take() {
-                source.remove();
-            }
-            dialog.dialog.close();
-        }
-        if let Some(dialog) = self.settings_dialog.borrow_mut().take() {
-            dialog.dialog.close();
         }
     }
 }
@@ -69,13 +55,23 @@ impl Drop for SelectedLyricsState {
         if let Some(source) = self.timing_source.get_mut().take() {
             source.remove();
         }
-        self.close_dialogs();
+        if let Some(dialog) = self.search_dialog.get_mut().take() {
+            if let Some(source) = dialog.search_debounce_source.borrow_mut().take() {
+                source.remove();
+            }
+            dialog.dialog.close();
+        }
+        if let Some(dialog) = self.settings_dialog.upgrade() {
+            dialog.close();
+        }
     }
 }
 
 impl Shell {
     pub(crate) fn right_lyrics_surface_visible(&self) -> bool {
-        self.right_sidebar_visible() && self.lyrics.panel_visible.get()
+        !self.fullscreen_player_visible()
+            && self.right_sidebar_visible()
+            && self.lyrics.panel_visible.get()
     }
 
     pub(crate) fn fullscreen_lyrics_surface_visible(&self) -> bool {

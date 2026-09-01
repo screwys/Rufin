@@ -16,6 +16,15 @@ valid:
       }
 invalid:
   - |
+      impl Pane {
+          fn connect(&self) {
+              let pane = self.clone();
+              self.scroller.connect_scroll(move |_, _, _| {
+                  pane.pause_follow_scroll();
+              });
+          }
+      }
+  - |
       fn connect(tracks: Rc<Projection>) {
           let projection = tracks.clone();
           tracks.connect_search_request(move |request| {
@@ -35,4 +44,20 @@ invalid:
           tracks.connect_search_request(move |request| {
               request_order(request, projection.clone());
           });
+      }
+  - |
+      fn connect(editor: Editor) {
+          let retained = editor.clone();
+          editor.save.clone().connect_clicked(move |_| {
+              retained.save();
+          });
+      }
+  - |
+      fn connect(row: Row) {
+          let motion = EventControllerMotion::new();
+          let retained = row.clone();
+          motion.connect_leave(move |_| {
+              retained.hide_controls();
+          });
+          row.add_controller(motion);
       }

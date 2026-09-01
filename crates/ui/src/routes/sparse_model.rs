@@ -60,6 +60,8 @@ pub(crate) struct SparseRouteModel<K, R> {
     windows: RefCell<SparseWindowDemand>,
     generation: Cell<u64>,
     running: Cell<Option<u64>>,
+    demand_deferred: Cell<bool>,
+    initial_window: Cell<Option<usize>>,
     cancellation: RefCell<Option<(u64, ReadCancellation)>>,
 }
 
@@ -287,9 +289,14 @@ pub(crate) fn connect_sparse_bind(
     });
     factory.connect_teardown(move |_, object| {
         if let Some(item) = object.downcast_ref::<gtk::ListItem>() {
-            unbind_sparse_item(item);
+            teardown_sparse_item(item);
         }
     });
+}
+
+fn teardown_sparse_item(item: &gtk::ListItem) {
+    unbind_sparse_item(item);
+    item.set_child(None::<&gtk::Widget>);
 }
 
 fn set_sparse_child_ready(item: &gtk::ListItem, ready: bool) {
@@ -454,7 +461,15 @@ impl SparseObjectModel {
         K: Clone + 'static,
         R: 'static,
     {
-        self.with_typed_mut::<K, R, _>(|state| state.sparse.seed(rows));
+        self.seed_at::<K, R>(0, rows);
+    }
+
+    pub(crate) fn seed_at<K, R>(&self, first: usize, rows: Vec<R>)
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| state.sparse.seed_at(first, rows));
     }
 
     fn cold_live_windows(&self) -> Vec<usize> {
@@ -545,7 +560,7 @@ impl SparseObjectModel {
         self.items_changed(0, old_len, self.n_items());
     }
 
-    fn replace_prepared<K, R>(&self, order: Vec<K>, rows: Vec<R>)
+    fn replace_prepared<K, R>(&self, order: Vec<K>, first: usize, rows: Vec<R>)
     where
         K: Clone + Eq + 'static,
         R: Clone + PartialEq + 'static,
@@ -556,7 +571,7 @@ impl SparseObjectModel {
         let (same_order, updates) = self.with_typed_mut::<K, R, _>(|state| {
             let same_order = state.sparse.order.as_ref() == order.as_slice();
             state.sparse.replace_order(order);
-            state.sparse.seed(rows);
+            state.sparse.seed_at(first, rows);
             if !same_order {
                 state.objects.clear();
                 return (false, Vec::new());
@@ -679,6 +694,8 @@ where
             windows: RefCell::new(SparseWindowDemand::default()),
             generation: Cell::new(1),
             running: Cell::new(None),
+            demand_deferred: Cell::new(false),
+            initial_window: Cell::new(None),
             cancellation: RefCell::new(None),
         });
         let weak = Rc::downgrade(&route);
@@ -707,16 +724,43 @@ where
     }
 
     pub(crate) fn seed_matching(&self, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
+        self.seed_matching_at(0, rows, key)
+    }
+
+    pub(crate) fn seed_matching_at(
+        &self,
+        first: usize,
+        rows: Vec<R>,
+        key: impl Fn(&R) -> K,
+    ) -> bool {
         let order = self.order();
         if !rows
             .iter()
             .enumerate()
-            .all(|(position, row)| order.get(position) == Some(&key(row)))
+            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
         {
             return false;
         }
-        self.seed(rows);
+        self.model.seed_at::<K, R>(first, rows);
+        self.demand_deferred.set(first > 0);
+        self.initial_window
+            .set((first > 0).then(|| window_first(first)));
         true
+    }
+
+    pub(crate) fn resume_initial_demand(self: &Rc<Self>) {
+        self.demand_deferred.set(false);
+        let Some(initial) = self.initial_window.take() else {
+            return;
+        };
+        let demanded = self
+            .model
+            .cold_live_windows()
+            .into_iter()
+            .filter(|window| window.abs_diff(initial) <= SPARSE_WINDOW_SIZE)
+            .collect();
+        self.windows.borrow_mut().replace(demanded);
+        self.start();
     }
 
     pub(crate) fn replace_order(&self, order: Vec<K>) {
@@ -733,15 +777,28 @@ where
     where
         R: PartialEq,
     {
+        self.replace_prepared_at(order, 0, rows, key)
+    }
+
+    pub(crate) fn replace_prepared_at(
+        &self,
+        order: Vec<K>,
+        first: usize,
+        rows: Vec<R>,
+        key: impl Fn(&R) -> K,
+    ) -> bool
+    where
+        R: PartialEq,
+    {
         if !rows
             .iter()
             .enumerate()
-            .all(|(position, row)| order.get(position) == Some(&key(row)))
+            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
         {
             return false;
         }
         self.cancel();
-        self.model.replace_prepared::<K, R>(order, rows);
+        self.model.replace_prepared::<K, R>(order, first, rows);
         true
     }
 
@@ -785,6 +842,9 @@ where
     }
 
     fn demand(self: &Rc<Self>, _: u32) {
+        if self.demand_deferred.get() {
+            return;
+        }
         let cancel_running = self
             .windows
             .borrow_mut()
@@ -902,10 +962,11 @@ where
         Arc::clone(&self.order)
     }
 
-    fn seed(&mut self, rows: Vec<R>) {
+    fn seed_at(&mut self, first: usize, rows: Vec<R>) {
         let rows = rows.into_iter().take(SPARSE_WINDOW_SIZE);
         let mut inserted = false;
-        for (position, row) in rows.enumerate() {
+        for (offset, row) in rows.enumerate() {
+            let position = first.saturating_add(offset);
             if position >= self.order.len() {
                 break;
             }
@@ -913,7 +974,9 @@ where
             inserted = true;
         }
         if inserted {
-            self.ready_windows.push_back(0);
+            let first = window_first(first);
+            self.ready_windows.retain(|window| *window != first);
+            self.ready_windows.push_back(first);
         }
     }
 
@@ -1027,6 +1090,83 @@ mod tests {
     use super::*;
 
     #[test]
+    #[ignore = "requires a GTK display"]
+    fn recycled_cell_teardown_releases_widget_and_artwork_state() {
+        gtk::init().expect("GTK display");
+        crate::verify_interface_resources().expect("compiled resources");
+        let _: crate::routes::recycled_cells::RecycledTextCell = glib::Object::new();
+        let _: crate::routes::recycled_cells::RecycledBadgedTextCell = glib::Object::new();
+        let _: crate::routes::recycled_cells::RecycledMergedCell = glib::Object::new();
+        let _: crate::routes::recycled_cells::RecycledFolderCell = glib::Object::new();
+
+        for _ in 0..128 {
+            let item: gtk::ListItem = glib::Object::new();
+            let cell = crate::routes::recycled_cells::RecycledArtworkCell::new(48);
+            let weak_cell = cell.downgrade();
+            let weak_artwork = cell.artwork().downgrade();
+            item.set_child(Some(&cell));
+            drop(cell);
+
+            teardown_sparse_item(&item);
+
+            assert!(weak_cell.upgrade().is_none());
+            assert!(weak_artwork.upgrade().is_none());
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn repeated_list_teardown_releases_every_recycled_cell() {
+        gtk::init().expect("GTK display");
+        crate::verify_interface_resources().expect("compiled resources");
+
+        for _ in 0..16 {
+            let model = gio::ListStore::new::<glib::BoxedAnyObject>();
+            for value in 0..128_u32 {
+                model.append(&glib::BoxedAnyObject::new(value));
+            }
+            let selection = gtk::NoSelection::new(Some(model));
+            let factory = gtk::SignalListItemFactory::new();
+            let live = Rc::new(RefCell::new(Vec::new()));
+            let setup_count = Rc::new(Cell::new(0_usize));
+            let setup_live = Rc::clone(&live);
+            let setup_total = Rc::clone(&setup_count);
+            factory.connect_setup(move |_, item| {
+                let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+                let cell = crate::routes::recycled_cells::RecycledArtworkCell::new(48);
+                setup_live.borrow_mut().push(cell.downgrade());
+                setup_total.set(setup_total.get() + 1);
+                item.set_child(Some(&cell));
+            });
+            connect_sparse_bind(&factory, |_| {});
+            let teardown_count = Rc::new(Cell::new(0_usize));
+            let teardown_total = Rc::clone(&teardown_count);
+            factory.connect_teardown(move |_, item| {
+                let item = item.downcast_ref::<gtk::ListItem>().expect("list item");
+                assert!(item.child().is_none());
+                teardown_total.set(teardown_total.get() + 1);
+            });
+
+            let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
+            let window = gtk::Window::new();
+            window.set_default_size(320, 480);
+            window.set_child(Some(&list));
+            window.present();
+            while glib::MainContext::default().iteration(false) {}
+            window.set_child(None::<&gtk::Widget>);
+            window.close();
+            drop(list);
+            drop(selection);
+            drop(window);
+            while glib::MainContext::default().iteration(false) {}
+
+            assert!(setup_count.get() > 0);
+            assert_eq!(teardown_count.get(), setup_count.get());
+            assert!(live.borrow().iter().all(|cell| cell.upgrade().is_none()));
+        }
+    }
+
+    #[test]
     fn deep_windows_keep_route_extent_and_three_exact_ready_pages() {
         let mut model = SparseModel::<u64, String>::new(8);
         model.replace_order((0..10_000).collect());
@@ -1065,6 +1205,20 @@ mod tests {
             Some(SparseItem::Placeholder(5_000))
         ));
         assert_eq!(model.key(9_999), Some(&9_999));
+    }
+
+    #[test]
+    fn restored_seed_populates_only_its_aligned_window() {
+        let mut model = SparseModel::new(SPARSE_WINDOW_SIZE);
+        model.replace_order((0..256_u64).collect());
+        model.seed_at(128, (128..192).map(|value| value.to_string()).collect());
+
+        assert!(matches!(model.item(0), Some(SparseItem::Placeholder(0))));
+        assert!(matches!(
+            model.item(128),
+            Some(SparseItem::Ready(value)) if value.as_str() == "128"
+        ));
+        assert_eq!(model.ready_windows, [128]);
     }
 
     #[test]
@@ -1221,6 +1375,7 @@ mod tests {
 
         model.replace_prepared::<u64, String>(
             vec![10, 11],
+            0,
             vec!["ten".to_string(), "eleven".to_string()],
         );
 
@@ -1248,6 +1403,7 @@ mod tests {
 
         model.replace_prepared::<u64, String>(
             vec![1, 2],
+            0,
             vec!["one".to_string(), "two".to_string()],
         );
 
@@ -1281,6 +1437,7 @@ mod tests {
 
         model.replace_prepared::<u64, String>(
             vec![1, 2],
+            0,
             vec!["one".to_string(), "changed".to_string()],
         );
 
@@ -1314,6 +1471,7 @@ mod tests {
 
         model.replace_prepared::<u64, String>(
             order,
+            0,
             (0..64).map(|value| value.to_string()).collect(),
         );
 

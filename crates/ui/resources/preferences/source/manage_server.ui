@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkScrolledWindow" id="scroller">
+    <property name="hscrollbar-policy">never</property>
+    <property name="vscrollbar-policy">automatic</property>
+    <property name="vexpand">true</property>
+    <property name="child">
+      <object class="AdwClamp" id="clamp">
+        <property name="tightening-threshold">360</property>
+        <property name="margin-top">8</property>
+        <property name="margin-bottom">20</property>
+        <property name="margin-start">24</property>
+        <property name="margin-end">24</property>
+        <property name="valign">start</property>
+        <property name="child">
+          <object class="GtkBox" id="content">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="hexpand">true</property>
+            <style><class name="manage-server-content"/></style>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+
+  <object class="AdwPreferencesGroup" id="mapping_group">
+    <property name="title" translatable="yes">Local File Access</property>
+    <child>
+      <object class="AdwExpanderRow" id="mapping_expander">
+        <property name="title" translatable="yes">Local File Mapping</property>
+        <child>
+          <object class="AdwActionRow" id="folder_row">
+            <property name="title" translatable="yes">Local music folder</property>
+            <property name="use-markup">false</property>
+            <child type="suffix">
+              <object class="GtkButton" id="folder_button">
+                <property name="label" translatable="yes">Choose</property>
+                <property name="valign">center</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child><object class="AdwEntryRow" id="server_prefix"><property name="title" translatable="yes">Server Prefix</property></object></child>
+        <child><object class="AdwEntryRow" id="local_prefix"><property name="title" translatable="yes">Local Prefix</property></object></child>
+        <child><object class="AdwActionRow" id="sample_row"><property name="title" translatable="yes">Server Sample</property><property name="use-markup">false</property></object></child>
+        <child><object class="AdwActionRow" id="preview_row"><property name="title" translatable="yes">Mapped Local Path</property><property name="use-markup">false</property></object></child>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkLabel" id="status">
+    <property name="wrap">true</property>
+    <property name="xalign">0</property>
+    <style><class name="muted"/><class name="manage-server-status"/></style>
+  </object>
+  <object class="GtkBox" id="actions">
+    <property name="spacing">8</property>
+    <property name="halign">end</property>
+    <child>
+      <object class="GtkButton" id="remove">
+        <property name="tooltip-text" translatable="yes">Clear Mapping</property>
+        <style><class name="pill-button"/><class name="pill"/></style>
+        <child>
+          <object class="GtkBox"><property name="spacing">6</property>
+            <child><object class="GtkImage"><property name="icon-name">rufin-edit-clear-symbolic</property></object></child>
+            <child><object class="GtkLabel" id="remove_label"><property name="label" translatable="yes">Clear Mapping</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkButton" id="save">
+        <property name="tooltip-text" translatable="yes">Save Mapping</property>
+        <style><class name="pill-button"/><class name="pill"/><class name="suggested-action"/></style>
+        <child>
+          <object class="GtkBox"><property name="spacing">6</property>
+            <child><object class="GtkImage"><property name="icon-name">rufin-document-save-symbolic</property></object></child>
+            <child><object class="GtkLabel" id="save_label"><property name="label" translatable="yes">Save Mapping</property></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

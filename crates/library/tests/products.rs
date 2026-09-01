@@ -1,6 +1,6 @@
 use library::{
     ArtistSort, CalendarActivityPeriod, GenreSort, LocalAccessOrigin, LocalAccessWrite,
-    PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, SearchRequest,
+    PlayedFilter, RadioSeed, RandomCriteria, ReadCancellation, RouteSeedWindow, SearchRequest,
     SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRule,
     SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistSort,
 };
@@ -216,7 +216,7 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
     drop(raw);
 
     for sort in [GenreSort::Title, GenreSort::TrackCount] {
-        let (order, _) = fixture
+        let (order, _, _) = fixture
             .database
             .genre_route_page(
                 fixture.source,
@@ -224,6 +224,7 @@ async fn genre_routes_reject_an_artwork_only_identity_without_track_membership()
                 "",
                 sort,
                 false,
+                RouteSeedWindow::top(),
                 &ReadCancellation::new(),
             )
             .await
@@ -272,6 +273,7 @@ async fn artist_play_order_stays_complete_beside_the_favorite_section() {
             library::TrackSort::Title,
             false,
             true,
+            RouteSeedWindow::top(),
             &cancel,
         )
         .await
@@ -529,6 +531,7 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
                             "",
                             sort,
                             descending,
+                            RouteSeedWindow::top(),
                             &cancel,
                         )
                         .await
@@ -548,6 +551,7 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
                             "",
                             sort,
                             descending,
+                            RouteSeedWindow::top(),
                             &cancel,
                         )
                         .await
@@ -803,7 +807,7 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
             .expect("default Smart Playlists are idempotent")
     );
     let cancellation = ReadCancellation::new();
-    let (order, rows) = fixture
+    let (order, _, rows) = fixture
         .database
         .smart_playlist_route_page(
             fixture.source,
@@ -811,6 +815,7 @@ async fn selected_source_defaults_have_the_three_activity_smart_playlists() {
             SmartPlaylistListSort::Position,
             false,
             0,
+            RouteSeedWindow::top(),
             &cancellation,
         )
         .await
@@ -877,6 +882,7 @@ async fn smart_playlist_reordering_preserves_unique_positions() {
                 SmartPlaylistListSort::Position,
                 false,
                 0,
+                RouteSeedWindow::top(),
                 &ReadCancellation::new(),
             )
             .await
@@ -1096,6 +1102,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 SmartPlaylistListSort::TrackCount,
                 true,
                 now,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -1112,6 +1119,7 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
                 SmartPlaylistListSort::Duration,
                 true,
                 now,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -1181,6 +1189,7 @@ async fn home_search_and_radio_results_stay_bounded() {
                 "artist a",
                 library::TrackSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await

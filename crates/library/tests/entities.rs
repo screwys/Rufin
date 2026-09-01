@@ -1,7 +1,7 @@
 use library::{
     AlbumMetadataWrite, AlbumReleaseResult, AlbumSort, ArtistMetadataWrite, ArtistSort,
-    FavoriteTarget, GenreSort, MoodSort, ReadCancellation, SearchRequest, TrackMetadataWrite,
-    TrackSort,
+    FavoriteTarget, GenreSort, MoodSort, ReadCancellation, RouteSeedWindow, SearchRequest,
+    TrackMetadataWrite, TrackSort,
 };
 
 use super::support::{connection, fixture};
@@ -39,6 +39,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
                 "",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
@@ -57,6 +58,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
                 "",
                 ArtistSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
@@ -183,6 +185,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
@@ -200,6 +203,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 AlbumSort::DateAdded,
                 true,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
@@ -218,6 +222,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 ArtistSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
@@ -236,6 +241,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 ArtistSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
@@ -246,7 +252,15 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .genre_route_page(fixture.source, None, "", GenreSort::Title, false, &cancel,)
+            .genre_route_page(
+                fixture.source,
+                None,
+                "",
+                GenreSort::Title,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
             .await
             .expect("Genre order")
             .0,
@@ -261,6 +275,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 GenreSort::TrackCount,
                 true,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -271,7 +286,15 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .mood_route_page(fixture.source, None, "", MoodSort::Duration, true, &cancel,)
+            .mood_route_page(
+                fixture.source,
+                None,
+                "",
+                MoodSort::Duration,
+                true,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
             .await
             .expect("sorted Mood order")
             .0,
@@ -579,6 +602,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "artist a",
                 ArtistSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -597,6 +621,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "artist a",
                 ArtistSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -661,6 +686,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
@@ -668,6 +694,54 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .0
             .is_empty()
     );
+}
+
+#[tokio::test]
+async fn empty_named_collection_routes_return_empty_pages() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for statement in [
+        "DELETE FROM track_genres",
+        "DELETE FROM album_genres",
+        "DELETE FROM genres",
+        "DELETE FROM track_moods",
+        "DELETE FROM moods",
+    ] {
+        sqlx::query(statement).execute(&mut raw).await.unwrap();
+    }
+    drop(raw);
+    let source = fixture.source;
+    let cancellation = ReadCancellation::new();
+
+    let genres = fixture
+        .database
+        .genre_route_page(
+            source,
+            None,
+            "",
+            GenreSort::TrackCount,
+            false,
+            RouteSeedWindow::top(),
+            &cancellation,
+        )
+        .await
+        .expect("empty Genre route");
+    let moods = fixture
+        .database
+        .mood_route_page(
+            source,
+            None,
+            "",
+            MoodSort::Duration,
+            false,
+            RouteSeedWindow::top(),
+            &cancellation,
+        )
+        .await
+        .expect("empty Mood route");
+
+    assert_eq!(genres, (Vec::new(), 0, Vec::new()));
+    assert_eq!(moods, (Vec::new(), 0, Vec::new()));
 }
 
 #[tokio::test]
@@ -757,6 +831,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
             "changed",
             library::TrackSort::Title,
             false,
+            RouteSeedWindow::top(),
             &cancel,
         )
         .await
@@ -773,6 +848,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 "2025",
                 library::TrackSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -790,6 +866,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 "rock",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -807,6 +884,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 "artist b",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await
@@ -824,6 +902,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 "2024",
                 AlbumSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel,
             )
             .await

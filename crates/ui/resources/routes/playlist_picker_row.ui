@@ -1,0 +1,39 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinPlaylistPickerRowView" parent="GtkBox">
+    <property name="orientation">horizontal</property><property name="spacing">10</property>
+    <property name="margin-top">4</property><property name="margin-bottom">4</property>
+    <style><class name="playlist-picker-row"/><class name="context-playlist-row"/></style>
+    <child><object class="GtkCheckButton" id="check"/></child>
+    <child><object class="GtkBox" id="cover_host"/></child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property><property name="spacing">2</property><property name="hexpand">true</property>
+        <child><object class="GtkLabel" id="title"><property name="xalign">0</property><property name="ellipsize">end</property><style><class name="context-playlist-title"/></style></object></child>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property><property name="spacing">10</property>
+            <style><class name="context-playlist-meta"/></style>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property><property name="spacing">4</property>
+                <child><object class="GtkImage"><property name="icon-name">rufin-tracks-symbolic</property><property name="pixel-size">13</property><style><class name="muted"/></style></object></child>
+                <child><object class="GtkLabel" id="track_count"><property name="xalign">0</property><style><class name="muted"/></style></object></child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property><property name="spacing">4</property>
+                <child><object class="GtkImage"><property name="icon-name">rufin-preferences-system-time-symbolic</property><property name="pixel-size">13</property><style><class name="muted"/></style></object></child>
+                <child><object class="GtkLabel" id="duration"><property name="xalign">0</property><style><class name="muted"/></style></object></child>
+              </object>
+            </child>
+            <child><object class="GtkBox" id="genres"><property name="orientation">horizontal</property><property name="spacing">6</property><style><class name="context-playlist-genres"/></style></object></child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

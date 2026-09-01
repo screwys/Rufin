@@ -1,0 +1,31 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinReleaseNoteRowView" parent="GtkBox">
+    <property name="orientation">vertical</property><property name="spacing">8</property>
+    <style><class name="release-note-row"/></style>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property><property name="spacing">10</property><property name="hexpand">true</property>
+        <child>
+          <object class="GtkButton" id="version">
+            <property name="tooltip-text" translatable="yes">Open release notes</property>
+            <style><class name="flat"/><class name="release-note-version"/></style>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property><property name="spacing">5</property>
+                <child><object class="GtkLabel" id="version_text"/></child>
+                <child><object class="GtkImage"><property name="icon-name">rufin-external-link-symbolic</property><property name="pixel-size">12</property></object></child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child><object class="GtkBox" id="status"><property name="orientation">horizontal</property></object></child>
+        <child><object class="GtkBox"><property name="hexpand">true</property></object></child>
+        <child><object class="GtkLabel" id="date"><style><class name="release-note-date"/></style></object></child>
+      </object>
+    </child>
+    <child><object class="GtkBox" id="body"><property name="orientation">vertical</property><property name="spacing">8</property><style><class name="release-note-body"/></style></object></child>
+  </template>
+</interface>

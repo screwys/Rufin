@@ -59,6 +59,33 @@ pub(crate) enum AlbumDetailRouteRow {
     Track(TrackRow),
 }
 
+pub(crate) fn album_detail_rows_for_keys(
+    keys: Vec<AlbumDetailRouteKey>,
+    albums: Vec<AlbumRow>,
+    tracks: Vec<TrackRow>,
+) -> Result<Vec<AlbumDetailRouteRow>, String> {
+    let mut albums = albums
+        .into_iter()
+        .map(|row| (row.album_key, row))
+        .collect::<BTreeMap<_, _>>();
+    let mut tracks = tracks
+        .into_iter()
+        .map(|row| (row.track_key, row))
+        .collect::<BTreeMap<_, _>>();
+    keys.into_iter()
+        .map(|key| {
+            if let Some(album) = key.album_key() {
+                albums.remove(&album).map(AlbumDetailRouteRow::Album)
+            } else if let Some(track) = key.track_key() {
+                tracks.remove(&track).map(AlbumDetailRouteRow::Track)
+            } else {
+                None
+            }
+            .ok_or_else(|| "Album detail row is no longer current".to_string())
+        })
+        .collect()
+}
+
 #[derive(Clone)]
 pub(crate) struct AlbumCollectionModels {
     rows: Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>>,
@@ -91,7 +118,9 @@ impl AlbumCollectionModels {
     pub(crate) fn new(
         selected: &crate::runtime::SelectedLibrary,
         order: AlbumCollectionOrder,
+        first_row_position: usize,
         first_rows: Vec<AlbumRow>,
+        first_detail_rows: Vec<AlbumDetailRouteRow>,
         layout: LibraryLayout,
     ) -> Self {
         let source = selected.source_key;
@@ -109,31 +138,18 @@ impl AlbumCollectionModels {
                             .album_detail_route_rows(source, &keys, folder, &cancellation)
                             .await
                             .map_err(|error| error.to_string())?;
-                        let mut albums = albums
-                            .into_iter()
-                            .map(|row| (row.album_key, row))
-                            .collect::<BTreeMap<_, _>>();
-                        let mut tracks = tracks
-                            .into_iter()
-                            .map(|row| (row.track_key, row))
-                            .collect::<BTreeMap<_, _>>();
-                        keys.into_iter()
-                            .map(|key| {
-                                if let Some(album) = key.album_key() {
-                                    albums.remove(&album).map(AlbumDetailRouteRow::Album)
-                                } else if let Some(track) = key.track_key() {
-                                    tracks.remove(&track).map(AlbumDetailRouteRow::Track)
-                                } else {
-                                    None
-                                }
-                                .ok_or_else(|| "Album detail row is no longer current".to_string())
-                            })
-                            .collect::<Result<Vec<_>, _>>()
+                        album_detail_rows_for_keys(keys, albums, tracks)
                     })
                         as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
                 },
             );
             let sparse = SparseRouteModel::new(order, 24, selected.runtime.clone(), load);
+            sparse.seed_matching_at(first_row_position, first_detail_rows, |row| match row {
+                AlbumDetailRouteRow::Album(row) => AlbumDetailRouteKey::album(row.album_key)
+                    .expect("Album detail Album row has an identity"),
+                AlbumDetailRouteRow::Track(row) => AlbumDetailRouteKey::track(row.track_key)
+                    .expect("Album detail Track row has an identity"),
+            });
             return Self {
                 rows: None,
                 detail: AlbumDetailModel {
@@ -157,7 +173,7 @@ impl AlbumCollectionModels {
             },
         );
         let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), load);
-        sparse.seed_matching(first_rows, |row| row.album_key);
+        sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
         Self {
             rows: Some(sparse),
             detail: AlbumDetailModel::empty(),
@@ -185,6 +201,15 @@ impl AlbumCollectionModels {
             .map_or_else(|| self.detail.n_items() == 0, |rows| rows.len() == 0)
     }
 
+    pub(crate) fn resume_initial_demand(&self) {
+        if let Some(sparse) = &self.rows {
+            sparse.resume_initial_demand();
+        }
+        if let Some(sparse) = &self.detail.sparse {
+            sparse.resume_initial_demand();
+        }
+    }
+
     pub(crate) fn replace_order(&self, order: AlbumCollectionOrder) {
         if let Some(rows) = &self.rows {
             if let AlbumCollectionOrder::Rows(order) = order {
@@ -200,13 +225,15 @@ impl AlbumCollectionModels {
     pub(crate) fn replace_prepared(
         &self,
         order: AlbumCollectionOrder,
+        first_row_position: usize,
         first_rows: Vec<AlbumRow>,
     ) -> bool {
         if let Some(rows) = &self.rows {
             let AlbumCollectionOrder::Rows(order) = order else {
                 return false;
             };
-            return rows.replace_prepared(order, first_rows, |row| row.album_key);
+            return rows
+                .replace_prepared_at(order, first_row_position, first_rows, |row| row.album_key);
         }
         if !first_rows.is_empty() {
             return false;
@@ -1101,7 +1128,7 @@ fn album_lead_meta(
     meta.set_width_request(metrics.meta_width);
     meta.set_hexpand(false);
     let cover = super::cards::album_cover_overlay(shell, album, metrics.cover_size);
-    meta.append(&cover.widget());
+    meta.append(&cover);
     let title = album_meta_label(&album.title, "track-title", metrics.meta_width);
     meta.append(&title);
     let artist = album_meta_label(&album.display_artist, "muted", metrics.meta_width);
@@ -1290,6 +1317,9 @@ fn album_track_cell(
 
 fn album_track_label(text: &str, field: LibraryField, width: i32) -> gtk::Label {
     let label = gtk::Label::new(Some(text));
+    if field == LibraryField::Duration {
+        label.add_css_class("tabular-numeric");
+    }
     if matches!(field, LibraryField::Title | LibraryField::TitleMerged) {
         label.add_css_class("track-list-title");
     }

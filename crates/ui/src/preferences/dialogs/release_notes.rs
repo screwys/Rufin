@@ -7,6 +7,7 @@ use crate::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHa
 use crate::shell::Shell;
 use adw::prelude::*;
 use gtk::glib;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use localization::{tr, trn_with};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use tracing::warn;
@@ -15,6 +16,20 @@ const RELEASE_NOTES_POPUP_WIDTH: i32 = 700;
 const RELEASE_NOTES_POPUP_HEIGHT: i32 = 640;
 const RELEASE_TOAST_TITLE: &str = "✨ New release is available!";
 const RELEASE_CHECK_POLL_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
+
+crate::ui_resource::composite_box!(
+    pub(crate) ReleaseNoteRowView,
+    release_note_row_view_imp,
+    "RufinReleaseNoteRowView",
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/release_note_row.ui",
+    {
+        version: gtk::Button,
+        version_text: gtk::Label,
+        status: gtk::Box,
+        date: gtk::Label,
+        body: gtk::Box,
+    }
+);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct CivilDate {
@@ -400,24 +415,11 @@ fn release_note_row(
     updating_version: Option<&str>,
     release_updates: &ReleaseUpdateHandle,
 ) -> gtk::Widget {
-    let row = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    row.add_css_class("release-note-row");
-
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-    header.set_hexpand(true);
+    let row = ReleaseNoteRowView::new();
     let version_label = format!("v{}", note.version);
-    let version = gtk::Button::new();
-    version.add_css_class("flat");
-    version.add_css_class("release-note-version");
+    let version = row.imp().version.get();
+    row.imp().version_text.set_label(&version_label);
     version.set_cursor_from_name(Some("pointer"));
-    version.set_tooltip_text(Some(&tr("Open release notes")));
-    let version_content = gtk::Box::new(gtk::Orientation::Horizontal, 5);
-    let version_text = gtk::Label::new(Some(&version_label));
-    let version_icon = gtk::Image::from_icon_name("rufin-external-link-symbolic");
-    version_icon.set_pixel_size(12);
-    version_content.append(&version_text);
-    version_content.append(&version_icon);
-    version.set_child(Some(&version_content));
     let url = note.url.clone();
     let window = window.downgrade();
     version.connect_clicked(move |_| {
@@ -431,16 +433,12 @@ fn release_note_row(
             }
         });
     });
-    let date = gtk::Label::new(Some(&release_relative_date(&note.date)));
-    date.add_css_class("release-note-date");
-    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    header.append(&version);
+    row.imp().date.set_label(&release_relative_date(&note.date));
     match release_row_status(history, note) {
         ReleaseRowStatus::Installed => {
             let installed = gtk::Label::new(Some(&tr("Installed")));
             installed.add_css_class("release-note-installed");
-            header.append(&installed);
+            row.imp().status.append(&installed);
         }
         ReleaseRowStatus::Update => {
             let update = gtk::Button::with_label(&tr("Update"));
@@ -453,19 +451,15 @@ fn release_note_row(
             update.connect_clicked(move |_| {
                 release_updates.update(version.clone());
             });
-            header.append(&update);
+            row.imp().status.append(&update);
         }
         ReleaseRowStatus::None => {}
     }
-    header.append(&spacer);
-    header.append(&date);
-    row.append(&header);
-
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    body.add_css_class("release-note-body");
     for block in release_markdown_blocks(&note.body) {
         if block.kind == ReleaseBlockKind::Divider {
-            body.append(&gtk::Separator::new(gtk::Orientation::Horizontal));
+            row.imp()
+                .body
+                .append(&gtk::Separator::new(gtk::Orientation::Horizontal));
             continue;
         }
         let text = gtk::Label::new(None);
@@ -491,13 +485,11 @@ fn release_note_row(
             marker.set_valign(gtk::Align::Start);
             bullet.append(&marker);
             bullet.append(&text);
-            body.append(&bullet);
+            row.imp().body.append(&bullet);
         } else {
-            body.append(&text);
+            row.imp().body.append(&text);
         }
     }
-    row.append(&body);
-
     row.upcast()
 }
 
@@ -507,24 +499,19 @@ fn present_release_notes_dialog(
     updating_version: Option<&str>,
     release_updates: &ReleaseUpdateHandle,
 ) -> gtk::glib::WeakRef<gtk::Box> {
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Version History"), "")));
-    toolbar.add_top_bar(&header);
-
-    let view = gtk::Box::new(gtk::Orientation::Vertical, 0);
+    let resource = crate::ui_resource::RELEASE_NOTES_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        dialog: adw::Dialog,
+        view: gtk::Box,
+    });
     populate_release_notes_view(window, &view, history, updating_version, release_updates);
 
-    let popup_width = large_popup_content_width(RELEASE_NOTES_POPUP_WIDTH);
-    let popup_height = large_popup_content_height(window.height(), RELEASE_NOTES_POPUP_HEIGHT);
-    toolbar.set_content(Some(&view));
-
-    let dialog = adw::Dialog::builder()
-        .title(tr("Version History"))
-        .content_width(popup_width)
-        .content_height(popup_height)
-        .child(&toolbar)
-        .build();
+    dialog.set_content_width(large_popup_content_width(RELEASE_NOTES_POPUP_WIDTH));
+    dialog.set_content_height(large_popup_content_height(
+        window.height(),
+        RELEASE_NOTES_POPUP_HEIGHT,
+    ));
     let view = view.downgrade();
     present_light_dismiss_dialog(&dialog, window);
     view
@@ -561,15 +548,13 @@ fn populate_release_notes_view(
                 .position(|note| note.version == version)
         })
         .unwrap_or_default() as u32;
-    while let Some(child) = view.first_child() {
-        view.remove(&child);
+    let selector_row = view
+        .first_child()
+        .and_then(|child| child.downcast::<gtk::Box>().ok())
+        .expect("Release History selector host");
+    while let Some(child) = selector_row.first_child() {
+        selector_row.remove(&child);
     }
-
-    let selector_row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    selector_row.add_css_class("release-note-selector");
-    selector_row.set_margin_top(12);
-    selector_row.set_margin_start(18);
-    selector_row.set_margin_end(18);
     let titles = history
         .notes
         .iter()
@@ -587,10 +572,18 @@ fn populate_release_notes_view(
     selector.set_sensitive(!history.notes.is_empty());
     selector.set_selected(selected);
     selector_row.append(&selector);
-    view.append(&selector_row);
 
-    let release = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    release.add_css_class("release-notes-list");
+    let release = view
+        .last_child()
+        .and_then(|child| child.downcast::<gtk::ScrolledWindow>().ok())
+        .and_then(|scroller| scroller.child())
+        .and_then(|child| child.downcast::<gtk::Viewport>().ok())
+        .and_then(|viewport| viewport.child())
+        .and_then(|child| child.downcast::<gtk::Box>().ok())
+        .expect("Release History content host");
+    while let Some(child) = release.first_child() {
+        release.remove(&child);
+    }
     if let Some(note) = history.notes.get(selected as usize) {
         release.append(&release_note_row(
             window,
@@ -600,16 +593,6 @@ fn populate_release_notes_view(
             release_updates,
         ));
     }
-
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_margin_top(12);
-    scroller.set_margin_bottom(12);
-    scroller.set_margin_start(18);
-    scroller.set_margin_end(18);
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(&release));
-    view.append(&scroller);
 
     let window = window.clone();
     let history = history.clone();
@@ -753,11 +736,24 @@ mod tests {
     use std::sync::Arc;
 
     use crate::runtime::{ReleaseHistory, ReleaseNote};
+    use gtk::prelude::WidgetExt;
+    use gtk::subclass::prelude::ObjectSubclassIsExt;
 
     use super::{
-        CivilDate, ReleaseBlockKind, ReleaseRowStatus, release_markdown_blocks,
+        CivilDate, ReleaseBlockKind, ReleaseNoteRowView, ReleaseRowStatus, release_markdown_blocks,
         release_relative_date_for, release_row_status,
     };
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn release_note_row_template_builds() {
+        gtk::init().expect("GTK display");
+        crate::application::verify_interface_resources().expect("compiled interface resources");
+        let row = ReleaseNoteRowView::new();
+        assert!(row.imp().version.parent().is_some());
+        assert!(row.imp().status.parent().is_some());
+        assert!(row.imp().body.parent().is_some());
+    }
 
     #[test]
     fn release_dates_use_relative_labels_without_singular_units() {

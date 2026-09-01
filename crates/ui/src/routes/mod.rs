@@ -8,7 +8,6 @@ pub(crate) mod collections;
 mod columns;
 pub(crate) mod detail_links;
 mod detail_showcase;
-mod factory_cells;
 pub(crate) mod folders;
 pub(crate) mod grid_cells;
 mod grouped_detail;
@@ -21,6 +20,8 @@ pub(crate) mod playlist_detail;
 mod playlist_entries;
 mod playlist_entry_model;
 pub(crate) mod playlist_picker;
+mod recycled_cells;
+pub(crate) use recycled_cells::{RecycledArtworkCell, RecycledTextCell};
 pub(super) mod release_kind;
 pub(crate) mod route;
 pub(crate) mod route_layout;
@@ -33,7 +34,7 @@ mod table_sizing;
 mod track_model;
 pub(crate) mod track_selection;
 
-pub(crate) use album_detail::AlbumCollectionOrder;
+pub(crate) use album_detail::{AlbumCollectionOrder, album_detail_rows_for_keys};
 pub(crate) use artist::{
     artist_detail_route, load_artist_discography, load_artist_overview, load_artist_tracks,
 };

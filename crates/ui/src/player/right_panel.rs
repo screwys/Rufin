@@ -4,42 +4,37 @@ use std::rc::Rc;
 use crate::RightSidebarMode;
 use adw::prelude::*;
 
-use crate::layout::allocation_owner;
 use crate::shell::Shell;
-use crate::shell::actions::icon_button;
-use crate::shell::layout::{
-    ActiveLayoutProfile, MIN_RESTORED_WINDOW_HEIGHT, WINDOW_CHROME_MARGIN_END, resolve_layout,
-};
+use crate::shell::layout::{ActiveLayoutProfile, MIN_RESTORED_WINDOW_HEIGHT, resolve_layout};
 use localization::tr;
 
 use super::bottom::BOTTOM_PLAYER_HEIGHT;
 const QUEUE_LYRICS_DEFAULT_LYRICS_HEIGHT: i32 = 300;
-const QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT: i32 = 10;
-const QUEUE_HEADER_TOP_MARGIN: i32 = 10;
+const QUEUE_LYRICS_HANDLE_HEIGHT: f64 = 10.0;
 
 pub(crate) struct RightPanelWidgets {
     pub(crate) right_split: gtk::Paned,
     pub(crate) right_panel_slot: gtk::ScrolledWindow,
     pub(crate) right_resize_handle: gtk::Box,
     pub(crate) root: gtk::Box,
+    pub(crate) queue_header_host: gtk::Box,
     pub(crate) queue_panel: gtk::Box,
     pub(crate) queue_search: gtk::SearchEntry,
     pub(crate) queue_clear_button: gtk::Button,
-    pub(crate) queue_lyrics_overlay: gtk::Overlay,
+    pub(crate) queue_lyrics_split: gtk::Paned,
     pub(crate) lyrics_surface: gtk::Box,
-    pub(crate) lyrics_resize_handle: gtk::Box,
     pub(crate) lyrics_host: gtk::Box,
     pub(crate) visualizer_visible: Cell<bool>,
 }
 
 pub(crate) struct RightPanelParts {
     pub(crate) root: gtk::Box,
+    pub(crate) queue_header_host: gtk::Box,
     pub(crate) queue_panel: gtk::Box,
     pub(crate) queue_search: gtk::SearchEntry,
     pub(crate) queue_clear_button: gtk::Button,
-    pub(crate) queue_lyrics_overlay: gtk::Overlay,
+    pub(crate) queue_lyrics_split: gtk::Paned,
     pub(crate) lyrics_surface: gtk::Box,
-    pub(crate) lyrics_resize_handle: gtk::Box,
     pub(crate) lyrics_host: gtk::Box,
 }
 
@@ -47,127 +42,82 @@ pub(crate) fn build_right_panel(
     end_window_controls: &impl IsA<gtk::Widget>,
     visualizer_area: &gtk::DrawingArea,
 ) -> RightPanelParts {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    root.add_css_class("right-panel");
-    root.set_hexpand(true);
-    root.set_vexpand(true);
-
-    let queue_header = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    queue_header.add_css_class("sidebar-header");
-    queue_header.add_css_class("queue-toolbar");
-    queue_header.set_valign(gtk::Align::Center);
-    queue_header.set_margin_top(QUEUE_HEADER_TOP_MARGIN);
-    queue_header.set_margin_bottom(0);
-    queue_header.set_margin_start(QUEUE_HEADER_TOP_MARGIN);
-    queue_header.set_margin_end(WINDOW_CHROME_MARGIN_END);
-
-    let queue_search = gtk::SearchEntry::new();
-    queue_search.add_css_class("queue-search");
-    let search_label = tr("Search queue");
-    queue_search.update_property(&[gtk::accessible::Property::Label(&search_label)]);
-    queue_search.set_hexpand(true);
-    queue_search.set_height_request(30);
-    queue_header.append(&queue_search);
-
-    let queue_clear_button = icon_button("rufin-edit-clear-symbolic", "Clear queue");
-    queue_header.append(&queue_clear_button);
-    queue_header.append(end_window_controls);
-    let queue_panel = gtk::Box::new(gtk::Orientation::Vertical, 6);
-    queue_panel.add_css_class("queue-panel");
-    queue_panel.set_vexpand(true);
-    queue_panel.set_margin_top(8);
-    queue_panel.set_margin_start(QUEUE_HEADER_TOP_MARGIN);
-    queue_panel.set_margin_end(0);
-    queue_panel.set_margin_bottom(0);
-    queue_panel.set_overflow(gtk::Overflow::Hidden);
-
-    let queue_region = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    queue_region.set_vexpand(true);
-    queue_region.append(&queue_header);
-    queue_region.append(&queue_panel);
-
-    let lyrics_host = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    lyrics_host.set_hexpand(true);
-    lyrics_host.set_vexpand(true);
-    let media_background = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    media_background.set_hexpand(true);
-    media_background.set_vexpand(true);
-    let media_overlay = gtk::Overlay::new();
-    media_overlay.set_hexpand(true);
-    media_overlay.set_vexpand(true);
-    media_overlay.set_child(Some(&media_background));
+    let resource = crate::ui_resource::RIGHT_PANEL_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        root: gtk::Box,
+        queue_lyrics_overlay: gtk::Overlay,
+        queue_fixed_top: gtk::Box,
+        queue_header_host: gtk::Box,
+        queue_panel: gtk::Box,
+        queue_search: gtk::SearchEntry,
+        queue_clear_button: gtk::Button,
+        window_controls_host: gtk::Box,
+        queue_lyrics_split: gtk::Paned,
+        lyrics_surface: gtk::Box,
+        media_overlay: gtk::Overlay,
+        lyrics_host: gtk::Box,
+    });
+    window_controls_host.append(end_window_controls);
     media_overlay.add_overlay(visualizer_area);
     media_overlay.set_measure_overlay(visualizer_area, false);
     media_overlay.add_overlay(&lyrics_host);
     media_overlay.set_measure_overlay(&lyrics_host, false);
-    let lyrics_resize_handle = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    lyrics_resize_handle.add_css_class("queue-lyrics-resize-handle");
-    lyrics_resize_handle.set_height_request(QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT);
-    lyrics_resize_handle.set_hexpand(true);
-    lyrics_resize_handle.set_focusable(false);
-    lyrics_resize_handle.set_cursor_from_name(Some("row-resize"));
-    lyrics_resize_handle.set_accessible_role(gtk::AccessibleRole::Separator);
-    let resize_label = tr("Hold and drag to resize");
-    lyrics_resize_handle.update_property(&[gtk::accessible::Property::Label(&resize_label)]);
-
-    let lyrics_surface = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    lyrics_surface.add_css_class("queue-lyrics-surface");
-    lyrics_surface.set_overflow(gtk::Overflow::Hidden);
-    lyrics_surface.set_hexpand(true);
-    lyrics_surface.set_halign(gtk::Align::Fill);
-    lyrics_surface.set_valign(gtk::Align::End);
-    lyrics_surface.append(&lyrics_resize_handle);
-    lyrics_surface.append(&media_overlay);
-
-    let queue_lyrics_overlay = gtk::Overlay::new();
-    queue_lyrics_overlay.add_css_class("queue-lyrics-overlay");
-    queue_lyrics_overlay.set_hexpand(true);
-    queue_lyrics_overlay.set_vexpand(true);
-    queue_lyrics_overlay.set_child(Some(&queue_region));
-    queue_lyrics_overlay.add_overlay(&lyrics_surface);
-    queue_lyrics_overlay.set_measure_overlay(&lyrics_surface, false);
-    let sized_surface = lyrics_surface.clone();
-    let queue_lyrics_owner = allocation_owner(&queue_lyrics_overlay, move |_, height| {
-        if height >= QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT && sized_surface.height_request() > height {
-            sized_surface.set_height_request(height);
+    queue_lyrics_overlay.remove_overlay(&queue_panel);
+    queue_lyrics_overlay.add_overlay(&queue_panel);
+    queue_lyrics_overlay.set_measure_overlay(&queue_panel, false);
+    queue_lyrics_overlay.set_measure_overlay(&queue_lyrics_split, false);
+    let positioned_queue = queue_panel.clone();
+    let positioned_top = queue_fixed_top.clone();
+    let positioned_split = queue_lyrics_split.clone();
+    queue_lyrics_overlay.connect_get_child_position(move |overlay, child| {
+        if child != positioned_queue.upcast_ref::<gtk::Widget>() {
+            return None;
         }
+        let top = positioned_top.height().max(0);
+        Some(gtk::gdk::Rectangle::new(
+            0,
+            top,
+            overlay.width().max(0),
+            positioned_split.position().saturating_sub(top).max(0),
+        ))
     });
-    root.append(&queue_lyrics_owner);
+    let allocate_queue = queue_lyrics_overlay.clone();
+    queue_lyrics_split.connect_position_notify(move |_| allocate_queue.queue_allocate());
+    root.append(&queue_lyrics_overlay);
 
     RightPanelParts {
         root,
+        queue_header_host,
         queue_panel,
         queue_search,
         queue_clear_button,
-        queue_lyrics_overlay,
+        queue_lyrics_split,
         lyrics_surface,
-        lyrics_resize_handle,
         lyrics_host,
     }
 }
 
 impl Shell {
-    fn save_queue_lyrics_height(&self, height: i32) {
+    fn save_queue_lyrics_height(&self) {
         if !self.lyrics.panel_visible.get() && !self.right_panel.visualizer_visible.get() {
             return;
         }
-        if height < QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT {
+        let height = self
+            .right_panel
+            .queue_lyrics_split
+            .height()
+            .saturating_sub(self.right_panel.queue_lyrics_split.position());
+        if height <= 0 {
             return;
         }
-        self.update_app_settings("queue lyrics height", |settings| {
-            if settings.queue_lyrics_height == Some(height) {
-                return false;
-            }
-            settings.queue_lyrics_height = Some(height);
-            true
+        self.set_app_setting("queue lyrics height", Some(height), |settings| {
+            &mut settings.queue_lyrics_height
         });
     }
 
     pub(crate) fn remember_queue_lyrics_open_position(&self) {
-        if !self.lyrics.panel_visible.get() && !self.right_panel.visualizer_visible.get() {
-            return;
-        }
-        self.save_queue_lyrics_height(self.right_panel.lyrics_surface.height());
+        self.save_queue_lyrics_height();
     }
 
     pub(crate) fn toggle_right_panel(self: &Rc<Self>) {
@@ -271,79 +221,36 @@ impl Shell {
     }
 }
 
-pub(crate) fn connect_queue_lyrics_overlay(shell: &Rc<Shell>) {
+pub(crate) fn connect_queue_lyrics_split(shell: &Rc<Shell>) {
     let saved_height = shell.settings.current.borrow().queue_lyrics_height;
     let available_height = queue_lyrics_restore_available_height(shell);
     shell
         .right_panel
-        .lyrics_surface
-        .set_height_request(queue_lyrics_initial_height(available_height, saved_height));
-    let dragging = Rc::new(std::cell::Cell::new(false));
-    let resize_shell = Rc::clone(shell);
-    let resize_dragging = Rc::clone(&dragging);
-    shell
-        .right_panel
-        .lyrics_surface
-        .connect_height_request_notify(move |_| {
-            if !resize_dragging.get() {
-                resize_shell.schedule_queue_panel_render();
-            }
-        });
-
-    let start_height = Rc::new(std::cell::Cell::new(None));
+        .queue_lyrics_split
+        .set_position(queue_lyrics_initial_position(
+            available_height,
+            saved_height,
+        ));
     let drag = gtk::GestureDrag::new();
     drag.set_button(1);
-    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let drag_shell = Rc::clone(shell);
-    let drag_start_height = Rc::clone(&start_height);
-    let drag_active = Rc::clone(&dragging);
-    drag.connect_drag_begin(move |gesture, _, start_y| {
-        drag_active.set(false);
-        drag_start_height.set(None);
-        let overlay = &drag_shell.right_panel.queue_lyrics_overlay;
-        let surface = &drag_shell.right_panel.lyrics_surface;
-        let handle = &drag_shell.right_panel.lyrics_resize_handle;
-        let surface_height = surface.height();
-        let handle_top = overlay.height().saturating_sub(surface_height);
-        let handle_bottom = handle_top.saturating_add(handle.height().max(1));
-        if !handle.is_mapped()
-            || !surface.is_visible()
-            || start_y < f64::from(handle_top)
-            || start_y > f64::from(handle_bottom)
-        {
-            gesture.set_state(gtk::EventSequenceState::Denied);
-            return;
-        }
-
-        gesture.set_state(gtk::EventSequenceState::Claimed);
-        drag_active.set(true);
-        drag_start_height.set(Some(surface_height));
+    drag.set_propagation_phase(gtk::PropagationPhase::Bubble);
+    let resizing = Rc::new(Cell::new(false));
+    let resize_split = shell.right_panel.queue_lyrics_split.clone();
+    let resize_active = Rc::clone(&resizing);
+    drag.connect_drag_begin(move |_, _, start_y| {
+        resize_active.set(
+            (start_y - f64::from(resize_split.position())).abs()
+                <= QUEUE_LYRICS_HANDLE_HEIGHT / 2.0,
+        );
     });
     let drag_shell = Rc::clone(shell);
-    let drag_start_height = Rc::clone(&start_height);
-    drag.connect_drag_update(move |_, _, offset_y| {
-        let Some(start_height) = drag_start_height.get() else {
-            return;
-        };
-        let available_height = drag_shell.right_panel.queue_lyrics_overlay.height();
-        let requested = start_height.saturating_sub(offset_y.round() as i32);
-        drag_shell
-            .right_panel
-            .lyrics_surface
-            .set_height_request(queue_lyrics_clamped_height(available_height, requested));
-    });
-    let drag_shell = Rc::clone(shell);
-    let drag_start_height = Rc::clone(&start_height);
-    let drag_active = Rc::clone(&dragging);
+    let resize_active = Rc::clone(&resizing);
     drag.connect_drag_end(move |_, _, _| {
-        drag_active.set(false);
-        if drag_start_height.take().is_none() {
-            return;
+        if resize_active.replace(false) {
+            drag_shell.save_queue_lyrics_height();
         }
-        drag_shell.save_queue_lyrics_height(drag_shell.right_panel.lyrics_surface.height_request());
-        drag_shell.schedule_queue_panel_render();
     });
-    shell.right_panel.queue_lyrics_overlay.add_controller(drag);
+    shell.right_panel.queue_lyrics_split.add_controller(drag);
 }
 
 pub(crate) fn apply_sidebar_media_visibility(shell: Rc<Shell>) {
@@ -362,18 +269,17 @@ pub(crate) fn apply_sidebar_media_visibility(shell: Rc<Shell>) {
         .visualizer
         .sidebar_area
         .set_opacity(if lyrics_visible { 0.48 } else { 1.0 });
-    shell.right_panel.lyrics_resize_handle.set_visible(visible);
-    shell.right_panel.lyrics_surface.set_valign(gtk::Align::End);
-    shell.right_panel.lyrics_surface.set_vexpand(false);
     if visible {
         let available_height = queue_lyrics_restore_available_height(&shell);
         let saved_height = shell.settings.current.borrow().queue_lyrics_height;
         shell
             .right_panel
-            .lyrics_surface
-            .set_height_request(queue_lyrics_initial_height(available_height, saved_height));
+            .queue_lyrics_split
+            .set_position(queue_lyrics_initial_position(
+                available_height,
+                saved_height,
+            ));
     }
-    shell.schedule_queue_panel_render();
     if lyrics_visible {
         shell.sync_visible_lyrics_surfaces();
     } else {
@@ -383,9 +289,9 @@ pub(crate) fn apply_sidebar_media_visibility(shell: Rc<Shell>) {
 }
 
 fn queue_lyrics_restore_available_height(shell: &Shell) -> i32 {
-    let overlay_height = shell.right_panel.queue_lyrics_overlay.height();
-    if overlay_height > 1 {
-        return overlay_height;
+    let split_height = shell.right_panel.queue_lyrics_split.height();
+    if split_height > 1 {
+        return split_height;
     }
     let window_height = shell.chrome.window.height();
     if window_height > MIN_RESTORED_WINDOW_HEIGHT {
@@ -403,18 +309,10 @@ fn queue_lyrics_estimated_split_height(window_height: i32) -> i32 {
     (window_height - BOTTOM_PLAYER_HEIGHT - 48).max(1)
 }
 
-fn queue_lyrics_clamped_height(available_height: i32, height: i32) -> i32 {
-    if available_height <= QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT {
-        return available_height.max(0);
-    }
-    height.clamp(QUEUE_LYRICS_RESIZE_HANDLE_HEIGHT, available_height)
-}
-
-fn queue_lyrics_initial_height(available_height: i32, saved_height: Option<i32>) -> i32 {
-    saved_height
+fn queue_lyrics_initial_position(available_height: i32, saved_height: Option<i32>) -> i32 {
+    let lyrics_height = saved_height
         .filter(|height| *height > 0)
-        .map(|height| queue_lyrics_clamped_height(available_height, height))
-        .unwrap_or_else(|| {
-            queue_lyrics_clamped_height(available_height, QUEUE_LYRICS_DEFAULT_LYRICS_HEIGHT)
-        })
+        .unwrap_or(QUEUE_LYRICS_DEFAULT_LYRICS_HEIGHT)
+        .clamp(0, available_height.max(0));
+    available_height.saturating_sub(lyrics_height)
 }

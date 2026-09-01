@@ -20,7 +20,7 @@ use super::{Shell, layout, navigation};
 pub(crate) const PLAY_ICON: &str = "rufin-media-playback-start-symbolic";
 pub(crate) const PLAY_NEXT_ICON: &str = "rufin-mail-forward-symbolic";
 pub(crate) const PLAY_LATER_ICON: &str = "rufin-go-last-symbolic";
-pub(crate) const EDIT_ICON: &str = "rufin-edit-symbolic";
+pub(crate) const EDIT_ICON: &str = "rufin-document-edit-symbolic";
 pub(crate) const ADD_ICON: &str = "rufin-list-add-symbolic";
 pub(crate) const REMOVE_ICON: &str = "rufin-list-remove-symbolic";
 pub(crate) const DELETE_ICON: &str = "rufin-process-stop-symbolic";
@@ -760,9 +760,45 @@ pub(crate) fn toggle_mute_shortcut(shell: &Rc<Shell>) {
 }
 
 fn show_shortcuts_dialog(shell: &Shell) {
-    let dialog = adw::ShortcutsDialog::builder()
-        .title(tr("Keyboard Shortcuts"))
-        .build();
+    let resource = crate::ui_resource::SHORTCUTS_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::ShortcutsDialog =
+        crate::ui_resource::object(&builder, resource, "shortcuts_dialog");
+    #[cfg(target_os = "macos")]
+    let platform_accelerators = [
+        ("shortcut_play_pause", "space"),
+        ("shortcut_multi_selection", "<Meta>Pointer_Button1"),
+        ("shortcut_select_all", "<Meta>a"),
+        ("shortcut_selection_play_next", "<Meta>Return"),
+        ("shortcut_selection_play_later", "<Meta><Shift>Return"),
+        ("shortcut_add_to_playlist", "<Meta><Shift>p"),
+        ("shortcut_download", "<Meta><Shift>d"),
+        ("shortcut_previous_output", "<Alt><Meta>Up"),
+        ("shortcut_next_output", "<Alt><Meta>Down"),
+        ("shortcut_back", "Back <Meta>bracketleft"),
+        ("shortcut_forward", "Forward <Meta>bracketright"),
+        ("shortcut_sidebar_position", "<Meta>1...9 <Meta>0"),
+    ];
+    #[cfg(not(target_os = "macos"))]
+    let platform_accelerators = [
+        ("shortcut_play_pause", "space <Control>space"),
+        ("shortcut_multi_selection", "<Control>Pointer_Button1"),
+        ("shortcut_select_all", "<Control>a"),
+        ("shortcut_selection_play_next", "<Control>Return"),
+        ("shortcut_selection_play_later", "<Control><Shift>Return"),
+        ("shortcut_add_to_playlist", "<Control><Shift>p"),
+        ("shortcut_download", "<Control><Shift>d"),
+        ("shortcut_previous_output", "<Control><Shift>Up"),
+        ("shortcut_next_output", "<Control><Shift>Down"),
+        ("shortcut_back", "Back <Alt>Left"),
+        ("shortcut_forward", "Forward <Alt>Right"),
+        ("shortcut_sidebar_position", "<Control>1...9 <Control>0"),
+    ];
+    for (id, accelerator) in platform_accelerators {
+        let item: adw::ShortcutsItem = crate::ui_resource::object(&builder, resource, id);
+        item.set_accelerator(accelerator);
+    }
+
     dialog.connect_map(|dialog| {
         let dialog = dialog.downgrade();
         glib::idle_add_local_once(move || {
@@ -771,287 +807,7 @@ fn show_shortcuts_dialog(shell: &Shell) {
             }
         });
     });
-
-    let section = adw::ShortcutsSection::new(Some(&tr("General")));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Menu"),
-        "win.show-primary-menu",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Preferences"),
-        "app.preferences",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Keyboard Shortcuts"),
-        "app.show-shortcuts",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Troubleshooting"),
-        "win.troubleshooting",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Version History"),
-        "win.show-release-notes",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Private mode"),
-        "win.toggle-private-mode",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Collapse/expand sidebar"),
-        "win.toggle-left-sidebar",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Resync Library"),
-        "win.refresh-library",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Close app window"),
-        "window.close",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Quit Rufin"),
-        "app.quit",
-    ));
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Playback")));
-    #[cfg(target_os = "macos")]
-    section.add(adw::ShortcutsItem::new(&tr("Play/Pause"), "space"));
-    #[cfg(not(target_os = "macos"))]
-    section.add(adw::ShortcutsItem::new(
-        &tr("Play/Pause"),
-        "space <Control>space",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Previous"),
-        "win.previous-track",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Next"),
-        "win.next-track",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Seek Backward"),
-        "win.seek-backward",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Seek Forward"),
-        "win.seek-forward",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Favorite"),
-        "win.toggle-favorite",
-    ));
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Queue")));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Play random"),
-        "win.play-random",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Play random (play next)"),
-        "win.play-random-next",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Play random (play later)"),
-        "win.play-random-later",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Shuffle"),
-        "win.toggle-shuffle",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Repeat"),
-        "win.cycle-repeat",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Auto DJ"),
-        "win.toggle-auto-dj",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Clear queue"),
-        "win.clear-queue",
-    ));
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Selection")));
-    #[cfg(target_os = "macos")]
-    section.add(adw::ShortcutsItem::new(
-        &tr("Multi-selection"),
-        "<Meta>Pointer_Button1",
-    ));
-    #[cfg(not(target_os = "macos"))]
-    section.add(adw::ShortcutsItem::new(
-        &tr("Multi-selection"),
-        "<Control>Pointer_Button1",
-    ));
-    section.add(adw::ShortcutsItem::new(
-        &tr("Range selection"),
-        "<Shift>Pointer_Button1",
-    ));
-    section.add(adw::ShortcutsItem::new(&tr("Delete"), "Delete"));
-    #[cfg(target_os = "macos")]
-    {
-        section.add(adw::ShortcutsItem::new(&tr("Select all"), "<Meta>a"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Play"),
-            "Return Pointer_Button1&Pointer_Button1",
-        ));
-        section.add(adw::ShortcutsItem::new(&tr("Play Next"), "<Meta>Return"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Play Later"),
-            "<Meta><Shift>Return",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Add to Playlist"),
-            "<Meta><Shift>p",
-        ));
-        section.add(adw::ShortcutsItem::new(&tr("Download"), "<Meta><Shift>d"));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        section.add(adw::ShortcutsItem::new(&tr("Select all"), "<Control>a"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Play"),
-            "Return Pointer_Button1&Pointer_Button1",
-        ));
-        section.add(adw::ShortcutsItem::new(&tr("Play Next"), "<Control>Return"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Play Later"),
-            "<Control><Shift>Return",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Add to Playlist"),
-            "<Control><Shift>p",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Download"),
-            "<Control><Shift>d",
-        ));
-    }
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Audio")));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Gapless mode"),
-        "win.use-gapless",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Crossfade mode"),
-        "win.use-crossfade",
-    ));
-    section.add(adw::ShortcutsItem::new(&tr("Mute"), "m"));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Volume Up"),
-        "win.volume-up",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Volume Down"),
-        "win.volume-down",
-    ));
-    #[cfg(target_os = "macos")]
-    {
-        section.add(adw::ShortcutsItem::new(
-            &tr("Previous audio device"),
-            "<Alt><Meta>Up",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Next audio device"),
-            "<Alt><Meta>Down",
-        ));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        section.add(adw::ShortcutsItem::new(
-            &tr("Previous audio device"),
-            "<Control><Shift>Up",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Next audio device"),
-            "<Control><Shift>Down",
-        ));
-    }
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("View")));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show/hide right sidebar"),
-        "win.toggle-queue",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show visualizer in the right panel"),
-        "win.show-visualizer-panel",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show lyrics in the right panel"),
-        "win.show-lyrics-panel",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Show visualizer and lyrics in the right panel"),
-        "win.show-visualizer-lyrics-panel",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Toggle Fullscreen"),
-        "win.toggle-fullscreen",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Open fullscreen player"),
-        "win.toggle-fullscreen-player",
-    ));
-    dialog.add(section);
-
-    let section = adw::ShortcutsSection::new(Some(&tr("Navigation")));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Search in page"),
-        "win.focus-search",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Navigate to Search"),
-        "win.navigate-search",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Switch between layouts"),
-        "win.cycle-layout",
-    ));
-    section.add(adw::ShortcutsItem::from_action(
-        &tr("Switch Search/Favorites tabs"),
-        "win.cycle-tabs",
-    ));
-    #[cfg(target_os = "macos")]
-    {
-        section.add(adw::ShortcutsItem::new(
-            &tr("Back"),
-            "Back <Meta>bracketleft",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Forward"),
-            "Forward <Meta>bracketright",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Sidebar route by position"),
-            "<Meta>1...9 <Meta>0",
-        ));
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        section.add(adw::ShortcutsItem::new(&tr("Back"), "Back <Alt>Left"));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Forward"),
-            "Forward <Alt>Right",
-        ));
-        section.add(adw::ShortcutsItem::new(
-            &tr("Sidebar route by position"),
-            "<Control>1...9 <Control>0",
-        ));
-    }
-    section.add(adw::ShortcutsItem::new(
-        &tr("Navigate page items"),
-        "Up Down Left Right",
-    ));
-    dialog.add(section);
-
+    drop(builder);
     present_light_dismiss_dialog(&dialog, &shell.chrome.window);
 }
 
@@ -1084,25 +840,13 @@ fn replace_pointer_keycaps(container: &gtk::Widget) {
 }
 
 fn show_about_dialog(shell: &Shell) {
-    let dialog = adw::AboutDialog::builder()
-        .application_name(DISPLAY_NAME)
-        .application_icon(APP_ID)
-        .developer_name("screwy")
-        .developers(["screwy <screwygit@proton.me>"])
-        .translator_credits(TRANSLATOR_CREDITS)
-        .version(env!("CARGO_PKG_VERSION"))
-        .website("https://github.com/screwys/Rufin")
-        .issue_url("https://github.com/screwys/Rufin/issues")
-        .copyright("© 2026 screwy")
-        .license_type(gtk::License::Custom)
-        .license(
-            "This application comes with absolutely no warranty and is licensed under GNU General Public Licence, version 3 or later.",
-        )
-        .comments(tr(
-            "Thank you for trying out Rufin! If you have problems or suggestions, please open an issue in Github.",
-        ))
-        .build();
-    dialog.add_link(&tr("Support"), "https://github.com/sponsors/screwys");
+    let resource = crate::ui_resource::ABOUT_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::AboutDialog = crate::ui_resource::object(&builder, resource, "dialog");
+    dialog.set_application_name(DISPLAY_NAME);
+    dialog.set_application_icon(APP_ID);
+    dialog.set_translator_credits(TRANSLATOR_CREDITS);
+    dialog.set_version(env!("CARGO_PKG_VERSION"));
     present_light_dismiss_dialog(&dialog, &shell.chrome.window);
 }
 
@@ -1278,10 +1022,14 @@ pub(crate) fn configure_action_button(button: &gtk::Button, variant: ActionButto
         ActionButtonVariant::CoverCornerMenu => {
             button.add_css_class("cover-menu-button");
             pin_action_button(button, COVER_SIDE_ACTION_SIZE);
+            button.set_halign(gtk::Align::Start);
+            button.set_valign(gtk::Align::End);
         }
         ActionButtonVariant::CoverCornerFavorite => {
             button.add_css_class("cover-favorite-button");
             pin_action_button(button, COVER_SIDE_ACTION_SIZE);
+            button.set_halign(gtk::Align::End);
+            button.set_valign(gtk::Align::Start);
         }
         ActionButtonVariant::DetailAction => {}
         ActionButtonVariant::DetailPrimary => {

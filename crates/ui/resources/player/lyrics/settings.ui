@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesDialog" id="dialog">
+    <property name="title" translatable="yes">Lyrics settings</property>
+    <property name="search-enabled">false</property>
+  </object>
+
+  <object class="AdwPreferencesPage" id="page">
+    <property name="title" translatable="yes">Lyrics settings</property>
+    <property name="icon-name">rufin-applications-system-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="sources">
+        <property name="title" translatable="yes">Sources</property>
+        <child><object class="AdwSwitchRow" id="external"><property name="title" translatable="yes">External lyric lookup</property></object></child>
+        <child><object class="AdwSwitchRow" id="prefer_server"><property name="title" translatable="yes">Prefer server lyrics</property></object></child>
+        <child><object class="AdwSwitchRow" id="save_to_source"><property name="title" translatable="yes">Saves lyrics to your source</property><property name="subtitle" translatable="yes">Save action saves the lyrics directly to your source</property></object></child>
+        <child>
+          <object class="AdwActionRow" id="save_automatically">
+            <property name="title" translatable="yes">Save lyrics automatically</property>
+            <property name="activatable">true</property>
+            <child type="suffix">
+              <object class="GtkSwitch" id="automatic_toggle">
+                <property name="valign">center</property>
+                <property name="can-target">false</property>
+                <property name="focusable">false</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="storage">
+            <property name="title" translatable="yes">Lyrics storage</property>
+            <child type="suffix">
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="valign">center</property>
+                <style><class name="linked"/><class name="preference-selection-buttons"/></style>
+                <child>
+                  <object class="GtkToggleButton" id="embed">
+                    <property name="label" translatable="yes">Embed in track</property>
+                    <style><class name="preference-selection-button"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkToggleButton" id="sidecar">
+                    <property name="label" translatable="yes">separate .lrc file</property>
+                    <property name="group">embed</property>
+                    <style><class name="preference-selection-button"/></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="language_and_readings">
+        <property name="title" translatable="yes">Language and readings</property>
+        <child><object class="AdwSwitchRow" id="translations"><property name="title" translatable="yes">Prefer translations</property></object></child>
+        <child><object class="AdwComboRow" id="language_row"><property name="title" translatable="yes">Translation language</property></object></child>
+        <child><object class="AdwSwitchRow" id="furigana"><property name="title" translatable="yes">Furigana</property><property name="subtitle" translatable="yes">Increases memory usage</property></object></child>
+        <child><object class="AdwSwitchRow" id="romanization"><property name="title" translatable="yes">Romaji</property><property name="subtitle" translatable="yes">Increases memory usage</property></object></child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="playback">
+        <property name="title" translatable="yes">Karaoke Playback</property>
+        <child><object class="AdwSwitchRow" id="karaoke"><property name="title" translatable="yes">Karaoke mode</property><property name="subtitle" translatable="yes">Uses available karaoke lyrics or fetches them from the internet</property></object></child>
+        <child>
+          <object class="AdwActionRow" id="highlight_color">
+            <property name="title" translatable="yes">Karaoke highlight color</property>
+            <property name="subtitle" translatable="yes">Color for the active word during playback</property>
+            <property name="activatable-widget">color_button</property>
+            <child type="suffix">
+              <object class="GtkBox" id="theme_accent">
+                <property name="orientation">horizontal</property>
+                <property name="opacity">0</property>
+                <property name="can-target">false</property>
+                <style><class name="lyrics-theme-accent-probe"/></style>
+              </object>
+            </child>
+            <child type="suffix">
+              <object class="GtkButton" id="color_button">
+                <property name="width-request">32</property>
+                <property name="height-request">32</property>
+                <property name="valign">center</property>
+                <style><class name="flat"/></style>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">horizontal</property>
+                    <style><class name="lyrics-highlight-swatch"/></style>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwPreferencesGroup" id="typography">
+        <property name="title" translatable="yes">Typography</property>
+        <child>
+          <object class="AdwComboRow" id="font">
+            <property name="title" translatable="yes">Font family</property>
+            <property name="enable-search">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSpinRow" id="size">
+            <property name="title" translatable="yes">Font size (px)</property>
+            <property name="digits">0</property>
+            <property name="adjustment">
+              <object class="GtkAdjustment" id="size_adjustment">
+                <property name="lower">12</property>
+                <property name="upper">28</property>
+                <property name="step-increment">1</property>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

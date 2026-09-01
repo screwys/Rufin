@@ -23,7 +23,7 @@ pub(crate) const ALBUM_ICON: &str = "rufin-albums-symbolic";
 pub(crate) const ARTIST_ICON: &str = "rufin-artists-symbolic";
 pub(crate) const DOWNLOAD_ICON: &str = "rufin-download-symbolic";
 pub(crate) const GO_TO_ICON: &str = "rufin-external-link-compact-symbolic";
-pub(crate) const RADIO_ICON: &str = "rufin-audio-radio-symbolic";
+pub(crate) const RADIO_ICON: &str = "rufin-audio-only-symbolic";
 
 pub(crate) type ContextMenuOpen = Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>)>;
 

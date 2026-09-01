@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwWindow" id="dialog">
+    <property name="title" translatable="yes">Karaoke highlight color</property>
+    <property name="default-width">520</property>
+    <property name="default-height">420</property>
+    <property name="modal">true</property>
+    <property name="resizable">false</property>
+    <property name="content">
+      <object class="AdwToolbarView">
+        <child type="top">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">false</property>
+            <property name="title-widget">
+              <object class="AdwWindowTitle" id="title"><property name="title" translatable="yes">Karaoke highlight color</property></object>
+            </property>
+            <child type="start"><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+            <child type="end">
+              <object class="GtkButton" id="select">
+                <property name="label" translatable="yes">Save</property>
+                <style><class name="suggested-action"/></style>
+              </object>
+            </child>
+            <child type="end"><object class="GtkButton" id="default"><property name="label" translatable="yes">Default</property></object></child>
+          </object>
+        </child>
+        <property name="content">
+          <object class="GtkBox" id="body">
+            <property name="orientation">vertical</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

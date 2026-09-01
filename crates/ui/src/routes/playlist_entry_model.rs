@@ -37,6 +37,7 @@ impl PlaylistEntryModel {
         selected: &crate::runtime::SelectedLibrary,
         playlist_key: PlaylistKey,
         order: PlaylistEntryOrder,
+        first_row_position: usize,
         first_rows: Vec<PlaylistEntryRow>,
         settings: LibraryListSettings,
     ) -> Self {
@@ -65,7 +66,7 @@ impl PlaylistEntryModel {
             selected.runtime.clone(),
             load,
         );
-        sparse.seed_matching(first_rows, |row| row.playlist_entry_key);
+        sparse.seed_matching_at(first_row_position, first_rows, |row| row.playlist_entry_key);
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 source_key,
@@ -84,6 +85,10 @@ impl PlaylistEntryModel {
 
     pub(crate) fn list_model(&self) -> SparseObjectModel {
         self.inner.sparse.list_model()
+    }
+
+    pub(crate) fn resume_initial_demand(&self) {
+        self.inner.sparse.resume_initial_demand();
     }
 
     pub(crate) fn order(&self) -> Arc<[PlaylistEntryKey]> {

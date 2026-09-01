@@ -1,0 +1,139 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkOverlay" id="root">
+    <property name="hexpand">true</property><property name="vexpand">true</property>
+    <property name="visible">false</property><property name="can-target">false</property>
+    <property name="sensitive">false</property><property name="opacity">0</property>
+    <style><class name="fullscreen-player"/></style>
+    <property name="child">
+      <object class="GtkBox" id="body">
+        <property name="orientation">vertical</property><property name="spacing">10</property>
+        <property name="hexpand">true</property><property name="vexpand">true</property>
+        <style><class name="fullscreen-player-body"/></style>
+        <child>
+          <object class="GtkBox" id="hero">
+            <property name="orientation">horizontal</property><property name="spacing">18</property>
+            <property name="hexpand">true</property><property name="width-request">1</property>
+            <property name="halign">fill</property><property name="valign">center</property>
+            <style><class name="fullscreen-player-hero"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkOverlay" id="switcher_bar">
+            <property name="margin-top">10</property>
+            <property name="hexpand">true</property>
+            <style><class name="fullscreen-player-tab-bar"/></style>
+            <property name="child">
+              <object class="GtkCenterBox">
+                <property name="hexpand">true</property>
+                <property name="center-widget">
+                  <object class="GtkBox" id="switcher">
+                    <property name="orientation">horizontal</property><property name="halign">center</property><property name="valign">center</property>
+                    <style><class name="linked"/></style>
+                    <child>
+                      <object class="GtkToggleButton" id="queue_tab">
+                        <property name="tooltip-text" translatable="yes">Queue</property><property name="valign">center</property>
+                        <accessibility><property name="label" translatable="yes">Queue</property></accessibility>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-view-list-ordered-symbolic</property></object></child><child><object class="GtkLabel" id="queue_tab_label"><property name="label" translatable="yes">Queue</property></object></child></object></property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="lyrics_tab">
+                        <property name="tooltip-text" translatable="yes">Lyrics</property><property name="valign">center</property><property name="active">true</property>
+                        <accessibility><property name="label" translatable="yes">Lyrics</property></accessibility>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="lyrics_tab_icon"/></child><child><object class="GtkLabel" id="lyrics_tab_label"><property name="label" translatable="yes">Lyrics</property></object></child></object></property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="visualizer_tab">
+                        <property name="tooltip-text" translatable="yes">Visualizer</property><property name="valign">center</property>
+                        <accessibility><property name="label" translatable="yes">Visualizer</property></accessibility>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="visualizer_tab_icon"/></child><child><object class="GtkLabel" id="visualizer_tab_label"><property name="label" translatable="yes">Visualizer</property></object></child></object></property>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkToggleButton" id="equalizer_tab">
+                        <property name="tooltip-text" translatable="yes">Equalizer</property><property name="valign">center</property>
+                        <accessibility><property name="label" translatable="yes">Equalizer</property></accessibility>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="equalizer_tab_icon"/></child><child><object class="GtkLabel" id="equalizer_tab_label"><property name="label" translatable="yes">Equalizer</property></object></child></object></property>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </property>
+            <child type="overlay"><object class="GtkBox" id="inline_start"><property name="orientation">horizontal</property><property name="margin-start">14</property><property name="halign">start</property><property name="valign">center</property></object></child>
+            <child type="overlay"><object class="GtkBox" id="inline_end"><property name="orientation">horizontal</property><property name="margin-end">8</property><property name="halign">end</property><property name="valign">center</property></object></child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwViewStack" id="stack">
+            <property name="hhomogeneous">false</property><property name="vhomogeneous">false</property>
+            <property name="hexpand">true</property><property name="vexpand">true</property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkButton" id="close_button">
+    <property name="icon-name">rufin-go-down-symbolic</property><property name="tooltip-text" translatable="yes">Close fullscreen player</property><property name="valign">start</property>
+    <accessibility><property name="label" translatable="yes">Close fullscreen player</property></accessibility>
+    <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="fullscreen-player-close-button"/></style>
+  </object>
+  <object class="GtkButton" id="inline_close_button">
+    <property name="icon-name">rufin-go-down-symbolic</property><property name="tooltip-text" translatable="yes">Close fullscreen player</property><property name="visible">false</property><property name="valign">center</property>
+    <accessibility><property name="label" translatable="yes">Close fullscreen player</property></accessibility>
+    <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="fullscreen-player-close-button"/></style>
+  </object>
+
+  <object class="AdwWrapBox" id="hero_content">
+    <property name="orientation">horizontal</property><property name="child-spacing">18</property><property name="line-spacing">12</property>
+    <property name="align">0.5</property><property name="wrap-policy">minimum</property>
+    <property name="width-request">1</property><property name="hexpand">true</property>
+    <property name="halign">fill</property><property name="valign">center</property>
+    <child>
+      <object class="GtkBox" id="details">
+        <property name="orientation">vertical</property><property name="spacing">5</property>
+        <property name="hexpand">true</property><property name="width-request">1</property>
+        <property name="halign">fill</property><property name="valign">center</property>
+        <style><class name="fullscreen-player-details"/></style>
+        <child><object class="GtkLabel" id="title"><property name="xalign">0</property><property name="justify">left</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">4</property><property name="ellipsize">end</property><property name="width-chars">1</property><property name="max-width-chars">48</property><property name="width-request">1</property><property name="halign">start</property><style><class name="fullscreen-player-title"/></style></object></child>
+        <child><object class="GtkLabel" id="artist"><property name="xalign">0</property><property name="justify">left</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property><property name="ellipsize">end</property><property name="width-chars">1</property><property name="max-width-chars">48</property><property name="width-request">1</property><property name="halign">start</property><style><class name="fullscreen-player-artist"/></style></object></child>
+        <child><object class="GtkLabel" id="album"><property name="xalign">0</property><property name="justify">left</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property><property name="ellipsize">end</property><property name="width-chars">1</property><property name="max-width-chars">48</property><property name="width-request">1</property><property name="halign">start</property><style><class name="fullscreen-player-album"/></style></object></child>
+        <child><object class="GtkFlowBox" id="meta"><property name="column-spacing">4</property><property name="row-spacing">4</property><property name="selection-mode">none</property><property name="max-children-per-line">4</property><property name="halign">start</property><property name="valign">center</property><style><class name="fullscreen-player-meta-row"/></style></object></child>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkBox" id="fullscreen_queue_header">
+    <property name="orientation">horizontal</property><property name="spacing">16</property>
+    <property name="margin-start">6</property><property name="margin-end">6</property>
+    <property name="hexpand">true</property><property name="halign">fill</property><property name="valign">center</property>
+    <style><class name="table-header"/></style>
+    <child><object class="GtkBox"><property name="width-request">50</property></object></child>
+    <child>
+      <object class="GtkBox">
+        <property name="orientation">horizontal</property><property name="spacing">16</property><property name="homogeneous">true</property>
+        <property name="width-request">1</property><property name="hexpand">true</property><property name="halign">fill</property>
+        <child><object class="GtkLabel"><property name="label" translatable="yes">Title</property><property name="xalign">0</property><property name="width-request">1</property><style><class name="muted"/></style></object></child>
+        <child><object class="GtkLabel" id="fullscreen_queue_album"><property name="label" translatable="yes">Album</property><property name="xalign">0</property><property name="width-request">1</property><style><class name="muted"/></style></object></child>
+      </object>
+    </child>
+    <child><object class="GtkImage"><property name="icon-name">rufin-preferences-system-time-symbolic</property><property name="width-request">82</property><style><class name="muted"/></style></object></child>
+    <child><object class="GtkLabel" id="fullscreen_queue_year"><property name="label" translatable="yes">Year</property><property name="width-request">64</property><style><class name="muted"/></style></object></child>
+    <child><object class="GtkImage"><property name="icon-name">rufin-heart-outline-symbolic</property><property name="width-request">32</property><style><class name="muted"/></style></object></child>
+  </object>
+  <object class="GtkBox" id="queue_panel"><property name="orientation">vertical</property><property name="spacing">6</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/><class name="fullscreen-player-queue-panel"/></style></object>
+  <object class="GtkBox" id="lyrics_host"><property name="orientation">vertical</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/></style></object>
+  <object class="GtkBox" id="visualizer_panel"><property name="orientation">vertical</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/><class name="fullscreen-player-visualizer"/></style></object>
+  <object class="GtkScrolledWindow" id="equalizer_panel">
+    <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">never</property>
+    <property name="hexpand">true</property><property name="vexpand">true</property>
+    <property name="min-content-width">0</property><property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property>
+    <style><class name="fullscreen-player-pane"/><class name="fullscreen-player-equalizer-scroller"/></style>
+  </object>
+</interface>

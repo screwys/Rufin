@@ -20,14 +20,12 @@ use actions::ControlFeedbackState;
 use chrome::WindowChrome;
 use cover::ArtworkState;
 use layout::ShellLayoutState;
-use localization::LocalizationState;
 use navigation::{NavigationState, NavigationWidgets};
 use startup::StartupState;
 
 pub(crate) mod actions;
 pub(crate) mod cover;
 mod events;
-mod localization;
 pub(crate) mod route;
 mod route_position;
 pub(crate) mod selected_ui;
@@ -60,7 +58,6 @@ pub(crate) struct Shell {
     pub(crate) preferences: PreferencesState,
     pub(crate) downloads: DownloadsState,
     pub(crate) control_feedback: ControlFeedbackState,
-    localization: LocalizationState,
     pub(crate) desktop: DesktopState,
     artwork: ArtworkState,
     pub(crate) selected_ui: SelectedUiState,

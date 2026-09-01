@@ -14,7 +14,8 @@ For translations, you can visit [Weblate](https://hosted.weblate.org/projects/ru
 
 ## Development environment
 
-For development using your host packages, please see
+Native development uses CMake 3.25 or newer and Ninja. For the complete host
+package requirements, see
 [README.md#building-locally](README.md#building-locally).
 
 If you have nix available, it is easier to:
@@ -91,7 +92,8 @@ validates the generated metadata. Direct `makepkg --printsrcinfo` also works on
 Arch-based systems, while `just deps` handles a Nix-provided `makepkg` without
 `/etc/makepkg.conf`.
 
-If you are testing natively, this also needs rustfmt, clippy, cargo-deny, and gettext.
+Broader native checks additionally need rustfmt, clippy, cargo-deny, and `msgfmt`
+from gettext.
 `cargo-nextest` and `ast-grep` (which CI runs by default) are used when available.
 
 To enable the debug logging, refer to [README.md#troubleshooting](README.md#troubleshooting).

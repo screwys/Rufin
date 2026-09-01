@@ -21,11 +21,7 @@ pub(crate) use desktop::{install_desktop_lifecycle, present_initial_window};
 pub(crate) use desktop::{
     now_playing_notification_can_send, now_playing_notification_should_withdraw,
 };
-pub(crate) use equalizer::{
-    build_equalizer_preset_row, connect_equalizer_scale_commit, equalizer_band_title,
-    equalizer_default_preset_bands, equalizer_preset_bands, equalizer_preset_name_at,
-    equalizer_preset_position, equalizer_selected_preset, install_equalizer_scroll,
-};
+pub(crate) use equalizer::EqualizerSurface;
 pub(crate) use fullscreen::{
     FullscreenPlayerParts, build_fullscreen_player, connect_fullscreen_player_controls,
 };
@@ -34,12 +30,13 @@ pub(crate) use outputs::{
     select_next_audio_output, select_previous_audio_output, warm_audio_output_cache,
 };
 pub(crate) use playback_settings::{
-    crossfade_duration_row, install_sliding_value_bubble, playback_rate_row, preserve_pitch_row,
+    crossfade_duration_row, install_scale_scroll_forwarding, install_sliding_value_bubble,
+    playback_rate_row, preserve_pitch_row,
 };
 pub(crate) use queue::connect_queue_panel_controls;
 pub(crate) use random_play::play_saved_random;
 pub(crate) use right_panel::{
-    apply_sidebar_media_visibility, build_right_panel, connect_queue_lyrics_overlay,
+    apply_sidebar_media_visibility, build_right_panel, connect_queue_lyrics_split,
 };
 pub(crate) use visualizer::{VisualizerParts, build_visualizer};
 

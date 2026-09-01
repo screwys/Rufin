@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwAlertDialog" id="new_dialog">
+    <property name="heading" translatable="yes">New Playlist</property>
+    <property name="close-response">cancel</property>
+    <property name="extra-child">
+      <object class="GtkEntry" id="new_entry">
+        <property name="placeholder-text" translatable="yes">Playlist name</property>
+      </object>
+    </property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="create" translatable="yes" appearance="suggested">Create</response>
+    </responses>
+  </object>
+
+  <object class="AdwAlertDialog" id="rename_dialog">
+    <property name="heading" translatable="yes">Rename Playlist</property>
+    <property name="default-response">rename</property>
+    <property name="close-response">cancel</property>
+    <property name="extra-child">
+      <object class="GtkEntry" id="rename_entry">
+        <property name="activates-default">true</property>
+      </object>
+    </property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="rename" translatable="yes" appearance="suggested">Rename</response>
+    </responses>
+  </object>
+</interface>

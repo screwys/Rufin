@@ -36,6 +36,7 @@ ebur128 = "0.1.10"
 fcast-sender-sdk = { version = "0.2.0", default-features = false, features = ["chromecast"] }
 futures-util = "0.3.32"
 getrandom = "0.4.0"
+gettext-rs = { version = "0.8.0", features = ["gettext-system"] }
 gio = "0.22.6"
 gstreamer = "0.25.2"
 gstreamer-app = "0.25.2"
@@ -63,6 +64,7 @@ percent-encoding = "2.3.2"
 playback = { path = "crates/playback" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
 playback-cast = { path = "crates/playback-cast" }
+proc-macro2 = "1.0.107"
 pulldown-cmark = { version = "0.13.0", default-features = false }
 scrobbling = { path = "crates/scrobbling" }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
@@ -70,6 +72,7 @@ roxmltree = "0.21.0"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
 rustix = { version = "1.1.4", features = ["fs"] }
 rustfft = "6.2.0"
+syn = { version = "2.0.119", features = ["full", "visit"] }
 secrets = { path = "crates/secrets" }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.150"

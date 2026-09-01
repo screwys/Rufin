@@ -10,9 +10,6 @@ impl Shell {
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
-        lyrics
-            .timing_generation
-            .set(lyrics.timing_generation.get().saturating_add(1));
         if let Some(source) = lyrics.timing_source.borrow_mut().take() {
             source.remove();
         }
@@ -43,8 +40,6 @@ impl Shell {
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
-        let generation = lyrics.timing_generation.get().saturating_add(1);
-        lyrics.timing_generation.set(generation);
         drop(lyrics);
 
         let shell = Rc::clone(self);
@@ -52,9 +47,6 @@ impl Shell {
             let Some(lyrics) = shell.selected_lyrics() else {
                 return;
             };
-            if lyrics.timing_generation.get() != generation {
-                return;
-            }
             let _source = lyrics.timing_source.borrow_mut().take();
             drop(lyrics);
             shell.update_lyrics_highlight_at(next_playback_position_millis);

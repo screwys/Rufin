@@ -10,19 +10,22 @@ use crate::shell::Shell;
 use super::collections::CollectionPlay;
 use super::collections::library_route_inset;
 use super::detail_showcase::{
-    CollectionDetailShowcase, DetailSummaryProjection, collection_detail_showcase,
-    detail_action_row, detail_playback_controls,
+    CollectionDetailShowcase, DetailShowcaseView, collection_detail_showcase,
+    detail_playback_controls,
 };
 use super::playlist_detail::playlist_cover_size;
 use super::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
     detail_route_inner_width,
 };
+use super::route_shell::LibraryToolbarProjection;
 use super::routes::{SearchableTrackOptions, TrackListProjection};
 
 pub(crate) struct GroupedDetailData {
     pub(super) key: LibraryListKey,
-    pub(super) kind_row: Option<gtk::Widget>,
+    pub(super) kind: &'static str,
+    pub(super) genre_kind: bool,
+    pub(super) kind_controls: Vec<gtk::Widget>,
     pub(super) title: String,
     pub(super) artwork: Vec<ArtworkBinding>,
     pub(super) seed: u32,
@@ -30,6 +33,7 @@ pub(crate) struct GroupedDetailData {
     pub(super) context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
     pub(super) selected: crate::runtime::SelectedLibrary,
     pub(super) tracks: Vec<library::TrackKey>,
+    pub(super) first_row_position: usize,
     pub(super) first_rows: Vec<library::TrackRow>,
     pub(super) play_order: Option<Vec<library::TrackKey>>,
     pub(super) table_context: &'static str,
@@ -41,6 +45,7 @@ pub(crate) struct GroupedDetailData {
 pub(crate) struct GroupedDetailView {
     root: gtk::Widget,
     tracks: TrackListProjection,
+    toolbar: LibraryToolbarProjection,
 }
 
 impl GroupedDetailView {
@@ -55,6 +60,14 @@ impl GroupedDetailView {
     pub(crate) fn item_navigation(&self) -> crate::shell::route::MountedRouteItemNavigation {
         self.tracks.item_navigation()
     }
+
+    pub(crate) fn search(&self) -> gtk::SearchEntry {
+        self.tracks.search()
+    }
+
+    pub(crate) fn layout_cycle(&self) -> crate::shell::route::MountedRouteCommand {
+        self.toolbar.layout_cycle()
+    }
 }
 
 impl Shell {
@@ -64,7 +77,9 @@ impl Shell {
     ) -> GroupedDetailView {
         let GroupedDetailData {
             key,
-            kind_row,
+            kind,
+            genre_kind,
+            kind_controls,
             title,
             artwork,
             seed,
@@ -72,6 +87,7 @@ impl Shell {
             context_menu,
             selected,
             tracks,
+            first_row_position,
             first_rows,
             play_order,
             table_context,
@@ -93,9 +109,16 @@ impl Shell {
             cover_size,
             playlist_cover_size(i32::MAX),
         );
+        let showcase_view =
+            DetailShowcaseView::new("playlist-detail-showcase", seed, kind, genre_kind, &title);
+        for control in kind_controls {
+            showcase_view.append_kind_control(&control);
+        }
+        showcase_view.replace_summary(&summary_items);
         let track_projection = self.searchable_track_collection(
             &selected,
             tracks,
+            first_row_position,
             first_rows,
             key,
             SearchableTrackOptions {
@@ -157,7 +180,7 @@ impl Shell {
                 );
             })
         };
-        let actions = detail_action_row();
+        let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let cover_controls =
             detail_playback_controls(&actions, play_label, None, true, Rc::clone(&play));
@@ -167,30 +190,16 @@ impl Shell {
                 present(target, position, Rc::clone(&play));
             }) as crate::interactions::ContextMenuOpen
         });
-        let title_label = gtk::Label::new(Some(&title));
-        title_label.add_css_class("detail-title");
-        title_label.set_xalign(0.0);
-        title_label.set_wrap(true);
-        title_label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        let mut metadata = Vec::new();
-        if let Some(kind_row) = kind_row {
-            metadata.push(kind_row);
-        }
-        metadata.push(title_label.clone().upcast());
-        let summary = DetailSummaryProjection::new(&summary_items);
-        metadata.push(summary.widget());
-        metadata.push(actions.upcast());
         let showcase = collection_detail_showcase(
             self,
             CollectionDetailShowcase {
-                seed,
+                view: showcase_view,
                 initial_width: content_width,
                 compact_spacing: 22,
                 wide_spacing: 22,
                 cover: cover.clone(),
                 cover_controls,
                 context_menu,
-                metadata,
             },
         );
         wrapper.append(&library_route_inset(showcase));
@@ -202,7 +211,6 @@ impl Shell {
         track_section.set_vexpand(true);
         let toolbar = self.library_toolbar_projection(key, track_projection.search());
         track_section.append(&library_route_inset(toolbar.widget()));
-        self.set_route_search(Some(track_projection.search()));
         track_section.append(&track_projection.scrolling_widget());
 
         let track_stack = gtk::Stack::new();
@@ -223,6 +231,7 @@ impl Shell {
         GroupedDetailView {
             root: wrapper.upcast(),
             tracks: track_projection,
+            toolbar,
         }
     }
 }

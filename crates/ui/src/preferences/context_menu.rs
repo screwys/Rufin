@@ -4,49 +4,40 @@ use std::rc::Rc;
 use adw::prelude::*;
 use localization::{msgid, tr};
 
-use super::layout::visibility_position_subtitle;
+use super::layout::{ReorderRowPresentation, reorder_row, visibility_position_subtitle};
 use crate::settings::{ContextMenuItem, ContextMenuItemSettings};
 use crate::shell::Shell;
 
-pub(crate) fn context_menus_expander(shell: &Rc<Shell>) -> adw::ExpanderRow {
-    let expander = adw::ExpanderRow::builder()
-        .title(tr("Context Menus"))
-        .expanded(false)
-        .build();
+pub(crate) fn configure_context_menus_expander(
+    shell: &Rc<Shell>,
+    expander: &adw::ExpanderRow,
+    rating: &adw::ActionRow,
+    rating_visible: &gtk::Switch,
+) {
+    rating.set_activatable_widget(Some(rating_visible));
+    rating_visible.set_active(shell.settings.current.borrow().context_menu.rating_visible);
+    let rating_shell = Rc::clone(shell);
+    rating_visible.connect_active_notify(move |switch| {
+        let is_visible = switch.is_active();
+        rating_shell.set_app_setting("context menu rating setting", is_visible, |settings| {
+            &mut settings.context_menu.rating_visible
+        });
+    });
     let rows = Rc::new(RefCell::new(
         Vec::<gtk::glib::WeakRef<adw::ActionRow>>::new(),
     ));
-    populate_context_menu_rows(shell, &expander, &rows);
-    expander
-}
-
-fn context_menu_rating_row(shell: &Rc<Shell>) -> adw::ActionRow {
-    let visible = gtk::Switch::builder()
-        .active(shell.settings.current.borrow().context_menu.rating_visible)
-        .valign(gtk::Align::Center)
-        .build();
-    let row = adw::ActionRow::builder().title(tr(msgid("Rating"))).build();
-    row.add_suffix(&visible);
-    row.set_activatable_widget(Some(&visible));
-
     let shell = Rc::clone(shell);
-    visible.connect_active_notify(move |switch| {
-        let is_visible = switch.is_active();
-        shell.update_app_settings("context menu rating setting", |settings| {
-            if settings.context_menu.rating_visible == is_visible {
-                return false;
-            }
-            settings.context_menu.rating_visible = is_visible;
-            true
-        });
+    let rating = rating.clone();
+    super::populate_expander_once(&expander, move |expander| {
+        populate_context_menu_rows(&shell, expander, &rows, &rating);
     });
-    row
 }
 
 fn populate_context_menu_rows(
     shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     rows: &Rc<RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
+    rating: &adw::ActionRow,
 ) {
     for row in rows.borrow_mut().drain(..) {
         if let Some(row) = row.upgrade() {
@@ -56,12 +47,11 @@ fn populate_context_menu_rows(
 
     let items = shell.settings.current.borrow().context_menu.items.clone();
     for (position, entry) in items.into_iter().enumerate() {
-        let row = context_menu_item_row(shell, expander, rows, entry, position);
+        let row = context_menu_item_row(shell, expander, rows, rating, entry, position);
         expander.add_row(&row);
         rows.borrow_mut().push(row.downgrade());
     }
-    let rating = context_menu_rating_row(shell);
-    expander.add_row(&rating);
+    expander.add_row(rating);
     rows.borrow_mut().push(rating.downgrade());
 }
 
@@ -69,121 +59,58 @@ fn context_menu_item_row(
     shell: &Rc<Shell>,
     expander: &adw::ExpanderRow,
     rows: &Rc<RefCell<Vec<gtk::glib::WeakRef<adw::ActionRow>>>>,
+    rating: &adw::ActionRow,
     entry: ContextMenuItemSettings,
     position: usize,
 ) -> adw::ActionRow {
-    let row = adw::ActionRow::builder()
-        .title(tr(context_menu_item_title(entry.item)))
-        .subtitle(visibility_position_subtitle(entry.visible, position))
-        .build();
-
-    let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
-    drag.add_css_class("dim-label");
-    drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-    row.add_prefix(&drag);
-
-    let up = gtk::Button::from_icon_name("rufin-go-up-symbolic");
-    up.add_css_class("flat");
-    up.set_tooltip_text(Some(&tr("Move up")));
-    up.set_valign(gtk::Align::Center);
-    row.add_suffix(&up);
-
-    let down = gtk::Button::from_icon_name("rufin-go-down-symbolic");
-    down.add_css_class("flat");
-    down.set_tooltip_text(Some(&tr("Move down")));
-    down.set_valign(gtk::Align::Center);
-    row.add_suffix(&down);
-
-    let visible = gtk::Switch::builder()
-        .active(entry.visible)
-        .valign(gtk::Align::Center)
-        .build();
-    row.add_suffix(&visible);
-    row.set_activatable_widget(Some(&visible));
-
-    {
-        let shell = Rc::clone(shell);
-        let expander = expander.downgrade();
-        let rows = Rc::clone(rows);
-        visible.connect_active_notify(move |switch| {
-            let is_visible = switch.is_active();
-            shell.update_app_settings("context menu setting", |settings| {
-                let Some(stored) = settings
-                    .context_menu
-                    .items
-                    .iter_mut()
-                    .find(|stored| stored.item == entry.item)
-                else {
-                    return false;
-                };
-                if stored.visible == is_visible {
-                    return false;
-                }
-                stored.visible = is_visible;
-                true
-            });
-            let Some(expander) = expander.upgrade() else {
-                return;
+    let visible_shell = Rc::clone(shell);
+    let visible_expander = expander.downgrade();
+    let visible_rows = Rc::clone(rows);
+    let visible_rating = rating.clone();
+    let on_visible = move |is_visible| {
+        visible_shell.update_app_settings("context menu setting", |settings| {
+            let Some(stored) = settings
+                .context_menu
+                .items
+                .iter_mut()
+                .find(|stored| stored.item == entry.item)
+            else {
+                return false;
             };
-            populate_context_menu_rows(&shell, &expander, &rows);
+            if stored.visible == is_visible {
+                return false;
+            }
+            stored.visible = is_visible;
+            true
         });
-    }
-    {
-        let shell = Rc::clone(shell);
-        let expander = expander.downgrade();
-        let rows = Rc::clone(rows);
-        up.connect_clicked(move |_| {
-            move_context_menu_item(&shell, entry.item, -1);
-            let Some(expander) = expander.upgrade() else {
-                return;
-            };
-            populate_context_menu_rows(&shell, &expander, &rows);
-        });
-    }
-    {
-        let shell = Rc::clone(shell);
-        let expander = expander.downgrade();
-        let rows = Rc::clone(rows);
-        down.connect_clicked(move |_| {
-            move_context_menu_item(&shell, entry.item, 1);
-            let Some(expander) = expander.upgrade() else {
-                return;
-            };
-            populate_context_menu_rows(&shell, &expander, &rows);
-        });
-    }
+        if let Some(expander) = visible_expander.upgrade() {
+            populate_context_menu_rows(&visible_shell, &expander, &visible_rows, &visible_rating);
+        }
+    };
 
-    let source = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
-        .build();
-    let item_id = context_menu_item_drag_id(entry.item).to_string();
-    source.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&item_id.to_value()))
-    });
-    drag.add_controller(source);
+    let move_shell = Rc::clone(shell);
+    let move_expander = expander.downgrade();
+    let move_rows = Rc::clone(rows);
+    let move_rating = rating.clone();
+    let on_move = move |delta| {
+        move_context_menu_item(&move_shell, entry.item, delta);
+        if let Some(expander) = move_expander.upgrade() {
+            populate_context_menu_rows(&move_shell, &expander, &move_rows, &move_rating);
+        }
+    };
 
-    let drop_target = gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
-    let shell = Rc::clone(shell);
-    let expander = expander.downgrade();
-    let rows = Rc::downgrade(rows);
-    let row_for_drop = row.downgrade();
-    drop_target.connect_drop(move |_, value, _, y| {
-        let Ok(source_id) = value.get::<String>() else {
-            return false;
-        };
+    let drop_shell = Rc::clone(shell);
+    let drop_expander = expander.downgrade();
+    let drop_rows = Rc::downgrade(rows);
+    let drop_rating = rating.clone();
+    let on_drop = move |source_id: String, after| {
         let Some(source_item) = context_menu_item_from_drag_id(&source_id) else {
             return false;
         };
-        if source_item == entry.item {
-            return false;
-        }
-        let (Some(row), Some(expander), Some(rows)) =
-            (row_for_drop.upgrade(), expander.upgrade(), rows.upgrade())
-        else {
+        let (Some(expander), Some(rows)) = (drop_expander.upgrade(), drop_rows.upgrade()) else {
             return false;
         };
-        let after = y > f64::from(row.height()) / 2.0;
-        let changed = shell
+        let changed = drop_shell
             .update_app_settings("context menu setting", |settings| {
                 reorder_context_menu_items(
                     &mut settings.context_menu.items,
@@ -194,13 +121,25 @@ fn context_menu_item_row(
             })
             .is_some();
         if changed {
-            populate_context_menu_rows(&shell, &expander, &rows);
+            populate_context_menu_rows(&drop_shell, &expander, &rows, &drop_rating);
         }
         changed
-    });
-    row.add_controller(drop_target);
+    };
 
-    row
+    reorder_row(
+        ReorderRowPresentation {
+            title: tr(context_menu_item_title(entry.item)),
+            subtitle: visibility_position_subtitle(entry.visible, position),
+            visible: entry.visible,
+            visible_sensitive: true,
+            up_sensitive: true,
+            down_sensitive: true,
+            drag_id: context_menu_item_drag_id(entry.item).to_string(),
+        },
+        on_visible,
+        on_move,
+        on_drop,
+    )
 }
 
 fn move_context_menu_item(shell: &Rc<Shell>, item: ContextMenuItem, delta: isize) {

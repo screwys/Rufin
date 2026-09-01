@@ -118,6 +118,7 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
             "",
             library::AlbumSort::Title,
             false,
+            library::RouteSeedWindow::top(),
             &ReadCancellation::new(),
         )
         .await
@@ -325,6 +326,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
             "",
             library::AlbumSort::Title,
             false,
+            library::RouteSeedWindow::top(),
             &ReadCancellation::new(),
         )
         .await
@@ -476,6 +478,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
             "",
             library::AlbumSort::Title,
             false,
+            library::RouteSeedWindow::top(),
             &ReadCancellation::new(),
         )
         .await

@@ -8,12 +8,11 @@ use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumDetailRouteKey, AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError,
-    LibraryResult, MoodKey, ReadCancellation, SourceKey, TrackKey, TrackRoutePage, TrackRow,
-    TrackSort, tracks::load_track_rows,
+    LibraryResult, MoodKey, ReadCancellation, RouteSeedWindow, SourceKey, TrackKey, TrackRoutePage,
+    TrackRow, TrackSort, tracks::load_track_rows,
 };
 
 const COLLECTION_ROW_LIMIT: usize = 128;
-const COLLECTION_ROUTE_PAGE_LIMIT: usize = 64;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlbumSort {
@@ -576,8 +575,9 @@ impl Database {
         filter: &str,
         sort: AlbumSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<AlbumKey>, Vec<AlbumRow>)> {
+    ) -> LibraryResult<(Vec<AlbumKey>, usize, Vec<AlbumRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
@@ -595,16 +595,13 @@ impl Database {
             .bind(favorites_only)
             .fetch_all(&mut *transaction)
             .await?;
-            let first_rows = load_album_rows(
-                &mut transaction,
-                source,
-                &order[..order.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-                folder,
-            )
-            .await?;
+            let seed = window.range(order.len());
+            let first_row_position = seed.start;
+            let first_rows =
+                load_album_rows(&mut transaction, source, &order[seed], folder).await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((order, first_rows));
+            return Ok((order, first_row_position, first_rows));
         }
         if sort == AlbumSort::Title {
             let result = sqlx::query_scalar::<_, AlbumKey>(if descending {
@@ -612,16 +609,13 @@ impl Database {
             } else {
                 "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE(album.user_favorite,album.source_favorite)=1) ORDER BY album.sort_text,album.album_key"
             }).bind(source).bind(folder).bind(favorites_only).fetch_all(&mut *transaction).await?;
-            let first_rows = load_album_rows(
-                &mut transaction,
-                source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-                folder,
-            )
-            .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
+            let first_rows =
+                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         if matches!(
             sort,
@@ -680,16 +674,13 @@ impl Database {
                 .persistent(false)
                 .fetch_all(&mut *transaction)
                 .await?;
-            let first_rows = load_album_rows(
-                &mut transaction,
-                source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-                folder,
-            )
-            .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
+            let first_rows =
+                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         if matches!(sort, AlbumSort::TrackCount | AlbumSort::Duration) {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -710,16 +701,13 @@ impl Database {
                 .persistent(false)
                 .fetch_all(&mut *transaction)
                 .await?;
-            let first_rows = load_album_rows(
-                &mut transaction,
-                source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-                folder,
-            )
-            .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
+            let first_rows =
+                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         let result = sqlx::query_scalar::<_, AlbumKey>(
             "WITH listens_by_track AS (
@@ -777,16 +765,12 @@ impl Database {
         .bind(favorites_only)
         .fetch_all(&mut *transaction)
         .await?;
-        let first_rows = load_album_rows(
-            &mut transaction,
-            source,
-            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-            folder,
-        )
-        .await?;
+        let seed = window.range(result.len());
+        let first_row_position = seed.start;
+        let first_rows = load_album_rows(&mut transaction, source, &result[seed], folder).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((result, first_rows))
+        Ok((result, first_row_position, first_rows))
     }
 
     pub async fn album_detail_route_order(
@@ -900,8 +884,9 @@ impl Database {
         filter: &str,
         sort: ArtistSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<ArtistKey>, Vec<ArtistRow>)> {
+    ) -> LibraryResult<(Vec<ArtistKey>, usize, Vec<ArtistRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
@@ -921,17 +906,19 @@ impl Database {
             .bind(favorites_only)
             .fetch_all(&mut *transaction)
             .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
             let first_rows = load_artist_rows(
                 &mut transaction,
                 source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                &result[seed],
                 album_artists_only,
                 folder,
             )
             .await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         if sort == ArtistSort::Title {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -945,17 +932,19 @@ impl Database {
                 .persistent(false)
                 .fetch_all(&mut *transaction)
                 .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
             let first_rows = load_artist_rows(
                 &mut transaction,
                 source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                &result[seed],
                 album_artists_only,
                 folder,
             )
             .await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         if matches!(sort, ArtistSort::Rating | ArtistSort::Favorite) {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -989,17 +978,19 @@ impl Database {
                 .persistent(false)
                 .fetch_all(&mut *transaction)
                 .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
             let first_rows = load_artist_rows(
                 &mut transaction,
                 source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                &result[seed],
                 album_artists_only,
                 folder,
             )
             .await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         if matches!(sort, ArtistSort::AlbumCount | ArtistSort::TrackCount) {
             let mut query = QueryBuilder::<Sqlite>::new(
@@ -1022,17 +1013,19 @@ impl Database {
                 .persistent(false)
                 .fetch_all(&mut *transaction)
                 .await?;
+            let seed = window.range(result.len());
+            let first_row_position = seed.start;
             let first_rows = load_artist_rows(
                 &mut transaction,
                 source,
-                &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+                &result[seed],
                 album_artists_only,
                 folder,
             )
             .await?;
             transaction.commit().await?;
             Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_rows));
+            return Ok((result, first_row_position, first_rows));
         }
         let result=sqlx::query_scalar::<_,ArtistKey>(
             "WITH listen AS (SELECT track_key,count(*) plays,max(started_at) last_played
@@ -1075,17 +1068,19 @@ impl Database {
               CASE WHEN ?2=6 AND ?3=0 THEN favorite END ASC,
               CASE WHEN ?2=6 AND ?3=1 THEN favorite END DESC,sort_text,artist_key")
             .bind(source).bind(sort.code()).bind(descending).bind(folder).bind(favorites_only).bind(album_artists_only).fetch_all(&mut *transaction).await?;
+        let seed = window.range(result.len());
+        let first_row_position = seed.start;
         let first_rows = load_artist_rows(
             &mut transaction,
             source,
-            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
+            &result[seed],
             album_artists_only,
             folder,
         )
         .await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((result, first_rows))
+        Ok((result, first_row_position, first_rows))
     }
 
     pub async fn genre_route_page(
@@ -1095,8 +1090,9 @@ impl Database {
         filter: &str,
         sort: GenreSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<GenreKey>, Vec<GenreRow>)> {
+    ) -> LibraryResult<(Vec<GenreKey>, usize, Vec<GenreRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
@@ -1116,16 +1112,12 @@ impl Database {
                 "WITH rows AS (SELECT genre.genre_key,genre.sort_text,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count FROM genres genre JOIN track_genres credit USING(genre_key) JOIN tracks track USING(track_key) WHERE genre.source_key=?1 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY genre.genre_key) SELECT genre_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN album_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN album_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=2 AND ?3=1 THEN track_count END DESC,sort_text,genre_key")
                 .bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *transaction).await?
         };
-        let first_rows = load_genre_rows(
-            &mut transaction,
-            source,
-            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-            folder,
-        )
-        .await?;
+        let seed = window.range(result.len());
+        let first_row_position = seed.start;
+        let first_rows = load_genre_rows(&mut transaction, source, &result[seed], folder).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((result, first_rows))
+        Ok((result, first_row_position, first_rows))
     }
 
     pub async fn mood_route_page(
@@ -1135,8 +1127,9 @@ impl Database {
         filter: &str,
         sort: MoodSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<MoodKey>, Vec<MoodRow>)> {
+    ) -> LibraryResult<(Vec<MoodKey>, usize, Vec<MoodRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
@@ -1147,16 +1140,12 @@ impl Database {
         } else {
             sqlx::query_scalar::<_,MoodKey>("WITH rows AS (SELECT mood.mood_key,mood.sort_text,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration FROM moods mood LEFT JOIN track_moods credit USING(mood_key) LEFT JOIN tracks track USING(track_key) WHERE mood.source_key=?1 AND (?4 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4)) GROUP BY mood.mood_key) SELECT mood_key FROM rows ORDER BY CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,CASE WHEN ?2=1 AND ?3=0 THEN track_count END ASC,CASE WHEN ?2=1 AND ?3=1 THEN track_count END DESC,CASE WHEN ?2=2 AND ?3=0 THEN duration END ASC,CASE WHEN ?2=2 AND ?3=1 THEN duration END DESC,sort_text,mood_key").bind(source).bind(sort.code()).bind(descending).bind(folder).fetch_all(&mut *transaction).await?
         };
-        let first_rows = load_mood_rows(
-            &mut transaction,
-            source,
-            &result[..result.len().min(COLLECTION_ROUTE_PAGE_LIMIT)],
-            folder,
-        )
-        .await?;
+        let seed = window.range(result.len());
+        let first_row_position = seed.start;
+        let first_rows = load_mood_rows(&mut transaction, source, &result[seed], folder).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((result, first_rows))
+        Ok((result, first_row_position, first_rows))
     }
     pub async fn folder_key_by_object(
         &self,
@@ -1205,6 +1194,7 @@ impl Database {
         filter: &str,
         sort: TrackSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -1220,7 +1210,7 @@ impl Database {
             &mut transaction,
         )
         .await?;
-        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        let page = finish_track_route_page(&mut transaction, source, order, window).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(page)
@@ -1258,6 +1248,7 @@ impl Database {
         sort: TrackSort,
         descending: bool,
         favorites_only: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -1273,7 +1264,7 @@ impl Database {
             &mut transaction,
         )
         .await?;
-        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        let page = finish_track_route_page(&mut transaction, source, order, window).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(page)
@@ -1308,6 +1299,7 @@ impl Database {
         filter: &str,
         sort: TrackSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -1323,7 +1315,7 @@ impl Database {
             &mut transaction,
         )
         .await?;
-        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        let page = finish_track_route_page(&mut transaction, source, order, window).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(page)
@@ -1358,6 +1350,7 @@ impl Database {
         filter: &str,
         sort: TrackSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -1373,7 +1366,7 @@ impl Database {
             &mut transaction,
         )
         .await?;
-        let page = finish_track_route_page(&mut transaction, source, order).await?;
+        let page = finish_track_route_page(&mut transaction, source, order, window).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(page)
@@ -1992,14 +1985,16 @@ async fn finish_track_route_page(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     source: SourceKey,
     order: Vec<TrackKey>,
+    window: RouteSeedWindow,
 ) -> LibraryResult<TrackRoutePage> {
-    let first_rows = load_track_rows(
-        transaction,
-        source,
-        &order[..order.len().min(COLLECTION_ROW_LIMIT)],
-    )
-    .await?;
-    Ok(TrackRoutePage { order, first_rows })
+    let seed = window.range(order.len());
+    let first_row_position = seed.start;
+    let first_rows = load_track_rows(transaction, source, &order[seed]).await?;
+    Ok(TrackRoutePage {
+        order,
+        first_row_position,
+        first_rows,
+    })
 }
 
 async fn artist_facts_rows(
@@ -2135,6 +2130,9 @@ async fn load_genre_rows(
     keys: &[GenreKey],
     folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<GenreRow>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut query = QueryBuilder::<Sqlite>::new("WITH requested(genre_key, position) AS (");
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
@@ -2164,6 +2162,9 @@ async fn load_mood_rows(
     keys: &[MoodKey],
     folder: Option<FolderKey>,
 ) -> LibraryResult<Vec<MoodRow>> {
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
     let mut query = QueryBuilder::<Sqlite>::new("WITH requested(mood_key, position) AS (");
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);

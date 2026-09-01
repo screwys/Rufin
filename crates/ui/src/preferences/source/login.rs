@@ -14,7 +14,7 @@ use super::{
         compact_field_row_group, install_compact_field_row_responsiveness, style_compact_field_row,
     },
     folder_selected_text,
-    local_access::{confirm_forget_source, credential_source_settings_group},
+    local_access::confirm_forget_source,
     source_operation_text,
 };
 use crate::layout::large_popup_content_width;
@@ -117,9 +117,20 @@ pub(crate) trait SourceSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget;
 }
 
-#[derive(Clone)]
 pub(crate) struct SourceSetupViewHandle {
-    context: SetupViewContext,
+    context: Option<SetupViewContext>,
+    flow: Rc<RefCell<Rc<dyn SourceSetupFlow>>>,
+    first_run: bool,
+}
+
+impl SourceSetupViewHandle {
+    fn new(context: SetupViewContext) -> Self {
+        Self {
+            flow: Rc::clone(&context.flow),
+            first_run: context.is_first_run(),
+            context: Some(context),
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -135,14 +146,12 @@ pub(crate) struct SetupViewContext {
     preferences_dialog: Option<adw::Dialog>,
 }
 
-#[derive(Clone)]
 struct SetupActions {
     status: gtk::Label,
     connect: gtk::Button,
     ready: Rc<dyn Fn() -> bool>,
 }
 
-#[derive(Clone)]
 struct DiscoveredServersView {
     group: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk::Widget>>>,
@@ -203,6 +212,8 @@ struct LocalSetupFlow {
 #[derive(Clone)]
 struct CredentialHost {
     widget: gtk::Box,
+    fields_group: adw::PreferencesGroup,
+    rows: adw::PreferencesGroup,
     name: adw::EntryRow,
     url: adw::EntryRow,
     username: adw::EntryRow,
@@ -238,16 +249,20 @@ impl CredentialHost {
 impl Shell {
     pub(crate) fn add_server_navigation_page(
         self: &Rc<Self>,
-        _navigation: &adw::NavigationView,
         preferences_dialog: &adw::Dialog,
     ) -> adw::NavigationPage {
-        // Keep the form mounted while the operation runs. A failed connection
-        // returns to the same values so the user can correct them and retry.
-        let context = self.setup_view_context(Some(preferences_dialog.clone()));
+        // Keep only the flow draft across page replacement. A failed connection
+        // rebuilds the form from those values so the user can correct and retry.
+        let flow = self
+            .source
+            .add_server
+            .borrow()
+            .as_ref()
+            .filter(|handle| !handle.first_run)
+            .map(|handle| Rc::clone(&handle.flow));
+        let context = self.setup_view_context(Some(preferences_dialog.clone()), flow);
         mount_setup_flow(self, &context);
-        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle {
-            context: context.clone(),
-        });
+        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle::new(context.clone()));
         adw::NavigationPage::new(&context.content, &tr("Add server"))
     }
 
@@ -257,73 +272,49 @@ impl Shell {
             .add_server
             .borrow()
             .as_ref()
-            .filter(|handle| handle.context.is_first_run())
-            .map(|handle| handle.context.clone());
+            .filter(|handle| handle.first_run)
+            .and_then(|handle| handle.context.clone());
         if let Some(context) = retained {
             update_setup_surface(self, &context);
             return context.content.upcast();
         }
-        let context = self.setup_view_context(None);
+        let context = self.setup_view_context(None, None);
         mount_setup_flow(self, &context);
-        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle {
-            context: context.clone(),
-        });
+        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle::new(context.clone()));
         context.content.upcast()
     }
 
     pub(crate) fn first_run_setup_mounted(&self) -> bool {
-        self.source
-            .add_server
-            .borrow()
-            .as_ref()
-            .is_some_and(|handle| handle.context.is_first_run() && handle.context.is_mounted())
+        self.mounted_add_server_context()
+            .is_some_and(|context| context.is_first_run())
     }
 
     pub(crate) fn take_first_run_setup_view(&self) -> Option<gtk::Widget> {
         let context = {
             let mut handle = self.source.add_server.borrow_mut();
-            if !handle
-                .as_ref()
-                .is_some_and(|handle| handle.context.is_first_run())
-            {
+            if !handle.as_ref().is_some_and(|handle| handle.first_run) {
                 return None;
             }
             let Some(handle) = handle.take() else {
                 return None;
             };
-            handle.context
+            handle.context?
         };
         Some(context.content.upcast())
     }
 
     pub(crate) fn update_add_server_dialog(self: &Rc<Self>) {
-        let Some(handle) = self.source.add_server.borrow().clone() else {
+        let Some(context) = self.mounted_add_server_context() else {
             return;
         };
-        if !handle.context.is_mounted() {
-            if handle.context.preferences_dialog.is_none()
-                || !self.source.operation.borrow().add_form_active()
-            {
-                self.source.add_server.borrow_mut().take();
-            }
-            return;
-        }
-        update_setup_surface(self, &handle.context);
+        update_setup_surface(self, &context);
     }
 
     pub(crate) fn update_add_server_discovery(self: &Rc<Self>) {
-        let Some(handle) = self.source.add_server.borrow().clone() else {
+        let Some(context) = self.mounted_add_server_context() else {
             return;
         };
-        if !handle.context.is_mounted() {
-            if handle.context.preferences_dialog.is_none()
-                || !self.source.operation.borrow().add_form_active()
-            {
-                self.source.add_server.borrow_mut().take();
-            }
-            return;
-        }
-        if let Some(discovery) = handle.context.discovery.borrow().as_ref() {
+        if let Some(discovery) = context.discovery.borrow().as_ref() {
             refresh_discovered_servers_view(self, discovery);
         }
     }
@@ -331,15 +322,13 @@ impl Shell {
     pub(crate) fn complete_add_server_dialog(&self) {
         let preferences_dialog = {
             let mut handle = self.source.add_server.borrow_mut();
-            if !handle
-                .as_ref()
-                .is_some_and(|handle| !handle.context.is_first_run())
-            {
+            if !handle.as_ref().is_some_and(|handle| !handle.first_run) {
                 return;
             }
             handle
                 .take()
-                .and_then(|handle| handle.context.preferences_dialog)
+                .and_then(|handle| handle.context)
+                .and_then(|context| context.preferences_dialog)
         };
         if let Some(dialog) = preferences_dialog {
             dialog.close();
@@ -350,15 +339,38 @@ impl Shell {
         self.source.add_server.borrow_mut().take();
     }
 
-    pub(crate) fn restore_add_server_dialog_after_failure(self: &Rc<Self>) -> bool {
-        let Some(context) = self
-            .source
+    fn mounted_add_server_context(&self) -> Option<SetupViewContext> {
+        let context = self.source.add_server.borrow().as_ref()?.context.clone()?;
+        context.is_mounted().then_some(context)
+    }
+
+    pub(crate) fn release_inactive_add_server_form(&self) {
+        let mut handle = self.source.add_server.borrow_mut();
+        let Some(handle) = handle.as_mut().filter(|handle| !handle.first_run) else {
+            return;
+        };
+        handle.context.take();
+    }
+
+    pub(crate) fn has_retained_add_server_form(&self) -> bool {
+        self.source
             .add_server
             .borrow()
             .as_ref()
-            .map(|handle| handle.context.clone())
-            .filter(|context| !context.is_first_run())
-        else {
+            .is_some_and(|handle| !handle.first_run)
+    }
+
+    pub(crate) fn restore_add_server_dialog_after_failure(self: &Rc<Self>) -> bool {
+        let context = self.source.add_server.borrow().as_ref().and_then(|handle| {
+            (!handle.first_run)
+                .then(|| handle.context.clone())
+                .flatten()
+        });
+        let Some(context) = context else {
+            if self.has_retained_add_server_form() {
+                crate::preferences::present_add_server_preferences_dialog(self);
+                return true;
+            }
             return false;
         };
         let Some(dialog) = context.preferences_dialog.clone() else {
@@ -373,27 +385,24 @@ impl Shell {
     fn setup_view_context(
         self: &Rc<Self>,
         preferences_dialog: Option<adw::Dialog>,
+        flow: Option<Rc<RefCell<Rc<dyn SourceSetupFlow>>>>,
     ) -> SetupViewContext {
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        let surface = gtk::Stack::new();
-        surface.set_hexpand(true);
-        surface.set_vexpand(true);
-        surface.set_hhomogeneous(false);
-        surface.set_vhomogeneous(false);
-        let form = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        form.set_hexpand(true);
-        form.set_vexpand(true);
-        surface.add_named(&form, Some(SETUP_FORM_PAGE));
-        let (progress, progress_status) = self.connection_progress_view();
-        surface.add_named(&progress, Some(SETUP_PROGRESS_PAGE));
-        content.append(&surface);
-        let flow = self.default_source_setup_flow();
+        let resource = crate::ui_resource::CONNECTION_PROGRESS_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            content: gtk::Box,
+            surface: gtk::Stack,
+            form: gtk::Box,
+            status: gtk::Label,
+        });
+        status.set_label(&self.source_connection_progress_text());
+        let flow = flow.unwrap_or_else(|| Rc::new(RefCell::new(self.default_source_setup_flow())));
         SetupViewContext {
             content,
             surface,
             form,
-            progress_status,
-            flow: Rc::new(RefCell::new(flow)),
+            progress_status: status,
+            flow,
             actions: Rc::new(RefCell::new(None)),
             discovery: Rc::new(RefCell::new(None)),
             retry_focus: Rc::new(RefCell::new(None)),
@@ -437,50 +446,6 @@ impl Shell {
             self.close_preferences_dialog();
             self.enter_startup_loading();
         }
-    }
-
-    fn connection_progress_view(self: &Rc<Self>) -> (gtk::Widget, gtk::Label) {
-        let scroller = gtk::ScrolledWindow::new();
-        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-        scroller.set_vexpand(true);
-
-        let clamp = adw::Clamp::new();
-        clamp.set_maximum_size(440);
-        clamp.set_tightening_threshold(320);
-        clamp.set_margin_top(72);
-        clamp.set_margin_bottom(72);
-        clamp.set_margin_start(24);
-        clamp.set_margin_end(24);
-        clamp.set_valign(gtk::Align::Center);
-
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
-        content.add_css_class("first-run-progress");
-        content.set_halign(gtk::Align::Center);
-        content.set_valign(gtk::Align::Center);
-        content.set_hexpand(true);
-
-        let spinner = gtk::Spinner::new();
-        spinner.set_halign(gtk::Align::Center);
-        spinner.start();
-        content.append(&spinner);
-
-        let title = gtk::Label::new(Some(&tr("Caching Library")));
-        title.add_css_class("title-1");
-        title.set_justify(gtk::Justification::Center);
-        title.set_wrap(true);
-        content.append(&title);
-
-        let status_text = self.source_connection_progress_text();
-        let status = gtk::Label::new(Some(&status_text));
-        status.add_css_class("muted");
-        status.set_justify(gtk::Justification::Center);
-        status.set_wrap(true);
-        status.set_xalign(0.5);
-        content.append(&status);
-
-        clamp.set_child(Some(&content));
-        scroller.set_child(Some(&clamp));
-        (scroller.upcast(), status)
     }
 
     fn source_connection_progress_text(&self) -> String {
@@ -664,9 +629,65 @@ fn subsonic_settings_group(
     subsonic_settings_group_for(shell, saved, presentation, OpenSubsonicKind::OpenSubsonic)
 }
 
+fn credential_source_settings_group(
+    shell: &Rc<Shell>,
+    preset: CredentialPreset,
+    source_title: &'static str,
+    authentication: Option<OpenSubsonicAuthentication>,
+    extra: Option<adw::SwitchRow>,
+    submit: impl Fn(&SourceHandle, CredentialInput, Option<OpenSubsonicAuthentication>) + 'static,
+) -> gtk::Widget {
+    let snapshot = credential_draft(Some(preset));
+    let authentication = authentication.map(|value| Rc::new(Cell::new(value)));
+    let host = credential_host_view(&snapshot, true, authentication);
+    host.fields_group.set_title(&tr("Server Settings"));
+    host.fields_group.set_description(Some(&tr(source_title)));
+    host.cert_verify
+        .set_subtitle(&tr("Off only for a server you control"));
+    if let Some(extra) = extra.as_ref() {
+        host.rows.add(extra);
+    }
+
+    let save = adw::ButtonRow::builder()
+        .title(tr("Save Server Settings"))
+        .start_icon_name("rufin-document-save-symbolic")
+        .end_icon_name("rufin-go-next-symbolic")
+        .build();
+    save.add_css_class("manage-server-action-row");
+    save.add_css_class("suggested-action");
+    host.rows.add(&save);
+
+    let source = shell.products.source.clone();
+    let name = host.name.clone();
+    let url = host.url.clone();
+    let username = host.username.clone();
+    let password = host.password.clone();
+    let cert_verify = host.cert_verify.clone();
+    let authentication = host.authentication.clone();
+    save.connect_activated(move |_| {
+        let authentication = authentication
+            .as_ref()
+            .map(|authentication| authentication.get());
+        submit(
+            &source,
+            CredentialInput {
+                source_name: Some(name.text().trim().to_string()),
+                server_url: url.text().trim().to_string(),
+                username: username.text().trim().to_string(),
+                secret: password.text().to_string(),
+                trust_invalid_cert: !cert_verify.is_active(),
+            },
+            authentication,
+        );
+    });
+
+    host.widget.upcast()
+}
+
 impl SourceSetupFlow for CredentialSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
-        let (scroller, content) = setup_scaffold(shell, context, self.presentation);
+        let (scroller, content, actions, status) =
+            setup_scaffold(shell, context, self.presentation);
         let host = credential_host(
             &self.draft,
             !context.is_first_run(),
@@ -675,9 +696,17 @@ impl SourceSetupFlow for CredentialSetupFlow {
         content.append(&host.widget);
         let submit = Rc::clone(&self.submit);
         let authentication = Rc::clone(&self.authentication);
-        append_credential_connect(shell, context, &content, host, move |source, input| {
-            submit(source, input, authentication.get());
-        });
+        append_credential_connect(
+            shell,
+            context,
+            &content,
+            &actions,
+            status,
+            host,
+            move |source, input| {
+                submit(source, input, authentication.get());
+            },
+        );
         finish_setup_scaffold(shell, scroller, content, context.is_first_run())
     }
 }
@@ -685,7 +714,8 @@ impl SourceSetupFlow for CredentialSetupFlow {
 impl SourceSetupFlow for JellyfinSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
         shell.start_server_discovery_once();
-        let (scroller, content) = setup_scaffold(shell, context, self.presentation);
+        let (scroller, content, actions, status) =
+            setup_scaffold(shell, context, self.presentation);
         let host = credential_host(&self.draft, !context.is_first_run(), None);
         content.append(&host.widget);
 
@@ -709,6 +739,8 @@ impl SourceSetupFlow for JellyfinSetupFlow {
             shell,
             context,
             &content,
+            &actions,
+            status,
             host,
             move |source, credentials| {
                 submit(source, credentials, use_instant_mix.get());
@@ -720,28 +752,22 @@ impl SourceSetupFlow for JellyfinSetupFlow {
 
 impl SourceSetupFlow for LocalSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
-        let (scroller, content) = setup_scaffold(shell, context, self.presentation);
-        let group = adw::PreferencesGroup::builder()
-            .title(tr("Local library"))
-            .description(tr(
-                "Choose one or more folders to scan and play directly from this computer",
-            ))
-            .build();
-        let summary = adw::ActionRow::builder()
-            .title(tr("Folders"))
-            .subtitle(local_folders_subtitle(&self.folders.borrow()))
-            .build();
-        let add = gtk::Button::with_label(&tr("Add folder"));
-        add.set_valign(gtk::Align::Center);
-        summary.add_suffix(&add);
+        let (scroller, content, actions, status) =
+            setup_scaffold(shell, context, self.presentation);
+        let resource = crate::ui_resource::LOCAL_SETUP_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            group: adw::PreferencesGroup,
+            summary: adw::ActionRow,
+            add: gtk::Button,
+            connect: gtk::Button,
+        });
+        summary.set_subtitle(&local_folders_subtitle(&self.folders.borrow()));
         summary.set_activatable_widget(Some(&add));
-        group.add(&summary);
         content.append(&group);
 
-        let status = setup_status_label(shell);
-        let login = text_button("rufin-folder-music-symbolic", "Connect");
-        login.add_css_class("suggested-action");
-        let actions = setup_actions(&login);
+        let login = connect;
+        actions.append(&login);
         content.append(&actions);
         content.append(&status);
 
@@ -812,32 +838,39 @@ fn setup_scaffold(
     shell: &Rc<Shell>,
     context: &SetupViewContext,
     registration: &'static SourcePresentation,
-) -> (gtk::ScrolledWindow, gtk::Box) {
+) -> (gtk::ScrolledWindow, gtk::Box, gtk::Box, gtk::Label) {
     let compact = !context.is_first_run();
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_vexpand(true);
-    let clamp = adw::Clamp::new();
+    let resource = crate::ui_resource::SETUP_SCAFFOLD_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        scroller: gtk::ScrolledWindow,
+        clamp: adw::Clamp,
+        content: gtk::Box,
+        actions: gtk::Box,
+        status: gtk::Label,
+    });
     clamp.set_maximum_size(large_popup_content_width(ADD_SERVER_CLAMP_WIDTH));
-    clamp.set_tightening_threshold(360);
     clamp.set_margin_top(if compact { 8 } else { 36 });
     clamp.set_margin_bottom(if compact { 20 } else { 36 });
-    clamp.set_margin_start(24);
-    clamp.set_margin_end(24);
-    clamp.set_valign(gtk::Align::Start);
-    let content = gtk::Box::new(gtk::Orientation::Vertical, if compact { 10 } else { 18 });
-    content.add_css_class("first-run-content");
+    content.set_spacing(if compact { 10 } else { 18 });
     if compact {
         content.add_css_class("add-server-compact-content");
     }
-    content.set_hexpand(true);
     if let Some(saved_sources) = saved_source_recovery_group(shell, compact) {
         content.append(&saved_sources);
     }
     content.append(&source_choice_selector(shell, registration, compact));
-    clamp.set_child(Some(&content));
-    scroller.set_child(Some(&clamp));
-    (scroller, content)
+    if let SourceOperation::Failed {
+        message,
+        add_form: true,
+        ..
+    } = &*shell.source.operation.borrow()
+    {
+        status.set_text(message);
+        status.add_css_class("error-text");
+        status.set_visible(true);
+    }
+    (scroller, content, actions, status)
 }
 
 fn saved_source_recovery_group(shell: &Rc<Shell>, compact: bool) -> Option<adw::PreferencesGroup> {
@@ -949,33 +982,36 @@ fn source_choice_selector(
     selected: &'static SourcePresentation,
     compact: bool,
 ) -> gtk::Box {
-    let wrapper = gtk::Box::new(gtk::Orientation::Horizontal, if compact { 4 } else { 8 });
-    wrapper.add_css_class("source-choice-list");
+    let resource = crate::ui_resource::SOURCE_CHOICE_SELECTOR_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let wrapper: gtk::Box = crate::ui_resource::object(&builder, resource, "wrapper");
+    wrapper.set_spacing(if compact { 4 } else { 8 });
     if compact {
         wrapper.add_css_class("compact-source-choice-list");
     }
-    wrapper.set_homogeneous(true);
-    wrapper.set_hexpand(true);
-    for presentation in source_presentations() {
-        let button = gtk::Button::new();
-        button.add_css_class("flat");
-        button.add_css_class("source-choice-button");
+    for (presentation, id) in
+        source_presentations()
+            .iter()
+            .zip(["jellyfin", "navidrome", "subsonic", "local"])
+    {
+        let button: gtk::Button =
+            crate::ui_resource::object(&builder, resource, &format!("{id}_button"));
+        let content: gtk::Box =
+            crate::ui_resource::object(&builder, resource, &format!("{id}_content"));
+        let icon: gtk::Image =
+            crate::ui_resource::object(&builder, resource, &format!("{id}_icon"));
+        let label: gtk::Label =
+            crate::ui_resource::object(&builder, resource, &format!("{id}_label"));
         if compact {
             button.add_css_class("compact-source-choice-button");
         }
         set_source_choice_active(&button, same_registration(presentation, selected));
         button.update_property(&[gtk::accessible::Property::Label(&tr(presentation.title))]);
-        let child = gtk::Box::new(gtk::Orientation::Vertical, if compact { 2 } else { 4 });
-        child.set_halign(gtk::Align::Center);
-        let icon = gtk::Image::from_icon_name(presentation.icon_name);
+        content.set_spacing(if compact { 2 } else { 4 });
+        icon.set_icon_name(Some(presentation.icon_name));
         let icon_size = if compact { 24 } else { 34 };
         icon.set_pixel_size(icon_size);
-        child.append(&icon);
-        let label = gtk::Label::new(Some(&tr(presentation.title)));
-        label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        label.set_max_width_chars(14);
-        child.append(&label);
-        button.set_child(Some(&child));
+        label.set_label(&tr(presentation.title));
         if !same_registration(presentation, selected) {
             let shell = Rc::downgrade(shell);
             let presentation = *presentation;
@@ -988,7 +1024,7 @@ fn source_choice_selector(
                     .add_server
                     .borrow()
                     .as_ref()
-                    .map(|handle| handle.context.clone())
+                    .and_then(|handle| handle.context.clone())
                 else {
                     return;
                 };
@@ -996,7 +1032,6 @@ fn source_choice_selector(
                 mount_setup_flow(&shell, &context);
             });
         }
-        wrapper.append(&button);
     }
     wrapper
 }
@@ -1125,16 +1160,38 @@ fn credential_host(
     authentication: Option<Rc<Cell<OpenSubsonicAuthentication>>>,
 ) -> CredentialHost {
     let snapshot = draft.borrow().clone();
-    let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    let name = adw::EntryRow::builder()
-        .title(tr("Name"))
-        .text(&snapshot.name)
-        .build();
+    let host = credential_host_view(&snapshot, compact, authentication);
+    bind_credential_draft(
+        draft,
+        &host.name,
+        &host.url,
+        &host.username,
+        &host.password,
+        &host.cert_verify,
+    );
+    host
+}
+
+fn credential_host_view(
+    snapshot: &CredentialHostDraft,
+    compact: bool,
+    authentication: Option<Rc<Cell<OpenSubsonicAuthentication>>>,
+) -> CredentialHost {
+    let resource = crate::ui_resource::CREDENTIAL_HOST_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        section: gtk::Box,
+        fields_group: adw::PreferencesGroup,
+        rows: adw::PreferencesGroup,
+        name: adw::EntryRow,
+        url: adw::EntryRow,
+        username: adw::EntryRow,
+        password: adw::PasswordEntryRow,
+        cert_verify: adw::SwitchRow,
+    });
+    name.set_text(&snapshot.name);
     style_compact_field_row(&name);
-    let url = adw::EntryRow::builder()
-        .title(tr("Server Address"))
-        .text(&snapshot.url)
-        .build();
+    url.set_text(&snapshot.url);
     style_compact_field_row(&url);
     let fields = gtk::Box::new(gtk::Orientation::Horizontal, 12);
     fields.set_homogeneous(true);
@@ -1142,44 +1199,30 @@ fn credential_host(
     fields.append(&compact_field_row_group(&name));
     fields.append(&compact_field_row_group(&url));
     let fields = install_compact_field_row_responsiveness(&fields);
-    let fields_group = if compact {
-        adw::PreferencesGroup::new()
-    } else {
-        adw::PreferencesGroup::builder().title(tr("Server")).build()
-    };
+    if !compact {
+        fields_group.set_title(&tr("Server"));
+    }
     fields_group.add(&fields);
-    section.append(&fields_group);
 
-    let username = adw::EntryRow::builder()
-        .title(tr("Username"))
-        .text(&snapshot.username)
-        .build();
+    username.set_text(&snapshot.username);
     style_compact_field_row(&username);
-    let password = adw::PasswordEntryRow::builder()
-        .title(tr("Password"))
-        .build();
     password.set_text(&snapshot.password);
     style_compact_field_row(&password);
-    let cert_verify = adw::SwitchRow::builder()
-        .title(tr("Verify server certificate"))
-        .subtitle(tr("Turn off only for a server you control"))
-        .active(snapshot.cert_verify)
-        .build();
+    cert_verify.set_active(snapshot.cert_verify);
     let api_key = authentication.as_ref().map(|authentication| {
         open_subsonic_authentication_switch(Rc::clone(authentication), &username, &password)
     });
-    let rows = adw::PreferencesGroup::new();
     if let Some(api_key) = api_key.as_ref() {
         rows.add(api_key);
     }
     rows.add(&username);
     rows.add(&password);
     rows.add(&cert_verify);
-    section.append(&rows);
 
-    bind_credential_draft(draft, &name, &url, &username, &password, &cert_verify);
     CredentialHost {
         widget: section,
+        fields_group,
+        rows,
         name,
         url,
         username,
@@ -1255,10 +1298,11 @@ fn append_credential_connect(
     shell: &Rc<Shell>,
     context: &SetupViewContext,
     content: &gtk::Box,
+    actions: &gtk::Box,
+    status: gtk::Label,
     host: CredentialHost,
     submit: impl Fn(&SourceHandle, CredentialInput) + 'static,
 ) {
-    let status = setup_status_label(shell);
     let login = text_button("rufin-network-server-symbolic", "Connect");
     login.add_css_class("suggested-action");
     login.set_sensitive(host.ready());
@@ -1266,47 +1310,55 @@ fn append_credential_connect(
     connect_entry_row_activation(&host.url, &login);
     connect_entry_row_activation(&host.username, &login);
     connect_password_entry_row_activation(&host.password, &login);
-    {
+    let ready: Rc<dyn Fn() -> bool> = {
+        let url = host.url.downgrade();
+        let username = host.username.downgrade();
+        let password = host.password.downgrade();
+        let authentication = host.authentication.clone();
+        Rc::new(move || {
+            let (Some(url), Some(username), Some(password)) =
+                (url.upgrade(), username.upgrade(), password.upgrade())
+            else {
+                return false;
+            };
+            remote_login_ready(
+                &url,
+                &username,
+                &password,
+                authentication.as_ref().is_none_or(|authentication| {
+                    authentication.get() == OpenSubsonicAuthentication::Password
+                }),
+            )
+        })
+    };
+    let update_ready: Rc<dyn Fn()> = {
         let login = login.downgrade();
-        let host = host.clone();
-        host.url.clone().connect_text_notify(move |_| {
+        let ready = Rc::clone(&ready);
+        Rc::new(move || {
             if let Some(login) = login.upgrade() {
-                login.set_sensitive(host.ready());
+                login.set_sensitive(ready());
             }
-        });
+        })
+    };
+    {
+        let update_ready = Rc::clone(&update_ready);
+        host.url.connect_text_notify(move |_| update_ready());
     }
     {
-        let login = login.downgrade();
-        let host = host.clone();
-        host.username.clone().connect_text_notify(move |_| {
-            if let Some(login) = login.upgrade() {
-                login.set_sensitive(host.ready());
-            }
-        });
+        let update_ready = Rc::clone(&update_ready);
+        host.username.connect_text_notify(move |_| update_ready());
     }
     {
-        let login = login.downgrade();
-        let host = host.clone();
-        host.password.clone().connect_text_notify(move |_| {
-            if let Some(login) = login.upgrade() {
-                login.set_sensitive(host.ready());
-            }
-        });
+        let update_ready = Rc::clone(&update_ready);
+        host.password.connect_text_notify(move |_| update_ready());
     }
     if let Some(api_key) = host.api_key.as_ref() {
-        let login = login.downgrade();
-        let host = host.clone();
-        api_key.connect_active_notify(move |_| {
-            if let Some(login) = login.upgrade() {
-                login.set_sensitive(host.ready());
-            }
-        });
+        api_key.connect_active_notify(move |_| update_ready());
     }
-    let host_for_ready = host.clone();
     *context.actions.borrow_mut() = Some(SetupActions {
         status: status.clone(),
         connect: login.clone(),
-        ready: Rc::new(move || host_for_ready.ready()),
+        ready,
     });
 
     let source = shell.products.source.clone();
@@ -1337,35 +1389,9 @@ fn append_credential_connect(
         shell.begin_source_add_loading();
         submit(&source, host_for_click.input());
     });
-    content.append(&setup_actions(&login));
+    actions.append(&login);
+    content.append(actions);
     content.append(&status);
-}
-
-fn setup_actions(login: &gtk::Button) -> gtk::Box {
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    actions.set_halign(gtk::Align::End);
-    actions.append(login);
-    actions
-}
-
-fn setup_status_label(shell: &Rc<Shell>) -> gtk::Label {
-    let status = gtk::Label::new(None);
-    status.add_css_class("muted");
-    status.set_wrap(true);
-    status.set_xalign(0.0);
-    if let SourceOperation::Failed {
-        message,
-        add_form: true,
-        ..
-    } = &*shell.source.operation.borrow()
-    {
-        status.set_text(message);
-        status.add_css_class("error-text");
-        status.set_visible(true);
-    } else {
-        status.set_visible(false);
-    }
-    status
 }
 
 fn begin_connect_attempt(status: &gtk::Label, login: &gtk::Button, message: &str) {

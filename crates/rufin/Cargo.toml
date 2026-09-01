@@ -39,6 +39,7 @@ scrobbling.workspace = true
 sources.workspace = true
 secrets.workspace = true
 library.workspace = true
+localization.workspace = true
 lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -48,9 +49,6 @@ tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 ui.workspace = true
 url.workspace = true
-
-[dev-dependencies]
-localization.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-updater.workspace = true

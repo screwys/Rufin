@@ -8,8 +8,8 @@ use sqlx::sqlite::SqliteRow;
 use sqlx::{AssertSqlSafe, Connection, FromRow, QueryBuilder, Row, Sqlite, SqliteConnection};
 
 use crate::{
-    Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, SmartPlaylistKey,
-    SourceKey, TrackKey,
+    Database, FolderKey, LibraryError, LibraryResult, ReadCancellation, RouteSeedWindow,
+    SmartPlaylistKey, SourceKey, TrackKey,
 };
 
 const SMART_PLAYLIST_ROW_LIMIT: usize = 64;
@@ -617,24 +617,21 @@ impl Database {
         sort: SmartPlaylistListSort,
         descending: bool,
         now: i64,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<(Vec<SmartPlaylistKey>, Vec<SmartPlaylistRow>)> {
+    ) -> LibraryResult<(Vec<SmartPlaylistKey>, usize, Vec<SmartPlaylistRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let order =
             load_smart_playlist_order(&mut transaction, source, folder, sort, descending, now)
                 .await?;
-        let first_rows = load_smart_playlist_rows(
-            &mut transaction,
-            source,
-            &order[..order.len().min(SMART_PLAYLIST_ROW_LIMIT)],
-            folder,
-            now,
-        )
-        .await?;
+        let seed = window.range(order.len());
+        let first_row_position = seed.start;
+        let first_rows =
+            load_smart_playlist_rows(&mut transaction, source, &order[seed], folder, now).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((order, first_rows))
+        Ok((order, first_row_position, first_rows))
     }
 
     pub async fn smart_playlist_rows(

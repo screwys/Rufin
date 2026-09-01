@@ -5,8 +5,10 @@ use crate::favorites::{
     favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use crate::interactions::{
-    CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
+    CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, ContextMenuOpen,
+    install_context_menu_openers,
 };
+use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
 use crate::routes::collection_context::present_album_context_menu;
 use crate::routes::collections::PlaybackTarget;
 use crate::routes::route::Route;
@@ -19,8 +21,9 @@ use crate::shell::actions::{
 use crate::shell::cover::{ArtworkTile, LARGE_COVER_SIZE};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
+use localization::msgid;
 use playback::QueuePlacement;
-use std::cell::Cell;
 use std::rc::Rc;
 
 const COVER_CORNER_HORIZONTAL_INSET: i32 = 4;
@@ -28,47 +31,16 @@ const COVER_CORNER_VERTICAL_INSET: i32 = 8;
 const COVER_TRANSPORT_COMPACT_GAP: i32 = 3;
 const COVER_TRANSPORT_REGULAR_GAP: i32 = 8;
 
-#[derive(Clone)]
-pub(crate) struct ShowcaseCoverOverlay {
-    root: gtk::Overlay,
-    button: gtk::Button,
-    tile: ArtworkTile,
-    size: Rc<Cell<i32>>,
-}
-
-impl ShowcaseCoverOverlay {
-    pub(crate) fn widget(&self) -> gtk::Widget {
-        self.root.clone().upcast()
-    }
-
-    pub(crate) fn drag_paintable_source(&self) -> gtk::Picture {
-        self.tile.drag_paintable_source()
-    }
-
-    pub(crate) fn resize(&self, size: i32) {
-        let size = size.max(1);
-        if self.size.replace(size) == size {
-            return;
-        }
-        constrain_cover_widget(&self.root, size);
-        constrain_cover_widget(&self.button, size);
-        self.tile.set_square_size(size);
-    }
-}
-
 pub(crate) fn album_cover_overlay(
     shell: &Rc<Shell>,
     album: &library::AlbumRow,
     size: i32,
-) -> ShowcaseCoverOverlay {
-    let overlay = gtk::Overlay::new();
-    overlay.add_css_class("cover-frame");
-    constrain_cover_widget(&overlay, size);
+) -> gtk::Widget {
     let album_button = gtk::Button::new();
     album_button.add_css_class("album-cover-button");
     album_button.add_css_class("flat");
     constrain_cover_widget(&album_button, size);
-    clip_cover(&album_button);
+    album_button.set_overflow(gtk::Overflow::Hidden);
     let tile = ArtworkTile::new_sized(size, size);
     shell.bind_artwork_tile(
         &tile,
@@ -77,20 +49,17 @@ pub(crate) fn album_cover_overlay(
             .as_deref()
             .map(ArtworkBinding::opaque)
             .unwrap_or_default(),
-        super::home_layout::home_showcase_cover_size(i32::MAX),
+        super::route_layout::detail_showcase_cover_size(i32::MAX),
         LARGE_COVER_SIZE,
     );
     album_button.set_child(Some(&tile.widget()));
     let open_shell = Rc::clone(shell);
     let album_key = album.album_key;
     album_button.connect_clicked(move |_| open_shell.navigate(Route::AlbumDetail(album_key)));
-    overlay.set_child(Some(&album_button));
 
-    let mut controls = cover_hover_controls(0, "Play album", album.favorite);
-    let menu = controls.add_context_button();
     let menu_shell = Rc::clone(shell);
     let menu_album = album.clone();
-    let open_menu: crate::interactions::ContextMenuOpen = Rc::new(move |target, position| {
+    let open_menu: ContextMenuOpen = Rc::new(move |target, position| {
         present_album_context_menu(
             target,
             &menu_shell,
@@ -100,13 +69,7 @@ pub(crate) fn album_cover_overlay(
             position,
         );
     });
-    install_context_menu_openers(&overlay, Rc::clone(&open_menu));
-    let menu_target = overlay.downgrade();
-    menu.connect_clicked(move |_| {
-        if let Some(target) = menu_target.upgrade() {
-            open_menu(target.upcast_ref(), elastic_cover_context_point(&target));
-        }
-    });
+    let (controls, favorite) = cover_hover_controls_with_favorite(0, "Play album", album.favorite);
     for (button, placement, shuffled) in [
         (&controls.play, QueuePlacement::Now, true),
         (&controls.play_next, QueuePlacement::Next, false),
@@ -116,30 +79,23 @@ pub(crate) fn album_cover_overlay(
         let target = PlaybackTarget::Album(album.album_key);
         button.connect_clicked(move |_| target.play(&play_shell, placement, shuffled));
     }
-    if let Some(favorite) = controls.favorite.as_ref() {
-        let favorite_key = album.album_key;
-        shell.register_dynamic_favorite_button(
-            Rc::new(move || Some(crate::favorites::album_favorite_key(&favorite_key))),
-            favorite,
+    let favorite_key = album.album_key;
+    shell.register_dynamic_favorite_button(
+        Rc::new(move || Some(crate::favorites::album_favorite_key(&favorite_key))),
+        &favorite,
+    );
+    let favorite_shell = Rc::clone(shell);
+    let album_key = album.album_key;
+    favorite.connect_clicked(move |button| {
+        favorite_shell.set_favorite_with_feedback(
+            library::FavoriteTarget::Album(album_key),
+            !favorite_button_is_active(button),
+            Some(button),
         );
-        let favorite_shell = Rc::clone(shell);
-        let album_key = album.album_key;
-        favorite.connect_clicked(move |button| {
-            favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Album(album_key),
-                !favorite_button_is_active(button),
-                Some(button),
-            );
-        });
-    }
-    controls.add_to_overlay(&overlay);
-    controls.connect_hover(&overlay);
-    ShowcaseCoverOverlay {
-        root: overlay,
-        button: album_button,
-        tile,
-        size: Rc::new(Cell::new(size)),
-    }
+    });
+    let overlay = showcase_cover_overlay(&album_button.clone().upcast(), controls, Some(open_menu));
+    constrain_cover_widget(&overlay, size);
+    overlay.upcast()
 }
 
 fn cover_hover_transport_width(spacing: i32) -> i32 {
@@ -154,24 +110,167 @@ fn cover_hover_transport_spacing(cover_width: i32) -> i32 {
     available_spacing.clamp(COVER_TRANSPORT_COMPACT_GAP, COVER_TRANSPORT_REGULAR_GAP)
 }
 
-pub(super) fn elastic_cover_overlay() -> gtk::Overlay {
-    let overlay = gtk::Overlay::new();
-    overlay.add_css_class("cover-frame");
-    overlay.set_hexpand(true);
-    overlay.set_vexpand(true);
-    overlay.set_halign(gtk::Align::Fill);
-    overlay.set_valign(gtk::Align::Fill);
-    overlay
+pub(crate) mod collection_grid_cover_view_imp {
+    use gtk::{CompositeTemplate, TemplateChild, glib, prelude::*, subclass::prelude::*};
+
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/collection_grid_cover.ui")]
+    pub(crate) struct CollectionGridCoverView {
+        #[template_child]
+        pub(crate) overlay: TemplateChild<gtk::Overlay>,
+        #[template_child]
+        pub(crate) cover_button: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub(crate) shade: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(crate) transport: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(crate) play_next: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub(crate) play: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub(crate) play_last: TemplateChild<gtk::Button>,
+        #[template_child]
+        pub(crate) menu: TemplateChild<gtk::Button>,
+        pub(crate) favorite: std::cell::RefCell<Option<gtk::Button>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for CollectionGridCoverView {
+        const NAME: &'static str = "RufinCollectionGridCoverView";
+        type Type = super::CollectionGridCoverView;
+        type ParentType = gtk::Widget;
+
+        fn class_init(class: &mut Self::Class) {
+            class.bind_template();
+        }
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
+    }
+
+    impl ObjectImpl for CollectionGridCoverView {
+        fn dispose(&self) {
+            self.dispose_template();
+        }
+    }
+
+    impl WidgetImpl for CollectionGridCoverView {
+        fn request_mode(&self) -> gtk::SizeRequestMode {
+            gtk::SizeRequestMode::HeightForWidth
+        }
+
+        fn measure(&self, orientation: gtk::Orientation, for_size: i32) -> (i32, i32, i32, i32) {
+            if orientation == gtk::Orientation::Vertical {
+                super::square_cover_vertical_measure(for_size)
+            } else {
+                self.overlay.measure(orientation, for_size)
+            }
+        }
+
+        fn size_allocate(&self, width: i32, height: i32, baseline: i32) {
+            let spacing = super::cover_hover_transport_spacing(width);
+            if self.transport.spacing() != spacing {
+                self.transport.set_spacing(spacing);
+            }
+            self.overlay.allocate(width, height, baseline, None);
+        }
+
+        fn snapshot(&self, snapshot: &gtk::Snapshot) {
+            self.obj().snapshot_child(&*self.overlay, snapshot);
+        }
+    }
+}
+
+gtk::glib::wrapper! {
+    pub(crate) struct CollectionGridCoverView(ObjectSubclass<collection_grid_cover_view_imp::CollectionGridCoverView>)
+        @extends gtk::Widget,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl CollectionGridCoverView {
+    pub(crate) fn new(play_label: &str) -> Self {
+        Self::build(play_label, true)
+    }
+
+    pub(crate) fn without_favorite(play_label: &str) -> Self {
+        Self::build(play_label, false)
+    }
+
+    fn build(play_label: &str, with_favorite: bool) -> Self {
+        let view: Self = gtk::glib::Object::new();
+        let imp = view.imp();
+        for (button, label, variant) in [
+            (
+                &*imp.play_next,
+                msgid("Play Next"),
+                ActionButtonVariant::CoverSideTransport,
+            ),
+            (
+                &*imp.play,
+                play_label,
+                ActionButtonVariant::CoverPrimaryTransport,
+            ),
+            (
+                &*imp.play_last,
+                msgid("Play Later"),
+                ActionButtonVariant::CoverSideTransport,
+            ),
+        ] {
+            bind_widget_tooltip(button, label);
+            configure_action_button(button, variant);
+        }
+        bind_widget_accessible_label(&*imp.menu, msgid("More actions"));
+        configure_action_button(&imp.menu, ActionButtonVariant::CoverCornerMenu);
+        let favorite = with_favorite.then(|| {
+            let favorite = favorite_icon_button(msgid("Favorite"));
+            configure_action_button(&favorite, ActionButtonVariant::CoverCornerFavorite);
+            favorite.set_margin_top(COVER_CORNER_VERTICAL_INSET);
+            favorite.set_margin_end(COVER_CORNER_HORIZONTAL_INSET);
+            favorite.set_visible(false);
+            imp.overlay.add_overlay(&favorite);
+            favorite
+        });
+        imp.favorite.replace(favorite.clone());
+        let controls = CoverHoverControls {
+            shade: imp.shade.get(),
+            transport: imp.transport.get(),
+            play_next: imp.play_next.get(),
+            play: imp.play.get(),
+            play_last: imp.play_last.get(),
+            favorite,
+            menu: Some(imp.menu.get()),
+        };
+        controls.connect_hover(&imp.overlay);
+        view.set_hexpand(true);
+        view.set_halign(gtk::Align::Fill);
+        view.set_valign(gtk::Align::Start);
+        view.set_accessible_role(gtk::AccessibleRole::Presentation);
+        view
+    }
+
+    pub(crate) fn favorite(&self) -> gtk::Button {
+        self.imp()
+            .favorite
+            .borrow()
+            .clone()
+            .expect("Collection grid cover has a favorite button")
+    }
 }
 
 mod collection_grid_card_inset_imp {
-    use std::cell::Cell;
+    use std::{
+        any::Any,
+        cell::{Cell, RefCell},
+    };
 
     use gtk::{glib, prelude::*, subclass::prelude::*};
 
     #[derive(Default)]
     pub struct CollectionGridCardInset {
         pub(super) minimum_content_width: Cell<i32>,
+        pub(super) cell: RefCell<Option<Box<dyn Any>>>,
     }
 
     #[glib::object_subclass]
@@ -183,6 +282,7 @@ mod collection_grid_card_inset_imp {
 
     impl ObjectImpl for CollectionGridCardInset {
         fn dispose(&self) {
+            self.cell.take();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
@@ -265,6 +365,21 @@ gtk::glib::wrapper! {
     pub struct CollectionGridCardInset(ObjectSubclass<collection_grid_card_inset_imp::CollectionGridCardInset>)
         @extends gtk::Widget,
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
+}
+
+impl CollectionGridCardInset {
+    pub(super) fn set_cell<T: 'static>(&self, cell: T) {
+        self.imp().cell.replace(Some(Box::new(cell)));
+    }
+
+    pub(super) fn with_cell<T: 'static, R>(&self, apply: impl FnOnce(&T) -> R) -> Option<R> {
+        let cell = self.imp().cell.borrow();
+        cell.as_ref()?.downcast_ref::<T>().map(apply)
+    }
+
+    pub(super) fn clear_cell(&self) {
+        self.imp().cell.take();
+    }
 }
 
 fn collection_grid_card_inner_extent(allocation: i32) -> (i32, i32) {
@@ -467,8 +582,6 @@ impl CoverHoverControls {
     pub(super) fn add_context_button(&mut self) -> gtk::Button {
         let menu = icon_button_without_tooltip(MORE_ICON, "More actions");
         configure_action_button(&menu, ActionButtonVariant::CoverCornerMenu);
-        menu.set_halign(gtk::Align::Start);
-        menu.set_valign(gtk::Align::End);
         menu.set_margin_start(COVER_CORNER_HORIZONTAL_INSET);
         menu.set_margin_bottom(COVER_CORNER_VERTICAL_INSET);
         menu.set_visible(false);
@@ -548,6 +661,33 @@ impl CoverHoverControls {
     }
 }
 
+pub(crate) fn showcase_cover_overlay(
+    cover: &gtk::Widget,
+    mut controls: CoverHoverControls,
+    context_menu: Option<ContextMenuOpen>,
+) -> gtk::Overlay {
+    let overlay = gtk::Overlay::new();
+    overlay.add_css_class("cover-frame");
+    overlay.set_halign(gtk::Align::Start);
+    overlay.set_valign(gtk::Align::Start);
+    overlay.set_child(Some(cover));
+
+    if let Some(open) = context_menu {
+        let menu = controls.add_context_button();
+        install_context_menu_openers(&overlay, Rc::clone(&open));
+        let target = overlay.downgrade();
+        menu.connect_clicked(move |_| {
+            let Some(target) = target.upgrade() else {
+                return;
+            };
+            open(target.upcast_ref(), elastic_cover_context_point(&target));
+        });
+    }
+    controls.add_to_overlay(&overlay);
+    controls.connect_hover(&overlay);
+    overlay
+}
+
 pub(super) fn cover_hover_controls(
     size: i32,
     play_label: &str,
@@ -564,8 +704,6 @@ pub(super) fn cover_hover_controls_with_favorite(
     let mut controls = cover_play_hover_controls(size, play_label);
     let favorite = favorite_icon_button("Favorite");
     configure_action_button(&favorite, ActionButtonVariant::CoverCornerFavorite);
-    favorite.set_halign(gtk::Align::End);
-    favorite.set_valign(gtk::Align::Start);
     favorite.set_margin_top(COVER_CORNER_VERTICAL_INSET);
     favorite.set_margin_end(COVER_CORNER_HORIZONTAL_INSET);
     favorite.set_visible(false);
@@ -641,8 +779,4 @@ pub(super) fn constrain_cover_widget(widget: &impl IsA<gtk::Widget>, size: i32) 
     widget.set_size_request(size, size);
     widget.set_hexpand(false);
     widget.set_halign(gtk::Align::Start);
-}
-
-pub(super) fn clip_cover(widget: &impl IsA<gtk::Widget>) {
-    widget.set_overflow(gtk::Overflow::Hidden);
 }
