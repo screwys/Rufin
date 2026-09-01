@@ -57,11 +57,6 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr "感謝您使用 Rufin！如果遇到問題或有任何建議，請在 GitHub 上建立 issue。"
@@ -149,6 +144,11 @@ msgstr "新增規則"
 
 msgid "Add a matching server prefix"
 msgstr "新增匹配的伺服器前綴"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "本地音樂資料夾"
 
 msgid "Add a new source"
 msgstr "新增來源"
@@ -337,6 +337,9 @@ msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "套用變更到 {count} 個曲目"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "檢查中..."
 
@@ -364,11 +367,21 @@ msgstr "古典"
 msgid "Clear Mapping"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "播放藝人"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "清除此曲目已抓取的歌詞"
 
 msgid "Clear queue"
 msgstr "清除播放佇列"
+
+#, fuzzy
+#| msgid "Add a title"
+msgid "Clear title"
+msgstr "新增標題"
 
 msgid "Clearing queue also clears the current song"
 msgstr ""
@@ -934,9 +947,6 @@ msgstr ""
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "資料夾載入中..."
 
 msgid "Local File Access"
 msgstr ""
@@ -1586,6 +1596,11 @@ msgstr "移除規則與下載內容"
 msgid "Remove Rule, Keep Downloads"
 msgstr "移除規則，保留下載內容"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "移除所有下載內容"
+
 msgid "Remove and Delete"
 msgstr "移除並刪除"
 
@@ -1641,9 +1656,6 @@ msgstr "重複播放"
 
 msgid "ReplayGain"
 msgstr ""
-
-msgid "Reset equalizer"
-msgstr "重置等化器"
 
 msgid "Reset to defaults"
 msgstr "重置回預設值"
@@ -1974,9 +1986,6 @@ msgstr ""
 msgid "Stream quality"
 msgstr "串流品質"
 
-msgid "Support"
-msgstr ""
-
 msgid "Switch Search/Favorites tabs"
 msgstr ""
 
@@ -2099,6 +2108,9 @@ msgstr ""
 
 msgid "Use Rufin data folder"
 msgstr "使用 Rufin 資料資料夾"
+
+msgid "Use This Source"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr ""
@@ -2260,6 +2272,12 @@ msgstr[0] "{count} 週之前"
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
+
+#~ msgid "Loading folders..."
+#~ msgstr "資料夾載入中..."
+
+#~ msgid "Reset equalizer"
+#~ msgstr "重置等化器"
 
 #~ msgid "Go to Artist"
 #~ msgstr "前往藝人"

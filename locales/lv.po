@@ -74,14 +74,6 @@ msgstr[2] ""
 "metadatiem, {unmatched} neatbilst no {total} celiņiem"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Pieskarieties ierakstam, lai ielādētu dziesmas tekstu un saglabātu to "
-"lietotnes kešatmiņā; noklikšķiniet uz «Saglabāt», ja vēlaties to saglabāt "
-"arī savā mūzikas mapē"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -192,6 +184,11 @@ msgstr "Pievienot noteikumu"
 
 msgid "Add a matching server prefix"
 msgstr "Pievienojiet atbilstošu servera prefiksu"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "Lokālā mūzikas mape"
 
 msgid "Add a new source"
 msgstr "Pievienot jaunu avotu"
@@ -382,6 +379,9 @@ msgstr[0] "Izmaiņas attiecas uz {count} celiņu"
 msgstr[1] "Izmaiņas attiecas uz {count} celiņiem"
 msgstr[2] "Izmaiņas attiecas uz {count} celiņiem"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "Notiek pārbaude..."
 
@@ -411,11 +411,21 @@ msgstr "Klasiskais"
 msgid "Clear Mapping"
 msgstr "Notīrīt kartējumu"
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "Atskaņot mākslinieku"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Notīrīt ielādētos tekstus šai dziesmai"
 
 msgid "Clear queue"
 msgstr "Notīrīt rindu"
+
+#, fuzzy
+#| msgid "Sort title"
+msgid "Clear title"
+msgstr "Kārto pēc nosaukuma"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Rindas notīrīšana arī notīra pašreizējo dziesmu"
@@ -971,9 +981,6 @@ msgstr "ListenBrainz skroblēšana"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "Ielādē mapes…"
 
 msgid "Local File Access"
 msgstr "Lokāla failu piekļuve"
@@ -1609,6 +1616,11 @@ msgstr "Noņemt noteikumu un lejupielādes"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Noņemt noteikumu, saglabāt lejupielādes"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "Dzēst visas lejupielādes"
+
 msgid "Remove and Delete"
 msgstr "Noņemt un dzēst"
 
@@ -1662,9 +1674,6 @@ msgstr "Atkārtot"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
-
-msgid "Reset equalizer"
-msgstr "Atiestatīt ekvalaizeru"
 
 msgid "Reset to defaults"
 msgstr "Atiestatīt uz noklusējuma iestatījumiem"
@@ -1987,9 +1996,6 @@ msgstr "Saglabāt aprēķināto skaļumu atbalstītajos lokālajos mūzikas fail
 msgid "Stream quality"
 msgstr "Straumes kvalitāte"
 
-msgid "Support"
-msgstr "Atbalsts"
-
 msgid "Switch Search/Favorites tabs"
 msgstr "Pārslēgt starp meklēšanas un izlases cilnēm"
 
@@ -2112,6 +2118,9 @@ msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
+
+msgid "Use This Source"
+msgstr "Izmantot šo avotu"
 
 msgid "Use a number above zero"
 msgstr "Izmantojiet skaitli, kas ir lielāka par nulli"
@@ -2291,6 +2300,23 @@ msgid_plural "{count} years ago"
 msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Pieskarieties ierakstam, lai ielādētu dziesmas tekstu un saglabātu to "
+#~ "lietotnes kešatmiņā; noklikšķiniet uz «Saglabāt», ja vēlaties to saglabāt "
+#~ "arī savā mūzikas mapē"
+
+#~ msgid "Loading folders..."
+#~ msgstr "Ielādē mapes…"
+
+#~ msgid "Reset equalizer"
+#~ msgstr "Atiestatīt ekvalaizeru"
+
+#~ msgid "Support"
+#~ msgstr "Atbalsts"
 
 #~ msgid "Use Template"
 #~ msgstr "Izmantot veidni"
@@ -2791,9 +2817,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "Unsaved changes."
 #~ msgstr "Nesaglabātas izmaiņas."
-
-#~ msgid "Use This Source"
-#~ msgstr "Izmantot šo avotu"
 
 #~ msgid "Use remote lyric providers when server lyrics are unavailable"
 #~ msgstr ""

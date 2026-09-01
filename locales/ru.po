@@ -74,14 +74,6 @@ msgstr[2] ""
 "по метаданным, {unmatched} не найдено. Всего: {total} треков"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Нажмите на запись, чтобы загрузить текст песни и сохранить его в кэше "
-"приложения. Нажмите «Сохранить», только если вы также хотите сохранить его в "
-"папке с музыкой"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -196,6 +188,11 @@ msgstr "Добавить правило"
 
 msgid "Add a matching server prefix"
 msgstr "Введите соответствующий префикс сервера"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "Локальная папка с музыкой"
 
 msgid "Add a new source"
 msgstr "Новый источник"
@@ -387,6 +384,9 @@ msgstr[0] "Изменения применяются к {count} треку"
 msgstr[1] "Изменения применяются к {count} трекам"
 msgstr[2] "Изменения применяются к {count} трекам"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "Проверка..."
 
@@ -416,11 +416,21 @@ msgstr "Классическая"
 msgid "Clear Mapping"
 msgstr "Удалить Соответствия"
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "Воспроизвести исполнителя"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Удалить загруженные тексты песен для этого трека"
 
 msgid "Clear queue"
 msgstr "Очистить очередь"
+
+#, fuzzy
+#| msgid "Sort title"
+msgid "Clear title"
+msgstr "Сортировать по названию"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Очистка очереди также очищает текущую песню"
@@ -978,9 +988,6 @@ msgstr "Отправка данных о прослушивании в ListenBra
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "Загрузка папок…"
 
 msgid "Local File Access"
 msgstr "Доступ к локальным файлам"
@@ -1618,6 +1625,11 @@ msgstr "Удалить правило и загрузки"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Удалить правило, сохранить загрузки"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "Удалить все загрузки"
+
 msgid "Remove and Delete"
 msgstr "Убрать и удалить"
 
@@ -1671,9 +1683,6 @@ msgstr "Повтор"
 
 msgid "ReplayGain"
 msgstr "Нормализация громкости"
-
-msgid "Reset equalizer"
-msgstr "Сбросить настройки эквалайзера"
 
 msgid "Reset to defaults"
 msgstr "Восстановить настройки по умолчанию"
@@ -2000,9 +2009,6 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Качество потока"
 
-msgid "Support"
-msgstr "Поддержка"
-
 msgid "Switch Search/Favorites tabs"
 msgstr "Переключить вкладки «Поиск» и «Избранное»"
 
@@ -2125,6 +2131,9 @@ msgstr "Использовать Мгновенный Микс Jellyfin для �
 
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
+
+msgid "Use This Source"
+msgstr "Использовать Этот Источник"
 
 msgid "Use a number above zero"
 msgstr "Используйте число больше нуля"
@@ -2306,6 +2315,23 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Нажмите на запись, чтобы загрузить текст песни и сохранить его в кэше "
+#~ "приложения. Нажмите «Сохранить», только если вы также хотите сохранить "
+#~ "его в папке с музыкой"
+
+#~ msgid "Loading folders..."
+#~ msgstr "Загрузка папок…"
+
+#~ msgid "Reset equalizer"
+#~ msgstr "Сбросить настройки эквалайзера"
+
+#~ msgid "Support"
+#~ msgstr "Поддержка"
 
 #~ msgid "Use Template"
 #~ msgstr "Использовать шаблон"
@@ -2811,9 +2837,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Unsaved changes."
 #~ msgstr "Несохраненные изменения."
-
-#~ msgid "Use This Source"
-#~ msgstr "Использовать Этот Источник"
 
 #~ msgid "Use remote lyric providers when server lyrics are unavailable"
 #~ msgstr ""

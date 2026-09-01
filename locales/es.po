@@ -66,14 +66,6 @@ msgstr[1] ""
 "{unmatched} sin coincidir {total} pistas"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Pulse a la entrada para cargar las letras y guardar en el caché de la "
-"aplicación, haga clic en sólo guardar si también desea guardarlo en su "
-"carpeta de música"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -177,6 +169,11 @@ msgstr "Añadir Regla"
 
 msgid "Add a matching server prefix"
 msgstr "Añadir un prefijo de servidor que coincida"
+
+#, fuzzy
+#| msgid "Add folder"
+msgid "Add a music folder"
+msgstr "Agregar carpeta"
 
 msgid "Add a new source"
 msgstr "Añadir una nueva fuente"
@@ -366,6 +363,9 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] ""
 msgstr[1] ""
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr ""
 
@@ -393,11 +393,21 @@ msgstr ""
 msgid "Clear Mapping"
 msgstr ""
 
+#, fuzzy
+#| msgid "Album artist"
+msgid "Clear artist"
+msgstr "Artista de álbum"
+
 msgid "Clear fetched lyrics for this track"
 msgstr ""
 
 msgid "Clear queue"
 msgstr ""
+
+#, fuzzy
+#| msgid "Add a title"
+msgid "Clear title"
+msgstr "Añadir un título"
 
 msgid "Clearing queue also clears the current song"
 msgstr ""
@@ -952,9 +962,6 @@ msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
-msgstr ""
-
-msgid "Loading folders..."
 msgstr ""
 
 msgid "Local File Access"
@@ -1587,6 +1594,9 @@ msgstr ""
 msgid "Remove Rule, Keep Downloads"
 msgstr ""
 
+msgid "Remove all downloads"
+msgstr ""
+
 msgid "Remove and Delete"
 msgstr ""
 
@@ -1639,9 +1649,6 @@ msgid "Repeat"
 msgstr ""
 
 msgid "ReplayGain"
-msgstr ""
-
-msgid "Reset equalizer"
 msgstr ""
 
 msgid "Reset to defaults"
@@ -1965,9 +1972,6 @@ msgstr ""
 msgid "Stream quality"
 msgstr ""
 
-msgid "Support"
-msgstr ""
-
 msgid "Switch Search/Favorites tabs"
 msgstr ""
 
@@ -2091,6 +2095,9 @@ msgid "Use Jellyfin Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
+msgstr ""
+
+msgid "Use This Source"
 msgstr ""
 
 msgid "Use a number above zero"
@@ -2261,6 +2268,14 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Pulse a la entrada para cargar las letras y guardar en el caché de la "
+#~ "aplicación, haga clic en sólo guardar si también desea guardarlo en su "
+#~ "carpeta de música"
 
 #~ msgid "ALSA"
 #~ msgstr "ALSA"

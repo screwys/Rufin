@@ -70,14 +70,6 @@ msgstr[1] ""
 "Metadaten, {unmatched} nicht zugeordnet von insgesamt {total} Titeln"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Tippe auf den Eintrag, um die Songtexte zu laden und im App-Cache zu "
-"speichern. Klicke nur dann auf Speichern, wenn du sie auch in deinem "
-"Musikordner speichern möchtest"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -190,6 +182,11 @@ msgstr "Regel hinzufügen"
 
 msgid "Add a matching server prefix"
 msgstr "Passendes Server-Präfix hinzufügen"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "Lokaler Musikordner"
 
 msgid "Add a new source"
 msgstr "Neue Quelle hinzufügen"
@@ -379,6 +376,9 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "Änderungen werden auf {count} Titel angewendet"
 msgstr[1] "Änderungen werden auf {count} Titel angewendet"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "Wird überprüft …"
 
@@ -408,11 +408,21 @@ msgstr "Klassik"
 msgid "Clear Mapping"
 msgstr "Zuordnung aufheben"
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "Künstler abspielen"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Abgerufene Songtexte für diesen Titel löschen"
 
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
+
+#, fuzzy
+#| msgid "Sort title"
+msgid "Clear title"
+msgstr "Sortiertitel"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Beim Leeren der Warteschlange wird auch der aktuelle Titel entfernt"
@@ -970,9 +980,6 @@ msgstr "ListenBrainz scrobbling"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "Lade Ordner..."
 
 msgid "Local File Access"
 msgstr "Zugriff auf lokale Dateien"
@@ -1611,6 +1618,11 @@ msgstr "Regel und Downloads entfernen"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Regel entfernen, Downloads behalten"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "Alle Downloads entfernen"
+
 msgid "Remove and Delete"
 msgstr "Entfernen und löschen"
 
@@ -1664,9 +1676,6 @@ msgstr "Wiederholen"
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
-
-msgid "Reset equalizer"
-msgstr "Equalizer zurücksetzen"
 
 msgid "Reset to defaults"
 msgstr "Auf Standardeinstellungen zurücksetzen"
@@ -1989,9 +1998,6 @@ msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
 
-msgid "Support"
-msgstr "Support"
-
 msgid "Switch Search/Favorites tabs"
 msgstr "Zwischen „Suche“ und „Favoriten“ wechseln"
 
@@ -2114,6 +2120,9 @@ msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
+
+msgid "Use This Source"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
@@ -2286,6 +2295,23 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Tippe auf den Eintrag, um die Songtexte zu laden und im App-Cache zu "
+#~ "speichern. Klicke nur dann auf Speichern, wenn du sie auch in deinem "
+#~ "Musikordner speichern möchtest"
+
+#~ msgid "Loading folders..."
+#~ msgstr "Lade Ordner..."
+
+#~ msgid "Reset equalizer"
+#~ msgstr "Equalizer zurücksetzen"
+
+#~ msgid "Support"
+#~ msgstr "Support"
 
 #~ msgid "Use Template"
 #~ msgstr "Vorlage verwenden"
