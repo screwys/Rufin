@@ -113,6 +113,8 @@ pub(crate) struct StoredSettings {
     pub(crate) ui: UiSettings,
     #[serde(default)]
     pub(crate) scrobbling: ScrobblingSettings,
+    #[serde(default = "legacy_scrobbling_secrets_present")]
+    pub(crate) scrobbling_secrets_present: bool,
     #[serde(default)]
     pub(crate) sources: SourceSettings,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -130,6 +132,7 @@ impl Default for StoredSettings {
         Self {
             ui: UiSettings::default(),
             scrobbling: ScrobblingSettings::default(),
+            scrobbling_secrets_present: false,
             sources: SourceSettings::default(),
             secret_scope_id: String::new(),
             jellyfin_device_id: String::new(),
@@ -455,15 +458,17 @@ pub(crate) fn persist_scrobbling_settings(
     input.sanitize();
     let stored = file.load();
     let mut current = stored.scrobbling_runtime_settings();
-    for descriptor in scrobbling::secret_descriptors() {
-        if !descriptor.value(&current).trim().is_empty() {
-            continue;
-        }
-        let key = scrobbling_secret_key(*descriptor);
-        if let Some(secret) = load_secret(Arc::clone(secrets), key.clone())
-            .map_err(|error| format!("failed to load scrobbling secret {key:?}: {error}"))?
-        {
-            *descriptor.value_mut(&mut current) = secret;
+    if stored.scrobbling_secrets_present {
+        for descriptor in scrobbling::secret_descriptors() {
+            if !descriptor.value(&current).trim().is_empty() {
+                continue;
+            }
+            let key = scrobbling_secret_key(*descriptor);
+            if let Some(secret) = load_secret(Arc::clone(secrets), key.clone())
+                .map_err(|error| format!("failed to load scrobbling secret {key:?}: {error}"))?
+            {
+                *descriptor.value_mut(&mut current) = secret;
+            }
         }
     }
     current.sanitize();
@@ -486,9 +491,11 @@ pub(crate) fn persist_scrobbling_settings(
 
     // Removing the previous fixed-key value first makes an interrupted account
     // change disconnected rather than pairing a new username with an old session.
-    for (_, key, _) in &changed_secrets {
-        delete_secret(Arc::clone(secrets), key.clone())
-            .map_err(|error| format!("failed to replace scrobbling secret {key:?}: {error}"))?;
+    if stored.scrobbling_secrets_present {
+        for (_, key, _) in &changed_secrets {
+            delete_secret(Arc::clone(secrets), key.clone())
+                .map_err(|error| format!("failed to replace scrobbling secret {key:?}: {error}"))?;
+        }
     }
 
     let mut persisted = input.clone();
@@ -499,6 +506,7 @@ pub(crate) fn persist_scrobbling_settings(
     file.update(|stored| {
         stored.ui.lastfm_api_key = input.lastfm.api_key.clone();
         stored.scrobbling = persisted;
+        stored.scrobbling_secrets_present = scrobbling_secrets_present(&input);
         Ok(())
     })?;
 
@@ -510,7 +518,7 @@ pub(crate) fn persist_scrobbling_settings(
                 .map_err(|error| format!("failed to save scrobbling secret {key:?}: {error}"))?;
         }
     }
-    Ok(load_scrobbling_settings(file, secrets))
+    Ok(input)
 }
 
 pub(crate) fn load_scrobbling_settings(
@@ -519,6 +527,10 @@ pub(crate) fn load_scrobbling_settings(
 ) -> ScrobblingSettings {
     let stored = file.load();
     let mut settings = stored.scrobbling_runtime_settings();
+    if !stored.scrobbling_secrets_present {
+        return settings;
+    }
+    let mut loaded = true;
     for descriptor in scrobbling::secret_descriptors() {
         let value = descriptor.value_mut(&mut settings);
         if !value.trim().is_empty() {
@@ -527,11 +539,35 @@ pub(crate) fn load_scrobbling_settings(
         match load_secret(Arc::clone(secrets), scrobbling_secret_key(*descriptor)) {
             Ok(Some(secret)) => *value = secret,
             Ok(None) => {}
-            Err(error) => warn!(%error, "failed to load a scrobbling secret"),
+            Err(error) => {
+                loaded = false;
+                warn!(%error, "failed to load a scrobbling secret");
+            }
         }
     }
     settings.sanitize();
+    if loaded {
+        let present = scrobbling_secrets_present(&settings);
+        if stored.scrobbling_secrets_present != present
+            && let Err(error) = file.update(|stored| {
+                stored.scrobbling_secrets_present = present;
+                Ok(())
+            })
+        {
+            warn!(%error, "could not save scrobbling secret presence");
+        }
+    }
     settings
+}
+
+fn scrobbling_secrets_present(settings: &ScrobblingSettings) -> bool {
+    scrobbling::secret_descriptors()
+        .iter()
+        .any(|descriptor| !descriptor.value(settings).trim().is_empty())
+}
+
+fn legacy_scrobbling_secrets_present() -> bool {
+    true
 }
 
 pub(crate) fn startup_scrobbling_settings(
@@ -760,4 +796,144 @@ fn restrict_file(path: &Path) -> std::io::Result<()> {
 #[cfg(not(unix))]
 fn restrict_file(_path: &Path) -> std::io::Result<()> {
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use secrets::{SecretError, SecretResult};
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    #[derive(Default)]
+    struct CountingSecretStore {
+        loads: AtomicUsize,
+        saves: AtomicUsize,
+        deletes: AtomicUsize,
+    }
+
+    impl SecretStore for CountingSecretStore {
+        fn save_secret(&self, _key: &SecretKey, _secret: &str) -> SecretResult<()> {
+            self.saves.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+
+        fn load_secret(&self, _key: &SecretKey) -> SecretResult<Option<String>> {
+            self.loads.fetch_add(1, Ordering::Relaxed);
+            Ok(None)
+        }
+
+        fn delete_secret(&self, _key: &SecretKey) -> SecretResult<()> {
+            self.deletes.fetch_add(1, Ordering::Relaxed);
+            Ok(())
+        }
+    }
+
+    fn counting_secrets() -> (Arc<CountingSecretStore>, Arc<SwitchableSecretStore>) {
+        let store = Arc::new(CountingSecretStore::default());
+        let backend: Arc<dyn SecretStore> = store.clone();
+        (store, Arc::new(SwitchableSecretStore::new(backend)))
+    }
+
+    #[test]
+    fn fresh_settings_persist_empty_secret_storage_while_legacy_settings_probe_once() {
+        let fresh = StoredSettings::default();
+        let serialized = serde_json::to_value(&fresh).expect("serialize fresh settings");
+        let mut legacy_json = serialized.clone();
+        legacy_json
+            .as_object_mut()
+            .expect("settings object")
+            .remove("scrobbling_secrets_present");
+        let legacy: StoredSettings =
+            serde_json::from_value(legacy_json).expect("deserialize old settings");
+
+        assert_eq!(serialized["scrobbling_secrets_present"], false);
+        assert!(!fresh.scrobbling_secrets_present);
+        assert!(legacy.scrobbling_secrets_present);
+    }
+
+    #[test]
+    fn fresh_scrobbling_preferences_and_toggles_do_not_open_secret_storage() {
+        let file = SettingsFile::memory();
+        let (store, secrets) = counting_secrets();
+
+        let mut settings = load_scrobbling_settings(&file, &secrets);
+        settings.lastfm.enabled = true;
+        persist_scrobbling_settings(&file, &secrets, &settings)
+            .expect("persist non-secret scrobbling setting");
+
+        assert_eq!(store.loads.load(Ordering::Relaxed), 0);
+        assert_eq!(store.saves.load(Ordering::Relaxed), 0);
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
+        assert!(file.load().scrobbling.lastfm.enabled);
+        assert!(!file.load().scrobbling_secrets_present);
+    }
+
+    #[test]
+    fn first_scrobbling_secret_write_skips_a_redundant_delete() {
+        let file = SettingsFile::memory();
+        let (store, secrets) = counting_secrets();
+        let mut settings = load_scrobbling_settings(&file, &secrets);
+        settings.listenbrainz.user_token = "token".to_string();
+
+        let committed = persist_scrobbling_settings(&file, &secrets, &settings)
+            .expect("persist first scrobbling secret");
+
+        assert_eq!(store.loads.load(Ordering::Relaxed), 0);
+        assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
+        assert_eq!(store.saves.load(Ordering::Relaxed), 1);
+        assert_eq!(committed.listenbrainz.user_token, "token");
+        assert!(file.load().scrobbling_secrets_present);
+        assert!(file.load().scrobbling.listenbrainz.user_token.is_empty());
+    }
+
+    #[test]
+    fn legacy_secret_state_records_an_empty_probe() {
+        let file = SettingsFile::memory();
+        file.update(|stored| {
+            stored.scrobbling_secrets_present = true;
+            Ok(())
+        })
+        .expect("mark legacy secret state");
+        let (store, secrets) = counting_secrets();
+
+        load_scrobbling_settings(&file, &secrets);
+
+        assert_eq!(
+            store.loads.load(Ordering::Relaxed),
+            scrobbling::secret_descriptors().len()
+        );
+        assert!(!file.load().scrobbling_secrets_present);
+    }
+
+    #[test]
+    fn unavailable_legacy_secret_state_remains_conservative() {
+        struct Unavailable;
+
+        impl SecretStore for Unavailable {
+            fn save_secret(&self, _key: &SecretKey, _secret: &str) -> SecretResult<()> {
+                unreachable!()
+            }
+
+            fn load_secret(&self, _key: &SecretKey) -> SecretResult<Option<String>> {
+                Err(SecretError::Backend("unavailable".to_string()))
+            }
+
+            fn delete_secret(&self, _key: &SecretKey) -> SecretResult<()> {
+                unreachable!()
+            }
+        }
+
+        let file = SettingsFile::memory();
+        file.update(|stored| {
+            stored.scrobbling_secrets_present = true;
+            Ok(())
+        })
+        .expect("mark legacy secret state");
+        let backend: Arc<dyn SecretStore> = Arc::new(Unavailable);
+        let secrets = Arc::new(SwitchableSecretStore::new(backend));
+
+        load_scrobbling_settings(&file, &secrets);
+
+        assert!(file.load().scrobbling_secrets_present);
+    }
 }

@@ -1342,6 +1342,7 @@ impl SourcePort for SourceOwner {
                     for descriptor in scrobbling::secret_descriptors() {
                         descriptor.value_mut(&mut stored.scrobbling).clear();
                     }
+                    stored.scrobbling_secrets_present = false;
                     Ok(stored.clone())
                 });
                 match update {

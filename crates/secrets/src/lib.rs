@@ -486,13 +486,14 @@ impl SystemKeyringBackend {
             .build()
             .map_err(|error| SecretError::Backend(error.to_string()))?;
         let result = runtime
-            .block_on(async { tokio::time::timeout(SECRET_SERVICE_TIMEOUT, operation).await })
-            .map_err(|_| {
-                SecretError::Backend(format!(
-                    "secret service timed out after {}s",
-                    SECRET_SERVICE_TIMEOUT.as_secs_f64()
-                ))
-            })?;
+            .block_on(async { tokio::time::timeout(SECRET_SERVICE_TIMEOUT, operation).await });
+        runtime.shutdown_background();
+        let result = result.map_err(|_| {
+            SecretError::Backend(format!(
+                "secret service timed out after {}s",
+                SECRET_SERVICE_TIMEOUT.as_secs_f64()
+            ))
+        })?;
         result.map_err(|error| SecretError::Backend(error.to_string()))
     }
 
