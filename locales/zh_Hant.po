@@ -1813,6 +1813,9 @@ msgstr "全選"
 msgid "Selection"
 msgstr "選擇"
 
+msgid "Separate .lrc file"
+msgstr ""
+
 msgid "Server Actions"
 msgstr ""
 
@@ -2227,9 +2230,6 @@ msgid "kbps"
 msgstr "kbps"
 
 msgid "range"
-msgstr ""
-
-msgid "separate .lrc file"
 msgstr ""
 
 msgid "to"

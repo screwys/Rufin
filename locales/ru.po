@@ -1835,6 +1835,11 @@ msgstr "Выбрать всё"
 msgid "Selection"
 msgstr "Выбор"
 
+#, fuzzy
+#| msgid "separate .lrc file"
+msgid "Separate .lrc file"
+msgstr "отдельный файл .lrc"
+
 msgid "Server Actions"
 msgstr "Действия на сервере"
 
@@ -2255,9 +2260,6 @@ msgstr "кбит/с"
 
 msgid "range"
 msgstr "диапазон"
-
-msgid "separate .lrc file"
-msgstr "отдельный файл .lrc"
 
 msgid "to"
 msgstr "до"

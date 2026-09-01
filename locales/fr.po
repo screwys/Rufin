@@ -1769,6 +1769,9 @@ msgstr ""
 msgid "Selection"
 msgstr ""
 
+msgid "Separate .lrc file"
+msgstr ""
+
 msgid "Server Actions"
 msgstr ""
 
@@ -2181,9 +2184,6 @@ msgid "kbps"
 msgstr ""
 
 msgid "range"
-msgstr ""
-
-msgid "separate .lrc file"
 msgstr ""
 
 msgid "to"

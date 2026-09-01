@@ -1825,6 +1825,11 @@ msgstr "Atlasīt visu"
 msgid "Selection"
 msgstr "Atlasīšana"
 
+#, fuzzy
+#| msgid "separate .lrc file"
+msgid "Separate .lrc file"
+msgstr "atsevišķs .lrc fails"
+
 msgid "Server Actions"
 msgstr "Servera darbības"
 
@@ -2240,9 +2245,6 @@ msgstr "kbit/s"
 
 msgid "range"
 msgstr "diapazons"
-
-msgid "separate .lrc file"
-msgstr "atsevišķs .lrc fails"
 
 msgid "to"
 msgstr "uz"
