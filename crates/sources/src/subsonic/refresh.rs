@@ -71,17 +71,9 @@ impl SubsonicSource {
         };
         let mut query = vec![("type", list_type.to_string()), ("size", "24".to_string())];
         query.extend(extra);
-        let value = self
-            .get_json::<serde_json::Value>("getAlbumList2", &query)
-            .await?;
-        let (albums, complete, _) =
-            subsonic_items::<SubsonicAlbum>(value, &["albumList2", "album"], "Home")?;
-        if !complete {
-            return Err(SourceError::Other(
-                "OpenSubsonic Home response contains an unreadable Album".to_string(),
-            ));
-        }
-        albums
+        let body: AlbumListBody = self.get_json("getAlbumList2", &query).await?;
+        body.album_list
+            .album
             .into_iter()
             .enumerate()
             .map(|(position, dto)| {
@@ -118,138 +110,46 @@ impl SubsonicSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
         check_cancelled(cancelled)?;
-        scan.reset_folders().await?;
-        let music_folders = match self.read_music_folders().await {
-            Ok(folders) => {
-                scan.begin_batch().await?;
-                for folder in &folders {
-                    scan.write_folder(
-                        &folder.id,
-                        &folder.name,
-                        &folder.name.to_lowercase(),
-                        &folder.name.to_lowercase(),
-                        None,
-                    )
-                    .await?;
-                }
-                scan.finish_batch().await?;
-                Some(folders)
-            }
-            Err(error) => {
-                crate::source::report_remote_failure(error, "OpenSubsonic", "Folders")?;
-                scan.discard_freshness();
-                None
-            }
-        };
-
-        if self.has_navidrome_library() {
-            if let Err(error) = self.stage_navidrome_core(scan, progress, cancelled).await {
-                crate::source::retain_remote_failure(
-                    error,
-                    "Navidrome",
-                    "catalog",
-                    scan.retain_incomplete_catalog(),
-                )
-                .await?;
-                scan.retain_folders().await?;
-            }
-        } else {
-            progress(stage(SourceReadStage::Albums, 0));
-            match self.emit_albums(scan, progress, cancelled).await {
-                Ok(albums_complete) => {
-                    progress(stage(SourceReadStage::Tracks, 0));
-                    let folders = music_folders.as_deref().unwrap_or_default();
-                    match self.emit_tracks(folders, scan, progress, cancelled).await {
-                        Ok(tracks_complete) => {
-                            if !albums_complete || !tracks_complete {
-                                scan.retain_incomplete_catalog().await?;
-                            }
-                        }
-                        Err(error) => {
-                            crate::source::retain_remote_failure(
-                                error,
-                                "OpenSubsonic",
-                                "catalog",
-                                scan.retain_incomplete_catalog(),
-                            )
-                            .await?;
-                            scan.retain_folders().await?;
-                        }
-                    }
-                }
-                Err(error) => {
-                    crate::source::retain_remote_failure(
-                        error,
-                        "OpenSubsonic",
-                        "catalog",
-                        scan.retain_incomplete_catalog(),
-                    )
-                    .await?;
-                    scan.retain_folders().await?;
-                }
-            }
-        }
-        if music_folders.is_none() {
-            scan.retain_folders().await?;
-        }
-
-        check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Artists, 0));
-        let artists = if self.has_navidrome_library() {
-            self.stage_navidrome_artists(scan, progress, cancelled)
-                .await
-        } else {
-            self.stage_artists(scan, progress, cancelled).await
-        };
-        if let Err(error) = artists {
-            crate::source::retain_remote_failure(
-                error,
-                "OpenSubsonic",
-                "Artists",
-                scan.retain_enrichment(),
+        let music_folders = self.read_music_folders().await?;
+        scan.begin_batch().await?;
+        for folder in &music_folders {
+            scan.write_folder(
+                &folder.id,
+                &folder.name,
+                &folder.name.to_lowercase(),
+                &folder.name.to_lowercase(),
+                None,
             )
             .await?;
+        }
+        scan.finish_batch().await?;
+        check_cancelled(cancelled)?;
+        if self.has_navidrome_library() {
+            self.stage_navidrome_library(scan, progress, cancelled)
+                .await?;
+        } else {
+            progress(stage(SourceReadStage::Albums, 0));
+            self.emit_albums(scan, progress, cancelled).await?;
+            progress(stage(SourceReadStage::Tracks, 0));
+            self.emit_tracks(&music_folders, scan, progress, cancelled)
+                .await?;
+            check_cancelled(cancelled)?;
+            progress(stage(SourceReadStage::Artists, 0));
+            self.stage_artists(scan, progress, cancelled).await?;
         }
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Genres, 0));
-        match self.read_genres().await {
-            Ok(genres) => {
-                scan.begin_batch().await?;
-                for genre in genres {
-                    stage_genre(scan, genre).await?;
-                }
-                scan.finish_batch().await?;
-            }
-            Err(error) => {
-                crate::source::retain_remote_failure(
-                    error,
-                    "OpenSubsonic",
-                    "Genres",
-                    scan.retain_enrichment(),
-                )
-                .await?;
-            }
+        scan.begin_batch().await?;
+        for genre in self.read_genres().await? {
+            stage_genre(scan, genre).await?;
         }
+        scan.finish_batch().await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Playlists, 0));
-        scan.reset_playlists().await?;
-        if let Err(error) = self.emit_playlists(scan, progress, cancelled).await {
-            crate::source::retain_remote_failure(
-                error,
-                "OpenSubsonic",
-                "Playlists",
-                scan.retain_playlists(),
-            )
-            .await?;
-        }
-
-        scan.reset_home().await?;
-        if let Err(error) = self.stage_home(scan).await {
-            crate::source::retain_remote_failure(error, "OpenSubsonic", "Home", scan.retain_home())
-                .await?;
-        }
+        self.emit_playlists(scan, progress, cancelled).await?;
+        self.stage_home(scan).await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Finalizing, 0));
@@ -261,12 +161,11 @@ impl SubsonicSource {
         scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<bool> {
+    ) -> SourceResult<()> {
         let mut offset = 0_usize;
-        let mut complete = true;
         loop {
             check_cancelled(cancelled)?;
-            let value = self
+            let body: AlbumListBody = self
                 .get_json(
                     "getAlbumList2",
                     &[
@@ -276,13 +175,12 @@ impl SubsonicSource {
                     ],
                 )
                 .await?;
-            let (page, page_complete, page_len) =
-                subsonic_items::<SubsonicAlbum>(value, &["albumList2", "album"], "Albums")?;
-            complete &= page_complete;
-            if page_len == 0 {
-                return Ok(complete);
+            let page = body.album_list.album;
+            if page.is_empty() {
+                return Ok(());
             }
-            offset = offset.checked_add(page_len).ok_or_else(|| {
+            let page_len = page.len();
+            offset = offset.checked_add(page.len()).ok_or_else(|| {
                 SourceError::Other("OpenSubsonic album offset overflowed".to_string())
             })?;
             scan.begin_batch().await?;
@@ -292,7 +190,7 @@ impl SubsonicSource {
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Albums, offset));
             if page_len < ALBUM_REQUEST_SIZE {
-                return Ok(complete);
+                return Ok(());
             }
         }
     }
@@ -303,14 +201,13 @@ impl SubsonicSource {
         scan: &mut Scan,
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
-    ) -> SourceResult<bool> {
+    ) -> SourceResult<()> {
         let scopes = if music_folders.is_empty() {
             vec![None]
         } else {
             music_folders.iter().map(Some).collect()
         };
         let mut emitted = 0;
-        let mut complete = true;
         for folder in scopes {
             let mut offset = 0_usize;
             loop {
@@ -327,16 +224,15 @@ impl SubsonicSource {
                 if let Some(folder) = folder {
                     extra.push(("musicFolderId", raw_item_id(folder.id.as_str()).to_string()));
                 }
-                let value = self
-                    .get_json::<serde_json::Value>("search3", &extra)
-                    .await?;
-                let (page, page_complete, page_len) =
-                    subsonic_items::<SubsonicSong>(value, &["searchResult3", "song"], "Tracks")?;
-                complete &= page_complete;
-                if page_len == 0 {
+                let body: SearchBody = self.get_json("search3", &extra).await?;
+                let page = body
+                    .search_result
+                    .and_then(|result| result.song)
+                    .unwrap_or_default();
+                if page.is_empty() {
                     break;
                 }
-                offset = offset.checked_add(page_len).ok_or_else(|| {
+                offset = offset.checked_add(page.len()).ok_or_else(|| {
                     SourceError::Other("OpenSubsonic track offset overflowed".to_string())
                 })?;
                 scan.begin_batch().await?;
@@ -352,7 +248,7 @@ impl SubsonicSource {
                 scan.write_track_folders(
                     &folder_links
                         .iter()
-                        .map(|(track, folder)| (track.as_str(), folder.as_str()))
+                        .map(|(track, folder)| library::ScanLink::new(track, folder, 0))
                         .collect::<Vec<_>>(),
                 )
                 .await?;
@@ -360,24 +256,14 @@ impl SubsonicSource {
                 progress(stage(SourceReadStage::Tracks, emitted));
             }
         }
-        Ok(complete)
+        Ok(())
     }
 
     async fn read_music_folders(&self) -> SourceResult<Vec<MusicFolder>> {
-        let value = self
-            .get_json::<serde_json::Value>("getMusicFolders", &[])
-            .await?;
-        let (folders, complete, _) = subsonic_items::<SubsonicMusicFolder>(
-            value,
-            &["musicFolders", "musicFolder"],
-            "Folders",
-        )?;
-        if !complete {
-            return Err(SourceError::Other(
-                "OpenSubsonic Folder response contains an unreadable item".to_string(),
-            ));
-        }
-        Ok(folders
+        let body: MusicFoldersBody = self.get_json("getMusicFolders", &[]).await?;
+        Ok(body
+            .music_folders
+            .music_folder
             .into_iter()
             .map(|folder| MusicFolder {
                 id: String::from(self.id("music-folder", &folder.id.0)),
@@ -388,15 +274,10 @@ impl SubsonicSource {
     }
 
     async fn read_genres(&self) -> SourceResult<Vec<Genre>> {
-        let value = self.get_json::<serde_json::Value>("getGenres", &[]).await?;
-        let (genres, complete, _) =
-            subsonic_items::<SubsonicGenre>(value, &["genres", "genre"], "Genres")?;
-        if !complete {
-            return Err(SourceError::Other(
-                "OpenSubsonic Genre response contains an unreadable item".to_string(),
-            ));
-        }
-        Ok(genres
+        let body: GenresBody = self.get_json("getGenres", &[]).await?;
+        Ok(body
+            .genres
+            .genre
             .into_iter()
             .map(|genre| genre_from_dto(self, genre))
             .collect())
@@ -408,16 +289,12 @@ impl SubsonicSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let value = self
-            .get_json::<serde_json::Value>("getPlaylists", &[])
-            .await?;
-        let (playlists, complete, total) =
-            subsonic_items::<SubsonicPlaylist>(value, &["playlists", "playlist"], "Playlists")?;
-        if !complete {
-            return Err(SourceError::Other(
-                "OpenSubsonic Playlist response contains an unreadable item".to_string(),
-            ));
-        }
+        let body: PlaylistsBody = self.get_json("getPlaylists", &[]).await?;
+        let playlists = body
+            .playlists
+            .map(|playlists| playlists.playlist)
+            .unwrap_or_default();
+        let total = playlists.len();
         for (position, playlist) in playlists.into_iter().enumerate() {
             check_cancelled(cancelled)?;
             let id = String::from(self.id("playlist", &raw_id_string(&playlist.id)));
@@ -440,7 +317,7 @@ impl SubsonicSource {
         let mut offset = 0_usize;
         loop {
             check_cancelled(cancelled)?;
-            let value = self
+            let body: SearchBody = self
                 .get_json(
                     "search3",
                     &[
@@ -454,16 +331,15 @@ impl SubsonicSource {
                     ],
                 )
                 .await?;
-            let (page, complete, page_len) =
-                subsonic_items::<SubsonicArtist>(value, &["searchResult3", "artist"], "Artists")?;
-            if !complete {
-                scan.retain_enrichment().await?;
-            }
-            if page_len == 0 {
+            let page = body
+                .search_result
+                .and_then(|result| result.artist)
+                .unwrap_or_default();
+            if page.is_empty() {
                 return Ok(());
             }
-            offset += page_len;
-            let finished = page_len < ALBUM_REQUEST_SIZE;
+            offset += page.len();
+            let finished = page.len() < ALBUM_REQUEST_SIZE;
             scan.begin_batch().await?;
             for artist in page {
                 stage_artist(scan, artist_from_dto(self, artist)).await?;
@@ -555,18 +431,6 @@ fn freshness(status: ScanStatus) -> Vec<u8> {
         marker.extend_from_slice(&0_u64.to_le_bytes());
     }
     marker
-}
-
-fn subsonic_items<T: serde::de::DeserializeOwned>(
-    value: serde_json::Value,
-    path: &[&str],
-    collection: &'static str,
-) -> SourceResult<(Vec<T>, bool, usize)> {
-    let items = crate::remote_http::take_json_array(value, path)?;
-    let count = items.len();
-    let (items, complete) =
-        crate::remote_http::decode_json_items(items, "OpenSubsonic", collection);
-    Ok((items, complete, count))
 }
 
 fn completed_freshness(status: ScanStatus) -> Option<Vec<u8>> {

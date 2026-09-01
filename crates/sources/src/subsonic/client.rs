@@ -1217,6 +1217,11 @@ pub(super) struct ScanStatus {
     pub(super) error: Option<String>,
 }
 #[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct AlbumListBody {
+    #[serde(default, rename = "albumList2")]
+    pub(super) album_list: AlbumList,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct AlbumBody {
     #[serde(default)]
     pub(super) album: AlbumDetail,
@@ -1237,6 +1242,11 @@ pub(super) struct ArtistDetail {
     pub(super) album: Vec<SubsonicAlbum>,
 }
 #[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct AlbumList {
+    #[serde(default)]
+    pub(super) album: Vec<SubsonicAlbum>,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct SearchBody {
     #[serde(default, rename = "searchResult3")]
     pub(super) search_result: Option<SearchResult>,
@@ -1249,6 +1259,16 @@ pub(super) struct SearchResult {
     pub(super) album: Option<Vec<SubsonicAlbum>>,
     #[serde(default)]
     pub(super) song: Option<Vec<SubsonicSong>>,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct MusicFoldersBody {
+    #[serde(default, rename = "musicFolders")]
+    pub(super) music_folders: MusicFolders,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct MusicFolders {
+    #[serde(default, rename = "musicFolder")]
+    pub(super) music_folder: Vec<SubsonicMusicFolder>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct SubsonicMusicFolder {
@@ -1278,6 +1298,25 @@ pub(super) struct ArtistsIndex {
 pub(super) struct ArtistIndex {
     #[serde(default)]
     pub(super) artist: Vec<SubsonicArtist>,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct GenresBody {
+    pub(super) genres: GenresList,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct GenresList {
+    #[serde(default)]
+    pub(super) genre: Vec<SubsonicGenre>,
+}
+#[derive(Clone, Debug, Default, Deserialize)]
+pub(super) struct PlaylistsBody {
+    #[serde(default)]
+    pub(super) playlists: Option<PlaylistsList>,
+}
+#[derive(Clone, Debug, Deserialize)]
+pub(super) struct PlaylistsList {
+    #[serde(default)]
+    pub(super) playlist: Vec<SubsonicPlaylist>,
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct PlaylistBody {

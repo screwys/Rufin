@@ -25,7 +25,7 @@ async fn fresh_schema_has_exact_whitelisted_tables() {
             .fetch_one(&mut reader)
             .await
             .expect("read final schema version"),
-        44
+        43
     );
     let tables = sqlx::query_scalar::<_, String>(
         "SELECT name FROM sqlite_schema
@@ -176,66 +176,6 @@ async fn schema_42_adds_stable_playlist_positions() {
 }
 
 #[tokio::test]
-async fn schema_43_makes_track_folder_membership_a_set() {
-    let directory = tempfile::tempdir().expect("temporary Store directory");
-    let path = directory.path().join("library.sqlite3");
-    let database = Database::open(&path).await.expect("create current Store");
-    drop(database);
-    let mut schema_43 = connection(&path, false).await;
-    sqlx::raw_sql(
-        "INSERT INTO sources(
-             source_key,object_id,display_name,normalized_name,
-             catalog_digest,artwork_digest
-         ) VALUES(1,'source','Source','source',zeroblob(32),zeroblob(32));
-         INSERT INTO tracks(
-             track_key,source_key,object_id,title,normalized_search,
-             display_album,display_artist,sort_text,duration_millis
-         ) VALUES(1,1,'track','Track','track','Album','Artist','track',180000);
-         INSERT INTO folders(folder_key,source_key,object_id,name,normalized_name,sort_text)
-         VALUES(1,1,'first','First','first','first'),(2,1,'second','Second','second','second');
-         DROP INDEX track_folders_folder_idx;
-         DROP TABLE track_folders;
-         CREATE TABLE track_folders(
-             track_key INTEGER NOT NULL REFERENCES tracks ON DELETE CASCADE,
-             folder_key INTEGER NOT NULL REFERENCES folders ON DELETE CASCADE,
-             position INTEGER NOT NULL CHECK(position>=0),
-             PRIMARY KEY(track_key,position),
-             UNIQUE(track_key,folder_key)
-         ) STRICT;
-         CREATE INDEX track_folders_folder_idx ON track_folders(folder_key,track_key);
-         INSERT INTO track_folders(track_key,folder_key,position) VALUES(1,1,0),(1,2,1);
-         PRAGMA user_version=43;",
-    )
-    .execute(&mut schema_43)
-    .await
-    .expect("create schema-43 fixture");
-    schema_43.close().await.expect("close schema-43 fixture");
-
-    let _database = Database::open(&path)
-        .await
-        .expect("migrate schema 43 in place");
-    let mut reader = connection(&path, false).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, String>(
-            "SELECT name FROM pragma_table_info('track_folders') ORDER BY cid"
-        )
-        .fetch_all(&mut reader)
-        .await
-        .expect("read Track Folder columns"),
-        ["track_key", "folder_key"]
-    );
-    assert_eq!(
-        sqlx::query_as::<_, (i64, i64)>(
-            "SELECT track_key,folder_key FROM track_folders ORDER BY folder_key"
-        )
-        .fetch_all(&mut reader)
-        .await
-        .expect("read migrated memberships"),
-        [(1, 1), (1, 2)]
-    );
-}
-
-#[tokio::test]
 async fn schema_40_store_migrates_into_current_schema() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
@@ -259,7 +199,7 @@ async fn schema_40_store_migrates_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read recovered schema version"),
-        44
+        43
     );
     assert_eq!(
         sqlx::query_as::<_, (String, i64)>("SELECT object_id, catalog_revision FROM sources",)
@@ -556,7 +496,7 @@ async fn schema_40_store_migrates_into_current_schema() {
     drop(database);
     let devel_path = directory.path().join("devel.sqlite3");
     let mut devel = connection(&devel_path, true).await;
-    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=45; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unsupported schema-45 Store");
+    sqlx::raw_sql("PRAGMA application_id=1381320270; PRAGMA user_version=44; CREATE TABLE devel_only(value INTEGER) STRICT;").execute(&mut devel).await.expect("create unsupported schema-44 Store");
     devel.close().await.expect("close Devel Store");
     let _database = Database::open(&devel_path)
         .await
@@ -567,7 +507,7 @@ async fn schema_40_store_migrates_into_current_schema() {
             .fetch_one(&mut rebuilt)
             .await
             .expect("read rebuilt final schema version"),
-        44
+        43
     );
     assert!(
         devel_path.exists(),
@@ -628,7 +568,7 @@ async fn schema_39_store_runs_the_committed_chain_into_current_schema() {
             .fetch_one(&mut reader)
             .await
             .expect("read current schema version"),
-        44
+        43
     );
     let definition = sqlx::query_scalar::<_, String>(
         "SELECT definition_json FROM smart_playlists WHERE object_id='smart-list'",
@@ -669,7 +609,7 @@ async fn failed_known_schema_migration_repairs_readable_families_and_opens() {
             .fetch_one(&mut restored)
             .await
             .expect("read repaired schema version"),
-        44
+        43
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM sources")

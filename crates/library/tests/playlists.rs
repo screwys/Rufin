@@ -23,7 +23,7 @@ async fn playlist_destinations_are_title_ordered_and_folder_scoped() {
         .fetch_one(&mut raw)
         .await
         .expect("insert destination folder");
-    sqlx::query("INSERT INTO track_folders(track_key,folder_key) VALUES (?1,?2)")
+    sqlx::query("INSERT INTO track_folders(track_key,folder_key,position) VALUES (?1,?2,1)")
         .bind(fixture.tracks[0])
         .bind(folder)
         .execute(&mut raw)
@@ -214,7 +214,7 @@ async fn playlist_edits_preserve_occurrence_identity_order_and_duplicates() {
     let mut raw = connection(&fixture.path).await;
     let scoped_folder = sqlx::query_scalar("INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES (?1,'playlist-folder','Playlist Folder','playlist folder','playlist folder') RETURNING folder_key")
         .bind(fixture.source).fetch_one(&mut raw).await.expect("insert Playlist Folder scope");
-    sqlx::query("INSERT INTO track_folders(track_key,folder_key) VALUES (?1,?2)")
+    sqlx::query("INSERT INTO track_folders(track_key,folder_key,position) VALUES (?1,?2,1)")
         .bind(fixture.tracks[0])
         .bind(scoped_folder)
         .execute(&mut raw)
