@@ -1149,7 +1149,10 @@ mod tests {
         };
 
         for template in smart_playlist_templates().into_iter().take(4) {
-            assert_eq!(template.definition.match_all, [expected.clone()]);
+            assert_eq!(
+                template.definition.match_all.as_slice(),
+                std::slice::from_ref(&expected)
+            );
         }
     }
 }
