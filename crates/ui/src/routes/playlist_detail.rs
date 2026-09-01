@@ -187,6 +187,7 @@ impl Shell {
                 self.placeholder_view(msgid("Smart Playlist"), msgid("This isn't available")),
             );
         };
+        crate::shell::navigation::update_sidebar_smart_playlist_pin_metadata(self, &detail.summary);
         self.shared_playlist_detail_route(
             PlaylistDetailOwner::Smart {
                 key,
