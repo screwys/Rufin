@@ -18,12 +18,8 @@ use sources::{
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct LocalAccessStatus {
     pub total_track_count: usize,
-    pub direct_match_count: usize,
-    pub prefix_match_count: usize,
-    pub metadata_match_count: usize,
-    pub unmatched_count: usize,
+    pub matched_track_count: usize,
     pub sample_source_path: Option<String>,
-    pub sample_local_path: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -238,7 +234,11 @@ pub trait SourcePort: Send + Sync {
     fn replace_local_folder(&self, current: String, replacement: PathBuf);
     fn remove_local_folder(&self, path: String);
     fn refresh_source(&self, source_id: SourceId);
-    fn save_local_access(&self, input: SourceLocalAccess) -> Receiver<Result<(), String>>;
+    fn save_local_access(
+        &self,
+        input: SourceLocalAccess,
+        wait_until_mapped: bool,
+    ) -> Receiver<Result<(), String>>;
     fn clear_local_access(&self, source_id: SourceId);
     fn forget_source(&self, source_id: SourceId);
 }

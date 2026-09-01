@@ -10,7 +10,6 @@ use std::path::{Path, PathBuf};
 use lofty::prelude::{Accessor, TaggedFileExt};
 use lofty::tag::ItemKey;
 use serde::Deserialize;
-use walkdir::WalkDir;
 
 use crate::source::SourceReadProgress;
 use crate::{
@@ -282,97 +281,6 @@ impl LocalSource {
             should_stop,
         )
     }
-}
-
-pub(crate) async fn apply_metadata_mapping(
-    database: &library::Database,
-    source: library::SourceKey,
-    root: &Path,
-    cancelled: &(dyn Fn() -> bool + Send + Sync),
-) -> SourceResult<usize> {
-    let mut worker = media::Worker::default();
-    let mut accepted = 0;
-    for entry in WalkDir::new(root).follow_links(false) {
-        if cancelled() {
-            return Err(SourceError::Cancelled);
-        }
-        let entry = entry.map_err(|error| SourceError::Other(error.to_string()))?;
-        if !entry.file_type().is_file() {
-            continue;
-        }
-        let path = entry.into_path();
-        let Some(metadata) = media::read_basic_audio(&mut worker, path.clone()) else {
-            continue;
-        };
-        let object_id = database
-            .mapping_track_object(
-                source,
-                &metadata.title,
-                &metadata.album,
-                &metadata.artist,
-                i64::from(metadata.disc_number),
-                i64::from(metadata.track_number),
-                i64::from(metadata.duration_seconds) * 1000,
-                &library::ReadCancellation::new(),
-            )
-            .await?;
-        let Some(object_id) = object_id else { continue };
-        let file = fs::metadata(&path).map_err(|error| SourceError::Other(error.to_string()))?;
-        let mtime_ns = file
-            .modified()
-            .ok()
-            .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-            .and_then(|value| i64::try_from(value.as_nanos()).ok())
-            .unwrap_or_default();
-        #[cfg(unix)]
-        let (device_id, inode) = {
-            use std::os::unix::fs::MetadataExt;
-            (
-                i64::try_from(file.dev()).ok(),
-                i64::try_from(file.ino()).ok(),
-            )
-        };
-        #[cfg(not(unix))]
-        let (device_id, inode) = (None, None);
-        let media_uri = url::Url::from_file_path(&path)
-            .map_err(|()| SourceError::Other("could not create mapped file URI".to_string()))?
-            .to_string();
-        let mut hash = blake3::Hasher::new();
-        hash.update(path.to_string_lossy().as_bytes());
-        hash.update(&file.len().to_le_bytes());
-        hash.update(&mtime_ns.to_le_bytes());
-        database
-            .upsert_local_access(
-                source,
-                &library::LocalAccessWrite {
-                    track_object_id: Some(object_id),
-                    origin: library::LocalAccessOrigin::Mapping,
-                    path: path.to_string_lossy().into_owned(),
-                    root: root.to_string_lossy().into_owned(),
-                    relative_path: path
-                        .strip_prefix(root)
-                        .unwrap_or(&path)
-                        .to_string_lossy()
-                        .into_owned(),
-                    size_bytes: i64::try_from(file.len()).unwrap_or(i64::MAX),
-                    mtime_ns,
-                    device_id,
-                    inode,
-                    parser_version: 1,
-                    title: metadata.title,
-                    album: metadata.album,
-                    artist: metadata.artist,
-                    disc_number: i64::from(metadata.disc_number),
-                    track_number: i64::from(metadata.track_number),
-                    duration_millis: i64::from(metadata.duration_seconds) * 1000,
-                    media_uri,
-                    loudness_analysis_key: *hash.finalize().as_bytes(),
-                },
-            )
-            .await?;
-        accepted += 1;
-    }
-    Ok(accepted)
 }
 
 fn observation_revision_values(size_bytes: Option<i64>, mtime_ns: i64) -> String {

@@ -120,46 +120,6 @@ pub(super) struct Worker {
     discovery: discovery::Reader,
 }
 
-/// Reads only the fields used to match a remote track to a local file.
-///
-/// Local-access discovery deliberately skips pictures, MusicBrainz fields,
-/// relationships, and Rufin identities. A readable file with invalid metadata
-/// still has a useful filename-based match candidate.
-pub(super) fn read_basic_audio(worker: &mut Worker, path: PathBuf) -> Option<BasicAudioMetadata> {
-    let file = fs::File::open(&path).ok()?;
-    let tagged_file = read_lofty_file(file, false).ok().flatten();
-    let topology_admitted = tagged_file
-        .as_ref()
-        .filter(|file| requires_topology_admission(file.file_type()))
-        .map(|_| worker.discovery.read(&path));
-    let tagged_file = tagged_file.filter(|file| {
-        if requires_topology_admission(file.file_type()) {
-            topology_admitted.as_ref().is_some_and(Option::is_some)
-        } else {
-            lofty_supplies_required_audio(file)
-        }
-    });
-    let discovered = tagged_file
-        .is_none()
-        .then(|| {
-            topology_admitted
-                .flatten()
-                .or_else(|| worker.discovery.read(&path))
-        })
-        .flatten();
-    let Some(tagged_file) = tagged_file.as_ref() else {
-        return Some(basic_audio_metadata_from_discoverer(
-            &path,
-            discovered.as_ref(),
-        ));
-    };
-    let tag = tagged_file
-        .primary_tag()
-        .or_else(|| tagged_file.first_tag());
-    let duration_seconds = lofty_duration_seconds(&tagged_file);
-    Some(basic_audio_metadata(&path, tag, duration_seconds))
-}
-
 pub(super) fn read_media(
     worker: &mut Worker,
     path: PathBuf,

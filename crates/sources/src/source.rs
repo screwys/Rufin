@@ -2115,7 +2115,7 @@ impl Source {
         local_prefix: Option<&str>,
         sample_source_path: Option<&str>,
         cancelled: Arc<AtomicBool>,
-    ) -> SourceResult<usize> {
+    ) -> SourceResult<PathBuf> {
         let root =
             std::fs::canonicalize(root).map_err(|error| SourceError::Other(error.to_string()))?;
         if cancelled.load(Ordering::Acquire) {
@@ -2139,7 +2139,7 @@ impl Source {
         )?;
         database.clear_mapping_access(source).await?;
         database.upsert_local_access(source, &access).await?;
-        Ok(1)
+        Ok(root)
     }
 
     pub async fn complete_local_mapping(
@@ -2178,10 +2178,6 @@ impl Source {
                 }
             }
         }
-        accepted += crate::local::apply_metadata_mapping(database, source, &root, &|| {
-            cancelled.load(Ordering::Acquire)
-        })
-        .await?;
         Ok(accepted)
     }
 }
@@ -2253,35 +2249,106 @@ fn mapped_local_path(
     local_prefix: Option<&str>,
     source_path: &str,
 ) -> Option<PathBuf> {
+    let candidate = project_local_access_path(root, server_prefix, local_prefix, source_path)?;
+    mapped_file(root, candidate)
+}
+
+pub fn match_local_access_sample(
+    root: &std::path::Path,
+    server_prefix: Option<&str>,
+    local_prefix: Option<&str>,
+    source_path: &str,
+) -> Option<Option<String>> {
+    let root = std::fs::canonicalize(root).ok()?;
+    let server_prefix = server_prefix
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty());
+    if mapped_local_path(&root, server_prefix, local_prefix, source_path).is_some() {
+        return Some(server_prefix.map(str::to_string));
+    }
+    if server_prefix.is_some() {
+        return None;
+    }
+    let inferred = infer_server_prefix(&root, local_prefix, source_path)?;
+    mapped_local_path(&root, Some(&inferred), local_prefix, source_path).map(|_| Some(inferred))
+}
+
+fn infer_server_prefix(
+    root: &std::path::Path,
+    local_prefix: Option<&str>,
+    source_path: &str,
+) -> Option<String> {
     let mut base = root.to_path_buf();
-    if let Some(prefix) = local_prefix.filter(|prefix| !prefix.trim().is_empty()) {
+    if let Some(prefix) = local_prefix
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+    {
         base.push(prefix);
     }
-    if let Some(prefix) = server_prefix {
+    let starts = std::iter::once(0).chain(
+        source_path
+            .char_indices()
+            .filter(|(_, character)| *character == '/' || *character == '\\')
+            .map(|(index, character)| index + character.len_utf8()),
+    );
+    for start in starts {
+        let suffix = source_path.get(start..)?.trim_start_matches(['/', '\\']);
+        if suffix.is_empty() {
+            continue;
+        }
+        let candidate = base.join(suffix.replace('\\', "/"));
+        if mapped_file(root, candidate).is_some() {
+            let prefix = source_path.get(..start)?.trim_end_matches(['/', '\\']);
+            return Some(if prefix.is_empty() {
+                source_path
+                    .chars()
+                    .next()
+                    .filter(|character| *character == '/' || *character == '\\')
+                    .map_or_else(String::new, |character| character.to_string())
+            } else {
+                prefix.to_string()
+            });
+        }
+    }
+    None
+}
+
+/// Applies one saved server-prefix/local-prefix formula to a reported source path.
+///
+/// File existence and containment within `root` remain the caller's responsibility.
+pub fn project_local_access_path(
+    root: &std::path::Path,
+    server_prefix: Option<&str>,
+    local_prefix: Option<&str>,
+    source_path: &str,
+) -> Option<PathBuf> {
+    let mut base = root.to_path_buf();
+    if let Some(prefix) = local_prefix
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+    {
+        base.push(prefix);
+    }
+    if let Some(prefix) = server_prefix
+        .map(str::trim)
+        .filter(|prefix| !prefix.is_empty())
+    {
         let relative = source_path
             .strip_prefix(prefix)?
             .trim_start_matches(['/', '\\']);
-        return mapped_file(root, base.join(relative.replace('\\', "/")));
+        return Some(base.join(relative.replace('\\', "/")));
     }
-    if let Some(path) = mapped_file(root, PathBuf::from(source_path)) {
-        return Some(path);
+    if reported_path_is_absolute(source_path) {
+        Some(PathBuf::from(source_path))
+    } else {
+        Some(base.join(source_path.replace('\\', "/")))
     }
-    let components = std::path::Path::new(source_path)
-        .components()
-        .filter_map(|component| match component {
-            std::path::Component::Normal(value) => Some(value),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
-    (0..components.len()).find_map(|start| {
-        let path = components[start..]
-            .iter()
-            .fold(base.clone(), |mut path, part| {
-                path.push(part);
-                path
-            });
-        mapped_file(root, path)
-    })
+}
+
+pub fn reported_path_is_absolute(value: &str) -> bool {
+    std::path::Path::new(value).is_absolute()
+        || value.as_bytes().get(1) == Some(&b':')
+        || value.starts_with("\\\\")
 }
 
 fn mapped_file(root: &std::path::Path, candidate: PathBuf) -> Option<PathBuf> {
@@ -2685,7 +2752,53 @@ mod refresh_laws {
     }
 
     #[test]
-    fn representative_mapping_finds_the_existing_suffix_without_a_manual_server_prefix() {
+    fn one_prefix_formula_projects_jellyfin_navidrome_and_subsonic_paths() {
+        let root = tempfile::tempdir().expect("local music root");
+        let track = root.path().join("Artist").join("Album").join("Track.flac");
+        std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
+        std::fs::write(&track, b"media").expect("write Track");
+        let canonical_root = root.path().canonicalize().expect("canonical music root");
+        let canonical_track = track.canonicalize().expect("canonical Track");
+
+        assert_eq!(
+            mapped_local_path(
+                &canonical_root,
+                Some("/srv/navidrome/music"),
+                None,
+                "/srv/navidrome/music/Artist/Album/Track.flac",
+            ),
+            Some(canonical_track.clone())
+        );
+        assert_eq!(
+            match_local_access_sample(
+                &canonical_root,
+                None,
+                None,
+                "/srv/navidrome/music/Artist/Album/Track.flac",
+            ),
+            Some(Some("/srv/navidrome/music".to_string()))
+        );
+        assert_eq!(
+            project_local_access_path(
+                &canonical_root,
+                Some("/media/music"),
+                None,
+                "/media/music/Artist/Album/Track.flac",
+            ),
+            Some(canonical_track.clone())
+        );
+        assert_eq!(
+            project_local_access_path(&canonical_root, None, None, "Artist/Album/Track.flac",),
+            Some(canonical_track)
+        );
+        assert_eq!(
+            match_local_access_sample(&canonical_root, None, None, "Artist/Album/Track.flac",),
+            Some(None)
+        );
+    }
+
+    #[test]
+    fn mapping_without_a_prefix_does_not_search_for_a_different_formula_per_track() {
         let root = tempfile::tempdir().expect("local music root");
         let track = root.path().join("Artist").join("Album").join("Track.flac");
         std::fs::create_dir_all(track.parent().expect("Track parent")).expect("create Album");
@@ -2697,9 +2810,9 @@ mod refresh_laws {
                 &canonical_root,
                 None,
                 None,
-                "/srv/navidrome/music/Artist/Album/Track.flac",
+                "/different/server/root/Artist/Album/Track.flac",
             ),
-            Some(track.canonicalize().expect("canonical Track"))
+            None
         );
     }
 }

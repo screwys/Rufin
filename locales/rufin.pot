@@ -45,16 +45,6 @@ msgid ""
 "This can use significant CPU, battery, and network bandwidth for a long time."
 msgstr ""
 
-#, rust-format
-msgid ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-msgstr[1] ""
-
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
@@ -95,16 +85,6 @@ msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
 msgstr ""
-
-#, rust-format
-msgid ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-msgstr[1] ""
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -338,9 +318,6 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
-
-msgid "Checking..."
 msgstr ""
 
 msgid "Choose a local music folder"
@@ -700,9 +677,6 @@ msgstr ""
 msgid "Featured genres"
 msgstr ""
 
-msgid "File path replacement"
-msgstr ""
-
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
@@ -949,8 +923,11 @@ msgstr ""
 msgid "Local file mapping is no longer available"
 msgstr ""
 
-msgid "Local file mapping"
-msgstr ""
+#, rust-format
+msgid "Local file mapping: {matched} of {total} server path matches"
+msgid_plural "Local file mapping: {matched} of {total} server paths match"
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "Local library"
 msgstr ""
@@ -995,6 +972,9 @@ msgid "Manage"
 msgstr ""
 
 msgid "Mapped Local Path"
+msgstr ""
+
+msgid "Mapped local file not found"
 msgstr ""
 
 msgid "Maximum year"
@@ -1583,9 +1563,6 @@ msgstr ""
 msgid "Remove from Queue"
 msgstr ""
 
-msgid "Remove prefix"
-msgstr ""
-
 msgid "Remove rule"
 msgstr ""
 
@@ -1675,6 +1652,12 @@ msgstr ""
 
 msgid "Saved Sources"
 msgstr ""
+
+#, rust-format
+msgid "Saved mapping. {matched} of {total} server path matches"
+msgid_plural "Saved mapping. {matched} of {total} server paths match"
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "Saved to"
 msgstr ""
@@ -1798,9 +1781,6 @@ msgid "Server is unreachable"
 msgstr ""
 
 msgid "Server lyrics are off in private mode"
-msgstr ""
-
-msgid "Server path"
 msgstr ""
 
 msgid "Server prefix doesn't match"

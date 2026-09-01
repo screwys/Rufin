@@ -144,7 +144,6 @@
     <file compressed="true">preferences/source/credential_host.ui</file>
     <file compressed="true">preferences/source/local_setup.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>
-    <file compressed="true">preferences/source/metadata_recovery.ui</file>
     <file compressed="true">preferences/source/server_actions.ui</file>
     <file compressed="true">preferences/source/setup_scaffold.ui</file>
     <file compressed="true">routes/collection_grid_card.ui</file>
