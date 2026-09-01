@@ -69,14 +69,6 @@ msgstr[1] ""
 "metateabega, {unmatched} puuduvat vastet {total} loo puhul"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Laulusõnade laadimiseks ja nende salvestamiseks rakenduse vahemällu klõpsa "
-"kirjet. Klõpsa nuppu „Salvesta“, kui soovid salvestada need ka "
-"muusikafailide kausta"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -185,6 +177,11 @@ msgstr "Lisa reegel"
 
 msgid "Add a matching server prefix"
 msgstr "Sisesta sobiv serveri prefiks"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "Kohalik muusikakaust"
 
 msgid "Add a new source"
 msgstr "Lisa uus allikas"
@@ -374,6 +371,9 @@ msgid_plural "Changes apply to {count} tracks"
 msgstr[0] "Muudatused rakenduvad {count}-le loole"
 msgstr[1] "Muudatused rakenduvad {count}-le loole"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "Kontrollin…"
 
@@ -403,11 +403,21 @@ msgstr "Klassikaline muusika"
 msgid "Clear Mapping"
 msgstr "Eemalda vastendus"
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "Esita esitajat"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
 
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
+
+#, fuzzy
+#| msgid "Sort title"
+msgid "Clear title"
+msgstr "Järjesta pealkirja alusel"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
@@ -963,9 +973,6 @@ msgstr "Kraasimine ListenBrainzi teenuses"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "Laadin kaustu…"
 
 msgid "Local File Access"
 msgstr "Ligipääs kohalikele failidele"
@@ -1601,6 +1608,11 @@ msgstr "Eemalda reegel ja allalaaditu"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Eemalda reegel ja säilita allalaaditu"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "Eemalda kõik allalaadimised"
+
 msgid "Remove and Delete"
 msgstr "Eemalda ja kustuta"
 
@@ -1654,9 +1666,6 @@ msgstr "Korda"
 
 msgid "ReplayGain"
 msgstr "Esitusvaljuse tundlikkus"
-
-msgid "Reset equalizer"
-msgstr "Lähtesta ekvalaiser"
 
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
@@ -1980,9 +1989,6 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Voogedastuse kvaliteet"
 
-msgid "Support"
-msgstr "Kasutajatugi"
-
 msgid "Switch Search/Favorites tabs"
 msgstr "Vaheta otsingute ja lemmikute vahekaardid"
 
@@ -2105,6 +2111,9 @@ msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
 
 msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
+
+msgid "Use This Source"
+msgstr "Kasuta seda allikat"
 
 msgid "Use a number above zero"
 msgstr "Kasuta nullist suuremat numbrit"
@@ -2278,6 +2287,23 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Laulusõnade laadimiseks ja nende salvestamiseks rakenduse vahemällu "
+#~ "klõpsa kirjet. Klõpsa nuppu „Salvesta“, kui soovid salvestada need ka "
+#~ "muusikafailide kausta"
+
+#~ msgid "Loading folders..."
+#~ msgstr "Laadin kaustu…"
+
+#~ msgid "Reset equalizer"
+#~ msgstr "Lähtesta ekvalaiser"
+
+#~ msgid "Support"
+#~ msgstr "Kasutajatugi"
 
 #~ msgid "Use Template"
 #~ msgstr "Kasuta malli"
@@ -2768,9 +2794,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Unsynchronized"
 #~ msgstr "Sünkroonimata"
-
-#~ msgid "Use This Source"
-#~ msgstr "Kasuta seda allikat"
 
 #~ msgid "Use remote lyric providers when server lyrics are unavailable"
 #~ msgstr ""

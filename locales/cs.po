@@ -70,14 +70,6 @@ msgstr[2] ""
 "{unmatched} neshodné z {total} sladeb"
 
 msgid ""
-"Tap to the entry to load the lyrics and save in the app cache, click save "
-"only if you also want to save it in your music folder"
-msgstr ""
-"Klepnutím na položku načtete text skladby a uložíte jej do mezipaměti "
-"aplikace, klikněte na Uložit pouze v případě, že jej chcete uložit také do "
-"složky s hudbou"
-
-msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
@@ -184,6 +176,11 @@ msgstr "Přidat pravidlo"
 
 msgid "Add a matching server prefix"
 msgstr "Přidejte odpovídající prefix serveru"
+
+#, fuzzy
+#| msgid "Local music folder"
+msgid "Add a music folder"
+msgstr "Místní hudební složka"
 
 msgid "Add a new source"
 msgstr "Přidat nový zdroj"
@@ -380,6 +377,9 @@ msgstr[0] "Změny se vztahují na {count} skladbu"
 msgstr[1] "Změny se vztahují na {count} skladby"
 msgstr[2] "Změny se vztahují na {count} skladeb"
 
+msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
 msgid "Checking..."
 msgstr "Kontrola..."
 
@@ -409,11 +409,21 @@ msgstr "Klasická hudba"
 msgid "Clear Mapping"
 msgstr "Vymazat mapování"
 
+#, fuzzy
+#| msgid "Play artist"
+msgid "Clear artist"
+msgstr "Přehrát interpreta"
+
 msgid "Clear fetched lyrics for this track"
 msgstr "Vymazat načtený text pro tuto skladbu"
 
 msgid "Clear queue"
 msgstr "Vymazat frontu"
+
+#, fuzzy
+#| msgid "Sort title"
+msgid "Clear title"
+msgstr "Seřadit podle názvu"
 
 msgid "Clearing queue also clears the current song"
 msgstr ""
@@ -985,9 +995,6 @@ msgstr "Scrobblování na ListenBrainz"
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
-
-msgid "Loading folders..."
-msgstr "Načítání složek..."
 
 msgid "Local File Access"
 msgstr "Přístup k místním souborům"
@@ -1644,6 +1651,11 @@ msgstr "Odebrat pravidlo a stahování"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Odebrat pravidlo, zachovat stažené soubory"
 
+#, fuzzy
+#| msgid "Remove All Downloads"
+msgid "Remove all downloads"
+msgstr "Odstranit všechny stažené soubory"
+
 msgid "Remove and Delete"
 msgstr "Odebrat a smazat"
 
@@ -1699,9 +1711,6 @@ msgstr "Opakovat"
 
 msgid "ReplayGain"
 msgstr ""
-
-msgid "Reset equalizer"
-msgstr "Resetovat equalizer"
 
 msgid "Reset to defaults"
 msgstr "Obnovit výchozí nastavení"
@@ -2036,9 +2045,6 @@ msgstr ""
 msgid "Stream quality"
 msgstr "Kvalita streamu"
 
-msgid "Support"
-msgstr "Uživatelská podpora"
-
 msgid "Switch Search/Favorites tabs"
 msgstr ""
 
@@ -2165,6 +2171,9 @@ msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
+
+msgid "Use This Source"
+msgstr ""
 
 msgid "Use a number above zero"
 msgstr "Zadejte číslo větší než nula"
@@ -2344,6 +2353,23 @@ msgid_plural "{count} years ago"
 msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
+
+#~ msgid ""
+#~ "Tap to the entry to load the lyrics and save in the app cache, click save "
+#~ "only if you also want to save it in your music folder"
+#~ msgstr ""
+#~ "Klepnutím na položku načtete text skladby a uložíte jej do mezipaměti "
+#~ "aplikace, klikněte na Uložit pouze v případě, že jej chcete uložit také "
+#~ "do složky s hudbou"
+
+#~ msgid "Loading folders..."
+#~ msgstr "Načítání složek..."
+
+#~ msgid "Reset equalizer"
+#~ msgstr "Resetovat equalizer"
+
+#~ msgid "Support"
+#~ msgstr "Uživatelská podpora"
 
 #~ msgid "Go to Artist"
 #~ msgstr "Přejít na interpreta"
