@@ -1155,6 +1155,31 @@ pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
     let _ = request_sidebar_pins(shell);
 }
 
+pub(crate) fn update_sidebar_smart_playlist_pin_metadata(
+    shell: &Shell,
+    summary: &SmartPlaylistRow,
+) {
+    let item = {
+        let mut items = shell.navigation.pin_items.borrow_mut();
+        let Some(SidebarPinItem::SmartPlaylist(playlist)) = items.iter_mut().find(|item| {
+            matches!(item, SidebarPinItem::SmartPlaylist(playlist) if playlist.smart_playlist_key == summary.smart_playlist_key)
+        }) else {
+            return;
+        };
+        playlist.track_count = summary.track_count;
+        playlist.duration_millis = summary.duration_millis;
+        SidebarPinItem::SmartPlaylist(playlist.clone())
+    };
+    let Some(key) = sidebar_pin_route_key(&item.route()) else {
+        return;
+    };
+    if let Some(widget) =
+        keyed_sidebar_pin_widgets(&shell.navigation_view.normal_nav_pins).get(&key)
+    {
+        update_sidebar_pin_widget_metadata(widget, &item);
+    }
+}
+
 fn sidebar_pin_items(shell: &Shell) -> Vec<SidebarPinItem> {
     shell.navigation.pin_items.borrow().clone()
 }

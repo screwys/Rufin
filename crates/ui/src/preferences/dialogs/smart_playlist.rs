@@ -111,7 +111,11 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
     let most_played = |name, activity_period| SmartPlaylistTemplate {
         name,
         definition: SmartPlaylistDefinition {
-            match_all: Vec::new(),
+            match_all: vec![SmartPlaylistRule {
+                field: SmartPlaylistRuleField::PlayCount,
+                operator: SmartPlaylistRuleOperator::Above,
+                value: Some(SmartPlaylistRuleValue::Number(0)),
+            }],
             match_any: Vec::new(),
             sort_field: SmartPlaylistSort::PlayCount,
             descending: true,
@@ -1077,7 +1081,7 @@ fn connect_editor_name_validation(button: &gtk::Button, editor: &SmartPlaylistEd
 mod tests {
     use std::{cell::RefCell, rc::Rc};
 
-    use super::{change_rule_operator, remove_rule};
+    use super::{change_rule_operator, remove_rule, smart_playlist_templates};
     use ::library::{
         SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator,
         SmartPlaylistRuleValue,
@@ -1134,5 +1138,21 @@ mod tests {
         let rules = rules.borrow();
         assert_eq!(rules.len(), 1);
         assert_eq!(rules[0].field, SmartPlaylistRuleField::Genre);
+    }
+
+    #[test]
+    fn most_played_templates_only_include_tracks_played_in_the_period() {
+        let expected = SmartPlaylistRule {
+            field: SmartPlaylistRuleField::PlayCount,
+            operator: SmartPlaylistRuleOperator::Above,
+            value: Some(SmartPlaylistRuleValue::Number(0)),
+        };
+
+        for template in smart_playlist_templates().into_iter().take(4) {
+            assert_eq!(
+                template.definition.match_all.as_slice(),
+                std::slice::from_ref(&expected)
+            );
+        }
     }
 }
