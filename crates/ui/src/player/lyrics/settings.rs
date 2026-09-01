@@ -344,11 +344,11 @@ fn selected_source_uses_local_lyrics_storage(shell: &Shell) -> bool {
         .is_some_and(|source| {
             source.kind == "local"
                 || matches!(source.kind.as_str(), "navidrome" | "subsonic")
-                    && selected_source_has_local_mapping(shell)
+                    && selected_source_has_local_access(shell)
         })
 }
 
-fn selected_source_has_local_mapping(shell: &Shell) -> bool {
+fn selected_source_has_local_access(shell: &Shell) -> bool {
     let Some(source_id) = shell
         .selected_library()
         .as_deref()
@@ -363,12 +363,7 @@ fn selected_source_has_local_mapping(shell: &Shell) -> bool {
         .local_access
         .iter()
         .find(|summary| summary.source_id == source_id)
-        .is_some_and(|summary| {
-            summary.status.direct_match_count
-                + summary.status.prefix_match_count
-                + summary.status.metadata_match_count
-                > 0
-        })
+        .is_some_and(|summary| summary.access.is_some())
 }
 
 fn populate_provider_rows(
