@@ -1,33 +1,21 @@
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
-use crate::runtime::source::{
-    CredentialInput, CredentialPreset, LocalAccessStatus, OpenSubsonicAuthentication, SourceHandle,
-    SourceLocalAccess, SourceSummary,
-};
+use crate::runtime::source::{LocalAccessStatus, SourceHandle, SourceLocalAccess, SourceSummary};
 use adw::prelude::*;
 use gtk::{gio, glib};
 
 use localization::{tr, trn_with};
 use sources::SourceId;
 
-use super::field_layout::{
-    compact_field_row_group, install_compact_field_row_responsiveness,
-    install_compact_field_row_responsiveness_at, style_compact_field_row,
-};
-use super::login::{
-    connect_folder_button, open_subsonic_authentication_switch, source_kind_title,
-    source_settings_group,
-};
+use super::field_layout::install_compact_field_row_responsiveness_at;
+use super::login::{connect_folder_button, source_kind_title, source_settings_group};
 use crate::layout::large_popup_content_width;
 use crate::shell::Shell;
-use crate::shell::actions::text_button;
 
 const MANAGE_SERVER_CLAMP_WIDTH: i32 = 560;
 const METADATA_RECOVERY_FIELD_STACK_WIDTH: i32 = 520;
-const METADATA_RECOVERY_COLUMN_SPACING: i32 = 18;
-const METADATA_RECOVERY_ROW_SPACING: i32 = 14;
 
 #[derive(Clone)]
 struct ManageServerExitSlot {
@@ -232,24 +220,26 @@ fn manage_server_content(
         (access, status, selected)
     };
     let sample_source_path = access_status.sample_source_path.clone();
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_vexpand(true);
-
-    let clamp = adw::Clamp::new();
+    let resource = crate::ui_resource::MANAGE_SERVER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        scroller: gtk::ScrolledWindow,
+        clamp: adw::Clamp,
+        content: gtk::Box,
+        mapping_group: adw::PreferencesGroup,
+        mapping_expander: adw::ExpanderRow,
+        folder_row: adw::ActionRow,
+        folder_button: gtk::Button,
+        server_prefix: adw::EntryRow,
+        local_prefix: adw::EntryRow,
+        sample_row: adw::ActionRow,
+        preview_row: adw::ActionRow,
+        status: gtk::Label,
+        actions: gtk::Box,
+        remove: gtk::Button,
+        save: gtk::Button,
+    });
     clamp.set_maximum_size(large_popup_content_width(MANAGE_SERVER_CLAMP_WIDTH));
-    clamp.set_tightening_threshold(360);
-    clamp.set_margin_top(8);
-    clamp.set_margin_bottom(20);
-    clamp.set_margin_start(24);
-    clamp.set_margin_end(24);
-    clamp.set_valign(gtk::Align::Start);
-    scroller.set_child(Some(&clamp));
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.add_css_class("manage-server-content");
-    content.set_hexpand(true);
-    clamp.set_child(Some(&content));
     match shell.products.source.configured_source(&server.id) {
         Ok(Some(saved)) => {
             if let Some(settings_group) = source_settings_group(shell, &saved) {
@@ -302,85 +292,40 @@ fn manage_server_content(
         local_prefix: saved_local_prefix.trim().to_string(),
     };
 
-    let folder_row = adw::ActionRow::builder()
-        .title(tr("Local music folder"))
-        .use_markup(false)
-        .subtitle(
-            access
-                .as_ref()
-                .map(|access| access.root_path.display().to_string())
-                .unwrap_or_else(|| tr("No folder selected")),
-        )
-        .build();
-    let folder_button = gtk::Button::with_label(&tr("Choose"));
-    folder_button.set_valign(gtk::Align::Center);
-    folder_row.add_suffix(&folder_button);
+    folder_row.set_subtitle(
+        &access
+            .as_ref()
+            .map(|access| access.root_path.display().to_string())
+            .unwrap_or_else(|| tr("No folder selected")),
+    );
     folder_row.set_activatable_widget(Some(&folder_button));
 
-    let server_prefix = adw::EntryRow::builder()
-        .title(tr("Server Prefix"))
-        .text(&display_server_prefix)
-        .build();
+    server_prefix.set_text(&display_server_prefix);
 
-    let local_prefix = adw::EntryRow::builder()
-        .title(tr("Local Prefix"))
-        .text(&display_local_prefix)
-        .build();
+    local_prefix.set_text(&display_local_prefix);
 
     let sample_subtitle = sample_source_path
         .clone()
         .unwrap_or_else(|| tr("No cached server path yet"));
-    let sample_row = adw::ActionRow::builder()
-        .title(tr("Server Sample"))
-        .use_markup(false)
-        .subtitle(sample_subtitle)
-        .build();
+    sample_row.set_subtitle(&sample_subtitle);
 
-    let preview_row = adw::ActionRow::builder()
-        .title(tr("Mapped Local Path"))
-        .use_markup(false)
-        .subtitle(preview_local_path_text(
-            sample_source_path.as_deref(),
-            server_prefix.text().as_str(),
-            local_prefix.text().as_str(),
-            saved_folder.as_deref(),
-        ))
-        .build();
-    let group = adw::PreferencesGroup::builder()
-        .title(tr("Local File Access"))
-        .build();
+    preview_row.set_subtitle(&preview_local_path_text(
+        sample_source_path.as_deref(),
+        server_prefix.text().as_str(),
+        local_prefix.text().as_str(),
+        saved_folder.as_deref(),
+    ));
     let subtitle = if access.is_some() {
         tr("Local file access configured")
     } else {
         tr("Use local files for playback, lyrics, and supported metadata editing")
     };
-    let mapping_expander = adw::ExpanderRow::builder()
-        .title(tr("Local File Mapping"))
-        .subtitle(subtitle)
-        .build();
-    mapping_expander.add_row(&folder_row);
-    mapping_expander.add_row(&server_prefix);
-    mapping_expander.add_row(&local_prefix);
-    mapping_expander.add_row(&sample_row);
-    mapping_expander.add_row(&preview_row);
-    group.add(&mapping_expander);
-    content.append(&group);
+    mapping_expander.set_subtitle(&subtitle);
+    content.append(&mapping_group);
 
-    let status = gtk::Label::new(None);
-    status.add_css_class("muted");
-    status.add_css_class("manage-server-status");
-    status.set_wrap(true);
-    status.set_xalign(0.0);
     content.append(&status);
 
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    actions.set_halign(gtk::Align::End);
-    let remove = text_button("rufin-edit-clear-symbolic", "Clear Mapping");
     remove.set_visible(access.is_some());
-    let save = text_button("rufin-document-save-symbolic", "Save Mapping");
-    save.add_css_class("suggested-action");
-    actions.append(&remove);
-    actions.append(&save);
     content.append(&actions);
     status.set_visible(mapping_expander.is_expanded());
     actions.set_visible(mapping_expander.is_expanded());
@@ -539,67 +484,40 @@ pub(crate) fn metadata_local_access_recovery_form(
             .map(PathBuf::from)
             .unwrap_or_else(|| access.root_path.clone())
     });
-    let fields = gtk::Box::new(gtk::Orientation::Vertical, METADATA_RECOVERY_ROW_SPACING);
-    fields.set_margin_top(8);
-    fields.set_margin_bottom(18);
-    fields.set_margin_start(24);
-    fields.set_margin_end(24);
-
-    let title = gtk::Label::new(Some(&tr("File path replacement")));
-    title.set_halign(gtk::Align::Start);
-    title.add_css_class("heading");
-    fields.append(&title);
-
-    let reported_path = adw::ActionRow::builder()
-        .title(tr("Server path"))
-        .use_markup(false)
-        .subtitle(source_path)
-        .build();
+    let resource = crate::ui_resource::METADATA_RECOVERY_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        fields: gtk::Box,
+        locations: gtk::Box,
+        reported_path: adw::ActionRow,
+        local_folder: adw::ActionRow,
+        choose: gtk::Button,
+        server_prefix_group: adw::PreferencesGroup,
+        server_prefix: adw::EntryRow,
+        status: gtk::Label,
+        continue_button: gtk::Button,
+    });
+    reported_path.set_subtitle(source_path);
     reported_path.set_tooltip_text(Some(source_path));
 
-    let server_prefix = adw::EntryRow::builder()
-        .title(tr("Remove prefix"))
-        .text(&server_prefix_text)
-        .build();
-    let local_folder = adw::ActionRow::builder()
-        .title(tr("Local music folder"))
-        .use_markup(false)
-        .subtitle(
-            folder
-                .as_deref()
-                .map(|path| path.display().to_string())
-                .unwrap_or_else(|| tr("No folder selected")),
-        )
-        .build();
+    server_prefix.set_text(&server_prefix_text);
+    local_folder.set_subtitle(
+        &folder
+            .as_deref()
+            .map(|path| path.display().to_string())
+            .unwrap_or_else(|| tr("No folder selected")),
+    );
     if let Some(path) = folder.as_deref() {
         local_folder.set_tooltip_text(Some(&path.display().to_string()));
     }
-    let choose = gtk::Button::with_label(&tr("Choose"));
-    choose.set_valign(gtk::Align::Center);
-    local_folder.add_suffix(&choose);
     local_folder.set_activatable_widget(Some(&choose));
-    let locations = gtk::Box::new(
-        gtk::Orientation::Horizontal,
-        METADATA_RECOVERY_COLUMN_SPACING,
-    );
-    locations.set_homogeneous(true);
-    locations.append(&compact_field_row_group(&reported_path));
-    locations.append(&compact_field_row_group(&local_folder));
     fields.append(&install_compact_field_row_responsiveness_at(
         &locations,
         METADATA_RECOVERY_FIELD_STACK_WIDTH,
     ));
-    fields.append(&compact_field_row_group(&server_prefix));
-
-    let status = gtk::Label::new(None);
-    status.set_halign(gtk::Align::Start);
-    status.set_wrap(true);
-    status.add_css_class("error");
+    fields.append(&server_prefix_group);
     fields.append(&status);
 
-    let continue_button = gtk::Button::with_label(&tr("Continue"));
-    continue_button.add_css_class("destructive-action");
-    continue_button.set_halign(gtk::Align::End);
     fields.append(&continue_button);
 
     let editor = LocalAccessEditor::new(
@@ -680,117 +598,6 @@ fn close_manage_server(exit: &ManageServerExitSlot) {
     (exit.on_close)();
 }
 
-pub(crate) fn credential_source_settings_group(
-    shell: &Rc<Shell>,
-    preset: CredentialPreset,
-    source_title: &'static str,
-    authentication: Option<OpenSubsonicAuthentication>,
-    extra: Option<adw::SwitchRow>,
-    submit: impl Fn(&SourceHandle, CredentialInput, Option<OpenSubsonicAuthentication>) + 'static,
-) -> gtk::Widget {
-    let section = gtk::Box::new(gtk::Orientation::Vertical, 8);
-
-    let fields_group = adw::PreferencesGroup::builder()
-        .title(tr("Server Settings"))
-        .description(tr(source_title))
-        .build();
-
-    let (name_address_row, name, address) =
-        server_name_address_row(&preset.source_name, &preset.server_url, true);
-    fields_group.add(&name_address_row);
-    section.append(&fields_group);
-
-    let rows_group = adw::PreferencesGroup::new();
-
-    let username = adw::EntryRow::builder()
-        .title(tr("Username"))
-        .text(&preset.username)
-        .build();
-    style_compact_field_row(&username);
-
-    let password = adw::PasswordEntryRow::builder()
-        .title(tr("Password"))
-        .build();
-    style_compact_field_row(&password);
-    let authentication = authentication.map(|authentication| Rc::new(Cell::new(authentication)));
-    if let Some(authentication) = authentication.as_ref() {
-        let api_key =
-            open_subsonic_authentication_switch(Rc::clone(authentication), &username, &password);
-        rows_group.add(&api_key);
-    }
-    rows_group.add(&username);
-    rows_group.add(&password);
-
-    let cert_verify = adw::SwitchRow::builder()
-        .title(tr("Verify server certificate"))
-        .subtitle(tr("Off only for a server you control"))
-        .active(!preset.trust_invalid_cert)
-        .build();
-    rows_group.add(&cert_verify);
-    if let Some(extra) = extra.as_ref() {
-        rows_group.add(extra);
-    }
-
-    let save = button_row("Save Server Settings", "rufin-document-save-symbolic");
-    save.add_css_class("suggested-action");
-    rows_group.add(&save);
-    section.append(&rows_group);
-
-    let source = shell.products.source.clone();
-    save.connect_activated(move |_| {
-        let authentication = authentication
-            .as_ref()
-            .map(|authentication| authentication.get());
-        submit(
-            &source,
-            CredentialInput {
-                source_name: Some(name.text().trim().to_string()),
-                server_url: address.text().trim().to_string(),
-                username: username.text().trim().to_string(),
-                secret: password.text().to_string(),
-                trust_invalid_cert: !cert_verify.is_active(),
-            },
-            authentication,
-        );
-    });
-
-    section.upcast()
-}
-
-fn server_name_address_row(
-    name_text: &str,
-    address_text: &str,
-    show_address: bool,
-) -> (gtk::Widget, adw::EntryRow, adw::EntryRow) {
-    let fields = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    fields.set_homogeneous(true);
-    fields.set_halign(gtk::Align::Fill);
-    fields.set_hexpand(true);
-    fields.set_margin_top(0);
-    fields.set_margin_bottom(0);
-
-    let name = adw::EntryRow::builder()
-        .title(tr("Name"))
-        .text(name_text)
-        .build();
-    style_compact_field_row(&name);
-    let name_group = compact_field_row_group(&name);
-    fields.append(&name_group);
-
-    let address = adw::EntryRow::builder()
-        .title(tr("Server Address"))
-        .text(address_text)
-        .build();
-    style_compact_field_row(&address);
-    let address_group = compact_field_row_group(&address);
-    address_group.set_visible(show_address);
-    fields.append(&address_group);
-
-    let fields = install_compact_field_row_responsiveness(&fields).upcast();
-
-    (fields, name, address)
-}
-
 fn server_actions_group(
     shell: &Rc<Shell>,
     server: &SourceSummary,
@@ -798,14 +605,16 @@ fn server_actions_group(
     exit: &ManageServerExitSlot,
     preferences_dialog: &adw::Dialog,
 ) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder()
-        .title(tr("Server Actions"))
-        .build();
-    let row = adw::PreferencesRow::new();
-    let actions = action_button_box();
+    let resource = crate::ui_resource::SERVER_ACTIONS_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        group: adw::PreferencesGroup,
+        select: gtk::Button,
+        resync: gtk::Button,
+        forget: gtk::Button,
+    });
 
     if !selected {
-        let select = row_action_button("Use This Source", "rufin-object-select-symbolic");
         let source = shell.products.source.clone();
         let source_id = server.id.clone();
         let exit = exit.clone();
@@ -817,10 +626,10 @@ fn server_actions_group(
                 dialog.close();
             }
         });
-        actions.append(&select);
+    } else {
+        select.set_visible(false);
     }
 
-    let resync = row_action_button("Resync Library", "rufin-view-refresh-symbolic");
     let source = shell.products.source.clone();
     let source_id = server.id.clone();
     let preferences_dialog_for_resync = preferences_dialog.downgrade();
@@ -830,10 +639,6 @@ fn server_actions_group(
             dialog.close();
         }
     });
-    actions.append(&resync);
-
-    let forget = row_action_button("Forget Server", "rufin-window-close-symbolic");
-    forget.add_css_class("destructive-action");
     let forget_shell = Rc::clone(shell);
     let source_id = server.id.clone();
     let server_name = server_display_name(server);
@@ -856,57 +661,7 @@ fn server_actions_group(
             }),
         );
     });
-    actions.append(&forget);
-    row.set_child(Some(&actions));
-    row.set_activatable(false);
-    row.set_selectable(false);
-    group.add(&row);
-
     group
-}
-
-fn action_button_box() -> gtk::Box {
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    actions.set_homogeneous(true);
-    actions.set_halign(gtk::Align::Fill);
-    actions.set_hexpand(true);
-    actions.set_margin_top(6);
-    actions.set_margin_bottom(6);
-    actions.set_margin_start(8);
-    actions.set_margin_end(8);
-    actions
-}
-
-fn row_action_button(title: &str, icon_name: &str) -> gtk::Button {
-    let button = gtk::Button::new();
-    button.add_css_class("flat");
-    button.set_halign(gtk::Align::Fill);
-    button.set_hexpand(true);
-    button.set_tooltip_text(Some(&tr(title)));
-    let content = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    content.set_halign(gtk::Align::Center);
-    content.set_valign(gtk::Align::Center);
-    content.append(&gtk::Image::from_icon_name(icon_name));
-    let label = gtk::Label::new(Some(&tr(title)));
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_width_chars(0);
-    label.set_max_width_chars(18);
-    label.set_wrap(true);
-    label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    label.set_lines(2);
-    content.append(&label);
-    button.set_child(Some(&content));
-    button
-}
-
-fn button_row(title: &str, icon_name: &str) -> adw::ButtonRow {
-    let row = adw::ButtonRow::builder()
-        .title(tr(title))
-        .start_icon_name(icon_name)
-        .end_icon_name("rufin-go-next-symbolic")
-        .build();
-    row.add_css_class("manage-server-action-row");
-    row
 }
 
 pub(crate) fn confirm_forget_source(

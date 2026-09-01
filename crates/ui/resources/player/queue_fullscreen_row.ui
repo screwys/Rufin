@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <template class="RufinQueueFullscreenRow" parent="GtkBox">
+    <property name="spacing">16</property>
+    <property name="margin-start">6</property>
+    <property name="margin-end">6</property>
+    <property name="height-request">58</property>
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="valign">center</property>
+    <property name="focusable">true</property>
+    <style><class name="queue-row"/></style>
+    <child><object class="RufinRecycledArtworkCell" id="cover"/></child>
+    <child>
+      <object class="GtkBox" id="text_columns">
+        <property name="spacing">16</property>
+        <property name="homogeneous">true</property>
+        <property name="width-request">1</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">2</property>
+            <property name="width-request">1</property>
+            <property name="hexpand">true</property>
+            <property name="halign">fill</property>
+            <property name="valign">center</property>
+            <child><object class="GtkLabel" id="title"><property name="xalign">0</property><property name="width-request">1</property><property name="ellipsize">end</property><style><class name="queue-title"/></style></object></child>
+            <child><object class="RufinRecycledTextCell" id="artist"><property name="width-request">1</property></object></child>
+          </object>
+        </child>
+        <child><object class="GtkLabel" id="album"><property name="xalign">0</property><property name="width-request">1</property><property name="hexpand">true</property><property name="halign">fill</property><property name="ellipsize">end</property><style><class name="muted"/></style></object></child>
+      </object>
+    </child>
+    <child><object class="GtkLabel" id="duration"><property name="xalign">0.5</property><property name="width-request">82</property><style><class name="muted"/></style></object></child>
+    <child><object class="GtkLabel" id="year"><property name="xalign">0.5</property><property name="width-request">64</property><style><class name="muted"/></style></object></child>
+    <child>
+      <object class="GtkCenterBox">
+        <property name="width-request">32</property>
+        <style><class name="queue-favorite-cell"/></style>
+        <property name="center-widget">
+          <object class="GtkButton" id="favorite">
+            <property name="icon-name">rufin-heart-outline-symbolic</property>
+            <property name="valign">center</property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="favorite-toggle"/><class name="row-favorite-button"/><class name="queue-favorite-button"/></style>
+          </object>
+        </property>
+      </object>
+    </child>
+  </template>
+</interface>

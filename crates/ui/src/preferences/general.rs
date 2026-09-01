@@ -4,73 +4,77 @@ use std::{
 };
 
 use super::{
-    INTEGRATIONS_ICON_NAME, LASTFM_API_CREATE_URL, LISTENBRAINZ_TOKEN_URL,
-    context_menu::context_menus_expander, controlled_selection_row,
-    layout::populate_home_block_rows, layout_group, quality_selection_row, selection_row,
-    sidebar_items_expander,
+    LASTFM_API_CREATE_URL, LISTENBRAINZ_TOKEN_URL, configure_sidebar_items_expander,
+    context_menu::configure_context_menus_expander, controlled_selection_row,
+    layout::populate_home_block_rows, populate_layout_group, quality_selection_row, selection_row,
 };
 use crate::player::{
-    audio_output_dropdown, build_equalizer_preset_row, connect_equalizer_scale_commit,
-    crossfade_duration_row, equalizer_band_title, equalizer_default_preset_bands,
-    equalizer_preset_bands, equalizer_preset_name_at, equalizer_preset_position,
-    equalizer_selected_preset, install_equalizer_scroll, install_sliding_value_bubble,
-    playback_rate_row, preserve_pitch_row,
+    EqualizerSurface, audio_output_dropdown, crossfade_duration_row,
+    install_scale_scroll_forwarding, install_sliding_value_bubble, playback_rate_row,
+    preserve_pitch_row,
 };
-use crate::runtime::{ScrobblingConnection, ScrobblingConnectionEvent};
+use crate::runtime::{ScrobblingConnection, ScrobblingConnectionEvent, ScrobblingPreferences};
 use crate::shell::Shell;
 use crate::{AccentPreference, ThemePreference};
 use adw::prelude::*;
 use localization::{tr, tr_with};
 use playback::StreamQuality;
 use playback::{
-    EQUALIZER_BAND_COUNT, LoudnessNormalization, LoudnessNormalizationScope,
-    MAX_AUTO_DJ_REFILL_THRESHOLD, MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_THRESHOLD,
-    MIN_EBU_R128_TARGET_LUFS, PlaybackTransitionMode, VolumeScale,
+    LoudnessNormalization, LoudnessNormalizationScope, MAX_AUTO_DJ_REFILL_THRESHOLD,
+    MAX_EBU_R128_TARGET_LUFS, MIN_AUTO_DJ_REFILL_THRESHOLD, MIN_EBU_R128_TARGET_LUFS,
+    PlaybackTransitionMode, VolumeScale,
 };
 
-pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder()
-        .title(tr("Integrations"))
-        .icon_name(INTEGRATIONS_ICON_NAME)
-        .build();
+const PREFERENCES_EQUALIZER_BAND_HEIGHT: i32 = 280;
+
+pub(super) type ScrobblingCredentialDrafts = Rc<RefCell<ScrobblingPreferences>>;
+
+pub(crate) fn scrobbling_page(
+    shell: &Rc<Shell>,
+    drafts: &ScrobblingCredentialDrafts,
+) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let page: adw::PreferencesPage =
+        crate::ui_resource::object(&builder, resource, "integrations_page");
     let settings = shell.products.scrobbling.preferences();
-
-    let lastfm_group = adw::PreferencesGroup::builder()
-        .title(tr("Last.fm"))
-        .build();
-    let lastfm_enabled = adw::SwitchRow::builder()
-        .title(tr("Last.fm scrobbling"))
-        .active(settings.lastfm.enabled)
-        .build();
-    let lastfm_enabled_shell = Rc::clone(shell);
-    lastfm_enabled.connect_active_notify(move |row| {
-        lastfm_enabled_shell.update_scrobbling_settings("Last.fm scrobbling setting", |settings| {
-            if settings.lastfm.enabled == row.is_active() {
-                return false;
-            }
-            settings.lastfm.enabled = row.is_active();
-            true
-        });
+    crate::ui_resource::objects!(builder, resource, {
+        lastfm_enabled: adw::SwitchRow,
+        lastfm_api_help: adw::ActionRow,
+        lastfm_api_key: adw::PasswordEntryRow,
+        lastfm_api_secret: adw::PasswordEntryRow,
+        lastfm_connection: adw::ActionRow,
+        lastfm_connect: gtk::Button,
+        lastfm_now_playing: adw::SwitchRow,
+        librefm_enabled: adw::SwitchRow,
+        librefm_connection: adw::ActionRow,
+        librefm_connect: gtk::Button,
+        librefm_now_playing: adw::SwitchRow,
+        listenbrainz_enabled: adw::SwitchRow,
+        listenbrainz_token_help: adw::ActionRow,
+        listenbrainz_token: adw::PasswordEntryRow,
+        listenbrainz_now_playing: adw::SwitchRow,
     });
-    lastfm_group.add(&lastfm_enabled);
 
-    let lastfm_api_help = adw::ActionRow::builder()
-        .title(tr("API keys"))
-        .subtitle(inline_link_markup(
-            &tr("If you do not have API keys, create them"),
-            LASTFM_API_CREATE_URL,
-            &tr("here"),
-            &tr(". You only need to fill email and an application name parts"),
-        ))
-        .use_markup(true)
-        .build();
-    lastfm_group.add(&lastfm_api_help);
+    lastfm_enabled.set_active(settings.lastfm.enabled);
+    bind_scrobbling_switch(
+        &lastfm_enabled,
+        shell,
+        "Last.fm scrobbling setting",
+        |settings, active| replace_if_changed(&mut settings.lastfm.enabled, active),
+    );
+    lastfm_api_help.set_subtitle(&inline_link_markup(
+        &tr("If you do not have API keys, create them"),
+        LASTFM_API_CREATE_URL,
+        &tr("here"),
+        &tr(". You only need to fill email and an application name parts"),
+    ));
 
-    let lastfm_api_key = adw::PasswordEntryRow::builder()
-        .title(tr("API key"))
-        .text(&settings.lastfm.api_key)
-        .show_apply_button(true)
-        .build();
+    lastfm_api_key.set_text(&drafts.borrow().lastfm.api_key);
+    let key_drafts = drafts.clone();
+    lastfm_api_key.connect_text_notify(move |row| {
+        key_drafts.borrow_mut().lastfm.api_key = row.text().to_string();
+    });
     let lastfm_api_shell = Rc::clone(shell);
     lastfm_api_key.connect_apply(move |row| {
         let api_key = row.text().trim().to_string();
@@ -87,13 +91,11 @@ pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             lastfm_api_shell.retry_external_artwork("Last.fm API key setting");
         }
     });
-    lastfm_group.add(&lastfm_api_key);
-
-    let lastfm_api_secret = adw::PasswordEntryRow::builder()
-        .title(tr("Shared secret"))
-        .text(&settings.lastfm.api_secret)
-        .show_apply_button(true)
-        .build();
+    lastfm_api_secret.set_text(&drafts.borrow().lastfm.api_secret);
+    let secret_drafts = drafts.clone();
+    lastfm_api_secret.connect_text_notify(move |row| {
+        secret_drafts.borrow_mut().lastfm.api_secret = row.text().to_string();
+    });
     let lastfm_secret_shell = Rc::clone(shell);
     lastfm_api_secret.connect_apply(move |row| {
         let api_secret = row.text().trim().to_string();
@@ -108,29 +110,31 @@ pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             },
         );
     });
-    lastfm_group.add(&lastfm_api_secret);
-
-    let lastfm_connection = adw::ActionRow::builder()
-        .title(tr("Connection"))
-        .subtitle(audioscrobbler_connection_subtitle(
-            settings.lastfm.connected,
-            &settings.lastfm.username,
-        ))
-        .build();
+    lastfm_connection.set_subtitle(&audioscrobbler_connection_subtitle(
+        settings.lastfm.connected,
+        &settings.lastfm.username,
+    ));
     let lastfm_connect_label = if settings.lastfm.connected {
         tr("Reconnect")
     } else {
         tr("Connect")
     };
-    let lastfm_connect = gtk::Button::with_label(&lastfm_connect_label);
-    lastfm_connect.set_valign(gtk::Align::Center);
-    lastfm_connection.add_suffix(&lastfm_connect);
+    lastfm_connect.set_label(&lastfm_connect_label);
     lastfm_connection.set_activatable_widget(Some(&lastfm_connect));
     let lastfm_connect_shell = Rc::clone(shell);
-    let lastfm_api_key_row = lastfm_api_key.clone();
-    let lastfm_secret_row = lastfm_api_secret.clone();
-    let lastfm_connection_row = lastfm_connection.clone();
+    let lastfm_api_key_row = lastfm_api_key.downgrade();
+    let lastfm_secret_row = lastfm_api_secret.downgrade();
+    let lastfm_connection_row = lastfm_connection.downgrade();
     lastfm_connect.connect_clicked(move |button| {
+        let Some(lastfm_api_key_row) = lastfm_api_key_row.upgrade() else {
+            return;
+        };
+        let Some(lastfm_secret_row) = lastfm_secret_row.upgrade() else {
+            return;
+        };
+        let Some(lastfm_connection_row) = lastfm_connection_row.upgrade() else {
+            return;
+        };
         let api_key = lastfm_api_key_row.text().trim().to_string();
         let api_secret = lastfm_secret_row.text().trim().to_string();
         if api_key.is_empty() || api_secret.is_empty() {
@@ -167,72 +171,37 @@ pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             button.set_sensitive(true);
         });
     });
-    lastfm_group.add(&lastfm_connection);
-
-    let lastfm_now_playing = adw::SwitchRow::builder()
-        .title(tr("Now playing updates"))
-        .active(settings.lastfm.now_playing_enabled)
-        .build();
-    let lastfm_now_playing_shell = Rc::clone(shell);
-    lastfm_now_playing.connect_active_notify(move |row| {
-        lastfm_now_playing_shell.update_scrobbling_settings(
-            "Last.fm now playing setting",
-            |settings| {
-                if settings.lastfm.now_playing_enabled == row.is_active() {
-                    return false;
-                }
-                settings.lastfm.now_playing_enabled = row.is_active();
-                true
-            },
-        );
-    });
-    lastfm_group.add(&lastfm_now_playing);
-    page.add(&lastfm_group);
-
-    let librefm_group = adw::PreferencesGroup::builder()
-        .title(tr("Libre.fm"))
-        .description(tr(
-            "If the page doesn't load, then Libre.fm blocks your IP range/VPN",
-        ))
-        .build();
-    let librefm_enabled = adw::SwitchRow::builder()
-        .title(tr("Libre.fm scrobbling"))
-        .active(settings.librefm.enabled)
-        .build();
-    let librefm_enabled_shell = Rc::clone(shell);
-    librefm_enabled.connect_active_notify(move |row| {
-        librefm_enabled_shell.update_scrobbling_settings(
-            "Libre.fm scrobbling setting",
-            |settings| {
-                if settings.librefm.enabled == row.is_active() {
-                    return false;
-                }
-                settings.librefm.enabled = row.is_active();
-                true
-            },
-        );
-    });
-    librefm_group.add(&librefm_enabled);
-
-    let librefm_connection = adw::ActionRow::builder()
-        .title(tr("Connection"))
-        .subtitle(audioscrobbler_connection_subtitle(
-            settings.librefm.connected,
-            &settings.librefm.username,
-        ))
-        .build();
+    lastfm_now_playing.set_active(settings.lastfm.now_playing_enabled);
+    bind_scrobbling_switch(
+        &lastfm_now_playing,
+        shell,
+        "Last.fm now playing setting",
+        |settings, active| replace_if_changed(&mut settings.lastfm.now_playing_enabled, active),
+    );
+    librefm_enabled.set_active(settings.librefm.enabled);
+    bind_scrobbling_switch(
+        &librefm_enabled,
+        shell,
+        "Libre.fm scrobbling setting",
+        |settings, active| replace_if_changed(&mut settings.librefm.enabled, active),
+    );
+    librefm_connection.set_subtitle(&audioscrobbler_connection_subtitle(
+        settings.librefm.connected,
+        &settings.librefm.username,
+    ));
     let librefm_connect_label = if settings.librefm.connected {
         tr("Reconnect")
     } else {
         tr("Connect")
     };
-    let librefm_connect = gtk::Button::with_label(&librefm_connect_label);
-    librefm_connect.set_valign(gtk::Align::Center);
-    librefm_connection.add_suffix(&librefm_connect);
+    librefm_connect.set_label(&librefm_connect_label);
     librefm_connection.set_activatable_widget(Some(&librefm_connect));
     let librefm_connect_shell = Rc::clone(shell);
-    let librefm_connection_row = librefm_connection.clone();
+    let librefm_connection_row = librefm_connection.downgrade();
     librefm_connect.connect_clicked(move |button| {
+        let Some(librefm_connection_row) = librefm_connection_row.upgrade() else {
+            return;
+        };
         button.set_sensitive(false);
         librefm_connection_row.set_subtitle(&tr("Opening Libre.fm authorization..."));
         let shell = Rc::clone(&librefm_connect_shell);
@@ -259,67 +228,32 @@ pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             button.set_sensitive(true);
         });
     });
-    librefm_group.add(&librefm_connection);
+    librefm_now_playing.set_active(settings.librefm.now_playing_enabled);
+    bind_scrobbling_switch(
+        &librefm_now_playing,
+        shell,
+        "Libre.fm now playing setting",
+        |settings, active| replace_if_changed(&mut settings.librefm.now_playing_enabled, active),
+    );
+    listenbrainz_enabled.set_active(settings.listenbrainz.enabled);
+    bind_scrobbling_switch(
+        &listenbrainz_enabled,
+        shell,
+        "ListenBrainz scrobbling setting",
+        |settings, active| replace_if_changed(&mut settings.listenbrainz.enabled, active),
+    );
+    listenbrainz_token_help.set_subtitle(&inline_link_markup(
+        &tr("Find your ListenBrainz user token"),
+        LISTENBRAINZ_TOKEN_URL,
+        &tr("here"),
+        ".",
+    ));
 
-    let librefm_now_playing = adw::SwitchRow::builder()
-        .title(tr("Now playing updates"))
-        .active(settings.librefm.now_playing_enabled)
-        .build();
-    let librefm_now_playing_shell = Rc::clone(shell);
-    librefm_now_playing.connect_active_notify(move |row| {
-        librefm_now_playing_shell.update_scrobbling_settings(
-            "Libre.fm now playing setting",
-            |settings| {
-                if settings.librefm.now_playing_enabled == row.is_active() {
-                    return false;
-                }
-                settings.librefm.now_playing_enabled = row.is_active();
-                true
-            },
-        );
+    listenbrainz_token.set_text(&drafts.borrow().listenbrainz.user_token);
+    let token_drafts = drafts.clone();
+    listenbrainz_token.connect_text_notify(move |row| {
+        token_drafts.borrow_mut().listenbrainz.user_token = row.text().to_string();
     });
-    librefm_group.add(&librefm_now_playing);
-    page.add(&librefm_group);
-
-    let listenbrainz_group = adw::PreferencesGroup::builder()
-        .title(tr("ListenBrainz"))
-        .build();
-    let listenbrainz_enabled = adw::SwitchRow::builder()
-        .title(tr("ListenBrainz scrobbling"))
-        .active(settings.listenbrainz.enabled)
-        .build();
-    let listenbrainz_enabled_shell = Rc::clone(shell);
-    listenbrainz_enabled.connect_active_notify(move |row| {
-        listenbrainz_enabled_shell.update_scrobbling_settings(
-            "ListenBrainz scrobbling setting",
-            |settings| {
-                if settings.listenbrainz.enabled == row.is_active() {
-                    return false;
-                }
-                settings.listenbrainz.enabled = row.is_active();
-                true
-            },
-        );
-    });
-    listenbrainz_group.add(&listenbrainz_enabled);
-
-    let listenbrainz_token_help = adw::ActionRow::builder()
-        .title(tr("Get token"))
-        .subtitle(inline_link_markup(
-            &tr("Find your ListenBrainz user token"),
-            LISTENBRAINZ_TOKEN_URL,
-            &tr("here"),
-            ".",
-        ))
-        .use_markup(true)
-        .build();
-    listenbrainz_group.add(&listenbrainz_token_help);
-
-    let listenbrainz_token = adw::PasswordEntryRow::builder()
-        .title(tr("User token"))
-        .text(&settings.listenbrainz.user_token)
-        .show_apply_button(true)
-        .build();
     let listenbrainz_token_shell = Rc::clone(shell);
     listenbrainz_token.connect_apply(move |row| {
         let token = row.text().trim().to_string();
@@ -334,30 +268,40 @@ pub(crate) fn scrobbling_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             },
         );
     });
-    listenbrainz_group.add(&listenbrainz_token);
-
-    let listenbrainz_now_playing = adw::SwitchRow::builder()
-        .title(tr("Now playing updates"))
-        .active(settings.listenbrainz.now_playing_enabled)
-        .build();
-    let listenbrainz_now_playing_shell = Rc::clone(shell);
-    listenbrainz_now_playing.connect_active_notify(move |row| {
-        listenbrainz_now_playing_shell.update_scrobbling_settings(
-            "ListenBrainz now playing setting",
-            |settings| {
-                if settings.listenbrainz.now_playing_enabled == row.is_active() {
-                    return false;
-                }
-                settings.listenbrainz.now_playing_enabled = row.is_active();
-                true
-            },
-        );
-    });
-    listenbrainz_group.add(&listenbrainz_now_playing);
-    page.add(&listenbrainz_group);
-
+    listenbrainz_now_playing.set_active(settings.listenbrainz.now_playing_enabled);
+    bind_scrobbling_switch(
+        &listenbrainz_now_playing,
+        shell,
+        "ListenBrainz now playing setting",
+        |settings, active| {
+            replace_if_changed(&mut settings.listenbrainz.now_playing_enabled, active)
+        },
+    );
     page
 }
+
+fn bind_scrobbling_switch(
+    row: &adw::SwitchRow,
+    shell: &Rc<Shell>,
+    warning_action: &'static str,
+    update: impl Fn(&mut ScrobblingPreferences, bool) -> bool + 'static,
+) {
+    let shell = Rc::clone(shell);
+    row.connect_active_notify(move |row| {
+        shell.update_scrobbling_settings(warning_action, |settings| {
+            update(settings, row.is_active())
+        });
+    });
+}
+
+fn replace_if_changed(current: &mut bool, next: bool) -> bool {
+    if *current == next {
+        return false;
+    }
+    *current = next;
+    true
+}
+
 pub(crate) fn audioscrobbler_connection_subtitle(connected: bool, username: &str) -> String {
     if !connected {
         tr("Not connected")
@@ -430,17 +374,28 @@ async fn connect_scrobbling(
     Err(connection_error)
 }
 pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder()
-        .title(tr("Playback"))
-        .icon_name("rufin-tracks-symbolic")
-        .build();
+    let resource = crate::ui_resource::PLAYBACK_PREFERENCES_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let page: adw::PreferencesPage =
+        crate::ui_resource::object(&builder, resource, "playback_page");
 
     let app_settings = shell.settings.current.borrow().clone();
     let settings = app_settings.playback.clone();
+    crate::ui_resource::objects!(builder, resource, {
+        transition_group: adw::PreferencesGroup,
+        skip_same_album_crossfade_row: adw::SwitchRow,
+        audio_fade_row: adw::SwitchRow,
+        refill_row: adw::ActionRow,
+        refill: gtk::SpinButton,
+        clear_queue_row: adw::SwitchRow,
+        audio_group: adw::PreferencesGroup,
+        ebu_target_row: adw::ActionRow,
+        ebu_target: gtk::Scale,
+        write_ebu_tags_row: adw::SwitchRow,
+        output_row: adw::ActionRow,
+        equalizer_group: adw::PreferencesGroup,
+    });
 
-    let transition_group = adw::PreferencesGroup::builder()
-        .title(tr("Queue and transitions"))
-        .build();
     let transition_shell = Rc::clone(shell);
     let transition_row = selection_row(
         &tr("Transition mode"),
@@ -463,11 +418,7 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     let pitch_row = preserve_pitch_row(shell, settings.preserve_pitch);
     transition_group.add(&pitch_row);
 
-    let skip_same_album_crossfade_row = adw::SwitchRow::builder()
-        .title(tr("Skip same-album crossfade"))
-        .subtitle(tr("Keep album transitions gapless when possible"))
-        .active(settings.skip_same_album_crossfade)
-        .build();
+    skip_same_album_crossfade_row.set_active(settings.skip_same_album_crossfade);
     let skip_same_album_crossfade_shell = Rc::clone(shell);
     skip_same_album_crossfade_row.connect_active_notify(move |row| {
         skip_same_album_crossfade_shell.update_playback_settings(|settings| {
@@ -476,11 +427,7 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     });
     transition_group.add(&skip_same_album_crossfade_row);
 
-    let audio_fade_row = adw::SwitchRow::builder()
-        .title(tr("Audio fade on play/pause"))
-        .subtitle(tr("Fade audio when playback is paused or resumed"))
-        .active(settings.audio_fade_on_status_change)
-        .build();
+    audio_fade_row.set_active(settings.audio_fade_on_status_change);
     let audio_fade_shell = Rc::clone(shell);
     audio_fade_row.connect_active_notify(move |row| {
         audio_fade_shell.update_playback_settings(|settings| {
@@ -489,51 +436,31 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     });
     transition_group.add(&audio_fade_row);
 
-    let refill_row = adw::ActionRow::builder()
-        .title(tr("Auto DJ refill threshold"))
-        .subtitle(tr("Add tracks when fewer than this many remain"))
-        .build();
-    let refill = gtk::SpinButton::with_range(
+    refill.set_range(
         f64::from(MIN_AUTO_DJ_REFILL_THRESHOLD),
         f64::from(MAX_AUTO_DJ_REFILL_THRESHOLD),
-        1.0,
     );
+    refill.set_increments(1.0, 10.0);
     refill.set_value(f64::from(app_settings.auto_dj_refill_threshold));
-    refill.set_valign(gtk::Align::Center);
     let refill_shell = Rc::clone(shell);
     refill.connect_value_changed(move |spin| {
         let threshold = spin.value().round() as u8;
-        refill_shell.update_app_settings("Auto DJ setting", |settings| {
-            if settings.auto_dj_refill_threshold == threshold {
-                return false;
-            }
-            settings.auto_dj_refill_threshold = threshold;
-            true
+        refill_shell.set_app_setting("Auto DJ setting", threshold, |settings| {
+            &mut settings.auto_dj_refill_threshold
         });
     });
-    refill_row.add_suffix(&refill);
     refill_row.set_activatable_widget(Some(&refill));
     transition_group.add(&refill_row);
 
-    let clear_queue_row = adw::SwitchRow::builder()
-        .title(tr("Clearing queue also clears the current song"))
-        .active(app_settings.clear_queue_includes_current)
-        .build();
+    clear_queue_row.set_active(app_settings.clear_queue_includes_current);
     let clear_queue_shell = Rc::clone(shell);
     clear_queue_row.connect_active_notify(move |row| {
-        clear_queue_shell.update_app_settings("clear queue setting", |settings| {
-            if settings.clear_queue_includes_current == row.is_active() {
-                return false;
-            }
-            settings.clear_queue_includes_current = row.is_active();
-            true
+        clear_queue_shell.set_app_setting("clear queue setting", row.is_active(), |settings| {
+            &mut settings.clear_queue_includes_current
         });
     });
     transition_group.add(&clear_queue_row);
 
-    page.add(&transition_group);
-
-    let audio_group = adw::PreferencesGroup::builder().title(tr("Audio")).build();
     let loudness_scope_shell = Rc::clone(shell);
     let loudness_scope_row = selection_row(
         &tr("Normalization scope"),
@@ -549,19 +476,9 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         "Track evens out every song, while Album preserves the intended differences within each album",
     ));
 
-    let ebu_target_row = adw::ActionRow::builder()
-        .title(tr("Target loudness"))
-        .subtitle(tr("EBU R128 reference level"))
-        .build();
-    let ebu_target = gtk::Scale::with_range(
-        gtk::Orientation::Horizontal,
-        MIN_EBU_R128_TARGET_LUFS,
-        MAX_EBU_R128_TARGET_LUFS,
-        1.0,
-    );
-    ebu_target.add_css_class("playback-setting-scale");
-    ebu_target.set_width_request(240);
-    ebu_target.set_valign(gtk::Align::Center);
+    ebu_target.set_range(MIN_EBU_R128_TARGET_LUFS, MAX_EBU_R128_TARGET_LUFS);
+    ebu_target.set_increments(1.0, 10.0);
+    install_scale_scroll_forwarding(&ebu_target);
     install_sliding_value_bubble(&ebu_target, |value| format!("{value:.0} LUFS"));
     for mark in [-48.0, -36.0, -30.0, -23.0, -18.0, -12.0, 0.0] {
         let label = format!("{mark:.0}");
@@ -574,16 +491,9 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             settings.ebu_r128_target_lufs = scale.value().round();
         });
     });
-    ebu_target_row.add_suffix(&ebu_target);
     ebu_target_row.set_activatable_widget(Some(&ebu_target));
 
-    let write_ebu_tags_row = adw::SwitchRow::builder()
-        .title(tr("Write EBU R128 tags to files"))
-        .subtitle(tr(
-            "Store calculated loudness in supported Local music files",
-        ))
-        .active(settings.write_ebu_r128_tags)
-        .build();
+    write_ebu_tags_row.set_active(settings.write_ebu_r128_tags);
     let write_tags_shell = Rc::clone(shell);
     write_ebu_tags_row.connect_active_notify(move |row| {
         write_tags_shell.update_playback_settings(|settings| {
@@ -597,11 +507,14 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         &mode_titles,
         loudness_normalization_index(settings.loudness_normalization),
     );
-    let mode_buttons = Rc::new(mode_buttons);
+    let weak_mode_buttons: Rc<[gtk::glib::WeakRef<gtk::ToggleButton>]> = mode_buttons
+        .iter()
+        .map(gtk::prelude::ObjectExt::downgrade)
+        .collect();
     let mode_guard = Rc::new(Cell::new(false));
     for (index, button) in mode_buttons.iter().enumerate() {
         let shell = Rc::clone(shell);
-        let buttons = Rc::clone(&mode_buttons);
+        let buttons = Rc::clone(&weak_mode_buttons);
         let guard = Rc::clone(&mode_guard);
         let scope = loudness_scope_row.clone();
         let target = ebu_target_row.clone();
@@ -633,7 +546,11 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
                 return;
             }
             guard.set(true);
-            buttons[loudness_normalization_index(previous) as usize].set_active(true);
+            if let Some(button) =
+                buttons[loudness_normalization_index(previous) as usize].upgrade()
+            {
+                button.set_active(true);
+            }
             guard.set(false);
             let confirm = adw::AlertDialog::builder()
                 .heading(tr("Enable EBU R128 Analysis?"))
@@ -664,8 +581,12 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
                     target.set_visible(true);
                     write.set_visible(selected_source_is_local(&shell));
                     guard.set(true);
-                    buttons[loudness_normalization_index(LoudnessNormalization::EbuR128) as usize]
-                        .set_active(true);
+                    if let Some(button) = buttons
+                        [loudness_normalization_index(LoudnessNormalization::EbuR128) as usize]
+                        .upgrade()
+                    {
+                        button.set_active(true);
+                    }
                     guard.set(false);
                 },
             );
@@ -716,214 +637,102 @@ pub(crate) fn playback_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
     );
     audio_group.add(&quality_row);
 
-    let output_row = adw::ActionRow::builder().title(tr("Audio output")).build();
     let output_dropdown = audio_output_dropdown(shell, 220);
     output_row.add_suffix(&output_dropdown);
     output_row.set_activatable_widget(Some(&output_dropdown));
     audio_group.add(&output_row);
-    page.add(&audio_group);
 
-    let equalizer_group = adw::PreferencesGroup::builder()
-        .title(tr("Equalizer"))
-        .build();
-    let resetting_equalizer = Rc::new(Cell::new(false));
-    let equalizer_row = adw::SwitchRow::builder()
-        .title(tr("Enable equalizer"))
-        .active(settings.equalizer.enabled)
-        .build();
+    let equalizer = EqualizerSurface::new(&settings.equalizer);
+    equalizer.set_band_height_request(PREFERENCES_EQUALIZER_BAND_HEIGHT);
+    equalizer
+        .root
+        .add_css_class("preferences-equalizer-surface");
     let equalizer_shell = Rc::clone(shell);
-    let switch_reset_guard = Rc::clone(&resetting_equalizer);
-    equalizer_row.connect_active_notify(move |row| {
-        if switch_reset_guard.get() {
-            return;
-        }
+    equalizer.connect_changed(move |equalizer| {
         equalizer_shell.update_playback_settings(|settings| {
-            settings.equalizer.enabled = row.is_active();
+            settings.equalizer = equalizer.clone();
         });
     });
-    equalizer_group.add(&equalizer_row);
-
-    let selected_preset =
-        equalizer_preset_position(&equalizer_selected_preset(&settings.equalizer));
-    let selected_preset = Rc::new(Cell::new(selected_preset));
-    let preset_row = build_equalizer_preset_row("Preset", selected_preset.get());
-    let preset_shell = Rc::clone(shell);
-    let preset_switch = equalizer_row.clone();
-    let preset_reset_guard = Rc::clone(&resetting_equalizer);
-    equalizer_group.add(&preset_row);
-
-    let band_scales = Rc::new(std::cell::RefCell::new(Vec::with_capacity(
-        EQUALIZER_BAND_COUNT,
-    )));
-    let pending_equalizer_update = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
-    let equalizer_drag_active = Rc::new(Cell::new(false));
-    let equalizer_commit: Rc<dyn Fn()> = {
-        let band_shell = Rc::clone(shell);
-        let update_preset = preset_row.clone();
-        let update_selected_preset = Rc::clone(&selected_preset);
-        let update_guard = Rc::clone(&resetting_equalizer);
-        let update_scales = Rc::clone(&band_scales);
-        Rc::new(move || {
-            let bands = update_scales
-                .borrow()
-                .iter()
-                .map(gtk::Scale::value)
-                .collect::<Vec<_>>();
-            band_shell.update_playback_settings(|settings| {
-                if settings.equalizer.bands.len() != EQUALIZER_BAND_COUNT {
-                    settings.equalizer.sanitize();
-                }
-                settings.equalizer.bands = bands.clone();
-                settings.equalizer.selected_preset = "Custom".to_string();
-            });
-            let preset =
-                equalizer_selected_preset(&band_shell.settings.current.borrow().playback.equalizer);
-            update_guard.set(true);
-            update_selected_preset.set(equalizer_preset_position(&preset));
-            update_preset.set_selected(equalizer_preset_position(&preset));
-            update_guard.set(false);
-        })
-    };
-    for index in 0..EQUALIZER_BAND_COUNT {
-        let row = adw::ActionRow::builder()
-            .title(equalizer_band_title(index))
-            .build();
-        let scale = gtk::Scale::with_range(gtk::Orientation::Horizontal, -12.0, 12.0, 0.5);
-        scale.set_value(settings.equalizer.bands.get(index).copied().unwrap_or(0.0));
-        scale.set_draw_value(true);
-        scale.set_digits(1);
-        scale.set_width_request(220);
-        scale.set_valign(gtk::Align::Center);
-        install_equalizer_scroll(&scale);
-        connect_equalizer_scale_commit(
-            &scale,
-            Rc::clone(&resetting_equalizer),
-            Rc::clone(&pending_equalizer_update),
-            Rc::clone(&equalizer_drag_active),
-            Rc::clone(&equalizer_commit),
-        );
-        row.add_suffix(&scale);
-        row.set_activatable_widget(Some(&scale));
-        equalizer_group.add(&row);
-        band_scales.borrow_mut().push(scale);
-    }
-
-    let preset_scales = Rc::clone(&band_scales);
-    let preset_selected_preset = Rc::clone(&selected_preset);
-    preset_row.connect_selected_notify(move |row| {
-        if preset_reset_guard.get() {
-            return;
-        }
-        let Some(preset) = equalizer_preset_name_at(row.selected()) else {
-            return;
-        };
-        let bands = equalizer_preset_bands(&preset);
-        preset_reset_guard.set(true);
-        preset_switch.set_active(true);
-        preset_selected_preset.set(equalizer_preset_position(&preset));
-        for (scale, gain) in preset_scales.borrow().iter().zip(bands.iter()) {
-            scale.set_value(*gain);
-        }
-        preset_reset_guard.set(false);
-        preset_shell.update_playback_settings(|settings| {
-            settings.equalizer.enabled = true;
-            settings.equalizer.selected_preset = preset.clone();
-            settings.equalizer.bands = bands;
-            settings.equalizer.sanitize();
-        });
-    });
-
-    let reset_row = adw::ActionRow::builder()
-        .title(tr("Reset equalizer"))
-        .build();
-    let reset_button = gtk::Button::with_label(&tr("Reset"));
-    reset_button.set_valign(gtk::Align::Center);
-    reset_button.add_css_class("destructive-action");
-    let reset_shell = Rc::clone(shell);
-    let reset_preset = preset_row.clone();
-    let reset_selected_preset = Rc::clone(&selected_preset);
-    let reset_scales = Rc::clone(&band_scales);
-    let reset_guard = Rc::clone(&resetting_equalizer);
-    reset_button.connect_clicked(move |_| {
-        let preset = equalizer_preset_name_at(reset_selected_preset.get()).unwrap_or_else(|| {
-            equalizer_selected_preset(&reset_shell.settings.current.borrow().playback.equalizer)
-        });
-        let bands = equalizer_default_preset_bands(&preset);
-        reset_guard.set(true);
-        reset_selected_preset.set(equalizer_preset_position(&preset));
-        reset_preset.set_selected(equalizer_preset_position(&preset));
-        for (scale, gain) in reset_scales.borrow().iter().zip(bands.iter()) {
-            scale.set_value(*gain);
-        }
-        reset_guard.set(false);
-        reset_shell.update_playback_settings(|settings| {
-            settings.equalizer.selected_preset = preset;
-            settings.equalizer.bands = bands;
-            settings.equalizer.sanitize();
-        });
-    });
-    reset_row.add_suffix(&reset_button);
-    reset_row.set_activatable_widget(Some(&reset_button));
-    equalizer_group.add(&reset_row);
-    page.add(&equalizer_group);
+    equalizer_group.add(&equalizer.root);
 
     page
 }
 pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
-    let page = adw::PreferencesPage::builder()
-        .title(tr("Appearance"))
-        .icon_name("rufin-preferences-desktop-appearance-symbolic")
-        .build();
+    let resource = crate::ui_resource::APPEARANCE_PREFERENCES_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let page: adw::PreferencesPage =
+        crate::ui_resource::object(&builder, resource, "appearance_page");
+    crate::ui_resource::objects!(builder, resource, {
+        theme_group: adw::PreferencesGroup,
+        waveform_row: adw::SwitchRow,
+        layout_group: adw::PreferencesGroup,
+        lyrics_panel_row: adw::SwitchRow,
+        visualizer_panel_row: adw::SwitchRow,
+        bottom_bar_rating_row: adw::SwitchRow,
+        narrow_row: adw::SwitchRow,
+        threshold_row: adw::SpinRow,
+        sidebar_items: adw::ExpanderRow,
+        sidebar_pins_row: adw::SwitchRow,
+        home_blocks: adw::ExpanderRow,
+        context_menus: adw::ExpanderRow,
+        context_menu_rating_row: adw::ActionRow,
+        context_menu_rating_visible: gtk::Switch,
+    });
 
-    page.add(&theme_group(shell));
-    page.add(&seekbar_group(shell));
-    page.add(&layout_group(shell));
+    populate_theme_group(shell, &theme_group);
+    waveform_row.set_active(shell.settings.current.borrow().seekbar_waveform_enabled);
+    let waveform_shell = Rc::clone(shell);
+    waveform_row.connect_active_notify(move |row| {
+        if waveform_shell
+            .set_app_setting("seekbar waveform setting", row.is_active(), |settings| {
+                &mut settings.seekbar_waveform_enabled
+            })
+            .is_some()
+        {
+            waveform_shell.update_bottom_player();
+        }
+    });
+    populate_layout_group(
+        shell,
+        &layout_group,
+        lyrics_panel_row,
+        visualizer_panel_row,
+        bottom_bar_rating_row,
+        narrow_row,
+        threshold_row,
+    );
 
-    let sidebar_items_group = adw::PreferencesGroup::new();
-    sidebar_items_group.add(&sidebar_items_expander(shell));
-    page.add(&sidebar_items_group);
+    configure_sidebar_items_expander(shell, &sidebar_items, &sidebar_pins_row);
 
-    let home_blocks = adw::ExpanderRow::builder()
-        .title(tr("Home Blocks"))
-        .expanded(false)
-        .build();
     let rows = Rc::new(std::cell::RefCell::new(Vec::new()));
-    populate_home_block_rows(shell, &home_blocks, &rows);
-    let home_blocks_group = adw::PreferencesGroup::new();
-    home_blocks_group.add(&home_blocks);
-    page.add(&home_blocks_group);
+    let home_shell = Rc::clone(shell);
+    super::populate_expander_once(&home_blocks, move |home_blocks| {
+        populate_home_block_rows(&home_shell, home_blocks, &rows);
+    });
 
-    let context_menus_group = adw::PreferencesGroup::new();
-    context_menus_group.add(&context_menus_expander(shell));
-    page.add(&context_menus_group);
+    configure_context_menus_expander(
+        shell,
+        &context_menus,
+        &context_menu_rating_row,
+        &context_menu_rating_visible,
+    );
 
     page
 }
 
-fn seekbar_group(shell: &Rc<Shell>) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder()
-        .title(tr("Seekbar"))
-        .build();
-    let waveform_row = adw::SwitchRow::builder()
-        .title(tr("Waveform seekbar"))
-        .subtitle(tr("Generate and cache waveforms for the current track"))
-        .active(shell.settings.current.borrow().seekbar_waveform_enabled)
-        .build();
-    let waveform_shell = Rc::clone(shell);
-    waveform_row.connect_active_notify(move |row| {
-        waveform_shell.set_seekbar_waveform_enabled(row.is_active());
-    });
-    group.add(&waveform_row);
-    group
-}
-
-fn theme_group(shell: &Rc<Shell>) -> adw::PreferencesGroup {
-    let group = adw::PreferencesGroup::builder().title(tr("Theme")).build();
+fn populate_theme_group(shell: &Rc<Shell>, group: &adw::PreferencesGroup) {
     let options = [tr("System"), tr("Light"), tr("Dark")];
     let selected = theme_preference_index(shell.settings.current.borrow().theme_preference);
     let theme_shell = Rc::clone(shell);
     let row = selection_row(&tr("Color scheme"), &options, selected, move |selected| {
-        theme_shell.set_theme_preference(theme_preference_from_index(selected));
+        let preference = theme_preference_from_index(selected);
+        if let Some(settings) =
+            theme_shell.set_app_setting("theme setting", preference, |settings| {
+                &mut settings.theme_preference
+            })
+        {
+            theme_shell.appearance.apply(&settings);
+        }
     });
     group.add(&row);
 
@@ -938,10 +747,16 @@ fn theme_group(shell: &Rc<Shell>) -> adw::PreferencesGroup {
         .build();
     let accent_shell = Rc::clone(shell);
     accent_row.connect_selected_notify(move |row| {
-        accent_shell.set_accent_preference(accent_preference_from_index(row.selected()));
+        let preference = accent_preference_from_index(row.selected());
+        if let Some(settings) =
+            accent_shell.set_app_setting("accent setting", preference, |settings| {
+                &mut settings.accent_preference
+            })
+        {
+            accent_shell.appearance.apply(&settings);
+        }
     });
     group.add(&accent_row);
-    group
 }
 
 pub(super) fn theme_preference_index(preference: ThemePreference) -> u32 {

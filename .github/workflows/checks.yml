@@ -119,7 +119,7 @@ jobs:
               fi
 
               case "$path" in
-                LICENSE|data|data/*|locales/*|*.md|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
+                LICENSE|data|data/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
                   continue
                   ;;
               esac
@@ -476,7 +476,11 @@ jobs:
           persist-credentials: false
 
       - name: Install test dependencies
-        run: brew install gstreamer gtk4 libadwaita pkgconf
+        run: |
+          brew install gettext gstreamer gtk4 libadwaita pkgconf
+          gettext_prefix="$(brew --prefix gettext)"
+          echo "GETTEXT_DIR=$gettext_prefix" >> "$GITHUB_ENV"
+          echo "$gettext_prefix/bin" >> "$GITHUB_PATH"
 
       - name: Select Xcode 26
         run: |
@@ -540,6 +544,8 @@ jobs:
             base-devel
             git
             mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-gettext-runtime
+            mingw-w64-ucrt-x86_64-gettext-tools
             mingw-w64-ucrt-x86_64-gst-plugins-base
             mingw-w64-ucrt-x86_64-gst-plugins-good
             mingw-w64-ucrt-x86_64-gstreamer

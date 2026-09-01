@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <object class="GtkBox" id="root">
+    <property name="orientation">vertical</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <style><class name="right-panel"/></style>
+  </object>
+
+  <object class="GtkOverlay" id="queue_lyrics_overlay">
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="vexpand">true</property>
+        <child>
+          <object class="GtkBox" id="queue_fixed_top">
+            <property name="orientation">vertical</property>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">6</property>
+                <property name="valign">center</property>
+                <property name="margin-top">10</property>
+                <property name="margin-start">10</property>
+                <property name="margin-end">8</property>
+                <style><class name="sidebar-header"/><class name="queue-toolbar"/></style>
+                <child>
+                  <object class="GtkSearchEntry" id="queue_search">
+                    <accessibility><property name="label" translatable="yes">Search queue</property></accessibility>
+                    <property name="hexpand">true</property>
+                    <property name="height-request">30</property>
+                    <style><class name="queue-search"/></style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="queue_clear_button">
+                    <property name="icon-name">rufin-edit-clear-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Clear queue</property>
+                    <accessibility><property name="label" translatable="yes">Clear queue</property></accessibility>
+                    <property name="valign">center</property>
+                    <style><class name="icon-button"/><class name="flat"/><class name="circular"/></style>
+                  </object>
+                </child>
+                <child><object class="GtkBox" id="window_controls_host"/></child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox" id="queue_header_host">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="margin-top">8</property><property name="margin-start">10</property><property name="margin-end">8</property>
+                <property name="visible">false</property>
+                <style><class name="table-header"/></style>
+                <child><object class="GtkBox"><property name="width-request">50</property></object></child>
+                <child><object class="GtkLabel"><property name="label" translatable="yes">Title</property><property name="xalign">0</property><property name="hexpand">true</property><style><class name="muted"/></style></object></child>
+                <child><object class="GtkLabel"><property name="label" translatable="yes">Year</property><property name="xalign">1</property><property name="width-chars">4</property><property name="halign">end</property><style><class name="muted"/><class name="queue-year"/></style></object></child>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child><object class="GtkBox"><property name="vexpand">true</property></object></child>
+      </object>
+    </property>
+    <child type="overlay">
+      <object class="GtkBox" id="queue_panel">
+        <property name="orientation">vertical</property><property name="overflow">hidden</property>
+        <property name="margin-start">10</property>
+        <style><class name="queue-panel"/></style>
+        <child>
+          <object class="GtkScrolledWindow" id="queue_scroller">
+            <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
+            <property name="vexpand">true</property>
+            <style><class name="queue-scroller"/><class name="right-panel-scroller"/></style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child type="overlay">
+      <object class="GtkPaned" id="queue_lyrics_split">
+        <property name="orientation">vertical</property>
+        <property name="hexpand">true</property><property name="vexpand">true</property>
+        <property name="wide-handle">false</property>
+        <property name="resize-start-child">true</property><property name="resize-end-child">false</property>
+        <property name="shrink-start-child">true</property><property name="shrink-end-child">false</property>
+        <style><class name="queue-lyrics-split"/></style>
+        <property name="start-child">
+          <object class="GtkBox"/>
+        </property>
+        <property name="end-child">
+          <object class="GtkBox" id="lyrics_surface">
+            <property name="orientation">vertical</property><property name="overflow">hidden</property>
+            <property name="hexpand">true</property>
+            <style><class name="queue-lyrics-surface"/></style>
+            <child>
+              <object class="GtkOverlay" id="media_overlay">
+                <property name="hexpand">true</property><property name="vexpand">true</property>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property>
+                    <property name="hexpand">true</property><property name="vexpand">true</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkBox" id="lyrics_host">
+    <property name="orientation">vertical</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+  </object>
+</interface>

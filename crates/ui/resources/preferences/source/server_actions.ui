@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesGroup" id="group">
+    <property name="title" translatable="yes">Server Actions</property>
+    <child>
+      <object class="AdwPreferencesRow">
+        <property name="activatable">false</property><property name="selectable">false</property>
+        <property name="child">
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property><property name="homogeneous">true</property>
+            <property name="halign">fill</property><property name="hexpand">true</property>
+            <property name="margin-top">6</property><property name="margin-bottom">6</property><property name="margin-start">8</property><property name="margin-end">8</property>
+            <child>
+              <object class="GtkButton" id="select">
+                <property name="tooltip-text" translatable="yes">Use This Source</property><property name="halign">fill</property><property name="hexpand">true</property>
+                <style><class name="flat"/></style>
+                <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-object-select-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Use This Source</property><property name="ellipsize">end</property><property name="width-chars">0</property><property name="max-width-chars">18</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property></object></child></object></property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="resync">
+                <property name="tooltip-text" translatable="yes">Resync Library</property><property name="halign">fill</property><property name="hexpand">true</property>
+                <style><class name="flat"/></style>
+                <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-view-refresh-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Resync Library</property><property name="ellipsize">end</property><property name="width-chars">0</property><property name="max-width-chars">18</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property></object></child></object></property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="forget">
+                <property name="tooltip-text" translatable="yes">Forget Server</property><property name="halign">fill</property><property name="hexpand">true</property>
+                <style><class name="flat"/><class name="destructive-action"/></style>
+                <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-window-close-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Forget Server</property><property name="ellipsize">end</property><property name="width-chars">0</property><property name="max-width-chars">18</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property></object></child></object></property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+</interface>

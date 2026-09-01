@@ -35,37 +35,6 @@ pub const MIN_RIGHT_SIDEBAR_WIDTH: i32 = 250;
 pub const MAX_RIGHT_SIDEBAR_WIDTH: i32 = 500;
 pub const MIN_TABLE_COLUMN_WIDTH: i32 = 24;
 pub const MAX_TABLE_COLUMN_WIDTH: i32 = 4_096;
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub struct FolderViewSettings {
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub tree_width: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub name_column_width: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub detail_column_width: Option<i32>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub duration_column_width: Option<i32>,
-}
-impl FolderViewSettings {
-    pub fn is_default(&self) -> bool {
-        self == &Self::default()
-    }
-
-    pub fn sanitize(&mut self) {
-        for width in [
-            &mut self.name_column_width,
-            &mut self.detail_column_width,
-            &mut self.duration_column_width,
-        ] {
-            if let Some(value) = width {
-                *value = (*value).clamp(MIN_TABLE_COLUMN_WIDTH, MAX_TABLE_COLUMN_WIDTH);
-            }
-        }
-        if let Some(width) = &mut self.tree_width {
-            *width = (*width).clamp(1, MAX_TABLE_COLUMN_WIDTH);
-        }
-    }
-}
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize)]
 pub enum LeftSidebarMode {
     #[default]
@@ -289,7 +258,7 @@ impl<'de> Deserialize<'de> for LayoutSettings {
         Ok(settings)
     }
 }
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+#[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub enum SidebarRouteItem {
     Home,
     Search,
@@ -1201,8 +1170,37 @@ pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
 }
 
 #[cfg(test)]
-mod sidebar_pin_tests {
+mod sidebar_tests {
     use super::*;
+
+    #[test]
+    fn route_defaults_and_sanitization_preserve_saved_behavior() {
+        let defaults = SidebarSettings::default();
+        assert_eq!(
+            defaults
+                .route_items
+                .iter()
+                .map(|entry| entry.item)
+                .collect::<Vec<_>>(),
+            SidebarRouteItem::all()
+        );
+        assert_eq!(
+            defaults
+                .route_items
+                .iter()
+                .filter(|entry| !entry.visible)
+                .map(|entry| entry.item)
+                .collect::<Vec<_>>(),
+            [SidebarRouteItem::Search, SidebarRouteItem::Moods]
+        );
+
+        let mut saved = defaults.clone();
+        saved.route_items.rotate_left(4);
+        saved.route_items[0].visible = false;
+        let expected = saved.route_items.clone();
+        saved.sanitize();
+        assert_eq!(saved.route_items, expected);
+    }
 
     fn pin(id: &str) -> SidebarPin {
         SidebarPin::Playlist {

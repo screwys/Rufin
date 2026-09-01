@@ -152,7 +152,9 @@ pub(crate) fn casting_network_dropdown(shell: &Rc<Shell>, width: i32) -> gtk::Dr
             return;
         };
         dropdown.set_tooltip_text(Some(title));
-        network_shell.set_cast_network_interface(id.clone());
+        network_shell.set_app_setting("casting network setting", id.clone(), |settings| {
+            &mut settings.cast_network_interface
+        });
     });
     dropdown
 }

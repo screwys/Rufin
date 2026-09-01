@@ -13,3 +13,6 @@ build = "build.rs"
 
 [lints]
 workspace = true
+
+[dependencies]
+gettext-rs.workspace = true

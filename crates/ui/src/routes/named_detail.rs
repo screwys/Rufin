@@ -11,7 +11,6 @@ use localization::{msgid, track_count_text};
 use playback::RadioPlayRequest;
 
 use crate::format_duration_units;
-use crate::localization::localized_label;
 use crate::shell::Shell;
 use crate::shell::cover::presentation::stable_seed;
 use crate::shell::route::MountedRoute;
@@ -181,6 +180,7 @@ impl Shell {
         id: NamedDetailId,
         summary: Option<NamedDetailSummary>,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -199,7 +199,13 @@ impl Shell {
         let context_menu = named_context_menu(self, Rc::clone(&current));
         let grouped = self.grouped_detail_view(GroupedDetailData {
             key: id.key(),
-            kind_row: Some(named_kind_row(self, id).upcast()),
+            kind: if matches!(id, NamedDetailId::Genre(_)) {
+                "Genre"
+            } else {
+                "Mood"
+            },
+            genre_kind: matches!(id, NamedDetailId::Genre(_)),
+            kind_controls: named_kind_controls(self, id),
             title,
             artwork,
             seed,
@@ -207,6 +213,7 @@ impl Shell {
             context_menu,
             selected: selected.clone(),
             tracks: order,
+            first_row_position,
             first_rows,
             play_order: None,
             table_context: id.table_context(),
@@ -252,7 +259,14 @@ impl Shell {
                 );
             })
         };
-        MountedRoute::new(grouped.widget(), resume).with_item_navigation(grouped.item_navigation())
+        MountedRoute::new(grouped.widget(), resume)
+            .with_search(grouped.search())
+            .with_layout_cycle(grouped.layout_cycle())
+            .with_item_navigation(grouped.item_navigation())
+            .with_initial_demand({
+                let tracks = Rc::clone(&tracks);
+                Rc::new(move || tracks.resume_initial_demand())
+            })
     }
 }
 
@@ -282,6 +296,7 @@ fn request_named_order(
                         &query,
                         sort,
                         descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
@@ -295,6 +310,7 @@ fn request_named_order(
                         &query,
                         sort,
                         descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
@@ -315,6 +331,7 @@ fn request_named_order(
         if let Some(page) = page {
             projection.replace_prepared(PreparedTrackProjection {
                 order: page.order,
+                first_row_position: page.first_row_position,
                 first_rows: page.first_rows,
                 request,
             });
@@ -328,6 +345,7 @@ pub(crate) async fn load_named_detail(
     folder: Option<library::FolderKey>,
     id: NamedDetailId,
     settings: &LibraryListSettings,
+    window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<(Option<NamedDetailSummary>, library::TrackRoutePage), String> {
     let sort = settings.sort_key.track_sort();
@@ -352,7 +370,16 @@ pub(crate) async fn load_named_detail(
                 None
             };
             let page = database
-                .genre_track_route_page(source, key, folder, "", sort, descending, cancellation)
+                .genre_track_route_page(
+                    source,
+                    key,
+                    folder,
+                    "",
+                    sort,
+                    descending,
+                    window,
+                    cancellation,
+                )
                 .await
                 .map_err(|error| error.to_string())?;
             Ok((detail, page))
@@ -376,7 +403,16 @@ pub(crate) async fn load_named_detail(
                 None
             };
             let page = database
-                .mood_track_route_page(source, key, folder, "", sort, descending, cancellation)
+                .mood_track_route_page(
+                    source,
+                    key,
+                    folder,
+                    "",
+                    sort,
+                    descending,
+                    window,
+                    cancellation,
+                )
                 .await
                 .map_err(|error| error.to_string())?;
             Ok((detail, page))
@@ -404,31 +440,17 @@ fn named_context_menu(
         >)
 }
 
-fn named_kind_row(shell: &Rc<Shell>, id: NamedDetailId) -> gtk::Box {
-    let genre = matches!(id, NamedDetailId::Genre(_));
-    let kind = localized_label(if genre { "Genre" } else { "Mood" });
-    kind.add_css_class("eyebrow");
-    kind.set_xalign(0.0);
-    kind.set_halign(gtk::Align::Start);
-    kind.set_valign(gtk::Align::Center);
-    kind.set_margin_end(6);
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-    row.add_css_class("album-detail-kind-row");
-    if genre {
-        row.add_css_class("album-detail-genre-row");
-    }
-    row.set_valign(gtk::Align::Center);
-    row.set_halign(gtk::Align::Start);
-    row.append(&kind);
+fn named_kind_controls(shell: &Rc<Shell>, id: NamedDetailId) -> Vec<gtk::Widget> {
+    let mut controls = Vec::new();
     if let NamedDetailId::Genre(key) = id {
         let radio = detail_radio_button();
         let controller = shell.products.playback.radio.clone();
         radio.connect_clicked(move |_| {
             controller.play_radio(RadioPlayRequest::now(RadioSeed::Genre(key)));
         });
-        row.append(&radio);
+        controls.push(radio.upcast());
     }
-    row
+    controls
 }
 
 fn named_summary_items(summary: &NamedDetailSummary) -> Vec<(&'static str, String)> {

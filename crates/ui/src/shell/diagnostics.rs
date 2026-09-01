@@ -18,84 +18,25 @@ const DIAGNOSTICS_DIALOG_HEIGHT: i32 = 560;
 const LOG_REFRESH_INTERVAL: Duration = Duration::from_millis(250);
 
 pub(super) fn present_diagnostics(shell: &Rc<Shell>) {
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Troubleshooting"), "")));
-    toolbar.add_top_bar(&header);
+    let resource = crate::ui_resource::DIAGNOSTICS_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "diagnostics_dialog");
+    dialog.set_content_width(large_popup_content_width(DIAGNOSTICS_DIALOG_WIDTH));
+    dialog.set_content_height(large_popup_content_height(
+        shell.chrome.window.height(),
+        DIAGNOSTICS_DIALOG_HEIGHT,
+    ));
+    let debug: adw::SwitchRow = crate::ui_resource::object(&builder, resource, "debug");
+    debug.set_active(shell.diagnostics.debug_enabled());
 
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    content.set_margin_top(12);
-    content.set_margin_bottom(12);
-    content.set_margin_start(18);
-    content.set_margin_end(18);
-
-    let debug_group = adw::PreferencesGroup::new();
-    let debug = adw::SwitchRow::builder()
-        .title(tr("Debug logging"))
-        .subtitle(tr("Include detailed Rufin diagnostics in this session"))
-        .active(shell.diagnostics.debug_enabled())
-        .build();
-    debug_group.add(&debug);
-    content.append(&debug_group);
-
-    let sharing_note = gtk::Label::builder()
-        .label(tr(
-            "Logs have secrets and absolute folder paths redacted, but you may still want to review the logs before sharing them",
-        ))
-        .wrap(true)
-        .xalign(0.0)
-        .margin_start(12)
-        .build();
-    sharing_note.add_css_class("dim-label");
-    sharing_note.add_css_class("caption");
-    content.append(&sharing_note);
-
-    let log = gtk::TextView::builder()
-        .editable(false)
-        .cursor_visible(false)
-        .monospace(true)
-        .wrap_mode(gtk::WrapMode::WordChar)
-        .left_margin(8)
-        .right_margin(8)
-        .top_margin(8)
-        .bottom_margin(8)
-        .build();
+    let log: gtk::TextView = crate::ui_resource::object(&builder, resource, "log");
     log.update_property(&[gtk::accessible::Property::Label(&tr("Diagnostic log"))]);
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.add_css_class("card");
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_hexpand(true);
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(&log));
-    content.append(&scroller);
-
-    let copy = gtk::Button::with_label(&tr("Copy"));
-    let save = gtk::Button::with_label(&tr("Save"));
-    save.add_css_class("suggested-action");
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-    actions.set_halign(gtk::Align::End);
-    actions.set_homogeneous(true);
-    actions.append(&copy);
-    actions.append(&save);
-    let status = gtk::Label::new(None);
-    status.set_halign(gtk::Align::Start);
-    status.set_hexpand(true);
-    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    let footer = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    footer.append(&status);
-    footer.append(&actions);
-    content.append(&footer);
-    toolbar.set_content(Some(&content));
-
-    let dialog = adw::Dialog::builder()
-        .title(tr("Troubleshooting"))
-        .content_width(large_popup_content_width(DIAGNOSTICS_DIALOG_WIDTH))
-        .content_height(large_popup_content_height(
-            shell.chrome.window.height(),
-            DIAGNOSTICS_DIALOG_HEIGHT,
-        ))
-        .child(&toolbar)
-        .build();
+    let scroller: gtk::ScrolledWindow =
+        crate::ui_resource::object(&builder, resource, "log_scroller");
+    let copy: gtk::Button = crate::ui_resource::object(&builder, resource, "copy");
+    let save: gtk::Button = crate::ui_resource::object(&builder, resource, "save");
+    let status: gtk::Label = crate::ui_resource::object(&builder, resource, "status");
+    drop(builder);
 
     let changing_debug = Rc::new(Cell::new(false));
     let diagnostics = shell.diagnostics.clone();

@@ -1,0 +1,21 @@
+id: activatable-row-does-not-retain-itself
+valid:
+  - |
+      fn connect(row: ActionRow, button: Button) {
+          row.set_activatable_widget(Some(&button));
+          let owner = row.downgrade();
+          button.connect_clicked(move |_| {
+              if let Some(owner) = owner.upgrade() {
+                  owner.activate();
+              }
+          });
+      }
+invalid:
+  - |
+      fn connect(row: ActionRow, button: Button) {
+          row.set_activatable_widget(Some(&button));
+          let owner = row.clone();
+          button.connect_clicked(move |_| {
+              owner.activate();
+          });
+      }

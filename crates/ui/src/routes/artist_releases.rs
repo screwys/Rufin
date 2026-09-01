@@ -4,10 +4,12 @@ use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use adw::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 
 use crate::layout::{configure_fill_width_clip, width_allocation_owner};
 use crate::shell::Shell;
+use crate::shell::route::MountedRouteSearchTarget;
 use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 
 use super::cards;
@@ -23,12 +25,6 @@ use super::sparse_model::SparseRouteModel;
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
 
-#[derive(Clone)]
-pub(super) struct ArtistRouteSearchTarget {
-    pub(super) search: gtk::SearchEntry,
-    pub(super) focus: Rc<dyn Fn()>,
-}
-
 pub(super) struct ArtistReleaseRoutePreamble {
     pub(super) header: gtk::Widget,
     pub(super) favorite: Option<(gtk::Widget, gtk::SearchEntry)>,
@@ -36,17 +32,16 @@ pub(super) struct ArtistReleaseRoutePreamble {
     pub(super) empty: gtk::Widget,
 }
 
-#[derive(Clone)]
 pub(super) struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
-    orders: Rc<RefCell<[Vec<library::AlbumKey>; 6]>>,
+    orders: RefCell<[Vec<library::AlbumKey>; 6]>,
     sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
     lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
     layout: Rc<Cell<LibraryLayout>>,
     favorite: Option<gtk::Widget>,
-    favorite_present: Rc<Cell<bool>>,
-    search_targets: Rc<HashMap<ArtistRouteTarget, ArtistRouteSearchTarget>>,
+    favorite_present: Cell<bool>,
+    search_targets: HashMap<ArtistRouteTarget, MountedRouteSearchTarget>,
     apply_grid_fields: Rc<dyn Fn(&[LibraryField])>,
     grid_fields: Rc<RefCell<Vec<LibraryField>>>,
     empty: gtk::Widget,
@@ -62,8 +57,7 @@ struct ArtistAlbumProjection {
     header: gtk::Widget,
     toolbar: LibraryToolbarProjection,
     rows: gio::ListStore,
-    row_table: RefCell<Option<CollectionTableProjection>>,
-    row_surface: RefCell<Option<gtk::Widget>>,
+    row: RefCell<Option<(CollectionTableProjection, gtk::Widget)>>,
     body_layout: Cell<Option<LibraryLayout>>,
     layout: Rc<Cell<LibraryLayout>>,
     columns: Rc<Cell<usize>>,
@@ -91,16 +85,74 @@ enum ArtistRouteRow {
     },
 }
 
-struct ArtistRouteListCell {
-    root: gtk::Box,
-    grid_cells: Vec<ArtistGridSlot>,
-    grid_columns: usize,
-    grid_mode: bool,
-}
-
 struct ArtistGridSlot {
     cell: AlbumGridCell,
     widget: gtk::Widget,
+}
+
+mod artist_route_list_cell_imp {
+    use super::ArtistGridSlot;
+    use std::cell::{Cell, RefCell};
+
+    use gtk::glib;
+    use gtk::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub(super) struct ArtistRouteListCell {
+        pub(super) grid_cells: RefCell<Vec<ArtistGridSlot>>,
+        pub(super) grid_columns: Cell<usize>,
+        pub(super) grid_mode: Cell<bool>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for ArtistRouteListCell {
+        const NAME: &'static str = "RufinArtistRouteListCell";
+        type Type = super::ArtistRouteListCell;
+        type ParentType = gtk::Box;
+    }
+
+    impl ObjectImpl for ArtistRouteListCell {}
+    impl WidgetImpl for ArtistRouteListCell {}
+    impl BoxImpl for ArtistRouteListCell {}
+}
+
+glib::wrapper! {
+    struct ArtistRouteListCell(ObjectSubclass<artist_route_list_cell_imp::ArtistRouteListCell>)
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl ArtistRouteListCell {
+    fn new() -> Self {
+        glib::Object::builder()
+            .property("orientation", gtk::Orientation::Horizontal)
+            .property("hexpand", true)
+            .property("halign", gtk::Align::Fill)
+            .property("vexpand", false)
+            .property("valign", gtk::Align::Start)
+            .build()
+    }
+
+    fn clear_grid_state(&self, remove: bool) {
+        let imp = self.imp();
+        for slot in imp.grid_cells.borrow().iter() {
+            slot.cell.clear();
+            slot.widget.set_visible(false);
+        }
+        if remove {
+            remove_box_children(self);
+            imp.grid_cells.borrow_mut().clear();
+            imp.grid_columns.set(0);
+            imp.grid_mode.set(false);
+            self.remove_css_class("album-grid");
+        }
+    }
+
+    fn apply_fields(&self, fields: &[LibraryField]) {
+        for slot in self.imp().grid_cells.borrow().iter() {
+            slot.cell.apply_fields(fields);
+        }
+    }
 }
 
 impl ArtistAlbumProjection {
@@ -150,8 +202,7 @@ impl ArtistAlbumProjection {
             header,
             toolbar,
             rows,
-            row_table: RefCell::new(None),
-            row_surface: RefCell::new(None),
+            row: RefCell::new(None),
             body_layout: Cell::new(None),
             layout,
             columns,
@@ -194,10 +245,8 @@ impl ArtistAlbumProjection {
     }
 
     fn row_widget(&self, settings: &LibraryListSettings) -> gtk::Widget {
-        if let Some(surface) = self.row_surface.borrow().as_ref() {
-            if let Some(table) = self.row_table.borrow().as_ref() {
-                table.apply_fields(&settings.row_fields);
-            }
+        if let Some((table, surface)) = self.row.borrow().as_ref() {
+            table.apply_fields(&settings.row_fields);
             return surface.clone();
         }
         let Some(shell) = self.shell.upgrade() else {
@@ -218,8 +267,7 @@ impl ArtistAlbumProjection {
             resize_table.fit_scroller_allocation(&resize_clip, width);
         })
         .upcast::<gtk::Widget>();
-        self.row_table.replace(Some(table));
-        self.row_surface.replace(Some(surface.clone()));
+        self.row.replace(Some((table, surface.clone())));
         surface
     }
 
@@ -228,6 +276,7 @@ impl ArtistAlbumProjection {
             self.header.set_visible(false);
             self.header.set_margin_bottom(0);
             replace_artist_release_body(&self.rows, Vec::new());
+            self.row.borrow_mut().take();
             self.body_layout.set(None);
             return;
         }
@@ -259,6 +308,7 @@ impl ArtistAlbumProjection {
                     ARTIST_RELEASE_HEADER_GAP
                 });
                 replace_artist_release_body(&self.rows, self.grid_rows(0, self.grid_row_count()));
+                self.row.borrow_mut().take();
             }
         }
         self.body_layout.set(Some(self.layout.get()));
@@ -337,6 +387,7 @@ impl ArtistReleaseProjections {
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
         orders: [Vec<library::AlbumKey>; 6],
+        first_row_position: usize,
         first_rows: Vec<library::AlbumRow>,
     ) -> Self {
         let settings = shell
@@ -362,8 +413,8 @@ impl ArtistReleaseProjections {
             },
         );
         let sparse = SparseRouteModel::new(flat_order, 32, selected.runtime.clone(), load);
-        sparse.seed_matching(first_rows, |row| row.album_key);
-        let orders = Rc::new(RefCell::new(orders));
+        sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
+        let orders = RefCell::new(orders);
         let mut start = 0_usize;
         let sections = Rc::new(
             titles
@@ -464,8 +515,8 @@ impl ArtistReleaseProjections {
             surface: owner.upcast(),
             layout,
             favorite: favorite_widget,
-            favorite_present: Rc::new(Cell::new(favorite_present)),
-            search_targets: Rc::new(search_targets),
+            favorite_present: Cell::new(favorite_present),
+            search_targets,
             apply_grid_fields,
             grid_fields,
             empty,
@@ -480,15 +531,12 @@ impl ArtistReleaseProjections {
         self.sections.get(index).map(|section| section.search())
     }
 
-    pub(super) fn section_lane(
-        &self,
-        index: usize,
-    ) -> Option<Rc<super::named_detail::NamedOrderLane>> {
-        self.sections.get(index).map(|_| Rc::clone(&self.lane))
-    }
-
     pub(super) fn lane(&self) -> Rc<super::named_detail::NamedOrderLane> {
         Rc::clone(&self.lane)
+    }
+
+    pub(super) fn resume_initial_demand(&self) {
+        self.sparse.resume_initial_demand();
     }
 
     pub(super) fn replace_section_order(
@@ -554,7 +602,7 @@ impl ArtistReleaseProjections {
         );
     }
 
-    pub(super) fn primary_search(&self) -> Option<ArtistRouteSearchTarget> {
+    pub(super) fn primary_search(&self) -> Option<MountedRouteSearchTarget> {
         let target = if self.favorite_present.get() {
             Some(ArtistRouteTarget::Favorite)
         } else {
@@ -564,6 +612,14 @@ impl ArtistReleaseProjections {
                 .map(ArtistRouteTarget::Release)
         }?;
         self.search_targets.get(&target).cloned()
+    }
+
+    pub(super) fn layout_cycle(&self) -> crate::shell::route::MountedRouteCommand {
+        self.sections
+            .first()
+            .expect("Artist releases have a section")
+            .toolbar
+            .layout_cycle()
     }
 
     pub(super) fn apply_library_list_settings(&self, settings: &LibraryListSettings) {
@@ -614,29 +670,18 @@ fn artist_route_list(
 ) -> (gtk::ListView, Rc<dyn Fn(&[LibraryField])>) {
     let selection = gtk::NoSelection::new(Some(model));
     let factory = gtk::SignalListItemFactory::new();
-    let cells = Rc::new(RefCell::new(HashMap::<usize, ArtistRouteListCell>::new()));
+    let cells = Rc::new(RefCell::new(
+        Vec::<glib::WeakRef<ArtistRouteListCell>>::new(),
+    ));
     let setup_cells = Rc::clone(&cells);
     factory.connect_setup(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        root.set_hexpand(true);
-        root.set_halign(gtk::Align::Fill);
-        root.set_vexpand(false);
-        root.set_valign(gtk::Align::Start);
+        let root = ArtistRouteListCell::new();
         item.set_child(Some(&root));
-        setup_cells.borrow_mut().insert(
-            item.as_ptr() as usize,
-            ArtistRouteListCell {
-                root,
-                grid_cells: Vec::new(),
-                grid_columns: 0,
-                grid_mode: false,
-            },
-        );
+        setup_cells.borrow_mut().push(root.downgrade());
     });
-    let bind_cells = Rc::clone(&cells);
     let bind_fields = Rc::clone(&fields);
     let bind_shell = Rc::clone(shell);
     factory.connect_bind(move |_, item| {
@@ -650,21 +695,20 @@ fn artist_route_list(
         else {
             return;
         };
-        let mut states = bind_cells.borrow_mut();
-        let Some(state) = states.get_mut(&(item.as_ptr() as usize)) else {
+        let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() else {
             return;
         };
         match row {
             ArtistRouteRow::Static { widget } => {
-                clear_grid_state(state, true);
-                state.root.set_orientation(gtk::Orientation::Vertical);
-                state.root.set_homogeneous(false);
-                state.root.set_margin_bottom(0);
-                if widget.parent().as_ref() != Some(state.root.upcast_ref()) {
+                state.clear_grid_state(true);
+                state.set_orientation(gtk::Orientation::Vertical);
+                state.set_homogeneous(false);
+                state.set_margin_bottom(0);
+                if widget.parent().as_ref() != Some(state.upcast_ref()) {
                     if let Some(parent) = widget.parent().and_downcast::<gtk::Box>() {
                         parent.remove(&widget);
                     }
-                    state.root.append(&widget);
+                    state.append(&widget);
                 }
             }
             ArtistRouteRow::AlbumGrid {
@@ -677,11 +721,12 @@ fn artist_route_list(
                 let Some(section) = section.upgrade() else {
                     return;
                 };
-                if !state.grid_mode || state.grid_columns != columns {
-                    clear_grid_state(state, true);
-                    state.root.set_orientation(gtk::Orientation::Horizontal);
-                    state.root.set_homogeneous(true);
-                    state.root.add_css_class("album-grid");
+                let imp = state.imp();
+                if !imp.grid_mode.get() || imp.grid_columns.get() != columns {
+                    state.clear_grid_state(true);
+                    state.set_orientation(gtk::Orientation::Horizontal);
+                    state.set_homogeneous(true);
+                    state.add_css_class("album-grid");
                     for _ in 0..columns {
                         let cell = AlbumGridCell::new(&bind_shell, &bind_fields.borrow(), None);
                         let widget = cell.widget();
@@ -689,15 +734,17 @@ fn artist_route_list(
                             &widget,
                             COLLECTION_GRID_MIN_CARD_WIDTH,
                         );
-                        state.root.append(&wrapper);
-                        state.grid_cells.push(ArtistGridSlot { cell, widget });
+                        state.append(&wrapper);
+                        imp.grid_cells
+                            .borrow_mut()
+                            .push(ArtistGridSlot { cell, widget });
                     }
-                    state.grid_columns = columns;
-                    state.grid_mode = true;
+                    imp.grid_columns.set(columns);
+                    imp.grid_mode.set(true);
                 }
-                state.root.set_margin_bottom(margin_bottom);
+                state.set_margin_bottom(margin_bottom);
                 let model = section.sparse.list_model();
-                for (offset, slot) in state.grid_cells.iter().enumerate() {
+                for (offset, slot) in imp.grid_cells.borrow().iter().enumerate() {
                     if offset >= len {
                         slot.cell.clear();
                         slot.widget.set_visible(false);
@@ -714,29 +761,24 @@ fn artist_route_list(
             }
         }
     });
-    let unbind_cells = Rc::clone(&cells);
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        if let Some(state) = unbind_cells.borrow_mut().get_mut(&(item.as_ptr() as usize)) {
-            if state.grid_mode {
-                clear_grid_state(state, false);
+        if let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() {
+            if state.imp().grid_mode.get() {
+                state.clear_grid_state(false);
             } else {
-                remove_box_children(&state.root);
+                remove_box_children(&state);
             }
         }
     });
-    let teardown_cells = Rc::clone(&cells);
     factory.connect_teardown(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        if let Some(mut state) = teardown_cells
-            .borrow_mut()
-            .remove(&(item.as_ptr() as usize))
-        {
-            clear_grid_state(&mut state, true);
+        if let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() {
+            state.clear_grid_state(true);
         }
         item.set_child(None::<&gtk::Widget>);
     });
@@ -748,30 +790,18 @@ fn artist_route_list(
     list.set_vexpand(true);
     let apply_cells = Rc::clone(&cells);
     let apply_fields = Rc::new(move |fields: &[LibraryField]| {
-        for state in apply_cells.borrow().values() {
-            for slot in &state.grid_cells {
-                slot.cell.apply_fields(fields);
-            }
-        }
+        apply_cells.borrow_mut().retain(|cell| {
+            cell.upgrade().is_some_and(|cell| {
+                cell.apply_fields(fields);
+                true
+            })
+        });
     }) as Rc<dyn Fn(&[LibraryField])>;
     (list, apply_fields)
 }
 
-fn clear_grid_state(state: &mut ArtistRouteListCell, remove: bool) {
-    for slot in &state.grid_cells {
-        slot.cell.clear();
-        slot.widget.set_visible(false);
-    }
-    if remove {
-        remove_box_children(&state.root);
-        state.grid_cells.clear();
-        state.grid_columns = 0;
-        state.grid_mode = false;
-        state.root.remove_css_class("album-grid");
-    }
-}
-
-fn remove_box_children(root: &gtk::Box) {
+fn remove_box_children(root: &impl IsA<gtk::Box>) {
+    let root = root.as_ref();
     while let Some(child) = root.first_child() {
         root.remove(&child);
     }
@@ -793,7 +823,7 @@ fn virtual_search_target(
     models: Rc<Vec<gio::ListStore>>,
     model_index: usize,
     search: gtk::SearchEntry,
-) -> ArtistRouteSearchTarget {
+) -> MountedRouteSearchTarget {
     let pending = Rc::new(Cell::new(false));
     let mapped_pending = Rc::clone(&pending);
     search.connect_map(move |search| {
@@ -821,7 +851,10 @@ fn virtual_search_target(
             list.scroll_to(position, gtk::ListScrollFlags::FOCUS, None);
         }
     }) as Rc<dyn Fn()>;
-    ArtistRouteSearchTarget { search, focus }
+    MountedRouteSearchTarget {
+        search,
+        focus: Some(focus),
+    }
 }
 
 #[cfg(test)]

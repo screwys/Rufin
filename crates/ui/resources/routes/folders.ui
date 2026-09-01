@@ -1,0 +1,33 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinFoldersRouteView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">10</property>
+    <property name="margin-top">10</property>
+    <property name="margin-bottom">8</property>
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="width-request">1</property>
+    <property name="vexpand">true</property>
+    <style><class name="route-content"/><class name="folders-route"/></style>
+    <child>
+      <object class="GtkBox" id="toolbar_host">
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="margin-start">10</property>
+        <property name="margin-end">10</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="breadcrumb_host">
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="margin-start">10</property>
+        <property name="margin-end">10</property>
+      </object>
+    </child>
+  </template>
+
+</interface>

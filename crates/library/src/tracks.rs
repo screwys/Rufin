@@ -7,7 +7,7 @@ use sqlx::{Connection, FromRow, QueryBuilder, Sqlite, SqliteConnection};
 
 use crate::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, LibraryError, LibraryResult,
-    ReadCancellation, SourceKey, TrackKey, loudness::recompute_album_loudness_key,
+    ReadCancellation, RouteSeedWindow, SourceKey, TrackKey, loudness::recompute_album_loudness_key,
 };
 
 const TRACK_ROW_LIMIT: usize = 256;
@@ -169,6 +169,7 @@ pub struct TrackRow {
 #[derive(Clone, Debug)]
 pub struct TrackRoutePage {
     pub order: Vec<TrackKey>,
+    pub first_row_position: usize,
     pub first_rows: Vec<TrackRow>,
 }
 
@@ -335,6 +336,7 @@ impl Database {
         filter: &str,
         sort: TrackSort,
         descending: bool,
+        window: RouteSeedWindow,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -350,15 +352,16 @@ impl Database {
             false,
         )
         .await?;
-        let first_rows = load_track_rows(
-            &mut transaction,
-            source,
-            &order[..order.len().min(TRACK_ROW_LIMIT)],
-        )
-        .await?;
+        let seed = window.range(order.len());
+        let first_row_position = seed.start;
+        let first_rows = load_track_rows(&mut transaction, source, &order[seed]).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(TrackRoutePage { order, first_rows })
+        Ok(TrackRoutePage {
+            order,
+            first_row_position,
+            first_rows,
+        })
     }
 
     pub async fn live_folder_track_order(

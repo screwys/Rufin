@@ -386,7 +386,12 @@ test *args:
     @scripts/container run default none just _test {{ args }}
 
 _test *args:
-    @if command -v cargo-nextest >/dev/null 2>&1; then \
+    @if [[ "$(uname -s)" == Darwin ]]; then \
+        gettext_prefix="$(brew --prefix gettext)"; \
+        export GETTEXT_DIR="$gettext_prefix"; \
+        export PATH="$gettext_prefix/bin:$PATH"; \
+    fi; \
+    if command -v cargo-nextest >/dev/null 2>&1; then \
         nextest_jobs="${NEXTEST_JOBS:-4}"; \
         if [[ ! "$nextest_jobs" =~ ^[1-9][0-9]*$ ]]; then \
             echo "NEXTEST_JOBS must be a positive integer." >&2; \
@@ -410,7 +415,10 @@ _ast-grep:
     @ast-grep scan --error crates
 
 _lint:
-    @cargo clippy --workspace --all-targets --locked
+    @if [[ "$(uname -s)" == Darwin ]]; then \
+        export GETTEXT_DIR="$(brew --prefix gettext)"; \
+    fi; \
+    cargo clippy --workspace --all-targets --locked
 
 # Regenerate Linux package dependency metadata.
 deps:

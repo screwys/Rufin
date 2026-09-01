@@ -11,8 +11,6 @@ use lyrics::{
     japanese_reading_from_romanization,
 };
 
-use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
-
 use super::wrapping_line::WrappingLine;
 
 const DEFAULT_LYRICS_SCROLL_ANIMATION_MS: u64 = 300;
@@ -125,6 +123,12 @@ mod karaoke_text {
             let widget: Self = glib::Object::new();
             let base = gtk::Label::new(Some(text));
             let highlight = gtk::Label::new(Some(text));
+            for label in [&base, &highlight] {
+                label.set_wrap(true);
+                label.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+                label.set_xalign(0.5);
+                label.set_justify(gtk::Justification::Center);
+            }
             highlight.add_css_class("lyrics-cue-sung");
             highlight.set_accessible_role(gtk::AccessibleRole::Presentation);
             base.set_parent(&widget);
@@ -176,6 +180,8 @@ pub(crate) struct LyricsPane {
     offset_increase_button: gtk::Button,
     rows: Rc<RefCell<Vec<LyricsRow>>>,
     active_index: Rc<Cell<Option<usize>>>,
+    active_row: Rc<RefCell<Option<gtk::Widget>>>,
+    resize_anchor_y: Rc<Cell<Option<f32>>>,
     scroll_generation: Rc<Cell<u64>>,
     follow_pause_until: Rc<Cell<Option<Instant>>>,
 }
@@ -226,85 +232,28 @@ pub(crate) enum LyricsPaneContent<'a> {
 
 impl LyricsPane {
     pub fn new() -> Self {
-        let root = gtk::Overlay::new();
-        root.add_css_class("lyrics-panel");
-        root.set_vexpand(true);
-        root.set_margin_start(8);
-        root.set_margin_end(0);
-
-        let clear_auto_search_button = gtk::Button::from_icon_name("rufin-process-stop-symbolic");
-        clear_auto_search_button.add_css_class("icon-button");
-        clear_auto_search_button.add_css_class("flat");
-        clear_auto_search_button.add_css_class("circular");
-
-        let search_button = gtk::Button::from_icon_name("rufin-lyrics-search-symbolic");
-        search_button.add_css_class("icon-button");
-        search_button.add_css_class("flat");
-        search_button.add_css_class("circular");
-        let edit_button = gtk::Button::from_icon_name("rufin-document-edit-symbolic");
-        edit_button.add_css_class("icon-button");
-        edit_button.add_css_class("flat");
-        edit_button.add_css_class("circular");
-        edit_button.set_focus_on_click(false);
+        let resource = crate::ui_resource::LYRICS_PANE_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            root: gtk::Overlay,
+            scroller: gtk::ScrolledWindow,
+            body: gtk::Box,
+            controls: gtk::Box,
+            save_button: gtk::Button,
+            clear_auto_search_button: gtk::Button,
+            search_button: gtk::Button,
+            edit_button: gtk::Button,
+            settings_button: gtk::Button,
+            offset_decrease_button: gtk::Button,
+            offset_entry: gtk::Entry,
+            offset_increase_button: gtk::Button,
+        });
         let edit_label = tr("Edit lyrics");
         edit_button.set_tooltip_text(Some(&edit_label));
         edit_button.update_property(&[gtk::accessible::Property::Label(&edit_label)]);
-        let settings_button = gtk::Button::from_icon_name("rufin-applications-system-symbolic");
-        settings_button.add_css_class("icon-button");
-        settings_button.add_css_class("flat");
-        settings_button.add_css_class("circular");
-        settings_button.set_focus_on_click(false);
         let settings_label = tr("Lyrics settings");
         settings_button.set_tooltip_text(Some(&settings_label));
         settings_button.update_property(&[gtk::accessible::Property::Label(&settings_label)]);
-        let top_controls = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        top_controls.add_css_class("lyrics-controls");
-        top_controls.add_css_class("lyrics-top-controls");
-        top_controls.set_halign(gtk::Align::Start);
-        top_controls.set_valign(gtk::Align::Start);
-        top_controls.append(&search_button);
-        top_controls.append(&settings_button);
-        top_controls.append(&edit_button);
-
-        let offset_decrease_button = lyrics_control_button("rufin-value-decrease-symbolic");
-        let offset_entry = gtk::Entry::new();
-        offset_entry.set_text("0 ms");
-        gtk::prelude::EditableExt::set_alignment(&offset_entry, 0.5);
-        offset_entry.set_width_chars(4);
-        offset_entry.set_max_width_chars(8);
-        offset_entry.set_max_length(24);
-        offset_entry.add_css_class("flat");
-        offset_entry.add_css_class("lyrics-offset-value");
-        let offset_increase_button = lyrics_control_button("rufin-list-add-symbolic");
-
-        let save_button = lyrics_control_button("rufin-download-symbolic");
-
-        let controls = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-        controls.add_css_class("lyrics-controls");
-        controls.add_css_class("lyrics-control-bar");
-        controls.set_halign(gtk::Align::Center);
-        controls.set_valign(gtk::Align::End);
-        controls.set_margin_bottom(10);
-        controls.append(&save_button);
-        controls.append(&offset_decrease_button);
-        controls.append(&offset_entry);
-        controls.append(&offset_increase_button);
-        controls.append(&clear_auto_search_button);
-
-        let scroller = gtk::ScrolledWindow::new();
-        scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-        scroller.set_hexpand(true);
-        scroller.set_vexpand(true);
-
-        let body = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        body.set_vexpand(true);
-        body.set_margin_end(WINDOW_CHROME_MARGIN_END);
-        body.add_css_class("lyrics-lines");
-        scroller.set_child(Some(&body));
-
-        root.set_child(Some(&scroller));
-        root.add_overlay(&top_controls);
-        root.add_overlay(&controls);
         root.set_measure_overlay(&controls, false);
 
         let pane = Self {
@@ -321,6 +270,8 @@ impl LyricsPane {
             offset_increase_button,
             rows: Rc::new(RefCell::new(Vec::new())),
             active_index: Rc::new(Cell::new(None)),
+            active_row: Rc::new(RefCell::new(None)),
+            resize_anchor_y: Rc::new(Cell::new(None)),
             scroll_generation: Rc::new(Cell::new(0)),
             follow_pause_until: Rc::new(Cell::new(None)),
         };
@@ -330,6 +281,10 @@ impl LyricsPane {
 
     pub fn widget(&self) -> &gtk::Overlay {
         &self.root
+    }
+
+    pub(crate) fn use_right_panel_scrollbar(&self) {
+        self.scroller.add_css_class("right-panel-scroller");
     }
 
     pub fn connect_search_clicked(&self, search: impl Fn() + 'static) {
@@ -449,6 +404,7 @@ impl LyricsPane {
         }
         self.rows.borrow_mut().clear();
         self.active_index.set(None);
+        self.active_row.borrow_mut().take();
         self.cancel_scroll_animation();
         if !matches!(&content, LyricsPaneContent::Document { .. }) {
             self.body.add_css_class("lyrics-placeholder");
@@ -733,6 +689,9 @@ impl LyricsPane {
         let highlight_all_lines =
             lyrics.is_some_and(|lyrics| should_highlight_all_lyrics_lines(lyrics.lines.as_slice()));
         let previous_index = self.active_index.replace(active_index);
+        if previous_index != active_index {
+            self.active_row.borrow_mut().take();
+        }
         let full_row_sync = karaoke_rows_need_full_sync(previous_index, active_index);
         let follow_pause = self.follow_scroll_pause();
         let scroll_target = {
@@ -748,6 +707,9 @@ impl LyricsPane {
                     && (highlight_all_lines || Some(row.line_index) == active_index);
                 if active {
                     row.row.add_css_class("lyrics-row-active");
+                    if Some(row.line_index) == active_index {
+                        self.active_row.replace(Some(row.row.clone()));
+                    }
                 } else {
                     row.row.remove_css_class("lyrics-row-active");
                 }
@@ -797,14 +759,39 @@ impl LyricsPane {
         self.update_highlight_with_scroll_duration(lyrics, position_millis, Some(0));
     }
 
-    pub fn pause_follow_scroll(&self) {
-        self.follow_pause_until.set(Some(
-            Instant::now() + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS),
-        ));
-    }
-
     pub fn clear_follow_scroll_pause(&self) {
         self.follow_pause_until.set(None);
+    }
+
+    pub fn capture_active_row_resize_anchor(&self) {
+        let anchor = self
+            .active_row
+            .borrow()
+            .as_ref()
+            .and_then(|row| row.compute_bounds(&self.scroller))
+            .map(|bounds| bounds.y());
+        self.resize_anchor_y.set(anchor);
+    }
+
+    pub fn restore_active_row_resize_anchor(&self) {
+        let Some(previous_y) = self.resize_anchor_y.take() else {
+            return;
+        };
+        let Some(current_y) = self
+            .active_row
+            .borrow()
+            .as_ref()
+            .and_then(|row| row.compute_bounds(&self.scroller))
+            .map(|bounds| bounds.y())
+        else {
+            return;
+        };
+        let adjustment = self.scroller.vadjustment();
+        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+        adjustment.set_value(
+            (adjustment.value() + f64::from(current_y - previous_y))
+                .clamp(adjustment.lower(), maximum),
+        );
     }
 
     pub fn restart_follow_tracking(&self) {
@@ -816,9 +803,11 @@ impl LyricsPane {
     fn connect_user_scroll_pause(&self) {
         let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let pane = self.clone();
+        let follow_pause_until = Rc::clone(&self.follow_pause_until);
         controller.connect_scroll(move |_, _, _| {
-            pane.pause_follow_scroll();
+            follow_pause_until.set(Some(
+                Instant::now() + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS),
+            ));
             glib::Propagation::Proceed
         });
         self.scroller.add_controller(controller);
@@ -1299,16 +1288,9 @@ fn lyric_line_has_text(line: &LyricsLine) -> bool {
     !line.text.trim().is_empty()
 }
 
-fn lyrics_control_button(icon_name: &str) -> gtk::Button {
-    let button = gtk::Button::from_icon_name(icon_name);
-    button.add_css_class("icon-button");
-    button.add_css_class("flat");
-    button.add_css_class("circular");
-    button
-}
-
 #[cfg(test)]
 mod tests {
+    use super::karaoke_text::KaraokeText;
     use super::{
         LyricsFollowScrollPause, active_lyrics_line_index, centered_scroll_target,
         karaoke_cue_progress, karaoke_rows_need_full_sync, lyrics_follow_scroll_pause_state,
@@ -1316,10 +1298,24 @@ mod tests {
         next_lyrics_line_start_after, reading_segments_for_byte_range,
         should_highlight_all_lyrics_lines,
     };
+    use gtk::prelude::WidgetExt;
     use lyrics::{
         LyricsCue, LyricsCueLine, LyricsLine as LyricLine, japanese_reading_from_romanization,
     };
     use std::time::{Duration, Instant};
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn phrase_sized_karaoke_cue_wraps_inside_the_lyrics_width() {
+        gtk::init().expect("GTK display");
+        let text = KaraokeText::new("one enhanced lyric cue containing several words");
+        text.add_text_class("lyrics-line");
+        let (_, natural_width, _, _) = text.measure(gtk::Orientation::Horizontal, -1);
+        let (_, single_line_height, _, _) = text.measure(gtk::Orientation::Vertical, natural_width);
+        let (_, wrapped_height, _, _) = text.measure(gtk::Orientation::Vertical, natural_width / 3);
+
+        assert!(wrapped_height > single_line_height);
+    }
 
     #[test]
     fn karaoke_frames_resync_only_after_nonsequential_transitions() {

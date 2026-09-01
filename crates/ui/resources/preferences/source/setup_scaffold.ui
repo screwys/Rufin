@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkScrolledWindow" id="scroller">
+    <property name="hscrollbar-policy">never</property>
+    <property name="vscrollbar-policy">automatic</property>
+    <property name="vexpand">true</property>
+    <property name="child">
+      <object class="AdwClamp" id="clamp">
+        <property name="tightening-threshold">360</property>
+        <property name="margin-start">24</property>
+        <property name="margin-end">24</property>
+        <property name="valign">start</property>
+        <property name="child">
+          <object class="GtkBox" id="content">
+            <property name="orientation">vertical</property>
+            <property name="hexpand">true</property>
+            <style>
+              <class name="first-run-content"/>
+            </style>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+
+  <object class="GtkBox" id="actions">
+    <property name="orientation">horizontal</property>
+    <property name="spacing">12</property>
+    <property name="halign">end</property>
+  </object>
+
+  <object class="GtkLabel" id="status">
+    <property name="visible">false</property>
+    <property name="wrap">true</property>
+    <property name="xalign">0</property>
+    <style><class name="muted"/></style>
+  </object>
+</interface>

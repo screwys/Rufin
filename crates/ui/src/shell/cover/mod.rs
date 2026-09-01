@@ -20,14 +20,14 @@ pub(crate) struct PlaybackArtworkPath {
     pub(crate) path: PathBuf,
 }
 
+mod cover_group;
 pub(crate) mod presentation;
 mod texture_cache;
 mod tile;
-mod tiles;
 
+pub(crate) use cover_group::CoverGroupProjection;
 use texture_cache::TextureCache;
-pub(crate) use tile::ArtworkTile;
-pub(crate) use tiles::CoverGroupProjection;
+pub(crate) use tile::{ArtworkTile, ArtworkTileWeak};
 
 pub(crate) fn cover_decode_size(display_size: i32, fetch_size: u32, scale: f64) -> u32 {
     let display_size = f64::from(display_size.max(1));
@@ -67,23 +67,27 @@ const fn artwork_binding_needs_work(
 }
 
 pub(super) struct ArtworkState {
-    pub(super) startup_prime: StartupArtworkPrime,
+    pub(super) startup_prime: ArtworkPrime,
+    pub(super) route_prime: ArtworkPrime,
+    pub(super) route_registration_open: Cell<bool>,
+    pub(super) route_registrations: RefCell<Vec<(glib::WeakRef<gtk::Widget>, Box<dyn FnOnce()>)>>,
     pub(super) textures: RefCell<TextureCache>,
 }
 
 #[derive(Default)]
-pub(super) struct StartupArtworkPrime {
+pub(super) struct ArtworkPrime {
     active: Cell<bool>,
     generation: Cell<u64>,
     pending: Cell<usize>,
 }
 
-impl StartupArtworkPrime {
-    fn begin(&self) {
+impl ArtworkPrime {
+    fn begin(&self) -> u64 {
         self.generation
             .set(self.generation.get().wrapping_add(1).max(1));
         self.pending.set(0);
         self.active.set(true);
+        self.generation.get()
     }
 
     fn reserve(&self) -> Option<u64> {
@@ -119,6 +123,11 @@ struct StartupArtworkLease {
     generation: u64,
 }
 
+struct RouteArtworkLease {
+    shell: std::rc::Weak<Shell>,
+    generation: u64,
+}
+
 impl Drop for StartupArtworkLease {
     fn drop(&mut self) {
         let Some(shell) = self.shell.upgrade() else {
@@ -126,6 +135,17 @@ impl Drop for StartupArtworkLease {
         };
         if shell.artwork.startup_prime.release(self.generation) {
             shell.try_reveal_startup_route();
+        }
+    }
+}
+
+impl Drop for RouteArtworkLease {
+    fn drop(&mut self) {
+        let Some(shell) = self.shell.upgrade() else {
+            return;
+        };
+        if shell.artwork.route_prime.release(self.generation) {
+            shell.try_finish_route_loading(self.generation);
         }
     }
 }
@@ -244,26 +264,63 @@ impl Shell {
         ) {
             return;
         }
-        if let Some(image) = prepared.ready.as_ref() {
-            self.cancel_artwork_tile_request(tile);
-            if let Some(texture) = self.texture_for_decoded(&texture_source_id, Arc::clone(image)) {
-                tile.set_texture_if_current(outcome.generation, texture);
-            } else {
-                tile.set_fallback_if_current(outcome.generation);
-            }
-            return;
-        }
         if !outcome.request_changed && tile.has_artwork_request() {
             return;
         }
         self.cancel_artwork_tile_request(tile);
+
+        if self.artwork.route_registration_open.get() {
+            self.defer_route_artwork_request(
+                tile,
+                outcome.generation,
+                texture_source_id,
+                refresh_desktop_on_ready,
+                prepared,
+            );
+            return;
+        }
+
+        self.start_prepared_artwork_tile_request(
+            tile,
+            outcome.generation,
+            texture_source_id,
+            refresh_desktop_on_ready,
+            prepared,
+        );
+    }
+
+    fn start_prepared_artwork_tile_request(
+        self: &Rc<Self>,
+        tile: &ArtworkTile,
+        generation: u64,
+        texture_source_id: ::sources::SourceId,
+        refresh_desktop_on_ready: bool,
+        prepared: artwork::PreparedArtwork,
+    ) {
+        if let Some(texture) = self
+            .artwork
+            .textures
+            .borrow_mut()
+            .prepared_texture(&prepared.decoded_identities)
+        {
+            tile.set_texture_if_current(generation, texture);
+            return;
+        }
+        if let Some(image) = prepared.ready.as_ref() {
+            if let Some(texture) = self.texture_for_decoded(&texture_source_id, Arc::clone(image)) {
+                tile.set_texture_if_current(generation, texture);
+            } else {
+                tile.set_fallback_if_current(generation);
+            }
+            return;
+        }
 
         match self.products.artwork.request_prepared(prepared) {
             Ok(load) => match load {
                 artwork::ArtworkLoad::Pending(pending) => {
                     self.start_artwork_tile_request(
                         tile,
-                        outcome.generation,
+                        generation,
                         texture_source_id,
                         refresh_desktop_on_ready,
                         pending,
@@ -271,18 +328,18 @@ impl Shell {
                 }
                 artwork::ArtworkLoad::Ready(image) => {
                     if let Some(texture) = self.texture_for_decoded(&texture_source_id, image) {
-                        tile.set_texture_if_current(outcome.generation, texture);
+                        tile.set_texture_if_current(generation, texture);
                     } else {
-                        tile.set_fallback_if_current(outcome.generation);
+                        tile.set_fallback_if_current(generation);
                     }
                 }
                 artwork::ArtworkLoad::Missing => {
-                    tile.set_missing_if_current(outcome.generation);
+                    tile.set_missing_if_current(generation);
                 }
             },
             Err(error) => {
                 warn!(%error, "failed to start artwork request");
-                tile.set_fallback_if_current(outcome.generation);
+                tile.set_fallback_if_current(generation);
             }
         }
     }
@@ -298,6 +355,7 @@ impl Shell {
         let tile_weak = tile.downgrade();
         let shell = Rc::downgrade(self);
         let startup_prime = self.reserve_startup_cover_prime();
+        let route_prime = self.reserve_route_cover_prime();
         let request = glib::spawn_future_local(async move {
             let outcome = pending.finish().await;
             let Some(tile) = tile_weak.upgrade() else {
@@ -335,6 +393,7 @@ impl Shell {
                 shell.update_media_controls();
             }
             drop(startup_prime);
+            drop(route_prime);
         });
         tile.replace_artwork_request(request);
     }
@@ -382,6 +441,7 @@ impl Shell {
 
     pub(crate) fn reset_cover_pipeline_state(&self) {
         self.finish_startup_cover_prime_gate();
+        self.finish_route_cover_prime_gate();
     }
 
     pub(in crate::shell) fn begin_startup_cover_prime(&self) {
@@ -403,6 +463,115 @@ impl Shell {
             generation,
         })
     }
+
+    pub(in crate::shell) fn begin_route_cover_prime(&self) -> u64 {
+        self.artwork.route_registration_open.set(true);
+        self.artwork.route_registrations.borrow_mut().clear();
+        self.artwork.route_prime.begin()
+    }
+
+    pub(in crate::shell) fn close_route_cover_registration(
+        &self,
+        generation: u64,
+        route_viewport: &gtk::Widget,
+    ) {
+        if self.artwork.route_prime.generation.get() == generation
+            && self.artwork.route_registration_open.get()
+        {
+            let registrations = self.artwork.route_registrations.take();
+            let mut warm = Vec::new();
+            for (widget, start) in registrations {
+                if artwork_tile_intersects_viewport(&widget, route_viewport) {
+                    start();
+                } else {
+                    warm.push(start);
+                }
+            }
+            self.artwork.route_registration_open.set(false);
+            for start in warm {
+                start();
+            }
+        }
+    }
+
+    pub(in crate::shell) fn route_cover_prime_ready(&self, generation: u64) -> bool {
+        self.artwork.route_prime.generation.get() == generation
+            && !self.artwork.route_registration_open.get()
+            && self.artwork.route_prime.pending() == 0
+    }
+
+    pub(in crate::shell) fn finish_route_cover_prime_gate(&self) {
+        self.artwork.route_registration_open.set(false);
+        self.artwork.route_registrations.borrow_mut().clear();
+        self.artwork.route_prime.finish();
+    }
+
+    fn defer_route_artwork_request(
+        self: &Rc<Self>,
+        tile: &ArtworkTile,
+        generation: u64,
+        source_id: ::sources::SourceId,
+        refresh_desktop_on_ready: bool,
+        prepared: artwork::PreparedArtwork,
+    ) {
+        debug_assert!(self.artwork.route_registration_open.get());
+        let widget = tile.widget();
+        let tile = tile.downgrade();
+        let shell = Rc::downgrade(self);
+        let mut registrations = self.artwork.route_registrations.borrow_mut();
+        registrations.retain(|(registered, _)| {
+            registered
+                .upgrade()
+                .is_some_and(|registered| registered != widget)
+        });
+        registrations.push((
+            widget.downgrade(),
+            Box::new(move || {
+                let (Some(shell), Some(tile)) = (shell.upgrade(), tile.upgrade()) else {
+                    return;
+                };
+                if tile.generation_is_current(generation) {
+                    shell.start_prepared_artwork_tile_request(
+                        &tile,
+                        generation,
+                        source_id,
+                        refresh_desktop_on_ready,
+                        prepared,
+                    );
+                }
+            }),
+        ));
+    }
+
+    fn reserve_route_cover_prime(self: &Rc<Self>) -> Option<RouteArtworkLease> {
+        if !self.artwork.route_registration_open.get() {
+            return None;
+        }
+        let generation = self.artwork.route_prime.reserve()?;
+        Some(RouteArtworkLease {
+            shell: Rc::downgrade(self),
+            generation,
+        })
+    }
+}
+
+fn artwork_tile_intersects_viewport(
+    widget: &glib::WeakRef<gtk::Widget>,
+    route_viewport: &gtk::Widget,
+) -> bool {
+    let Some(widget) = widget.upgrade().filter(|widget| widget.is_mapped()) else {
+        return false;
+    };
+    let viewport = widget
+        .ancestor(gtk::ScrolledWindow::static_type())
+        .unwrap_or_else(|| route_viewport.clone());
+    let Some(bounds) = widget.compute_bounds(&viewport) else {
+        return false;
+    };
+    bounds.x() < viewport.width() as f32
+        && bounds.y() < viewport.height() as f32
+        && bounds.x() + bounds.width() > 0.0
+        && bounds.y() + bounds.height() > 0.0
 }
 
 fn artwork_external_policy(settings: &UiSettings) -> artwork::ExternalPolicy {
@@ -420,7 +589,7 @@ fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
 #[cfg(test)]
 mod tests {
     use super::{
-        StartupArtworkPrime, artwork_binding_needs_work, cache_only_artwork_external_policy,
+        ArtworkPrime, artwork_binding_needs_work, cache_only_artwork_external_policy,
         cover_decode_size, cover_request_sizes,
     };
 
@@ -463,7 +632,7 @@ mod tests {
 
     #[test]
     fn startup_artwork_completion_only_releases_its_own_reveal_gate() {
-        let prime = StartupArtworkPrime::default();
+        let prime = ArtworkPrime::default();
         prime.begin();
         let first = prime.reserve().expect("first cover joins startup gate");
         let second = prime.reserve().expect("second cover joins startup gate");

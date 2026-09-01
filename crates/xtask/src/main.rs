@@ -4,6 +4,7 @@ use std::env;
 use std::error::Error;
 
 mod generate;
+mod i18n;
 mod linux_packaging;
 mod media;
 mod process;

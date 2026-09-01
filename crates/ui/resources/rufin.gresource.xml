@@ -1,4 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
+<!-- The UI crate owns Rufin's compiled icons, interface definitions, and base style. -->
 <gresources>
   <gresource prefix="/io/github/screwys/Rufin/icons">
     <file>hicolor/512x512/apps/io.github.screwys.Rufin.png</file>
@@ -11,8 +12,7 @@
     <file>hicolor/scalable/actions/rufin-mail-forward-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-media-skip-backward-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-media-skip-forward-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-audio-radio-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-edit-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-audio-only-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-filled-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-heart-outline-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-list-drag-handle-symbolic.svg</file>
@@ -24,15 +24,16 @@
     <file>hicolor/scalable/actions/rufin-artists-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-folders-selected-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-folders-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-genres-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-tag-outline-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-history-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-home-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-moods-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-playlists-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-search-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-smart-playlists-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-tracks-selected-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-tracks-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-library-music-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-music-queue-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sidebar-hide-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sort-name-descending-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-sort-name-symbolic.svg</file>
@@ -59,6 +60,7 @@
     <file>hicolor/scalable/actions/rufin-external-link-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-external-link-compact-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-appointment-new-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-preferences-desktop-appearance-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-applications-system-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-audio-volume-high-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-audio-volume-low-symbolic.svg</file>
@@ -66,10 +68,9 @@
     <file>hicolor/scalable/actions/rufin-audio-volume-muted-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-audio-x-generic-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-edit-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-download-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-disk-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-drive-multidisk-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-download-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-edit-undo-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-folder-download-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-folder-music-symbolic.svg</file>
@@ -88,7 +89,6 @@
     <file>hicolor/scalable/actions/rufin-non-starred-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-object-select-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-open-menu-symbolic.svg</file>
-    <file>hicolor/scalable/actions/rufin-preferences-desktop-appearance-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-preferences-desktop-keyboard-shortcuts-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-preferences-system-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-preferences-system-time-symbolic.svg</file>
@@ -111,5 +111,65 @@
     <file>hicolor/scalable/actions/rufin-x-office-calendar-symbolic.svg</file>
     <file>hicolor/scalable/apps/io.github.screwys.Rufin.svg</file>
     <file>hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg</file>
+  </gresource>
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">application/about.ui</file>
+    <file compressed="true">player/random_play.ui</file>
+    <file compressed="true">player/bottom.ui</file>
+    <file compressed="true">player/equalizer.ui</file>
+    <file compressed="true">player/fullscreen.ui</file>
+    <file compressed="true">player/playback_settings.ui</file>
+    <file compressed="true">player/right_panel.ui</file>
+    <file compressed="true">player/queue_sidebar_row.ui</file>
+    <file compressed="true">player/queue_fullscreen_row.ui</file>
+    <file compressed="true">player/lyrics/color_chooser.ui</file>
+    <file compressed="true">player/lyrics/edit.ui</file>
+    <file compressed="true">player/lyrics/pane.ui</file>
+    <file compressed="true">player/lyrics/search.ui</file>
+    <file compressed="true">player/lyrics/settings.ui</file>
+    <file compressed="true">preferences/appearance.ui</file>
+    <file compressed="true">preferences/dialog.ui</file>
+    <file compressed="true">preferences/general.ui</file>
+    <file compressed="true">preferences/dialogs/metadata.ui</file>
+    <file compressed="true">preferences/dialogs/playlist_name.ui</file>
+    <file compressed="true">preferences/dialogs/release_note_row.ui</file>
+    <file compressed="true">preferences/dialogs/release_notes.ui</file>
+    <file compressed="true">preferences/dialogs/smart_playlist.ui</file>
+    <file compressed="true">preferences/integrations.ui</file>
+    <file compressed="true">preferences/library.ui</file>
+    <file compressed="true">preferences/playback.ui</file>
+    <file compressed="true">preferences/reorder_row.ui</file>
+    <file compressed="true">preferences/source/connection_progress.ui</file>
+    <file compressed="true">preferences/source/choice_selector.ui</file>
+    <file compressed="true">preferences/source/credential_host.ui</file>
+    <file compressed="true">preferences/source/local_setup.ui</file>
+    <file compressed="true">preferences/source/manage_server.ui</file>
+    <file compressed="true">preferences/source/metadata_recovery.ui</file>
+    <file compressed="true">preferences/source/server_actions.ui</file>
+    <file compressed="true">preferences/source/setup_scaffold.ui</file>
+    <file compressed="true">routes/collection_grid_card.ui</file>
+    <file compressed="true">routes/collection_grid_cover.ui</file>
+    <file compressed="true">routes/detail_showcase.ui</file>
+    <file compressed="true">routes/folders.ui</file>
+    <file compressed="true">routes/home_section_header.ui</file>
+    <file compressed="true">routes/library_config.ui</file>
+    <file compressed="true">routes/library_page.ui</file>
+    <file compressed="true">routes/library_toolbar.ui</file>
+    <file compressed="true">routes/placeholder.ui</file>
+    <file compressed="true">routes/playlist_picker.ui</file>
+    <file compressed="true">routes/playlist_picker_context.ui</file>
+    <file compressed="true">routes/playlist_picker_row.ui</file>
+    <file compressed="true">routes/recycled_artwork_cell.ui</file>
+    <file compressed="true">routes/recycled_badged_text_cell.ui</file>
+    <file compressed="true">routes/recycled_folder_cell.ui</file>
+    <file compressed="true">routes/recycled_merged_cell.ui</file>
+    <file compressed="true">routes/recycled_text_cell.ui</file>
+    <file compressed="true">routes/search.ui</file>
+    <file compressed="true">shell/diagnostics.ui</file>
+    <file compressed="true">shell/content_chrome.ui</file>
+    <file compressed="true">shell/navigation.ui</file>
+    <file compressed="true">shell/root.ui</file>
+    <file compressed="true">shell/shortcuts.ui</file>
+    <file compressed="true">style.css</file>
   </gresource>
 </gresources>

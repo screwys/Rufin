@@ -1,0 +1,332 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwShortcutsDialog" id="shortcuts_dialog">
+    <property name="title" translatable="yes">Keyboard Shortcuts</property>
+    <child>
+      <object class="AdwShortcutsSection" id="section_general">
+        <property name="title" translatable="yes">General</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_menu">
+            <property name="title" translatable="yes">Menu</property>
+            <property name="action-name">win.show-primary-menu</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_preferences">
+            <property name="title" translatable="yes">Preferences</property>
+            <property name="action-name">app.preferences</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_keyboard_shortcuts">
+            <property name="title" translatable="yes">Keyboard Shortcuts</property>
+            <property name="action-name">app.show-shortcuts</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_troubleshooting">
+            <property name="title" translatable="yes">Troubleshooting</property>
+            <property name="action-name">win.troubleshooting</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_version_history">
+            <property name="title" translatable="yes">Version History</property>
+            <property name="action-name">win.show-release-notes</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_private_mode">
+            <property name="title" translatable="yes">Private mode</property>
+            <property name="action-name">win.toggle-private-mode</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_sidebar_toggle">
+            <property name="title" translatable="yes">Collapse/expand sidebar</property>
+            <property name="action-name">win.toggle-left-sidebar</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_resync_library">
+            <property name="title" translatable="yes">Resync Library</property>
+            <property name="action-name">win.refresh-library</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_close_window">
+            <property name="title" translatable="yes">Close app window</property>
+            <property name="action-name">window.close</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_quit">
+            <property name="title" translatable="yes">Quit Rufin</property>
+            <property name="action-name">app.quit</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_playback">
+        <property name="title" translatable="yes">Playback</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_play_pause"><property name="title" translatable="yes">Play/Pause</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_previous">
+            <property name="title" translatable="yes">Previous</property>
+            <property name="action-name">win.previous-track</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_next">
+            <property name="title" translatable="yes">Next</property>
+            <property name="action-name">win.next-track</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_seek_backward">
+            <property name="title" translatable="yes">Seek Backward</property>
+            <property name="action-name">win.seek-backward</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_seek_forward">
+            <property name="title" translatable="yes">Seek Forward</property>
+            <property name="action-name">win.seek-forward</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_favorite">
+            <property name="title" translatable="yes">Favorite</property>
+            <property name="action-name">win.toggle-favorite</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_queue">
+        <property name="title" translatable="yes">Queue</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_play_random">
+            <property name="title" translatable="yes">Play random</property>
+            <property name="action-name">win.play-random</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_play_random_next">
+            <property name="title" translatable="yes">Play random (play next)</property>
+            <property name="action-name">win.play-random-next</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_play_random_later">
+            <property name="title" translatable="yes">Play random (play later)</property>
+            <property name="action-name">win.play-random-later</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_shuffle">
+            <property name="title" translatable="yes">Shuffle</property>
+            <property name="action-name">win.toggle-shuffle</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_repeat">
+            <property name="title" translatable="yes">Repeat</property>
+            <property name="action-name">win.cycle-repeat</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_auto_dj">
+            <property name="title" translatable="yes">Auto DJ</property>
+            <property name="action-name">win.toggle-auto-dj</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_clear_queue">
+            <property name="title" translatable="yes">Clear queue</property>
+            <property name="action-name">win.clear-queue</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_selection">
+        <property name="title" translatable="yes">Selection</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_multi_selection"><property name="title" translatable="yes">Multi-selection</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_range_selection">
+            <property name="title" translatable="yes">Range selection</property>
+            <property name="accelerator">&lt;Shift&gt;Pointer_Button1</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_delete">
+            <property name="title" translatable="yes">Delete</property>
+            <property name="accelerator">Delete</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_select_all"><property name="title" translatable="yes">Select all</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_selection_play">
+            <property name="title" translatable="yes">Play</property>
+            <property name="accelerator">Return Pointer_Button1&amp;Pointer_Button1</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_selection_play_next"><property name="title" translatable="yes">Play Next</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_selection_play_later"><property name="title" translatable="yes">Play Later</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_add_to_playlist"><property name="title" translatable="yes">Add to Playlist</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_download"><property name="title" translatable="yes">Download</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_audio">
+        <property name="title" translatable="yes">Audio</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_gapless">
+            <property name="title" translatable="yes">Gapless mode</property>
+            <property name="action-name">win.use-gapless</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_crossfade">
+            <property name="title" translatable="yes">Crossfade mode</property>
+            <property name="action-name">win.use-crossfade</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_mute">
+            <property name="title" translatable="yes">Mute</property>
+            <property name="accelerator">m</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_volume_up">
+            <property name="title" translatable="yes">Volume Up</property>
+            <property name="action-name">win.volume-up</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_volume_down">
+            <property name="title" translatable="yes">Volume Down</property>
+            <property name="action-name">win.volume-down</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_previous_output"><property name="title" translatable="yes">Previous audio device</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_next_output"><property name="title" translatable="yes">Next audio device</property></object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_view">
+        <property name="title" translatable="yes">View</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_right_sidebar">
+            <property name="title" translatable="yes">Show/hide right sidebar</property>
+            <property name="action-name">win.toggle-queue</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_visualizer_panel">
+            <property name="title" translatable="yes">Show visualizer in the right panel</property>
+            <property name="action-name">win.show-visualizer-panel</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_lyrics_panel">
+            <property name="title" translatable="yes">Show lyrics in the right panel</property>
+            <property name="action-name">win.show-lyrics-panel</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_visualizer_lyrics_panel">
+            <property name="title" translatable="yes">Show visualizer and lyrics in the right panel</property>
+            <property name="action-name">win.show-visualizer-lyrics-panel</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_toggle_fullscreen">
+            <property name="title" translatable="yes">Toggle Fullscreen</property>
+            <property name="action-name">win.toggle-fullscreen</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_fullscreen_player">
+            <property name="title" translatable="yes">Open fullscreen player</property>
+            <property name="action-name">win.toggle-fullscreen-player</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_navigation">
+        <property name="title" translatable="yes">Navigation</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_search_page">
+            <property name="title" translatable="yes">Search in page</property>
+            <property name="action-name">win.focus-search</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_navigate_search">
+            <property name="title" translatable="yes">Navigate to Search</property>
+            <property name="action-name">win.navigate-search</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_cycle_layout">
+            <property name="title" translatable="yes">Switch between layouts</property>
+            <property name="action-name">win.cycle-layout</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_cycle_tabs">
+            <property name="title" translatable="yes">Switch Search/Favorites tabs</property>
+            <property name="action-name">win.cycle-tabs</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_back"><property name="title" translatable="yes">Back</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_forward"><property name="title" translatable="yes">Forward</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_sidebar_position"><property name="title" translatable="yes">Sidebar route by position</property></object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_navigate_items">
+            <property name="title" translatable="yes">Navigate page items</property>
+            <property name="accelerator">Up Down Left Right</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

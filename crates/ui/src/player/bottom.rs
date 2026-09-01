@@ -7,10 +7,9 @@ use std::thread;
 use std::time::Duration;
 
 use crate::format_duration;
-use crate::routes::detail_links::{DetailLinkBinding, DetailLinks};
+use crate::routes::detail_links::DetailLinkBinding;
 use crate::routes::route::Route;
 use adw::prelude::*;
-use artwork::ArtworkBinding;
 use gtk::glib;
 use playback::{
     CurrentMediaId, PlaybackOutput, PlaybackView, RemoteOutput, RemoteOutputProtocol, RepeatMode,
@@ -27,6 +26,7 @@ use super::icons::{
 };
 use super::playback_settings::configure_playback_settings_popover;
 use super::progress::seekbar_target_seconds;
+use super::state::NowPlayingPresentation;
 use crate::interactions::add_widget_click;
 use crate::layout::{AllocationOwner, allocation_owner};
 use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
@@ -36,7 +36,7 @@ use crate::routes::collection_context::{
 };
 use crate::routes::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
 use crate::shell::Shell;
-use crate::shell::actions::{icon_button_without_tooltip, set_active_class};
+use crate::shell::actions::set_active_class;
 use crate::shell::cover::ArtworkTile;
 use crate::shell::cover::MEDIUM_COVER_SIZE;
 
@@ -63,8 +63,6 @@ const BOTTOM_PLAYER_BUTTON_STEP: f64 = 38.0;
 const BOTTOM_PLAYER_WAVEFORM_HEIGHT: i32 = 32;
 const BOTTOM_PLAYER_ACTION_BUTTON_SIZE: i32 = 34;
 const BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE: i32 = 18;
-const BOTTOM_PLAYER_TITLE_MENU_GAP: i32 = 0;
-const BOTTOM_PLAYER_TITLE_MENU_ICON: &str = "rufin-player-more-symbolic";
 const BOTTOM_PLAYER_IDENTITY_HEIGHT: i32 = 58;
 const BOTTOM_PLAYER_TITLE_ROW_HEIGHT: i32 = 20;
 const BOTTOM_PLAYER_META_ROW_HEIGHT: i32 = 18;
@@ -78,9 +76,6 @@ const BOTTOM_PLAYER_VOLUME_SLOT_WIDTH: i32 = 95;
 const BOTTOM_PLAYER_VOLUME_SLOT_LAYOUT_WIDTH: i32 = 90;
 const OUTPUT_DISCOVERY_REFRESH_INTERVAL: Duration = Duration::from_secs(5);
 const BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH: i32 = 126;
-const BOTTOM_PLAYER_TINY_CONTROL_SPACING: i32 = 2;
-const BOTTOM_PLAYER_TINY_CONTROLS_WIDTH: i32 = BOTTOM_PLAYER_TINY_TRANSPORT_WIDTH;
-const BOTTOM_PLAYER_TINY_ROW_SPACING: i32 = 6;
 const BOTTOM_PLAYER_IDENTITY_MIN_WIDTH: i32 = 85;
 const BOTTOM_PLAYER_IDENTITY_COMPACT_MIN_WIDTH: i32 = BOTTOM_PLAYER_EDGE_PADDING * 2
     + BOTTOM_PLAYER_TRANSPORT_WIDTH
@@ -116,7 +111,6 @@ enum BottomPlayerActions {
 
 pub(crate) struct PlayerControls {
     pub(crate) root: AllocationOwner,
-    surface: gtk::Box,
     pub(crate) cover: ArtworkTile,
     title: gtk::Label,
     pub(crate) menu_button: gtk::Button,
@@ -125,11 +119,7 @@ pub(crate) struct PlayerControls {
     album: gtk::Label,
     album_links: RefCell<Option<DetailLinkBinding>>,
     now_playing_wall: gtk::Box,
-    left_slot: gtk::Overlay,
     right_slot: gtk::Overlay,
-    tiny_row: gtk::Box,
-    tiny_controls: gtk::Box,
-    tiny_layout: Cell<bool>,
     transport: gtk::Box,
     transport_slot: gtk::Box,
     transport_buttons: gtk::Fixed,
@@ -483,11 +473,22 @@ impl Shell {
     }
 
     pub(crate) fn update_bottom_player(self: &Rc<Self>) {
-        self.update_bottom_player_view(true);
+        let player = self.selected_playback().as_deref().cloned();
+        let presentation = NowPlayingPresentation::new(player.as_ref());
+        self.update_bottom_player_view(player.as_ref(), Some(&presentation));
+    }
+
+    pub(crate) fn update_bottom_player_with(
+        self: &Rc<Self>,
+        player: &PlaybackView,
+        presentation: &NowPlayingPresentation,
+    ) {
+        self.update_bottom_player_view(Some(player), Some(presentation));
     }
 
     pub(crate) fn update_bottom_player_transport(self: &Rc<Self>) {
-        self.update_bottom_player_view(false);
+        let player = self.selected_playback().as_deref().cloned();
+        self.update_bottom_player_view(player.as_ref(), None);
     }
 
     pub(crate) fn update_bottom_player_position(&self) {
@@ -522,114 +523,33 @@ impl Shell {
         self.playback.updating_controls.set(false);
     }
 
-    fn update_bottom_player_view(self: &Rc<Self>, update_identity: bool) {
-        let player = self.selected_playback().as_deref().cloned();
-        let current = player
-            .as_ref()
-            .and_then(|player| player.transport.current.as_ref());
-        let source_id = current.map(|entry| sources::SourceId::new(entry.track.source_id.clone()));
+    fn update_bottom_player_view(
+        self: &Rc<Self>,
+        player: Option<&PlaybackView>,
+        presentation: Option<&NowPlayingPresentation>,
+    ) {
+        let current = player.and_then(|player| player.transport.current.as_ref());
         let state = player
-            .as_ref()
             .map(|player| player.transport.effective_state())
             .unwrap_or(TransportStatus::Stopped);
         let duration_seconds = player
-            .as_ref()
             .map(|player| {
                 (player.transport.duration_millis / 1_000).min(u64::from(u32::MAX)) as u32
             })
             .unwrap_or_default();
         let position_seconds = player
-            .as_ref()
             .map(|player| {
                 (player.transport.position_millis / 1_000).min(u64::from(u32::MAX)) as u32
             })
             .unwrap_or_default();
         let repeat_mode = player
-            .as_ref()
             .map(|player| player.controls.repeat_mode)
             .unwrap_or(RepeatMode::Off);
         let controls = &self.player_view.player_controls;
         self.playback.updating_controls.set(true);
 
-        if update_identity {
-            let window_title = crate::shell::chrome::playback_window_title(
-                current.map(|entry| entry.track.title.as_str()),
-                current.map(|entry| entry.track.artist.as_str()),
-            );
-            self.chrome.window.set_title(Some(&window_title));
-
-            if let (Some(entry), Some(source_id)) = (current, source_id.as_ref()) {
-                self.bind_playback_artwork_tile(
-                    &controls.cover,
-                    source_id,
-                    entry
-                        .track
-                        .artwork_binding
-                        .as_deref()
-                        .map(ArtworkBinding::opaque)
-                        .unwrap_or_default(),
-                    MEDIUM_COVER_SIZE as i32,
-                    MEDIUM_COVER_SIZE,
-                );
-            } else {
-                self.clear_artwork_tile(&controls.cover);
-            }
-
-            let title = current
-                .map(|entry| entry.track.title.as_str())
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| localization::tr("Nothing playing"));
-            let artist = current
-                .map(|entry| entry.track.artist.as_str())
-                .map(ToOwned::to_owned)
-                .unwrap_or_else(|| localization::tr("Queue a track to begin"));
-            let album = current
-                .map(|entry| entry.track.album.as_str())
-                .unwrap_or("");
-            let album_route = current
-                .and_then(|entry| entry.track.album_key)
-                .map(Route::AlbumDetail);
-            controls.title.set_text(&title);
-            if let Some(artist_links) = controls.artist_links.borrow().as_ref() {
-                artist_links.bind(current.map_or_else(
-                    || DetailLinks::text(&artist),
-                    |entry| {
-                        crate::routes::detail_links::playback_artist_links(
-                            &artist,
-                            &entry.track.artist_links,
-                        )
-                    },
-                ));
-            } else {
-                controls.artist.set_text(&artist);
-            }
-            if let Some(album_links) = controls.album_links.borrow().as_ref() {
-                album_links.bind(DetailLinks::route(album, album_route));
-            } else {
-                controls.album.set_text(album);
-            }
-            controls.title.set_sensitive(current.is_some());
-            controls.menu_button.set_sensitive(current.is_some());
-            controls
-                .artist
-                .set_sensitive(current.is_some_and(|entry| !entry.track.artist.is_empty()));
-            controls
-                .album
-                .set_sensitive(current.is_some_and(|entry| !entry.track.album.is_empty()));
-            controls.favorite_button.set_sensitive(current.is_some());
-            let rating_visible = self.settings.current.borrow().show_bottom_bar_rating
-                && current.is_some_and(|entry| entry.track.track_key.is_some());
-            controls.rating.set_rating(
-                current.and_then(|entry| u8::try_from(entry.track.rating?).ok()),
-                self.half_stars_enabled(),
-            );
-            controls.rating.widget().set_visible(rating_visible);
-            controls.rating.widget().set_sensitive(rating_visible);
-            controls.action_buttons.set_margin_top(if rating_visible {
-                BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
-            } else {
-                0
-            });
+        if let Some(presentation) = presentation {
+            self.apply_bottom_now_playing(presentation);
         }
 
         set_play_icon(
@@ -640,12 +560,8 @@ impl Shell {
             .play_button
             .set_tooltip_text(Some(&playback_state_label(state)));
 
-        let shuffle_enabled = player
-            .as_ref()
-            .is_some_and(|player| player.controls.shuffle_enabled);
-        let auto_dj_enabled = player
-            .as_ref()
-            .is_some_and(|player| player.controls.auto_dj_enabled);
+        let shuffle_enabled = player.is_some_and(|player| player.controls.shuffle_enabled);
+        let auto_dj_enabled = player.is_some_and(|player| player.controls.auto_dj_enabled);
         set_active_class(&controls.shuffle_button, shuffle_enabled);
         set_active_class(&controls.repeat_button, repeat_mode != RepeatMode::Off);
         set_repeat_button_icon(&controls.repeat_button, repeat_mode);
@@ -668,9 +584,8 @@ impl Shell {
             .set_text(&format_duration(displayed_seconds));
         let max = f64::from(duration_seconds.max(1));
         controls.progress.set_range(0.0, max);
-        let can_seek = player
-            .as_ref()
-            .is_some_and(|player| player.transport.can_seek && duration_seconds > 0);
+        let can_seek =
+            player.is_some_and(|player| player.transport.can_seek && duration_seconds > 0);
         controls.progress.set_sensitive(can_seek);
         controls.waveform.widget().set_sensitive(can_seek);
         controls
@@ -718,7 +633,6 @@ impl Shell {
             .set_text(&format_duration(duration_seconds));
 
         let (muted, volume) = player
-            .as_ref()
             .map(|player| (player.controls.muted, player.controls.volume))
             .unwrap_or((false, 1.0));
         let volume_icon = volume_icon_state(muted, volume);
@@ -728,7 +642,6 @@ impl Shell {
         }
         controls.volume.set_value(volume);
         let output = player
-            .as_ref()
             .map(|player| &player.controls.playback_output)
             .cloned()
             .unwrap_or_default();
@@ -737,6 +650,58 @@ impl Shell {
             .output_button
             .set_tooltip_text(Some(&playback_output_label(&output)));
         self.playback.updating_controls.set(false);
+    }
+
+    fn apply_bottom_now_playing(self: &Rc<Self>, presentation: &NowPlayingPresentation) {
+        let controls = &self.player_view.player_controls;
+        let window_title = crate::shell::chrome::playback_window_title(
+            presentation.current.then_some(presentation.title.as_str()),
+            presentation.current.then_some(presentation.artist.as_str()),
+        );
+        self.chrome.window.set_title(Some(&window_title));
+        if let Some(source_id) = presentation.source_id.as_ref() {
+            self.bind_playback_artwork_tile(
+                &controls.cover,
+                source_id,
+                presentation.artwork.clone(),
+                MEDIUM_COVER_SIZE as i32,
+                MEDIUM_COVER_SIZE,
+            );
+        } else {
+            self.clear_artwork_tile(&controls.cover);
+        }
+        controls.title.set_text(&presentation.title);
+        if let Some(artist_links) = controls.artist_links.borrow().as_ref() {
+            artist_links.bind(presentation.artist_links.clone());
+        } else {
+            controls.artist.set_text(&presentation.artist);
+        }
+        if let Some(album_links) = controls.album_links.borrow().as_ref() {
+            album_links.bind(presentation.album_links.clone());
+        } else {
+            controls.album.set_text(&presentation.album);
+        }
+        controls.title.set_sensitive(presentation.current);
+        controls.menu_button.set_sensitive(presentation.current);
+        controls
+            .artist
+            .set_sensitive(presentation.current && !presentation.artist.is_empty());
+        controls
+            .album
+            .set_sensitive(presentation.current && !presentation.album.is_empty());
+        controls.favorite_button.set_sensitive(presentation.current);
+        let rating_visible =
+            self.settings.current.borrow().show_bottom_bar_rating && presentation.has_track_key;
+        controls
+            .rating
+            .set_rating(presentation.rating, self.half_stars_enabled());
+        controls.rating.widget().set_visible(rating_visible);
+        controls.rating.widget().set_sensitive(rating_visible);
+        controls.action_buttons.set_margin_top(if rating_visible {
+            BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
+        } else {
+            0
+        });
     }
 
     pub(crate) fn maybe_clear_player_seek_preview(
@@ -784,12 +749,15 @@ fn should_clear_seek_preview(
 }
 
 pub(crate) fn build_bottom_player() -> PlayerControls {
-    let root = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    root.add_css_class("bottom-player");
-    root.set_hexpand(true);
-    root.set_vexpand(false);
+    let resource = crate::ui_resource::BOTTOM_PLAYER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        root: gtk::Box,
+        now_playing_wall: gtk::Box,
+        transport_slot: gtk::Box,
+    });
     root.set_height_request(BOTTOM_PLAYER_HEIGHT);
-    root.set_valign(gtk::Align::Center);
+    transport_slot.set_width_request(BOTTOM_PLAYER_TRANSPORT_WIDTH);
 
     let NowPlayingControls {
         root: now_playing,
@@ -798,7 +766,7 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         menu_button,
         artist,
         album,
-    } = build_now_playing_controls();
+    } = build_now_playing_controls(&builder, resource);
 
     let TransportControls {
         root: transport,
@@ -817,15 +785,8 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         progress,
         waveform,
         duration,
-    } = build_transport_controls();
+    } = build_transport_controls(&builder, resource);
 
-    let now_playing_wall = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    now_playing_wall.add_css_class("player-now-playing-wall");
-    now_playing_wall.set_hexpand(true);
-    now_playing_wall.set_vexpand(false);
-    now_playing_wall.set_valign(gtk::Align::Center);
-    now_playing_wall.set_width_request(1);
-    now_playing_wall.set_overflow(gtk::Overflow::Hidden);
     now_playing_wall.append(&now_playing);
 
     let PlayerActionControls {
@@ -842,7 +803,7 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         settings_button,
         output_button,
         output_icon,
-    } = build_player_action_controls();
+    } = build_player_action_controls(&builder, resource);
 
     let left_slot = bottom_player_allocated_slot(&now_playing_wall, 1, 1);
     left_slot.set_hexpand(true);
@@ -853,26 +814,7 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
     right_slot.set_halign(gtk::Align::Fill);
     right_slot.set_valign(gtk::Align::Fill);
 
-    let transport_slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    transport_slot.set_width_request(BOTTOM_PLAYER_TRANSPORT_WIDTH);
-    transport_slot.set_halign(gtk::Align::Center);
-    transport_slot.set_valign(gtk::Align::Center);
     transport_slot.append(&transport);
-
-    let tiny_controls = gtk::Box::new(
-        gtk::Orientation::Horizontal,
-        BOTTOM_PLAYER_TINY_CONTROL_SPACING,
-    );
-    tiny_controls.set_halign(gtk::Align::End);
-    tiny_controls.set_valign(gtk::Align::Center);
-    tiny_controls.set_width_request(BOTTOM_PLAYER_TINY_CONTROLS_WIDTH);
-
-    let tiny_row = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_TINY_ROW_SPACING);
-    tiny_row.set_hexpand(true);
-    tiny_row.set_halign(gtk::Align::Fill);
-    tiny_row.set_valign(gtk::Align::Center);
-    tiny_row.set_width_request(1);
-    tiny_row.append(&tiny_controls);
 
     root.append(&left_slot);
     root.append(&transport_slot);
@@ -884,7 +826,6 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
 
     PlayerControls {
         root: allocation_root,
-        surface: root,
         cover,
         title,
         menu_button,
@@ -893,11 +834,7 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
         album,
         album_links: RefCell::new(None),
         now_playing_wall,
-        left_slot,
         right_slot,
-        tiny_row,
-        tiny_controls,
-        tiny_layout: Cell::new(false),
         transport,
         transport_slot,
         transport_buttons,
@@ -933,17 +870,18 @@ pub(crate) fn build_bottom_player() -> PlayerControls {
     }
 }
 
-fn build_now_playing_controls() -> NowPlayingControls {
-    let root = gtk::Box::new(
-        gtk::Orientation::Horizontal,
-        BOTTOM_PLAYER_NOW_PLAYING_SPACING,
-    );
-    root.add_css_class("player-now-playing");
-    root.set_hexpand(true);
-    root.set_width_request(1);
-    root.set_halign(gtk::Align::Fill);
-    root.set_valign(gtk::Align::Center);
-    root.set_margin_start(BOTTOM_PLAYER_HORIZONTAL_PADDING);
+fn build_now_playing_controls(builder: &gtk::Builder, resource: &str) -> NowPlayingControls {
+    crate::ui_resource::objects!(builder, resource, {
+        now_playing: gtk::Box,
+        identity: gtk::Box,
+        title_row: gtk::Box,
+        title: gtk::Label,
+        menu_button: gtk::Button,
+        artist: gtk::Label,
+        album: gtk::Label,
+    });
+    now_playing.set_spacing(BOTTOM_PLAYER_NOW_PLAYING_SPACING);
+    now_playing.set_margin_start(BOTTOM_PLAYER_HORIZONTAL_PADDING);
 
     let cover = ArtworkTile::new(BOTTOM_PLAYER_COVER_SIZE);
     cover.area.set_valign(gtk::Align::Center);
@@ -953,49 +891,22 @@ fn build_now_playing_controls() -> NowPlayingControls {
     cover
         .area
         .update_property(&[gtk::accessible::Property::Label(&cover_label)]);
-    root.append(&cover.area);
+    now_playing.append(&cover.area);
 
-    let identity = gtk::Box::new(gtk::Orientation::Vertical, 1);
-    identity.add_css_class("player-identity");
-    identity.set_hexpand(true);
-    identity.set_width_request(1);
-    identity.set_halign(gtk::Align::Fill);
-    identity.set_valign(gtk::Align::Center);
-    let title = player_link("player-title");
-    let menu_button = icon_button_without_tooltip(BOTTOM_PLAYER_TITLE_MENU_ICON, "More actions");
-    menu_button.add_css_class("player-title-menu-button");
+    bind_widget_accessible_label(&menu_button, "More actions");
     menu_button.set_size_request(
         BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE,
         BOTTOM_PLAYER_TITLE_MENU_BUTTON_SIZE,
     );
-    menu_button.set_valign(gtk::Align::Center);
-    menu_button.set_sensitive(false);
-    let title_row = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_TITLE_MENU_GAP);
-    title_row.add_css_class("player-title-row");
-    title_row.set_hexpand(true);
-    title_row.set_width_request(1);
-    title_row.set_halign(gtk::Align::Fill);
-    title_row.set_valign(gtk::Align::Center);
     title_row.set_height_request(BOTTOM_PLAYER_TITLE_ROW_HEIGHT);
     title.set_height_request(BOTTOM_PLAYER_TITLE_ROW_HEIGHT);
-    title_row.append(&title);
-    title_row.append(&menu_button);
-    let artist = player_link("player-primary");
-    let album = player_link("player-primary");
     artist.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
     album.set_height_request(BOTTOM_PLAYER_META_ROW_HEIGHT);
-    artist.set_hexpand(true);
-    artist.set_width_request(1);
-    album.set_hexpand(true);
-    album.set_width_request(1);
-    identity.append(&title_row);
-    identity.append(&artist);
-    identity.append(&album);
     let identity_slot = bottom_player_identity_slot(&identity);
-    root.append(&identity_slot);
+    now_playing.append(&identity_slot);
 
     NowPlayingControls {
-        root,
+        root: now_playing,
         cover,
         title,
         menu_button,
@@ -1028,20 +939,24 @@ fn bottom_player_allocated_slot(
     slot
 }
 
-fn build_transport_controls() -> TransportControls {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 5);
-    root.add_css_class("player-transport");
-    root.set_width_request(BOTTOM_PLAYER_TRANSPORT_WIDTH);
-    root.set_valign(gtk::Align::Center);
-
-    let buttons = gtk::Fixed::new();
-    buttons.add_css_class("player-button-row");
-    buttons.set_halign(gtk::Align::Center);
-    buttons.set_valign(gtk::Align::Center);
-    buttons.set_size_request(
+fn build_transport_controls(builder: &gtk::Builder, resource: &str) -> TransportControls {
+    crate::ui_resource::objects!(builder, resource, {
+        transport: gtk::Box,
+        transport_buttons: gtk::Fixed,
+        progress_row: gtk::Box,
+        elapsed: gtk::Label,
+        progress_stack: gtk::Stack,
+        progress: gtk::Scale,
+        duration: gtk::Label,
+    });
+    transport.set_width_request(BOTTOM_PLAYER_TRANSPORT_WIDTH);
+    transport_buttons.set_size_request(
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         BOTTOM_PLAYER_BUTTON_ROW_HEIGHT,
     );
+    progress_row.set_spacing(BOTTOM_PLAYER_PROGRESS_SPACING);
+    progress.set_width_request(BOTTOM_PLAYER_PROGRESS_WIDTH);
+    progress_stack.set_size_request(BOTTOM_PLAYER_PROGRESS_WIDTH, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
 
     let dj_button = auto_dj_icon_button("Auto DJ");
     let previous_button = skip_icon_button(false, "Previous");
@@ -1060,90 +975,63 @@ fn build_transport_controls() -> TransportControls {
     configure_transport_side_button(&random_button);
 
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &dj_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         -3.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &shuffle_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         -2.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &previous_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         -1.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &play_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         0.0,
         BOTTOM_PLAYER_PLAY_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &next_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         1.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &repeat_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         2.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
     put_transport_button(
-        &buttons,
+        &transport_buttons,
         &random_button,
         BOTTOM_PLAYER_TRANSPORT_WIDTH,
         3.0,
         BOTTOM_PLAYER_SIDE_BUTTON_SIZE,
     );
 
-    let progress_row = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_PROGRESS_SPACING);
-    progress_row.add_css_class("player-progress-row");
-    progress_row.set_halign(gtk::Align::Center);
-    progress_row.set_valign(gtk::Align::Center);
-    let elapsed = gtk::Label::new(Some("0:00"));
-    elapsed.add_css_class("muted");
-    elapsed.add_css_class("player-timestamp");
-    elapsed.set_width_chars(4);
-    elapsed.set_xalign(1.0);
-    let progress = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 1.0);
-    progress.add_css_class("player-progress");
-    progress.set_draw_value(false);
-    progress.set_width_request(BOTTOM_PLAYER_PROGRESS_WIDTH);
     let waveform = WaveformSeekBar::new();
-    let progress_stack = gtk::Stack::new();
-    progress_stack.set_size_request(BOTTOM_PLAYER_PROGRESS_WIDTH, BOTTOM_PLAYER_WAVEFORM_HEIGHT);
-    progress_stack.set_hhomogeneous(false);
-    progress_stack.set_vhomogeneous(true);
     progress_stack.add_named(&progress, Some("scale"));
     progress_stack.add_named(waveform.widget(), Some("waveform"));
     progress_stack.set_visible_child(&progress);
-    let duration = gtk::Label::new(Some("0:00"));
-    duration.add_css_class("muted");
-    duration.add_css_class("player-timestamp");
-    duration.set_width_chars(4);
-    progress_row.append(&elapsed);
-    progress_row.append(&progress_stack);
-    progress_row.append(&duration);
-
-    root.append(&buttons);
-    root.append(&progress_row);
 
     TransportControls {
-        root,
-        buttons,
+        root: transport,
+        buttons: transport_buttons,
         random_button,
         previous_button,
         play_button,
@@ -1161,11 +1049,19 @@ fn build_transport_controls() -> TransportControls {
     }
 }
 
-fn build_player_action_controls() -> PlayerActionControls {
-    let root = gtk::Overlay::new();
-    root.set_halign(gtk::Align::End);
-    root.set_valign(gtk::Align::Fill);
-    root.set_vexpand(true);
+fn build_player_action_controls(builder: &gtk::Builder, resource: &str) -> PlayerActionControls {
+    crate::ui_resource::objects!(builder, resource, {
+        actions: gtk::Overlay,
+        action_buttons: gtk::Box,
+        output_button: gtk::Button,
+        output_icon: gtk::Image,
+        settings_button: gtk::MenuButton,
+        volume_group: gtk::Box,
+        volume: gtk::Scale,
+    });
+    let root = actions;
+    let buttons = action_buttons;
+    buttons.set_spacing(BOTTOM_PLAYER_ACTION_SPACING);
     let rating = RatingControl::new(None, true);
     rating
         .widget()
@@ -1178,35 +1074,10 @@ fn build_player_action_controls() -> PlayerActionControls {
     root.add_overlay(rating.widget());
     root.set_measure_overlay(rating.widget(), false);
 
-    let buttons = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_ACTION_SPACING);
-    buttons.set_halign(gtk::Align::End);
-    buttons.set_valign(gtk::Align::Center);
-    let output_button = icon_button_without_tooltip(
-        "rufin-video-display-symbolic",
-        msgid("Choose playback output"),
-    );
-    output_button.add_css_class("player-output-button");
-    configure_player_action_button(&output_button);
-    let output_icon = output_button
-        .child()
-        .and_then(|child| child.downcast::<gtk::Image>().ok())
-        .expect("an icon button contains an image");
-    output_icon.add_css_class("player-output-icon");
-    buttons.append(&output_button);
-    let settings_button = gtk::MenuButton::new();
-    settings_button.set_icon_name("rufin-preferences-system-symbolic");
-    settings_button.set_direction(gtk::ArrowType::Up);
-    settings_button.set_has_frame(false);
-    settings_button.add_css_class("icon-button");
-    settings_button.add_css_class("flat");
-    settings_button.add_css_class("circular");
-    settings_button.add_css_class("player-settings-button");
-    settings_button.set_valign(gtk::Align::Center);
+    bind_widget_accessible_label(&output_button, msgid("Choose playback output"));
     bind_widget_tooltip(&settings_button, "Playback settings");
     bind_widget_accessible_label(&settings_button, "Playback settings");
-    buttons.append(&settings_button);
-
-    let volume_group = gtk::Box::new(gtk::Orientation::Horizontal, BOTTOM_PLAYER_VOLUME_SPACING);
+    volume_group.set_spacing(BOTTOM_PLAYER_VOLUME_SPACING);
     volume_group.set_valign(gtk::Align::Center);
     let favorite_button = favorite_icon_button("Favorite");
     favorite_button.add_css_class("player-favorite-button");
@@ -1219,20 +1090,10 @@ fn build_player_action_controls() -> PlayerActionControls {
     mute_button.add_css_class("player-mute-button");
     configure_player_action_button(&mute_button);
     volume_group.append(&mute_button);
-    let volume = gtk::Scale::with_range(gtk::Orientation::Horizontal, 0.0, 1.0, 0.01);
-    volume.add_css_class("volume-slider");
-    volume.set_hexpand(true);
-    volume.set_halign(gtk::Align::Fill);
-    volume.set_valign(gtk::Align::Center);
-    volume.set_value(1.0);
-    volume.set_draw_value(false);
     let volume_slot = bottom_player_allocated_slot(&volume, BOTTOM_PLAYER_VOLUME_SLOT_WIDTH, 1);
     volume_slot.add_css_class("volume-slider-slot");
     volume_slot.set_valign(gtk::Align::Fill);
     volume_group.append(&volume_slot);
-    buttons.append(&volume_group);
-    root.set_child(Some(&buttons));
-
     PlayerActionControls {
         root,
         buttons,
@@ -1367,22 +1228,6 @@ fn transport_button_position(width: i32, slot: f64, size: i32) -> (f64, f64) {
     (center_x - radius, y)
 }
 
-fn player_link(css_class: &str) -> gtk::Label {
-    let label = gtk::Label::new(None);
-    label.add_css_class("player-link");
-    label.add_css_class(css_class);
-    label.set_xalign(0.0);
-    label.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    label.set_single_line_mode(true);
-    label.set_lines(1);
-    label.set_width_chars(1);
-    label.set_halign(gtk::Align::Fill);
-    label.set_valign(gtk::Align::Center);
-    label.set_hexpand(false);
-    label.set_yalign(0.5);
-    label
-}
-
 fn playback_state_label(state: TransportStatus) -> String {
     match state {
         TransportStatus::Stopped | TransportStatus::Failed => tr("Play"),
@@ -1469,13 +1314,6 @@ impl OutputPopoverStatus {
         } else {
             self.root.set_visible(false);
         }
-    }
-
-    fn fail_connection(&self) {
-        self.spinner.stop();
-        self.spinner.set_visible(false);
-        self.label.add_css_class("error");
-        self.label.set_text(&tr("Connection failed"));
     }
 }
 
@@ -1671,11 +1509,20 @@ fn add_output_row(
         row.add_suffix(&gtk::Image::from_icon_name("rufin-object-select-symbolic"));
     }
     let row_output = output.clone();
-    let row_group = group.clone();
-    let row_popover = popover.clone();
+    let row_group = group.downgrade();
+    let row_popover = popover.downgrade();
     let row_status = status.clone();
-    let row_shell = Rc::clone(shell);
+    let row_shell = Rc::downgrade(shell);
     row.connect_activated(move |_| {
+        let Some(row_shell) = row_shell.upgrade() else {
+            return;
+        };
+        let Some(row_group) = row_group.upgrade() else {
+            return;
+        };
+        let Some(row_popover) = row_popover.upgrade() else {
+            return;
+        };
         select_output_async(
             &row_shell,
             &row_group,
@@ -1712,13 +1559,31 @@ fn select_output_async(
     thread::spawn(move || {
         let _ = sender.send(transport.select_playback_output(selected));
     });
-    let shell = Rc::clone(shell);
-    let outputs = outputs.clone();
-    let popover = popover.clone();
-    let status = status.clone();
+    let shell = Rc::downgrade(shell);
+    let outputs = outputs.downgrade();
+    let popover = popover.downgrade();
+    let spinner = status.spinner.downgrade();
+    let status_label = status.label.downgrade();
+    let fail_connection: Rc<dyn Fn()> = Rc::new({
+        let spinner = spinner.clone();
+        let status_label = status_label.clone();
+        move || {
+            if let Some(spinner) = spinner.upgrade() {
+                spinner.stop();
+                spinner.set_visible(false);
+            }
+            if let Some(label) = status_label.upgrade() {
+                label.add_css_class("error");
+                label.set_text(&tr("Connection failed"));
+            }
+        }
+    });
     gtk::glib::timeout_add_local(Duration::from_millis(50), move || {
         match receiver.try_recv() {
             Ok(Ok(())) => {
+                let Some(shell) = shell.upgrade() else {
+                    return glib::ControlFlow::Break;
+                };
                 if let PlaybackOutput::Remote(remote) = &output {
                     remember_remote_output(&shell, remote);
                 }
@@ -1738,21 +1603,33 @@ fn select_output_async(
                     }
                 };
                 shell.show_feedback_toast(message.clone());
-                outputs.set_sensitive(true);
-                status.spinner.stop();
-                popover.popdown();
+                if let Some(outputs) = outputs.upgrade() {
+                    outputs.set_sensitive(true);
+                }
+                if let Some(spinner) = spinner.upgrade() {
+                    spinner.stop();
+                }
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
                 glib::ControlFlow::Break
             }
             Ok(Err(error)) => {
-                outputs.set_sensitive(true);
-                status.fail_connection();
-                shell.show_feedback_toast(error);
+                if let Some(outputs) = outputs.upgrade() {
+                    outputs.set_sensitive(true);
+                }
+                fail_connection();
+                if let Some(shell) = shell.upgrade() {
+                    shell.show_feedback_toast(error);
+                }
                 glib::ControlFlow::Break
             }
             Err(TryRecvError::Empty) => glib::ControlFlow::Continue,
             Err(TryRecvError::Disconnected) => {
-                outputs.set_sensitive(true);
-                status.fail_connection();
+                if let Some(outputs) = outputs.upgrade() {
+                    outputs.set_sensitive(true);
+                }
+                fail_connection();
                 glib::ControlFlow::Break
             }
         }
@@ -2217,7 +2094,6 @@ impl Shell {
         player
             .transport_buttons
             .set_size_request(transport_width, BOTTOM_PLAYER_BUTTON_ROW_HEIGHT);
-        player.tiny_row.set_width_request(1);
         player.now_playing_wall.set_width_request(1);
         player.transport_slot.set_halign(if tiny {
             gtk::Align::End
@@ -2251,24 +2127,7 @@ impl Shell {
         player.random_button.set_visible(!tiny);
         player.progress_row.set_visible(!tiny);
         player.actions.set_visible(!tiny);
-        if player.tiny_layout.replace(tiny) == tiny {
-            return;
-        }
-        if tiny {
-            player.surface.remove(&player.left_slot);
-            player.surface.remove(&player.transport_slot);
-            player.surface.remove(&player.right_slot);
-            player.tiny_row.prepend(&player.left_slot);
-            player.tiny_controls.prepend(&player.transport_slot);
-            player.surface.append(&player.tiny_row);
-        } else {
-            player.surface.remove(&player.tiny_row);
-            player.tiny_row.remove(&player.left_slot);
-            player.tiny_controls.remove(&player.transport_slot);
-            player.surface.append(&player.left_slot);
-            player.surface.append(&player.transport_slot);
-            player.surface.append(&player.right_slot);
-        }
+        player.right_slot.set_visible(!tiny);
     }
 
     fn apply_bottom_player_actions(&self, actions: BottomPlayerActions) {

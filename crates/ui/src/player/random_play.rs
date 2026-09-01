@@ -12,8 +12,6 @@ use localization::tr;
 
 use crate::settings::{RandomPlayGenreSelection, RandomPlaySettings};
 use crate::shell::Shell;
-use crate::shell::actions::text_button;
-use crate::shell::actions::{PLAY_ICON, PLAY_LATER_ICON, PLAY_NEXT_ICON};
 
 const MIN_LIMIT: f64 = 1.0;
 const MAX_LIMIT: f64 = 500.0;
@@ -44,7 +42,15 @@ pub(super) fn present_random_play_dialog(shell: &Rc<Shell>) {
     let runtime = selected.runtime.clone();
     let task = runtime.spawn(async move {
         let order = database
-            .genre_route_page(source, folder, "", GenreSort::Title, false, &cancellation)
+            .genre_route_page(
+                source,
+                folder,
+                "",
+                GenreSort::Title,
+                false,
+                library::RouteSeedWindow::top(),
+                &cancellation,
+            )
             .await?
             .0;
         let mut genres = Vec::with_capacity(order.len());
@@ -85,35 +91,37 @@ fn present_random_play_dialog_loaded(
         selected.music_folder_object_id.as_deref(),
     );
 
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    let title = adw::WindowTitle::new(&tr("Play random"), "");
-    header.set_title_widget(Some(&title));
-    toolbar.add_top_bar(&header);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 14);
-    content.set_margin_top(18);
-    content.set_margin_bottom(18);
-    content.set_margin_start(18);
-    content.set_margin_end(18);
-
+    let resource = crate::ui_resource::RANDOM_PLAY_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    let dialog: adw::Dialog = crate::ui_resource::object(&builder, resource, "random_play_dialog");
     let controls = RandomPlayControls {
-        limit: count_spinner(saved.limit as f64, MIN_LIMIT, MAX_LIMIT),
-        min_year_enabled: gtk::CheckButton::new(),
-        min_year: count_spinner(
-            saved.min_year.map_or(DEFAULT_MIN_YEAR, f64::from),
-            MIN_YEAR,
-            MAX_YEAR,
-        ),
-        max_year_enabled: gtk::CheckButton::new(),
-        max_year: count_spinner(
-            saved.max_year.map_or(DEFAULT_MAX_YEAR, f64::from),
-            MIN_YEAR,
-            MAX_YEAR,
-        ),
-        genre: genre_dropdown(&genres, selected_genre),
-        played_filter: played_filter_dropdown(&played_filters, saved.played_filter),
+        limit: crate::ui_resource::object(&builder, resource, "limit"),
+        min_year_enabled: crate::ui_resource::object(&builder, resource, "min_year_enabled"),
+        min_year: crate::ui_resource::object(&builder, resource, "min_year"),
+        max_year_enabled: crate::ui_resource::object(&builder, resource, "max_year_enabled"),
+        max_year: crate::ui_resource::object(&builder, resource, "max_year"),
+        genre: crate::ui_resource::object(&builder, resource, "genre"),
+        played_filter: crate::ui_resource::object(&builder, resource, "played_filter"),
     };
+    configure_spinner(&controls.limit, saved.limit as f64, MIN_LIMIT, MAX_LIMIT);
+    configure_spinner(
+        &controls.min_year,
+        saved.min_year.map_or(DEFAULT_MIN_YEAR, f64::from),
+        MIN_YEAR,
+        MAX_YEAR,
+    );
+    configure_spinner(
+        &controls.max_year,
+        saved.max_year.map_or(DEFAULT_MAX_YEAR, f64::from),
+        MIN_YEAR,
+        MAX_YEAR,
+    );
+    configure_genre_dropdown(&controls.genre, &genres, selected_genre);
+    configure_played_filter_dropdown(
+        &controls.played_filter,
+        &played_filters,
+        saved.played_filter,
+    );
     controls
         .min_year_enabled
         .set_active(saved.min_year.is_some());
@@ -125,36 +133,10 @@ fn present_random_play_dialog_loaded(
     connect_year_toggle(&controls.min_year_enabled, &controls.min_year);
     connect_year_toggle(&controls.max_year_enabled, &controls.max_year);
 
-    content.append(&control_row(&tr("Number of songs"), &controls.limit));
-    content.append(&optional_control_row(
-        &tr("Minimum year"),
-        &controls.min_year_enabled,
-        &controls.min_year,
-    ));
-    content.append(&optional_control_row(
-        &tr("Maximum year"),
-        &controls.max_year_enabled,
-        &controls.max_year,
-    ));
-    content.append(&control_row(&tr("Genre"), &controls.genre));
-    content.append(&control_row(&tr("Play filter"), &controls.played_filter));
-
-    let actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    actions.set_halign(gtk::Align::End);
-    let play_next = text_button(PLAY_NEXT_ICON, "Play Next");
-    let play_now = text_button(PLAY_ICON, "Play");
-    play_now.add_css_class("suggested-action");
-    let play_later = text_button(PLAY_LATER_ICON, "Play Later");
-    actions.append(&play_next);
-    actions.append(&play_now);
-    actions.append(&play_later);
-    content.append(&actions);
-
-    toolbar.set_content(Some(&content));
-    let dialog = adw::Dialog::builder()
-        .content_width(460)
-        .child(&toolbar)
-        .build();
+    let play_next: gtk::Button = crate::ui_resource::object(&builder, resource, "play_next");
+    let play_now: gtk::Button = crate::ui_resource::object(&builder, resource, "play_now");
+    let play_later: gtk::Button = crate::ui_resource::object(&builder, resource, "play_later");
+    drop(builder);
 
     connect_action(
         &play_next,
@@ -187,12 +169,11 @@ fn present_random_play_dialog_loaded(
     shell.present_selected_dialog(&dialog);
 }
 
-fn count_spinner(default: f64, min: f64, max: f64) -> gtk::SpinButton {
-    let spinner = gtk::SpinButton::with_range(min, max, 1.0);
+fn configure_spinner(spinner: &gtk::SpinButton, default: f64, min: f64, max: f64) {
+    spinner.set_range(min, max);
+    spinner.set_increments(1.0, 10.0);
+    spinner.set_climb_rate(1.0);
     spinner.set_value(default);
-    spinner.set_numeric(true);
-    spinner.set_width_chars(5);
-    spinner
 }
 
 fn connect_year_toggle(check: &gtk::CheckButton, spinner: &gtk::SpinButton) {
@@ -202,23 +183,25 @@ fn connect_year_toggle(check: &gtk::CheckButton, spinner: &gtk::SpinButton) {
     });
 }
 
-fn genre_dropdown(genres: &[GenreRow], selected: Option<&str>) -> gtk::DropDown {
+fn configure_genre_dropdown(dropdown: &gtk::DropDown, genres: &[GenreRow], selected: Option<&str>) {
     let mut labels = Vec::with_capacity(genres.len() + 1);
     labels.push(tr("Any genre"));
     labels.extend(genres.iter().map(|genre| genre.name.clone()));
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     let model = gtk::StringList::new(&refs);
-    let dropdown = gtk::DropDown::new(Some(model), None::<gtk::Expression>);
-    dropdown.set_enable_search(true);
+    dropdown.set_model(Some(&model));
     dropdown.set_selected(
         selected
             .and_then(|selected| genres.iter().position(|genre| genre.object_id == selected))
             .map_or(0, |index| index as u32 + 1),
     );
-    dropdown
 }
 
-fn played_filter_dropdown(filters: &[PlayedFilter], selected: PlayedFilter) -> gtk::DropDown {
+fn configure_played_filter_dropdown(
+    dropdown: &gtk::DropDown,
+    filters: &[PlayedFilter],
+    selected: PlayedFilter,
+) {
     let labels = filters
         .iter()
         .map(|filter| match filter {
@@ -229,7 +212,7 @@ fn played_filter_dropdown(filters: &[PlayedFilter], selected: PlayedFilter) -> g
         .collect::<Vec<_>>();
     let refs = labels.iter().map(String::as_str).collect::<Vec<_>>();
     let model = gtk::StringList::new(&refs);
-    let dropdown = gtk::DropDown::new(Some(model), None::<gtk::Expression>);
+    dropdown.set_model(Some(&model));
     dropdown.set_sensitive(filters.len() > 1);
     dropdown.set_selected(
         filters
@@ -237,34 +220,6 @@ fn played_filter_dropdown(filters: &[PlayedFilter], selected: PlayedFilter) -> g
             .position(|filter| *filter == selected)
             .unwrap_or_default() as u32,
     );
-    dropdown
-}
-
-fn control_row<W: IsA<gtk::Widget>>(label: &str, control: &W) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row.set_valign(gtk::Align::Center);
-    let label = gtk::Label::new(Some(label));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    row.append(&label);
-    row.append(control);
-    row
-}
-
-fn optional_control_row<W: IsA<gtk::Widget>>(
-    label: &str,
-    check: &gtk::CheckButton,
-    control: &W,
-) -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 12);
-    row.set_valign(gtk::Align::Center);
-    let label = gtk::Label::new(Some(label));
-    label.set_xalign(0.0);
-    label.set_hexpand(true);
-    row.append(&label);
-    row.append(check);
-    row.append(control);
-    row
 }
 
 fn connect_action(

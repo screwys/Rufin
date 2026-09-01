@@ -202,6 +202,7 @@ pub struct ArtworkBindingIdentity {
 
 pub struct PreparedArtwork {
     pub identity: ArtworkBindingIdentity,
+    pub decoded_identities: Vec<DecodedImageIdentity>,
     pub ready: Option<Arc<DecodedImage>>,
     source: SourceImages,
     request: ArtworkRequest,
@@ -272,9 +273,11 @@ impl Artwork {
     }
 
     pub fn prepare(&self, source: SourceImages, request: ArtworkRequest) -> PreparedArtwork {
-        let (identity, ready) = self.pipeline.binding_identity_and_image(&source, &request);
+        let (identity, decoded_identities, ready) =
+            self.pipeline.binding_identity_and_image(&source, &request);
         PreparedArtwork {
             identity,
+            decoded_identities,
             ready,
             source,
             request,

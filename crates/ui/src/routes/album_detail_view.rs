@@ -12,12 +12,11 @@ use crate::favorites::{
     album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use crate::format_duration_units;
-use crate::localization::bind_label_text_with;
 use crate::shell::Shell;
 use crate::shell::actions::{ActionButtonVariant, configure_action_button};
 use crate::shell::route::{LatestMountedRouteRead, MountedRoute};
 use ::library::RadioSeed;
-use localization::{msgid, tr, track_count_text};
+use localization::{msgid, track_count_text};
 use playback::RadioPlayRequest;
 
 use super::collection_context::present_album_context_menu;
@@ -25,10 +24,9 @@ use super::collections::CollectionPlay;
 use super::collections::{library_route_inset, set_library_table_content_height};
 use super::detail_links::{DetailLinkBinding, album_artist_links};
 use super::detail_showcase::{
-    DetailExternalLinksProjection, DetailSummaryProjection, MediaDetailShowcase,
-    album_external_links, detail_action_row, detail_cover_projection, detail_genre_pill_button,
-    detail_playback_controls, detail_radio_button, fit_detail_text, fitted_detail_title_label,
-    media_detail_showcase,
+    DetailShowcaseView, MediaShowcase, album_external_links, detail_genre_pill_button,
+    detail_playback_controls, detail_radio_button, detail_showcase_frame_with_back,
+    fit_detail_text, media_cover_projection, media_showcase,
 };
 use super::release_kind::album_release_kind_label;
 use super::route::Route;
@@ -52,6 +50,8 @@ impl Shell {
         self: &Rc<Self>,
         album_id: AlbumKey,
         detail: Option<AlbumDetail>,
+        first_row_position: usize,
+        first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let Some(detail) = detail else {
@@ -92,7 +92,8 @@ impl Shell {
         let track_projection = self.searchable_track_collection(
             &selected,
             tracks,
-            Vec::new(),
+            first_row_position,
+            first_rows,
             LibraryListKey::AlbumDetailTracks,
             SearchableTrackOptions {
                 on_visible_count_changed: Some(resize_tracks),
@@ -103,38 +104,31 @@ impl Shell {
             },
         );
         let cover_size = detail_showcase_cover_size(inner_content_width);
-        let cover = detail_cover_projection(
+        let cover = media_cover_projection(
             self,
             super::library_fields::opaque_artwork(detail.album.artwork_binding.as_deref()),
             cover_size,
             "album-detail-cover",
         );
-        let facts = DetailSummaryProjection::new(&album_summary_items(&detail.album));
+        let showcase_view = DetailShowcaseView::new(
+            "album-detail-showcase",
+            album
+                .object_id
+                .bytes()
+                .fold(2_166_136_261_u32, |hash, byte| {
+                    hash.wrapping_mul(16_777_619) ^ u32::from(byte)
+                }),
+            album_release_kind_label(&album),
+            true,
+            &album.title,
+        );
+        showcase_view.add_external_links_class("album-detail-link-stack");
+        showcase_view.replace_summary(&album_summary_items(&detail.album));
         let track_count = Rc::new(Cell::new(detail.album.track_count.max(0) as u32));
         let localized_track_count = Rc::clone(&track_count);
-        facts.bind_text_with(1, move || {
+        showcase_view.bind_summary_text_with(1, move || {
             track_count_text(u64::from(localized_track_count.get()))
         });
-
-        let text_stack = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        text_stack.set_hexpand(true);
-        text_stack.set_halign(gtk::Align::Fill);
-        text_stack.set_width_request(1);
-        let kind_message = Rc::new(RefCell::new(album_release_kind_label(&album)));
-        let kind = gtk::Label::new(None);
-        let localized_kind = Rc::clone(&kind_message);
-        bind_label_text_with(&kind, move || tr(*localized_kind.borrow()));
-        kind.add_css_class("eyebrow");
-        kind.set_xalign(0.0);
-        kind.set_halign(gtk::Align::Start);
-        kind.set_valign(gtk::Align::Center);
-        kind.set_margin_end(6);
-        let kind_row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        kind_row.add_css_class("album-detail-kind-row");
-        kind_row.add_css_class("album-detail-genre-row");
-        kind_row.set_valign(gtk::Align::Center);
-        kind_row.set_halign(gtk::Align::Start);
-        kind_row.append(&kind);
 
         let radio = detail_radio_button();
         let radio_controller = self.products.playback.radio.clone();
@@ -144,12 +138,9 @@ impl Shell {
                 radio_album.borrow().album_key,
             )));
         });
-        kind_row.append(&radio);
-        let genres = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        kind_row.append(&genres);
-        self.append_album_genre_buttons(&genres, &album.genres);
+        showcase_view.append_kind_control(&radio);
+        self.append_album_genre_buttons(&showcase_view, &album.genres);
 
-        let title = fitted_detail_title_label(&album.title);
         let artist = gtk::Label::new(Some(&album.display_artist));
         artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
@@ -162,12 +153,9 @@ impl Shell {
         fit_detail_text(&artist, &album.display_artist);
         let artist_links = DetailLinkBinding::new(&artist, self);
         artist_links.bind(album_artist_links(&album));
-        text_stack.append(&kind_row);
-        text_stack.append(&title);
-        text_stack.append(&artist);
-        text_stack.append(&facts.widget());
+        showcase_view.append_detail(&artist);
 
-        let actions = detail_action_row();
+        let actions = showcase_view.actions();
         actions.add_css_class("album-detail-actions");
         actions.set_halign(gtk::Align::Start);
         let play_controller = self.products.playback.queue.clone();
@@ -227,28 +215,17 @@ impl Shell {
                 );
             });
 
-        let external_links = DetailExternalLinksProjection::new(
-            Some("album-detail-link-stack"),
-            album_external_links(self, &album),
-        );
-        let showcase = media_detail_showcase(
+        showcase_view.replace_external_links(album_external_links(self, &album));
+        let showcase = detail_showcase_frame_with_back(
             self,
-            MediaDetailShowcase {
-                route_class: "album-detail-showcase",
-                seed: album
-                    .object_id
-                    .bytes()
-                    .fold(2_166_136_261_u32, |hash, byte| {
-                        hash.wrapping_mul(16_777_619) ^ u32::from(byte)
-                    }),
+            media_showcase(MediaShowcase {
+                view: showcase_view.clone(),
                 initial_width: inner_content_width,
                 cover: cover.clone(),
                 cover_controls,
                 context_menu: Some(context_menu),
-                external_links: external_links.clone(),
-                text_stack: text_stack.upcast(),
-                actions: actions.upcast(),
-            },
+                actions_min_cover_size: None,
+            }),
         );
         content.append(&showcase);
 
@@ -262,7 +239,6 @@ impl Shell {
             track_projection.search(),
         );
         table.append(&track_toolbar.widget());
-        self.set_route_search(Some(track_projection.search()));
         let item_navigation = track_projection.item_navigation();
         let track_content = track_projection.mount_in_scroller(&table_scroller);
         table.append(&track_content);
@@ -317,12 +293,14 @@ impl Shell {
                         &request.tracks.query,
                         request.tracks.settings.sort_key.track_sort(),
                         request.tracks.settings.descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok::<_, String>(PreparedTrackProjection {
                     order: page.order,
+                    first_row_position: page.first_row_position,
                     first_rows: page.first_rows,
                     request: request.tracks,
                 })
@@ -343,10 +321,11 @@ impl Shell {
                 read.request_with(AlbumDetailReadRequest { tracks });
             });
         }
+        let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
             let album = Rc::clone(&current_album);
-            let external_links = external_links.clone();
+            let showcase = showcase_view.clone();
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
             let read = Rc::clone(&read);
@@ -357,7 +336,7 @@ impl Shell {
                 let external_link_settings =
                     shell.settings.current.borrow().external_site_links.clone();
                 if *applied_external_link_settings.borrow() != external_link_settings {
-                    external_links.replace(album_external_links(&shell, &album.borrow()));
+                    showcase.replace_external_links(album_external_links(&shell, &album.borrow()));
                     applied_external_link_settings.replace(external_link_settings);
                 }
                 let settings = shell
@@ -373,12 +352,19 @@ impl Shell {
                 });
             })
         };
-        MountedRoute::new(route_stack.upcast(), resume).with_item_navigation(item_navigation)
+        MountedRoute::new(route_stack.upcast(), resume)
+            .with_search(track_projection.search())
+            .with_layout_cycle(layout_cycle)
+            .with_item_navigation(item_navigation)
+            .with_initial_demand({
+                let track_projection = track_projection.clone();
+                Rc::new(move || track_projection.resume_initial_demand())
+            })
     }
 
     fn append_album_genre_buttons(
         self: &Rc<Self>,
-        row: &gtk::Box,
+        showcase: &DetailShowcaseView,
         genres: &[::library::AlbumGenreLink],
     ) {
         for genre in genres.iter().filter(|genre| !genre.name.trim().is_empty()) {
@@ -386,7 +372,7 @@ impl Shell {
             let shell = Rc::clone(self);
             let genre_id = genre.genre_key;
             button.connect_clicked(move |_| shell.navigate(Route::GenreDetail(genre_id)));
-            row.append(&button);
+            showcase.append_kind_control(&button);
         }
     }
 }

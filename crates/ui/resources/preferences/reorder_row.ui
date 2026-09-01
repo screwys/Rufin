@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <template class="RufinPreferencesReorderRow" parent="AdwActionRow">
+    <child type="prefix">
+      <object class="GtkImage" id="drag">
+        <property name="icon-name">rufin-list-drag-handle-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Drag to reorder</property>
+        <style><class name="dim-label"/></style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkButton" id="up">
+        <property name="icon-name">rufin-go-up-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Move up</property>
+        <property name="valign">center</property>
+        <style><class name="flat"/></style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkButton" id="down">
+        <property name="icon-name">rufin-go-down-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Move down</property>
+        <property name="valign">center</property>
+        <style><class name="flat"/></style>
+      </object>
+    </child>
+    <child type="suffix">
+      <object class="GtkSwitch" id="visible">
+        <property name="valign">center</property>
+      </object>
+    </child>
+  </template>
+</interface>

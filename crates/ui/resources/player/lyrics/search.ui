@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Search Lyrics</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="margin-top">16</property>
+        <property name="margin-bottom">16</property>
+        <property name="margin-start">16</property>
+        <property name="margin-end">16</property>
+        <property name="width-request">420</property>
+        <property name="height-request">500</property>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <property name="valign">center</property>
+            <child>
+              <object class="GtkLabel" id="search_title">
+                <property name="label" translatable="yes">Search Lyrics</property>
+                <property name="xalign">0</property>
+                <property name="hexpand">true</property>
+                <style><class name="title"/></style>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="close_button">
+                <property name="icon-name">rufin-window-close-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Close</property>
+                <property name="valign">center</property>
+                <style><class name="icon-button"/><class name="flat"/><class name="circular"/></style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox">
+            <property name="orientation">horizontal</property>
+            <property name="spacing">8</property>
+            <child>
+              <object class="GtkEntry" id="artist_entry">
+                <property name="placeholder-text" translatable="yes">Artist</property>
+                <property name="hexpand">true</property>
+                <property name="width-request">1</property>
+                <property name="secondary-icon-name">rufin-edit-clear-symbolic</property>
+                <property name="secondary-icon-tooltip-text" translatable="yes">Clear artist</property>
+                <property name="secondary-icon-activatable">true</property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkEntry" id="title_entry">
+                <property name="placeholder-text" translatable="yes">Song</property>
+                <property name="hexpand">true</property>
+                <property name="width-request">1</property>
+                <property name="secondary-icon-name">rufin-edit-clear-symbolic</property>
+                <property name="secondary-icon-tooltip-text" translatable="yes">Clear title</property>
+                <property name="secondary-icon-activatable">true</property>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="status">
+            <property name="label" translatable="yes">Ready</property>
+            <property name="xalign">0</property>
+            <property name="wrap">true</property>
+            <style><class name="muted"/></style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkScrolledWindow">
+            <property name="hscrollbar-policy">never</property>
+            <property name="vscrollbar-policy">automatic</property>
+            <property name="vexpand">true</property>
+            <property name="child">
+              <object class="GtkListBox" id="list">
+                <property name="selection-mode">none</property>
+                <style><class name="boxed-list"/></style>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </property>
+  </object>
+</interface>

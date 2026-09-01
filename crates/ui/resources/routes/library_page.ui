@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinLibraryPageView" parent="GtkBox">
+    <property name="orientation">vertical</property>
+    <property name="spacing">10</property>
+    <property name="margin-top">10</property>
+    <property name="margin-bottom">8</property>
+    <property name="hexpand">true</property>
+    <property name="vexpand">true</property>
+    <style>
+      <class name="route-content"/>
+    </style>
+    <child>
+      <object class="GtkBox" id="toolbar_host">
+        <property name="margin-start">10</property>
+        <property name="margin-end">10</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="category_host">
+        <property name="visible">false</property>
+        <property name="margin-start">10</property>
+        <property name="margin-end">10</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkStack" id="contents">
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+        <child>
+          <object class="GtkBox" id="empty_view">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">10</property>
+            <property name="margin-end">10</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="empty-state"/>
+            </style>
+            <child>
+              <object class="GtkLabel" id="empty_label">
+                <property name="wrap">true</property>
+                <property name="justify">center</property>
+                <style>
+                  <class name="muted"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+        <child>
+          <object class="GtkBox" id="search_empty_view">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-start">10</property>
+            <property name="margin-end">10</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <property name="halign">center</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="empty-state"/>
+            </style>
+            <child>
+              <object class="GtkLabel" id="search_empty_label">
+                <property name="wrap">true</property>
+                <property name="justify">center</property>
+                <style>
+                  <class name="muted"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+
+</interface>

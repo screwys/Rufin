@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinCollectionGridCoverView" parent="GtkWidget">
+    <property name="hexpand">true</property>
+    <property name="halign">fill</property>
+    <property name="valign">start</property>
+    <child>
+      <object class="GtkOverlay" id="overlay">
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="valign">fill</property>
+        <style>
+          <class name="cover-frame"/>
+          <class name="context-menu-hover-owner"/>
+        </style>
+        <child>
+          <object class="GtkButton" id="cover_button">
+            <property name="width-request">1</property>
+            <property name="height-request">1</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <property name="halign">fill</property>
+            <property name="valign">fill</property>
+            <property name="focus-on-click">false</property>
+            <property name="overflow">hidden</property>
+            <style>
+              <class name="album-cover-button"/>
+              <class name="flat"/>
+            </style>
+          </object>
+        </child>
+    <child type="overlay">
+      <object class="GtkBox" id="shade">
+        <property name="visible">false</property>
+        <property name="can-target">false</property>
+        <property name="hexpand">true</property>
+        <property name="vexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="valign">fill</property>
+        <style>
+          <class name="cover-hover-layer"/>
+        </style>
+      </object>
+    </child>
+    <child type="overlay">
+      <object class="GtkBox" id="transport">
+        <property name="visible">false</property>
+        <property name="spacing">8</property>
+        <property name="halign">center</property>
+        <property name="valign">center</property>
+        <style>
+          <class name="cover-hover-transport"/>
+        </style>
+        <child>
+          <object class="GtkButton" id="play_next">
+            <property name="icon-name">rufin-mail-forward-symbolic</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="icon-button"/>
+              <class name="flat"/>
+              <class name="circular"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="play">
+            <property name="icon-name">rufin-media-playback-start-symbolic</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="icon-button"/>
+              <class name="flat"/>
+              <class name="circular"/>
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="play_last">
+            <property name="icon-name">rufin-go-last-symbolic</property>
+            <property name="valign">center</property>
+            <style>
+              <class name="icon-button"/>
+              <class name="flat"/>
+              <class name="circular"/>
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child type="overlay">
+      <object class="GtkButton" id="menu">
+        <property name="visible">false</property>
+        <property name="icon-name">rufin-more-symbolic</property>
+        <property name="halign">start</property>
+        <property name="valign">end</property>
+        <property name="margin-start">4</property>
+        <property name="margin-bottom">8</property>
+        <style>
+          <class name="icon-button"/>
+          <class name="flat"/>
+          <class name="circular"/>
+        </style>
+      </object>
+    </child>
+      </object>
+    </child>
+  </template>
+</interface>

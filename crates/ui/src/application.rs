@@ -382,17 +382,28 @@ pub(crate) fn verify_interface_resources() -> Result<(), String> {
     for relative_path in [
         "scalable/apps/io.github.screwys.Rufin.svg",
         "scalable/actions/rufin-go-last-symbolic.svg",
+        "scalable/actions/rufin-audio-only-symbolic.svg",
+        "scalable/actions/rufin-library-music-symbolic.svg",
         "scalable/actions/rufin-mail-forward-symbolic.svg",
         "scalable/actions/rufin-media-playback-start-symbolic.svg",
         "scalable/actions/rufin-media-skip-backward-symbolic.svg",
         "scalable/actions/rufin-media-skip-forward-symbolic.svg",
+        "scalable/actions/rufin-moods-symbolic.svg",
+        "scalable/actions/rufin-music-queue-symbolic.svg",
         "scalable/actions/rufin-open-menu-symbolic.svg",
         "scalable/actions/rufin-player-more-symbolic.svg",
+        "scalable/actions/rufin-preferences-desktop-appearance-symbolic.svg",
+        "scalable/actions/rufin-search-symbolic.svg",
+        "scalable/actions/rufin-tag-outline-symbolic.svg",
         "scalable/actions/rufin-x-office-calendar-symbolic.svg",
         "symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
     ] {
         let path = format!("{ICON_RESOURCE_ROOT}/{relative_path}");
         gio::resources_lookup_data(&path, gio::ResourceLookupFlags::NONE)
+            .map_err(|error| format!("missing compiled Rufin resource {path}: {error}"))?;
+    }
+    for path in crate::ui_resource::INTERFACE_RESOURCE_PATHS {
+        gio::resources_lookup_data(path, gio::ResourceLookupFlags::NONE)
             .map_err(|error| format!("missing compiled Rufin resource {path}: {error}"))?;
     }
     Ok(())
@@ -418,5 +429,41 @@ mod tests {
     #[test]
     fn representative_rufin_icons_are_compiled_resources() {
         verify_interface_resources().expect("compiled interface resources");
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn every_interface_resource_builds() {
+        gtk::init().expect("GTK display");
+        verify_interface_resources().expect("compiled interface resources");
+        for path in crate::ui_resource::INTERFACE_RESOURCE_PATHS
+            .iter()
+            .filter(|path| path.ends_with(".ui"))
+        {
+            let data = gio::resources_lookup_data(path, gio::ResourceLookupFlags::NONE)
+                .expect("compiled interface resource");
+            if String::from_utf8_lossy(data.as_ref()).contains("<template") {
+                continue;
+            }
+            crate::ui_resource::builder(path);
+        }
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display and a German test process locale"]
+    fn gettext_domain_is_shared_by_rust_and_builder() {
+        assert_eq!(std::env::var("LANGUAGE").as_deref(), Ok("de"));
+        localization::initialize().expect("Rufin gettext domain");
+        gtk::init().expect("GTK display");
+        verify_interface_resources().expect("compiled interface resources");
+
+        assert_eq!(localization::tr("Troubleshooting"), "Fehlerbehebung");
+        let resource = crate::ui_resource::DIAGNOSTICS_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        let dialog: adw::Dialog =
+            crate::ui_resource::object(&builder, resource, "diagnostics_dialog");
+        let debug: adw::SwitchRow = crate::ui_resource::object(&builder, resource, "debug");
+        assert_eq!(dialog.title(), "Fehlerbehebung");
+        assert_eq!(debug.title(), "Debug-Protokollierung");
     }
 }

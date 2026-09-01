@@ -19,8 +19,7 @@ use crate::shell::Shell;
 use super::outputs::audio_output_dropdown;
 
 const PLAYBACK_RATE_COMMIT_DELAY: Duration = Duration::from_millis(200);
-const PLAYBACK_SETTINGS_WIDTH: i32 = 400;
-const PLAYBACK_SETTINGS_MAX_HEIGHT: i32 = 520;
+const SCALE_SURFACE_SCROLL_FACTOR: f64 = 2.5;
 const PLAYBACK_SETTINGS_SCALE_WIDTH: i32 = 180;
 
 pub(crate) fn configure_playback_settings_popover(button: &gtk::MenuButton, shell: &Rc<Shell>) {
@@ -40,19 +39,15 @@ fn playback_settings_popover(shell: &Rc<Shell>) -> gtk::Popover {
         .playback_output()
         .is_local();
 
-    let popover = gtk::Popover::new();
-    popover.add_css_class("playback-settings-popover");
-    popover.set_autohide(true);
-    popover.set_position(gtk::PositionType::Top);
-
-    let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    content.set_margin_top(2);
-    content.set_margin_bottom(2);
-    content.set_margin_start(2);
-    content.set_margin_end(2);
-    content.set_width_request(PLAYBACK_SETTINGS_WIDTH);
-
-    let settings_group = adw::PreferencesGroup::new();
+    let resource = crate::ui_resource::PLAYBACK_SETTINGS_POPOVER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        popover: gtk::Popover,
+        settings_group: adw::PreferencesGroup,
+        output_row: adw::ActionRow,
+        lyrics: adw::SwitchRow,
+        visualizer: adw::SwitchRow,
+    });
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
     }
@@ -89,7 +84,6 @@ fn playback_settings_popover(shell: &Rc<Shell>) -> gtk::Popover {
     preserve_pitch.set_sensitive(local_output);
     settings_group.add(&preserve_pitch);
 
-    let output_row = adw::ActionRow::builder().title(tr("Audio output")).build();
     let output_dropdown = audio_output_dropdown(shell, PLAYBACK_SETTINGS_SCALE_WIDTH);
     output_row.add_suffix(&output_dropdown);
     output_row.set_activatable_widget(Some(&output_dropdown));
@@ -111,35 +105,19 @@ fn playback_settings_popover(shell: &Rc<Shell>) -> gtk::Popover {
     volume_scale_row.set_sensitive(local_output);
     settings_group.add(&volume_scale_row);
 
-    let lyrics = adw::SwitchRow::builder()
-        .title(tr("Show lyrics"))
-        .active(settings.lyrics_panel_visible)
-        .build();
+    lyrics.set_active(settings.lyrics_panel_visible);
     let lyrics_shell = Rc::clone(shell);
     lyrics.connect_active_notify(move |row| {
         lyrics_shell.set_lyrics_panel_visible(row.is_active());
     });
     settings_group.add(&lyrics);
-    let visualizer = adw::SwitchRow::builder()
-        .title(tr("Show visualizer"))
-        .active(settings.visualizer_panel_visible)
-        .build();
+    visualizer.set_active(settings.visualizer_panel_visible);
     visualizer.set_sensitive(local_output);
     let visualizer_shell = Rc::clone(shell);
     visualizer.connect_active_notify(move |row| {
         visualizer_shell.set_visualizer_panel_visible(row.is_active());
     });
     settings_group.add(&visualizer);
-    content.append(&settings_group);
-
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_min_content_width(PLAYBACK_SETTINGS_WIDTH);
-    scroller.set_propagate_natural_width(false);
-    scroller.set_propagate_natural_height(true);
-    scroller.set_max_content_height(PLAYBACK_SETTINGS_MAX_HEIGHT);
-    scroller.set_child(Some(&content));
-    popover.set_child(Some(&scroller));
     popover
 }
 
@@ -158,6 +136,7 @@ pub(crate) fn crossfade_duration_row(
         1.0,
     );
     scale.add_css_class("playback-setting-scale");
+    install_scale_scroll_forwarding(&scale);
     scale.set_width_request(scale_width);
     scale.set_valign(gtk::Align::Center);
     install_sliding_value_bubble(&scale, |seconds| format!("{seconds:.0}"));
@@ -193,6 +172,7 @@ pub(crate) fn playback_rate_row(
         0.05,
     );
     scale.add_css_class("playback-setting-scale");
+    install_scale_scroll_forwarding(&scale);
     scale.set_width_request(scale_width);
     install_sliding_value_bubble(&scale, playback_rate_value);
     scale.add_mark(0.5, gtk::PositionType::Bottom, Some("0.5"));
@@ -238,6 +218,60 @@ pub(crate) fn preserve_pitch_row(shell: &Rc<Shell>, active: bool) -> adw::Switch
         });
     });
     row
+}
+
+pub(crate) fn install_scale_scroll_forwarding(scale: &gtk::Scale) {
+    let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
+    controller.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let scale_weak = scale.downgrade();
+    controller.connect_scroll(move |controller, _, dy| {
+        if dy == 0.0 {
+            return gtk::glib::Propagation::Proceed;
+        }
+        let Some(scale) = scale_weak.upgrade() else {
+            return gtk::glib::Propagation::Stop;
+        };
+        if let Some(scroller) = nearest_parent_scroller(scale.upcast_ref()) {
+            let adjustment = scroller.vadjustment();
+            adjustment.set_value(scale_scroll_target(
+                adjustment.value(),
+                adjustment.lower(),
+                adjustment.upper(),
+                adjustment.page_size(),
+                dy,
+                controller.unit() == gtk::gdk::ScrollUnit::Surface,
+            ));
+        }
+        gtk::glib::Propagation::Stop
+    });
+    scale.add_controller(controller);
+}
+
+fn nearest_parent_scroller(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
+    let mut parent = widget.parent();
+    while let Some(widget) = parent {
+        if let Ok(scroller) = widget.clone().downcast::<gtk::ScrolledWindow>() {
+            return Some(scroller);
+        }
+        parent = widget.parent();
+    }
+    None
+}
+
+fn scale_scroll_target(
+    value: f64,
+    lower: f64,
+    upper: f64,
+    page_size: f64,
+    dy: f64,
+    surface_units: bool,
+) -> f64 {
+    let multiplier = if surface_units {
+        SCALE_SURFACE_SCROLL_FACTOR
+    } else {
+        page_size.powf(2.0 / 3.0)
+    };
+    (value + dy * multiplier).clamp(lower, (upper - page_size).max(lower))
 }
 
 pub(crate) fn install_sliding_value_bubble(
@@ -329,7 +363,7 @@ fn playback_rate_value(rate: f64) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::playback_rate_value;
+    use super::{playback_rate_value, scale_scroll_target};
 
     #[test]
     fn playback_rate_value_keeps_a_clear_multiplier() {
@@ -337,5 +371,19 @@ mod tests {
         assert_eq!(playback_rate_value(1.0), "1.0 x");
         assert_eq!(playback_rate_value(1.25), "1.25 x");
         assert_eq!(playback_rate_value(2.0), "2.0 x");
+    }
+
+    #[test]
+    fn forwarded_scale_scroll_stays_inside_the_parent_page_range() {
+        assert_eq!(
+            scale_scroll_target(890.0, 0.0, 1_000.0, 100.0, 10.0, true),
+            900.0
+        );
+        assert_eq!(
+            scale_scroll_target(10.0, 0.0, 1_000.0, 100.0, -10.0, true),
+            0.0
+        );
+        let target = scale_scroll_target(200.0, 0.0, 1_000.0, 100.0, 1.0, false);
+        assert!((target - 221.544_346_900_318_83).abs() < 1e-9);
     }
 }

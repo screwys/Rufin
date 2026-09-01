@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinRecycledMergedCell" parent="GtkBox">
+    <property name="spacing">10</property>
+    <property name="valign">center</property>
+    <child>
+      <object class="RufinRecycledArtworkCell" id="cover"/>
+    </child>
+    <child>
+      <object class="GtkBox" id="labels">
+        <property name="orientation">vertical</property>
+        <property name="spacing">2</property>
+        <property name="valign">center</property>
+        <property name="hexpand">true</property>
+        <property name="halign">fill</property>
+        <property name="width-request">1</property>
+        <child>
+          <object class="GtkLabel" id="title">
+            <property name="xalign">0</property>
+            <property name="wrap">false</property>
+            <property name="single-line-mode">true</property>
+            <property name="ellipsize">end</property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkLabel" id="subtitle">
+            <property name="xalign">0</property>
+            <property name="halign">start</property>
+            <property name="hexpand">false</property>
+            <property name="width-chars">1</property>
+            <property name="max-width-chars">28</property>
+            <property name="wrap">false</property>
+            <property name="single-line-mode">true</property>
+            <property name="ellipsize">end</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

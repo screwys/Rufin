@@ -4,6 +4,7 @@ use std::rc::Rc;
 use adw::prelude::*;
 use artwork::ArtworkBinding;
 use downloads::DownloadSubject;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use localization::{msgid, tr};
 use playback::SourceSessionEpoch;
@@ -20,6 +21,21 @@ use super::track_selection::{TrackSelection, TrackSelectionSnapshot};
 
 const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
 const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
+
+crate::ui_resource::composite_box!(
+    pub(crate) PlaylistPickerRowView,
+    playlist_picker_row_view_imp,
+    "RufinPlaylistPickerRowView",
+    "/io/github/screwys/Rufin/ui/routes/playlist_picker_row.ui",
+    {
+        check: gtk::CheckButton,
+        cover_host: gtk::Box,
+        title: gtk::Label,
+        track_count: gtk::Label,
+        duration: gtk::Label,
+        genres: gtk::Box,
+    }
+);
 
 #[derive(Clone, Default)]
 pub(crate) struct PlaylistDragPreviewBinding {
@@ -424,17 +440,16 @@ fn populate_context_playlist_picker(
     source: PlaylistTrackSource,
     popover: &gtk::PopoverMenu,
 ) {
-    let header = gtk::Overlay::new();
-    let search = gtk::SearchEntry::new();
-    search.add_css_class("context-playlist-submenu-search");
+    let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        content: gtk::Box,
+        search: gtk::SearchEntry,
+        skip_duplicates: gtk::CheckButton,
+        list: gtk::ListView,
+        spinner: gtk::Spinner,
+    });
     search.set_placeholder_text(Some(&tr("Search")));
-    search.set_hexpand(true);
-    header.set_child(Some(&search));
-    let skip_duplicates = gtk::CheckButton::new();
-    skip_duplicates.set_active(true);
-    skip_duplicates.set_halign(gtk::Align::End);
-    skip_duplicates.set_valign(gtk::Align::Center);
-    skip_duplicates.set_margin_end(6);
     let skip_duplicates_label = tr("Don't duplicate");
     skip_duplicates.set_tooltip_text(Some(&skip_duplicates_label));
     skip_duplicates.update_property(&[gtk::accessible::Property::Label(&skip_duplicates_label)]);
@@ -444,9 +459,7 @@ fn populate_context_playlist_picker(
             .as_deref()
             .is_some_and(|selected| selected.playlist_tracks_can_repeat),
     );
-    header.add_overlay(&skip_duplicates);
-    header.set_measure_overlay(&skip_duplicates, false);
-    root.append(&header);
+    root.append(&content);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
     let query = Rc::new(RefCell::new(String::new()));
@@ -493,21 +506,8 @@ fn populate_context_playlist_picker(
         };
         label.set_label(&choice.borrow::<PlaylistChoice>().name);
     });
-    let list = gtk::ListView::new(Some(selection), Some(factory));
-    list.add_css_class("context-playlist-submenu-list");
-    list.set_single_click_activate(true);
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_propagate_natural_height(true);
-    scroller.set_max_content_height(320);
-    scroller.set_child(Some(&list));
-    root.append(&scroller);
-
-    let spinner = gtk::Spinner::new();
-    spinner.set_margin_top(12);
-    spinner.set_margin_bottom(12);
-    spinner.start();
-    root.append(&spinner);
+    list.set_model(Some(&selection));
+    list.set_factory(Some(&factory));
 
     let search_filter = filter.clone();
     search.connect_search_changed(move |search| {
@@ -625,65 +625,27 @@ fn present_playlist_picker(
     tracks: Vec<library::TrackKey>,
     subject: DownloadSubject,
 ) {
-    let root = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    root.add_css_class("context-playlist-picker");
-    root.set_margin_top(12);
-    root.set_margin_bottom(14);
-    root.set_margin_start(18);
-    root.set_margin_end(18);
-    let search = gtk::SearchEntry::new();
-    search.set_placeholder_text(Some(&tr("Type to search or create a new playlist")));
-    root.append(&search);
-    let list = gtk::Box::new(gtk::Orientation::Vertical, 0);
-    let create = gtk::Button::new();
-    create.add_css_class("flat");
-    create.add_css_class("playlist-picker-create-row");
-    create.add_css_class("context-playlist-row");
-    create.add_css_class("context-playlist-create-row");
-    create.set_halign(gtk::Align::Fill);
-    create.set_visible(false);
-    list.append(&create);
+    let resource = crate::ui_resource::PLAYLIST_PICKER_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        dialog: adw::Dialog,
+        search: gtk::SearchEntry,
+        list: gtk::Box,
+        create: gtk::Button,
+        skip: gtk::CheckButton,
+        cancel: gtk::Button,
+        add: gtk::Button,
+    });
     let rows = Rc::new(RefCell::new(Vec::<PickerRow>::new()));
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_vexpand(true);
-    scroller.set_child(Some(&list));
-    root.append(&scroller);
-
-    let footer = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    let skip = gtk::CheckButton::with_label(&tr("Don't duplicate"));
-    skip.set_active(true);
     skip.set_visible(selected.playlist_tracks_can_repeat);
-    footer.append(&skip);
-    let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    spacer.set_hexpand(true);
-    footer.append(&spacer);
-    let cancel = gtk::Button::with_label(&tr("Cancel"));
-    let add = gtk::Button::with_label(&tr("Add"));
-    add.add_css_class("suggested-action");
-    add.set_sensitive(false);
-    footer.append(&cancel);
-    footer.append(&add);
-    root.append(&footer);
     replace_picker_rows(shell, &list, &create, &rows, &add, playlists);
 
-    let dialog = adw::Dialog::builder()
-        .title(tr("Add to Playlist"))
-        .content_width(700)
-        .content_height(510)
-        .build();
     let close_shell = Rc::downgrade(shell);
     dialog.connect_closed(move |_| {
         if let Some(shell) = close_shell.upgrade() {
             shell.set_playlist_picker_refresh(None);
         }
     });
-    let toolbar = adw::ToolbarView::new();
-    let header = adw::HeaderBar::new();
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Add to Playlist"), "")));
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&root));
-    dialog.set_child(Some(&toolbar));
     let close = dialog.downgrade();
     cancel.connect_clicked(move |_| {
         if let Some(dialog) = close.upgrade() {
@@ -827,13 +789,8 @@ fn replace_picker_rows(
         .borrow()
         .prefer_server_playlist_covers;
     for playlist in playlists {
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        row.add_css_class("playlist-picker-row");
-        row.add_css_class("context-playlist-row");
-        row.set_margin_top(4);
-        row.set_margin_bottom(4);
-        let check = gtk::CheckButton::new();
-        row.append(&check);
+        let row = PlaylistPickerRowView::new();
+        let check = row.imp().check.get();
         let artwork = playlist_artwork(&playlist, prefer_server);
         let cover = shell
             .cover_group_projection_for_artwork(
@@ -843,34 +800,24 @@ fn replace_picker_rows(
             )
             .widget();
         cover.add_css_class("context-playlist-cover");
-        row.append(&cover);
-        let labels = gtk::Box::new(gtk::Orientation::Vertical, 2);
-        labels.set_hexpand(true);
-        let title = gtk::Label::new(Some(&playlist.name));
-        title.add_css_class("context-playlist-title");
-        title.set_xalign(0.0);
-        labels.append(&title);
-        let meta = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        meta.add_css_class("context-playlist-meta");
-        meta.append(&playlist_picker_meta(
-            "rufin-tracks-symbolic",
-            &localization::track_count_text(playlist.track_count.max(0) as u64),
+        row.imp().cover_host.append(&cover);
+        row.imp().title.set_label(&playlist.name);
+        row.imp()
+            .track_count
+            .set_label(&localization::track_count_text(
+                playlist.track_count.max(0) as u64
+            ));
+        row.imp().duration.set_label(&crate::format_duration_units(
+            (playlist.duration_millis.max(0) / 1_000) as u32,
         ));
-        meta.append(&playlist_picker_meta(
-            "rufin-preferences-system-time-symbolic",
-            &crate::format_duration_units((playlist.duration_millis.max(0) / 1_000) as u32),
-        ));
-        let genres = gtk::Box::new(gtk::Orientation::Horizontal, 6);
-        genres.add_css_class("context-playlist-genres");
         for genre in playlist.genres.iter().take(2) {
             let pill = gtk::Label::new(Some(&genre.name));
             pill.add_css_class("album-detail-genre-pill");
-            genres.append(&pill);
+            row.imp().genres.append(&pill);
         }
-        genres.set_visible(genres.first_child().is_some());
-        meta.append(&genres);
-        labels.append(&meta);
-        row.append(&labels);
+        row.imp()
+            .genres
+            .set_visible(row.imp().genres.first_child().is_some());
         let widget = row.upcast::<gtk::Widget>();
         list.append(&widget);
         rows.borrow_mut().push(PickerRow {
@@ -893,19 +840,6 @@ fn replace_picker_rows(
             }
         });
     }
-}
-
-fn playlist_picker_meta(icon_name: &str, text: &str) -> gtk::Box {
-    let item = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-    let icon = gtk::Image::from_icon_name(icon_name);
-    icon.add_css_class("muted");
-    icon.set_pixel_size(13);
-    item.append(&icon);
-    let label = gtk::Label::new(Some(text));
-    label.add_css_class("muted");
-    label.set_xalign(0.0);
-    item.append(&label);
-    item
 }
 
 impl PlaylistTrackSource {
@@ -1005,6 +939,17 @@ fn picker_source_is_current(shell: &Shell, expected: &crate::runtime::SelectedLi
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn playlist_picker_row_template_builds() {
+        gtk::init().expect("GTK display");
+        crate::application::verify_interface_resources().expect("compiled interface resources");
+        let row = PlaylistPickerRowView::new();
+        assert!(row.imp().check.parent().is_some());
+        assert!(row.imp().cover_host.parent().is_some());
+        assert!(row.imp().genres.parent().is_some());
+    }
 
     #[test]
     fn playlist_drag_value_roundtrips_the_scoped_source() {

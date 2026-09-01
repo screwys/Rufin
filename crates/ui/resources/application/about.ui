@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwAboutDialog" id="dialog">
+    <property name="developer-name">screwy</property>
+    <property name="developers">screwy &lt;screwygit@proton.me&gt;</property>
+    <property name="website">https://github.com/screwys/Rufin</property>
+    <property name="support-url">https://github.com/sponsors/screwys</property>
+    <property name="issue-url">https://github.com/screwys/Rufin/issues</property>
+    <property name="copyright">© 2026 screwy</property>
+    <property name="license-type">custom</property>
+    <property name="license">This application comes with absolutely no warranty and is licensed under GNU General Public Licence, version 3 or later.</property>
+    <property name="comments" translatable="yes">Thank you for trying out Rufin! If you have problems or suggestions, please open an issue in Github.</property>
+  </object>
+</interface>

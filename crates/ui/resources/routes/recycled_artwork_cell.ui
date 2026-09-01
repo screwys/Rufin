@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+
+  <template class="RufinRecycledArtworkCell" parent="GtkWidget">
+    <property name="hexpand">false</property>
+    <property name="vexpand">false</property>
+    <property name="halign">start</property>
+    <property name="valign">start</property>
+    <child>
+      <object class="GtkOverlay" id="area">
+        <property name="width-request">48</property>
+        <property name="height-request">48</property>
+        <property name="hexpand">false</property>
+        <property name="vexpand">false</property>
+        <property name="halign">start</property>
+        <property name="valign">start</property>
+        <property name="overflow">hidden</property>
+        <property name="opacity">0</property>
+        <style>
+          <class name="cover-tile"/>
+          <class name="card"/>
+        </style>
+        <child>
+          <object class="GtkBox">
+            <property name="can-target">false</property>
+            <property name="accessible-role">presentation</property>
+          </object>
+        </child>
+        <child type="overlay">
+          <object class="GtkPicture" id="image">
+            <property name="visible">false</property>
+            <property name="accessible-role">presentation</property>
+            <property name="can-shrink">true</property>
+            <property name="content-fit">cover</property>
+            <property name="hexpand">true</property>
+            <property name="vexpand">true</property>
+            <property name="halign">fill</property>
+            <property name="valign">fill</property>
+            <property name="can-target">false</property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </template>
+</interface>

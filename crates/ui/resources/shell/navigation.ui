@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="GtkBox" id="normal_nav_panel">
+    <property name="orientation">vertical</property><property name="width-request">1</property><property name="vexpand">true</property>
+    <style><class name="sidebar-pane"/><class name="wide-sidebar-slot"/></style>
+    <child>
+      <object class="GtkWindowHandle">
+        <property name="halign">fill</property>
+        <property name="valign">start</property>
+        <property name="hexpand">true</property>
+        <property name="vexpand">false</property>
+        <style><class name="sidebar-drag-handle"/></style>
+        <property name="child">
+          <object class="AdwHeaderBar">
+            <property name="show-start-title-buttons">false</property>
+            <property name="show-end-title-buttons">false</property>
+            <style><class name="flat"/></style>
+            <child type="start">
+              <object class="GtkBox">
+                <child><object class="GtkBox" id="normal_window_controls_host"/></child>
+                <child>
+                  <object class="GtkButton" id="normal_search">
+                    <property name="icon-name">rufin-system-search-symbolic</property>
+                    <property name="tooltip-text" translatable="yes">Search</property>
+                    <accessibility><property name="label" translatable="yes">Search</property></accessibility>
+                  </object>
+                </child>
+              </object>
+            </child>
+            <property name="title-widget">
+              <object class="GtkLabel" id="normal_sidebar_title">
+                <style><class name="heading"/></style>
+              </object>
+            </property>
+            <child type="end">
+              <object class="GtkMenuButton" id="normal_main_menu">
+                <property name="icon-name">rufin-open-menu-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Menu</property>
+                <accessibility><property name="label" translatable="yes">Menu</property></accessibility>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkScrolledWindow" id="normal_nav_scroller">
+        <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">external</property>
+        <property name="width-request">1</property><property name="min-content-width">1</property><property name="max-content-width">-1</property>
+        <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
+        <property name="child">
+          <object class="GtkViewport">
+            <property name="vscroll-policy">natural</property>
+            <property name="child">
+              <object class="GtkBox" id="normal_nav">
+                <property name="orientation">vertical</property><property name="spacing">4</property><property name="hexpand">true</property><property name="vexpand">true</property><property name="width-request">1</property>
+                <style><class name="wide-sidebar"/></style>
+                <child><object class="AdwSidebar" id="normal_nav_routes"><property name="mode">sidebar</property><property name="vexpand">false</property></object></child>
+                <child><object class="GtkBox" id="normal_nav_pins"><property name="orientation">vertical</property><property name="spacing">4</property><property name="vexpand">false</property></object></child>
+              </object>
+            </property>
+          </object>
+        </property>
+      </object>
+    </child>
+  </object>
+
+  <object class="GtkScrolledWindow" id="compact_nav_slot">
+    <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">external</property>
+    <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
+    <style><class name="sidebar-pane"/><class name="compact-rail-slot"/></style>
+    <property name="child">
+      <object class="GtkViewport">
+        <property name="vscroll-policy">natural</property>
+        <property name="child">
+          <object class="GtkBox" id="compact_nav">
+            <property name="orientation">vertical</property><property name="spacing">8</property><property name="hexpand">false</property><property name="vexpand">true</property>
+            <style><class name="compact-rail"/></style>
+            <child>
+              <object class="GtkWindowHandle">
+                <property name="halign">fill</property><property name="valign">start</property>
+                <property name="hexpand">true</property><property name="vexpand">false</property>
+                <style><class name="sidebar-drag-handle"/></style>
+                <property name="child"><object class="GtkBox" id="compact_window_controls_host"/></property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkButton" id="compact_main_menu">
+                <property name="tooltip-text" translatable="yes">Menu</property>
+                <accessibility><property name="label" translatable="yes">Menu</property></accessibility>
+                <style><class name="primary-menu-button"/><class name="flat"/><class name="nav-button"/><class name="rail-button"/></style>
+                <property name="child">
+                  <object class="GtkBox">
+                    <property name="orientation">vertical</property><property name="spacing">8</property><property name="halign">center</property>
+                    <child>
+                      <object class="GtkImage">
+                        <property name="icon-name">rufin-open-menu-symbolic</property>
+                        <property name="pixel-size">24</property><property name="width-request">24</property><property name="height-request">24</property>
+                        <property name="halign">center</property><property name="valign">center</property>
+                        <style><class name="nav-icon"/></style>
+                      </object>
+                    </child>
+                    <child>
+                      <object class="GtkLabel" id="compact_main_menu_label">
+                        <property name="xalign">0.5</property><property name="justify">center</property>
+                        <property name="lines">2</property><property name="wrap">true</property><property name="wrap-mode">word-char</property>
+                        <property name="ellipsize">end</property><property name="width-request">60</property>
+                        <property name="width-chars">1</property><property name="max-width-chars">8</property>
+                        <style><class name="sidebar-entry-label"/></style>
+                      </object>
+                    </child>
+                  </object>
+                </property>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

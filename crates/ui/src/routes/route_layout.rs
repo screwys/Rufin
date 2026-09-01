@@ -1,7 +1,7 @@
 use adw::prelude::*;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
 
 use crate::layout::configure_fill_width_clip;
-use crate::localization::localized_label;
 use crate::shell::Shell;
 use crate::shell::layout::route_content_width;
 
@@ -9,16 +9,26 @@ use super::collections::configure_library_route_scroller;
 use super::library_fields::COLLECTION_GRID_CARD_MARGIN;
 
 const ROUTE_SCROLL_OWNER_CLASS: &str = "route-scroll-owner";
-pub(crate) const ROUTE_SCROLLBAR_LANE_WIDTH: i32 = 9;
 const DETAIL_SHOWCASE_MIN_COVER_SIZE: i32 = 150;
-const DETAIL_SHOWCASE_TEXT_MIN_WIDTH: i32 = 420;
+pub(crate) const DETAIL_SHOWCASE_METADATA_MIN_WIDTH: i32 = 430;
 const DETAIL_SHOWCASE_COMPACT_WIDTH: i32 = 760;
 const DETAIL_SHOWCASE_MAX_COVER_SIZE: i32 = 224;
 pub(crate) const ROUTE_TOP_MARGIN: i32 = 10;
-pub(crate) const PRIMARY_ROUTE_MARGIN_START: i32 = ROUTE_TOP_MARGIN;
-pub(crate) const PRIMARY_ROUTE_MARGIN_END: i32 = ROUTE_SCROLLBAR_LANE_WIDTH;
+pub(crate) const PRIMARY_ROUTE_MARGIN_START: i32 = 10;
+pub(crate) const PRIMARY_ROUTE_MARGIN_END: i32 = 10;
 pub(crate) const PRIMARY_ROUTE_HORIZONTAL_INSET: i32 =
     PRIMARY_ROUTE_MARGIN_START + PRIMARY_ROUTE_MARGIN_END;
+
+crate::ui_resource::composite_box!(
+    pub(crate) RoutePlaceholderView,
+    route_placeholder_view_imp,
+    "RufinRoutePlaceholderView",
+    "/io/github/screwys/Rufin/ui/routes/placeholder.ui",
+    {
+        heading: gtk::Label,
+        body: gtk::Label,
+    }
+);
 
 pub(crate) fn home_album_content_width(shell: &Shell) -> i32 {
     home_album_content_width_for(route_content_width(shell))
@@ -39,20 +49,20 @@ pub(crate) fn detail_route_inner_width_for_viewport(
 }
 
 pub(crate) fn detail_showcase_cover_size(width: i32) -> i32 {
-    if width < DETAIL_SHOWCASE_TEXT_MIN_WIDTH {
+    if width < DETAIL_SHOWCASE_METADATA_MIN_WIDTH {
         width.clamp(72, DETAIL_SHOWCASE_MIN_COVER_SIZE)
     } else if width < DETAIL_SHOWCASE_COMPACT_WIDTH {
         DETAIL_SHOWCASE_MIN_COVER_SIZE
-            + ((width - DETAIL_SHOWCASE_TEXT_MIN_WIDTH)
+            + ((width - DETAIL_SHOWCASE_METADATA_MIN_WIDTH)
                 * (DETAIL_SHOWCASE_MAX_COVER_SIZE - DETAIL_SHOWCASE_MIN_COVER_SIZE)
-                / (DETAIL_SHOWCASE_COMPACT_WIDTH - DETAIL_SHOWCASE_TEXT_MIN_WIDTH))
+                / (DETAIL_SHOWCASE_COMPACT_WIDTH - DETAIL_SHOWCASE_METADATA_MIN_WIDTH))
     } else {
         DETAIL_SHOWCASE_MAX_COVER_SIZE
     }
 }
 
 pub(crate) fn detail_showcase_cover_only(width: i32) -> bool {
-    width < DETAIL_SHOWCASE_TEXT_MIN_WIDTH
+    width < DETAIL_SHOWCASE_METADATA_MIN_WIDTH
 }
 
 pub(crate) fn home_album_content_width_for(width: i32) -> i32 {
@@ -121,38 +131,17 @@ pub(crate) fn detail_route_wrapper(spacing: i32) -> gtk::Box {
 
 impl Shell {
     pub(crate) fn placeholder_view(&self, title: &str, body: &str) -> gtk::Widget {
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        wrapper.add_css_class("empty-state");
-        wrapper.set_vexpand(true);
-        wrapper.set_hexpand(true);
-        wrapper.set_valign(gtk::Align::Center);
-        wrapper.set_halign(gtk::Align::Center);
-
-        let heading = localized_label(title);
-        heading.add_css_class("section-heading");
-        let label = localized_label(body);
-        label.add_css_class("muted");
-        label.set_wrap(true);
-        label.set_justify(gtk::Justification::Center);
-        wrapper.append(&heading);
-        wrapper.append(&label);
-        wrapper.upcast()
+        let view = RoutePlaceholderView::new();
+        view.imp().heading.set_label(&localization::tr(title));
+        view.imp().body.set_label(&localization::tr(body));
+        view.upcast()
     }
 
     pub(crate) fn route_empty_view(&self, body: &str) -> gtk::Widget {
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 12);
-        wrapper.add_css_class("empty-state");
-        wrapper.set_vexpand(true);
-        wrapper.set_hexpand(true);
-        wrapper.set_valign(gtk::Align::Center);
-        wrapper.set_halign(gtk::Align::Center);
-
-        let label = localized_label(body);
-        label.add_css_class("muted");
-        label.set_wrap(true);
-        label.set_justify(gtk::Justification::Center);
-        wrapper.append(&label);
-        wrapper.upcast()
+        let view = RoutePlaceholderView::new();
+        view.imp().heading.set_visible(false);
+        view.imp().body.set_label(&localization::tr(body));
+        view.upcast()
     }
 }
 
@@ -164,11 +153,21 @@ mod tests {
     fn detail_inner_width_comes_from_the_route_viewport() {
         assert_eq!(
             detail_route_inner_width_for_viewport(900, PRIMARY_ROUTE_MARGIN_START),
-            881
+            880
         );
         assert_eq!(
             detail_route_inner_width_for_viewport(8, PRIMARY_ROUTE_MARGIN_START),
             1
         );
+    }
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn route_placeholder_template_builds() {
+        gtk::init().expect("GTK display");
+        crate::application::verify_interface_resources().expect("compiled interface resources");
+        let view = RoutePlaceholderView::new();
+        assert!(view.imp().heading.is_visible());
+        assert!(view.imp().body.wraps());
     }
 }

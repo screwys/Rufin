@@ -90,7 +90,7 @@ impl ApplicationAppearance {
         };
 
         let base_provider = gtk::CssProvider::new();
-        base_provider.load_from_string(include_str!("../style.css"));
+        base_provider.load_from_resource(crate::ui_resource::BASE_CSS_RESOURCE);
         gtk::style_context_add_provider_for_display(
             &display,
             &base_provider,

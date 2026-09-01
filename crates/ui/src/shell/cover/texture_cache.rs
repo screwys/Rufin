@@ -8,7 +8,9 @@ use gtk::glib;
 use gtk::prelude::{Cast, ObjectExt};
 use sources::SourceId;
 
-const MAX_TEXTURES: usize = 20_480;
+// The byte budget remains authoritative for Rufin's smallest 32px cover while
+// still bounding anomalous sub-32px texture/object metadata.
+const MAX_TEXTURES: usize = 8_192;
 const MAX_TEXTURE_BYTES: usize = 32 * 1024 * 1024;
 
 pub(in crate::shell) struct TextureCache<K = DecodedImageIdentity> {
@@ -189,6 +191,15 @@ impl Default for TextureCache {
 }
 
 impl TextureCache {
+    pub(super) fn prepared_texture(
+        &mut self,
+        identities: &[DecodedImageIdentity],
+    ) -> Option<gdk::Texture> {
+        identities
+            .iter()
+            .find_map(|identity| self.get_or_revive(identity))
+    }
+
     pub(super) fn texture(
         &mut self,
         source_id: &SourceId,
@@ -259,6 +270,12 @@ mod tests {
             .expect("a mounted texture remains interned after LRU eviction");
         assert_eq!(revived.as_ptr(), second.as_ptr());
         assert_eq!(cache.bytes, 8);
+    }
+
+    #[test]
+    fn count_limit_does_not_preempt_the_budget_for_real_cover_sizes() {
+        let smallest_cover_bytes = 32 * 32 * 4;
+        assert!(MAX_TEXTURES * smallest_cover_bytes >= MAX_TEXTURE_BYTES);
     }
 
     #[test]

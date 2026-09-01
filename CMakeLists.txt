@@ -92,7 +92,6 @@ string(REGEX REPLACE [=[^version = "([^"]+)".*]=] "\\1" RUFIN_VERSION
 
 find_program(RUFIN_CARGO cargo REQUIRED)
 find_program(RUFIN_RUSTC rustc REQUIRED)
-find_program(RUFIN_MSGFMT msgfmt REQUIRED)
 
 execute_process(
   COMMAND "${RUFIN_RUSTC}" --version
@@ -176,25 +175,8 @@ else()
 endif()
 
 file(GLOB RUFIN_PO_FILES CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/locales/*.po")
-set(RUFIN_COMPILED_LOCALES)
-foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
-  get_filename_component(RUFIN_LOCALE "${RUFIN_PO_FILE}" NAME_WE)
-  set(RUFIN_MO_FILE
-    "${CMAKE_CURRENT_BINARY_DIR}/locale/${RUFIN_LOCALE}/LC_MESSAGES/rufin.mo")
-  add_custom_command(
-    OUTPUT "${RUFIN_MO_FILE}"
-    COMMAND "${CMAKE_COMMAND}" -E make_directory
-      "${CMAKE_CURRENT_BINARY_DIR}/locale/${RUFIN_LOCALE}/LC_MESSAGES"
-    COMMAND "${RUFIN_MSGFMT}" --check "${RUFIN_PO_FILE}" -o "${RUFIN_MO_FILE}"
-    DEPENDS "${RUFIN_PO_FILE}"
-    VERBATIM
-  )
-  list(APPEND RUFIN_COMPILED_LOCALES "${RUFIN_MO_FILE}")
-  install(FILES "${RUFIN_MO_FILE}"
-    DESTINATION "${RUFIN_INSTALL_LOCALEDIR}/${RUFIN_LOCALE}/LC_MESSAGES")
-endforeach()
-add_custom_target(rufin-translations ALL DEPENDS ${RUFIN_COMPILED_LOCALES})
-add_dependencies(rufin rufin-translations)
+install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/"
+  DESTINATION "${RUFIN_INSTALL_LOCALEDIR}")
 
 install(PROGRAMS "${RUFIN_CMAKE_EXECUTABLE}"
   DESTINATION "${RUFIN_INSTALL_BINDIR}"

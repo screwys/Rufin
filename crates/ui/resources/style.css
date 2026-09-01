@@ -22,9 +22,12 @@ tooltip.background label {
   color: white;
 }
 
+.table-header,
 columnview > header > button > box {
   font-size: 100%;
-  color: color-mix(in srgb, var(--window-fg-color) 70%, transparent);
+  font-weight: 400;
+  text-transform: uppercase;
+  color: color-mix(in srgb, var(--window-fg-color) 90%, var(--window-bg-color));
 }
 
 .playlist-drag-preview {
@@ -302,7 +305,7 @@ button.release-note-update:hover {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical {
   min-width: 9px;
   opacity: 1;
   background: transparent;
@@ -312,8 +315,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical,
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range,
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range,
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough {
   min-width: 9px;
   margin: 0;
   padding: 0;
@@ -323,7 +326,7 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider {
   min-width: 7px;
   min-height: 42px;
   margin: 0 1px;
@@ -336,15 +339,15 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:hover,
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:hover,
-.right-panel scrolledwindow.queue-scroller scrollbar.vertical > range > trough > slider:active {
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:hover,
+.right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:active {
   background: color-mix(in srgb, var(--window-fg-color) 56%, transparent);
 }
 
 scrolledwindow.route-scroll-owner undershoot,
 scrolledwindow.route-scroll-owner overshoot,
-.right-panel scrolledwindow.queue-scroller undershoot,
-.right-panel scrolledwindow.queue-scroller overshoot {
+.right-panel scrolledwindow.right-panel-scroller undershoot,
+.right-panel scrolledwindow.right-panel-scroller overshoot {
   background: transparent;
   background-image: none;
   border: none;
@@ -566,13 +569,13 @@ row:focus {
   background: transparent;
 }
 
-.startup-loading-page {
+.loading-page {
   border-spacing: 10px;
 }
 
-.startup-loading-page spinner {
-  min-width: 32px;
-  min-height: 32px;
+.loading-page .spinner {
+  min-width: 24px;
+  min-height: 24px;
 }
 
 .startup-loading-root {
@@ -917,6 +920,47 @@ row.entry.password:focus-within {
   padding: 6px 12px 8px;
 }
 
+.preferences-bottom-tab-bar {
+  min-height: 46px;
+  padding: 1px 0;
+  background: var(--headerbar-bg-color);
+  box-shadow: 0 -1px color-mix(in srgb, var(--window-fg-color) 10%, transparent);
+}
+
+.preferences-tabs-bottom .preferences-tab-bar {
+  padding-top: 4px;
+  padding-bottom: 4px;
+}
+
+.preferences-tabs-bottom preferencespage > scrolledwindow > viewport > clamp > box {
+  margin-top: 12px;
+}
+
+.preferences-bottom-tab-bar.preferences-tabs-icon-only {
+  min-height: 46px;
+  padding-top: 1px;
+  padding-bottom: 1px;
+}
+
+.preferences-bottom-switcher.preferences-tabs-icon-only {
+  min-height: 36px;
+  margin-top: 0;
+  margin-bottom: 0;
+}
+
+.preferences-bottom-switcher.preferences-tabs-icon-only button > stack > box.narrow {
+  min-height: 20px;
+  padding-top: 6px;
+  padding-bottom: 6px;
+}
+
+.preferences-bottom-switcher.preferences-tabs-icon-only label {
+  min-height: 0;
+  margin: 0;
+  padding: 0;
+  font-size: 0;
+}
+
 .preferences-search-button,
 .preferences-dialog-close,
 .preferences-nested-back {
@@ -1074,33 +1118,9 @@ row.entry.password:focus-within {
   color: color-mix(in srgb, var(--accent-color) 72%, var(--window-fg-color));
 }
 
-.home-showcase {
-  padding: 18px;
-}
-
-.home-showcase-title {
-  color: var(--window-fg-color);
-  font-size: 36px;
-  font-weight: 800;
-}
-
-.home-showcase-title-compact {
-  font-size: 28px;
-}
-
-.home-showcase-kind-row {
-  margin-bottom: -4px;
-}
-
 .cover-frame {
   border-radius: 12px;
   box-shadow: 0 6px 16px rgba(0, 0, 0, 0.18);
-}
-
-.home-showcase-cover {
-  box-shadow:
-    0 16px 34px rgba(0, 0, 0, 0.28),
-    inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 14%, transparent);
 }
 
 .home-genre-flow {
@@ -1351,7 +1371,9 @@ row.entry.password:focus-within {
 }
 
 .player-timestamp,
-.queue-year {
+.queue-year,
+.tabular-numeric,
+.tabular-numeric label {
   font-feature-settings: "tnum";
 }
 
@@ -2038,11 +2060,7 @@ button.download-queue-pause image {
   background: var(--window-bg-color);
 }
 
-.queue-lyrics-overlay {
-  background: transparent;
-}
-
-.queue-lyrics-resize-handle {
+.queue-lyrics-split > separator {
   min-height: 10px;
   background: transparent;
   box-shadow: inset 0 1px var(--border-color);
@@ -2082,6 +2100,11 @@ button.download-queue-pause image {
 columnview > listview > row > cell > .row-favorite-button {
   margin-right: 1px;
   margin-left: 1px;
+  transform: translateX(-8px);
+}
+
+columnview > listview > row > cell > .row-favorite-button image {
+  transform: translateX(8px);
 }
 
 .row-favorite-button {
@@ -2109,7 +2132,7 @@ listview.queue-list row:hover .row-favorite-button:not(.active-toggle),
   color: var(--accent-color);
 }
 
-.queue-header {
+.table-header {
   padding: 0 6px 3px;
   border-bottom: 1px solid color-mix(in srgb, var(--border-color) 78%, transparent);
 }
@@ -2309,50 +2332,50 @@ entry.lyrics-offset-value.flat:focus-within {
   min-height: 0;
 }
 
-.fullscreen-player-equalizer {
+.equalizer-surface {
   padding-bottom: 0;
 }
 
-.fullscreen-player-equalizer-header flowboxchild,
-.fullscreen-player-equalizer-header flowboxchild:focus,
-.fullscreen-player-equalizer-header flowboxchild:selected {
+.equalizer-surface-header flowboxchild,
+.equalizer-surface-header flowboxchild:focus,
+.equalizer-surface-header flowboxchild:selected {
   outline: none;
   background: transparent;
   box-shadow: none;
 }
 
-.fullscreen-player-equalizer-bands {
+.equalizer-surface-bands {
   min-width: 0;
   min-height: 0;
 }
 
-scale.fullscreen-player-equalizer-scale {
+scale.equalizer-surface-scale {
   min-width: 0;
   min-height: 0;
   padding: 0;
 }
 
-scale.fullscreen-player-equalizer-scale slider {
+scale.equalizer-surface-scale slider {
   min-width: 14px;
   min-height: 14px;
   margin: 0;
   padding: 0;
 }
 
-scale.fullscreen-player-equalizer-scale trough {
+scale.equalizer-surface-scale trough {
   min-width: 3px;
 }
 
-.fullscreen-player-equalizer-band-label {
+.equalizer-surface-band-label {
   font-size: 11px;
   line-height: 1;
 }
 
-.fullscreen-player-equalizer-levels {
+.equalizer-surface-levels {
   min-width: 48px;
 }
 
-.fullscreen-player-equalizer-level-label {
+.equalizer-surface-level-label {
   font-size: 12px;
 }
 
@@ -2373,29 +2396,22 @@ scale.fullscreen-player-equalizer-scale trough {
   min-height: 0;
 }
 
-.folder-breadcrumbs {
+.folder-path-switcher {
   min-height: 34px;
 }
 
-.folder-breadcrumb {
-  padding: 4px 8px;
+.folder-path-segment {
+  padding: 2px 12px;
 }
 
-.folder-search {
-  min-height: 34px;
+.folder-path-separator {
+  color: color-mix(in srgb, var(--window-fg-color) 55%, transparent);
 }
 
-.folders-split > separator {
-  margin: 0 8px;
-  background: color-mix(in srgb, var(--border-color) 78%, transparent);
-}
-
-.folder-tree,
 .folders-table {
   background: transparent;
 }
 
-.folder-tree-row,
 .folder-table-row {
   padding: 6px 8px;
   border-radius: 6px;
@@ -2405,7 +2421,6 @@ scale.fullscreen-player-equalizer-scale trough {
   color: var(--window-fg-color);
 }
 
-.folder-tree-row.active,
 .folder-table-row:selected {
   background: color-mix(in srgb, var(--accent-bg-color) 14%, transparent);
 }

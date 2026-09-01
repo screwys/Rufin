@@ -22,7 +22,6 @@ const EDITOR_WIDTH: i32 = 650;
 const EDITOR_MAX_HEIGHT: i32 = 720;
 const EDITOR_FIELD_STACK_WIDTH: i32 = 520;
 const FIELD_COLUMN_SPACING: i32 = 18;
-const FIELD_ROW_SPACING: i32 = 14;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum MetadataItemId {
@@ -63,22 +62,20 @@ enum MetadataField {
     Locked,
 }
 
-#[derive(Clone)]
 struct MetadataEntry {
     field: MetadataField,
     entry: adw::EntryRow,
     undo: gtk::Button,
 }
 
-#[derive(Clone)]
 struct Editor {
-    dialog: adw::Dialog,
+    dialog: gtk::glib::WeakRef<adw::Dialog>,
     draft: MetadataDraft,
-    entries: Rc<Vec<MetadataEntry>>,
+    entries: Vec<MetadataEntry>,
     locked: Option<adw::SwitchRow>,
-    touched: Rc<RefCell<HashSet<MetadataField>>>,
-    token: Rc<RefCell<Option<String>>>,
-    identified_originals: Rc<RefCell<HashMap<MetadataField, String>>>,
+    touched: RefCell<HashSet<MetadataField>>,
+    token: RefCell<Option<String>>,
+    identified_originals: RefCell<HashMap<MetadataField, String>>,
     status: gtk::Label,
     identify: gtk::Button,
     save: gtk::Button,
@@ -132,28 +129,15 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
 }
 
 fn present_metadata_error(shell: &Rc<Shell>, message: &str) {
-    let dialog = adw::Dialog::builder()
-        .title(tr("Edit metadata"))
-        .content_width(large_popup_content_width(480))
-        .build();
-    dialog.add_css_class("preferences");
-    let header = adw::HeaderBar::new();
-    header.set_show_start_title_buttons(false);
-    header.set_show_end_title_buttons(true);
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Edit metadata"), "")));
-    let message = gtk::Label::new(Some(message));
-    message.set_halign(gtk::Align::Start);
-    message.set_wrap(true);
-    message.add_css_class("error");
-    message.set_margin_start(24);
-    message.set_margin_end(24);
-    message.set_margin_top(18);
-    message.set_margin_bottom(24);
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    toolbar.set_content(Some(&message));
-    dialog.set_child(Some(&toolbar));
-    shell.present_selected_dialog(&dialog);
+    let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        error_dialog: adw::Dialog,
+        error_message: gtk::Label,
+    });
+    error_dialog.set_content_width(large_popup_content_width(480));
+    error_message.set_label(message);
+    shell.present_selected_dialog(&error_dialog);
 }
 
 enum MetadataReceiver {
@@ -190,18 +174,14 @@ fn present_local_access_recovery(
     source_path: &str,
     on_success: Rc<dyn Fn()>,
 ) {
-    let dialog = adw::Dialog::builder()
-        .title(tr(msgid("Edit metadata")))
-        .content_width(large_popup_content_width(EDITOR_WIDTH))
-        .build();
-    dialog.add_css_class("preferences");
-    let header = adw::HeaderBar::new();
-    header.set_show_start_title_buttons(false);
-    header.set_show_end_title_buttons(true);
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Edit metadata"), "")));
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-    let close = dialog.downgrade();
+    let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        recovery_dialog: adw::Dialog,
+        recovery_toolbar: adw::ToolbarView,
+    });
+    recovery_dialog.set_content_width(large_popup_content_width(EDITOR_WIDTH));
+    let close = recovery_dialog.downgrade();
     let retry: Rc<dyn Fn()> = Rc::new(move || {
         if let Some(dialog) = close.upgrade() {
             dialog.close();
@@ -214,9 +194,8 @@ fn present_local_access_recovery(
         &selected,
         retry,
     );
-    toolbar.set_content(Some(&form));
-    dialog.set_child(Some(&toolbar));
-    shell.present_selected_dialog(&dialog);
+    recovery_toolbar.set_content(Some(&form));
+    shell.present_selected_dialog(&recovery_dialog);
 }
 
 fn build_dialog(
@@ -225,108 +204,71 @@ fn build_dialog(
     item: MetadataItemId,
     draft: MetadataDraft,
 ) {
-    let dialog = adw::Dialog::builder()
-        .title(tr("Edit metadata"))
-        .content_width(large_popup_content_width(EDITOR_WIDTH))
-        .build();
-    dialog.add_css_class("preferences");
-
-    let identify = gtk::Button::with_label(&tr("Identify"));
-    identify.add_css_class("destructive-action");
+    let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        editor_dialog: adw::Dialog,
+        editor_scroller: gtk::ScrolledWindow,
+        fields: gtk::Box,
+        identify_scope: gtk::Label,
+        identify_spacer: gtk::Box,
+        identify: gtk::Button,
+        status: gtk::Label,
+        cancel: gtk::Button,
+        save: gtk::Button,
+    });
+    editor_dialog.set_content_width(large_popup_content_width(EDITOR_WIDTH));
     let external_lookup_allowed = shell
         .settings
         .current
         .borrow()
         .allows_external_metadata_lookup();
     identify.set_sensitive(draft.source_search() || external_lookup_allowed);
-    let header = adw::HeaderBar::new();
-    header.set_show_start_title_buttons(false);
-    header.set_show_end_title_buttons(true);
-    header.set_title_widget(Some(&adw::WindowTitle::new(&tr("Edit metadata"), "")));
-    let toolbar = adw::ToolbarView::new();
-    toolbar.add_top_bar(&header);
-
-    let cancel = gtk::Button::with_label(&tr("Cancel"));
-    let save = gtk::Button::with_label(&tr("Save"));
-    save.add_css_class("suggested-action");
-    save.set_sensitive(false);
-    let bottom_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    bottom_actions.set_hexpand(true);
-
-    let staging = gtk::Box::new(gtk::Orientation::Vertical, 0);
     let mut entries = Vec::new();
     let mut locked = None;
-    append_draft_fields(&staging, &draft, &mut entries, &mut locked);
-    let fields = metadata_fields_layout(&draft, &entries, locked.as_ref(), &identify);
-
-    let fields_clamp = adw::Clamp::new();
-    fields_clamp.set_maximum_size(EDITOR_WIDTH);
-    fields_clamp.set_tightening_threshold(EDITOR_FIELD_STACK_WIDTH);
-    fields_clamp.set_margin_top(1);
-    fields_clamp.set_margin_start(24);
-    fields_clamp.set_margin_end(24);
-    fields_clamp.set_child(Some(&fields));
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_propagate_natural_height(true);
-    scroller.set_vexpand(false);
-    scroller.set_max_content_height(
+    append_draft_fields(&draft, &mut entries, &mut locked);
+    populate_metadata_fields(
+        &fields,
+        &identify_scope,
+        &identify_spacer,
+        &draft,
+        &entries,
+        locked.as_ref(),
+    );
+    editor_scroller.set_max_content_height(
         large_popup_content_height(shell.chrome.window.height(), EDITOR_MAX_HEIGHT)
             .saturating_sub(64),
     );
-    scroller.set_child(Some(&fields_clamp));
 
-    let status = gtk::Label::new(None);
-    status.set_halign(gtk::Align::Start);
-    status.set_valign(gtk::Align::Center);
-    status.set_hexpand(true);
-    status.set_ellipsize(gtk::pango::EllipsizeMode::End);
-    status.add_css_class("error");
-    status.set_visible(false);
-    let status_slot = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    status_slot.set_hexpand(true);
-    status_slot.append(&status);
-    bottom_actions.append(&status_slot);
-    bottom_actions.append(&cancel);
-    bottom_actions.append(&save);
-    let footer_clamp = adw::Clamp::new();
-    footer_clamp.set_maximum_size(EDITOR_WIDTH);
-    footer_clamp.set_margin_start(24);
-    footer_clamp.set_margin_end(24);
-    footer_clamp.set_margin_bottom(14);
-    footer_clamp.set_child(Some(&bottom_actions));
-
-    let body = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    body.append(&scroller);
-    body.append(&footer_clamp);
-    toolbar.set_content(Some(&body));
-    dialog.set_child(Some(&toolbar));
-
-    let editor = Editor {
-        dialog: dialog.clone(),
+    let editor = Rc::new(Editor {
+        dialog: editor_dialog.downgrade(),
         draft,
-        entries: Rc::new(entries),
+        entries,
         locked,
-        touched: Rc::new(RefCell::new(HashSet::new())),
-        token: Rc::new(RefCell::new(None)),
-        identified_originals: Rc::new(RefCell::new(HashMap::new())),
+        touched: RefCell::new(HashSet::new()),
+        token: RefCell::new(None),
+        identified_originals: RefCell::new(HashMap::new()),
         status,
         identify,
         save,
         cancel,
         external_lookup_allowed,
-    };
+    });
     connect_editor_changes(&editor);
     seed_rufin_filled(&editor);
-    let close = dialog.downgrade();
+    let editor_lifetime = Rc::clone(&editor);
+    editor_dialog.connect_closed(move |_| {
+        let _ = &editor_lifetime;
+    });
+    let close = editor_dialog.downgrade();
     editor.cancel.connect_clicked(move |_| {
         if let Some(dialog) = close.upgrade() {
             dialog.close();
         }
     });
     connect_identify(shell, selected.clone(), item, &editor);
-    connect_save(shell, selected, item, &dialog, &editor);
-    shell.present_selected_dialog(&dialog);
+    connect_save(shell, selected, item, &editor_dialog, &editor);
+    shell.present_selected_dialog(&editor_dialog);
 }
 
 impl MetadataDraft {
@@ -412,36 +354,29 @@ const ARTIST_LAYOUT: &[FieldLayout] = &[
     FieldLayout::Lock,
 ];
 
-fn metadata_fields_layout(
+fn populate_metadata_fields(
+    fields: &gtk::Box,
+    identify_scope: &gtk::Label,
+    identify_spacer: &gtk::Box,
     draft: &MetadataDraft,
     entries: &[MetadataEntry],
     locked: Option<&adw::SwitchRow>,
-    identify: &gtk::Button,
-) -> gtk::Box {
-    let fields = gtk::Box::new(gtk::Orientation::Vertical, FIELD_ROW_SPACING);
-    fields.set_hexpand(true);
-    let identify_actions = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    identify_actions.set_hexpand(true);
+) {
     if draft.track_count() > 1 {
         let count = draft.track_count();
         let text = count.to_string();
-        let scope = gtk::Label::new(Some(&trn_with(
+        identify_scope.set_label(&trn_with(
             "Changes apply to {count} track",
             "Changes apply to {count} tracks",
             count as u64,
             &[("count", text.as_str())],
-        )));
-        scope.set_halign(gtk::Align::Start);
-        scope.set_hexpand(true);
-        scope.add_css_class("dim-label");
-        identify_actions.append(&scope);
+        ));
+        identify_scope.set_visible(true);
+        identify_spacer.set_visible(false);
     } else {
-        let spacer = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        spacer.set_hexpand(true);
-        identify_actions.append(&spacer);
+        identify_scope.set_visible(false);
+        identify_spacer.set_visible(true);
     }
-    identify_actions.append(identify);
-    fields.append(&identify_actions);
 
     let layout = match draft {
         MetadataDraft::Track(_) => TRACK_LAYOUT,
@@ -480,32 +415,16 @@ fn metadata_fields_layout(
             }
         }
     }
-    fields
 }
 
 fn append_draft_fields(
-    root: &gtk::Box,
     draft: &MetadataDraft,
     entries: &mut Vec<MetadataEntry>,
     locked: &mut Option<adw::SwitchRow>,
 ) {
-    if draft.track_count() > 1 {
-        let count = draft.track_count();
-        let count_text = count.to_string();
-        let scope = gtk::Label::new(Some(&trn_with(
-            "Changes apply to {count} track",
-            "Changes apply to {count} tracks",
-            count as u64,
-            &[("count", count_text.as_str())],
-        )));
-        scope.set_halign(gtk::Align::Start);
-        scope.add_css_class("dim-label");
-        root.append(&scope);
-    }
     match draft {
         MetadataDraft::Track(value) => {
             append_entry(
-                root,
                 entries,
                 MetadataField::Title,
                 &value.values.title,
@@ -513,7 +432,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::SortTitle,
                 value.values.sort_title.as_deref(),
@@ -521,7 +439,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Artist,
                 value.values.artist.as_deref(),
@@ -529,7 +446,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Album,
                 value.values.album.as_deref(),
@@ -537,7 +453,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::AlbumArtist,
                 value.values.album_artist.as_deref(),
@@ -545,7 +460,6 @@ fn append_draft_fields(
                 false,
             );
             append_number(
-                root,
                 entries,
                 MetadataField::TrackNumber,
                 value.values.track_number,
@@ -553,7 +467,6 @@ fn append_draft_fields(
                 false,
             );
             append_number(
-                root,
                 entries,
                 MetadataField::DiscNumber,
                 value.values.disc_number,
@@ -561,7 +474,6 @@ fn append_draft_fields(
                 false,
             );
             append_number(
-                root,
                 entries,
                 MetadataField::Year,
                 value.values.year,
@@ -569,7 +481,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Genre,
                 value.values.genre.as_deref(),
@@ -577,7 +488,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Comment,
                 value.values.comment.as_deref(),
@@ -585,7 +495,6 @@ fn append_draft_fields(
                 false,
             );
             append_number(
-                root,
                 entries,
                 MetadataField::Bpm,
                 value.values.bpm,
@@ -593,7 +502,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzRecordingId,
                 value.values.musicbrainz_recording_id.as_deref(),
@@ -601,7 +509,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzReleaseTrackId,
                 value.values.musicbrainz_release_track_id.as_deref(),
@@ -609,7 +516,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzAlbumId,
                 value.values.musicbrainz_album_id.as_deref(),
@@ -617,7 +523,6 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzReleaseGroupId,
                 value.values.musicbrainz_release_group_id.as_deref(),
@@ -625,18 +530,16 @@ fn append_draft_fields(
                 false,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzArtistId,
                 value.values.musicbrainz_artist_id.as_deref(),
                 value.writable.musicbrainz_artist_id,
                 false,
             );
-            append_lock(root, locked, value.values.locked, value.writable.locked);
+            append_lock(locked, value.values.locked, value.writable.locked);
         }
         MetadataDraft::Album(value) => {
             append_entry(
-                root,
                 entries,
                 MetadataField::Title,
                 &value.values.title,
@@ -644,7 +547,6 @@ fn append_draft_fields(
                 value.mixed.title,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::SortTitle,
                 value.values.sort_title.as_deref(),
@@ -652,7 +554,6 @@ fn append_draft_fields(
                 value.mixed.sort_title,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Artist,
                 value.values.artist.as_deref(),
@@ -660,7 +561,6 @@ fn append_draft_fields(
                 value.mixed.artist,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::AlbumArtist,
                 value.values.album_artist.as_deref(),
@@ -668,7 +568,6 @@ fn append_draft_fields(
                 value.mixed.album_artist,
             );
             append_number(
-                root,
                 entries,
                 MetadataField::Year,
                 value.values.year,
@@ -676,7 +575,6 @@ fn append_draft_fields(
                 value.mixed.year,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Genre,
                 value.values.genre.as_deref(),
@@ -684,7 +582,6 @@ fn append_draft_fields(
                 value.mixed.genre,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Comment,
                 value.values.comment.as_deref(),
@@ -696,7 +593,6 @@ fn append_draft_fields(
                     .set_title(&metadata_overview_title(value.mixed.comment));
             }
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzAlbumId,
                 value.values.musicbrainz_album_id.as_deref(),
@@ -704,18 +600,16 @@ fn append_draft_fields(
                 value.mixed.musicbrainz_album_id,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzReleaseGroupId,
                 value.values.musicbrainz_release_group_id.as_deref(),
                 value.writable.musicbrainz_release_group_id,
                 value.mixed.musicbrainz_release_group_id,
             );
-            append_lock(root, locked, value.values.locked, value.writable.locked);
+            append_lock(locked, value.values.locked, value.writable.locked);
         }
         MetadataDraft::Artist(value) => {
             append_entry(
-                root,
                 entries,
                 MetadataField::Title,
                 &value.values.name,
@@ -723,7 +617,6 @@ fn append_draft_fields(
                 value.mixed.name,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::SortTitle,
                 value.values.sort_name.as_deref(),
@@ -731,7 +624,6 @@ fn append_draft_fields(
                 value.mixed.sort_name,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Genre,
                 value.values.genre.as_deref(),
@@ -739,7 +631,6 @@ fn append_draft_fields(
                 value.mixed.genre,
             );
             append_optional(
-                root,
                 entries,
                 MetadataField::Comment,
                 value.values.comment.as_deref(),
@@ -751,37 +642,27 @@ fn append_draft_fields(
                     .set_title(&metadata_overview_title(value.mixed.comment));
             }
             append_optional(
-                root,
                 entries,
                 MetadataField::MusicBrainzArtistId,
                 value.values.musicbrainz_artist_id.as_deref(),
                 value.writable.musicbrainz_artist_id,
                 value.mixed.musicbrainz_artist_id,
             );
-            append_lock(root, locked, value.values.locked, value.writable.locked);
+            append_lock(locked, value.values.locked, value.writable.locked);
         }
     }
 }
 
 fn append_optional(
-    root: &gtk::Box,
     entries: &mut Vec<MetadataEntry>,
     field: MetadataField,
     value: Option<&str>,
     writable: bool,
     mixed: bool,
 ) {
-    append_entry(
-        root,
-        entries,
-        field,
-        value.unwrap_or_default(),
-        writable,
-        mixed,
-    );
+    append_entry(entries, field, value.unwrap_or_default(), writable, mixed);
 }
 fn append_number(
-    root: &gtk::Box,
     entries: &mut Vec<MetadataEntry>,
     field: MetadataField,
     value: Option<u16>,
@@ -789,7 +670,6 @@ fn append_number(
     mixed: bool,
 ) {
     append_entry(
-        root,
         entries,
         field,
         &value.map(|value| value.to_string()).unwrap_or_default(),
@@ -801,7 +681,6 @@ fn append_number(
     }
 }
 fn append_entry(
-    _root: &gtk::Box,
     entries: &mut Vec<MetadataEntry>,
     field: MetadataField,
     value: &str,
@@ -829,12 +708,7 @@ fn append_entry(
     entry.add_suffix(&undo);
     entries.push(MetadataEntry { field, entry, undo });
 }
-fn append_lock(
-    _root: &gtk::Box,
-    target: &mut Option<adw::SwitchRow>,
-    value: Option<bool>,
-    writable: bool,
-) {
+fn append_lock(target: &mut Option<adw::SwitchRow>, value: Option<bool>, writable: bool) {
     if !writable {
         return;
     }
@@ -880,17 +754,23 @@ fn metadata_overview_title(mixed: bool) -> String {
     }
 }
 
-fn connect_editor_changes(editor: &Editor) {
+fn connect_editor_changes(editor: &Rc<Editor>) {
     for row in editor.entries.iter() {
         let field = row.field;
-        let editor_changed = editor.clone();
+        let editor_changed = Rc::downgrade(editor);
         row.entry.connect_changed(move |_| {
+            let Some(editor_changed) = editor_changed.upgrade() else {
+                return;
+            };
             editor_changed.touched.borrow_mut().insert(field);
             refresh_save_state(&editor_changed);
         });
         let field = row.field;
-        let editor_undo = editor.clone();
+        let editor_undo = Rc::downgrade(editor);
         row.undo.connect_clicked(move |_| {
+            let Some(editor_undo) = editor_undo.upgrade() else {
+                return;
+            };
             let original = editor_undo.identified_originals.borrow_mut().remove(&field);
             if let Some(original) = original {
                 editor_undo.entry(field).set_text(&original);
@@ -904,8 +784,11 @@ fn connect_editor_changes(editor: &Editor) {
         });
     }
     if let Some(locked) = &editor.locked {
-        let editor = editor.clone();
+        let editor = Rc::downgrade(editor);
         locked.connect_active_notify(move |_| {
+            let Some(editor) = editor.upgrade() else {
+                return;
+            };
             editor.touched.borrow_mut().insert(MetadataField::Locked);
             refresh_save_state(&editor);
         });
@@ -973,16 +856,20 @@ fn connect_identify(
     shell: &Rc<Shell>,
     selected: crate::runtime::SelectedLibrary,
     item: MetadataItemId,
-    editor: &Editor,
+    editor: &Rc<Editor>,
 ) {
     let shell = Rc::downgrade(shell);
-    let editor = editor.clone();
-    editor.identify.clone().connect_clicked(move |_| {
+    let identify = editor.identify.clone();
+    let editor = Rc::downgrade(editor);
+    identify.connect_clicked(move |_| {
         let Some(shell) = shell.upgrade() else {
             return;
         };
+        let Some(editor) = editor.upgrade() else {
+            return;
+        };
         if !selected_metadata_source_is_current(&shell, &selected) {
-            editor.dialog.force_close();
+            editor.force_close();
             return;
         }
         let values = match current_values(item, &editor) {
@@ -1017,16 +904,19 @@ fn connect_identify(
                     .identify_artist_metadata(artist_key(item), values),
             ),
         };
-        let editor = editor.clone();
+        let editor = Rc::downgrade(&editor);
         let shell = Rc::downgrade(&shell);
         let selected = selected.clone();
         gtk::glib::spawn_future_local(async move {
             let response = receiver.recv().await;
+            let Some(editor) = editor.upgrade() else {
+                return;
+            };
             let Some(shell) = shell.upgrade() else {
                 return;
             };
             if !selected_metadata_source_is_current(&shell, &selected) {
-                editor.dialog.force_close();
+                editor.force_close();
                 return;
             }
             match response {
@@ -1056,17 +946,21 @@ fn connect_save(
     selected: crate::runtime::SelectedLibrary,
     item: MetadataItemId,
     dialog: &adw::Dialog,
-    editor: &Editor,
+    editor: &Rc<Editor>,
 ) {
     let shell = Rc::downgrade(shell);
     let dialog = dialog.downgrade();
-    let editor = editor.clone();
-    editor.save.clone().connect_clicked(move |_| {
+    let save = editor.save.clone();
+    let editor = Rc::downgrade(editor);
+    save.connect_clicked(move |_| {
         let Some(shell) = shell.upgrade() else {
             return;
         };
+        let Some(editor) = editor.upgrade() else {
+            return;
+        };
         if !selected_metadata_source_is_current(&shell, &selected) {
-            editor.dialog.force_close();
+            editor.force_close();
             return;
         }
         let edit = match metadata_edit(item, &editor) {
@@ -1105,17 +999,20 @@ fn connect_save(
                 ))
             }
         };
-        let editor = editor.clone();
+        let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         let shell = Rc::downgrade(&shell);
         let selected = selected.clone();
         gtk::glib::spawn_future_local(async move {
             let response = receiver.recv().await;
+            let Some(editor) = editor.upgrade() else {
+                return;
+            };
             let Some(shell) = shell.upgrade() else {
                 return;
             };
             if !selected_metadata_source_is_current(&shell, &selected) {
-                editor.dialog.force_close();
+                editor.force_close();
                 return;
             }
             match response {
@@ -1159,6 +1056,12 @@ fn artist_key(item: MetadataItemId) -> library::ArtistKey {
 }
 
 impl Editor {
+    fn force_close(&self) {
+        if let Some(dialog) = self.dialog.upgrade() {
+            dialog.force_close();
+        }
+    }
+
     fn entry(&self, field: MetadataField) -> &adw::EntryRow {
         &self
             .entries

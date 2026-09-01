@@ -179,8 +179,9 @@ This makes just commands go through the container development. If you want to bu
 
 ### Native build
 
-Rufin requires Rust 1.95 or newer, GTK 4.20 or newer, libadwaita 1.9 or
-newer, and GStreamer 1.26 or newer.
+Building Rufin requires Rust 1.95 or newer, CMake 3.25 or newer, Ninja,
+pkg-config, GTK 4.20 or newer, libadwaita 1.9 or newer, and GStreamer 1.26 or
+newer. Packaging and translation checks additionally require `msgfmt` from gettext.
 
 **Arch Linux:**
 
@@ -231,6 +232,9 @@ brew install \
 just build
 just debug
 ```
+
+On macOS, direct `cargo` commands outside these `just` recipes also need
+`GETTEXT_DIR="$(brew --prefix gettext)"` so Rust and GTK link the same gettext runtime.
 
 Local builds are shown as `Rufin (Development)` and use the isolated `Rufin.Devel` application
 identity. The first macOS `just debug` or

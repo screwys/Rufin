@@ -44,14 +44,13 @@ impl Shell {
     }
     pub(crate) fn startup_loading_view(&self) -> gtk::Widget {
         let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        wrapper.add_css_class("startup-loading-page");
+        wrapper.add_css_class("loading-page");
         wrapper.set_hexpand(true);
         wrapper.set_vexpand(true);
         wrapper.set_halign(gtk::Align::Center);
         wrapper.set_valign(gtk::Align::Center);
 
-        let spinner = gtk::Spinner::new();
-        spinner.start();
+        let spinner = adw::Spinner::new();
         wrapper.append(&spinner);
         let status = self.library_loading_status();
         if let Some(status) = status {

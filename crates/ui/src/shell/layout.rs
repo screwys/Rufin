@@ -438,7 +438,7 @@ impl Shell {
         self.layout_state.owner.queue_allocate();
     }
 
-    fn apply_layout_allocation(self: &Rc<Self>, width: i32, _height: i32) {
+    fn apply_layout_allocation(self: &Rc<Self>, width: i32, height: i32) {
         let settings = self.settings.current.borrow().layout.clone();
         let left_drag_preview = self.layout_state.left_drag_preview.get();
         let right_drag_width = self.layout_state.right_drag_width.get();
@@ -449,6 +449,9 @@ impl Shell {
             right_drag_width,
         );
         self.apply_resolved_layout_for_allocation(resolved);
+        if self.fullscreen_player_visible() {
+            self.apply_fullscreen_responsive_layout_for_size(width, height);
+        }
     }
 
     fn apply_resolved_layout_for_allocation(self: &Rc<Self>, resolved: ResolvedLayout) {
@@ -477,10 +480,6 @@ impl Shell {
             resolved.left_sidebar_width
         };
         self.preview_left_sidebar_width(overlay_sidebar_width);
-        if app_active && self.fullscreen_player_visible() {
-            self.refresh_fullscreen_player_layout();
-        }
-
         let root_changed =
             self.chrome.root_stack.visible_child_name().as_deref() != Some(presentation.root_page);
         if root_changed {
@@ -547,7 +546,7 @@ impl Shell {
         }
         set_widget_visible(&self.player_view.player_controls.root, app_active);
 
-        if right_visibility_changed || previous_right_visible != right_visible {
+        if right_visibility_changed {
             self.update_right_panel_button();
             self.sync_visualizer_state();
             let lyrics_shell = Rc::clone(self);
@@ -559,7 +558,7 @@ impl Shell {
                 }
             });
         }
-        if previous_left != resolved.left_sidebar || previous_right_visible != right_visible {
+        if previous_left != resolved.left_sidebar || right_visibility_changed {
             debug!(?resolved, "resolved layout changed");
         }
     }
@@ -949,6 +948,9 @@ fn connect_right_sidebar_resize(shell: &Rc<Shell>) {
         );
         drag_exact.set(Some(exact_width));
         let requested_width = exact_width.round() as i32;
+        if let Some(lyrics) = drag_shell.selected_lyrics() {
+            lyrics.right_pane.capture_active_row_resize_anchor();
+        }
         drag_shell
             .layout_state
             .right_drag_width
@@ -1012,6 +1014,9 @@ fn connect_layout_allocation_owner(shell: &Rc<Shell>) {
     let after_shell = Rc::downgrade(shell);
     owner.set_after_allocate(move |width, _| {
         if let Some(shell) = after_shell.upgrade() {
+            if let Some(lyrics) = shell.selected_lyrics() {
+                lyrics.right_pane.restore_active_row_resize_anchor();
+            }
             shell.sync_left_resize_handle_to_allocation();
             shell.finish_startup_route_allocation(width);
         }

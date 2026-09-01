@@ -6,8 +6,10 @@ External service icons in `hicolor/64x64/apps` are resized from [Last.fm favicon
 
 `hicolor/scalable/actions/rufin-smart-playlists-symbolic.svg` is based on `playlist-symbolic.svg` from [FolderPlay (GPL-3.0)](https://github.com/juancarlosbernal/FolderPlay).
 
-`hicolor/scalable/actions/rufin-audio-radio-symbolic.svg` is based on `audio-radio.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
+`hicolor/scalable/actions/rufin-folder-download-symbolic.svg` is based on `folder-download.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
 
 `hicolor/scalable/actions/rufin-open-menu-symbolic.svg` is based on `open-menu-symbolic.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
 
 `hicolor/scalable/actions/rufin-player-more-symbolic.svg` is based on `overflow-menu.svg` from [Breeze Icons (LGPL-3.0-or-later)](https://invent.kde.org/frameworks/breeze-icons).
+
+`hicolor/scalable/actions/rufin-audio-only-symbolic.svg`, `rufin-library-music-symbolic.svg`, `rufin-music-queue-symbolic.svg`, and `rufin-tag-outline-symbolic.svg` are adapted from the [GNOME Icon Development Kit](https://gitlab.gnome.org/Teams/Design/icon-development-kit), including the archived [`icon-development-kit-www` catalog](https://gitlab.gnome.org/Teams/Design/icon-development-kit-www) (CC0-1.0).

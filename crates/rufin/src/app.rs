@@ -23,15 +23,9 @@ use crate::waveform::WaveformOwner;
 pub(crate) fn runtime_inputs(
     diagnostics: DiagnosticsHandle,
     take_previous_update_result: bool,
+    settings: SettingsFile,
 ) -> Result<RuntimeInputs, String> {
-    if let Err(error) = paths::prepare() {
-        warn!(%error, "could not prepare every Rufin data directory");
-    }
     let runtime = tokio::runtime::Handle::current();
-    let settings = SettingsFile::open(paths::settings_file()).unwrap_or_else(|error| {
-        warn!(%error, "could not use saved settings; startup will continue with defaults");
-        SettingsFile::memory()
-    });
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(&stored)));
     let store_path = paths::store_file();
@@ -222,6 +216,16 @@ pub(crate) fn runtime_inputs(
         configured_sources: configured,
         source_operation: operation,
         release_history,
+    })
+}
+
+pub(crate) fn startup_settings() -> SettingsFile {
+    if let Err(error) = paths::prepare() {
+        warn!(%error, "could not prepare every Rufin data directory");
+    }
+    SettingsFile::open(paths::settings_file()).unwrap_or_else(|error| {
+        warn!(%error, "could not use saved settings; startup will continue with defaults");
+        SettingsFile::memory()
     })
 }
 

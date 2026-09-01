@@ -5,6 +5,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::glib;
+use gtk::subclass::prelude::*;
 use playback::QueuePlacement;
 
 use crate::layout::{
@@ -22,30 +23,60 @@ use crate::routes::collection_context::{
 use crate::routes::playlist_picker::present_playlist_picker_selection;
 use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::shell::Shell;
-use crate::shell::actions::{ADD_ICON, MORE_ICON, sort_order_icon, toggle_mute_shortcut};
+use crate::shell::actions::{ADD_ICON, sort_order_icon, toggle_mute_shortcut};
+use crate::shell::route::{MountedRoute, MountedRouteCommand, MountedRouteResume};
 use crate::{
     LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings, available_sort_fields,
 };
 use localization::{msgid, tr};
 
-use super::collections::library_route_inset;
 use super::library_fields::{
     field_set_for_layout, layout_button_content, layout_icon, layout_title, next_layout,
     populate_library_field_rows, populate_library_field_rows_for_set, supported_layouts,
     sync_layout_buttons,
 };
-use super::route_layout::ROUTE_TOP_MARGIN;
-
 const LIBRARY_CONFIG_DIALOG_WIDTH: i32 = 620;
 const LIBRARY_CONFIG_DIALOG_HEIGHT: i32 = 560;
-const LIBRARY_ROUTE_BOTTOM_MARGIN: i32 = 8;
-const LIBRARY_TOOLBAR_CONTROL_SPACING: i32 = 12;
 const LIBRARY_TOOLBAR_ICON_BUTTON_WIDTH: i32 = 34;
 const LIBRARY_TOOLBAR_SORT_MIN_WIDTH: i32 = 112;
 const LIBRARY_TOOLBAR_SORT_CHAR_WIDTH: i32 = 8;
 const LIBRARY_TOOLBAR_SORT_HORIZONTAL_PADDING: i32 = 44;
 const LIBRARY_TOOLBAR_SORT_WIDTH_SHARE: i32 = 4;
 const LIBRARY_TOOLBAR_COMPACT_COMMAND_WIDTH: i32 = 760;
+
+crate::ui_resource::composite_box!(
+    pub(crate) LibraryPageView,
+    library_page_view_imp,
+    "RufinLibraryPageView",
+    "/io/github/screwys/Rufin/ui/routes/library_page.ui",
+    {
+        toolbar_host: gtk::Box,
+        category_host: gtk::Box,
+        contents: gtk::Stack,
+        empty_view: gtk::Box,
+        search_empty_view: gtk::Box,
+        empty_label: gtk::Label,
+        search_empty_label: gtk::Label,
+    }
+);
+
+crate::ui_resource::composite_box!(
+    pub(crate) LibraryToolbarView,
+    library_toolbar_view_imp,
+    "RufinLibraryToolbarView",
+    "/io/github/screwys/Rufin/ui/routes/library_toolbar.ui",
+    {
+        search_host: gtk::Box,
+        controls: gtk::Box,
+        command_button: gtk::Button,
+        sort_dropdown: gtk::DropDown,
+        direction: gtk::Button,
+        layout: gtk::Button,
+        configure: gtk::Button,
+        reservation_host: gtk::Box,
+    }
+);
+
 pub(crate) struct LibraryPageShellOptions {
     pub(crate) key: LibraryListKey,
     pub(crate) empty: bool,
@@ -65,21 +96,33 @@ enum SelectionShortcut {
 
 #[derive(Clone)]
 pub(crate) struct LibraryPageShell {
-    widget: gtk::Box,
-    contents: gtk::Stack,
+    widget: LibraryPageView,
     toolbar: LibraryToolbarProjection,
     search: gtk::SearchEntry,
     has_visible_results: Rc<dyn Fn() -> bool>,
     source_empty: Rc<Cell<bool>>,
+    tab_cycle: Option<MountedRouteCommand>,
 }
 
 impl LibraryPageShell {
     pub(crate) fn widget(&self) -> gtk::Widget {
         self.widget.clone().upcast()
     }
-    pub(crate) fn insert_after_toolbar(&self, widget: &impl IsA<gtk::Widget>) {
-        self.widget
-            .insert_child_after(widget, Some(&self.toolbar.widget()));
+    pub(crate) fn set_category_switcher(&self, widget: &impl IsA<gtk::Widget>) {
+        self.widget.imp().category_host.append(widget);
+        self.widget.imp().category_host.set_visible(true);
+    }
+    pub(crate) fn mounted_route(&self, resume: MountedRouteResume) -> MountedRoute {
+        let route = MountedRoute::new(self.widget(), resume)
+            .with_search(self.search.clone())
+            .with_layout_cycle(self.toolbar.layout_cycle());
+        if let Some(cycle) = &self.tab_cycle {
+            return route.with_tab_cycle(Rc::clone(cycle));
+        }
+        route
+    }
+    pub(crate) fn set_tab_cycle(&mut self, cycle: MountedRouteCommand) {
+        self.tab_cycle = Some(cycle);
     }
     pub(crate) fn apply_library_list_settings(
         &self,
@@ -90,11 +133,12 @@ impl LibraryPageShell {
     }
     pub(crate) fn set_empty(&self, empty: bool) {
         self.source_empty.set(empty);
-        self.contents.set_visible_child_name(library_page_child(
+        show_library_page_child(
+            &self.widget,
             empty,
             self.search.text().as_str(),
             (self.has_visible_results)(),
-        ));
+        );
     }
 }
 
@@ -102,10 +146,10 @@ impl LibraryPageShell {
 pub(crate) struct LibraryToolbarProjection {
     state: Rc<RefCell<LibraryToolbarState>>,
     widget: gtk::Widget,
-    controls: gtk::Box,
     sort_dropdown: gtk::DropDown,
     direction: gtk::Button,
     layout: gtk::Button,
+    configure: gtk::Button,
     layout_mode: Rc<Cell<LibraryLayout>>,
     syncing: Rc<Cell<bool>>,
 }
@@ -122,25 +166,23 @@ impl LibraryToolbarProjection {
         self.widget.clone()
     }
 
-    pub(crate) fn detach_controls(&self) -> gtk::Widget {
-        if let Some(parent) = self
-            .controls
-            .parent()
-            .and_then(|parent| parent.downcast::<gtk::Box>().ok())
-        {
-            parent.remove(&self.controls);
-        }
-        self.controls.clone().upcast()
-    }
-
     pub(crate) fn set_layout_control_visible(&self, visible: bool) {
         self.layout.set_visible(visible);
+    }
+
+    pub(crate) fn set_configure_control_visible(&self, visible: bool) {
+        self.configure.set_visible(visible);
     }
 
     pub(crate) fn cycle_layout(&self) {
         if self.layout.is_visible() && self.layout.is_sensitive() {
             self.layout.emit_clicked();
         }
+    }
+
+    pub(crate) fn layout_cycle(&self) -> MountedRouteCommand {
+        let toolbar = self.clone();
+        Rc::new(move || toolbar.cycle_layout())
     }
 
     pub(crate) fn apply(&self, key: LibraryListKey, settings: &LibraryListSettings) {
@@ -170,96 +212,52 @@ impl Shell {
         self: &Rc<Self>,
         options: LibraryPageShellOptions,
     ) -> LibraryPageShell {
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, ROUTE_TOP_MARGIN);
-        wrapper.add_css_class("route-content");
-        wrapper.set_margin_top(ROUTE_TOP_MARGIN);
-        wrapper.set_margin_bottom(LIBRARY_ROUTE_BOTTOM_MARGIN);
-        wrapper.set_hexpand(true);
-        wrapper.set_vexpand(true);
+        let wrapper = LibraryPageView::new();
         let toolbar = self.library_toolbar_projection(options.key, options.search.clone());
-        wrapper.append(&library_route_inset(toolbar.widget()));
-        self.set_route_search(Some(options.search.clone()));
-        let contents = gtk::Stack::new();
-        contents.set_hexpand(true);
-        contents.set_vexpand(true);
-        contents.add_named(
-            &library_route_inset(self.route_empty_view(options.empty_body)),
-            Some("empty"),
-        );
-        contents.add_named(
-            &library_route_inset(self.route_empty_view(msgid(r"No results ¯\_(°╭╮°)_/¯"))),
-            Some("search-empty"),
-        );
-        contents.add_named(&options.content, Some("content"));
-        contents.set_visible_child_name(library_page_child(
+        wrapper.imp().toolbar_host.append(&toolbar.widget());
+        wrapper.imp().empty_label.set_label(&tr(options.empty_body));
+        wrapper
+            .imp()
+            .search_empty_label
+            .set_label(&tr(msgid(r"No results ¯\_(°╭╮°)_/¯")));
+        wrapper.imp().contents.add_child(&options.content);
+        show_library_page_child(
+            &wrapper,
             options.empty,
             options.search.text().as_str(),
             (options.has_visible_results)(),
-        ));
-        wrapper.append(&contents);
+        );
         let source_empty = Rc::new(Cell::new(options.empty));
-        let weak_contents = contents.downgrade();
+        let weak_wrapper = wrapper.downgrade();
         let search_empty = Rc::clone(&source_empty);
         let search_visible = Rc::clone(&options.has_visible_results);
         options.search.connect_search_changed(move |search| {
-            let Some(contents) = weak_contents.upgrade() else {
+            let Some(wrapper) = weak_wrapper.upgrade() else {
                 return;
             };
-            contents.set_visible_child_name(library_page_child(
+            show_library_page_child(
+                &wrapper,
                 search_empty.get(),
                 search.text().as_str(),
                 search_visible(),
-            ));
+            );
         });
         LibraryPageShell {
             widget: wrapper,
-            contents,
             toolbar,
             search: options.search,
             has_visible_results: options.has_visible_results,
             source_empty,
+            tab_cycle: None,
         }
-    }
-
-    pub(crate) fn set_route_search(&self, search: Option<gtk::SearchEntry>) {
-        self.route_viewport.route_search.replace(search);
-        self.route_viewport.route_search_focus.borrow_mut().take();
-    }
-
-    pub(crate) fn set_route_search_with_focus(
-        &self,
-        search: gtk::SearchEntry,
-        focus: Rc<dyn Fn()>,
-    ) {
-        self.route_viewport.route_search.replace(Some(search));
-        self.route_viewport.route_search_focus.replace(Some(focus));
-    }
-
-    pub(crate) fn set_current_route_layout_cycle(&self, cycle: Option<Rc<dyn Fn()>>) {
-        self.route_viewport.route_layout_cycle.replace(cycle);
-    }
-
-    pub(crate) fn set_current_route_tab_cycle(&self, cycle: Option<Rc<dyn Fn()>>) {
-        self.route_viewport.route_tab_cycle.replace(cycle);
     }
 
     pub(crate) fn focus_current_route_search(&self) {
         if !self.route_keyboard_available() {
             return;
         }
-        let search = self.route_viewport.route_search.borrow().as_ref().cloned();
-        if let Some(search) = search {
-            let focus = self
-                .route_viewport
-                .route_search_focus
-                .borrow()
-                .as_ref()
-                .cloned();
-            if let Some(focus) = focus {
-                focus();
-            } else {
-                search.grab_focus();
-            }
+        if let Some(search) = self.current_route_search() {
+            search.focus();
         }
     }
 
@@ -334,21 +332,15 @@ impl Shell {
                     _ => {}
                 }
             }
-            let Some(search) = shell.route_viewport.route_search.borrow().as_ref().cloned() else {
+            let Some(search) = shell.current_route_search() else {
                 return glib::Propagation::Proceed;
             };
-            let focus = shell
-                .route_viewport
-                .route_search_focus
-                .borrow()
-                .as_ref()
-                .cloned();
             if !shell.settings.current.borrow().type_to_search_enabled
                 || !shell.route_keyboard_available()
                 || key_should_bypass_type_to_search(state)
                 || focus_blocks_type_to_search(
                     GtkWindowExt::focus(&shell.chrome.window).as_ref(),
-                    &search,
+                    &search.search,
                 )
             {
                 return glib::Propagation::Proceed;
@@ -357,21 +349,19 @@ impl Shell {
             else {
                 return glib::Propagation::Proceed;
             };
-            if character.is_whitespace() && search.text().trim().is_empty() {
+            if character.is_whitespace() && search.search.text().trim().is_empty() {
                 return glib::Propagation::Proceed;
             }
-            let mut position = search.position();
-            if let Some((start, end)) = search.selection_bounds() {
-                search.delete_text(start, end);
+            let mut position = search.search.position();
+            if let Some((start, end)) = search.search.selection_bounds() {
+                search.search.delete_text(start, end);
                 position = start;
             }
-            search.insert_text(&character.to_string(), &mut position);
-            search.set_position(position);
-            if let Some(focus) = focus {
-                focus();
-            } else {
-                search.grab_focus();
-            }
+            search
+                .search
+                .insert_text(&character.to_string(), &mut position);
+            search.search.set_position(position);
+            search.focus();
             glib::Propagation::Stop
         });
         self.chrome.window.add_controller(key);
@@ -450,7 +440,7 @@ impl Shell {
         search: gtk::SearchEntry,
         sort_fields: &'static [LibraryField],
     ) -> LibraryToolbarProjection {
-        self.library_toolbar_projection_with_options(key, search, false, sort_fields)
+        self.library_toolbar_projection_with_options(key, search, false, sort_fields, 6)
     }
 
     fn library_toolbar_projection_with_detail(
@@ -464,6 +454,7 @@ impl Shell {
             search,
             include_detail,
             available_sort_fields(key),
+            12,
         )
     }
 
@@ -473,28 +464,19 @@ impl Shell {
         search: gtk::SearchEntry,
         include_detail: bool,
         sort_fields: &'static [LibraryField],
+        outer_spacing: i32,
     ) -> LibraryToolbarProjection {
-        let toolbar = gtk::Box::new(
-            gtk::Orientation::Horizontal,
-            LIBRARY_TOOLBAR_CONTROL_SPACING,
-        );
-        toolbar.add_css_class("track-toolbar");
-        toolbar.set_hexpand(true);
-        toolbar.set_halign(gtk::Align::Fill);
-        toolbar.set_width_request(1);
+        let toolbar = LibraryToolbarView::new();
+        toolbar.set_spacing(outer_spacing);
         search.set_hexpand(true);
         search.set_width_request(1);
-        toolbar.append(&search);
-        let controls = gtk::Box::new(
-            gtk::Orientation::Horizontal,
-            LIBRARY_TOOLBAR_CONTROL_SPACING,
-        );
+        toolbar.imp().search_host.append(&search);
         let toolbar_state = Rc::new(RefCell::new(LibraryToolbarState {
             key,
             include_detail,
             sort_fields,
         }));
-        let command_button = gtk::Button::new();
+        let command_button = toolbar.imp().command_button.get();
         set_library_command_button_content(&command_button, false, ADD_ICON, "New Playlist");
         bind_widget_tooltip(&command_button, "New Playlist");
         command_button.set_visible(matches!(
@@ -510,11 +492,10 @@ impl Shell {
                 _ => {}
             });
         }
-        controls.append(&command_button);
-
         let settings = self.settings.current.borrow().library_list(key);
         let sort_options = gtk::StringList::new(&[]);
-        let sort_dropdown = gtk::DropDown::new(Some(sort_options), None::<gtk::Expression>);
+        let sort_dropdown = toolbar.imp().sort_dropdown.get();
+        sort_dropdown.set_model(Some(&sort_options));
         let preferred_sort_width = Rc::new(Cell::new(LIBRARY_TOOLBAR_SORT_MIN_WIDTH));
         let preferred_sort_width_for_locale = Rc::clone(&preferred_sort_width);
         let locale_toolbar_state = Rc::clone(&toolbar_state);
@@ -565,9 +546,8 @@ impl Shell {
                 });
             });
         }
-        controls.append(&sort_dropdown);
-
-        let direction = gtk::Button::from_icon_name(sort_order_icon(settings.descending));
+        let direction = toolbar.imp().direction.get();
+        direction.set_icon_name(sort_order_icon(settings.descending));
         configure_library_toolbar_icon_button(&direction, "Change sort order");
         {
             let shell = Rc::clone(self);
@@ -585,10 +565,9 @@ impl Shell {
                 direction.set_icon_name(sort_order_icon(descending));
             });
         }
-        controls.append(&direction);
-
         let current_layout = toolbar_layout(settings.layout, include_detail);
-        let layout = gtk::Button::from_icon_name(layout_icon(current_layout));
+        let layout = toolbar.imp().layout.get();
+        layout.set_icon_name(layout_icon(current_layout));
         configure_library_toolbar_icon_button(&layout, "Layout");
         let layout_mode = Rc::new(Cell::new(current_layout));
         let layout_mode_for_locale = Rc::clone(&layout_mode);
@@ -619,9 +598,7 @@ impl Shell {
                 });
             });
         }
-        controls.append(&layout);
-
-        let configure = gtk::Button::from_icon_name(MORE_ICON);
+        let configure = toolbar.imp().configure.get();
         configure_library_toolbar_icon_button(&configure, "Customize display");
         {
             let shell = Rc::clone(self);
@@ -631,8 +608,15 @@ impl Shell {
                 shell.present_library_config_dialog_with_detail(state.key, state.include_detail);
             });
         }
-        controls.append(&configure);
-        toolbar.append(&self.window_controls_end_area(&controls, LIBRARY_TOOLBAR_CONTROL_SPACING));
+        let reservation = self.chrome.window_controls.end_width_reservation();
+        reservation.set_margin_start(outer_spacing);
+        toolbar.imp().reservation_host.append(&reservation);
+        self.right_panel
+            .right_panel_slot
+            .bind_property("visible", &*toolbar.imp().reservation_host, "visible")
+            .sync_create()
+            .invert_boolean()
+            .build();
         let command_compact = Cell::new(false);
         apply_library_command_button_layout(&command_button, &command_compact, 1);
         let applied_sort_width = Cell::new(sort_dropdown.width_request());
@@ -651,72 +635,40 @@ impl Shell {
         let projection = LibraryToolbarProjection {
             state: toolbar_state,
             widget,
-            controls,
             sort_dropdown,
             direction,
             layout,
+            configure,
             layout_mode,
             syncing,
         };
-        let layout_projection = projection.clone();
-        self.set_current_route_layout_cycle(Some(Rc::new(move || {
-            layout_projection.cycle_layout()
-        })));
         projection
-    }
-    pub(crate) fn window_controls_end_area(
-        &self,
-        controls: &impl IsA<gtk::Widget>,
-        spacing: i32,
-    ) -> gtk::Box {
-        let reservation = self.chrome.window_controls.end_width_reservation();
-        reservation.set_margin_start(spacing);
-        let reservation_host = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        reservation_host.append(&reservation);
-        self.right_panel
-            .right_panel_slot
-            .bind_property("visible", &reservation_host, "visible")
-            .sync_create()
-            .invert_boolean()
-            .build();
-
-        let area = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        area.append(controls);
-        area.append(&reservation_host);
-        area
     }
     fn present_library_config_dialog_with_detail(
         self: &Rc<Self>,
         key: LibraryListKey,
         include_detail: bool,
     ) {
-        let toolbar = adw::ToolbarView::new();
-        let header = adw::HeaderBar::new();
-        let title = adw::WindowTitle::new(&tr("Customize display"), &tr(key.title()));
-        header.set_title_widget(Some(&title));
-        toolbar.add_top_bar(&header);
-
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 18);
-        content.set_margin_top(18);
-        content.set_margin_bottom(18);
-        content.set_margin_start(18);
-        content.set_margin_end(18);
-
-        let layout_group = adw::PreferencesGroup::builder().title(tr("Layout")).build();
-        let reset = gtk::Button::with_label(&tr("Reset"));
-        reset.add_css_class("destructive-action");
-        reset.set_valign(gtk::Align::End);
-        reset.set_margin_end(16);
-        bind_widget_tooltip(&reset, msgid("Reset to defaults"));
-        layout_group.set_header_suffix(Some(&reset));
-        let layout_row = adw::ActionRow::builder().title(tr("View")).build();
+        let resource = crate::ui_resource::LIBRARY_CONFIG_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            dialog: adw::Dialog,
+            title: adw::WindowTitle,
+            scroller: gtk::ScrolledWindow,
+            reset: gtk::Button,
+            layout_box: gtk::Box,
+            fields_group: adw::PreferencesGroup,
+        });
+        title.set_subtitle(&tr(key.title()));
+        configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
+        dialog.set_content_width(large_popup_content_width(LIBRARY_CONFIG_DIALOG_WIDTH));
+        dialog.set_content_height(large_popup_content_height(
+            self.chrome.window.height(),
+            LIBRARY_CONFIG_DIALOG_HEIGHT,
+        ));
         let layout_buttons = Rc::new(RefCell::new(
             Vec::<(LibraryLayout, gtk::ToggleButton)>::new(),
         ));
-        let layout_box = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-        layout_box.add_css_class("linked");
-        layout_box.add_css_class("preference-selection-buttons");
-        layout_box.set_valign(gtk::Align::Center);
         let mut first_button: Option<gtk::ToggleButton> = None;
         let current_layout = toolbar_layout(
             self.settings.current.borrow().library_list(key).layout,
@@ -739,13 +691,7 @@ impl Shell {
             layout_box.append(&button);
             layout_buttons.borrow_mut().push((layout, button));
         }
-        layout_row.add_suffix(&layout_box);
-        layout_group.add(&layout_row);
-        content.append(&layout_group);
-
-        let fields_group = adw::PreferencesGroup::builder().build();
         let rows = Rc::new(RefCell::new(Vec::<adw::ActionRow>::new()));
-        content.append(&fields_group);
 
         for (layout, button) in layout_buttons.borrow().iter() {
             let shell = Rc::clone(self);
@@ -796,19 +742,6 @@ impl Shell {
             );
         }
 
-        let scroller = gtk::ScrolledWindow::new();
-        configure_fill_width_clip(&scroller, gtk::PolicyType::Automatic);
-        scroller.set_child(Some(&content));
-        toolbar.set_content(Some(&scroller));
-
-        let dialog = adw::Dialog::builder()
-            .content_width(large_popup_content_width(LIBRARY_CONFIG_DIALOG_WIDTH))
-            .content_height(large_popup_content_height(
-                self.chrome.window.height(),
-                LIBRARY_CONFIG_DIALOG_HEIGHT,
-            ))
-            .child(&toolbar)
-            .build();
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
 }
@@ -821,6 +754,24 @@ fn library_page_child(source_empty: bool, query: &str, has_visible_results: bool
     } else {
         "content"
     }
+}
+
+fn show_library_page_child(
+    page: &LibraryPageView,
+    source_empty: bool,
+    query: &str,
+    has_visible_results: bool,
+) {
+    let child: gtk::Widget = match library_page_child(source_empty, query, has_visible_results) {
+        "empty" => page.imp().empty_view.get().upcast(),
+        "search-empty" => page.imp().search_empty_view.get().upcast(),
+        _ => page
+            .imp()
+            .contents
+            .last_child()
+            .expect("library page content"),
+    };
+    page.imp().contents.set_visible_child(&child);
 }
 
 fn toolbar_layout(layout: LibraryLayout, include_detail: bool) -> LibraryLayout {
@@ -1072,8 +1023,8 @@ fn toolbar_sort_label_width(label: &str) -> i32 {
 
 pub(crate) fn responsive_toolbar_sort_width(toolbar_width: i32, preferred_width: i32) -> i32 {
     (toolbar_width / LIBRARY_TOOLBAR_SORT_WIDTH_SHARE)
-        .max(LIBRARY_TOOLBAR_SORT_MIN_WIDTH)
-        .min(preferred_width.max(LIBRARY_TOOLBAR_SORT_MIN_WIDTH))
+        .max(1)
+        .min(preferred_width.max(1))
 }
 
 fn configure_sort_dropdown_factory(dropdown: &gtk::DropDown) {
@@ -1169,6 +1120,13 @@ mod tests {
         weak_target_callback,
     };
     use crate::LibraryLayout;
+
+    #[test]
+    fn narrow_toolbar_can_shrink_the_sort_control_below_its_normal_floor() {
+        assert_eq!(super::responsive_toolbar_sort_width(414, 200), 103);
+        assert_eq!(super::responsive_toolbar_sort_width(448, 200), 112);
+        assert_eq!(super::responsive_toolbar_sort_width(800, 160), 160);
+    }
 
     #[test]
     fn signal_callback_does_not_retain_its_source_or_target() {

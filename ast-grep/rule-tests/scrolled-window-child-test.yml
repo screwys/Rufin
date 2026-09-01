@@ -1,0 +1,21 @@
+id: scrolled-box-is-behind-viewport
+valid:
+  - |
+      fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
+          scroller
+              .child()
+              .and_then(|child| child.downcast::<gtk::Viewport>().ok())
+              .and_then(|viewport| viewport.child())
+              .and_then(|child| child.downcast::<gtk::Box>().ok())
+      }
+invalid:
+  - |
+      fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
+          scroller
+              .child()
+              .and_then(|child| child.downcast::<gtk::Box>().ok())
+      }
+  - |
+      fn content(scroller: &gtk::ScrolledWindow) -> Option<gtk::Box> {
+          scroller.child().and_downcast::<gtk::Box>()
+      }

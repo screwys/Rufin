@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesPage" id="playback_page">
+    <property name="title" translatable="yes">Playback</property>
+    <property name="icon-name">rufin-music-queue-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="transition_group"><property name="title" translatable="yes">Queue and transitions</property></object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="audio_group"><property name="title" translatable="yes">Audio</property></object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="equalizer_group"><property name="title" translatable="yes">Equalizer</property></object>
+    </child>
+  </object>
+
+  <object class="AdwSwitchRow" id="skip_same_album_crossfade_row"><property name="title" translatable="yes">Skip same-album crossfade</property><property name="subtitle" translatable="yes">Keep album transitions gapless when possible</property></object>
+  <object class="AdwSwitchRow" id="audio_fade_row"><property name="title" translatable="yes">Audio fade on play/pause</property><property name="subtitle" translatable="yes">Fade audio when playback is paused or resumed</property></object>
+  <object class="AdwActionRow" id="refill_row">
+    <property name="title" translatable="yes">Auto DJ refill threshold</property>
+    <property name="subtitle" translatable="yes">Add tracks when fewer than this many remain</property>
+    <child type="suffix">
+      <object class="GtkSpinButton" id="refill">
+        <property name="valign">center</property>
+      </object>
+    </child>
+  </object>
+  <object class="AdwSwitchRow" id="clear_queue_row"><property name="title" translatable="yes">Clearing queue also clears the current song</property></object>
+
+  <object class="AdwActionRow" id="ebu_target_row">
+    <property name="title" translatable="yes">Target loudness</property>
+    <property name="subtitle" translatable="yes">EBU R128 reference level</property>
+    <child type="suffix">
+      <object class="GtkScale" id="ebu_target">
+        <property name="orientation">horizontal</property>
+        <property name="width-request">240</property>
+        <property name="valign">center</property>
+        <style>
+          <class name="playback-setting-scale"/>
+        </style>
+      </object>
+    </child>
+  </object>
+  <object class="AdwSwitchRow" id="write_ebu_tags_row"><property name="title" translatable="yes">Write EBU R128 tags to files</property><property name="subtitle" translatable="yes">Store calculated loudness in supported Local music files</property></object>
+  <object class="AdwActionRow" id="output_row"><property name="title" translatable="yes">Audio output</property></object>
+
+</interface>

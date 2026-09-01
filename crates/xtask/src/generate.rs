@@ -1,16 +1,12 @@
 use std::collections::HashSet;
 use std::fs;
-use std::io::{BufReader, Write};
+use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
 
 use csv::{ReaderBuilder, Terminator, WriterBuilder};
 use vibrato_rkyv::{Dictionary, SystemDictionaryBuilder};
 
-use crate::process::{
-    collect_files_with_extension, ensure_command, path_to_slash, quoted_value, read_to_string,
-    repo_root, temp_path, write_string,
-};
+use crate::process::{quoted_value, read_to_string, repo_root, temp_path, write_string};
 use crate::{Result, parse_check_flag};
 
 const CARGO_REGISTRY_SOURCE: &str = "registry+https://github.com/rust-lang/crates.io-index";
@@ -329,164 +325,9 @@ pub(crate) fn i18n_template_check() -> Result<()> {
 }
 
 pub(crate) fn i18n_template_to(output: &Path) -> Result<()> {
-    ensure_command("xgettext")?;
     let root = repo_root()?;
-    let tmp_dir = root.join("target/tmp");
-    fs::create_dir_all(&tmp_dir)?;
-    let sources = tmp_dir.join(format!("i18n-sources-{}.txt", std::process::id()));
-    let entries = tmp_dir.join(format!("i18n-entries-{}.pot", std::process::id()));
-
-    let result = write_i18n_template(&root, &sources, &entries, output);
-    let _ = fs::remove_file(&sources);
-    let _ = fs::remove_file(&entries);
-    result
-}
-
-fn write_i18n_template(root: &Path, sources: &Path, entries: &Path, output: &Path) -> Result<()> {
-    let mut rust_files = Vec::new();
-    collect_files_with_extension(root, &root.join("crates"), "rs", &mut rust_files)?;
-    rust_files.sort();
-
-    let mut source_list = fs::File::create(sources)?;
-    for file in rust_files {
-        writeln!(source_list, "{}", path_to_slash(&file))?;
-    }
-
     if let Some(parent) = output.parent() {
         fs::create_dir_all(parent)?;
     }
-
-    let status = Command::new("xgettext")
-        .current_dir(root)
-        .args([
-            "--from-code=UTF-8",
-            "--language=Rust",
-            "--escape",
-            "--no-location",
-            "--package-name=Rufin",
-            "--msgid-bugs-address=https://github.com/screwys/Rufin/issues",
-            "--keyword=tr:1",
-            "--keyword=tr_with:1",
-            "--keyword=trn:1,2",
-            "--keyword=trn_with:1,2",
-            "--keyword=msgid:1",
-            "--keyword=text_button:2",
-            "--keyword=icon_button:2",
-            "--keyword=icon_button_without_tooltip:2",
-            "--keyword=detail_action_button:2",
-            "--keyword=detail_link_button:2",
-            "--keyword=toggle_button:2",
-            "--keyword=row_button:2",
-            "--keyword=cover_hover_controls:2",
-            "--keyword=relocalize_icon_button:2",
-            "--keyword=table_header_label:1",
-            "--keyword=button_row:1",
-            "--keyword=dialog_button:1",
-            "--keyword=labeled_control:1",
-            "--keyword=labeled_row:1",
-            "--keyword=smart_playlist_dialog:1",
-        ])
-        .arg(format!("--files-from={}", sources.display()))
-        .arg(format!("--output={}", entries.display()))
-        .stdin(Stdio::inherit())
-        .output()?;
-    let stdout = String::from_utf8_lossy(&status.stdout);
-    let stderr = String::from_utf8_lossy(&status.stderr);
-    if !status.status.success() {
-        return Err(format!(
-            "xgettext failed with status {}\nstdout:\n{stdout}\nstderr:\n{stderr}",
-            status.status
-        )
-        .into());
-    }
-    if !stderr.trim().is_empty() {
-        return Err(format!("xgettext emitted warnings:\n{stderr}").into());
-    }
-
-    let mut template = String::from(
-        "# Rufin translation template.\n# Copyright (C) 2026 Rufin contributors\n# This file is distributed under the same license as the Rufin package.\n#\n#, fuzzy\nmsgid \"\"\nmsgstr \"\"\n\"Project-Id-Version: Rufin\\n\"\n\"Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\\n\"\n\"POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\\n\"\n\"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\\n\"\n\"Last-Translator: Rufin translators\\n\"\n\"Language-Team: Rufin translators\\n\"\n\"Language: \\n\"\n\"MIME-Version: 1.0\\n\"\n\"Content-Type: text/plain; charset=UTF-8\\n\"\n\"Content-Transfer-Encoding: 8bit\\n\"\n",
-    );
-    if entries.metadata()?.len() > 0 {
-        template.push('\n');
-        template.push_str(&canonical_gettext_entries(strip_xgettext_header(
-            &read_to_string(entries)?,
-        )));
-    }
-    write_string(output, &template)
-}
-
-fn strip_xgettext_header(input: &str) -> &str {
-    input
-        .split_once("\n\n")
-        .map_or(input, |(_, entries)| entries)
-}
-
-fn canonical_gettext_entries(input: &str) -> String {
-    let mut entries = input
-        .trim()
-        .split("\n\n")
-        .filter(|entry| !entry.is_empty())
-        .map(|entry| (gettext_entry_sort_key(entry), entry))
-        .collect::<Vec<_>>();
-    entries.sort_by(|(left_key, left), (right_key, right)| {
-        left_key.cmp(right_key).then_with(|| left.cmp(right))
-    });
-    if entries.is_empty() {
-        return String::new();
-    }
-    let mut output = entries
-        .into_iter()
-        .map(|(_, entry)| entry)
-        .collect::<Vec<_>>()
-        .join("\n\n");
-    output.push('\n');
-    output
-}
-
-fn gettext_entry_sort_key(entry: &str) -> (String, String) {
-    (
-        gettext_field_key(entry, "msgctxt"),
-        gettext_field_key(entry, "msgid"),
-    )
-}
-
-fn gettext_field_key(entry: &str, field: &str) -> String {
-    let prefix = format!("{field} ");
-    let mut key = String::new();
-    let mut collecting = false;
-    for line in entry.lines() {
-        if let Some(value) = line.strip_prefix(&prefix) {
-            collecting = true;
-            key.push_str(value);
-        } else if collecting && line.starts_with('"') {
-            key.push_str(line);
-        } else if collecting {
-            break;
-        }
-    }
-    key
-}
-
-#[cfg(test)]
-mod tests {
-    use super::canonical_gettext_entries;
-
-    #[test]
-    fn gettext_entry_order_does_not_change_template() {
-        let plural = "#, rust-format\n\
-                      msgid \"{count} album\"\n\
-                      msgid_plural \"{count} albums\"\n\
-                      msgstr[0] \"\"\n\
-                      msgstr[1] \"\"";
-        let contextual = "msgctxt \"button\"\n\
-                          msgid \"Play\"\n\
-                          msgstr \"\"";
-        let first = format!("{plural}\n\n{contextual}\n");
-        let second = format!("{contextual}\n\n{plural}\n");
-
-        assert_eq!(
-            canonical_gettext_entries(&first),
-            canonical_gettext_entries(&second)
-        );
-    }
+    write_string(output, &crate::i18n::template(&root)?)
 }

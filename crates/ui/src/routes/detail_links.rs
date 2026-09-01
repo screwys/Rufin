@@ -6,6 +6,7 @@ use crate::preferences::source::login::source_kind_icon_name;
 use crate::shell::Shell;
 use ::library::{AlbumArtistLink, AlbumRow, ArtistKey, TrackArtistLink, TrackRow};
 use gtk::glib;
+use gtk::prelude::ObjectExt;
 use localization::msgid;
 
 use super::route::Route;
@@ -159,7 +160,7 @@ impl DetailLinks {
 
 #[derive(Clone)]
 pub(crate) struct DetailLinkBinding {
-    label: gtk::Label,
+    label: glib::WeakRef<gtk::Label>,
     links: Rc<RefCell<DetailLinks>>,
 }
 
@@ -176,7 +177,7 @@ impl DetailLinkBinding {
             glib::Propagation::Stop
         });
         Self {
-            label: label.clone(),
+            label: label.downgrade(),
             links,
         }
     }
@@ -184,12 +185,16 @@ impl DetailLinkBinding {
     pub(crate) fn bind(&self, links: DetailLinks) {
         let markup = links.markup();
         self.links.replace(links);
-        self.label.set_markup(&markup);
+        if let Some(label) = self.label.upgrade() {
+            label.set_markup(&markup);
+        }
     }
 
     pub(crate) fn clear(&self) {
         self.links.replace(DetailLinks::default());
-        self.label.set_text("");
+        if let Some(label) = self.label.upgrade() {
+            label.set_text("");
+        }
     }
 }
 
@@ -228,6 +233,25 @@ pub(crate) fn track_album_artist_links(track: &TrackRow) -> DetailLinks {
         |credit| credit.name.as_str(),
         true,
     )
+}
+
+pub(crate) fn track_artist_album_links(track: &TrackRow) -> DetailLinks {
+    let mut links = track_artist_links(track);
+    if track.display_album.trim().is_empty() {
+        return links;
+    }
+    if !links.text.is_empty() {
+        links.text.push_str(" / ");
+    }
+    let start = links.text.len();
+    links.text.push_str(&track.display_album);
+    if let Some(album_key) = track.album_key {
+        links.links.push(DetailLink {
+            range: start..links.text.len(),
+            route: Route::AlbumDetail(album_key),
+        });
+    }
+    links
 }
 
 pub(crate) fn album_artist_links(album: &AlbumRow) -> DetailLinks {
@@ -368,6 +392,23 @@ mod tests {
         assert_eq!(
             links.route_for_link("0"),
             Some(Route::AlbumArtistDetail(ArtistKey::from_raw(4)))
+        );
+    }
+
+    #[test]
+    fn folder_metadata_links_artist_and_album_destinations() {
+        let mut track = track("Artist");
+        track.artists = vec![credit(3, "Artist")];
+        track.display_album = "Album".to_string();
+        track.album_key = Some(AlbumKey::from_raw(8));
+        let links = track_artist_album_links(&track);
+        assert_eq!(
+            links.route_for_link("0"),
+            Some(Route::ArtistDetail(ArtistKey::from_raw(3)))
+        );
+        assert_eq!(
+            links.route_for_link("1"),
+            Some(Route::AlbumDetail(AlbumKey::from_raw(8)))
         );
     }
 

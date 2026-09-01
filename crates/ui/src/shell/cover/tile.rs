@@ -77,7 +77,14 @@ impl ArtworkTile {
         area.set_clip_overlay(&image, true);
         area.set_opacity(0.0);
 
-        let size = Rc::new(Cell::new(width.max(height)));
+        Self::from_widgets(area, image, width.max(height))
+    }
+
+    pub(crate) fn from_widgets(area: gtk::Overlay, image: gtk::Picture, size: i32) -> Self {
+        area.set_measure_overlay(&image, false);
+        area.set_clip_overlay(&image, true);
+
+        let size = Rc::new(Cell::new(size));
         let known_missing = Rc::new(Cell::new(false));
         let artwork_id = Rc::new(RefCell::new(None::<artwork::ArtworkVisualIdentity>));
         let request_key = Rc::new(RefCell::new(None::<artwork::ArtworkRequestIdentity>));
@@ -181,6 +188,10 @@ impl ArtworkTile {
 
     pub(super) fn has_artwork_request(&self) -> bool {
         self.artwork_request.borrow().is_some()
+    }
+
+    pub(super) fn generation_is_current(&self, generation: u64) -> bool {
+        self.generation.get() == generation
     }
 
     pub(super) fn replace_artwork_request(&self, request: glib::JoinHandle<()>) {

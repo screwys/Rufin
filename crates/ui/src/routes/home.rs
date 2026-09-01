@@ -8,29 +8,33 @@ use localization::{album_count_text, msgid, tr, track_count_text};
 use playback::RadioPlayRequest;
 
 use crate::LibraryField;
+use crate::favorites::{
+    favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
+};
 use crate::format_duration_units;
 use crate::layout::{configure_fill_width_clip, width_allocation_owner};
 use crate::localization::{bind_label_text_with, localized_label};
 use crate::settings::{HomeBlockKind, HomeSectionKind};
 use crate::shell::Shell;
-use crate::shell::cover::presentation::{add_album_seed_gradient_class, stable_seed};
+use crate::shell::actions::{ActionButtonVariant, configure_action_button};
+use crate::shell::cover::presentation::stable_seed;
 use crate::shell::route::MountedRoute;
 
-use super::cards::album_cover_overlay;
-use super::collections::{PlaybackTarget, library_route_inset};
+use super::collection_context::present_album_context_menu;
+use super::collections::{CollectionPlay, PlaybackTarget, library_route_inset};
 use super::detail_links::{
     DetailLinkBinding, DetailLinks, album_artist_links, track_album_artist_links,
     track_artist_links,
 };
-use super::detail_showcase::{DetailSummaryProjection, detail_radio_button};
+use super::detail_showcase::{
+    DetailShowcaseView, MediaShowcase, detail_playback_controls, detail_radio_button,
+    home_album_cover_projection, media_showcase,
+};
 use super::grid_cells::{
     AlbumGridCell, FixedPageCollectionRow, ReusableCollectionGridCell, TrackGridCell,
     collection_grid_column_count, fixed_page_collection_row,
 };
-use super::home_layout::{
-    HomeShowcaseMode, home_section_header, home_showcase_cover_size, home_showcase_is_compact,
-    home_showcase_mode, home_showcase_spacing,
-};
+use super::home_layout::home_section_header;
 use super::library_fields::{COLLECTION_GRID_CARD_MARGIN, track_field};
 use super::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
 use super::route::Route;
@@ -38,6 +42,7 @@ use super::route_layout::{ROUTE_TOP_MARGIN, home_album_content_width, route_scro
 
 const HOME_ALBUM_GRID_FIELDS: [LibraryField; 2] = [LibraryField::AlbumArtist, LibraryField::Year];
 const HOME_TRACK_GRID_FIELDS: [LibraryField; 2] = [LibraryField::Artist, LibraryField::Album];
+const HOME_SHOWCASE_ACTION_MIN_COVER_SIZE: i32 = 200;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum HomeRefreshAction {
@@ -418,8 +423,8 @@ impl Shell {
         let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         section.set_hexpand(true);
         let header = home_section_header(title);
-        header.root.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
-        section.append(&header.root);
+        header.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
+        section.append(&header);
 
         let content_width = home_album_content_width(self);
         let page_size = collection_grid_column_count(content_width);
@@ -436,8 +441,8 @@ impl Shell {
             data: Rc::new(RefCell::new(items)),
             model,
             row: row.clone(),
-            previous: header.previous.downgrade(),
-            next: header.next.downgrade(),
+            previous: header.previous().downgrade(),
+            next: header.next().downgrade(),
             page_start: Rc::new(Cell::new(0)),
             page_size: Rc::new(Cell::new(page_size)),
         };
@@ -448,15 +453,15 @@ impl Shell {
         }));
         let previous = mounted.clone();
         header
-            .previous
+            .previous()
             .connect_clicked(move |_| previous.shift(false));
         let next = mounted.clone();
-        header.next.connect_clicked(move |_| next.shift(true));
+        header.next().connect_clicked(move |_| next.shift(true));
         if let Some(kind) = refresh_kind {
             let shell = Rc::clone(self);
             let operations = self.selected_source_operations();
             let refresh_section = mounted.clone();
-            header.refresh.connect_clicked(move |_| {
+            header.refresh().connect_clicked(move |_| {
                 refresh_section.page_start.set(0);
                 if kind == HomeSectionKind::Explore {
                     shell
@@ -472,7 +477,7 @@ impl Shell {
                 }
             });
         } else {
-            header.refresh.set_visible(false);
+            header.refresh().set_visible(false);
         }
         HomeSectionView {
             root: section.upcast(),
@@ -482,25 +487,30 @@ impl Shell {
 
     fn home_showcase(self: &Rc<Self>, item: &HomeAlbumRow) -> gtk::Widget {
         let width = home_album_content_width(self);
-        let mode = home_showcase_mode(width);
-        let cover_size = home_showcase_cover_size(width);
         let mut album = item.album.clone();
         album.title.clone_from(&item.title);
         if item.artwork_binding.is_some() {
             album.artwork_binding.clone_from(&item.artwork_binding);
         }
         let seed = stable_seed(&album.object_id);
-        let cover = album_cover_overlay(self, &album, cover_size);
+        let cover = home_album_cover_projection(
+            self,
+            &album,
+            super::route_layout::detail_showcase_cover_size(width),
+        );
         let title_text = album.title.clone();
-        let artist_text = album.display_artist.clone();
-        let year = album.year;
-        let track_count = album.track_count;
-        let duration_millis = album.duration_millis;
-        let artist_links = album_artist_links(&album);
-        let radio = RadioSeed::Album(album.album_key);
+        let showcase_view =
+            DetailShowcaseView::new("home-showcase", seed, "Showcase", true, &title_text);
+        let radio = detail_radio_button();
+        let radio_controller = self.products.playback.radio.clone();
+        let radio_seed = RadioSeed::Album(album.album_key);
+        radio.connect_clicked(move |_| {
+            radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
+        });
+        showcase_view.append_kind_control(&radio);
         let drag_album = album.album_key;
         let drag_title = title_text.clone();
-        let drag_target = cover.widget();
+        let drag_target: gtk::Widget = cover.button().upcast();
         let drag_artwork = cover.drag_paintable_source();
         let drag_shell = Rc::downgrade(self);
         install_compact_playlist_drag_source(&drag_target, &drag_artwork, move || {
@@ -509,120 +519,96 @@ impl Shell {
                 PlaylistTrackSource::current_target(&shell, PlaybackTarget::Album(drag_album))?;
             Some((source, drag_title.clone()))
         });
-        let section = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        section.set_hexpand(true);
-        let body = gtk::Box::new(gtk::Orientation::Horizontal, home_showcase_spacing(width));
-        body.add_css_class("home-showcase");
-        add_album_seed_gradient_class(&body, seed);
-        body.set_hexpand(true);
-        body.set_halign(gtk::Align::Fill);
-        body.set_valign(gtk::Align::Start);
-        body.set_width_request(1);
-        body.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
-        body.set_overflow(gtk::Overflow::Hidden);
 
-        cover.widget().add_css_class("home-showcase-cover");
-        let cover_column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-        cover_column.set_width_request(cover_size);
-        cover_column.set_halign(gtk::Align::Start);
-        cover_column.append(&cover.widget());
-        body.append(&cover_column);
-
-        let metadata = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        metadata.set_hexpand(true);
-        metadata.set_halign(gtk::Align::Fill);
-        metadata.set_valign(gtk::Align::Center);
-        metadata.set_width_request(1);
-        metadata.set_visible(mode != HomeShowcaseMode::CoverOnly);
-        metadata.append(&self.home_showcase_kind_row(radio));
-
-        let title = gtk::Label::new(Some(&title_text));
-        title.add_css_class("home-showcase-title");
-        if home_showcase_is_compact(width) {
-            title.add_css_class("home-showcase-title-compact");
+        let actions = showcase_view.actions();
+        actions.set_halign(gtk::Align::Start);
+        let play_shell = Rc::clone(self);
+        let play_target = PlaybackTarget::Album(album.album_key);
+        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
+            play_target.play(&play_shell, placement, shuffled);
+        });
+        let controls = detail_playback_controls(
+            &actions,
+            msgid("Play album"),
+            Some(album.favorite),
+            true,
+            play,
+        );
+        let favorite = favorite_icon_button("Favorite");
+        configure_action_button(&favorite, ActionButtonVariant::DetailFavorite);
+        set_favorite_button_active(&favorite, album.favorite);
+        actions.append(&favorite);
+        let hover_favorite = controls
+            .favorite
+            .as_ref()
+            .expect("Home album has a Favorite cover control")
+            .clone();
+        let favorite_key = album.album_key;
+        for button in [favorite, hover_favorite] {
+            self.register_dynamic_favorite_button(
+                Rc::new(move || Some(crate::favorites::album_favorite_key(&favorite_key))),
+                &button,
+            );
+            let favorite_shell = Rc::clone(self);
+            let favorite_album = album.album_key;
+            button.connect_clicked(move |button| {
+                favorite_shell.set_favorite_with_feedback(
+                    library::FavoriteTarget::Album(favorite_album),
+                    !favorite_button_is_active(button),
+                    Some(button),
+                );
+            });
         }
-        title.set_xalign(0.0);
-        title.set_wrap(true);
-        title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-        title.set_lines(3);
-        title.set_ellipsize(gtk::pango::EllipsizeMode::End);
-        title.set_width_chars(1);
-        metadata.append(&title);
 
-        let artist = gtk::Label::new(Some(&artist_text));
-        artist.add_css_class("muted");
+        let menu_shell = Rc::clone(self);
+        let menu_album = album.clone();
+        let context_menu = Rc::new(move |target: &gtk::Widget, position| {
+            present_album_context_menu(
+                target,
+                &menu_shell,
+                menu_album.clone(),
+                None,
+                None,
+                position,
+            );
+        });
+
+        let artist = gtk::Label::new(Some(&album.display_artist));
+        artist.add_css_class("detail-artist");
         artist.set_xalign(0.0);
-        artist.set_ellipsize(gtk::pango::EllipsizeMode::End);
+        artist.set_halign(gtk::Align::Start);
+        artist.set_wrap(true);
+        artist.set_wrap_mode(gtk::pango::WrapMode::WordChar);
+        artist.set_width_request(1);
         artist.set_width_chars(1);
-        DetailLinkBinding::new(&artist, self).bind(artist_links);
-        metadata.append(&artist);
-
-        let facts = DetailSummaryProjection::new(&[
+        artist.set_max_width_chars(32);
+        DetailLinkBinding::new(&artist, self).bind(album_artist_links(&album));
+        showcase_view.append_detail(&artist);
+        showcase_view.replace_summary(&[
             (
                 "rufin-x-office-calendar-symbolic",
-                year.map(|year| year.to_string()).unwrap_or_default(),
+                album.year.map(|year| year.to_string()).unwrap_or_default(),
             ),
             (
                 "rufin-tracks-symbolic",
-                track_count_text(track_count.max(0) as u64),
+                track_count_text(album.track_count.max(0) as u64),
             ),
             (
                 "rufin-preferences-system-time-symbolic",
-                format_duration_units((duration_millis.max(0) / 1_000) as u32),
+                format_duration_units((album.duration_millis.max(0) / 1_000) as u32),
             ),
         ]);
-        let track_count = track_count.max(0) as u64;
-        facts.bind_text_with(1, move || track_count_text(track_count));
-        metadata.append(&facts.widget());
-        body.append(&metadata);
-        section.append(&body);
+        let track_count = album.track_count.max(0) as u64;
+        showcase_view.bind_summary_text_with(1, move || track_count_text(track_count));
 
-        let allocated = Rc::new(Cell::new(width));
-        let resize_body = body;
-        let resize_metadata = metadata;
-        let resize_title = title;
-        let resize_cover_column = cover_column;
-        let resize_cover = cover;
-        width_allocation_owner(&section, move |width| {
-            if width <= 1 || allocated.replace(width) == width {
-                return;
-            }
-            let mode = home_showcase_mode(width);
-            resize_body.set_spacing(home_showcase_spacing(width));
-            resize_metadata.set_visible(mode != HomeShowcaseMode::CoverOnly);
-            if home_showcase_is_compact(width) {
-                resize_title.add_css_class("home-showcase-title-compact");
-            } else {
-                resize_title.remove_css_class("home-showcase-title-compact");
-            }
-            let size = home_showcase_cover_size(width);
-            resize_cover_column.set_width_request(size);
-            resize_cover.resize(size);
+        media_showcase(MediaShowcase {
+            view: showcase_view,
+            initial_width: width,
+            cover,
+            cover_controls: controls,
+            context_menu: Some(context_menu),
+            actions_min_cover_size: Some(HOME_SHOWCASE_ACTION_MIN_COVER_SIZE),
         })
-        .upcast()
-    }
-
-    fn home_showcase_kind_row(self: &Rc<Self>, seed: RadioSeed) -> gtk::Box {
-        let label = localized_label("Showcase");
-        label.add_css_class("eyebrow");
-        label.set_xalign(0.0);
-        label.set_halign(gtk::Align::Start);
-        label.set_valign(gtk::Align::Center);
-        label.set_margin_end(6);
-        let row = gtk::Box::new(gtk::Orientation::Horizontal, 2);
-        row.add_css_class("album-detail-kind-row");
-        row.add_css_class("album-detail-genre-row");
-        row.add_css_class("home-showcase-kind-row");
-        row.set_valign(gtk::Align::Center);
-        row.set_halign(gtk::Align::Start);
-        row.append(&label);
-        let radio = detail_radio_button();
-        let controller = self.products.playback.radio.clone();
-        radio.connect_clicked(move |_| {
-            controller.play_radio(RadioPlayRequest::now(seed.clone()));
-        });
-        row.append(&radio);
-        row
     }
 
     fn home_genres(self: &Rc<Self>, genres: &[HomeGenreRow]) -> Option<gtk::Widget> {
@@ -771,6 +757,17 @@ fn activate_home_item(shell: &Rc<Shell>, item: HomeItem) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn home_section_header_template_builds() {
+        gtk::init().expect("GTK display");
+        crate::application::verify_interface_resources().expect("compiled interface resources");
+        let header = home_section_header("Section");
+        assert!(header.first_child().is_some());
+        assert!(header.previous().parent().is_some());
+        assert!(header.next().parent().is_some());
+    }
 
     #[test]
     fn home_page_start_stays_on_a_complete_available_page() {

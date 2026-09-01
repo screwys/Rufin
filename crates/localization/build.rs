@@ -33,7 +33,10 @@ fn cargo_env_path(name: &str) -> BuildResult<PathBuf> {
 
 fn compile_translation_catalogs(po_files: &[PathBuf]) -> BuildResult<PathBuf> {
     let out_dir = cargo_env_path("OUT_DIR")?;
-    let locale_dir = out_dir.join("share/locale");
+    println!("cargo:rerun-if-env-changed=RUFIN_BUILD_LOCALEDIR");
+    let locale_dir = env::var_os("RUFIN_BUILD_LOCALEDIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| out_dir.join("share/locale"));
     if locale_dir.exists() {
         fs::remove_dir_all(&locale_dir)?;
     }

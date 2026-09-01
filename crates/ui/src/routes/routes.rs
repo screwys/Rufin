@@ -17,7 +17,6 @@ use super::collections::{
 };
 use super::named_collections::{NamedOrderLoad, NamedReadRequest};
 use super::route::{CollectionCategory, Route};
-use super::route_layout::PRIMARY_ROUTE_HORIZONTAL_INSET;
 use super::route_shell::{LibraryPageShellOptions, LibraryToolbarProjection};
 use super::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
 
@@ -136,6 +135,10 @@ impl TrackListProjection {
         changed
     }
 
+    pub(crate) fn resume_initial_demand(&self) {
+        self.model.resume_initial_demand();
+    }
+
     pub(crate) fn apply_library_list_settings(
         &self,
         key: LibraryListKey,
@@ -168,6 +171,7 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         key: LibraryListKey,
         context: &str,
@@ -176,12 +180,13 @@ impl Shell {
         let projection = self.searchable_track_collection(
             selected,
             order,
+            first_row_position,
             first_rows,
             key,
             SearchableTrackOptions {
                 on_visible_count_changed: None,
                 context_id,
-                content_inset: PRIMARY_ROUTE_HORIZONTAL_INSET,
+                content_inset: 0,
                 fixed_layout: None,
                 search: None,
             },
@@ -192,7 +197,6 @@ impl Shell {
         wrapper.set_vexpand(true);
         let toolbar = self.library_toolbar_projection(key, projection.search());
         wrapper.append(&library_route_inset(toolbar.widget()));
-        self.set_route_search(Some(projection.search()));
         wrapper.append(&projection.scrolling_widget());
         (wrapper.upcast(), projection, toolbar)
     }
@@ -202,19 +206,28 @@ impl Shell {
         route: Route,
         favorites_only: bool,
         order: AlbumCollectionOrder,
+        first_row_position: usize,
         first_rows: Vec<library::AlbumRow>,
+        first_detail_rows: Vec<super::album_detail::AlbumDetailRouteRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let key = LibraryListKey::Albums;
         let settings = self.settings.current.borrow().library_list(key);
         let applied_settings = Rc::new(RefCell::new(settings.clone()));
-        let models = AlbumCollectionModels::new(&selected, order, first_rows, settings.layout);
+        let models = AlbumCollectionModels::new(
+            &selected,
+            order,
+            first_row_position,
+            first_rows,
+            first_detail_rows,
+            settings.layout,
+        );
 
         let search = gtk::SearchEntry::new();
         bind_search_placeholder(&search, "Search");
         let query = Rc::new(RefCell::new(String::new()));
         let content = album_collection_projection(self, models.clone(), key);
-        let page = self.library_page_shell(LibraryPageShellOptions {
+        let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: models.is_empty(),
             empty_body: if favorites_only {
@@ -237,7 +250,10 @@ impl Shell {
             let applied_settings = Rc::clone(&applied_settings);
             Rc::new(
                 move |request: CollectionReadRequest,
-                      result: Result<(AlbumCollectionOrder, Vec<library::AlbumRow>), String>| {
+                      result: Result<
+                    (AlbumCollectionOrder, usize, Vec<library::AlbumRow>),
+                    String,
+                >| {
                     let Some(shell) = shell.upgrade() else {
                         return;
                     };
@@ -245,8 +261,8 @@ impl Shell {
                         return;
                     }
                     match result {
-                        Ok((order, first_rows)) => {
-                            if !models.replace_prepared(order, first_rows) {
+                        Ok((order, first_row_position, first_rows)) => {
+                            if !models.replace_prepared(order, first_row_position, first_rows) {
                                 warn!("rejected a mismatched prepared Albums page");
                                 return;
                             }
@@ -279,10 +295,10 @@ impl Shell {
                             &cancellation,
                         )
                         .await
-                        .map(|order| (AlbumCollectionOrder::Detail(order), Vec::new()))
+                        .map(|order| (AlbumCollectionOrder::Detail(order), 0, Vec::new()))
                         .map_err(|error| error.to_string())
                 } else {
-                    let (order, first_rows) = database
+                    let (order, first_row_position, first_rows) = database
                         .album_route_page(
                             source,
                             folder,
@@ -290,11 +306,16 @@ impl Shell {
                             &request.query,
                             request.settings.sort_key.album_sort(),
                             request.settings.descending,
+                            library::RouteSeedWindow::top(),
                             &cancellation,
                         )
                         .await
                         .map_err(|error| error.to_string())?;
-                    Ok((AlbumCollectionOrder::Rows(order), first_rows))
+                    Ok((
+                        AlbumCollectionOrder::Rows(order),
+                        first_row_position,
+                        first_rows,
+                    ))
                 }
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         });
@@ -355,10 +376,14 @@ impl Shell {
         let favorite_read = Rc::clone(&read);
         let favorite_query = Rc::clone(&query);
         if favorites_only {
-            self.install_favorite_category_tabs(CollectionCategory::Albums, &page);
+            self.install_favorite_category_tabs(CollectionCategory::Albums, &mut page);
         }
-        MountedRoute::new(page.widget(), resume)
+        page.mounted_route(resume)
             .with_item_navigation(content.item_navigation())
+            .with_initial_demand({
+                let models = models.clone();
+                Rc::new(move || models.resume_initial_demand())
+            })
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let library::FavoriteTarget::Album(album) = settlement.target else {
                     return;
@@ -377,6 +402,7 @@ impl Shell {
     pub(crate) fn library_tracks_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -389,6 +415,7 @@ impl Shell {
                 history: false,
             },
             order,
+            first_row_position,
             first_rows,
             selected,
             false,
@@ -398,6 +425,7 @@ impl Shell {
     pub(crate) fn favorites_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -411,6 +439,7 @@ impl Shell {
                 history: false,
             },
             order,
+            first_row_position,
             first_rows,
             selected,
             true,
@@ -421,6 +450,7 @@ impl Shell {
         self: &Rc<Self>,
         options: RootTrackRouteOptions,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
         favorites_only: bool,
@@ -432,6 +462,7 @@ impl Shell {
         let projection = self.searchable_track_collection(
             &selected,
             order,
+            first_row_position,
             first_rows,
             options.key,
             SearchableTrackOptions {
@@ -448,6 +479,7 @@ impl Shell {
     pub(crate) fn history_route(
         self: &Rc<Self>,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -460,6 +492,7 @@ impl Shell {
                 history: true,
             },
             order,
+            first_row_position,
             first_rows,
             selected,
             false,
@@ -472,6 +505,7 @@ impl Shell {
         album_artist: bool,
         favorites_only: bool,
         order: Vec<library::ArtistKey>,
+        first_row_position: usize,
         first_rows: Vec<library::ArtistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -501,12 +535,12 @@ impl Shell {
             selected.runtime.clone(),
             row_load,
         );
-        sparse.seed_matching(first_rows, |row| row.artist_key);
+        sparse.seed_matching_at(first_row_position, first_rows, |row| row.artist_key);
         let content = artist_collection_projection(self, Rc::clone(&sparse), key);
         let search = gtk::SearchEntry::new();
         bind_search_placeholder(&search, "Search");
         let query = Rc::new(RefCell::new(String::new()));
-        let page = self.library_page_shell(LibraryPageShellOptions {
+        let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: sparse.len() == 0,
             empty_body: if favorites_only {
@@ -529,7 +563,7 @@ impl Shell {
             Rc::new(
                 move |request: CollectionReadRequest,
                       result: Result<
-                    (Vec<library::ArtistKey>, Vec<library::ArtistRow>),
+                    (Vec<library::ArtistKey>, usize, Vec<library::ArtistRow>),
                     String,
                 >| {
                     let Some(shell) = shell.upgrade() else {
@@ -539,8 +573,13 @@ impl Shell {
                         return;
                     }
                     match result {
-                        Ok((order, first_rows)) => {
-                            if !sparse.replace_prepared(order, first_rows, |row| row.artist_key) {
+                        Ok((order, first_row_position, first_rows)) => {
+                            if !sparse.replace_prepared_at(
+                                order,
+                                first_row_position,
+                                first_rows,
+                                |row| row.artist_key,
+                            ) {
                                 warn!("rejected a mismatched prepared Artist page");
                                 return;
                             }
@@ -567,6 +606,7 @@ impl Shell {
                         &request.query,
                         request.settings.sort_key.artist_sort(),
                         request.settings.descending,
+                        library::RouteSeedWindow::top(),
                         &cancellation,
                     )
                     .await
@@ -619,10 +659,14 @@ impl Shell {
         let favorite_query = Rc::clone(&query);
         let favorite_shell = Rc::downgrade(self);
         if favorites_only {
-            self.install_favorite_category_tabs(CollectionCategory::Artists, &page);
+            self.install_favorite_category_tabs(CollectionCategory::Artists, &mut page);
         }
-        MountedRoute::new(page.widget(), resume)
+        page.mounted_route(resume)
             .with_item_navigation(content.item_navigation())
+            .with_initial_demand({
+                let sparse = Rc::clone(&sparse);
+                Rc::new(move || sparse.resume_initial_demand())
+            })
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let Some(favorite_shell) = favorite_shell.upgrade() else {
                     return;
@@ -646,6 +690,7 @@ impl Shell {
     pub(crate) fn library_playlists_route(
         self: &Rc<Self>,
         order: Vec<library::PlaylistKey>,
+        first_row_position: usize,
         first_rows: Vec<library::PlaylistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -678,6 +723,7 @@ impl Shell {
                             request.settings.sort_key.playlist_sort(),
                             request.settings.descending,
                             &request.query,
+                            library::RouteSeedWindow::top(),
                             &cancellation,
                         )
                         .await
@@ -689,6 +735,7 @@ impl Shell {
             key,
             msgid("Nothing here yet"),
             order,
+            first_row_position,
             first_rows,
             |row: &library::PlaylistRow| row.playlist_key,
             selected,
@@ -700,6 +747,7 @@ impl Shell {
     pub(crate) fn library_smart_playlists_route(
         self: &Rc<Self>,
         order: Vec<library::SmartPlaylistKey>,
+        first_row_position: usize,
         first_rows: Vec<library::SmartPlaylistRow>,
         selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
@@ -738,6 +786,7 @@ impl Shell {
                             request.settings.sort_key.smart_playlist_sort(),
                             request.settings.descending,
                             now,
+                            library::RouteSeedWindow::top(),
                             &cancellation,
                         )
                         .await
@@ -749,6 +798,7 @@ impl Shell {
             key,
             msgid("No smart playlists yet"),
             order,
+            first_row_position,
             first_rows,
             |row: &library::SmartPlaylistRow| row.smart_playlist_key,
             selected,
@@ -761,6 +811,7 @@ impl Shell {
         self: &Rc<Self>,
         selected: &crate::runtime::SelectedLibrary,
         order: Vec<library::TrackKey>,
+        first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         key: LibraryListKey,
         options: SearchableTrackOptions,
@@ -775,6 +826,7 @@ impl Shell {
             Arc::clone(&selected.database),
             selected.runtime.clone(),
             order,
+            first_row_position,
             first_rows,
             settings.clone(),
         );
@@ -822,7 +874,7 @@ impl Shell {
         favorites_only: bool,
     ) -> MountedRoute {
         let key = options.key;
-        let page = self.library_page_shell(LibraryPageShellOptions {
+        let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
             empty: projection.source_is_empty(),
             empty_body: options.empty_body,
@@ -876,6 +928,7 @@ impl Shell {
                             source_key,
                             folder,
                             &request.tracks.query,
+                            library::RouteSeedWindow::top(),
                             &cancellation,
                         )
                         .await
@@ -888,6 +941,7 @@ impl Shell {
                             &request.tracks.query,
                             request.tracks.settings.sort_key.track_sort(),
                             request.tracks.settings.descending,
+                            library::RouteSeedWindow::top(),
                             &cancellation,
                         )
                         .await
@@ -895,6 +949,7 @@ impl Shell {
                 .map_err(|error| error.to_string())?;
                 Ok::<PreparedTrackProjection, String>(PreparedTrackProjection {
                     order: page.order,
+                    first_row_position: page.first_row_position,
                     first_rows: page.first_rows,
                     request: request.tracks,
                 })
@@ -935,10 +990,14 @@ impl Shell {
         let favorite_projection = projection.clone();
         let favorite_read = Rc::clone(&read);
         if favorites_only {
-            self.install_favorite_category_tabs(CollectionCategory::Tracks, &page);
+            self.install_favorite_category_tabs(CollectionCategory::Tracks, &mut page);
         }
-        MountedRoute::new(page.widget(), resume)
+        page.mounted_route(resume)
             .with_item_navigation(projection.item_navigation())
+            .with_initial_demand({
+                let projection = projection.clone();
+                Rc::new(move || projection.resume_initial_demand())
+            })
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let library::FavoriteTarget::Track(track) = settlement.target else {
                     return;

@@ -55,34 +55,30 @@ pub(crate) struct SelectedPlaybackState {
 
 #[derive(Default)]
 pub(crate) struct SelectedDialogState {
-    dialogs: RefCell<Vec<adw::Dialog>>,
+    dialogs: RefCell<Vec<gtk::glib::WeakRef<adw::Dialog>>>,
 }
 
 impl SelectedDialogState {
     fn register(&self, dialog: &adw::Dialog) {
         let mut dialogs = self.dialogs.borrow_mut();
-        if !dialogs.iter().any(|current| current == dialog) {
-            dialogs.push(dialog.clone());
-        }
-    }
-
-    fn forget(&self, dialog: &adw::Dialog) {
-        self.dialogs
-            .borrow_mut()
-            .retain(|current| current != dialog);
-    }
-
-    fn close_all(&self) {
-        let dialogs = std::mem::take(&mut *self.dialogs.borrow_mut());
-        for dialog in dialogs {
-            dialog.force_close();
+        dialogs.retain(|current| current.upgrade().is_some());
+        if !dialogs
+            .iter()
+            .filter_map(gtk::glib::WeakRef::upgrade)
+            .any(|current| current == *dialog)
+        {
+            dialogs.push(dialog.downgrade());
         }
     }
 }
 
 impl Drop for SelectedDialogState {
     fn drop(&mut self) {
-        self.close_all();
+        for dialog in self.dialogs.get_mut().drain(..) {
+            if let Some(dialog) = dialog.upgrade() {
+                dialog.force_close();
+            }
+        }
     }
 }
 
@@ -205,15 +201,6 @@ impl Shell {
         session.dialogs.register(&dialog);
         drop(session);
 
-        let shell = Rc::downgrade(self);
-        dialog.connect_closed(move |dialog| {
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            if let Some(session) = shell.selected_ui.session() {
-                session.dialogs.forget(dialog);
-            }
-        });
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
 

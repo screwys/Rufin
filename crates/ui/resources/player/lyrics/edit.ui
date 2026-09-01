@@ -1,0 +1,69 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwDialog" id="dialog">
+    <property name="title" translatable="yes">Edit Lyrics</property>
+    <property name="child">
+      <object class="AdwToolbarView">
+        <child type="top"><object class="AdwHeaderBar"/></child>
+        <property name="content">
+          <object class="GtkBox">
+            <property name="orientation">vertical</property>
+            <property name="spacing">12</property>
+            <property name="margin-top">16</property>
+            <property name="margin-bottom">16</property>
+            <property name="margin-start">16</property>
+            <property name="margin-end">16</property>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="halign">center</property>
+                <child><object class="GtkButton" id="offset_decrease_100"><property name="label">-100 ms</property></object></child>
+                <child><object class="GtkButton" id="offset_decrease_50"><property name="label">-50 ms</property></object></child>
+                <child>
+                  <object class="GtkEntry" id="offset_entry">
+                    <property name="tooltip-text" translatable="yes">Lyrics offset (ms)</property>
+                    <property name="xalign">0.5</property>
+                    <property name="width-chars">6</property>
+                    <property name="max-width-chars">9</property>
+                    <property name="max-length">24</property>
+                  </object>
+                </child>
+                <child><object class="GtkButton" id="offset_increase_50"><property name="label">+50 ms</property></object></child>
+                <child><object class="GtkButton" id="offset_increase_100"><property name="label">+100 ms</property></object></child>
+              </object>
+            </child>
+            <child>
+              <object class="GtkScrolledWindow">
+                <property name="vexpand">true</property>
+                <property name="child">
+                  <object class="GtkTextView" id="editor">
+                    <property name="monospace">true</property>
+                    <property name="wrap-mode">word-char</property>
+                  </object>
+                </property>
+              </object>
+            </child>
+            <child>
+              <object class="GtkBox">
+                <property name="orientation">horizontal</property>
+                <property name="spacing">8</property>
+                <property name="halign">end</property>
+                <child><object class="GtkButton" id="cancel"><property name="label" translatable="yes">Cancel</property></object></child>
+                <child>
+                  <object class="GtkButton" id="save">
+                    <property name="label" translatable="yes">Save</property>
+                    <style><class name="suggested-action"/></style>
+                  </object>
+                </child>
+              </object>
+            </child>
+          </object>
+        </property>
+      </object>
+    </property>
+  </object>
+</interface>

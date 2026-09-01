@@ -1123,7 +1123,7 @@ mod tests {
             .expect("cached source")
             .expect("published source")
             .source;
-        let (_, albums) = database
+        let (_, _, albums) = database
             .album_route_page(
                 source_key,
                 None,
@@ -1131,6 +1131,7 @@ mod tests {
                 "AAA Rich Album",
                 library::AlbumSort::Title,
                 false,
+                library::RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
@@ -1157,6 +1158,7 @@ mod tests {
                 "",
                 library::TrackSort::Title,
                 false,
+                library::RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
@@ -1179,7 +1181,7 @@ mod tests {
             mapping[0].source_path,
             "/srv/navidrome/audio/Artist/Album/Track.flac"
         );
-        let (_, artists) = database
+        let (_, _, artists) = database
             .artist_route_page(
                 source_key,
                 None,
@@ -1188,6 +1190,7 @@ mod tests {
                 "Track Artist",
                 library::ArtistSort::Title,
                 false,
+                library::RouteSeedWindow::top(),
                 &cancellation,
             )
             .await

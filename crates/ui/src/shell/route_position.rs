@@ -19,7 +19,7 @@ impl RoutePositionKey {
 
 pub(super) struct RoutePositionMemory {
     capacity: usize,
-    positions: HashMap<RoutePositionKey, f64>,
+    positions: HashMap<RoutePositionKey, RoutePosition>,
     recency: VecDeque<RoutePositionKey>,
 }
 
@@ -38,13 +38,21 @@ impl RoutePositionMemory {
         }
     }
 
-    pub(super) fn record(&mut self, key: RoutePositionKey, position: f64) {
-        if self.capacity == 0 || !position.is_finite() {
+    pub(super) fn record(&mut self, key: RoutePositionKey, value: f64, upper: f64, page_size: f64) {
+        if self.capacity == 0 || !value.is_finite() || !upper.is_finite() || !page_size.is_finite()
+        {
             return;
         }
 
         self.recency.retain(|candidate| candidate != &key);
-        self.positions.insert(key.clone(), position);
+        self.positions.insert(
+            key.clone(),
+            RoutePosition {
+                value,
+                upper,
+                page_size,
+            },
+        );
         self.recency.push_back(key);
         while self.positions.len() > self.capacity {
             let Some(oldest) = self.recency.pop_front() else {
@@ -54,7 +62,7 @@ impl RoutePositionMemory {
         }
     }
 
-    pub(super) fn restore(&mut self, key: &RoutePositionKey) -> Option<f64> {
+    pub(super) fn restore(&mut self, key: &RoutePositionKey) -> Option<RoutePosition> {
         let position = self.positions.get(key).copied()?;
         self.recency.retain(|candidate| candidate != key);
         self.recency.push_back(key.clone());
@@ -64,6 +72,24 @@ impl RoutePositionMemory {
     pub(super) fn clear(&mut self) {
         self.positions.clear();
         self.recency.clear();
+    }
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub(super) struct RoutePosition {
+    pub(super) value: f64,
+    upper: f64,
+    page_size: f64,
+}
+
+impl RoutePosition {
+    pub(super) fn relative(self) -> f64 {
+        let scrollable = (self.upper - self.page_size).max(0.0);
+        if scrollable <= f64::EPSILON {
+            0.0
+        } else {
+            (self.value / scrollable).clamp(0.0, 1.0)
+        }
     }
 }
 
@@ -80,6 +106,7 @@ mod restore_owner_imp {
     pub struct RoutePositionRestoreOwner {
         pub(super) adjustment: RefCell<Option<gtk::Adjustment>>,
         pub(super) target: Cell<Option<f64>>,
+        pub(super) ready: RefCell<Option<std::rc::Rc<dyn Fn()>>>,
     }
 
     #[glib::object_subclass]
@@ -93,6 +120,7 @@ mod restore_owner_imp {
         fn dispose(&self) {
             self.adjustment.take();
             self.target.take();
+            self.ready.take();
             while let Some(child) = self.obj().first_child() {
                 child.unparent();
             }
@@ -125,6 +153,9 @@ mod restore_owner_imp {
             }
             let Some(target) = self.target.take() else {
                 self.adjustment.take();
+                if let Some(ready) = self.ready.take() {
+                    ready();
+                }
                 return;
             };
             let Some(adjustment) = self.adjustment.take() else {
@@ -136,6 +167,7 @@ mod restore_owner_imp {
                 adjustment.upper(),
                 adjustment.page_size(),
             ));
+            self.obj().queue_allocate();
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {
@@ -154,10 +186,11 @@ gtk::glib::wrapper! {
         @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget;
 }
 
-pub(super) fn restore_route_position_before_snapshot(
+pub(super) fn prepare_route_position_before_snapshot(
     child: &impl IsA<gtk::Widget>,
-    adjustment: &gtk::Adjustment,
-    target: f64,
+    adjustment: Option<&gtk::Adjustment>,
+    target: Option<f64>,
+    ready: impl Fn() + 'static,
 ) -> gtk::Widget {
     use gtk::subclass::prelude::ObjectSubclassIsExt;
 
@@ -167,8 +200,9 @@ pub(super) fn restore_route_position_before_snapshot(
     owner.set_halign(child.halign());
     owner.set_valign(child.valign());
     owner.set_accessible_role(gtk::AccessibleRole::Presentation);
-    owner.imp().adjustment.replace(Some(adjustment.clone()));
-    owner.imp().target.set(Some(target));
+    owner.imp().adjustment.replace(adjustment.cloned());
+    owner.imp().target.set(target);
+    owner.imp().ready.replace(Some(std::rc::Rc::new(ready)));
     child.set_parent(&owner);
     owner.upcast()
 }
@@ -186,14 +220,20 @@ mod tests {
         let albums = RoutePositionKey::new(Route::Albums);
         let mut memory = RoutePositionMemory::with_capacity(2);
 
-        memory.record(home.clone(), 120.0);
-        memory.record(tracks.clone(), 240.0);
-        memory.record(home.clone(), 180.0);
-        memory.record(albums.clone(), 360.0);
+        memory.record(home.clone(), 120.0, 1_000.0, 400.0);
+        memory.record(tracks.clone(), 240.0, 1_000.0, 400.0);
+        memory.record(home.clone(), 180.0, 1_000.0, 400.0);
+        memory.record(albums.clone(), 360.0, 1_000.0, 400.0);
 
-        assert_eq!(memory.restore(&home), Some(180.0));
+        assert_eq!(
+            memory.restore(&home).map(|position| position.value),
+            Some(180.0)
+        );
         assert_eq!(memory.restore(&tracks), None);
-        assert_eq!(memory.restore(&albums), Some(360.0));
+        assert_eq!(
+            memory.restore(&albums).map(|position| position.value),
+            Some(360.0)
+        );
 
         memory.clear();
 
@@ -206,5 +246,15 @@ mod tests {
         assert_eq!(clamp_route_position(460.0, 0.0, 1_000.0, 400.0), 460.0);
         assert_eq!(clamp_route_position(900.0, 0.0, 1_000.0, 400.0), 600.0);
         assert_eq!(clamp_route_position(90.0, 100.0, 80.0, 20.0), 100.0);
+    }
+
+    #[test]
+    fn restored_position_retains_its_relative_extent() {
+        let position = super::RoutePosition {
+            value: 300.0,
+            upper: 1_000.0,
+            page_size: 400.0,
+        };
+        assert_eq!(position.relative(), 0.5);
     }
 }

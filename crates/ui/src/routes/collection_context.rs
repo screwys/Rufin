@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::rc::Rc;
 
 use adw::prelude::*;
 use library::{
@@ -33,8 +33,6 @@ use super::playlist_picker::{
 };
 use super::route::Route;
 use super::track_selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
-
-const DOCUMENT_EDIT_ICON: &str = "rufin-document-edit-symbolic";
 
 #[derive(Clone)]
 pub(crate) struct TrackContext {
@@ -80,46 +78,6 @@ impl From<PlaybackMedia> for TrackContext {
             media,
         }
     }
-}
-
-pub(crate) fn install_dynamic_track_context_menu(
-    target: &impl IsA<gtk::Widget>,
-    shell: &Rc<Shell>,
-    track: Rc<RefCell<Option<TrackRow>>>,
-) {
-    let shell = Rc::clone(shell);
-    install_context_menu_openers(
-        target,
-        Rc::new(move |target, position| {
-            if let Some(track) = track.borrow().clone() {
-                present_track_context_menu(target, &shell, track, position);
-            }
-        }),
-    );
-}
-
-pub(crate) fn install_dynamic_album_context_menu(
-    target: &impl IsA<gtk::Widget>,
-    shell: &Rc<Shell>,
-    album: Rc<RefCell<Option<AlbumRow>>>,
-    playback_context: Option<String>,
-) {
-    let shell = Rc::clone(shell);
-    install_context_menu_openers(
-        target,
-        Rc::new(move |target, position| {
-            if let Some(album) = album.borrow().clone() {
-                present_album_context_menu(
-                    target,
-                    &shell,
-                    album,
-                    playback_context.clone(),
-                    None,
-                    position,
-                );
-            }
-        }),
-    );
 }
 
 pub(crate) fn install_current_track_context_menu(
@@ -305,7 +263,7 @@ fn present_track_menu(
                 ContextMenuItem::EditMetadata,
                 msgid("Edit metadata"),
                 "edit-metadata",
-                DOCUMENT_EDIT_ICON,
+                EDIT_ICON,
             );
         }
     }
@@ -620,7 +578,7 @@ pub(crate) fn present_album_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        DOCUMENT_EDIT_ICON,
+        EDIT_ICON,
     );
     install_sidebar_pin_action(
         &surface,
@@ -727,7 +685,7 @@ pub(crate) fn present_artist_context_menu(
         ContextMenuItem::EditMetadata,
         msgid("Edit metadata"),
         "edit-metadata",
-        DOCUMENT_EDIT_ICON,
+        EDIT_ICON,
     );
     install_sidebar_pin_action(
         &surface,
@@ -880,7 +838,7 @@ pub(crate) fn present_playlist_context_menu(
             playlist_id: playlist.object_id.clone(),
         }),
     );
-    surface.append_fixed_action(msgid("Rename"), "rename", DOCUMENT_EDIT_ICON);
+    surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
     surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
     surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
     let playback = PlaybackTarget::Playlist(playlist.playlist_key);

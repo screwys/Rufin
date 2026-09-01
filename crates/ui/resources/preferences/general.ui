@@ -1,0 +1,104 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+
+  <object class="AdwPreferencesPage" id="page">
+    <property name="title" translatable="yes">General</property>
+    <property name="icon-name">rufin-preferences-system-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Language</property>
+        <child>
+          <object class="AdwComboRow" id="language_row">
+            <property name="title" translatable="yes">Language</property>
+            <property name="subtitle" translatable="yes">Changes take effect after restarting Rufin</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup" id="window_group">
+        <property name="title" translatable="yes">App settings</property>
+        <child><object class="AdwSwitchRow" id="tray_row"><property name="title" translatable="yes">Show tray icon</property></object></child>
+        <child><object class="AdwSwitchRow" id="keep_running_row"><property name="title" translatable="yes">Keep Rufin running after closing the window</property></object></child>
+        <child><object class="AdwSwitchRow" id="start_minimized_row"><property name="title" translatable="yes">Start minimized</property></object></child>
+        <child><object class="AdwSwitchRow" id="type_to_search_row"><property name="title" translatable="yes">Type to search</property></object></child>
+        <child>
+          <object class="AdwSwitchRow" id="automatic_updates_row">
+            <property name="title" translatable="yes">Automatic updates</property>
+            <property name="subtitle" translatable="yes">Install available updates when Rufin starts</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Notifications</property>
+        <child><object class="AdwSwitchRow" id="control_notifications_row"><property name="title" translatable="yes">Control notifications</property></object></child>
+        <child><object class="AdwSwitchRow" id="notifications_row"><property name="title" translatable="yes">Now playing notifications</property></object></child>
+        <child><object class="AdwSwitchRow" id="release_notifications_row"><property name="title" translatable="yes">Release notifications</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Metadata</property>
+        <child><object class="AdwSwitchRow" id="prefer_server_playlist_row"><property name="title" translatable="yes">Prefer server playlist covers</property></object></child>
+        <child><object class="AdwSwitchRow" id="external_metadata_row"><property name="title" translatable="yes">External metadata lookup</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">External site links</property>
+        <child>
+          <object class="AdwSwitchRow" id="external_links_row">
+            <property name="title" translatable="yes">Show external site links</property>
+            <property name="subtitle" translatable="yes">Show external service icons on album and artist pages</property>
+          </object>
+        </child>
+        <child><object class="AdwSwitchRow" id="lastfm_links_row"><property name="title" translatable="yes">Last.fm</property></object></child>
+        <child><object class="AdwSwitchRow" id="musicbrainz_links_row"><property name="title" translatable="yes">MusicBrainz</property></object></child>
+        <child><object class="AdwSwitchRow" id="server_links_row"><property name="title" translatable="yes">Server</property></object></child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Discord</property>
+        <child><object class="AdwSwitchRow" id="presence_row"><property name="title" translatable="yes">Rich presence</property></object></child>
+        <child><object class="AdwComboRow" id="display_row"><property name="title" translatable="yes">Status display</property></object></child>
+        <child>
+          <object class="AdwComboRow" id="link_row">
+            <property name="title" translatable="yes">Metadata source</property>
+            <property name="subtitle" translatable="yes">Source to use for cover images and song/artist links</property>
+          </object>
+        </child>
+        <child><object class="AdwSwitchRow" id="paused_row"><property name="title" translatable="yes">Show paused status</property></object></child>
+        <child>
+          <object class="AdwSwitchRow" id="listening_row">
+            <property name="title" translatable="yes">Use listening activity</property>
+            <property name="subtitle" translatable="yes">Set the Discord activity type to Listening</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Privacy and Security</property>
+        <child><object class="AdwSwitchRow" id="private_row"><property name="title" translatable="yes">Private mode</property></object></child>
+        <child>
+          <object class="AdwSwitchRow" id="cast_proxy_row">
+            <property name="title" translatable="yes">Proxy casting through Rufin</property>
+            <property name="subtitle" translatable="yes">Route server media through this device instead of sharing provider URLs with the renderer</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="cast_network_row">
+            <property name="title" translatable="yes">Casting network</property>
+            <property name="subtitle" translatable="yes">Network used to send local and proxied media to casting devices</property>
+          </object>
+        </child>
+        <child><object class="AdwComboRow" id="secret_storage_row"><property name="title" translatable="yes">Secret storage</property></object></child>
+      </object>
+    </child>
+  </object>
+</interface>

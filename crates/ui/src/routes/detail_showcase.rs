@@ -6,9 +6,11 @@ use std::{
 use ::library::{AlbumRow, ArtistRow};
 use adw::prelude::*;
 use artwork::ArtworkBinding;
+use gtk::subclass::prelude::ObjectSubclassIsExt;
+use gtk::{CompositeTemplate, TemplateChild, glib, subclass::prelude::*};
 use tracing::warn;
 
-use crate::interactions::{ContextMenuOpen, add_widget_click, install_context_menu_openers};
+use crate::interactions::{ContextMenuOpen, RADIO_ICON, add_widget_click};
 use crate::layout::width_allocation_owner;
 use crate::localization::bind_label_text_with;
 use crate::shell::Shell;
@@ -21,75 +23,243 @@ use crate::shell::cover::{
 use localization::{msgid, tr};
 
 use super::cards::{
-    CoverHoverControls, cover_hover_controls, cover_play_hover_controls,
-    elastic_cover_context_point,
+    CoverHoverControls, cover_hover_controls, cover_play_hover_controls, showcase_cover_overlay,
 };
 use super::collections::CollectionPlay;
 use super::detail_links::{DetailEntityKind, DetailExternalLink, server_entity_link};
+use super::route::Route;
 use super::route_layout::{detail_showcase_cover_only, detail_showcase_cover_size};
 
 const DETAIL_HEADER_SPACING: i32 = 18;
-const RADIO_ICON: &str = "rufin-audio-radio-symbolic";
+mod showcase_imp {
+    use super::*;
 
-pub(crate) struct MediaDetailShowcase {
-    pub(crate) route_class: &'static str,
-    pub(crate) seed: u32,
-    pub(crate) initial_width: i32,
-    pub(crate) cover: DetailCoverProjection,
-    pub(crate) cover_controls: CoverHoverControls,
-    pub(crate) context_menu: Option<ContextMenuOpen>,
-    pub(crate) external_links: DetailExternalLinksProjection,
-    pub(crate) text_stack: gtk::Widget,
-    pub(crate) actions: gtk::Widget,
-}
+    #[derive(CompositeTemplate, Default)]
+    #[template(resource = "/io/github/screwys/Rufin/ui/routes/detail_showcase.ui")]
+    pub(crate) struct DetailShowcaseView {
+        #[template_child]
+        pub(super) cover_column: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) cover_host: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) external_links: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) metadata: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) text_stack: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) kind_row: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) kind: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) kind_controls: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) title: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) details: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) summary: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) summary_item_0: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) summary_icon_0: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub(super) summary_label_0: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) summary_item_1: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) summary_icon_1: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub(super) summary_label_1: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) summary_item_2: TemplateChild<gtk::Box>,
+        #[template_child]
+        pub(super) summary_icon_2: TemplateChild<gtk::Image>,
+        #[template_child]
+        pub(super) summary_label_2: TemplateChild<gtk::Label>,
+        #[template_child]
+        pub(super) actions: TemplateChild<gtk::Box>,
+        pub(super) cover_only: Cell<bool>,
+    }
 
-#[derive(Clone)]
-pub(crate) struct DetailExternalLinksProjection {
-    root: gtk::Box,
-    cover_only: Rc<Cell<bool>>,
-}
+    #[glib::object_subclass]
+    impl ObjectSubclass for DetailShowcaseView {
+        const NAME: &'static str = "RufinDetailShowcaseView";
+        type Type = super::DetailShowcaseView;
+        type ParentType = gtk::Box;
 
-impl DetailExternalLinksProjection {
-    pub(crate) fn new(class: Option<&'static str>, links: Option<gtk::Widget>) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Vertical, 6);
-        if let Some(class) = class {
-            root.add_css_class(class);
+        fn class_init(class: &mut Self::Class) {
+            class.bind_template();
         }
-        root.set_halign(gtk::Align::Center);
-        let projection = Self {
-            root,
-            cover_only: Rc::new(Cell::new(false)),
-        };
-        projection.replace(links);
-        projection
+
+        fn instance_init(instance: &glib::subclass::InitializingObject<Self>) {
+            instance.init_template();
+        }
     }
 
-    fn widget(&self) -> gtk::Widget {
-        self.root.clone().upcast()
+    impl ObjectImpl for DetailShowcaseView {
+        fn dispose(&self) {
+            self.dispose_template();
+        }
+    }
+    impl WidgetImpl for DetailShowcaseView {}
+    impl BoxImpl for DetailShowcaseView {}
+}
+
+glib::wrapper! {
+    pub(crate) struct DetailShowcaseView(ObjectSubclass<showcase_imp::DetailShowcaseView>)
+        @extends gtk::Widget, gtk::Box,
+        @implements gtk::Accessible, gtk::Buildable, gtk::ConstraintTarget, gtk::Orientable;
+}
+
+impl DetailShowcaseView {
+    pub(crate) fn new(
+        route_class: &'static str,
+        seed: u32,
+        kind: &'static str,
+        genre_kind: bool,
+        title: &str,
+    ) -> Self {
+        let view: Self = glib::Object::new();
+        view.add_css_class("detail-showcase");
+        view.add_css_class(route_class);
+        add_album_seed_gradient_class(&view, seed);
+        bind_label_text_with(&view.imp().kind, move || tr(kind));
+        if genre_kind {
+            view.imp().kind_row.add_css_class("album-detail-genre-row");
+        }
+        view.set_title(title);
+        view
     }
 
-    pub(crate) fn replace(&self, links: Option<gtk::Widget>) {
-        while let Some(child) = self.root.first_child() {
-            self.root.remove(&child);
+    pub(crate) fn set_title(&self, text: &str) {
+        self.imp().title.set_text(text);
+        self.imp().title.remove_css_class("detail-text-long");
+        self.imp().title.remove_css_class("detail-text-very-long");
+        fit_detail_text(&self.imp().title, text);
+    }
+
+    pub(crate) fn append_kind_control(&self, child: &impl IsA<gtk::Widget>) {
+        self.imp().kind_controls.append(child);
+    }
+
+    pub(crate) fn clear_kind_controls(&self) {
+        while let Some(child) = self.imp().kind_controls.first_child() {
+            self.imp().kind_controls.remove(&child);
+        }
+    }
+
+    pub(crate) fn append_detail(&self, child: &impl IsA<gtk::Widget>) {
+        self.imp().details.set_visible(true);
+        self.imp().details.append(child);
+    }
+
+    pub(crate) fn actions(&self) -> gtk::Box {
+        self.imp().actions.get()
+    }
+
+    pub(crate) fn replace_summary(&self, values: &[(&str, String)]) {
+        let items = [
+            (
+                self.imp().summary_item_0.get(),
+                self.imp().summary_icon_0.get(),
+                self.imp().summary_label_0.get(),
+            ),
+            (
+                self.imp().summary_item_1.get(),
+                self.imp().summary_icon_1.get(),
+                self.imp().summary_label_1.get(),
+            ),
+            (
+                self.imp().summary_item_2.get(),
+                self.imp().summary_icon_2.get(),
+                self.imp().summary_label_2.get(),
+            ),
+        ];
+        let mut any = false;
+        for (index, (item, icon, label)) in items.into_iter().enumerate() {
+            if let Some((icon_name, text)) = values
+                .get(index)
+                .filter(|(_, text)| summary_value_is_visible(text))
+            {
+                icon.set_icon_name(Some(icon_name));
+                label.set_text(text);
+                item.set_visible(true);
+                any = true;
+            } else {
+                item.set_visible(false);
+            }
+        }
+        self.imp().summary.set_visible(any);
+    }
+
+    pub(crate) fn bind_summary_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
+        let labels = [
+            self.imp().summary_label_0.get(),
+            self.imp().summary_label_1.get(),
+            self.imp().summary_label_2.get(),
+        ];
+        if let Some(label) = labels.get(index) {
+            bind_label_text_with(label, text);
+        }
+    }
+
+    pub(crate) fn replace_external_links(&self, links: Option<gtk::Widget>) {
+        while let Some(child) = self.imp().external_links.first_child() {
+            self.imp().external_links.remove(&child);
         }
         if let Some(links) = links {
             links.set_halign(gtk::Align::Center);
-            self.root.append(&links);
+            self.imp().external_links.append(&links);
         }
-        self.apply_visibility();
+        self.apply_external_links_visibility();
+    }
+
+    pub(crate) fn add_external_links_class(&self, class: &'static str) {
+        self.imp().external_links.add_css_class(class);
+    }
+
+    fn attach_cover(&self, cover: &impl IsA<gtk::Widget>) {
+        self.imp().cover_host.append(cover);
     }
 
     fn set_cover_only(&self, cover_only: bool) {
-        self.cover_only.set(cover_only);
-        self.apply_visibility();
+        self.imp().metadata.set_visible(!cover_only);
+        self.imp().cover_only.set(cover_only);
+        self.apply_external_links_visibility();
     }
 
-    fn apply_visibility(&self) {
-        let has_links = self.root.first_child().is_some();
-        let cover_only = self.cover_only.get();
-        let visible = detail_external_links_visible(has_links, cover_only);
-        self.root.set_visible(visible);
+    fn apply_external_links_visibility(&self) {
+        self.imp()
+            .external_links
+            .set_visible(detail_external_links_visible(
+                self.imp().external_links.first_child().is_some(),
+                self.imp().cover_only.get(),
+            ));
     }
+
+    fn set_media_layout(&self) {
+        self.add_css_class("detail-showcase-horizontal");
+        self.set_spacing(DETAIL_HEADER_SPACING);
+        self.imp().metadata.set_valign(gtk::Align::Start);
+        self.imp().text_stack.set_spacing(8);
+    }
+
+    fn set_collection_layout(&self, spacing: i32) {
+        self.add_css_class("playlist-detail-showcase");
+        self.set_spacing(spacing);
+        self.imp().metadata.set_valign(gtk::Align::Center);
+        self.imp().text_stack.set_spacing(10);
+    }
+}
+
+pub(crate) struct MediaShowcase {
+    pub(crate) view: DetailShowcaseView,
+    pub(crate) initial_width: i32,
+    pub(crate) cover: MediaCoverProjection,
+    pub(crate) cover_controls: CoverHoverControls,
+    pub(crate) context_menu: Option<ContextMenuOpen>,
+    pub(crate) actions_min_cover_size: Option<i32>,
 }
 
 fn detail_external_links_visible(has_links: bool, cover_only: bool) -> bool {
@@ -97,72 +267,36 @@ fn detail_external_links_visible(has_links: bool, cover_only: bool) -> bool {
 }
 
 pub(crate) struct CollectionDetailShowcase {
-    pub(crate) seed: u32,
+    pub(crate) view: DetailShowcaseView,
     pub(crate) initial_width: i32,
     pub(crate) compact_spacing: i32,
     pub(crate) wide_spacing: i32,
     pub(crate) cover: CoverGroupProjection,
     pub(crate) cover_controls: CoverHoverControls,
     pub(crate) context_menu: Option<ContextMenuOpen>,
-    pub(crate) metadata: Vec<gtk::Widget>,
 }
 
-pub(crate) struct PlaylistDetailShowcase {
-    pub(crate) seed: u32,
-    pub(crate) initial_width: i32,
-    pub(crate) cover: CoverGroupProjection,
-    pub(crate) cover_controls: CoverHoverControls,
-    pub(crate) context_menu: Option<ContextMenuOpen>,
-    pub(crate) kind_row: gtk::Widget,
-    pub(crate) title: gtk::Widget,
-    pub(crate) summary: gtk::Widget,
-    pub(crate) actions: gtk::Widget,
-}
-
-pub(crate) fn media_detail_showcase(shell: &Rc<Shell>, config: MediaDetailShowcase) -> gtk::Widget {
-    let header = gtk::Box::new(gtk::Orientation::Vertical, 12);
-    header.add_css_class("detail-showcase");
-    header.add_css_class(config.route_class);
-    header.add_css_class("detail-showcase-horizontal");
-    add_album_seed_gradient_class(&header, config.seed);
-
-    let body = gtk::Box::new(gtk::Orientation::Horizontal, DETAIL_HEADER_SPACING);
-    body.set_hexpand(true);
-    body.set_halign(gtk::Align::Fill);
-    body.set_width_request(1);
-
-    let cover_column = gtk::Box::new(gtk::Orientation::Vertical, 8);
-    cover_column.set_halign(gtk::Align::Start);
-    cover_column.append(&detail_cover_overlay(
+pub(crate) fn media_showcase(config: MediaShowcase) -> gtk::Widget {
+    let view = config.view;
+    view.set_media_layout();
+    view.attach_cover(&showcase_cover_overlay(
         config.cover.button().upcast_ref(),
         config.cover_controls,
         config.context_menu,
     ));
-    cover_column.append(&config.external_links.widget());
-    body.append(&cover_column);
-
-    let metadata = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    metadata.set_hexpand(true);
-    metadata.set_valign(gtk::Align::Start);
-    metadata.set_halign(gtk::Align::Fill);
-    metadata.set_width_request(1);
-    metadata.append(&config.text_stack);
-    metadata.append(&config.actions);
-    body.append(&metadata);
-
-    header.append(&body);
+    let adaptive_actions = config
+        .actions_min_cover_size
+        .map(|threshold| (view.actions().upcast(), threshold));
     let presentation = MediaShowcasePresentation {
-        viewport_width: Rc::new(Cell::new(0)),
-        cover_width: Rc::new(Cell::new(0)),
-        header: header.clone(),
-        cover_column,
+        viewport_width: Cell::new(0),
+        cover_width: Cell::new(0),
+        view: view.clone(),
         cover: config.cover,
-        external_links: config.external_links,
-        metadata,
+        adaptive_actions,
     };
     presentation.apply_viewport_width(config.initial_width);
     presentation.resize_cover(config.initial_width);
-    let frame = detail_showcase_frame_with_back(shell, header.upcast());
+    let frame = detail_showcase_frame(view.upcast());
     width_allocation_owner(&frame, move |width| {
         presentation.apply_viewport_width(width);
         presentation.resize_cover(width);
@@ -170,15 +304,12 @@ pub(crate) fn media_detail_showcase(shell: &Rc<Shell>, config: MediaDetailShowca
     .upcast()
 }
 
-#[derive(Clone)]
 struct MediaShowcasePresentation {
-    viewport_width: Rc<Cell<i32>>,
-    cover_width: Rc<Cell<i32>>,
-    header: gtk::Box,
-    cover_column: gtk::Box,
-    cover: DetailCoverProjection,
-    external_links: DetailExternalLinksProjection,
-    metadata: gtk::Box,
+    viewport_width: Cell<i32>,
+    cover_width: Cell<i32>,
+    view: DetailShowcaseView,
+    cover: MediaCoverProjection,
+    adaptive_actions: Option<(gtk::Widget, i32)>,
 }
 
 impl MediaShowcasePresentation {
@@ -187,9 +318,8 @@ impl MediaShowcasePresentation {
             return;
         }
         let cover_only = detail_showcase_cover_only(width);
-        update_tiny_detail_showcase(&self.header, width);
-        self.external_links.set_cover_only(cover_only);
-        self.metadata.set_visible(!cover_only);
+        update_tiny_detail_showcase(&self.view, width);
+        self.view.set_cover_only(cover_only);
     }
 
     fn resize_cover(&self, width: i32) {
@@ -197,8 +327,11 @@ impl MediaShowcasePresentation {
             return;
         }
         let cover_size = super::route_layout::detail_showcase_cover_size(width);
-        self.cover_column.set_width_request(cover_size);
+        self.view.imp().cover_column.set_width_request(cover_size);
         self.cover.resize(cover_size);
+        if let Some((actions, threshold)) = self.adaptive_actions.as_ref() {
+            actions.set_visible(!detail_showcase_cover_only(width) && cover_size >= *threshold);
+        }
     }
 }
 
@@ -206,40 +339,25 @@ pub(crate) fn collection_detail_showcase(
     shell: &Rc<Shell>,
     config: CollectionDetailShowcase,
 ) -> gtk::Widget {
-    let header = gtk::Box::new(gtk::Orientation::Horizontal, config.wide_spacing);
-    header.add_css_class("playlist-detail-showcase");
-    add_album_seed_gradient_class(&header, config.seed);
-    header.set_hexpand(true);
-    header.set_halign(gtk::Align::Fill);
-    header.set_width_request(1);
-    header.append(&detail_cover_overlay(
+    let view = config.view;
+    view.set_collection_layout(config.wide_spacing);
+    view.attach_cover(&showcase_cover_overlay(
         &config.cover.widget(),
         config.cover_controls,
         config.context_menu,
     ));
 
-    let metadata = gtk::Box::new(gtk::Orientation::Vertical, 10);
-    metadata.set_valign(gtk::Align::Center);
-    metadata.set_hexpand(true);
-    metadata.set_halign(gtk::Align::Fill);
-    metadata.set_width_request(1);
-    for child in config.metadata {
-        metadata.append(&child);
-    }
-    header.append(&metadata);
-
     let presentation = CollectionShowcasePresentation {
-        viewport_width: Rc::new(Cell::new(0)),
-        cover_width: Rc::new(Cell::new(0)),
-        header: header.clone(),
+        viewport_width: Cell::new(0),
+        cover_width: Cell::new(0),
+        view: view.clone(),
         cover: config.cover,
-        metadata,
         compact_spacing: config.compact_spacing,
         wide_spacing: config.wide_spacing,
     };
     presentation.apply_viewport_width(config.initial_width);
     presentation.resize_cover(config.initial_width);
-    let frame = detail_showcase_frame_with_back(shell, header.upcast());
+    let frame = detail_showcase_frame_with_back(shell, view.upcast());
     width_allocation_owner(&frame, move |width| {
         presentation.apply_viewport_width(width);
         presentation.resize_cover(width);
@@ -247,37 +365,11 @@ pub(crate) fn collection_detail_showcase(
     .upcast()
 }
 
-pub(crate) fn playlist_detail_showcase(
-    shell: &Rc<Shell>,
-    config: PlaylistDetailShowcase,
-) -> gtk::Widget {
-    collection_detail_showcase(
-        shell,
-        CollectionDetailShowcase {
-            seed: config.seed,
-            initial_width: config.initial_width,
-            compact_spacing: 20,
-            wide_spacing: 28,
-            cover: config.cover,
-            cover_controls: config.cover_controls,
-            context_menu: config.context_menu,
-            metadata: vec![
-                config.kind_row,
-                config.title,
-                config.summary,
-                config.actions,
-            ],
-        },
-    )
-}
-
-#[derive(Clone)]
 struct CollectionShowcasePresentation {
-    viewport_width: Rc<Cell<i32>>,
-    cover_width: Rc<Cell<i32>>,
-    header: gtk::Box,
+    viewport_width: Cell<i32>,
+    cover_width: Cell<i32>,
+    view: DetailShowcaseView,
     cover: CoverGroupProjection,
-    metadata: gtk::Box,
     compact_spacing: i32,
     wide_spacing: i32,
 }
@@ -288,15 +380,15 @@ impl CollectionShowcasePresentation {
             return;
         }
         let cover_only = detail_showcase_cover_only(width);
-        update_tiny_detail_showcase(&self.header, width);
-        self.header.set_spacing(
+        update_tiny_detail_showcase(&self.view, width);
+        self.view.set_spacing(
             if super::playlist_detail::playlist_detail_compact_for_width(width) {
                 self.compact_spacing
             } else {
                 self.wide_spacing
             },
         );
-        self.metadata.set_visible(!cover_only);
+        self.view.set_cover_only(cover_only);
     }
 
     fn resize_cover(&self, width: i32) {
@@ -305,65 +397,6 @@ impl CollectionShowcasePresentation {
         }
         let cover_size = super::playlist_detail::playlist_cover_size(width);
         self.cover.resize(cover_size);
-    }
-}
-
-#[derive(Clone)]
-pub(crate) struct DetailSummaryProjection {
-    root: gtk::Box,
-    items: Rc<Vec<(gtk::Box, gtk::Image, gtk::Label)>>,
-}
-
-impl DetailSummaryProjection {
-    pub(crate) fn new(items: &[(&str, String)]) -> Self {
-        let root = gtk::Box::new(gtk::Orientation::Horizontal, 10);
-        root.add_css_class("detail-summary-row");
-        root.set_halign(gtk::Align::Start);
-        let slots = Rc::new(
-            (0..3)
-                .map(|_| {
-                    let item = gtk::Box::new(gtk::Orientation::Horizontal, 4);
-                    let icon = gtk::Image::new();
-                    icon.add_css_class("muted");
-                    icon.set_pixel_size(14);
-                    item.append(&icon);
-                    let label = gtk::Label::new(None);
-                    label.add_css_class("muted");
-                    label.set_xalign(0.0);
-                    item.append(&label);
-                    root.append(&item);
-                    (item, icon, label)
-                })
-                .collect::<Vec<_>>(),
-        );
-        let projection = Self { root, items: slots };
-        projection.replace(items);
-        projection
-    }
-
-    pub(crate) fn widget(&self) -> gtk::Widget {
-        self.root.clone().upcast()
-    }
-
-    pub(crate) fn replace(&self, values: &[(&str, String)]) {
-        for (index, (item, icon, label)) in self.items.iter().enumerate() {
-            if let Some((icon_name, text)) = values
-                .get(index)
-                .filter(|(_, text)| summary_value_is_visible(text))
-            {
-                icon.set_icon_name(Some(icon_name));
-                label.set_text(text);
-                item.set_visible(true);
-            } else {
-                item.set_visible(false);
-            }
-        }
-    }
-
-    pub(crate) fn bind_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
-        if let Some((_, _, label)) = self.items.get(index) {
-            bind_label_text_with(label, text);
-        }
     }
 }
 
@@ -463,54 +496,6 @@ fn connect_collection_play(
     button.connect_clicked(move |_| play(placement, shuffled_start));
 }
 
-fn detail_cover_overlay(
-    cover: &gtk::Widget,
-    mut controls: CoverHoverControls,
-    context_menu: Option<ContextMenuOpen>,
-) -> gtk::Overlay {
-    let overlay = gtk::Overlay::new();
-    overlay.add_css_class("cover-frame");
-    overlay.set_halign(gtk::Align::Start);
-    overlay.set_valign(gtk::Align::Start);
-    overlay.set_child(Some(cover));
-
-    if let Some(open) = context_menu {
-        let menu = controls.add_context_button();
-        install_context_menu_openers(&overlay, Rc::clone(&open));
-        let target = overlay.downgrade();
-        menu.connect_clicked(move |_| {
-            let Some(target) = target.upgrade() else {
-                return;
-            };
-            open(target.upcast_ref(), elastic_cover_context_point(&target));
-        });
-    }
-    controls.add_to_overlay(&overlay);
-    controls.connect_hover(&overlay);
-    overlay
-}
-
-pub(crate) fn detail_title_label(text: &str) -> gtk::Label {
-    let title = gtk::Label::new(Some(text));
-    title.add_css_class("detail-title");
-    title.set_xalign(0.0);
-    title.set_wrap(true);
-    title.set_wrap_mode(gtk::pango::WrapMode::WordChar);
-    title.set_hexpand(true);
-    title.set_halign(gtk::Align::Fill);
-    title.set_width_request(1);
-    title.set_width_chars(1);
-    title.set_max_width_chars(32);
-    title
-}
-
-pub(crate) fn fitted_detail_title_label(text: &str) -> gtk::Label {
-    let title = detail_title_label(text);
-    title.set_justify(gtk::Justification::Left);
-    fit_detail_text(&title, text);
-    title
-}
-
 pub(crate) fn detail_genre_pill_button(label: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("flat");
@@ -529,24 +514,21 @@ pub(crate) fn detail_genre_pill_button(label: &str) -> gtk::Button {
     button
 }
 
-pub(crate) fn detail_action_row() -> gtk::Box {
-    let row = gtk::Box::new(gtk::Orientation::Horizontal, 8);
-    row.add_css_class("detail-showcase-actions");
-    row.set_halign(gtk::Align::Center);
-    row
-}
-
 #[derive(Clone)]
-pub(crate) struct DetailCoverProjection {
+pub(crate) struct MediaCoverProjection {
     button: gtk::Button,
     tile: ArtworkTile,
     size: Rc<Cell<i32>>,
     candidates: Rc<RefCell<ArtworkBinding>>,
 }
 
-impl DetailCoverProjection {
+impl MediaCoverProjection {
     pub(crate) fn button(&self) -> gtk::Button {
         self.button.clone()
+    }
+
+    pub(crate) fn drag_paintable_source(&self) -> gtk::Picture {
+        self.tile.drag_paintable_source()
     }
 
     pub(crate) fn resize(&self, size: i32) {
@@ -569,19 +551,52 @@ impl DetailCoverProjection {
     }
 }
 
-pub(crate) fn detail_cover_projection(
+pub(crate) fn media_cover_projection(
     shell: &Rc<Shell>,
     candidates: ArtworkBinding,
     size: i32,
     cover_class: &str,
-) -> DetailCoverProjection {
+) -> MediaCoverProjection {
+    media_cover_projection_with_open(shell, candidates, size, cover_class, |shell, candidates| {
+        shell.present_full_artwork(candidates)
+    })
+}
+
+pub(crate) fn home_album_cover_projection(
+    shell: &Rc<Shell>,
+    album: &AlbumRow,
+    size: i32,
+) -> MediaCoverProjection {
+    let album_key = album.album_key;
+    media_cover_projection_with_open(
+        shell,
+        album
+            .artwork_binding
+            .as_deref()
+            .map(ArtworkBinding::opaque)
+            .unwrap_or_default(),
+        size,
+        "",
+        move |shell, _| shell.navigate(Route::AlbumDetail(album_key)),
+    )
+}
+
+fn media_cover_projection_with_open(
+    shell: &Rc<Shell>,
+    candidates: ArtworkBinding,
+    size: i32,
+    cover_class: &str,
+    open: impl Fn(&Rc<Shell>, ArtworkBinding) + 'static,
+) -> MediaCoverProjection {
     let render_size = detail_cover_render_size();
     let fetch_size = LARGE_COVER_SIZE;
     let tile = ArtworkTile::new_sized(size, size);
     shell.bind_artwork_tile(&tile, candidates.clone(), render_size, fetch_size);
     let cover = tile.widget();
     cover.add_css_class("detail-showcase-cover");
-    cover.add_css_class(cover_class);
+    if !cover_class.is_empty() {
+        cover.add_css_class(cover_class);
+    }
 
     let button = gtk::Button::new();
     button.add_css_class("flat");
@@ -596,9 +611,9 @@ pub(crate) fn detail_cover_projection(
     let shell = Rc::clone(shell);
     button.connect_clicked(move |_| {
         let candidates = open_candidates.borrow().clone();
-        shell.present_full_artwork(candidates);
+        open(&shell, candidates);
     });
-    DetailCoverProjection {
+    MediaCoverProjection {
         button,
         tile,
         size: Rc::new(Cell::new(size)),
