@@ -70,7 +70,6 @@ impl Shell {
         let wrapper = detail_route_wrapper(0);
         let content = gtk::Box::new(gtk::Orientation::Vertical, 22);
         content.set_margin_top(ROUTE_TOP_MARGIN);
-        content.set_margin_bottom(36);
         content.set_hexpand(true);
         content.set_halign(gtk::Align::Fill);
         content.set_width_request(1);

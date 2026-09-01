@@ -5,7 +5,7 @@
 
   <template class="RufinSearchRouteView" parent="GtkBox">
     <property name="orientation">vertical</property><property name="spacing">14</property>
-    <property name="margin-top">10</property><property name="margin-bottom">8</property>
+    <property name="margin-top">10</property>
     <property name="hexpand">true</property><property name="vexpand">true</property>
     <style><class name="route-content"/><class name="search-route"/></style>
     <child>
