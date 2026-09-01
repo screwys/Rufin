@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-01 01:15+0000\n"
+"PO-Revision-Date: 2026-09-01 22:20+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -54,19 +54,6 @@ msgid ""
 msgstr ""
 "Rufin arvutab terve muusikakogu jaoks puuduvad EBU R128 metaandmed. See võib "
 "pikka aega märkimisväärselt koormata protsessorit, akut ja võrgu ribalaiust."
-
-msgid ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-"Vastendus on salvestatud. {direct} otsene, {prefix} eesliitega, {metadata} "
-"metateabega, {unmatched} puuduv vaste {total} loo puhul"
-msgstr[1] ""
-"Vastendus on salvestatud. {direct} otsene, {prefix} eesliitega, {metadata} "
-"metateabega, {unmatched} puuduvat vastet {total} loo puhul"
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -126,19 +113,6 @@ msgstr ""
 "Lookohase esitusvaljuse puhul ühtlustuvad kõik lood, samas kui albumiohase "
 "puhul säilivad iga albumi sisemised erinevused"
 
-msgid ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} track"
-msgid_plural ""
-"Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
-"{unmatched} unmatched of {total} tracks"
-msgstr[0] ""
-"Salvestamata muudatused. {direct} otsene, {prefix} eesliite osas, {metadata} "
-"metaandmete osas, {unmatched} mittevastavus kokku {total}-st loost"
-msgstr[1] ""
-"Salvestamata muudatused. {direct} otsene, {prefix} eesliite osas, {metadata} "
-"metaandmete osas, {unmatched} mittevastavust kokku {total}-st loost"
-
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
 
@@ -178,10 +152,8 @@ msgstr "Lisa reegel"
 msgid "Add a matching server prefix"
 msgstr "Sisesta sobiv serveri prefiks"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Add a music folder"
-msgstr "Kohalik muusikakaust"
+msgstr "Lisa muusikakaust"
 
 msgid "Add a new source"
 msgstr "Lisa uus allikas"
@@ -372,10 +344,7 @@ msgstr[0] "Muudatused rakenduvad {count}-le loole"
 msgstr[1] "Muudatused rakenduvad {count}-le loole"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
-
-msgid "Checking..."
-msgstr "Kontrollin…"
+msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
 msgid "Choose a local music folder"
 msgstr "Vali kohalik muusikakaust"
@@ -403,10 +372,8 @@ msgstr "Klassikaline muusika"
 msgid "Clear Mapping"
 msgstr "Eemalda vastendus"
 
-#, fuzzy
-#| msgid "Play artist"
 msgid "Clear artist"
-msgstr "Esita esitajat"
+msgstr "Eemalda esitaja"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
@@ -414,10 +381,8 @@ msgstr "Kustuta see loo jaoks laaditud laulusõnad"
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
 
-#, fuzzy
-#| msgid "Sort title"
 msgid "Clear title"
-msgstr "Järjesta pealkirja alusel"
+msgstr "Eemalda pealkiri"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
@@ -737,9 +702,6 @@ msgstr "Lemmikud"
 msgid "Featured genres"
 msgstr "Esiletõstetud žanrid"
 
-msgid "File path replacement"
-msgstr "Faili asukoha asendamine"
-
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Selleks peavad failides olema meeleolu/BPM-i sildid. Jellyfinis vastav tugi "
@@ -992,8 +954,14 @@ msgstr "Ligipääs kohalikele failidele on seadistatud"
 msgid "Local file mapping is no longer available"
 msgstr "Kohalike failide vastendus pole enam saadaval"
 
-msgid "Local file mapping"
-msgstr "Kohalike failide vastendus"
+#, fuzzy
+#| msgid "Local mapping saved. Sync to preview matches."
+msgid "Local file mapping: {matched} of {total} server path matches"
+msgid_plural "Local file mapping: {matched} of {total} server paths match"
+msgstr[0] ""
+"Kohalik vastendus salvestatud. Vastete eelvaate nägemiseks sünkrooni."
+msgstr[1] ""
+"Kohalik vastendus salvestatud. Vastete eelvaate nägemiseks sünkrooni."
 
 msgid "Local library"
 msgstr "Kohalik meediakogu"
@@ -1039,6 +1007,9 @@ msgstr "Halda"
 
 msgid "Mapped Local Path"
 msgstr "Vastendatud kohalik kaust"
+
+msgid "Mapped local file not found"
+msgstr ""
 
 msgid "Maximum year"
 msgstr "Maksimaalne aasta"
@@ -1608,8 +1579,6 @@ msgstr "Eemalda reegel ja allalaaditu"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Eemalda reegel ja säilita allalaaditu"
 
-#, fuzzy
-#| msgid "Remove All Downloads"
 msgid "Remove all downloads"
 msgstr "Eemalda kõik allalaadimised"
 
@@ -1630,9 +1599,6 @@ msgstr "Eemalda esitusloendist"
 
 msgid "Remove from Queue"
 msgstr "Eemalda esitusjärjekorrast"
-
-msgid "Remove prefix"
-msgstr "Eemalda eesliide"
 
 msgid "Remove rule"
 msgstr "Eemalda reegel"
@@ -1723,6 +1689,11 @@ msgstr "Salvesta"
 
 msgid "Saved Sources"
 msgstr "Salvestatud allikad"
+
+msgid "Saved mapping. {matched} of {total} server path matches"
+msgid_plural "Saved mapping. {matched} of {total} server paths match"
+msgstr[0] ""
+msgstr[1] ""
 
 msgid "Saved to"
 msgstr "Salvestatud asukohta"
@@ -1817,10 +1788,8 @@ msgstr "Vali kõik"
 msgid "Selection"
 msgstr "Valik"
 
-#, fuzzy
-#| msgid "separate .lrc file"
 msgid "Separate .lrc file"
-msgstr "eraldi .lrc fail"
+msgstr "Eraldi .lrc fail"
 
 msgid "Server Actions"
 msgstr "Serveri tegevused"
@@ -1848,9 +1817,6 @@ msgstr "Server pole leitav"
 
 msgid "Server lyrics are off in private mode"
 msgstr "Serverist laaditavad laulusõnad pole privaatses režiimis kasutatavad"
-
-msgid "Server path"
-msgstr "Serveri asukoht"
 
 msgid "Server prefix doesn't match"
 msgstr "Serveri prefiks ei klapi"
@@ -2291,6 +2257,49 @@ msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
 
 #~ msgid ""
+#~ "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
+#~ "{unmatched} unmatched of {total} track"
+#~ msgid_plural ""
+#~ "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
+#~ "{unmatched} unmatched of {total} tracks"
+#~ msgstr[0] ""
+#~ "Vastendus on salvestatud. {direct} otsene, {prefix} eesliitega, "
+#~ "{metadata} metateabega, {unmatched} puuduv vaste {total} loo puhul"
+#~ msgstr[1] ""
+#~ "Vastendus on salvestatud. {direct} otsene, {prefix} eesliitega, "
+#~ "{metadata} metateabega, {unmatched} puuduvat vastet {total} loo puhul"
+
+#~ msgid ""
+#~ "Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
+#~ "{unmatched} unmatched of {total} track"
+#~ msgid_plural ""
+#~ "Unsaved changes. {direct} direct, {prefix} prefix, {metadata} metadata, "
+#~ "{unmatched} unmatched of {total} tracks"
+#~ msgstr[0] ""
+#~ "Salvestamata muudatused. {direct} otsene, {prefix} eesliite osas, "
+#~ "{metadata} metaandmete osas, {unmatched} mittevastavus kokku {total}-st "
+#~ "loost"
+#~ msgstr[1] ""
+#~ "Salvestamata muudatused. {direct} otsene, {prefix} eesliite osas, "
+#~ "{metadata} metaandmete osas, {unmatched} mittevastavust kokku {total}-st "
+#~ "loost"
+
+#~ msgid "Checking..."
+#~ msgstr "Kontrollin…"
+
+#~ msgid "File path replacement"
+#~ msgstr "Faili asukoha asendamine"
+
+#~ msgid "Local file mapping"
+#~ msgstr "Kohalike failide vastendus"
+
+#~ msgid "Remove prefix"
+#~ msgstr "Eemalda eesliide"
+
+#~ msgid "Server path"
+#~ msgstr "Serveri asukoht"
+
+#~ msgid ""
 #~ "Tap to the entry to load the lyrics and save in the app cache, click save "
 #~ "only if you also want to save it in your music folder"
 #~ msgstr ""
@@ -2468,10 +2477,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Local library folder is saved."
 #~ msgstr "Kohaliku muusikakogu kaust on salvestatud."
-
-#~ msgid "Local mapping saved. Sync to preview matches."
-#~ msgstr ""
-#~ "Kohalik vastendus salvestatud. Vastete eelvaate nägemiseks sünkrooni."
 
 #~ msgid "Local playback mapping configured"
 #~ msgstr "Kohaliku taasesituse vastenduse seadistamine on lõpetatud"
