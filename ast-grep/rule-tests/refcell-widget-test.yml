@@ -1,0 +1,39 @@
+id: finish-refcell-borrow-before-widget-update
+valid:
+  - |
+      fn select(draft: Rc<RefCell<Draft>>, name: Entry) {
+          {
+              let mut draft = draft.borrow_mut();
+              draft.name = String::from("Server");
+          }
+          name.set_text("Server");
+      }
+  - |
+      fn select(name: Entry) {
+          name.set_text("Server");
+      }
+invalid:
+  - |
+      fn select(draft: Rc<RefCell<Draft>>, name: Entry) {
+          let mut draft = draft.borrow_mut();
+          draft.name = String::from("Server");
+          name.set_text("Server");
+      }
+  - |
+      fn enable(state: Rc<RefCell<State>>, button: ToggleButton) {
+          let mut state = state.borrow_mut();
+          state.enabled = true;
+          button.set_active(true);
+      }
+  - |
+      fn choose(state: Rc<RefCell<State>>, dropdown: DropDown) {
+          let mut state = state.borrow_mut();
+          state.selected = 1;
+          dropdown.set_selected(1);
+      }
+  - |
+      fn adjust(state: Rc<RefCell<State>>, scale: Scale) {
+          let mut state = state.borrow_mut();
+          state.value = 1.0;
+          scale.set_value(1.0);
+      }

@@ -1,0 +1,20 @@
+id: copy-refcell-value-before-call
+valid:
+  - |
+      fn refresh(albums: Rc<RefCell<Vec<Album>>>, replace: Rc<dyn Fn(Vec<Album>)>) {
+          let albums = albums.borrow().clone();
+          replace(albums);
+      }
+  - |
+      fn radio(artist: Rc<RefCell<Artist>>) {
+          let seed = RadioSeed::Artist(artist.borrow().clone());
+      }
+invalid:
+  - |
+      fn refresh(albums: Rc<RefCell<Vec<Album>>>, replace: Rc<dyn Fn(Vec<Album>)>) {
+          replace(albums.borrow().clone());
+      }
+  - |
+      fn open(candidates: Rc<RefCell<Artwork>>, shell: Shell) {
+          shell.present(candidates.borrow().clone(), 1);
+      }
