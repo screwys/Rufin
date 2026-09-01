@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.3.13\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-01 01:15+0000\n"
+"PO-Revision-Date: 2026-09-01 22:20+0000\n"
 "Last-Translator: Priit Jõerüüt <jrthwlate@users.noreply.hosted.weblate.org>\n"
 "Language-Team: Estonian <https://hosted.weblate.org/projects/rufin/app/et/>\n"
 "Language: et\n"
@@ -178,10 +178,8 @@ msgstr "Lisa reegel"
 msgid "Add a matching server prefix"
 msgstr "Sisesta sobiv serveri prefiks"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Add a music folder"
-msgstr "Kohalik muusikakaust"
+msgstr "Lisa muusikakaust"
 
 msgid "Add a new source"
 msgstr "Lisa uus allikas"
@@ -372,7 +370,7 @@ msgstr[0] "Muudatused rakenduvad {count}-le loole"
 msgstr[1] "Muudatused rakenduvad {count}-le loole"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
 msgid "Checking..."
 msgstr "Kontrollin…"
@@ -403,10 +401,8 @@ msgstr "Klassikaline muusika"
 msgid "Clear Mapping"
 msgstr "Eemalda vastendus"
 
-#, fuzzy
-#| msgid "Play artist"
 msgid "Clear artist"
-msgstr "Esita esitajat"
+msgstr "Eemalda esitaja"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Kustuta see loo jaoks laaditud laulusõnad"
@@ -414,10 +410,8 @@ msgstr "Kustuta see loo jaoks laaditud laulusõnad"
 msgid "Clear queue"
 msgstr "Tühjenda esitusjärjekord"
 
-#, fuzzy
-#| msgid "Sort title"
 msgid "Clear title"
-msgstr "Järjesta pealkirja alusel"
+msgstr "Eemalda pealkiri"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Esitusjärjekorra tühjendamine eemaldab ka hetkel esitamisel oleva loo"
@@ -1608,8 +1602,6 @@ msgstr "Eemalda reegel ja allalaaditu"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Eemalda reegel ja säilita allalaaditu"
 
-#, fuzzy
-#| msgid "Remove All Downloads"
 msgid "Remove all downloads"
 msgstr "Eemalda kõik allalaadimised"
 
@@ -1817,10 +1809,8 @@ msgstr "Vali kõik"
 msgid "Selection"
 msgstr "Valik"
 
-#, fuzzy
-#| msgid "separate .lrc file"
 msgid "Separate .lrc file"
-msgstr "eraldi .lrc fail"
+msgstr "Eraldi .lrc fail"
 
 msgid "Server Actions"
 msgstr "Serveri tegevused"
