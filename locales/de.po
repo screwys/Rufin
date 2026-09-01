@@ -1827,6 +1827,11 @@ msgstr "Alle auswählen"
 msgid "Selection"
 msgstr "Auswahl"
 
+#, fuzzy
+#| msgid "separate .lrc file"
+msgid "Separate .lrc file"
+msgstr "Separate .lrc-Datei"
+
 msgid "Server Actions"
 msgstr "Server-Aktionen"
 
@@ -2243,9 +2248,6 @@ msgstr "kbps"
 
 msgid "range"
 msgstr "Bereich"
-
-msgid "separate .lrc file"
-msgstr "Separate .lrc-Datei"
 
 msgid "to"
 msgstr "bis"

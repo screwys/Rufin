@@ -1817,6 +1817,11 @@ msgstr "Vali kõik"
 msgid "Selection"
 msgstr "Valik"
 
+#, fuzzy
+#| msgid "separate .lrc file"
+msgid "Separate .lrc file"
+msgstr "eraldi .lrc fail"
+
 msgid "Server Actions"
 msgstr "Serveri tegevused"
 
@@ -2235,9 +2240,6 @@ msgstr "kbps"
 
 msgid "range"
 msgstr "vahemik on"
-
-msgid "separate .lrc file"
-msgstr "eraldi .lrc fail"
 
 msgid "to"
 msgstr "kuni"

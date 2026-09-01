@@ -1872,6 +1872,9 @@ msgstr "Vybrat vše"
 msgid "Selection"
 msgstr "Výběr"
 
+msgid "Separate .lrc file"
+msgstr ""
+
 msgid "Server Actions"
 msgstr "Akce serveru"
 
@@ -2293,9 +2296,6 @@ msgstr "kbps"
 
 msgid "range"
 msgstr "rozsah"
-
-msgid "separate .lrc file"
-msgstr ""
 
 msgid "to"
 msgstr "až"
