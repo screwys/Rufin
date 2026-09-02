@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-31 00:51+0000\n"
+"PO-Revision-Date: 2026-09-03 11:51+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.dev0\n"
+"X-Generator: Weblate 2026.9\n"
 
 msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
@@ -157,10 +157,8 @@ msgstr "Regel hinzufügen"
 msgid "Add a matching server prefix"
 msgstr "Passendes Server-Präfix hinzufügen"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Add a music folder"
-msgstr "Lokaler Musikordner"
+msgstr "Musikordner hinzufügen"
 
 msgid "Add a new source"
 msgstr "Neue Quelle hinzufügen"
@@ -351,7 +349,7 @@ msgstr[0] "Änderungen werden auf {count} Titel angewendet"
 msgstr[1] "Änderungen werden auf {count} Titel angewendet"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Änderungen werden nach einem Neustart von Rufin wirksam"
 
 msgid "Choose a local music folder"
 msgstr "Lokalen Musikordner auswählen"
@@ -379,10 +377,8 @@ msgstr "Klassik"
 msgid "Clear Mapping"
 msgstr "Zuordnung aufheben"
 
-#, fuzzy
-#| msgid "Play artist"
 msgid "Clear artist"
-msgstr "Künstler abspielen"
+msgstr "Künstler entfernen"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Abgerufene Songtexte für diesen Titel löschen"
@@ -390,10 +386,8 @@ msgstr "Abgerufene Songtexte für diesen Titel löschen"
 msgid "Clear queue"
 msgstr "Warteschlange leeren"
 
-#, fuzzy
-#| msgid "Sort title"
 msgid "Clear title"
-msgstr "Sortiertitel"
+msgstr "Titel entfernen"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Beim Leeren der Warteschlange wird auch der aktuelle Titel entfernt"
@@ -969,8 +963,9 @@ msgstr "Die Zuordnung lokaler Dateien ist nicht mehr verfügbar"
 
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
-msgstr[0] ""
+msgstr[0] "Zuordnung lokaler Dateien: {matched} von {total} Serverpfad zugeordnet"
 msgstr[1] ""
+"Zuordnung lokaler Dateien: {matched} von {total} Serverpfaden zugeordnet"
 
 msgid "Local library"
 msgstr "Lokale Mediathek"
@@ -1018,7 +1013,7 @@ msgid "Mapped Local Path"
 msgstr "Verknüpfter lokaler Pfad"
 
 msgid "Mapped local file not found"
-msgstr ""
+msgstr "Zugeordnete lokale Datei nicht gefunden"
 
 msgid "Maximum year"
 msgstr "Maximaljahr"
@@ -1591,8 +1586,6 @@ msgstr "Regel und Downloads entfernen"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Regel entfernen, Downloads behalten"
 
-#, fuzzy
-#| msgid "Remove All Downloads"
 msgid "Remove all downloads"
 msgstr "Alle Downloads entfernen"
 
@@ -1706,8 +1699,8 @@ msgstr "Gespeicherte Quellen"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "Gespeicherte Zuordnung: {matched} von {total} Serverpfad zugeordnet"
+msgstr[1] "Gespeicherte Zuordnung: {matched} von {total} Serverpfaden zugeordnet"
 
 msgid "Saved to"
 msgstr "Gespeichert unter"
@@ -1802,8 +1795,6 @@ msgstr "Alle auswählen"
 msgid "Selection"
 msgstr "Auswahl"
 
-#, fuzzy
-#| msgid "separate .lrc file"
 msgid "Separate .lrc file"
 msgstr "Separate .lrc-Datei"
 
@@ -2099,7 +2090,7 @@ msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
 
 msgid "Use This Source"
-msgstr ""
+msgstr "Diese Quelle verwenden"
 
 msgid "Use a number above zero"
 msgstr "Verwende eine Zahl größer als null"
