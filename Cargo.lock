@@ -1044,9 +1044,9 @@ checksum = "caf1079563223d5d59d83c85886a56e586cfd5c1a26292e971a0fa266531ac5a"
 
 [[package]]
 name = "fcast-sender-sdk"
-version = "0.2.0"
+version = "0.3.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7c5f132f0e6f746837b3900bfbf17ae3ea94d92376d79f4ec213833b3099bf6f"
+checksum = "f287d576e0dff57869e24c00468747821ab6a8a2db8e9093d29d12b7688a9bb5"
 dependencies = [
  "anyhow",
  "cfg_aliases",

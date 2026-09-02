@@ -1419,14 +1419,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/fcast-sender-sdk/fcast-sender-sdk-0.2.0.crate",
-        "sha256": "7c5f132f0e6f746837b3900bfbf17ae3ea94d92376d79f4ec213833b3099bf6f",
-        "dest": "cargo/vendor/fcast-sender-sdk-0.2.0"
+        "url": "https://static.crates.io/crates/fcast-sender-sdk/fcast-sender-sdk-0.3.0.crate",
+        "sha256": "f287d576e0dff57869e24c00468747821ab6a8a2db8e9093d29d12b7688a9bb5",
+        "dest": "cargo/vendor/fcast-sender-sdk-0.3.0"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"7c5f132f0e6f746837b3900bfbf17ae3ea94d92376d79f4ec213833b3099bf6f\", \"files\": {}}",
-        "dest": "cargo/vendor/fcast-sender-sdk-0.2.0",
+        "contents": "{\"package\": \"f287d576e0dff57869e24c00468747821ab6a8a2db8e9093d29d12b7688a9bb5\", \"files\": {}}",
+        "dest": "cargo/vendor/fcast-sender-sdk-0.3.0",
         "dest-filename": ".cargo-checksum.json"
     },
     {
