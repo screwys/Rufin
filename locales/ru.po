@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-08-31 00:51+0000\n"
+"PO-Revision-Date: 2026-09-03 11:51+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -16,7 +16,7 @@ msgstr ""
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=3; plural=(n%10==1 && n%100!=11 ? 0 : n%10>=2 && "
 "n%10<=4 && (n%100<10 || n%100>=20) ? 1 : 2);\n"
-"X-Generator: Weblate 2026.9.dev0\n"
+"X-Generator: Weblate 2026.9\n"
 
 msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
@@ -157,10 +157,8 @@ msgstr "Добавить правило"
 msgid "Add a matching server prefix"
 msgstr "Введите соответствующий префикс сервера"
 
-#, fuzzy
-#| msgid "Local music folder"
 msgid "Add a music folder"
-msgstr "Локальная папка с музыкой"
+msgstr "Добавить папку с музыкой"
 
 msgid "Add a new source"
 msgstr "Новый источник"
@@ -353,7 +351,7 @@ msgstr[1] "Изменения применяются к {count} трекам"
 msgstr[2] "Изменения применяются к {count} трекам"
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Изменения применяются после перезагрузки Rufin"
 
 msgid "Choose a local music folder"
 msgstr "Выбрать локальную папку с музыкой"
@@ -381,10 +379,8 @@ msgstr "Классическая"
 msgid "Clear Mapping"
 msgstr "Удалить Соответствия"
 
-#, fuzzy
-#| msgid "Play artist"
 msgid "Clear artist"
-msgstr "Воспроизвести исполнителя"
+msgstr "Очистить исполнителя"
 
 msgid "Clear fetched lyrics for this track"
 msgstr "Удалить загруженные тексты песен для этого трека"
@@ -392,10 +388,8 @@ msgstr "Удалить загруженные тексты песен для э�
 msgid "Clear queue"
 msgstr "Очистить очередь"
 
-#, fuzzy
-#| msgid "Sort title"
 msgid "Clear title"
-msgstr "Сортировать по названию"
+msgstr "Очистить название"
 
 msgid "Clearing queue also clears the current song"
 msgstr "Очистка очереди также очищает текущую песню"
@@ -969,19 +963,17 @@ msgstr "Доступ к локальным файлам настроен"
 msgid "Local file mapping is no longer available"
 msgstr "Сопоставление локальных файлов больше не доступно"
 
-#, fuzzy
-#| msgid "Local mapping saved. Sync to preview matches."
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
-"Локальное сопоставление сохранено. Синхронизация для предварительного "
-"просмотра соответствий."
+"Локальное сопоставление файлов: {matched} совпадение из {total} с путями на "
+"сервере"
 msgstr[1] ""
-"Локальное сопоставление сохранено. Синхронизация для предварительного "
-"просмотра соответствий."
+"Локальное сопоставление файлов: {matched} совпадения из {total} с путями на "
+"сервере"
 msgstr[2] ""
-"Локальное сопоставление сохранено. Синхронизация для предварительного "
-"просмотра соответствий."
+"Локальное сопоставление файлов: {matched} совпад из {total} с путями на "
+"сервере"
 
 msgid "Local library"
 msgstr "Локальная библиотека"
@@ -1026,10 +1018,10 @@ msgid "Manage"
 msgstr "Управление"
 
 msgid "Mapped Local Path"
-msgstr "Сопоставленный Локальный Путь"
+msgstr "Сопоставленный локальный путь"
 
 msgid "Mapped local file not found"
-msgstr ""
+msgstr "Сопоставленный локальный файл не найден"
 
 msgid "Maximum year"
 msgstr "Максимальный год"
@@ -1581,7 +1573,7 @@ msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
 
 msgid "Remove All Downloads"
-msgstr "Удалить все загрузки"
+msgstr "Удалить Все загрузки"
 
 msgid "Remove Download"
 msgstr "Удалить загрузку"
@@ -1601,8 +1593,6 @@ msgstr "Удалить правило и загрузки"
 msgid "Remove Rule, Keep Downloads"
 msgstr "Удалить правило, сохранить загрузки"
 
-#, fuzzy
-#| msgid "Remove All Downloads"
 msgid "Remove all downloads"
 msgstr "Удалить все загрузки"
 
@@ -1718,8 +1708,11 @@ msgstr "Сохраненные источники"
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
+"Сопоставление сохранено. {matched} совпадение из {total} с путями на сервере"
 msgstr[1] ""
+"Сопоставление сохранено. {matched} совпадения из {total} с путями на сервере"
 msgstr[2] ""
+"Сопоставление сохранено. {matched} совпадений из {total} с путями на сервере"
 
 msgid "Saved to"
 msgstr "Сохранено в"
@@ -1814,10 +1807,8 @@ msgstr "Выбрать всё"
 msgid "Selection"
 msgstr "Выбор"
 
-#, fuzzy
-#| msgid "separate .lrc file"
 msgid "Separate .lrc file"
-msgstr "отдельный файл .lrc"
+msgstr "Отдельный файл .lrc"
 
 msgid "Server Actions"
 msgstr "Действия на сервере"
