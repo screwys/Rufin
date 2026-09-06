@@ -767,6 +767,14 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             .object_id,
         object_id
     );
+    let uri = &changed_order[0];
+    let mut metadata = source.read_track_metadata(&database, uri).await.unwrap();
+    metadata.values.title = "After rename".into();
+    source.write_track_metadata(&database, uri, metadata.revision.as_deref().unwrap(), None, sources::TrackMetadataEdit {
+        values: metadata.values,
+        changed: sources::TrackMetadataWritable { title: true, ..Default::default() },
+    }).await.unwrap();
+    assert_eq!(database.track_row_by_uri(uri, &ReadCancellation::new()).await.unwrap().unwrap().object_id, object_id);
 }
 
 #[tokio::test]

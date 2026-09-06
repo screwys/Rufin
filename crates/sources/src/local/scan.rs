@@ -37,11 +37,22 @@ pub(super) async fn publish_metadata_paths(
     scan.finish_batch().await?;
     let mut worker = media::Worker::default();
     for page in paths.chunks(LOCAL_BATCH_SIZE) {
-        scan.begin_batch().await?;
         let mut tracks = Vec::with_capacity(page.len());
         for path in page {
-            match media::read_media(&mut worker, path.clone(), None) {
-                MediaRead::Accepted(track) => tracks.push(*track),
+            let existing = match url::Url::from_file_path(path) {
+                Ok(uri) => scan.local_track_file(uri.as_str()).await?,
+                Err(()) => None,
+            };
+            let read_path = existing
+                .as_ref()
+                .map_or(path.as_path(), |(_, path)| Path::new(path));
+            match media::read_media(&mut worker, read_path.to_path_buf(), None) {
+                MediaRead::Accepted(mut track) => {
+                    if let Some((id, _)) = existing {
+                        track.id = id;
+                    }
+                    tracks.push(*track);
+                }
                 MediaRead::Rejected | MediaRead::Unreadable => {
                     return Err(SourceError::Other(format!(
                         "Could not reread metadata from {}",
@@ -50,6 +61,7 @@ pub(super) async fn publish_metadata_paths(
                 }
             }
         }
+        scan.begin_batch().await?;
         stage_audio_tracks_batch(&mut scan, &tracks).await?;
         scan.finish_batch().await?;
     }

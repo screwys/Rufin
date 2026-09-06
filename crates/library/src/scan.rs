@@ -327,6 +327,16 @@ impl Scan {
         Ok(())
     }
 
+    pub async fn local_track_file(
+        &self,
+        media_uri: &str,
+    ) -> LibraryResult<Option<(String, String)>> {
+        let mut writer = self.database.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        Ok(sqlx::query_as("SELECT object_id,source_path FROM tracks WHERE media_uri=?1 AND source_path IS NOT NULL")
+            .bind(media_uri).fetch_optional(connection).await?)
+    }
+
     pub async fn local_artwork_album_page(&self, after: &str) -> LibraryResult<Vec<String>> {
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;

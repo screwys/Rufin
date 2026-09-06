@@ -796,6 +796,62 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn metadata_publication_keeps_identity_for_equivalent_file_paths() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().canonicalize().unwrap();
+        let audio = root.join("café %.wav");
+        fs::write(&audio, silent_wav()).unwrap();
+        let database = library::Database::open(root.join("library.db"))
+            .await
+            .unwrap();
+        let connected = crate::Source::connect(
+            crate::SourceId::new("metadata-paths"),
+            crate::SourceSetupInput::Local(crate::LocalFolderHostInput {
+                roots: vec![root.clone()],
+            }),
+        )
+        .await
+        .unwrap();
+        let (_, source, _) = connected.into_parts();
+        source
+            .manual_refresh(
+                &database,
+                "Local",
+                &|_| {},
+                std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            )
+            .await
+            .unwrap();
+        let uri = url::Url::from_file_path(&audio).unwrap().to_string();
+        let before = database
+            .track_row_by_uri(&uri, &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
+        for path in [
+            root.join(".").join("café %.wav"),
+            library::file_media_path(&uri).unwrap(),
+        ] {
+            super::super::scan::publish_metadata_paths(
+                &database,
+                source.source_id().as_str(),
+                &[path],
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            let after = database
+                .track_row_by_uri(&uri, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(after.track_key, before.track_key);
+            assert_eq!(after.object_id, before.object_id);
+        }
+    }
+
+    #[tokio::test]
     async fn removing_last_local_root_clears_catalog_without_deleting_files() {
         let directory = tempfile::tempdir().unwrap();
         let audio = directory.path().canonicalize().unwrap().join("track.wav");
