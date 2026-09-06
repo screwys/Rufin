@@ -417,6 +417,35 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn local_paths_import_without_a_configured_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Database::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let path = directory.path().join("café %.flac");
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        let input = format!("#EXTM3U\ncafé %.flac\n{}\n{uri}\n", path.display());
+        let report = database
+            .import_playlist_m3u(
+                std::io::Cursor::new(input),
+                &directory.path().join("mix.m3u8"),
+                |_| None,
+            )
+            .await
+            .unwrap();
+        assert_eq!(report.imported, 3);
+        let entries = database
+            .playlist_file_uri_page(report.playlist, -1)
+            .await
+            .unwrap();
+        assert_eq!(entries.len(), 3);
+        for (_, actual) in entries {
+            assert_eq!(actual, uri);
+            assert_eq!(crate::file_media_path(&actual).unwrap(), path);
+        }
+    }
+
+    #[tokio::test]
     async fn ordinary_m3u_preserves_unicode_duplicates_missing_paths_and_exact_reimport() {
         let directory = tempfile::tempdir().unwrap();
         let database = Database::open(directory.path().join("library.db"))

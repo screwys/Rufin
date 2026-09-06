@@ -662,8 +662,8 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
 #[tokio::test]
 async fn explicit_rename_preserves_track_identity_without_native_file_identity() {
     let root = tempfile::tempdir().expect("music root");
-    let old = root.path().join("old.wav");
-    let new = root.path().join("new.wav");
+    let old = root.path().join("old café %.wav");
+    let new = root.path().join("new café %.wav");
     write_tagged_wav(&old, "Track", "Artist", "Album", "Genre").expect("tagged WAV");
     let store = tempfile::tempdir().expect("Store");
     let database_path = store.path().join("library.sqlite");

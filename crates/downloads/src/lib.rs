@@ -1893,7 +1893,9 @@ impl Actor {
                     disc_number,
                     track_number,
                     duration_millis,
-                    access_uri: format!("file://{}", paths.audio.to_string_lossy()),
+                    access_uri: reqwest::Url::from_file_path(&paths.audio)
+                        .map_err(|()| "Download path is not absolute".to_string())?
+                        .into(),
                     loudness_analysis_key: loudness,
                 },
             )
@@ -2732,7 +2734,10 @@ mod tests {
     #[tokio::test]
     async fn direct_http_media_uses_the_application_download_queue_without_a_source() {
         let (_library, database, source_key, _) = download_fixture("unused", "track").await;
-        let root = tempfile::tempdir().expect("Downloads root");
+        let root = tempfile::Builder::new()
+            .prefix("downloads café %")
+            .tempdir()
+            .expect("Downloads root");
         let source_id = SourceId::new("unused");
         let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
         let media_uri = "https://media.example/direct.flac".to_string();
@@ -2803,7 +2808,13 @@ mod tests {
             .playback_access_uri(&media_uri)
             .await
             .unwrap();
-        assert!(access.is_some());
+        assert_eq!(
+            reqwest::Url::parse(access.as_deref().unwrap())
+                .unwrap()
+                .to_file_path()
+                .unwrap(),
+            paths.audio
+        );
         assert_eq!(
             received.recv().await.unwrap(),
             DownloadEvent::SubjectChanged {

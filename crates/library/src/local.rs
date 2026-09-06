@@ -632,11 +632,14 @@ async fn load_local_file_rows(
         {
             dependencies.entry(file).or_default().push(dependency);
         }
-        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,path) AS (");
+        let mut query =
+            QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,path,media_uri) AS (");
         query.push_values(&scalars, |mut row, file| {
-            row.push_bind(file.local_file_key).push_bind(&file.path);
+            row.push_bind(file.local_file_key)
+                .push_bind(&file.path)
+                .push_bind(url::Url::from_file_path(&file.path).ok().map(String::from));
         });
-        query.push(") SELECT requested.local_file_key,min(track.object_id) FROM requested JOIN tracks track ON track.media_uri='file://'||requested.path OR track.cue_path=requested.path GROUP BY requested.local_file_key");
+        query.push(") SELECT requested.local_file_key,min(track.object_id) FROM requested JOIN tracks track ON track.media_uri=requested.media_uri OR track.cue_path=requested.path GROUP BY requested.local_file_key");
         for (file, object_id) in query
             .build_query_as::<(LocalFileKey, String)>()
             .persistent(false)

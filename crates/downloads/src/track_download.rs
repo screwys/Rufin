@@ -1061,7 +1061,9 @@ pub(super) async fn attach_downloaded_files(
                         disc_number: track.disc_number,
                         track_number: track.track_number,
                         duration_millis: track.duration_millis,
-                        access_uri: format!("file://{}", paths.audio.to_string_lossy()),
+                        access_uri: reqwest::Url::from_file_path(&paths.audio)
+                            .map_err(|()| "Download path is not absolute".to_string())?
+                            .into(),
                         loudness_analysis_key: Some(track.loudness_analysis_key),
                     },
                 )
