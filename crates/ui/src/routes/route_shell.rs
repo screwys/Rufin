@@ -18,9 +18,12 @@ use crate::localization::{
 use crate::player::{select_next_audio_output, select_previous_audio_output};
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::routes::collection_context::{
-    download_track_selection, remove_playlist_entry_selection,
+    download_playlist_entry_selection, download_track_selection, remove_playlist_entry_selection,
 };
-use crate::routes::playlist_picker::present_playlist_picker_selection;
+use crate::routes::playlist_picker::{
+    present_playlist_picker_entries, present_playlist_picker_media_uris,
+    present_playlist_picker_selection,
+};
 use crate::routes::track_selection::TrackSelectionSnapshot;
 use crate::shell::Shell;
 use crate::shell::actions::{ADD_ICON, sort_order_icon, toggle_mute_shortcut};
@@ -69,6 +72,7 @@ crate::ui_resource::composite_box!(
         search_host: gtk::Box,
         controls: gtk::Box,
         command_button: gtk::Button,
+        import_button: gtk::Button,
         sort_dropdown: gtk::DropDown,
         direction: gtk::Button,
         layout: gtk::Button,
@@ -140,6 +144,22 @@ impl LibraryPageShell {
             (self.has_visible_results)(),
         );
     }
+
+    pub(crate) fn configure_history_filter(
+        &self,
+        current_source_name: Option<String>,
+        changed: impl Fn(bool) + 'static,
+    ) {
+        let dropdown = &self.toolbar.sort_dropdown;
+        let labels = gtk::StringList::new(&[&tr("All")]);
+        if let Some(name) = current_source_name.as_deref() {
+            labels.append(name);
+        }
+        dropdown.set_model(Some(&labels));
+        dropdown.set_selected(0);
+        dropdown.set_sensitive(current_source_name.is_some());
+        dropdown.connect_selected_notify(move |dropdown| changed(dropdown.selected() == 1));
+    }
 }
 
 #[derive(Clone)]
@@ -191,13 +211,15 @@ impl LibraryToolbarProjection {
             return;
         }
         self.syncing.set(true);
-        self.sort_dropdown.set_selected(
-            state
-                .sort_fields
-                .iter()
-                .position(|field| *field == settings.sort_key)
-                .unwrap_or(0) as u32,
-        );
+        if key != LibraryListKey::History {
+            self.sort_dropdown.set_selected(
+                state
+                    .sort_fields
+                    .iter()
+                    .position(|field| *field == settings.sort_key)
+                    .unwrap_or(0) as u32,
+            );
+        }
         self.direction
             .set_icon_name(sort_order_icon(settings.descending));
         let layout = toolbar_layout(settings.layout, state.include_detail);
@@ -262,13 +284,11 @@ impl Shell {
     }
 
     fn route_keyboard_available(&self) -> bool {
-        !self.source.login_screen_active()
-            && !self.fullscreen_player_visible()
-            && !self.transient_route_input_active()
+        !self.fullscreen_player_visible() && !self.transient_route_input_active()
     }
 
     fn playback_keyboard_available(&self) -> bool {
-        !self.source.login_screen_active() && !self.transient_route_input_active()
+        !self.transient_route_input_active()
     }
 
     fn transient_route_input_active(&self) -> bool {
@@ -375,6 +395,46 @@ impl Shell {
         if matches!(shortcut, SelectionShortcut::Delete) {
             return self.remove_focused_selection(focus);
         }
+        if self.queue_selection_focused(focus) {
+            let Some(queue) = self.selected_queue() else {
+                return false;
+            };
+            match shortcut {
+                SelectionShortcut::Play(_) => {
+                    let Some(occurrence) = queue
+                        .selected_occurrences()
+                        .and_then(|occurrences| occurrences.first().cloned())
+                    else {
+                        return false;
+                    };
+                    self.products.playback.queue.activate(occurrence);
+                }
+                SelectionShortcut::AddToPlaylist => {
+                    let Some(media_uris) = queue.selected_media_uris() else {
+                        return false;
+                    };
+                    present_playlist_picker_media_uris(self, media_uris.iter().cloned());
+                }
+                SelectionShortcut::Download => return false,
+                SelectionShortcut::Delete => unreachable!(),
+            }
+            return true;
+        }
+        if !self.queue_selection_focused(focus)
+            && let Some(selection) = self.current_playlist_entry_selection_snapshot()
+        {
+            match shortcut {
+                SelectionShortcut::Play(placement) => selection.play(self, placement),
+                SelectionShortcut::AddToPlaylist => {
+                    present_playlist_picker_entries(self, selection)
+                }
+                SelectionShortcut::Download => {
+                    return download_playlist_entry_selection(self, selection);
+                }
+                SelectionShortcut::Delete => unreachable!(),
+            }
+            return true;
+        }
         let Some(selection) = self.focused_track_selection(focus) else {
             return false;
         };
@@ -409,13 +469,8 @@ impl Shell {
 
     fn focused_track_selection(
         &self,
-        focus: Option<&gtk::Widget>,
+        _focus: Option<&gtk::Widget>,
     ) -> Option<TrackSelectionSnapshot> {
-        if self.queue_selection_focused(focus) {
-            return self
-                .selected_queue()
-                .and_then(|queue| queue.selected_tracks(self));
-        }
         self.current_route_track_selection_snapshot()
     }
 
@@ -476,6 +531,15 @@ impl Shell {
             include_detail,
             sort_fields,
         }));
+        toolbar
+            .imp()
+            .import_button
+            .set_visible(key == LibraryListKey::Playlists);
+        let import_shell = Rc::clone(self);
+        toolbar
+            .imp()
+            .import_button
+            .connect_clicked(move |_| import_shell.import_playlist_dialog());
         let command_button = toolbar.imp().command_button.get();
         set_library_command_button_content(&command_button, false, ADD_ICON, "New Playlist");
         bind_widget_tooltip(&command_button, "New Playlist");
@@ -536,6 +600,9 @@ impl Shell {
                     return;
                 }
                 let state = *state.borrow();
+                if state.key == LibraryListKey::History {
+                    return;
+                }
                 let sort_key = state
                     .sort_fields
                     .get(dropdown.selected() as usize)
@@ -831,20 +898,7 @@ fn library_sort_title(key: LibraryListKey, field: LibraryField) -> &'static str 
     }
 }
 
-pub(super) fn restore_single_click_activation_on_primary_press<T>(
-    target: &T,
-    restore: impl Fn(&T) + 'static,
-) where
-    T: IsA<gtk::Widget> + Clone + 'static,
-{
-    let pointer = gtk::GestureClick::new();
-    pointer.set_button(gtk::gdk::BUTTON_PRIMARY);
-    pointer.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let restore = weak_target_callback(target, move |target, ()| restore(target));
-    pointer.connect_pressed(move |_, _, _, _| restore(()));
-    target.add_controller(pointer);
-}
-
+#[cfg(test)]
 fn weak_target_callback<T, A>(
     target: &T,
     callback: impl Fn(&T, A) + 'static,

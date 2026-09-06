@@ -4,8 +4,6 @@ use adw::prelude::*;
 
 use crate::layout::{AllocationOwner, width_allocation_owner};
 
-const COMPACT_FIELD_ROW_STACK_WIDTH: i32 = 560;
-
 pub(crate) fn style_compact_field_row(row: &impl IsA<gtk::Widget>) {
     row.add_css_class("compact-field-row");
 }
@@ -15,10 +13,6 @@ pub(crate) fn compact_field_row_group(row: &impl IsA<gtk::Widget>) -> adw::Prefe
     group.set_hexpand(true);
     group.add(row);
     group
-}
-
-pub(crate) fn install_compact_field_row_responsiveness(fields: &gtk::Box) -> AllocationOwner {
-    install_compact_field_row_responsiveness_at(fields, COMPACT_FIELD_ROW_STACK_WIDTH)
 }
 
 pub(crate) fn install_compact_field_row_responsiveness_at(

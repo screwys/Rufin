@@ -9,6 +9,7 @@ use lyrics::{CurrentLyrics, CurrentLyricsContent, LyricsDocument, LyricsOrigin};
 
 use crate::player::lyrics::LyricsPane;
 use crate::player::lyrics::search::LyricsSearchDialog;
+use crate::player::lyrics::timing::LyricsTiming;
 use crate::player::state::{current_playback_media_id, current_playback_track_id};
 use crate::shell::Shell;
 
@@ -20,6 +21,7 @@ pub(crate) struct SelectedLyricsState {
     pub(crate) projection: RefCell<CurrentLyrics>,
     pub(crate) offset_millis: Cell<i64>,
     pub(crate) timing_source: RefCell<Option<glib::SourceId>>,
+    pub(super) timing: RefCell<LyricsTiming>,
     pub(crate) right_pane_dirty: Cell<bool>,
     pub(crate) fullscreen_pane_dirty: Cell<bool>,
     pub(crate) search_dialog: RefCell<Option<LyricsSearchDialog>>,
@@ -40,6 +42,7 @@ impl SelectedLyricsState {
             projection: RefCell::new(CurrentLyrics::Cleared),
             offset_millis: Cell::new(0),
             timing_source: RefCell::new(None),
+            timing: RefCell::new(LyricsTiming::default()),
             right_pane_dirty: Cell::new(true),
             fullscreen_pane_dirty: Cell::new(true),
             search_dialog: RefCell::new(None),
@@ -208,6 +211,19 @@ impl Shell {
         if document_changed {
             self.restart_lyrics_follow_tracking();
             lyrics.offset_millis.set(0);
+        }
+        match &projection {
+            CurrentLyrics::Ready {
+                content: Some(CurrentLyricsContent::Document { document, .. }),
+                ..
+            } if document_changed => {
+                *lyrics.timing.borrow_mut() = LyricsTiming::new(&document.lines);
+            }
+            CurrentLyrics::Ready {
+                content: Some(CurrentLyricsContent::Document { .. }),
+                ..
+            } => {}
+            _ => *lyrics.timing.borrow_mut() = LyricsTiming::default(),
         }
         *lyrics.projection.borrow_mut() = projection;
         self.render_lyrics_panel();

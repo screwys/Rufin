@@ -15,7 +15,7 @@ pub(super) async fn stage_album(
     let artwork = album
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_album(
         &album.id,
@@ -74,7 +74,7 @@ pub(super) async fn stage_track(
     let artwork = track
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     let mut audio = blake3::Hasher::new();
     audio.update(b"rufin-jellyfin-audio-v1\0");
@@ -175,7 +175,7 @@ pub(super) async fn stage_artist(
     let artwork = artist
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_artist(
         &artist.id,
@@ -184,7 +184,7 @@ pub(super) async fn stage_artist(
         &artist.name.to_lowercase(),
         artist.musicbrainz_artist_id.as_deref(),
         artwork.as_deref(),
-        artist.favorite,
+        Some(artist.favorite),
         artist.user_rating.map(i64::from),
     )
     .await
@@ -197,7 +197,7 @@ pub(super) async fn stage_genre(
     let artwork = genre
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_genre(
         &genre.id,
@@ -220,7 +220,7 @@ async fn stage_artist_credit(
         &artist.name.to_lowercase(),
         artist.musicbrainz_artist_id.as_deref(),
         None,
-        false,
+        None,
         None,
     )
     .await
@@ -417,7 +417,14 @@ struct UserData {
     is_favorite: Option<bool>,
     play_count: Option<i32>,
     last_played_date: Option<String>,
+    #[serde(default, deserialize_with = "optional_rating")]
     rating: Option<f64>,
+}
+
+fn optional_rating<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<Option<f64>, D::Error> {
+    Ok(serde_json::Value::deserialize(deserializer)?.as_f64())
 }
 
 pub(super) fn album_from_item(item: JellyfinItem) -> Album {

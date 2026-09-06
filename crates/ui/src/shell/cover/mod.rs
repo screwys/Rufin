@@ -4,7 +4,7 @@ use std::rc::Rc;
 use std::sync::Arc;
 
 use adw::prelude::*;
-use artwork::{ArtworkBinding, ArtworkRequest, SourceImages};
+use artwork::{ArtworkBinding, ArtworkRequest};
 use gtk::glib;
 use tracing::warn;
 
@@ -158,20 +158,6 @@ impl Shell {
         )
     }
 
-    fn artwork_source(&self, source_id: Option<&::sources::SourceId>) -> Option<SourceImages> {
-        let selected = self.selected_library();
-        match source_id {
-            None => selected.as_ref().map(|selected| selected.artwork.clone()),
-            Some(source_id) => selected
-                .as_ref()
-                .filter(|selected| &selected.artwork.source_id == source_id)
-                .map_or_else(
-                    || Some(SourceImages::cache_only(source_id.clone())),
-                    |selected| Some(selected.artwork.clone()),
-                ),
-        }
-    }
-
     pub(crate) fn bind_artwork_tile(
         self: &Rc<Self>,
         tile: &ArtworkTile,
@@ -179,7 +165,7 @@ impl Shell {
         render_size: i32,
         fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, None, artwork, render_size, fetch_size, false, false);
+        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, false, false);
     }
 
     pub(crate) fn bind_cache_only_artwork_tile(
@@ -189,32 +175,22 @@ impl Shell {
         render_size: i32,
         fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(tile, None, artwork, render_size, fetch_size, false, true);
+        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, false, true);
     }
 
     pub(crate) fn bind_playback_artwork_tile(
         self: &Rc<Self>,
         tile: &ArtworkTile,
-        source_id: &::sources::SourceId,
         artwork: ArtworkBinding,
         render_size: i32,
         fetch_size: u32,
     ) {
-        self.bind_artwork_tile_request(
-            tile,
-            Some(source_id.clone()),
-            artwork,
-            render_size,
-            fetch_size,
-            true,
-            false,
-        );
+        self.bind_artwork_tile_request(tile, artwork, render_size, fetch_size, true, false);
     }
 
     fn bind_artwork_tile_request(
         self: &Rc<Self>,
         tile: &ArtworkTile,
-        source_id: Option<::sources::SourceId>,
         artwork: ArtworkBinding,
         render_size: i32,
         fetch_size_cap: u32,
@@ -229,33 +205,18 @@ impl Shell {
         }
         let (fetch_size, render_size) =
             cover_request_sizes(render_size, fetch_size_cap, self.artwork_scale());
-        let prepared_source = if cache_only {
-            self.selected_library().as_deref().map(|selected| {
-                (
-                    SourceImages::cache_only(selected.artwork.source_id.clone()),
-                    cache_only_artwork_external_policy(),
-                )
-            })
+        let external = if cache_only {
+            cache_only_artwork_external_policy()
         } else {
-            self.artwork_source(source_id.as_ref()).map(|source| {
-                (
-                    source,
-                    artwork_external_policy(&self.settings.current.borrow()),
-                )
-            })
+            artwork_external_policy(&self.settings.current.borrow())
         };
-        let Some((source, external)) = prepared_source else {
-            self.cancel_artwork_tile_request(tile);
-            tile.bind_pending();
-            return;
-        };
-        let texture_source_id = source.source_id.clone();
         let request = ArtworkRequest::new(artwork, fetch_size, render_size).with_external(external);
-        let prepared = self.products.artwork.prepare(source, request);
-        let outcome = tile.bind_selected_cover(
-            prepared.identity.visual.clone(),
-            prepared.identity.request.clone(),
-        );
+        let prepared = if cache_only {
+            self.products.artwork.prepare_cache_only(request)
+        } else {
+            self.products.artwork.prepare(request)
+        };
+        let outcome = tile.bind_selected_cover(prepared.key.clone());
         if !artwork_binding_needs_work(
             outcome.request_needed,
             prepared.ready.is_some(),
@@ -273,7 +234,6 @@ impl Shell {
             self.defer_route_artwork_request(
                 tile,
                 outcome.generation,
-                texture_source_id,
                 refresh_desktop_on_ready,
                 prepared,
             );
@@ -283,7 +243,6 @@ impl Shell {
         self.start_prepared_artwork_tile_request(
             tile,
             outcome.generation,
-            texture_source_id,
             refresh_desktop_on_ready,
             prepared,
         );
@@ -293,7 +252,6 @@ impl Shell {
         self: &Rc<Self>,
         tile: &ArtworkTile,
         generation: u64,
-        texture_source_id: ::sources::SourceId,
         refresh_desktop_on_ready: bool,
         prepared: artwork::PreparedArtwork,
     ) {
@@ -301,13 +259,13 @@ impl Shell {
             .artwork
             .textures
             .borrow_mut()
-            .prepared_texture(&prepared.decoded_identities)
+            .prepared_texture(&prepared.key)
         {
             tile.set_texture_if_current(generation, texture);
             return;
         }
         if let Some(image) = prepared.ready.as_ref() {
-            if let Some(texture) = self.texture_for_decoded(&texture_source_id, Arc::clone(image)) {
+            if let Some(texture) = self.texture_for_decoded(Arc::clone(image)) {
                 tile.set_texture_if_current(generation, texture);
             } else {
                 tile.set_fallback_if_current(generation);
@@ -321,13 +279,12 @@ impl Shell {
                     self.start_artwork_tile_request(
                         tile,
                         generation,
-                        texture_source_id,
                         refresh_desktop_on_ready,
                         pending,
                     );
                 }
                 artwork::ArtworkLoad::Ready(image) => {
-                    if let Some(texture) = self.texture_for_decoded(&texture_source_id, image) {
+                    if let Some(texture) = self.texture_for_decoded(image) {
                         tile.set_texture_if_current(generation, texture);
                     } else {
                         tile.set_fallback_if_current(generation);
@@ -348,7 +305,6 @@ impl Shell {
         self: &Rc<Self>,
         tile: &ArtworkTile,
         generation: u64,
-        source_id: ::sources::SourceId,
         refresh_desktop_on_ready: bool,
         pending: artwork::PendingArtwork,
     ) {
@@ -366,7 +322,7 @@ impl Shell {
             };
             let ready = match outcome {
                 artwork::ArtworkOutcome::Ready(image) => {
-                    if let Some(texture) = shell.texture_for_decoded(&source_id, image) {
+                    if let Some(texture) = shell.texture_for_decoded(image) {
                         tile.set_texture_if_current(generation, texture)
                     } else {
                         tile.set_fallback_if_current(generation);
@@ -403,16 +359,8 @@ impl Shell {
         tile.clear_image();
     }
 
-    fn texture_for_decoded(
-        &self,
-        source_id: &::sources::SourceId,
-        image: Arc<artwork::DecodedImage>,
-    ) -> Option<gtk::gdk::Texture> {
-        self.artwork.textures.borrow_mut().texture(source_id, image)
-    }
-
-    pub(crate) fn release_artwork_textures(&self, source_id: &::sources::SourceId) {
-        self.artwork.textures.borrow_mut().release_source(source_id);
+    fn texture_for_decoded(&self, image: Arc<artwork::DecodedImage>) -> Option<gtk::gdk::Texture> {
+        self.artwork.textures.borrow_mut().texture(image)
     }
 
     fn cancel_artwork_tile_request(self: &Rc<Self>, tile: &ArtworkTile) {
@@ -421,12 +369,10 @@ impl Shell {
 
     pub(crate) fn current_playback_cached_artwork_path(
         &self,
-        source_id: &::sources::SourceId,
         media: &playback::CurrentMedia,
         preferred_size: u32,
     ) -> Option<PlaybackArtworkPath> {
         let candidates = media
-            .track
             .artwork_binding
             .as_deref()
             .map(ArtworkBinding::opaque)
@@ -435,7 +381,7 @@ impl Shell {
         let external = artwork_external_policy(&settings);
         let request =
             ArtworkRequest::new(candidates, preferred_size, preferred_size).with_external(external);
-        let path = self.products.artwork.cache_only_file(source_id, &request)?;
+        let path = self.products.artwork.cache_only_file(&request)?;
         Some(PlaybackArtworkPath { path })
     }
 
@@ -510,7 +456,6 @@ impl Shell {
         self: &Rc<Self>,
         tile: &ArtworkTile,
         generation: u64,
-        source_id: ::sources::SourceId,
         refresh_desktop_on_ready: bool,
         prepared: artwork::PreparedArtwork,
     ) {
@@ -534,7 +479,6 @@ impl Shell {
                     shell.start_prepared_artwork_tile_request(
                         &tile,
                         generation,
-                        source_id,
                         refresh_desktop_on_ready,
                         prepared,
                     );

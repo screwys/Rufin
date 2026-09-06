@@ -2,11 +2,9 @@ use std::collections::HashMap;
 use std::fs;
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 use std::future::Future;
-use std::io::ErrorKind;
+use std::io::{ErrorKind, Write};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-use std::time::Duration;
 
 #[cfg(any(target_os = "macos", target_os = "windows"))]
 use app_identity::APP_ID;
@@ -18,11 +16,8 @@ use thiserror::Error;
 
 const CONFIG_SECRET_FORMAT: &str = "config-base64";
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-const SECRET_SERVICE_TIMEOUT: Duration = Duration::from_secs(2);
-#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-static SECRET_SERVICE_KEYRING: Mutex<Option<Arc<oo7::Keyring>>> = Mutex::new(None);
-#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-static SECRET_SERVICE_KEYRING_INIT: Mutex<()> = Mutex::new(());
+static SECRET_SERVICE: Mutex<Option<(tokio::runtime::Runtime, Arc<oo7::Keyring>)>> =
+    Mutex::new(None);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Deserialize, Serialize)]
 #[serde(rename_all = "kebab-case")]
@@ -162,18 +157,11 @@ impl SecretStore for CachedSecretStore {
     }
 
     fn load_secret(&self, key: &SecretKey) -> SecretResult<Option<String>> {
-        if let Some(secret) = self
-            .secrets
-            .lock()
-            .map_err(|_| SecretError::Locked)?
-            .get(key)
-            .cloned()
-        {
+        let mut secrets = self.secrets.lock().map_err(|_| SecretError::Locked)?;
+        if let Some(secret) = secrets.get(key).cloned() {
             return Ok(secret);
         }
-
         let secret = self.inner.load_secret(key)?;
-        let mut secrets = self.secrets.lock().map_err(|_| SecretError::Locked)?;
         secrets.insert(key.clone(), secret.clone());
         Ok(secret)
     }
@@ -279,8 +267,18 @@ impl ConfigSecretStore {
         }
         let value = serde_json::to_string_pretty(&file).map_err(config_error)?;
         let temp_path = self.path.with_extension("json.tmp");
-        fs::write(&temp_path, format!("{value}\n")).map_err(config_error)?;
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let mut output = options.open(&temp_path).map_err(config_error)?;
         restrict_config_secret_file(&temp_path).map_err(config_error)?;
+        writeln!(output, "{value}").map_err(config_error)?;
+        output.sync_all().map_err(config_error)?;
+        drop(output);
         fs::rename(&temp_path, &self.path).map_err(config_error)?;
         Ok(())
     }
@@ -477,67 +475,33 @@ impl SystemKeyringBackend {
         key.label.clone()
     }
 
-    fn run<T, Fut>(&self, operation: Fut) -> SecretResult<T>
-    where
-        Fut: Future<Output = oo7::Result<T>>,
-    {
-        let runtime = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|error| SecretError::Backend(error.to_string()))?;
-        let result = runtime
-            .block_on(async { tokio::time::timeout(SECRET_SERVICE_TIMEOUT, operation).await });
-        runtime.shutdown_background();
-        let result = result.map_err(|_| {
-            SecretError::Backend(format!(
-                "secret service timed out after {}s",
-                SECRET_SERVICE_TIMEOUT.as_secs_f64()
-            ))
-        })?;
-        result.map_err(|error| SecretError::Backend(error.to_string()))
-    }
-
     fn run_with_keyring<T, Fut, Op>(&self, operation: Op) -> SecretResult<T>
     where
         Fut: Future<Output = oo7::Result<T>>,
         Op: FnOnce(Arc<oo7::Keyring>) -> Fut,
     {
-        if oo7::ashpd::is_sandboxed() {
-            let keyring = self.cached_keyring()?;
-            return self.run(operation(keyring));
+        // The D-Bus connection and portal keyring retain tasks on their originating
+        // runtime. Keep that runtime alive and serialize unlocks with the operation.
+        let mut service = SECRET_SERVICE.lock().map_err(|_| SecretError::Locked)?;
+        if service.is_none() {
+            let runtime = tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .map_err(|error| SecretError::Backend(error.to_string()))?;
+            let keyring = runtime
+                .block_on(oo7::Keyring::new())
+                .map_err(|error| SecretError::Backend(error.to_string()))?;
+            *service = Some((runtime, Arc::new(keyring)));
         }
-
-        self.run(async move {
-            let keyring = Arc::new(oo7::Keyring::new().await?);
-            operation(keyring).await
-        })
-    }
-
-    fn cached_keyring(&self) -> SecretResult<Arc<oo7::Keyring>> {
-        if let Some(keyring) = SECRET_SERVICE_KEYRING
-            .lock()
-            .map_err(|_| SecretError::Locked)?
-            .clone()
-        {
-            return Ok(keyring);
-        }
-
-        let _guard = SECRET_SERVICE_KEYRING_INIT
-            .lock()
-            .map_err(|_| SecretError::Locked)?;
-        if let Some(keyring) = SECRET_SERVICE_KEYRING
-            .lock()
-            .map_err(|_| SecretError::Locked)?
-            .clone()
-        {
-            return Ok(keyring);
-        }
-
-        let keyring = Arc::new(self.run(oo7::Keyring::new())?);
-        *SECRET_SERVICE_KEYRING
-            .lock()
-            .map_err(|_| SecretError::Locked)? = Some(Arc::clone(&keyring));
-        Ok(keyring)
+        let (runtime, keyring) = service.as_ref().expect("initialized secret service");
+        runtime
+            .block_on(async {
+                if keyring.is_locked().await? {
+                    keyring.unlock().await?;
+                }
+                operation(Arc::clone(keyring)).await
+            })
+            .map_err(|error| SecretError::Backend(error.to_string()))
     }
 }
 

@@ -6,7 +6,7 @@ use std::{
 
 use adw::prelude::*;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use library::{FolderKey, ReadCancellation, TrackKey};
+use library::{FolderKey, ReadCancellation};
 use localization::{msgid, tr};
 use playback::QueuePlacement;
 
@@ -24,13 +24,13 @@ pub(super) struct FolderLink {
 
 #[derive(Clone)]
 enum FolderTrackSource {
-    Live(Arc<[TrackKey]>),
+    Live(Arc<[String]>),
     CachedFolder(Option<FolderKey>),
 }
 
 pub(crate) struct PreparedFolderRoute {
     folders: Vec<FolderLink>,
-    order: Vec<TrackKey>,
+    order: Vec<String>,
     source: FolderTrackSource,
     first_tracks: Vec<library::TrackRow>,
 }
@@ -76,9 +76,9 @@ impl Shell {
             .imp()
             .breadcrumb_host
             .append(&folder_path_switcher(self, &path));
-        let resume = match prepared {
+        let (resume, download_change) = match prepared {
             Ok(prepared) => {
-                let (content, resume) = folder_page(
+                let (content, resume, download_change) = folder_page(
                     self,
                     selected,
                     path,
@@ -89,15 +89,21 @@ impl Shell {
                     prepared.first_tracks,
                 );
                 wrapper.append(&content);
-                resume
+                (resume, download_change)
             }
             Err(error) => {
                 tracing::warn!(%error, "failed to prepare Folder route");
                 wrapper.append(&folder_error_view(self));
-                Rc::new(|| {})
+                (
+                    Rc::new(|| {}) as FolderResume,
+                    Rc::new(|_: &downloads::DownloadEvent| {})
+                        as crate::shell::route::MountedDownloadChange,
+                )
             }
         };
-        MountedRoute::new(wrapper.upcast(), resume).with_search(search)
+        MountedRoute::new(wrapper.upcast(), resume)
+            .with_search(search)
+            .with_download_change(download_change)
     }
 }
 
@@ -111,19 +117,18 @@ pub(crate) async fn prepare_folder_route(
     let source = selected.source_key;
     let selected_folder = selected.music_folder_key;
     let folder_object_id = path.last().map(|item| item.id.clone());
-    let live =
-        (selected.artwork.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID).then(|| {
-            selected.operations.folder(
-                folder_object_id.clone(),
-                selected.music_folder_object_id.clone(),
-            )
-        });
+    let live = (selected.source_id.as_str() != sources::LOCAL_LIBRARY_SOURCE_ID).then(|| {
+        selected.operations.folder(
+            folder_object_id.clone(),
+            selected.music_folder_object_id.clone(),
+        )
+    });
     if let Some(live) = live {
         match live.recv().await {
             Ok(Ok(page)) => {
                 let track_ids = page.tracks;
                 let candidates = database
-                    .track_keys_by_objects(source, &track_ids, cancellation)
+                    .track_media_uris_by_objects(source, &track_ids, cancellation)
                     .await
                     .map_err(|error| error.to_string())?;
                 if candidates.len() == track_ids.len() {
@@ -147,8 +152,7 @@ pub(crate) async fn prepare_folder_route(
                         })
                         .collect();
                     let first_tracks = database
-                        .track_rows(
-                            source,
+                        .track_rows_by_uri(
                             &order[..order.len().min(64_usize.saturating_sub(folders.len()))],
                             cancellation,
                         )
@@ -255,10 +259,14 @@ fn folder_page(
     path: Vec<FolderPathItem>,
     search: gtk::SearchEntry,
     folders: Vec<FolderLink>,
-    order: Vec<TrackKey>,
+    order: Vec<String>,
     source: FolderTrackSource,
     first_tracks: Vec<library::TrackRow>,
-) -> (gtk::Widget, FolderResume) {
+) -> (
+    gtk::Widget,
+    FolderResume,
+    crate::shell::route::MountedDownloadChange,
+) {
     search.set_visible(true);
     let route_width = crate::shell::layout::route_content_width(shell);
 
@@ -286,12 +294,11 @@ fn folder_page(
             .collect(),
     );
     let row_database = Arc::clone(&selected.database);
-    let source_key = selected.source_key;
-    let track_load = Arc::new(move |keys: Vec<TrackKey>, cancellation: ReadCancellation| {
+    let track_load = Arc::new(move |keys: Vec<String>, cancellation: ReadCancellation| {
         let database = Arc::clone(&row_database);
         Box::pin(async move {
             let rows = database
-                .track_rows(source_key, &keys, &cancellation)
+                .track_rows_by_uri(&keys, &cancellation)
                 .await
                 .map_err(|error| error.to_string())?
                 .into_iter()
@@ -309,7 +316,7 @@ fn folder_page(
             .map(FolderTableRow::Track)
             .collect(),
         |row| match row {
-            FolderTableRow::Track(track) => track.track_key,
+            FolderTableRow::Track(track) => track.media_uri.clone(),
             FolderTableRow::Folder(_) => unreachable!(),
         },
     );
@@ -323,7 +330,6 @@ fn folder_page(
         rows,
         Rc::clone(&folder_sparse),
         Rc::clone(&track_sparse),
-        selected.clone(),
         path.clone(),
         table_initial_width,
     );
@@ -450,15 +456,35 @@ fn folder_page(
         search_request(entry.text().trim().to_string());
     });
     let resume = Rc::new(move || request(search.text().trim().to_string())) as FolderResume;
-    (table_stack.upcast(), resume)
+    let download_change = Rc::new(move |event: &downloads::DownloadEvent| {
+        let downloads::DownloadEvent::Changed {
+            media_uri,
+            downloaded,
+        } = event
+        else {
+            return;
+        };
+        let (media_uri, downloaded) = (media_uri.as_str(), *downloaded);
+        track_sparse.update_matching(
+            |row| {
+                matches!(row, FolderTableRow::Track(track)
+                if track.media_uri == media_uri && track.is_downloaded != downloaded)
+            },
+            |row| {
+                if let FolderTableRow::Track(track) = row {
+                    track.is_downloaded = downloaded;
+                }
+            },
+        );
+    });
+    (table_stack.upcast(), resume, download_change)
 }
 
 fn folder_table(
     shell: &Rc<Shell>,
     rows: gtk::FlattenListModel,
     folders: Rc<super::sparse_model::SparseRouteModel<FolderLink, FolderTableRow>>,
-    tracks: Rc<super::sparse_model::SparseRouteModel<TrackKey, FolderTableRow>>,
-    selected: crate::runtime::SelectedLibrary,
+    tracks: Rc<super::sparse_model::SparseRouteModel<String, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
 ) -> (gtk::ColumnView, super::table_sizing::ColumnViewWidthFit) {
@@ -523,22 +549,28 @@ fn folder_table(
             FolderTableRow::Track(track) => {
                 let anchor = position.saturating_sub(folder_count);
                 let order = activate_tracks.order();
-                if order.get(anchor) != Some(&track.track_key) {
+                if order.get(anchor) != Some(&track.media_uri) {
                     return;
                 }
-                let media = playback::PlaybackMedia::from(track.clone());
-                if let Some(request) = playback::LoadedPlayRequest::context(
-                    selected.source_key,
-                    selected.source_session_epoch,
-                    order,
-                    media,
-                    anchor,
-                    QueuePlacement::Now,
-                    folder_context_id(&path),
-                    false,
-                ) {
-                    activate_shell.products.playback.queue.play_loaded(request);
-                }
+                activate_shell
+                    .products
+                    .playback
+                    .queue
+                    .play(playback::PlayRequest::captured(
+                        library::QueueInput::Uris {
+                            order,
+                            context_id: format!(
+                                "{}|result={}",
+                                folder_context_id(&path),
+                                activate_tracks.order_id()
+                            )
+                            .into(),
+                            source_start: 0,
+                        },
+                        anchor,
+                        QueuePlacement::Now,
+                        false,
+                    ));
             }
         }
     });
@@ -576,7 +608,10 @@ fn folder_label_column(
                     return;
                 };
                 super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
+                    target,
+                    &shell,
+                    track.media_uri,
+                    position,
                 );
             }),
         );
@@ -708,7 +743,10 @@ fn folder_merged_column(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::Co
                     return;
                 };
                 super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
+                    target,
+                    &shell,
+                    track.media_uri,
+                    position,
                 );
             }),
         );
@@ -797,7 +835,7 @@ fn folder_detail_column(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::Co
         |row| match row {
             FolderTableRow::Folder(_) => tr("Folder"),
             FolderTableRow::Track(track) => {
-                format!("{} / {}", track.display_artist, track.display_album)
+                format!("{} / {}", track.artist, track.album)
             }
         },
         |row| match row {
@@ -820,13 +858,13 @@ fn folder_album_column(shell: &Rc<Shell>, path: Vec<FolderPathItem>) -> gtk::Col
         false,
         |row| match row {
             FolderTableRow::Folder(_) => String::new(),
-            FolderTableRow::Track(track) => track.display_album.clone(),
+            FolderTableRow::Track(track) => track.album.clone(),
         },
         |row| match row {
             FolderTableRow::Folder(_) => None,
             FolderTableRow::Track(track) => Some(super::detail_links::DetailLinks::route(
-                &track.display_album,
-                track.album_key.clone().map(Route::AlbumDetail),
+                &track.album,
+                track.album_media_uri.clone().map(Route::AlbumDetail),
             )),
         },
     );
@@ -925,7 +963,10 @@ fn folder_text_column(
                     return;
                 };
                 super::collection_context::present_track_context_menu(
-                    target, &shell, track, position,
+                    target,
+                    &shell,
+                    track.media_uri,
+                    position,
                 );
             }),
         );

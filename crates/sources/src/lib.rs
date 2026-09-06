@@ -29,9 +29,10 @@ mod local_change_integration_tests {
 
 pub use config::{
     CredentialHostInput, CredentialHostPreset, CredentialSettingsInput, EditableSource,
-    JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, SourceCacheMatch,
-    SourceConfiguration, SourceId, SourceSettingsInput, SourceSetupInput,
+    JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, SourceConfiguration,
+    SourceSettingsInput, SourceSetupInput,
 };
+pub use library::SourceId;
 pub use operations::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
     AlbumMetadataWritable, ArtistMetadata, ArtistMetadataEdit, ArtistMetadataMixed,
@@ -44,7 +45,8 @@ pub use source::*;
 
 pub use jellyfin::{DiscoveredJellyfinServer, discover_jellyfin_servers};
 pub use local::{
-    LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_embedded_lyrics, verify_local_media_file,
+    LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_embedded_lyrics, read_local_image,
+    verify_local_media_file,
 };
 pub use subsonic::{SubsonicAuthentication, SubsonicFlavor};
 

@@ -82,7 +82,7 @@ impl Database {
         let track_keys = object_track_keys(&mut transaction, source, track_objects).await?;
         let album_keys = object_album_keys(&mut transaction, source, album_objects).await?;
         let artist_keys = object_artist_keys(&mut transaction, source, artist_objects).await?;
-        let tracks = load_track_rows(&mut transaction, source, &track_keys).await?;
+        let tracks = load_track_rows(&mut transaction, &track_keys).await?;
         let albums = load_album_rows(&mut transaction, source, &album_keys, folder).await?;
         let artists = load_artist_rows(
             &mut transaction,
@@ -138,7 +138,7 @@ impl Database {
         .bind(folder)
         .fetch_all(&mut *transaction)
         .await?;
-        let tracks = load_track_rows(&mut transaction, source, &track_keys).await?;
+        let tracks = load_track_rows(&mut transaction, &track_keys).await?;
         let album_keys = sqlx::query_scalar::<_, AlbumKey>(
             "SELECT album.album_key FROM albums AS album
              WHERE album.source_key=?1 AND NOT EXISTS (

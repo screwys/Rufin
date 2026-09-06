@@ -2,14 +2,18 @@ use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
 
-use library::{Database, SourceKey, TrackKey, TrackRow};
-use playback::{LoadedPlayRequest, PlaybackMedia, QueuePlacement, SourceSessionEpoch};
+use library::{Database, TrackRow};
+use playback::{PlayRequest, QueuePlacement};
 
 use crate::LibraryListSettings;
 
+use super::library_fields::TrackPresentation;
 use super::sparse_model::{SparseObjectModel, SparseRouteModel};
 
 const TRACK_OVERSCAN: usize = 64;
+
+#[cfg(test)]
+use playback::queue_context_window;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TrackProjectionRequest {
@@ -18,56 +22,68 @@ pub(crate) struct TrackProjectionRequest {
 }
 
 #[derive(Clone)]
-pub(crate) struct PreparedTrackProjection {
-    pub(crate) order: Vec<TrackKey>,
+pub(crate) struct PreparedTrackProjection<T = TrackRow> {
+    pub(crate) order: Vec<String>,
     pub(crate) first_row_position: usize,
-    pub(crate) first_rows: Vec<TrackRow>,
+    pub(crate) first_rows: Vec<T>,
     pub(crate) request: TrackProjectionRequest,
 }
 
-struct TrackModelState {
-    source_key: SourceKey,
-    source_session_epoch: SourceSessionEpoch,
-    sparse: Rc<SparseRouteModel<TrackKey, TrackRow>>,
-    database: Arc<Database>,
-    runtime: tokio::runtime::Handle,
+struct TrackModelState<T: TrackPresentation> {
+    sparse: Rc<SparseRouteModel<String, T>>,
     request: RefCell<TrackProjectionRequest>,
 }
 
 #[derive(Clone)]
-pub(crate) struct TrackCollectionModel(Rc<TrackModelState>);
+pub(crate) struct TrackCollectionModel<T: TrackPresentation = TrackRow>(Rc<TrackModelState<T>>);
 
 impl TrackCollectionModel {
     pub(crate) fn new(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
         database: Arc<Database>,
         runtime: tokio::runtime::Handle,
-        order: Vec<TrackKey>,
+        order: Vec<String>,
         first_row_position: usize,
         first_rows: Vec<TrackRow>,
         settings: LibraryListSettings,
     ) -> Self {
         let rows_database = Arc::clone(&database);
         let load = Arc::new(
-            move |keys: Vec<TrackKey>, cancellation: library::ReadCancellation| {
+            move |keys: Vec<String>, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&rows_database);
                 Box::pin(async move {
                     database
-                        .track_rows(source_key, &keys, &cancellation)
+                        .track_rows_by_uri(&keys, &cancellation)
                         .await
                         .map_err(|error| error.to_string())
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load);
-        sparse.seed_matching_at(first_row_position, first_rows, |row| row.track_key);
+        Self::with_load(
+            runtime,
+            order,
+            first_row_position,
+            first_rows,
+            settings,
+            load,
+        )
+    }
+}
+
+impl<T: TrackPresentation> TrackCollectionModel<T> {
+    pub(crate) fn with_load(
+        runtime: tokio::runtime::Handle,
+        order: Vec<String>,
+        first_row_position: usize,
+        first_rows: Vec<T>,
+        settings: LibraryListSettings,
+        load: super::sparse_model::SparseLoad<String, T>,
+    ) -> Self {
+        let sparse = SparseRouteModel::new(order, TRACK_OVERSCAN, runtime.clone(), load.clone());
+        sparse.seed_matching_at(first_row_position, first_rows, |row| {
+            row.media_uri().to_string()
+        });
         Self(Rc::new(TrackModelState {
-            source_key,
-            source_session_epoch,
             sparse,
-            database,
-            runtime: runtime.clone(),
             request: RefCell::new(TrackProjectionRequest {
                 query: String::new(),
                 settings,
@@ -79,20 +95,12 @@ impl TrackCollectionModel {
         self.0.sparse.list_model()
     }
 
-    pub(crate) fn sparse_model(&self) -> Rc<SparseRouteModel<TrackKey, TrackRow>> {
+    pub(crate) fn sparse_model(&self) -> Rc<SparseRouteModel<String, T>> {
         Rc::clone(&self.0.sparse)
     }
 
-    pub(crate) fn order(&self) -> Arc<[TrackKey]> {
+    pub(crate) fn order(&self) -> Arc<[String]> {
         self.0.sparse.order()
-    }
-
-    pub(crate) fn source_key(&self) -> SourceKey {
-        self.0.source_key
-    }
-
-    pub(crate) fn source_session_epoch(&self) -> SourceSessionEpoch {
-        self.0.source_session_epoch
     }
 
     pub(crate) fn source_is_empty(&self) -> bool {
@@ -130,7 +138,7 @@ impl TrackCollectionModel {
         true
     }
 
-    pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection) -> bool {
+    pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection<T>) -> bool {
         if *self.0.request.borrow() != prepared.request {
             return false;
         }
@@ -138,7 +146,7 @@ impl TrackCollectionModel {
             prepared.order,
             prepared.first_row_position,
             prepared.first_rows,
-            |row| row.track_key,
+            |row| row.media_uri().to_string(),
         )
     }
 
@@ -146,34 +154,56 @@ impl TrackCollectionModel {
         self.0.sparse.resume_initial_demand();
     }
 
-    pub(crate) fn ready(&self, position: u32) -> Option<Arc<TrackRow>> {
-        self.0.sparse.ready(position)
-    }
-
-    pub(crate) fn update_favorite(&self, track: TrackKey, favorite: bool) -> bool {
+    pub(crate) fn update_favorite(&self, media_uri: &str, favorite: bool) -> bool {
+        let Some(position) = self
+            .0
+            .sparse
+            .ready_position(|row| row.media_uri() == media_uri)
+        else {
+            return false;
+        };
+        let Some(track) = self.0.sparse.order().get(position as usize).cloned() else {
+            return false;
+        };
         self.0
             .sparse
-            .update_ready(&track, |row| row.favorite = favorite)
+            .update_ready(&track, |row| row.set_favorite(favorite))
     }
 
-    pub(crate) fn play_request(
+    pub(crate) fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
+        self.0.sparse.update_matching(
+            |row| row.media_uri() == media_uri && row.downloaded() != downloaded,
+            |row| row.set_downloaded(downloaded),
+        );
+    }
+
+    pub(crate) fn play(
         &self,
+        queue: playback::QueueHandle,
         anchor_index: usize,
         placement: QueuePlacement,
         context_base: &str,
-        shuffled_start: bool,
-    ) -> Option<LoadedPlayRequest> {
-        let anchor = self.ready(u32::try_from(anchor_index).ok()?)?;
-        LoadedPlayRequest::context(
-            self.0.source_key,
-            self.0.source_session_epoch,
-            self.0.sparse.order(),
-            PlaybackMedia::from((*anchor).clone()),
+        collection_start: bool,
+    ) {
+        let order = self.0.sparse.order();
+        if order.get(anchor_index).is_none() {
+            return;
+        }
+        let request = if collection_start {
+            PlayRequest::ordered
+        } else {
+            PlayRequest::captured
+        };
+        queue.play(request(
+            library::QueueInput::Uris {
+                order,
+                context_id: self.visible_context_id(context_base).into(),
+                source_start: 0,
+            },
             anchor_index,
             placement,
-            self.visible_context_id(context_base),
-            shuffled_start,
-        )
+            collection_start,
+        ));
     }
 
     pub(crate) fn play_source(
@@ -181,79 +211,77 @@ impl TrackCollectionModel {
         queue: playback::QueueHandle,
         placement: QueuePlacement,
         context_id: String,
-        shuffled_start: bool,
     ) {
-        let order = self.0.sparse.order();
-        let Some(anchor_key) = order.first().copied() else {
-            return;
-        };
-        let database = Arc::clone(&self.0.database);
-        let source = self.0.source_key;
-        let epoch = self.0.source_session_epoch;
-        let runtime = self.0.runtime.clone();
-        runtime.spawn(async move {
-            let cancellation = library::ReadCancellation::new();
-            let anchor = database
-                .track_rows(source, &[anchor_key], &cancellation)
-                .await
-                .ok()
-                .and_then(|mut rows| rows.pop())
-                .map(PlaybackMedia::from);
-            let Some(anchor) = anchor else {
-                return;
-            };
-            let Some(request) = LoadedPlayRequest::context(
-                source,
-                epoch,
-                order,
-                anchor,
-                0,
-                placement,
-                context_id,
-                shuffled_start,
-            ) else {
-                return;
-            };
-            queue.play_loaded(request);
-        });
+        self.play(queue, 0, placement, &context_id, true);
     }
 
     pub(crate) fn visible_context_id(&self, context_base: &str) -> String {
         let request = self.0.request.borrow();
         format!(
-            "{context_base}|query={}|sort={:?}|descending={}",
-            request.query, request.settings.sort_key, request.settings.descending
+            "{context_base}|query={}|sort={:?}|descending={}|result={}",
+            request.query,
+            request.settings.sort_key,
+            request.settings.descending,
+            self.0.sparse.order_id()
         )
     }
 
-    pub(crate) fn position_for_current(
+    pub(crate) fn position_for_current_uri(
         &self,
-        track_key: &TrackKey,
+        media_uri: &str,
         source_rank: Option<usize>,
     ) -> Option<u32> {
-        let order = self.0.sparse.order();
         source_rank
-            .filter(|position| order.get(*position) == Some(track_key))
             .and_then(|position| u32::try_from(position).ok())
+            .filter(|position| {
+                self.0
+                    .sparse
+                    .ready(*position)
+                    .is_some_and(|row| row.media_uri() == media_uri)
+            })
             .or_else(|| {
                 self.0
                     .sparse
-                    .ready_position(|row| row.track_key == *track_key)
+                    .ready_position(|row| row.media_uri() == media_uri)
             })
     }
 
     pub(crate) fn selection_position_after_point_change(
         &self,
-        _: &TrackKey,
+        _: &str,
         selected_position: u32,
     ) -> Option<u32> {
         Some(selected_position)
     }
 }
 
-pub(crate) fn history_played_at_text(played_at: i64) -> String {
-    gtk::glib::DateTime::from_unix_local(played_at)
-        .and_then(|date| date.format("%Y-%m-%d %H:%M"))
-        .map(String::from)
-        .unwrap_or_else(|_| played_at.to_string())
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn queue_context_keeps_short_orders_whole() {
+        assert_eq!(queue_context_window(37, 20), 0..37);
+    }
+
+    #[test]
+    fn queue_context_fills_from_the_beginning() {
+        let window = queue_context_window(250, 3);
+        assert_eq!(window, 0..100);
+        assert_eq!(3 - window.start, 3);
+    }
+
+    #[test]
+    fn queue_context_centers_a_middle_anchor() {
+        let window = queue_context_window(250, 125);
+        assert_eq!(window, 75..175);
+        assert_eq!(125 - window.start, 50);
+    }
+
+    #[test]
+    fn queue_context_fills_to_the_end() {
+        let window = queue_context_window(250, 248);
+        assert_eq!(window, 150..250);
+        assert_eq!(248 - window.start, 98);
+    }
 }

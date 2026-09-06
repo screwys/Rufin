@@ -1110,14 +1110,15 @@ mod tests {
             Some("release-group-one")
         );
         assert_eq!(album.release_types, ["album", "live"]);
-        let image: ImageRef = serde_json::from_slice(
+        let binding: crate::NativeArtworkBinding = serde_json::from_slice(
             album
                 .artwork_binding
                 .as_deref()
                 .expect("Album artwork binding"),
         )
-        .expect("Album image ref");
-        assert_eq!(image.tag.as_deref(), Some("2026-08-27T00:00:00Z"));
+        .expect("Album artwork binding");
+        assert_eq!(binding.source_id, crate::SourceId::new("navidrome:test"));
+        assert_eq!(binding.image.tag.as_deref(), Some("2026-08-27T00:00:00Z"));
         let tracks = database
             .track_route_page(
                 source_key,

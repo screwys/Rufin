@@ -44,9 +44,7 @@ pub(crate) fn fullscreen_playback_refresh(
     let Some(previous) = previous else {
         return FullscreenPlaybackRefresh::Static;
     };
-    if previous.transport.source_id != next.transport.source_id
-        || previous.transport.current != next.transport.current
-    {
+    if previous.transport.current != next.transport.current {
         FullscreenPlaybackRefresh::Static
     } else if previous.transport.effective_state() != next.transport.effective_state() {
         FullscreenPlaybackRefresh::Visualizer
@@ -586,15 +584,10 @@ impl Shell {
             .fullscreen_player
             .cover
             .set_square_size(cover_size);
-        if let Some(source_id) = presentation.source_id.as_ref() {
+        if presentation.current {
             let fetch_size = cover_fetch_size_for_display(cover_size);
-            if source_id.as_str().is_empty() {
-                self.clear_fullscreen_player_cover();
-                return;
-            }
             self.bind_playback_artwork_tile(
                 &self.player_view.fullscreen_player.cover,
-                source_id,
                 presentation.artwork.clone(),
                 cover_size,
                 fetch_size,
@@ -934,8 +927,8 @@ mod layout_tests {
 mod playback_refresh_tests {
     use super::*;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackMedia, PlaybackOutput,
-        Provenance, QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportStatus,
+        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackOutput, Provenance,
+        QueueItem, QueueOccurrence, QueueSummaryView, RepeatMode, RunId, TransportStatus,
         TransportView,
     };
     use std::sync::Arc;
@@ -974,56 +967,52 @@ mod playback_refresh_tests {
         assert_eq!(presentation.meta, ["MP3", "2026"]);
     }
 
-    fn current_media(title: &str, source: library::SourceKey) -> CurrentMedia {
+    fn current_media(title: &str, _source: library::SourceKey) -> CurrentMedia {
+        let occurrence = OccurrenceId::new(format!("queue:{title}"));
         CurrentMedia {
             id: CurrentMediaId {
-                source_key: source,
-                source_session_epoch: SourceSessionEpoch::new(1),
                 run: Some(RunId::new(1)),
-                occurrence: OccurrenceId::new(format!("queue:{title}")),
+                occurrence: occurrence.clone(),
             },
-            track: PlaybackMedia {
-                source_id: "source".to_string(),
-                track_key: None,
-                track_object_id: title.to_string(),
-                title: title.to_string(),
-                artist: "Artist".to_string(),
-                album: "Album".to_string(),
-                album_display_artist: None,
-                album_key: None,
-                primary_artist_key: None,
-                media_uri: None,
-                artwork_binding: None,
-                duration_millis: 180_000,
-                disc_number: None,
-                track_number: None,
-                year: Some(2026),
-                release_date: None,
-                favorite: None,
-                rating: None,
-                is_downloaded: false,
-                source_format: Some("audio/mpeg".to_string()),
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                musicbrainz_album_id: None,
-                musicbrainz_release_group_id: None,
-                primary_artist_musicbrainz_id: None,
-                cue_path: None,
-                cue_start_millis: None,
-                cue_end_millis: None,
-                artist_links: Vec::new(),
-            },
-            provenance: Provenance::Manual,
+            occurrence: Arc::new(QueueOccurrence {
+                occurrence,
+                item: QueueItem {
+                    media_uri: library::source_entity_uri(
+                        &library::SourceId::new("source"),
+                        "track",
+                        title,
+                    ),
+                    title: title.to_string(),
+                    artist: "Artist".to_string(),
+                    album: "Album".to_string(),
+                    album_display_artist: None,
+                    artwork_binding: None,
+                    duration_millis: 180_000,
+                    disc_number: None,
+                    track_number: None,
+                    year: Some(2026),
+                    release_date: None,
+                    source_format: Some("audio/mpeg".to_string()),
+                    musicbrainz_recording_id: None,
+                    musicbrainz_release_track_id: None,
+                    musicbrainz_album_id: None,
+                    musicbrainz_release_group_id: None,
+                    primary_artist_musicbrainz_id: None,
+                },
+                canonical_position: 0,
+                provenance: Provenance::Manual,
+            }),
         }
     }
 
     fn playback_view(
-        source: library::SourceKey,
+        _source: library::SourceKey,
         current: Option<CurrentMedia>,
         position_millis: u64,
     ) -> PlaybackView {
         let current_occurrence = current.as_ref().map(|media| media.id.occurrence.clone());
         PlaybackView {
+            prepared_queue: None,
             queue: QueueSummaryView {
                 revision: 1,
                 total: usize::from(current.is_some()),
@@ -1033,7 +1022,6 @@ mod playback_refresh_tests {
                 next_occurrence: None,
             },
             transport: TransportView {
-                source_id: source,
                 current: current.map(Arc::new),
                 state: TransportStatus::Playing,
                 desired_playing: true,

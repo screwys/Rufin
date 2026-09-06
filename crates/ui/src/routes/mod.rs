@@ -13,6 +13,7 @@ pub(crate) mod grid_cells;
 mod grouped_detail;
 pub(crate) mod home;
 mod home_layout;
+mod interchange;
 pub(crate) mod library_fields;
 pub(crate) mod named_collections;
 mod named_detail;
@@ -34,9 +35,9 @@ mod table_sizing;
 mod track_model;
 pub(crate) mod track_selection;
 
-pub(crate) use album_detail::{AlbumCollectionOrder, album_detail_rows_for_keys};
+pub(crate) use album_detail::{AlbumCollectionOrder, album_detail_rows_for_items};
 pub(crate) use artist::{
     artist_detail_route, load_artist_discography, load_artist_overview, load_artist_tracks,
 };
 pub(crate) use named_detail::{NamedDetailId, load_named_detail};
-pub(crate) use playlist_detail::{load_playlist_detail, load_smart_playlist_detail};
+pub(crate) use playlist_detail::load_smart_playlist_detail;

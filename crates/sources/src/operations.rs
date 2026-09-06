@@ -1,6 +1,8 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::SourceId;
+
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct TrackMetadataValues {
     pub title: String,
@@ -51,7 +53,6 @@ pub struct TrackMetadataEdit {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct TrackMetadata {
-    pub track_key: library::TrackKey,
     pub writable: TrackMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
@@ -96,7 +97,6 @@ pub struct AlbumMetadataEdit {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AlbumMetadata {
-    pub album_key: library::AlbumKey,
     pub writable: AlbumMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
@@ -148,7 +148,6 @@ pub struct ArtistMetadataEdit {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct ArtistMetadata {
-    pub artist_key: library::ArtistKey,
     pub writable: ArtistMetadataWritable,
     pub source_search: bool,
     pub revision: Option<String>,
@@ -175,7 +174,10 @@ pub enum SourceMetadataError {
     #[error("metadata changed before it was saved")]
     Conflict,
     #[error("local access is required for {source_path}")]
-    LocalAccessRequired { source_path: String },
+    LocalAccessRequired {
+        source_id: SourceId,
+        source_path: String,
+    },
     #[error("metadata was saved but its source refresh failed: {0}")]
     SavedRefreshFailed(String),
     #[error("metadata failed: {0}")]

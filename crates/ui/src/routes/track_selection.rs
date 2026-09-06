@@ -6,7 +6,6 @@
 //! sparse hydration demand.
 
 use std::cell::RefCell;
-use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
 
@@ -14,14 +13,12 @@ use gtk::gio;
 use gtk::glib;
 use gtk::prelude::*;
 use gtk::subclass::prelude::*;
-use library::{PlaylistEntryKey, PlaylistKey, SourceKey, TrackKey};
+use library::{PlaylistEntryKey, PlaylistKey};
 use playback::QueuePlacement;
-use playback::SourceSessionEpoch;
 
 use crate::shell::Shell;
 
 use super::playlist_entry_model::PlaylistEntryModel;
-use super::sparse_model::SparseObjectModel;
 use super::track_model::TrackCollectionModel;
 
 mod position_selection_imp {
@@ -29,7 +26,7 @@ mod position_selection_imp {
 
     #[derive(Default)]
     pub(crate) struct PositionSelectionModel {
-        pub(super) model: RefCell<Option<SparseObjectModel>>,
+        pub(super) model: RefCell<Option<gio::ListModel>>,
         pub(super) model_handler: RefCell<Option<glib::SignalHandlerId>>,
         pub(super) selected: RefCell<Option<gtk::Bitset>>,
     }
@@ -56,7 +53,10 @@ mod position_selection_imp {
 
     impl ListModelImpl for PositionSelectionModel {
         fn item_type(&self) -> glib::Type {
-            super::super::sparse_model::SparseObjectItem::static_type()
+            self.model.borrow().as_ref().map_or_else(
+                glib::Object::static_type,
+                gio::prelude::ListModelExt::item_type,
+            )
         }
 
         fn n_items(&self) -> u32 {
@@ -176,9 +176,10 @@ glib::wrapper! {
 }
 
 impl PositionSelectionModel {
-    fn new(model: SparseObjectModel) -> Self {
+    fn new(model: impl IsA<gio::ListModel> + Clone + 'static) -> Self {
         use glib::subclass::types::ObjectSubclassIsExt;
 
+        let model = model.upcast::<gio::ListModel>();
         let selection: Self = glib::Object::new();
         selection
             .imp()
@@ -206,14 +207,19 @@ impl PositionSelectionModel {
 
 #[derive(Clone)]
 pub(crate) struct TrackSelection {
-    model: TrackCollectionModel,
+    order: Rc<dyn Fn() -> Arc<[String]>>,
     selection: PositionSelectionModel,
 }
 
 impl TrackSelection {
-    pub(crate) fn new(model: TrackCollectionModel) -> Self {
+    pub(crate) fn new<T: super::library_fields::TrackPresentation>(
+        model: TrackCollectionModel<T>,
+    ) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
-        Self { model, selection }
+        Self {
+            order: Rc::new(move || model.order()),
+            selection,
+        }
     }
 
     pub(crate) fn selection_model(&self) -> gtk::SelectionModel {
@@ -233,42 +239,37 @@ impl TrackSelection {
         self.selection == *selection
     }
 
-    pub(crate) fn selected_tracks_for(&self, clicked: TrackKey) -> Option<TrackSelectionSnapshot> {
-        self.selected_tracks()
-            .filter(|selection| selection.tracks.len() > 1 && selection.tracks.contains(&clicked))
-    }
-
-    pub(crate) fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
-        let tracks = selected_keys(&self.model.order(), &self.selection.selection());
-        (!tracks.is_empty()).then(|| TrackSelectionSnapshot {
-            source_key: self.model.source_key(),
-            source_session_epoch: self.model.source_session_epoch(),
-            tracks: tracks.into(),
+    pub(crate) fn selected_tracks_for(&self, clicked: &str) -> Option<TrackSelectionSnapshot> {
+        self.selected_tracks().filter(|selection| {
+            selection.media_uris.len() > 1 && selection.media_uris.iter().any(|uri| uri == clicked)
         })
     }
 
-    pub(crate) fn dragged_tracks_for(&self, clicked: TrackKey) -> TrackSelectionSnapshot {
+    pub(crate) fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
+        let media_uris = selected_values(&(self.order)(), &self.selection.selection());
+        (!media_uris.is_empty()).then(|| TrackSelectionSnapshot {
+            media_uris: media_uris.into(),
+        })
+    }
+
+    pub(crate) fn dragged_tracks_for(&self, clicked: &str) -> TrackSelectionSnapshot {
         self.selected_tracks_for(clicked)
             .unwrap_or_else(|| TrackSelectionSnapshot {
-                source_key: self.model.source_key(),
-                source_session_epoch: self.model.source_session_epoch(),
-                tracks: Arc::from([clicked]),
+                media_uris: Arc::from([clicked.to_string()]),
             })
     }
 }
 
-#[derive(Clone, Debug)]
+#[derive(Clone)]
 pub(crate) struct TrackSelectionSnapshot {
-    pub(crate) source_key: SourceKey,
-    pub(crate) source_session_epoch: SourceSessionEpoch,
-    pub(crate) tracks: Arc<[TrackKey]>,
+    pub(crate) media_uris: Arc<[String]>,
 }
 
 #[derive(Clone)]
 pub(crate) struct PlaylistEntrySelection {
     model: PlaylistEntryModel,
     selection: PositionSelectionModel,
-    playlist_name: Rc<str>,
+    playlist_name: Arc<str>,
 }
 
 impl PlaylistEntrySelection {
@@ -291,54 +292,28 @@ impl PlaylistEntrySelection {
     ) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
         let entries = selected_values(&self.model.order(), &positions);
-        (entries.len() > 1 && entries.contains(&clicked))
-            .then(|| self.snapshot(entries, &positions))
-    }
-
-    pub(crate) fn selected_tracks(&self) -> Option<TrackSelectionSnapshot> {
-        self.selected_entries().map(|selection| selection.tracks)
+        (entries.len() > 1 && entries.contains(&clicked)).then(|| self.snapshot(entries))
     }
 
     pub(crate) fn selected_entries(&self) -> Option<PlaylistEntrySelectionSnapshot> {
         let positions = self.selection.selection();
         let entries = selected_values(&self.model.order(), &positions);
-        (!entries.is_empty()).then(|| self.snapshot(entries, &positions))
+        (!entries.is_empty()).then(|| self.snapshot(entries))
     }
 
-    pub(crate) fn single_entry(
-        &self,
-        entry: PlaylistEntryKey,
-        track: Option<TrackKey>,
-    ) -> PlaylistEntrySelectionSnapshot {
+    pub(crate) fn single_entry(&self, entry: PlaylistEntryKey) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
-            playlist_name: Rc::clone(&self.playlist_name),
+            playlist_name: Arc::clone(&self.playlist_name),
             entries: Arc::from([entry]),
-            tracks: TrackSelectionSnapshot {
-                source_key: self.model.source_key(),
-                source_session_epoch: self.model.source_session_epoch(),
-                tracks: track.into_iter().collect::<Vec<_>>().into(),
-            },
         }
     }
 
-    fn snapshot(
-        &self,
-        entries: Vec<PlaylistEntryKey>,
-        positions: &gtk::Bitset,
-    ) -> PlaylistEntrySelectionSnapshot {
-        let tracks = selected_positions(positions)
-            .filter_map(|position| self.model.track_key_at_position(position as usize))
-            .collect::<Vec<_>>();
+    fn snapshot(&self, entries: Vec<PlaylistEntryKey>) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
             playlist: self.model.playlist_key(),
-            playlist_name: Rc::clone(&self.playlist_name),
+            playlist_name: Arc::clone(&self.playlist_name),
             entries: entries.into(),
-            tracks: TrackSelectionSnapshot {
-                source_key: self.model.source_key(),
-                source_session_epoch: self.model.source_session_epoch(),
-                tracks: tracks.into(),
-            },
         }
     }
 }
@@ -346,76 +321,71 @@ impl PlaylistEntrySelection {
 #[derive(Clone)]
 pub(crate) struct PlaylistEntrySelectionSnapshot {
     pub(crate) playlist: PlaylistKey,
-    pub(crate) playlist_name: Rc<str>,
+    pub(crate) playlist_name: Arc<str>,
     pub(crate) entries: Arc<[PlaylistEntryKey]>,
-    pub(crate) tracks: TrackSelectionSnapshot,
 }
 
-impl TrackSelectionSnapshot {
-    pub(crate) fn is_current(&self, shell: &Shell) -> bool {
-        shell.selected_library().as_deref().is_some_and(|selected| {
-            selected.source_key == self.source_key
-                && selected.source_session_epoch == self.source_session_epoch
-        })
+impl PlaylistEntrySelectionSnapshot {
+    pub(crate) async fn media_uris(
+        &self,
+        database: &library::Database,
+    ) -> Result<Vec<String>, String> {
+        let cancellation = library::ReadCancellation::new();
+        let mut media_uris = Vec::with_capacity(self.entries.len());
+        for entries in self.entries.chunks(256) {
+            media_uris.extend(
+                database
+                    .playlist_entry_media_uris(self.playlist, entries, &cancellation)
+                    .await
+                    .map_err(|error| error.to_string())?,
+            );
+        }
+        Ok(media_uris)
     }
 
     pub(crate) fn play(&self, shell: &Shell, placement: QueuePlacement) {
-        let Some(selected) = shell
-            .selected_library()
-            .as_deref()
-            .filter(|selected| {
-                selected.source_key == self.source_key
-                    && selected.source_session_epoch == self.source_session_epoch
-            })
-            .cloned()
-        else {
-            return;
-        };
-        let Some(anchor_key) = self.tracks.first().copied() else {
-            return;
-        };
-        let order = Arc::clone(&self.tracks);
-        let database = Arc::clone(&selected.database);
-        let queue = shell.products.playback.queue.clone();
-        selected.runtime.spawn(async move {
-            let cancellation = library::ReadCancellation::new();
-            let Some(anchor) = database
-                .track_rows(selected.source_key, &[anchor_key], &cancellation)
-                .await
-                .ok()
-                .and_then(|mut rows| rows.pop())
-                .map(playback::PlaybackMedia::from)
-            else {
-                return;
-            };
-            if let Some(request) = playback::LoadedPlayRequest::manual(
-                selected.source_key,
-                selected.source_session_epoch,
-                order,
-                anchor,
+        shell
+            .products
+            .playback
+            .queue
+            .play(playback::PlayRequest::ordered(
+                library::QueueInput::PlaylistEntries {
+                    order: self.entries.clone(),
+                    context_id: format!("playlist-selection:{}", self.playlist).into(),
+                },
+                0,
                 placement,
-            ) {
-                queue.play_loaded(request);
-            }
-        });
+                false,
+            ));
+    }
+}
+
+impl TrackSelectionSnapshot {
+    pub(crate) fn play(&self, shell: &Shell, placement: QueuePlacement) {
+        if self.media_uris.is_empty() {
+            return;
+        }
+        shell
+            .products
+            .playback
+            .queue
+            .play(playback::PlayRequest::ordered(
+                library::QueueInput::MediaUris {
+                    order: self.media_uris.clone(),
+                    provenance: library::QueueProvenance::Manual,
+                },
+                0,
+                placement,
+                false,
+            ));
     }
 
     pub(crate) fn download_subject(&self) -> downloads::DownloadSubject {
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        self.source_key.hash(&mut hasher);
-        self.tracks.hash(&mut hasher);
-        downloads::DownloadSubject::Prepared {
-            context_id: format!("track-selection:{:016x}", hasher.finish()),
-            title: None,
-        }
+        downloads::DownloadSubject::for_media_uris("track-selection", None, &self.media_uris)
     }
 }
 
-fn selected_keys(order: &[TrackKey], positions: &gtk::Bitset) -> Vec<TrackKey> {
-    selected_values(order, positions)
-}
-
-fn selected_values<T: Copy>(order: &[T], positions: &gtk::Bitset) -> Vec<T> {
+fn selected_values<T: Clone>(order: &[T], positions: &gtk::Bitset) -> Vec<T> {
     keys_at_positions(order, selected_positions(positions))
 }
 
@@ -426,9 +396,9 @@ fn selected_positions(positions: &gtk::Bitset) -> impl Iterator<Item = u32> + '_
         .flat_map(|(iter, first)| std::iter::once(first).chain(iter))
 }
 
-fn keys_at_positions<T: Copy>(order: &[T], positions: impl Iterator<Item = u32>) -> Vec<T> {
+fn keys_at_positions<T: Clone>(order: &[T], positions: impl Iterator<Item = u32>) -> Vec<T> {
     positions
-        .filter_map(|position| order.get(position as usize).copied())
+        .filter_map(|position| order.get(position as usize).cloned())
         .collect()
 }
 
@@ -438,14 +408,10 @@ mod tests {
 
     #[test]
     fn selected_positions_follow_visible_track_order() {
-        let order = [
-            TrackKey::from_raw(11),
-            TrackKey::from_raw(22),
-            TrackKey::from_raw(33),
-        ];
+        let order = ["one", "two", "three"];
         assert_eq!(
             keys_at_positions(&order, [0, 2].into_iter()),
-            [TrackKey::from_raw(11), TrackKey::from_raw(33)]
+            ["one", "three"]
         );
     }
 }

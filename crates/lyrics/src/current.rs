@@ -6,17 +6,17 @@ use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use async_channel::Sender;
-use library::{Database, ReadCancellation, SourceKey, TrackKey};
-use playback::{CurrentMedia, CurrentMediaId, PlaybackMedia, SourceSessionEpoch};
+use library::{Database, ReadCancellation};
+use playback::{CurrentMedia, CurrentMediaId};
 use serde::{Deserialize, Serialize};
-use sources::{Source, SourceInputIdentity};
+use sources::{Source, SourceId};
 use tokio::sync::Semaphore;
 use tokio::task::JoinHandle;
 use tracing::{debug, warn};
 
 use crate::lyrics::{
-    LyricsPlan, cached_lyrics_allowed, embedded_lyrics_from_audio, external_best_lyrics,
-    local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_native,
+    LyricsLookup, LyricsPlan, cached_lyrics_allowed, embedded_lyrics_from_audio,
+    external_best_lyrics, local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_native,
     lyrics_with_displayable_content,
 };
 use crate::{
@@ -30,26 +30,41 @@ const LYRICS_CACHE_PAYLOAD_VERSION: u32 = 4;
 #[derive(Clone)]
 pub struct LyricsContext {
     pub media: Arc<CurrentMedia>,
-    pub input: SourceInputIdentity,
-    pub source: Option<Arc<Source>>,
+    pub input_digest: [u8; 32],
+    pub source: Arc<dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync>,
     pub database: Database,
+}
+
+impl LyricsContext {
+    async fn source(&self) -> Option<Arc<Source>> {
+        let source_id = match library::source_entity_parts(&self.media.media_uri) {
+            Some((source, kind, _)) if kind == "track" => source,
+            Some(_) => return None,
+            None => SourceId::new(
+                self.database
+                    .track_row_by_uri(&self.media.media_uri, &ReadCancellation::new())
+                    .await
+                    .ok()??
+                    .source_id,
+            ),
+        };
+        let source = Arc::clone(&self.source);
+        tokio::task::spawn_blocking(move || source(&source_id))
+            .await
+            .ok()
+            .flatten()
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DocumentKey {
-    source_key: SourceKey,
-    source_session_epoch: SourceSessionEpoch,
-    track_key: Option<TrackKey>,
-    track_object_id: String,
+    media_uri: String,
 }
 
 impl DocumentKey {
     fn for_context(context: &LyricsContext) -> Self {
         Self {
-            source_key: context.media.id.source_key,
-            source_session_epoch: context.media.id.source_session_epoch,
-            track_key: context.media.track.track_key,
-            track_object_id: context.media.track.track_object_id.clone(),
+            media_uri: context.media.media_uri.clone(),
         }
     }
 
@@ -110,21 +125,16 @@ struct State {
 }
 
 struct CurrentResolution {
-    input: SourceInputIdentity,
-    source: Option<Arc<Source>>,
-    track: PlaybackMedia,
+    context: LyricsContext,
+    lookup: LyricsLookup,
     local: Option<LocalLyricsInput>,
     cue_track: bool,
     plan: LyricsPlan,
 }
 
 struct LyricsWriteTarget {
-    source: Arc<Source>,
-    database: Database,
-    source_key: SourceKey,
-    track_key: TrackKey,
+    context: LyricsContext,
     content: String,
-    media_id: CurrentMediaId,
     sidecar: bool,
 }
 
@@ -200,10 +210,7 @@ impl LyricsService {
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             if let Some(current) = state.current.as_mut().filter(|current| current.key == key) {
                 let media_changed = current.context.media.id != context.media.id;
-                let write_target_changed =
-                    current.context.media.track.media_uri != context.media.track.media_uri;
-                let write_check =
-                    (media_changed || write_target_changed).then(|| (key.clone(), context.clone()));
+                let write_check = media_changed.then(|| (key.clone(), context.clone()));
                 current.context = context;
                 (media_changed.then(|| current_event(current)), write_check)
             } else {
@@ -244,13 +251,13 @@ impl LyricsService {
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
                 .settings
                 .save_lyrics_as_sidecar;
-            let writable = match (context.source.as_ref(), key.track_key) {
-                (Some(source), Some(track)) => {
+            let writable = match context.source().await {
+                Some(source) => {
                     source
-                        .lyrics_writable(&context.database, key.source_key, track, sidecar)
+                        .lyrics_writable(&context.database, &key.media_uri, sidecar)
                         .await
                 }
-                _ => false,
+                None => false,
             };
             let event = {
                 let mut state = service
@@ -296,7 +303,7 @@ impl LyricsService {
             let current = state.current.as_ref().map(|current| {
                 (
                     current.context.media.id.clone(),
-                    current.key.track_object_id.clone(),
+                    current.key.media_uri.clone(),
                     current.automatic_attempted || current.loading || current.bundle.is_some(),
                     current.loading,
                     current.bundle.is_some(),
@@ -373,7 +380,7 @@ impl LyricsService {
                 .current
                 .as_ref()
                 .filter(|current| current.context.media.id == media_id)
-                .map(|current| current.context.media.track.track_object_id.clone())
+                .map(|current| current.key.media_uri.clone())
             else {
                 return;
             };
@@ -468,7 +475,8 @@ impl LyricsService {
         if let Some(event) = event {
             self.publish(event);
         }
-        let resolution = current_resolution(prepared.2, prepared.3);
+        let context = prepared.2;
+        let plan = prepared.3;
         let service = Arc::clone(self);
         let request = prepared.0;
         let key = prepared.1;
@@ -479,6 +487,7 @@ impl LyricsService {
             if !service.current_request_active(request, &task_key, &task_cancelled) {
                 return;
             }
+            let resolution = current_resolution(context, plan).await;
             service
                 .resolve_current(request, task_key, resolution, task_cancelled, use_cache)
                 .await;
@@ -612,7 +621,7 @@ impl LyricsService {
                     self.cache_and_accept(
                         request,
                         &key,
-                        &resolution.input,
+                        &resolution.context.input_digest,
                         &resolution.plan,
                         document,
                     )
@@ -637,9 +646,6 @@ impl LyricsService {
         fallback: &mut Option<LyricsBundle>,
         authority: LyricsAuthority,
     ) -> bool {
-        let Some(track_key) = key.track_key else {
-            return false;
-        };
         let (role, language, script) = key.cache_key(&resolution.plan);
         let authority = match authority {
             LyricsAuthority::Source => "source",
@@ -648,12 +654,11 @@ impl LyricsService {
         let cached = self
             .database
             .lyrics_cache_for_role(
-                key.source_key,
-                track_key,
+                &key.media_uri,
                 &role,
                 &language,
                 &script,
-                resolution.input.digest,
+                resolution.context.input_digest,
                 authority,
                 &ReadCancellation::new(),
             )
@@ -677,14 +682,7 @@ impl LyricsService {
         if self.current_request_active(request, key, cancelled) {
             let _ = self
                 .database
-                .remove_lyrics_cache(
-                    key.source_key,
-                    track_key,
-                    authority,
-                    &role,
-                    &language,
-                    &script,
-                )
+                .remove_lyrics_cache(&key.media_uri, authority, &role, &language, &script)
                 .await;
         }
         false
@@ -698,10 +696,10 @@ impl LyricsService {
         cancelled: &AtomicBool,
         fallback: &mut Option<LyricsBundle>,
     ) -> bool {
-        let Some(source) = resolution.source.as_ref() else {
+        let Some(source) = resolution.context.source().await else {
             return false;
         };
-        match source.lyrics(&key.track_object_id).await {
+        match source.lyrics(&key.media_uri).await {
             Ok(Some(native)) => {
                 self.resolve_candidate(
                     request,
@@ -715,7 +713,7 @@ impl LyricsService {
             }
             Ok(None) => false,
             Err(error) => {
-                debug!(%error, track_id = %key.track_object_id, "source lyrics request failed");
+                debug!(%error, media_uri = %key.media_uri, "source lyrics request failed");
                 false
             }
         }
@@ -732,7 +730,7 @@ impl LyricsService {
         if !resolution.plan.allows_external_fallback() {
             return false;
         }
-        let track = resolution.track.clone();
+        let lookup = resolution.lookup.clone();
         let providers = resolution.plan.external_providers().to_vec();
         let require_word_timing = resolution.plan.requires_word_timing();
         let prefer_translations = resolution.plan.prefers_translations();
@@ -741,7 +739,7 @@ impl LyricsService {
         let lookup_cancelled = Arc::clone(cancelled);
         let document = run_external_lookup(Arc::clone(&self.search_lane), move || {
             external_best_lyrics(
-                &track,
+                &lookup,
                 &providers,
                 require_word_timing,
                 prefer_translations,
@@ -762,8 +760,14 @@ impl LyricsService {
         };
         if acquisition_complete(&document, &resolution.plan) {
             if self.current_request_active(request, key, cancelled) {
-                self.cache_and_accept(request, key, &resolution.input, &resolution.plan, document)
-                    .await;
+                self.cache_and_accept(
+                    request,
+                    key,
+                    &resolution.context.input_digest,
+                    &resolution.plan,
+                    document,
+                )
+                .await;
             }
             return true;
         }
@@ -784,8 +788,14 @@ impl LyricsService {
     ) -> bool {
         if acquisition_complete(&document, &resolution.plan) {
             if self.current_request_active(request, key, cancelled) {
-                self.cache_and_accept(request, key, &resolution.input, &resolution.plan, document)
-                    .await;
+                self.cache_and_accept(
+                    request,
+                    key,
+                    &resolution.context.input_digest,
+                    &resolution.plan,
+                    document,
+                )
+                .await;
             }
             return true;
         }
@@ -799,7 +809,7 @@ impl LyricsService {
         self: &Arc<Self>,
         request: u64,
         key: &DocumentKey,
-        input: &SourceInputIdentity,
+        input: &[u8; 32],
         plan: &LyricsPlan,
         document: LyricsBundle,
     ) {
@@ -812,21 +822,19 @@ impl LyricsService {
         if document.origin != LyricsOrigin::Local {
             match cache_write(key, plan, &document) {
                 Ok((authority, role, language, script, payload, updated_at)) => {
-                    if let Some(track_key) = key.track_key
-                        && let Err(error) = self
-                            .database
-                            .write_lyrics_cache(
-                                key.source_key,
-                                track_key,
-                                &authority,
-                                &role,
-                                &language,
-                                &script,
-                                input.digest,
-                                &payload,
-                                updated_at,
-                            )
-                            .await
+                    if let Err(error) = self
+                        .database
+                        .write_lyrics_cache(
+                            &key.media_uri,
+                            &authority,
+                            &role,
+                            &language,
+                            &script,
+                            *input,
+                            &payload,
+                            updated_at,
+                        )
+                        .await
                     {
                         warn!(%error, "could not save lyrics cache");
                     }
@@ -861,32 +869,25 @@ impl LyricsService {
             if !state.settings.save_lyrics_to_source || !state.settings.save_lyrics_automatically {
                 return None;
             }
-            let (Some(source), Some(track_key)) = (current.context.source.clone(), key.track_key)
-            else {
-                return None;
-            };
             let Some(document) = lyrics.selected_document(&state.settings) else {
                 return None;
             };
             Some(LyricsWriteTarget {
-                source,
-                database: current.context.database.clone(),
-                source_key: key.source_key,
-                track_key,
+                context: current.context.clone(),
                 content: lyrics_to_lrc_text(document, 0),
-                media_id: current.context.media.id.clone(),
                 sidecar: state.settings.save_lyrics_as_sidecar,
             })
         }
     }
 
     async fn write_lyrics_to_source(&self, target: LyricsWriteTarget) {
-        if !target
-            .source
+        let Some(source) = target.context.source().await else {
+            return;
+        };
+        if !source
             .lyrics_writable(
-                &target.database,
-                target.source_key,
-                target.track_key,
+                &target.context.database,
+                &target.context.media.media_uri,
                 target.sidecar,
             )
             .await
@@ -896,12 +897,10 @@ impl LyricsService {
         let Ok(_permit) = self.write_lane.acquire().await else {
             return;
         };
-        if let Err(error) = target
-            .source
+        if let Err(error) = source
             .write_lyrics(
-                &target.database,
-                target.source_key,
-                target.track_key,
+                &target.context.database,
+                &target.context.media.media_uri,
                 &target.content,
                 target.sidecar,
             )
@@ -909,7 +908,7 @@ impl LyricsService {
         {
             warn!(%error, "could not save lyrics to source");
             self.publish(LyricsEvent::SourceSaveFailed {
-                media_id: target.media_id,
+                media_id: target.context.media.id.clone(),
                 error,
             });
             return;
@@ -1171,21 +1170,18 @@ impl LyricsService {
                         service.update_lyrics_text(media_id, content);
                         return;
                     }
-                    if let (
-                        Some(track_key),
-                        Ok((authority, role, language, script, payload, updated_at)),
-                    ) = (key.track_key, cache_write(&key, &plan, &document))
+                    if let Ok((authority, role, language, script, payload, updated_at)) =
+                        cache_write(&key, &plan, &document)
                     {
                         let _ = service
                             .database
                             .write_lyrics_cache(
-                                key.source_key,
-                                track_key,
+                                &key.media_uri,
                                 &authority,
                                 &role,
                                 &language,
                                 &script,
-                                input.digest,
+                                input,
                                 &payload,
                                 updated_at,
                             )
@@ -1213,7 +1209,7 @@ impl LyricsService {
         &self,
         media_id: &CurrentMediaId,
         result: &LyricsSearchResult,
-    ) -> Option<(u64, DocumentKey, SourceInputIdentity, LyricsPlan)> {
+    ) -> Option<(u64, DocumentKey, [u8; 32], LyricsPlan)> {
         let prepared = {
             let mut state = self
                 .state
@@ -1235,7 +1231,7 @@ impl LyricsService {
                 .as_ref()
                 .filter(|current| &current.context.media.id == media_id)?
                 .key
-                .track_object_id
+                .media_uri
                 .clone();
             let plan = state
                 .settings
@@ -1252,7 +1248,7 @@ impl LyricsService {
             (
                 current.request,
                 current.key.clone(),
-                current.context.input.clone(),
+                current.context.input_digest,
                 plan,
                 current.context.media.id.clone(),
             )
@@ -1318,17 +1314,11 @@ impl LyricsService {
             else {
                 return;
             };
-            let (Some(source), Some(track_key)) =
-                (current.context.source.clone(), current.key.track_key)
-            else {
-                return;
-            };
             let key = current.key.clone();
-            let input = current.context.input.clone();
-            let database = current.context.database.clone();
+            let context = current.context.clone();
             let plan = state
                 .settings
-                .configured_lyrics_plan(state.private_mode, &key.track_object_id);
+                .configured_lyrics_plan(state.private_mode, &key.media_uri);
             let sidecar = state.settings.save_lyrics_as_sidecar;
             cancel_current_work(&mut state);
             let request = self.next_request.fetch_add(1, Ordering::AcqRel);
@@ -1336,25 +1326,26 @@ impl LyricsService {
                 current.request = request;
                 current.loading = false;
             }
-            (
-                request, track_key, input, plan, source, database, key, sidecar,
-            )
+            (request, plan, context, key, sidecar)
         };
         let service = Arc::clone(self);
-        let (request, track_key, input, plan, source, database, key, sidecar) = prepared;
+        let (request, plan, context, key, sidecar) = prepared;
         let content = lyrics_to_lrc_text(document, 0);
         let _task = self.runtime.spawn(async move {
+            let Some(source) = context.source().await else {
+                return;
+            };
             let Ok(_permit) = service.write_lane.acquire().await else {
                 return;
             };
             match source
-                .write_lyrics(&database, key.source_key, track_key, &content, sidecar)
+                .write_lyrics(&context.database, &key.media_uri, &content, sidecar)
                 .await
             {
                 Ok(()) => match source.refresh_written_lyrics().await {
                     Ok(()) => {
                         service
-                            .cache_and_accept(request, &key, &input, &plan, bundle)
+                            .cache_and_accept(request, &key, &context.input_digest, &plan, bundle)
                             .await;
                     }
                     Err(error) => {
@@ -1387,11 +1378,8 @@ impl LyricsService {
         };
         let database = self.database.clone();
         let _task = self.runtime.spawn(async move {
-            let Some(track_key) = key.track_key else {
-                return;
-            };
             if let Err(error) = database
-                .remove_track_lyrics_by_authority(key.source_key, track_key, "external")
+                .remove_track_lyrics_by_authority(&key.media_uri, "external")
                 .await
             {
                 warn!(%error, "could not clear fetched lyrics cache");
@@ -1592,29 +1580,41 @@ async fn run_external_lookup(
     .ok()
 }
 
-fn current_resolution(context: LyricsContext, plan: LyricsPlan) -> CurrentResolution {
-    let cue_track = context.media.track.cue_path.is_some();
-    let local = local_audio_path(&context.media.track).map(|path| LocalLyricsInput {
-        audio_path: path,
-        title: context.media.track.title.clone(),
-        cue_track,
-    });
+async fn current_resolution(context: LyricsContext, plan: LyricsPlan) -> CurrentResolution {
+    let cue_track = library::cue_media_parts(&context.media.media_uri).is_some();
+    let access = context
+        .database
+        .playback_access_uri(&context.media.media_uri)
+        .await
+        .ok()
+        .flatten();
+    let local = access
+        .as_deref()
+        .and_then(local_audio_path)
+        .or_else(|| local_audio_path(&context.media.media_uri))
+        .map(|path| LocalLyricsInput {
+            audio_path: path,
+            title: context.media.title.clone(),
+            cue_track,
+        });
     CurrentResolution {
-        input: context.input,
-        source: context.source,
-        track: context.media.track.clone(),
+        lookup: LyricsLookup::from_search(
+            &context.media.artist,
+            &context.media.title,
+            u32::try_from(context.media.duration_millis.max(0) / 1_000).unwrap_or(u32::MAX),
+        ),
         local,
         cue_track,
         plan,
+        context,
     }
 }
 
-fn local_audio_path(track: &PlaybackMedia) -> Option<PathBuf> {
-    track
-        .media_uri
-        .as_deref()
-        .and_then(|uri| uri.strip_prefix("file://"))
-        .map(PathBuf::from)
+fn local_audio_path(media_uri: &str) -> Option<PathBuf> {
+    match library::cue_media_parts(media_uri) {
+        Some((_, uri, _, _)) => library::file_media_path(&uri),
+        None => library::file_media_path(media_uri),
+    }
 }
 
 fn cached_bundle(cached: &library::LyricsCacheRow) -> Option<LyricsBundle> {
@@ -1660,6 +1660,127 @@ fn unix_seconds() -> i64 {
 mod tests {
     use super::*;
     use crate::{LyricsCue, LyricsCueLine, LyricsLine};
+
+    #[tokio::test]
+    async fn current_lyrics_reads_local_cue_mapped_and_downloaded_files_by_logical_identity() {
+        let directory = tempfile::tempdir().expect("temporary directory");
+        let database = Database::open(directory.path().join("library.db"))
+            .await
+            .expect("database");
+        let audio = directory.path().join("album.flac");
+        std::fs::write(&audio, []).expect("audio file");
+        std::fs::write(audio.with_extension("lrc"), "[00:01.00]Whole file lyrics")
+            .expect("sidecar");
+        std::fs::write(
+            directory.path().join("Segment.lrc"),
+            "[00:01.00]Segment lyrics",
+        )
+        .expect("CUE sidecar");
+        let file_uri = reqwest::Url::from_file_path(&audio)
+            .expect("file URI")
+            .to_string();
+        let cue_uri = library::cue_media_uri("segment", &file_uri, 1_000, 3_000);
+        let mapped_uri = library::source_entity_uri(&SourceId::new("mapped"), "track", "mapped");
+        let downloaded_uri =
+            library::source_entity_uri(&SourceId::new("mapped"), "track", "downloaded");
+        let original = directory.path().join("original.flac");
+        let mut locators = String::from("{\"version\":1}\n");
+        for (media_uri, origin, path) in [
+            (&mapped_uri, "mapping", &audio),
+            (&downloaded_uri, "mapping", &original),
+            (&downloaded_uri, "download", &audio),
+        ] {
+            locators.push_str(
+                &serde_json::to_string(&library::LocalLocatorWrite {
+                    source_id: None,
+                    media_uri: media_uri.clone(),
+                    origin: origin.to_string(),
+                    path: path.to_string_lossy().into_owned(),
+                    root: directory.path().to_string_lossy().into_owned(),
+                    relative_path: path
+                        .file_name()
+                        .expect("file name")
+                        .to_string_lossy()
+                        .into_owned(),
+                    access_uri: reqwest::Url::from_file_path(path)
+                        .expect("access URI")
+                        .to_string(),
+                })
+                .expect("locator"),
+            );
+            locators.push('\n');
+        }
+        database
+            .import_local_locators_jsonl(std::io::Cursor::new(locators))
+            .await
+            .expect("local access");
+        let (events, received) = async_channel::unbounded();
+        let service = LyricsService::new(
+            database.clone(),
+            tokio::runtime::Handle::current(),
+            Settings {
+                external_lyrics_enabled: false,
+                ..Settings::default()
+            },
+            false,
+            events,
+        );
+        for (index, (media_uri, title, expected)) in [
+            (&file_uri, "Album", "Whole file lyrics"),
+            (&cue_uri, "Segment", "Segment lyrics"),
+            (&mapped_uri, "Mapped", "Whole file lyrics"),
+            (&downloaded_uri, "Downloaded", "Whole file lyrics"),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let occurrence = library::OccurrenceId::new(index.to_string());
+            let media_id = CurrentMediaId {
+                run: None,
+                occurrence: occurrence.clone(),
+            };
+            service.set_current(Some(LyricsContext {
+                media: Arc::new(CurrentMedia {
+                    id: media_id.clone(),
+                    occurrence: Arc::new(library::QueueOccurrence {
+                        occurrence,
+                        item: library::QueueItem::direct(
+                            media_uri, title, "Artist", "Album", 3_000,
+                        ),
+                        canonical_position: 0,
+                        provenance: playback::Provenance::Manual,
+                    }),
+                }),
+                input_digest: [0; 32],
+                source: Arc::new(|_| None),
+                database: database.clone(),
+            }));
+            service.handle().load(media_id.clone());
+            let document = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+                loop {
+                    if let LyricsEvent::Current(CurrentLyrics::Ready {
+                        media_id: actual,
+                        content: Some(CurrentLyricsContent::Document { document, .. }),
+                        origin: Some(LyricsOrigin::Local),
+                    }) = received.recv().await.expect("lyrics event")
+                        && actual == media_id
+                    {
+                        break document;
+                    }
+                }
+            })
+            .await
+            .expect("current lyrics");
+            assert_eq!(document.lines[0].text, expected);
+        }
+        assert_eq!(
+            database
+                .original_file_path(&downloaded_uri)
+                .await
+                .expect("original path"),
+            Some(original.to_string_lossy().into_owned())
+        );
+    }
 
     #[test]
     fn server_preference_owns_source_and_external_order() {

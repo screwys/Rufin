@@ -51,7 +51,21 @@ pub(crate) fn secrets_file() -> PathBuf {
     config_dir().join(SECRETS_FILE)
 }
 
+pub(crate) fn backup_password_file() -> PathBuf {
+    config_dir().join("backup-password.json")
+}
+
 pub(crate) fn store_file() -> PathBuf {
+    data_dir().join(STORE_DIRECTORY).join(STORE_FILE)
+}
+
+pub(crate) fn catalog_file() -> PathBuf {
+    cache_dir()
+        .join(STORE_DIRECTORY)
+        .join("rufin-catalog.sqlite")
+}
+
+pub(crate) fn legacy_store_file() -> PathBuf {
     cache_dir().join(STORE_DIRECTORY).join(STORE_FILE)
 }
 

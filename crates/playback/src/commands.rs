@@ -1,225 +1,104 @@
 use std::sync::Arc;
 
-use library::{RadioSeed, RandomCriteria, SourceKey, TrackKey};
+use library::{RadioSeed, RandomCriteria};
 
 use crate::{
-    AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackMedia,
-    PlaybackOutput, Provenance, QueueReorderTarget, RemoteOutput, RepeatMode, SourceSessionEpoch,
+    AudioOutput, Batch, BatchItem, CastNetwork, OccurrenceId, Placement, PlaybackOutput,
+    Provenance, QueueItem, QueueReorderTarget, RemoteOutput, RepeatMode,
 };
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum QueuePlacement {
-    Now,
-    Next,
-    Last,
-}
+pub type QueuePlacement = Placement;
 
-impl From<QueuePlacement> for Placement {
-    fn from(value: QueuePlacement) -> Self {
-        match value {
-            QueuePlacement::Now => Self::Replace { anchor_index: 0 },
-            QueuePlacement::Next => Self::AfterCurrent,
-            QueuePlacement::Last => Self::End,
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum QueueOrigin {
-    Context(String),
-    Manual,
-    Random,
-    Radio,
+pub fn queue_context_window(count: usize, anchor: usize) -> std::ops::Range<usize> {
+    let end = anchor
+        .saturating_sub(library::QUEUE_CONTEXT_LIMIT / 2)
+        .saturating_add(library::QUEUE_CONTEXT_LIMIT)
+        .min(count);
+    end.saturating_sub(library::QUEUE_CONTEXT_LIMIT)..end
 }
 
 #[derive(Clone)]
-pub struct LoadedPlayRequest {
-    pub source_key: SourceKey,
-    pub source_session_epoch: SourceSessionEpoch,
-    pub order: Arc<[TrackKey]>,
-    pub anchor: PlaybackMedia,
+pub struct PlayRequest {
+    pub batch: Batch,
     pub anchor_index: usize,
     pub placement: QueuePlacement,
-    pub origin: QueueOrigin,
+    /// Whole-collection start intent, resolved against the current Shuffle setting before admission.
     pub shuffled_start: bool,
+    reactivate: bool,
 }
 
-impl LoadedPlayRequest {
-    pub fn now(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        order: Arc<[TrackKey]>,
-        anchor: PlaybackMedia,
-        anchor_index: usize,
-    ) -> Option<Self> {
-        let anchor_key = anchor.track_key?;
-        (order.get(anchor_index) == Some(&anchor_key)).then(|| Self {
-            source_key,
-            source_session_epoch,
-            order,
-            anchor,
-            anchor_index,
-            placement: QueuePlacement::Now,
-            origin: QueueOrigin::Manual,
-            shuffled_start: false,
-        })
-    }
-
-    pub fn one(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        track: PlaybackMedia,
-        placement: QueuePlacement,
-    ) -> Option<Self> {
-        let track_key = track.track_key?;
-        Some(Self {
-            source_key,
-            source_session_epoch,
-            order: Arc::from([track_key]),
-            anchor: track,
+impl PlayRequest {
+    pub fn one(item: QueueItem, placement: QueuePlacement) -> Self {
+        Self {
+            batch: Batch::new(vec![BatchItem::direct(item, Provenance::Manual)]),
             anchor_index: 0,
             placement,
-            origin: QueueOrigin::Manual,
             shuffled_start: false,
-        })
+            reactivate: false,
+        }
     }
 
-    pub fn manual(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        order: Arc<[TrackKey]>,
-        anchor: PlaybackMedia,
-        placement: QueuePlacement,
-    ) -> Option<Self> {
-        let anchor_key = anchor.track_key?;
-        (order.first() == Some(&anchor_key)).then(|| Self {
-            source_key,
-            source_session_epoch,
-            order,
-            anchor,
-            anchor_index: 0,
-            placement,
-            origin: QueueOrigin::Manual,
-            shuffled_start: false,
-        })
-    }
-
-    #[allow(clippy::too_many_arguments)]
-    pub fn context(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        order: Arc<[TrackKey]>,
-        anchor: PlaybackMedia,
+    pub fn ordered(
+        input: library::QueueInput,
         anchor_index: usize,
         placement: QueuePlacement,
-        context_id: impl Into<String>,
         shuffled_start: bool,
-    ) -> Option<Self> {
-        let anchor_key = anchor.track_key?;
-        if order.get(anchor_index) != Some(&anchor_key) {
-            return None;
-        }
-        Some(Self {
-            source_key,
-            source_session_epoch,
-            order,
-            anchor,
+    ) -> Self {
+        Self {
+            batch: Batch::from_input(input),
             anchor_index,
             placement,
-            origin: QueueOrigin::Context(context_id.into()),
             shuffled_start,
-        })
+            reactivate: false,
+        }
     }
 
-    pub fn random(
-        source_key: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        order: Arc<[TrackKey]>,
-        anchor: PlaybackMedia,
+    pub fn captured(
+        input: library::QueueInput,
+        anchor_index: usize,
         placement: QueuePlacement,
-    ) -> Option<Self> {
-        let anchor_key = anchor.track_key?;
-        (order.first() == Some(&anchor_key)).then(|| Self {
-            source_key,
-            source_session_epoch,
-            order,
-            anchor,
+        shuffled_start: bool,
+    ) -> Self {
+        let mut request = Self::ordered(input, anchor_index, placement, shuffled_start);
+        request.reactivate = true;
+        request
+    }
+
+    pub fn random(items: Arc<[QueueItem]>, placement: QueuePlacement) -> Option<Self> {
+        (!items.is_empty()).then(|| Self {
+            batch: Batch::new(
+                items
+                    .iter()
+                    .cloned()
+                    .map(|item| BatchItem::direct(item, Provenance::Random))
+                    .collect(),
+            ),
             anchor_index: 0,
             placement,
-            origin: QueueOrigin::Random,
             shuffled_start: false,
+            reactivate: false,
         })
     }
 
-    pub(crate) fn activation_context(&self) -> Option<(String, TrackKey, usize)> {
-        let QueueOrigin::Context(context_id) = &self.origin else {
-            return None;
-        };
-        let anchor_track_id = self.anchor.track_key?;
-        (self.placement == QueuePlacement::Now && !self.shuffled_start)
-            .then(|| (context_id.clone(), anchor_track_id, self.anchor_index))
+    pub fn activation_context(&self) -> Option<(String, String, usize)> {
+        (self.reactivate && self.placement == QueuePlacement::Now && !self.shuffled_start)
+            .then(|| self.batch.activation_context(self.anchor_index))
+            .flatten()
     }
 
-    pub fn placement(&self) -> Placement {
-        self.placement.into()
-    }
-
-    pub fn compact_batch(self, shuffle_seed: u64) -> Option<(Batch, Placement, PlaybackMedia)> {
-        let placement = match self.placement {
-            QueuePlacement::Now => Placement::Replace {
-                anchor_index: self.anchor_index,
-            },
-            QueuePlacement::Next => Placement::AfterCurrent,
-            QueuePlacement::Last => Placement::End,
-        };
-        let anchor_track_id = self.anchor.track_key?;
-        if self.order.get(self.anchor_index) != Some(&anchor_track_id) {
-            return None;
-        }
-        let origin = self.origin;
-        let context_id = match &origin {
-            QueueOrigin::Context(context_id) => Some(Arc::<str>::from(context_id.as_str())),
-            QueueOrigin::Manual | QueueOrigin::Random | QueueOrigin::Radio => None,
-        };
-        let items = self
-            .order
-            .into_iter()
-            .copied()
-            .enumerate()
-            .map(|(source_rank, track_key)| {
-                let provenance = compact_provenance(&origin, context_id.as_ref(), source_rank);
-                BatchItem::new(track_key, provenance)
-            })
-            .collect();
-        Some((
-            Batch::new(items).with_shuffle_intent(shuffle_seed, self.shuffled_start),
+    pub fn compact_batch(self, shuffle_seed: u64) -> (Batch, Placement) {
+        let placement = self.placement.with_anchor(self.anchor_index);
+        (
+            self.batch
+                .with_shuffle_intent(shuffle_seed, self.shuffled_start),
             placement,
-            self.anchor,
-        ))
-    }
-}
-
-fn compact_provenance(
-    origin: &QueueOrigin,
-    context_id: Option<&Arc<str>>,
-    source_rank: usize,
-) -> Provenance {
-    match origin {
-        QueueOrigin::Context(_) => Provenance::Context {
-            context_id: Arc::clone(
-                context_id.expect("Context Queue origin has one shared identity"),
-            ),
-            source_rank,
-        },
-        QueueOrigin::Manual => Provenance::Manual,
-        QueueOrigin::Random => Provenance::Random,
-        QueueOrigin::Radio => Provenance::Radio,
+        )
     }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct QueueReorderRequest {
-    pub occurrence: OccurrenceId,
+    pub occurrences: Vec<OccurrenceId>,
     pub target: QueueReorderTarget,
 }
 
@@ -260,7 +139,8 @@ impl RadioPlayRequest {
 }
 
 pub trait QueueCommandPort: Send + Sync {
-    fn play_loaded(&self, request: LoadedPlayRequest);
+    fn play(&self, request: PlayRequest);
+    fn insert(&self, input: library::QueueInput, target: QueueReorderTarget);
     fn remove(&self, occurrence: OccurrenceId);
     fn remove_many(&self, occurrences: Vec<OccurrenceId>);
     fn activate(&self, occurrence: OccurrenceId);
@@ -302,16 +182,107 @@ pub trait TransportCommandPort: Send + Sync {
 
 #[cfg(test)]
 mod tests {
-    use super::{QueueOrigin, compact_provenance};
-    use crate::Provenance;
+    use super::{PlayRequest, QueuePlacement};
+    use crate::{Provenance, QueueItem};
     use std::sync::Arc;
 
     #[test]
-    fn collection_occurrences_share_one_context_identity() {
-        let origin = QueueOrigin::Context("genre:4".to_string());
-        let context = Arc::<str>::from("genre:4");
-        let first = compact_provenance(&origin, Some(&context), 0);
-        let second = compact_provenance(&origin, Some(&context), 1);
+    fn full_context_keeps_the_absolute_route_rank_for_reactivation() {
+        let items = (0..250)
+            .map(|index| {
+                QueueItem::direct(
+                    format!("https://example.test/{index}"),
+                    index.to_string(),
+                    "",
+                    "",
+                    0,
+                )
+            })
+            .collect::<Vec<_>>();
+        let order: Arc<[String]> = items.iter().map(|item| item.media_uri.clone()).collect();
+        for anchor in [3, 125, 248] {
+            let request = PlayRequest::captured(
+                library::QueueInput::Uris {
+                    order: Arc::clone(&order),
+                    context_id: "mounted-order".into(),
+                    source_start: 20,
+                },
+                anchor,
+                QueuePlacement::Now,
+                false,
+            );
+            assert_eq!(request.anchor_index, anchor);
+            let library::QueueInput::Uris {
+                order: captured, ..
+            } = &request.batch.input
+            else {
+                panic!("captured route order")
+            };
+            assert_eq!(captured.len(), 250);
+            assert_eq!(captured[anchor], format!("https://example.test/{anchor}"));
+            assert_eq!(
+                request.activation_context(),
+                Some((
+                    "mounted-order".into(),
+                    format!("https://example.test/{anchor}"),
+                    20 + anchor
+                ))
+            );
+        }
+        let request = PlayRequest::ordered(
+            library::QueueInput::MediaUris {
+                order,
+                provenance: Provenance::Manual,
+            },
+            0,
+            QueuePlacement::Next,
+            false,
+        );
+        let library::QueueInput::MediaUris { order, .. } = &request.batch.input else {
+            panic!("selected media order")
+        };
+        assert_eq!(order.len(), 250);
+        let request = PlayRequest::random(items.into(), QueuePlacement::Last).unwrap();
+        let library::QueueInput::Items(captured) = &request.batch.input else {
+            panic!("explicit random items")
+        };
+        assert_eq!(captured.len(), 250);
+        assert_eq!(captured[125].0.title, "125");
+    }
+
+    #[tokio::test]
+    async fn collection_occurrences_share_one_context_identity() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("queue.sqlite3"))
+            .await
+            .unwrap();
+        let request = PlayRequest::captured(
+            library::QueueInput::Uris {
+                order: Arc::from([
+                    "rufin://source/track/first".to_string(),
+                    "rufin://source/track/second".to_string(),
+                ]),
+                context_id: "genre:4".into(),
+                source_start: 75,
+            },
+            0,
+            QueuePlacement::Now,
+            false,
+        );
+        let window = database
+            .prepare_queue_window(request.batch.input(), 0, None, false, "prepared")
+            .await
+            .unwrap()
+            .expect("non-empty context");
+        let first = &window.occurrences[0].provenance;
+        let second = &window.occurrences[1].provenance;
+        assert!(matches!(
+            second,
+            Provenance::Context {
+                source_rank: 76,
+                ..
+            }
+        ));
         let (
             Provenance::Context {
                 context_id: first, ..

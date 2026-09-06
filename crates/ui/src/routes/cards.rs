@@ -54,8 +54,9 @@ pub(crate) fn album_cover_overlay(
     );
     album_button.set_child(Some(&tile.widget()));
     let open_shell = Rc::clone(shell);
-    let album_key = album.album_key;
-    album_button.connect_clicked(move |_| open_shell.navigate(Route::AlbumDetail(album_key)));
+    let album_uri = album.media_uri.clone();
+    album_button
+        .connect_clicked(move |_| open_shell.navigate(Route::AlbumDetail(album_uri.clone())));
 
     let menu_shell = Rc::clone(shell);
     let menu_album = album.clone();
@@ -70,25 +71,25 @@ pub(crate) fn album_cover_overlay(
         );
     });
     let (controls, favorite) = cover_hover_controls_with_favorite(0, "Play album", album.favorite);
-    for (button, placement, shuffled) in [
-        (&controls.play, QueuePlacement::Now, true),
-        (&controls.play_next, QueuePlacement::Next, false),
-        (&controls.play_last, QueuePlacement::Last, false),
+    for (button, placement) in [
+        (&controls.play, QueuePlacement::Now),
+        (&controls.play_next, QueuePlacement::Next),
+        (&controls.play_last, QueuePlacement::Last),
     ] {
         let play_shell = Rc::clone(shell);
-        let target = PlaybackTarget::Album(album.album_key);
-        button.connect_clicked(move |_| target.play(&play_shell, placement, shuffled));
+        let target = PlaybackTarget::Album(album.media_uri.clone());
+        button.connect_clicked(move |_| target.play(&play_shell, placement));
     }
-    let favorite_key = album.album_key;
+    let favorite_key = album.media_uri.clone();
     shell.register_dynamic_favorite_button(
         Rc::new(move || Some(crate::favorites::album_favorite_key(&favorite_key))),
         &favorite,
     );
     let favorite_shell = Rc::clone(shell);
-    let album_key = album.album_key;
+    let favorite_media_uri = album.media_uri.clone();
     favorite.connect_clicked(move |button| {
         favorite_shell.set_favorite_with_feedback(
-            library::FavoriteTarget::Album(album_key),
+            library::FavoriteTarget::Album(favorite_media_uri.clone()),
             !favorite_button_is_active(button),
             Some(button),
         );
@@ -119,7 +120,7 @@ pub(crate) mod collection_grid_cover_view_imp {
         #[template_child]
         pub(crate) overlay: TemplateChild<gtk::Overlay>,
         #[template_child]
-        pub(crate) cover_button: TemplateChild<gtk::Button>,
+        pub(crate) cover_host: TemplateChild<gtk::Box>,
         #[template_child]
         pub(crate) shade: TemplateChild<gtk::Box>,
         #[template_child]

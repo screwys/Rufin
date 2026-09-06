@@ -145,6 +145,8 @@ impl HomeBlockKind {
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
     #[serde(default)]
+    pub backup: crate::runtime::BackupSettings,
+    #[serde(default)]
     pub layout: LayoutSettings,
     #[serde(default)]
     pub sidebar: SidebarSettings,
@@ -179,6 +181,10 @@ pub struct Settings {
     pub external_site_links: ExternalSiteLinkSettings,
     #[serde(default)]
     pub prefer_server_playlist_covers: bool,
+    #[serde(default = "default_true")]
+    pub new_playlist_current: bool,
+    #[serde(default)]
+    pub prefer_distinct_track_covers: bool,
     #[serde(default = "default_true")]
     pub show_downloaded_badges: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -251,6 +257,8 @@ impl Default for Settings {
             external_metadata_enabled: true,
             external_site_links: ExternalSiteLinkSettings::default(),
             prefer_server_playlist_covers: false,
+            new_playlist_current: true,
+            prefer_distinct_track_covers: false,
             show_downloaded_badges: true,
             downloads: Vec::new(),
             seekbar_waveform_enabled: false,
@@ -268,6 +276,7 @@ impl Default for Settings {
             clear_queue_includes_current: false,
             playback: PlaybackSettings::default(),
             random_play: RandomPlaySettings::default(),
+            backup: crate::runtime::BackupSettings::default(),
             home_blocks: default_home_blocks(),
             window_width: None,
             window_height: None,
@@ -346,10 +355,6 @@ impl Settings {
 
     pub fn download_rules(&self, source_id: &SourceId) -> DownloadRules {
         self.download_settings(source_id).rules
-    }
-
-    pub fn download_quality(&self, source_id: &SourceId) -> StreamQuality {
-        self.download_settings(source_id).quality
     }
 
     pub fn download_directory(&self, source_id: &SourceId) -> Option<PathBuf> {

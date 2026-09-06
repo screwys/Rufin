@@ -7,12 +7,12 @@ use std::path::PathBuf;
 use std::sync::Arc;
 
 use async_channel::Receiver;
-use library::{AlbumKey, ArtistKey, FavoriteTarget, PlaylistEntryKey, PlaylistKey, TrackKey};
+use library::{FavoriteTarget, PlaylistEntryKey, PlaylistKey};
 use secrets::SecretStorageMode;
 use sources::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, ArtistMetadata, ArtistMetadataEdit,
-    ArtistMetadataValues, LiveFolderPage, LiveSearchResults, SourceId, SourceMetadataError,
-    TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
+    ArtistMetadataValues, LiveFolderPage, SourceId, SourceMetadataError, TrackMetadata,
+    TrackMetadataEdit, TrackMetadataValues,
 };
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
@@ -55,19 +55,12 @@ pub struct SourceLocalAccessSummary {
     pub track_count: usize,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub enum LiveSearchCollectionTarget {
-    Album(String),
-    Artist(String),
-}
-
 #[derive(Clone, Debug, Default)]
 pub struct ConfiguredSources {
     pub sources: Arc<[SourceSummary]>,
     pub selected_source_id: Option<SourceId>,
     pub local_folders: Arc<[LocalFolder]>,
     pub local_access: Arc<[SourceLocalAccessSummary]>,
-    pub first_run: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -76,12 +69,7 @@ pub enum OpenSubsonicKind {
     OpenSubsonic,
 }
 
-#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
-pub enum OpenSubsonicAuthentication {
-    #[default]
-    Password,
-    ApiKey,
-}
+pub use sources::SubsonicAuthentication as OpenSubsonicAuthentication;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct CredentialInput {
@@ -189,14 +177,7 @@ pub enum LibraryRefreshTrigger {
 
 impl SourceOperation {
     pub fn blocks_library(&self) -> bool {
-        matches!(self, Self::Adding { .. } | Self::Switching { .. })
-    }
-
-    pub fn add_form_active(&self) -> bool {
-        matches!(
-            self,
-            Self::Adding { .. } | Self::Failed { add_form: true, .. }
-        )
+        matches!(self, Self::Switching { .. })
     }
 }
 
@@ -223,6 +204,11 @@ pub struct DiscoveryUpdate {
 }
 
 pub trait SourcePort: Send + Sync {
+    fn import_playlist(
+        &self,
+        path: PathBuf,
+    ) -> Receiver<Result<library::PlaylistImportReport, String>>;
+    fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>>;
     fn configured_source(&self, source_id: &SourceId) -> Result<Option<EditableSource>, String>;
     fn discover_servers(&self);
     fn configure_source(&self, input: SourceSetup);
@@ -241,6 +227,73 @@ pub trait SourcePort: Send + Sync {
     ) -> Receiver<Result<(), String>>;
     fn clear_local_access(&self, source_id: SourceId);
     fn forget_source(&self, source_id: SourceId);
+    fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>);
+    fn set_favorite(&self, target: FavoriteTarget, favorite: bool);
+    fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>);
+    fn create_playlist(
+        &self,
+        source_id: Option<SourceId>,
+        name: String,
+        media_uris: Vec<String>,
+    ) -> Receiver<Result<Option<String>, String>>;
+    fn rename_playlist(&self, playlist: PlaylistKey, name: String);
+    fn delete_playlist(&self, playlist: PlaylistKey);
+    fn add_playlist_tracks(
+        &self,
+        playlist: PlaylistKey,
+        media_uris: Vec<String>,
+        skip_duplicates: bool,
+    ) -> Receiver<Result<usize, String>>;
+    fn remove_playlist_entries(&self, playlist: PlaylistKey, entries: Vec<PlaylistEntryKey>);
+    fn move_playlist_entry(&self, playlist: PlaylistKey, entry: PlaylistEntryKey, position: usize);
+    fn track_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<TrackMetadata, SourceMetadataError>>;
+    fn album_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<AlbumMetadata, SourceMetadataError>>;
+    fn artist_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<ArtistMetadata, SourceMetadataError>>;
+    fn write_reviewed_track_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        application_token: Option<String>,
+        edit: TrackMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>>;
+    fn write_reviewed_album_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        application_token: Option<String>,
+        edit: AlbumMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>>;
+    fn write_reviewed_artist_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        application_token: Option<String>,
+        edit: ArtistMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>>;
+    fn identify_track_metadata(
+        &self,
+        media_uri: String,
+        values: TrackMetadataValues,
+    ) -> Receiver<Result<Option<(TrackMetadataValues, Option<String>)>, String>>;
+    fn identify_album_metadata(
+        &self,
+        media_uri: String,
+        values: AlbumMetadataValues,
+    ) -> Receiver<Result<Option<(AlbumMetadataValues, Option<String>)>, String>>;
+    fn identify_artist_metadata(
+        &self,
+        media_uri: String,
+        values: ArtistMetadataValues,
+    ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>>;
 }
 
 /// Commands whose validity is owned by one selected source session.
@@ -252,83 +305,17 @@ pub trait SelectedSourcePort: Send + Sync {
     fn refresh_library(&self, trigger: LibraryRefreshTrigger);
     fn refresh_home(&self, kind: crate::settings::HomeSectionKind);
     fn set_music_folder(&self, folder_object_id: Option<String>);
-    fn set_favorite(&self, target: FavoriteTarget, favorite: bool);
-    fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>);
-    fn create_playlist(
-        &self,
-        name: String,
-        tracks: Vec<TrackKey>,
-    ) -> Receiver<Result<Option<String>, String>>;
-    fn rename_playlist(&self, playlist: PlaylistKey, name: String);
-    fn delete_playlist(&self, playlist: PlaylistKey);
-    fn add_playlist_tracks(
-        &self,
-        playlist: PlaylistKey,
-        tracks: Vec<TrackKey>,
-        skip_duplicates: bool,
-    ) -> usize;
-    fn remove_playlist_entries(&self, playlist: PlaylistKey, entries: Vec<PlaylistEntryKey>);
-    fn move_playlist_entry(&self, playlist: PlaylistKey, entry: PlaylistEntryKey, position: usize);
     fn folder(
         &self,
         folder_object_id: Option<String>,
         music_folder_object_id: Option<String>,
     ) -> Receiver<Result<LiveFolderPage, String>>;
     /// Dedicated live query route.
-    fn search(&self, query: String, limit: usize) -> Receiver<Result<LiveSearchResults, String>>;
-    fn play_live_search_collection(
+    fn search(
         &self,
-        target: LiveSearchCollectionTarget,
-        placement: playback::QueuePlacement,
-    );
-    fn track_metadata(
-        &self,
-        track: TrackKey,
-    ) -> Receiver<Result<TrackMetadata, SourceMetadataError>>;
-    fn album_metadata(
-        &self,
-        album: AlbumKey,
-    ) -> Receiver<Result<AlbumMetadata, SourceMetadataError>>;
-    fn artist_metadata(
-        &self,
-        artist: ArtistKey,
-    ) -> Receiver<Result<ArtistMetadata, SourceMetadataError>>;
-    fn write_reviewed_track_metadata(
-        &self,
-        track: TrackKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: TrackMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
-    fn write_reviewed_album_metadata(
-        &self,
-        album: AlbumKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: AlbumMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
-    fn write_reviewed_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: ArtistMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>>;
-    fn identify_track_metadata(
-        &self,
-        track: TrackKey,
-        values: TrackMetadataValues,
-    ) -> Receiver<Result<Option<(TrackMetadataValues, Option<String>)>, String>>;
-    fn identify_album_metadata(
-        &self,
-        album: AlbumKey,
-        values: AlbumMetadataValues,
-    ) -> Receiver<Result<Option<(AlbumMetadataValues, Option<String>)>, String>>;
-    fn identify_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        values: ArtistMetadataValues,
-    ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>>;
+        query: String,
+        limit: usize,
+    ) -> Receiver<Result<library::SearchResults, String>>;
 }
 
 pub type SourceHandle = Arc<dyn SourcePort>;
@@ -347,9 +334,9 @@ mod tests {
     }
 
     #[test]
-    fn adding_and_switching_gate_the_selected_library() {
+    fn only_switching_gates_the_selected_library() {
         assert!(
-            SourceOperation::Adding {
+            !SourceOperation::Adding {
                 progress: progress()
             }
             .blocks_library()

@@ -70,6 +70,7 @@ impl Shell {
         self.mark_lyrics_panes_dirty();
         self.render_lyrics_contents();
         self.refocus_current_lyrics_highlight();
+        self.update_lyrics_highlight();
     }
 
     pub(crate) fn sync_visible_lyrics_surfaces(self: &Rc<Self>) {
@@ -215,7 +216,7 @@ impl Shell {
         gtk::glib::spawn_future_local(async move {
             let dialog = gtk::FileDialog::builder()
                 .title(tr("Save Lyrics"))
-                .initial_name(lyrics_save_filename(&current.track.title))
+                .initial_name(lyrics_save_filename(&current.title))
                 .build();
             let Ok(file) = dialog.save_future(Some(&shell.chrome.window)).await else {
                 return;
@@ -426,8 +427,8 @@ impl Shell {
         });
         dialog.set_content_width(lyrics_popup_content_width());
         dialog.set_content_height(lyrics_popup_content_height(self.chrome.window.height()));
-        artist_entry.set_text(&current.track.artist);
-        title_entry.set_text(&current.track.title);
+        artist_entry.set_text(&current.artist);
+        title_entry.set_text(&current.title);
         for entry in [&artist_entry, &title_entry] {
             entry.set_icon_sensitive(gtk::EntryIconPosition::Secondary, !entry.text().is_empty());
             entry.connect_changed(|entry| {

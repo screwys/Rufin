@@ -175,13 +175,6 @@ pub(crate) fn home_block_from_drag_id(id: &str) -> Option<HomeBlockKind> {
         .into_iter()
         .find(|block| home_block_drag_id(*block) == id)
 }
-pub(crate) fn button_row(title: &str, icon_name: &str) -> adw::ButtonRow {
-    adw::ButtonRow::builder()
-        .title(tr(title))
-        .start_icon_name(icon_name)
-        .end_icon_name("rufin-go-next-symbolic")
-        .build()
-}
 pub(crate) fn left_sidebar_row<F>(
     title: &str,
     mode: LeftSidebarMode,

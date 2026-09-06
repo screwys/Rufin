@@ -9,6 +9,10 @@ mod view;
 
 pub use backend::*;
 pub use commands::*;
+pub use library::{
+    OccurrenceId, QueueItem, QueueOccurrence, QueueProvenance as Provenance,
+    QueueRepeatMode as RepeatMode,
+};
 pub use listening::*;
 pub use runtime::*;
 pub use sequence::*;

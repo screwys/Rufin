@@ -454,12 +454,7 @@ pub(crate) fn detail_playback_controls(
     );
 
     let primary = detail_primary_action_button(crate::shell::actions::PLAY_ICON, "Play");
-    connect_collection_play(
-        &primary,
-        Rc::clone(&play),
-        playback::QueuePlacement::Now,
-        true,
-    );
+    connect_collection_play(&primary, Rc::clone(&play), playback::QueuePlacement::Now);
     actions.append(&primary);
 
     for (icon, label, placement, hover) in [
@@ -478,12 +473,12 @@ pub(crate) fn detail_playback_controls(
     ] {
         if show_queue_actions {
             let button = detail_action_button(icon, label);
-            connect_collection_play(&button, Rc::clone(&play), placement, false);
+            connect_collection_play(&button, Rc::clone(&play), placement);
             actions.append(&button);
         }
-        connect_collection_play(&hover, Rc::clone(&play), placement, false);
+        connect_collection_play(&hover, Rc::clone(&play), placement);
     }
-    connect_collection_play(&controls.play, play, playback::QueuePlacement::Now, true);
+    connect_collection_play(&controls.play, play, playback::QueuePlacement::Now);
     controls
 }
 
@@ -491,9 +486,8 @@ fn connect_collection_play(
     button: &gtk::Button,
     play: CollectionPlay,
     placement: playback::QueuePlacement,
-    shuffled_start: bool,
 ) {
-    button.connect_clicked(move |_| play(placement, shuffled_start));
+    button.connect_clicked(move |_| play(placement));
 }
 
 pub(crate) fn detail_genre_pill_button(label: &str) -> gtk::Button {
@@ -567,7 +561,7 @@ pub(crate) fn home_album_cover_projection(
     album: &AlbumRow,
     size: i32,
 ) -> MediaCoverProjection {
-    let album_key = album.album_key;
+    let album_uri = album.media_uri.clone();
     media_cover_projection_with_open(
         shell,
         album
@@ -577,7 +571,7 @@ pub(crate) fn home_album_cover_projection(
             .unwrap_or_default(),
         size,
         "",
-        move |shell, _| shell.navigate(Route::AlbumDetail(album_key)),
+        move |shell, _| shell.navigate(Route::AlbumDetail(album_uri.clone())),
     )
 }
 
@@ -923,7 +917,7 @@ fn server_entity_url(
     let source_id = shell
         .selected_library()
         .as_deref()
-        .map(|selected| selected.artwork.source_id.clone())?;
+        .map(|selected| selected.source_id.clone())?;
     let source = shell
         .products
         .source

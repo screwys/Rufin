@@ -7,23 +7,210 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn collection_play_retains_full_order_with_bounded_queue_projection() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for position in 0..130 {
+        let id = format!("extra-{position:03}");
+        let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", &id);
+        let key: library::TrackKey = sqlx::query_scalar(
+            "INSERT INTO tracks(source_key,object_id,album_key,title,normalized_search,display_album,display_artist,sort_text,duration_millis,disc_number,track_number,media_uri) VALUES(?1,?2,?3,?2,?2,'Album A','Artist A',?2,1000,1,?4,?5) RETURNING track_key",
+        ).bind(fixture.source).bind(&id).bind(fixture.albums[0]).bind(position + 10).bind(uri)
+            .fetch_one(&mut raw).await.expect("extend collection");
+        sqlx::query("INSERT INTO track_artists VALUES(?1,?2,0)")
+            .bind(key)
+            .bind(fixture.artists[0])
+            .execute(&mut raw)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO track_genres VALUES(?1,?2,0)")
+            .bind(key)
+            .bind(fixture.genre)
+            .execute(&mut raw)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO track_moods VALUES(?1,?2,0)")
+            .bind(key)
+            .bind(fixture.mood)
+            .execute(&mut raw)
+            .await
+            .unwrap();
+    }
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    let pages = [
+        fixture
+            .database
+            .album_track_route_page(
+                fixture.source,
+                fixture.albums[0],
+                None,
+                "",
+                TrackSort::TrackNumber,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        fixture
+            .database
+            .artist_track_route_page(
+                fixture.source,
+                fixture.artists[0],
+                false,
+                None,
+                "",
+                TrackSort::Title,
+                false,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        fixture
+            .database
+            .artist_track_route_page(
+                fixture.source,
+                fixture.artists[0],
+                true,
+                None,
+                "",
+                TrackSort::Title,
+                false,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        fixture
+            .database
+            .genre_track_route_page(
+                fixture.source,
+                fixture.genre,
+                None,
+                "",
+                TrackSort::Title,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        fixture
+            .database
+            .mood_track_route_page(
+                fixture.source,
+                fixture.mood,
+                None,
+                "",
+                TrackSort::Title,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap(),
+    ];
+    assert!(
+        pages[0]
+            .first_rows
+            .windows(2)
+            .all(|pair| pair[0].track_number < pair[1].track_number)
+    );
+    assert!(
+        pages[1]
+            .first_rows
+            .windows(2)
+            .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase())
+    );
+    for page in pages {
+        let total = page.order.len();
+        assert!(total > 100);
+        assert!(
+            page.first_rows
+                .iter()
+                .all(|row| row.source_key == fixture.source)
+        );
+        let state = fixture
+            .database
+            .edit_queue_with_preview(
+                library::QueueEdit::Apply {
+                    input: library::QueueInput::Uris {
+                        order: page.order.into(),
+                        context_id: "collection".into(),
+                        source_start: 0,
+                    },
+                    placement: library::QueuePlacement::Now,
+                    shuffle_seed: None,
+                    random_start: false,
+                    identity: None,
+                },
+                None,
+                library::QueueRepeatMode::Off,
+                false,
+                0,
+                |_| {},
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.total, total);
+        assert!(state.occurrences.len() <= 100);
+    }
+    assert_eq!(
+        fixture
+            .database
+            .album_track_route_page(
+                fixture.source,
+                fixture.albums[0],
+                Some(fixture.folder),
+                "",
+                TrackSort::TrackNumber,
+                false,
+                RouteSeedWindow::top(),
+                &cancel
+            )
+            .await
+            .unwrap()
+            .order
+            .len(),
+        2
+    );
+    assert!(
+        fixture
+            .database
+            .album_track_route_page(
+                library::SourceKey::from_raw(999),
+                fixture.albums[0],
+                None,
+                "",
+                TrackSort::TrackNumber,
+                false,
+                RouteSeedWindow::top(),
+                &cancel
+            )
+            .await
+            .unwrap()
+            .order
+            .is_empty()
+    );
+}
+
+#[tokio::test]
 async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
     let fixture = fixture().await;
     let cancellation = ReadCancellation::new();
     fixture
         .database
-        .set_favorite(
-            fixture.source,
-            FavoriteTarget::Album(fixture.albums[0]),
-            true,
-        )
+        .set_favorite(&FavoriteTarget::Album(fixture.album_uris[0].clone()), true)
         .await
         .expect("favorite Album");
     fixture
         .database
         .set_favorite(
-            fixture.source,
-            FavoriteTarget::Artist(fixture.artists[1]),
+            &FavoriteTarget::Artist(fixture.artist_uris[1].clone()),
             true,
         )
         .await
@@ -67,7 +254,7 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         [fixture.artists[1]]
     );
 
-    let order = fixture
+    let (order, albums, albums_with_genres) = fixture
         .database
         .album_detail_route_order(
             fixture.source,
@@ -81,19 +268,27 @@ async fn favorite_collection_orders_keep_each_favorite_entity_extent() {
         .await
         .expect("favorite Album detail order");
 
+    assert_eq!(albums_with_genres, [fixture.album_uris[0].clone()]);
+    assert_eq!(albums, [fixture.album_uris[0].clone()]);
     assert_eq!(
         order
             .iter()
-            .filter_map(|key| key.album_key())
+            .filter(|media_uri| {
+                library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "album")
+            })
+            .map(String::as_str)
             .collect::<Vec<_>>(),
-        [fixture.albums[0]]
+        [fixture.album_uris[0].as_str()]
     );
     assert_eq!(
         order
             .iter()
-            .filter_map(|key| key.track_key())
+            .filter(|media_uri| {
+                library::source_entity_parts(media_uri).is_some_and(|(_, kind, _)| kind == "track")
+            })
+            .map(String::as_str)
             .collect::<Vec<_>>(),
-        fixture.tracks[..2]
+        fixture.track_uris[..2]
     );
 }
 
@@ -128,7 +323,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .expect("numbered Track order");
     assert_eq!(
         numbered,
-        fixture.tracks.iter().copied().rev().collect::<Vec<_>>()
+        fixture.track_uris.iter().cloned().rev().collect::<Vec<_>>()
     );
     let favorites = fixture
         .database
@@ -150,18 +345,20 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .expect("Folder Track order");
     assert_eq!(folder.len(), 4);
 
-    let supplied = [title[2], title[0]];
+    let supplied = [title[2].clone(), title[0].clone()];
     let rows = fixture
         .database
-        .track_rows(fixture.source, &supplied, &cancel)
+        .track_rows_by_uri(&supplied, &cancel)
         .await
         .expect("bounded Track rows");
     assert_eq!(
-        rows.iter().map(|row| row.track_key).collect::<Vec<_>>(),
+        rows.iter()
+            .map(|row| row.media_uri.clone())
+            .collect::<Vec<_>>(),
         supplied
     );
-    assert_eq!(rows[0].artists[0].name, rows[0].display_artist);
-    assert_eq!(rows[0].album_artists[0].name, rows[0].display_artist);
+    assert_eq!(rows[0].artists[0].name, rows[0].artist);
+    assert_eq!(rows[0].album_artists[0].name, rows[0].artist);
     assert_eq!(rows[0].genres[0].name, "Rock");
     assert_eq!(rows[0].rating, Some(8));
     assert_eq!(rows[0].play_count, 0);
@@ -170,7 +367,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert!(
         fixture
             .database
-            .track_rows(fixture.source, &vec![title[0]; 257], &cancel)
+            .track_rows_by_uri(&vec![title[0].clone(); 257], &cancel)
             .await
             .is_err(),
         "Track row bound was not enforced"
@@ -310,7 +507,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(album_rows[0].genres[0].name, "Rock");
     let album_detail = fixture
         .database
-        .album_detail(fixture.source, fixture.albums[0], None, &cancel)
+        .album_detail(&album_rows[0].media_uri, &cancel)
         .await
         .expect("Album detail")
         .expect("existing Album");
@@ -361,7 +558,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         missing_row.release_lookup_identity.as_deref(),
         Some("release-group:group-a")
     );
-    assert!(
+    assert!(matches!(
         fixture
             .database
             .update_album_metadata(
@@ -381,8 +578,9 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 }
             )
             .await
-            .unwrap()
-    );
+            .unwrap(),
+        library::ScanOutcome::Changed(_)
+    ));
     let changed = fixture
         .database
         .album_release_candidates(fixture.source, 100, &cancel)
@@ -439,7 +637,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .fetch_one(&mut release_raw)
             .await
             .unwrap(),
-        revision
+        revision + 1 // The metadata edit publishes once; release annotations do not republish it.
     );
 
     let mut raw = connection(&fixture.path).await;
@@ -453,7 +651,7 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .artist_track_order(
+            .artist_track_route_page(
                 fixture.source,
                 fixture.artists[0],
                 true,
@@ -461,17 +659,20 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 TrackSort::Title,
                 false,
+                false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
             .expect("Album Artist Tracks")
+            .order
             .len(),
         2
     );
     assert_eq!(
         fixture
             .database
-            .artist_track_order(
+            .artist_track_route_page(
                 fixture.source,
                 fixture.artists[0],
                 false,
@@ -479,10 +680,13 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
                 "",
                 TrackSort::Title,
                 false,
+                false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
             .expect("direct Artist Tracks")
+            .order
             .len(),
         0
     );
@@ -528,68 +732,76 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(
         fixture
             .database
-            .album_track_order(
+            .album_track_route_page(
                 fixture.source,
                 fixture.albums[0],
                 Some(fixture.folder),
                 "beta",
                 TrackSort::Title,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
-            .expect("scoped filtered Album Tracks"),
-        [fixture.tracks[1]]
+            .expect("scoped filtered Album Tracks")
+            .order,
+        [fixture.track_uris[1].clone()]
     );
     assert_eq!(
         fixture
             .database
-            .album_track_order(
+            .album_track_route_page(
                 fixture.source,
                 fixture.albums[0],
                 None,
                 "",
                 TrackSort::LastPlayed,
                 true,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
             .expect("Activity-sorted Album Tracks")
+            .order
             .len(),
         2
     );
     assert_eq!(
         fixture
             .database
-            .genre_track_order(
+            .genre_track_route_page(
                 fixture.source,
                 fixture.genre,
                 Some(fixture.folder),
                 "artist b",
                 TrackSort::Album,
                 true,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
             .expect("scoped filtered Genre Tracks")
+            .order
             .len(),
         2
     );
     assert_eq!(
         fixture
             .database
-            .mood_track_order(
+            .mood_track_route_page(
                 fixture.source,
                 fixture.mood,
                 None,
                 "2023",
                 TrackSort::Year,
                 false,
+                RouteSeedWindow::top(),
                 &cancel
             )
             .await
-            .expect("filtered Mood Tracks"),
-        [fixture.tracks[3]]
+            .expect("filtered Mood Tracks")
+            .order,
+        [fixture.track_uris[3].clone()]
     );
     assert!(
         fixture
@@ -745,11 +957,11 @@ async fn empty_named_collection_routes_return_empty_pages() {
 }
 
 #[tokio::test]
-async fn metadata_point_writes_return_concrete_current_rows() {
+async fn metadata_point_writes_publish_changes_and_leave_no_ops_unchanged() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let track = fixture.tracks[0];
-    let row = fixture
+    let outcome = fixture
         .database
         .update_track_metadata(
             fixture.source,
@@ -766,7 +978,6 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 year: Some(2025),
                 release_date: None,
                 date_added: Some("2025-01-01".to_string()),
-                media_uri: Some("file:///edited.flac".to_string()),
                 source_format: Some("FLAC".to_string()),
                 comment: Some("Changed".to_string()),
                 bpm: Some(121),
@@ -775,16 +986,22 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 cue_path: None,
                 cue_start_millis: None,
                 cue_end_millis: None,
-                loudness_analysis_key: [99; 32],
             },
         )
         .await
-        .expect("update Track metadata")
-        .expect("updated Track row");
+        .expect("update Track metadata");
+    assert!(matches!(outcome, library::ScanOutcome::Changed(_)));
+    let row = fixture
+        .database
+        .track_rows(&[track], &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
     assert_eq!(row.title, "Edited");
     assert_eq!(row.comment.as_deref(), Some("Changed"));
 
-    assert!(
+    assert!(matches!(
         fixture
             .database
             .update_album_metadata(
@@ -804,24 +1021,32 @@ async fn metadata_point_writes_return_concrete_current_rows() {
                 },
             )
             .await
-            .expect("update Album metadata")
-    );
-    assert!(
-        fixture
-            .database
-            .update_artist_metadata(
-                fixture.source,
-                fixture.artists[0],
-                ArtistMetadataWrite {
-                    name: "Edited Artist".to_string(),
-                    normalized_name: "edited artist".to_string(),
-                    sort_text: "edited artist".to_string(),
-                    musicbrainz_artist_id: None,
-                },
-            )
-            .await
-            .expect("update Artist metadata")
-    );
+            .expect("update Album metadata"),
+        library::ScanOutcome::Changed(_)
+    ));
+    let artist_write = ArtistMetadataWrite {
+        name: "Edited Artist".to_string(),
+        normalized_name: "edited artist".to_string(),
+        sort_text: "edited artist".to_string(),
+        musicbrainz_artist_id: None,
+    };
+    let outcome = fixture
+        .database
+        .update_artist_metadata(fixture.source, fixture.artists[0], artist_write.clone())
+        .await
+        .expect("update Artist metadata");
+    let library::ScanOutcome::Changed(publication) = outcome else {
+        panic!("changed artist must publish");
+    };
+    let unchanged = fixture
+        .database
+        .update_artist_metadata(fixture.source, fixture.artists[0], artist_write)
+        .await
+        .unwrap();
+    let library::ScanOutcome::Identical(unchanged) = unchanged else {
+        panic!("identical artist must not invalidate");
+    };
+    assert_eq!(publication.catalog_revision, unchanged.catalog_revision);
     let filtered = fixture
         .database
         .track_route_page(
@@ -837,7 +1062,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
         .await
         .expect("filter edited Track")
         .order;
-    assert_eq!(filtered, [track]);
+    assert_eq!(filtered, [fixture.track_uris[0].clone()]);
     assert_eq!(
         fixture
             .database
@@ -854,7 +1079,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
             .await
             .expect("Track Year filter")
             .order,
-        [fixture.tracks[0]]
+        [fixture.track_uris[0].clone()]
     );
     assert_eq!(
         fixture
@@ -936,11 +1161,11 @@ async fn metadata_point_writes_return_concrete_current_rows() {
     assert!(album_plan.contains("albums_order_idx"), "{album_plan}");
     for (sql, expected) in [
         (
-            "EXPLAIN QUERY PLAN SELECT track.track_key FROM tracks track WHERE track.source_key=?1 AND (?2 OR COALESCE(track.user_favorite,track.source_favorite)=1) AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=?3)) ORDER BY track.sort_text,track.track_key",
+            "EXPLAIN QUERY PLAN SELECT track.track_key FROM tracks track WHERE track.source_key=?1 AND (?2 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1) AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=?3)) ORDER BY track.sort_text,track.track_key",
             "tracks_order_idx",
         ),
         (
-            "EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?3)) AND (?2=0 OR COALESCE(album.user_favorite,album.source_favorite)=1) ORDER BY album.sort_text,album.album_key",
+            "EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?3)) AND (?2=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text,album.album_key",
             "albums_order_idx",
         ),
         (
@@ -969,14 +1194,14 @@ async fn metadata_point_writes_return_concrete_current_rows() {
             "{details}"
         );
     }
-    let artist_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artist.artist_key FROM artists artist WHERE artist.source_key=?1 AND (?2 OR EXISTS (SELECT 1 FROM album_artists relation WHERE relation.artist_key=artist.artist_key)) AND (?3 OR COALESCE(artist.user_favorite,artist.source_favorite)=1) AND (?4 IS NULL OR ((?5 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?6)) OR (?7 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?8)))) ORDER BY artist.sort_text,artist.artist_key")
+    let artist_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artist.artist_key FROM artists artist WHERE artist.source_key=?1 AND (?2 OR EXISTS (SELECT 1 FROM album_artists relation WHERE relation.artist_key=artist.artist_key)) AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=artist.media_uri),artist.source_favorite)=1) AND (?4 IS NULL OR ((?5 AND EXISTS (SELECT 1 FROM track_artists credit JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?6)) OR (?7 AND EXISTS (SELECT 1 FROM album_artists credit JOIN tracks track USING(album_key) JOIN track_folders scope USING(track_key) WHERE credit.artist_key=artist.artist_key AND scope.folder_key=?8)))) ORDER BY artist.sort_text,artist.artist_key")
         .bind(fixture.source).bind(true).bind(true).bind(Option::<i64>::None).bind(true).bind(Option::<i64>::None).bind(false).bind(Option::<i64>::None).fetch_all(&mut raw).await.expect("production Artist title plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
     assert!(artist_plan.contains("artists_order_idx"), "{artist_plan}");
     assert!(
         !artist_plan.contains("USE TEMP B-TREE FOR ORDER BY"),
         "{artist_plan}"
     );
-    let direct_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3 OR COALESCE(album.user_favorite,album.source_favorite)=1) ORDER BY album.year DESC NULLS LAST,album.sort_text,album.album_key")
+    let direct_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.year DESC NULLS LAST,album.sort_text,album.album_key")
         .bind(fixture.source).bind(Option::<i64>::None).bind(true).fetch_all(&mut raw).await.expect("actual direct Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
     assert!(
         !direct_album_plan.contains("listens"),
@@ -986,7 +1211,7 @@ async fn metadata_point_writes_return_concrete_current_rows() {
         !direct_album_plan.contains("activity_baseline"),
         "{direct_album_plan}"
     );
-    let counted_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album LEFT JOIN tracks track ON track.album_key=album.album_key AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2)) WHERE album.source_key=?1 AND (?3 OR COALESCE(album.user_favorite,album.source_favorite)=1) GROUP BY album.album_key ORDER BY count(track.track_key) DESC,album.sort_text,album.album_key")
+    let counted_album_plan = sqlx::query_as::<_, (i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT album.album_key FROM albums album LEFT JOIN tracks track ON track.album_key=album.album_key AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2)) WHERE album.source_key=?1 AND (?3 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) GROUP BY album.album_key ORDER BY count(track.track_key) DESC,album.sort_text,album.album_key")
         .bind(fixture.source).bind(Option::<i64>::None).bind(true).fetch_all(&mut raw).await.expect("actual counted Album sort plan").into_iter().map(|row| row.3).collect::<Vec<_>>().join(" | ");
     assert!(
         counted_album_plan.contains("tracks_album_idx"),

@@ -22,38 +22,79 @@ const JELLYFIN_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 };
 
 impl JellyfinSource {
-    pub(crate) async fn collection_track_object_ids(
+    pub(crate) async fn stage_collection(
         &self,
+        scan: &mut library::Scan,
         collection: &crate::SourceCollection,
-        limit: usize,
-    ) -> SourceResult<Vec<String>> {
-        let mut url = endpoint(&self.base_url, "Items")?;
-        url.query_pairs_mut()
-            .append_pair("UserId", &self.user_id)
-            .append_pair("Recursive", "true")
-            .append_pair("IncludeItemTypes", "Audio")
-            .append_pair("Fields", TRACK_FIELDS)
-            .append_pair("SortBy", "ParentIndexNumber,IndexNumber,SortName")
-            .append_pair("SortOrder", "Ascending")
-            .append_pair("Limit", &limit.clamp(1, 500).to_string());
-        match collection {
-            crate::SourceCollection::Album(id) => {
-                url.query_pairs_mut()
-                    .append_pair("ParentId", raw_item_id(id));
+    ) -> SourceResult<()> {
+        let mut staged_albums = std::collections::HashSet::new();
+        let mut start = 0;
+        loop {
+            let mut url = endpoint(&self.base_url, "Items")?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Recursive", "true")
+                .append_pair(
+                    "IncludeItemTypes",
+                    match collection {
+                        crate::SourceCollection::Album(_) => "Audio",
+                        crate::SourceCollection::Artist(_) => "MusicAlbum,Audio",
+                    },
+                )
+                .append_pair("Fields", MIXED_ITEM_FIELDS)
+                .append_pair("SortBy", "ParentIndexNumber,IndexNumber,SortName")
+                .append_pair("SortOrder", "Ascending")
+                .append_pair("StartIndex", &start.to_string())
+                .append_pair("Limit", "100");
+            match collection {
+                crate::SourceCollection::Album(id) => {
+                    url.query_pairs_mut()
+                        .append_pair("ParentId", raw_item_id(id));
+                }
+                crate::SourceCollection::Artist(id) => {
+                    url.query_pairs_mut()
+                        .append_pair("ArtistIds", raw_item_id(id));
+                }
             }
-            crate::SourceCollection::Artist(id) => {
-                url.query_pairs_mut()
-                    .append_pair("ArtistIds", raw_item_id(id));
+            let page = self.get_json::<ItemQueryResult>(url).await?;
+            let count = page.items.len();
+            if count == 0 {
+                break;
+            }
+            for item in &page.items {
+                if let Some(album_id) = item.album_id.as_ref().filter(|_| is_audio_item(item)) {
+                    if staged_albums.insert(album_id.clone()) {
+                        let mut album_url = endpoint(&self.base_url, &format!("Items/{album_id}"))?;
+                        album_url
+                            .query_pairs_mut()
+                            .append_pair("UserId", &self.user_id)
+                            .append_pair("Fields", ALBUM_FIELDS);
+                        let album = self.get_json::<JellyfinItem>(album_url).await?;
+                        scan.begin_batch().await?;
+                        stage_album(scan, album_from_item(album)).await?;
+                        scan.finish_batch().await?;
+                    }
+                }
+            }
+            scan.begin_batch().await?;
+            for item in page.items {
+                if is_audio_item(&item) {
+                    stage_track(scan, track_from_item(item)).await?;
+                } else if item
+                    .item_type
+                    .as_deref()
+                    .is_some_and(|kind| kind.eq_ignore_ascii_case("MusicAlbum"))
+                {
+                    stage_album(scan, album_from_item(item)).await?;
+                }
+            }
+            scan.finish_batch().await?;
+            start += count;
+            if count < 100 {
+                break;
             }
         }
-        Ok(self
-            .get_json::<ItemQueryResult>(url)
-            .await?
-            .items
-            .into_iter()
-            .filter(is_audio_item)
-            .map(|item| jellyfin_id("track", &item.id))
-            .collect())
+        Ok(())
     }
     pub(crate) async fn generated_track_object_ids(
         &self,
@@ -146,72 +187,73 @@ impl JellyfinSource {
 
     pub(crate) async fn live_search(
         &self,
+        source_id: &SourceId,
+        database: &library::Database,
         query: &str,
         limit: usize,
-    ) -> SourceResult<crate::LiveSearchResults> {
+    ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
         if query.trim().is_empty() {
-            return Ok(crate::LiveSearchResults::default());
+            return Ok((library::SearchResults::default(), None));
         }
         let limit = limit.clamp(1, 100);
-        let (artists, albums, tracks) = tokio::try_join!(
+        let (artists, albums, tracks) = tokio::join!(
             self.search_people(query, limit),
             self.search_items("MusicAlbum", ALBUM_FIELDS, query, limit),
             self.search_items("Audio", TRACK_FIELDS, query, limit),
-        )?;
-        Ok(crate::LiveSearchResults {
-            artists: artists
-                .items
-                .into_iter()
-                .map(artist_from_item)
-                .map(|artist| {
-                    Ok(crate::LiveSearchArtist {
-                        object_id: artist.id,
-                        name: artist.name,
-                        artwork_binding: artist
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-            albums: albums
-                .items
-                .into_iter()
-                .map(album_from_item)
-                .map(|album| {
-                    Ok(crate::LiveSearchAlbum {
-                        object_id: album.id,
-                        title: album.title,
-                        artist: album.artist,
-                        artwork_binding: album
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-            tracks: tracks
-                .items
-                .into_iter()
-                .filter(is_audio_item)
-                .map(track_from_item)
-                .map(|track| {
-                    Ok(crate::LiveSearchTrack {
-                        object_id: track.id,
-                        title: track.title,
-                        artist: track.artist,
-                        album: track.album,
-                        artwork_binding: track
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-        })
+        );
+        if artists.is_err() && albums.is_err() && tracks.is_err() {
+            return Err(tracks.err().expect("failed track search"));
+        }
+        let artists = artists.unwrap_or_default();
+        let albums = albums.unwrap_or_default();
+        let tracks = tracks.unwrap_or_default();
+        let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
+        let source = scan
+            .existing_source()
+            .ok_or(SourceError::InvalidRequest("Search source is unavailable"))?;
+        scan.begin_batch().await?;
+        let mut artist_ids = Vec::new();
+        let mut album_ids = Vec::new();
+        let mut track_ids = Vec::new();
+        for artist in artists.into_iter().map(artist_from_item) {
+            if raw_item_id(&artist.id).trim().is_empty() {
+                continue;
+            }
+            artist_ids.push(artist.id.clone());
+            stage_artist(&mut scan, artist).await?;
+        }
+        for album in albums.into_iter().map(album_from_item) {
+            if raw_item_id(&album.id).trim().is_empty() {
+                continue;
+            }
+            album_ids.push(album.id.clone());
+            stage_album(&mut scan, album).await?;
+        }
+        for track in tracks
+            .into_iter()
+            .filter(is_audio_item)
+            .map(track_from_item)
+        {
+            if raw_item_id(&track.id).trim().is_empty() {
+                continue;
+            }
+            track_ids.push(track.id.clone());
+            stage_track(&mut scan, track).await?;
+        }
+        scan.finish_batch().await?;
+        let outcome = scan.finish().await?;
+        let rows = database
+            .search_rows_by_objects(
+                source,
+                None,
+                false,
+                &track_ids,
+                &album_ids,
+                &artist_ids,
+                &library::ReadCancellation::new(),
+            )
+            .await?;
+        Ok((rows, Some(outcome)))
     }
 
     async fn search_items(
@@ -220,7 +262,7 @@ impl JellyfinSource {
         fields: &str,
         query: &str,
         limit: usize,
-    ) -> SourceResult<ItemQueryResult> {
+    ) -> SourceResult<Vec<JellyfinItem>> {
         let mut url = endpoint(&self.base_url, "Items")?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
@@ -230,12 +272,26 @@ impl JellyfinSource {
             .append_pair("StartIndex", "0")
             .append_pair("Limit", &limit.to_string())
             .append_pair("Fields", fields);
-        self.get_json(url).await
+        let body: serde_json::Value = self.get_json(url).await?;
+        Ok(body["Items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .take(limit)
+            .collect())
     }
-    async fn search_people(&self, query: &str, limit: usize) -> SourceResult<ItemQueryResult> {
+    async fn search_people(&self, query: &str, limit: usize) -> SourceResult<Vec<JellyfinItem>> {
         let mut url = endpoint(&self.base_url, "Artists")?;
         url.query_pairs_mut().append_pair("UserId",&self.user_id).append_pair("SearchTerm",query).append_pair("StartIndex","0").append_pair("Limit",&limit.to_string()).append_pair("Fields","ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds");
-        self.get_json(url).await
+        let body: serde_json::Value = self.get_json(url).await?;
+        Ok(body["Items"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value(value.clone()).ok())
+            .take(limit)
+            .collect())
     }
 }
 
@@ -292,7 +348,8 @@ fn incomplete_playlist() -> SourceError {
 impl JellyfinSource {
     pub(crate) async fn resolve_stream(
         &self,
-        request: &StreamRequest,
+        track_object_id: &str,
+        quality: StreamQuality,
     ) -> SourceResult<ResolvedStream> {
         stream_descriptor(
             &self.base_url,
@@ -300,7 +357,8 @@ impl JellyfinSource {
             &self.device_id,
             &self.access_token,
             self.trust_invalid_cert,
-            request,
+            track_object_id,
+            quality,
         )
     }
 }
@@ -308,24 +366,26 @@ impl JellyfinSource {
 impl JellyfinSource {
     pub(crate) fn resolve_download(
         &self,
-        request: &StreamRequest,
+        track_object_id: &str,
+        quality: StreamQuality,
     ) -> SourceResult<crate::ResolvedDownload> {
-        if request.quality == StreamQuality::Original {
+        if quality == StreamQuality::Original {
             let stream = stream_descriptor(
                 &self.base_url,
                 &self.user_id,
                 &self.device_id,
                 &self.access_token,
                 self.trust_invalid_cert,
-                request,
+                track_object_id,
+                quality,
             )?;
             return Ok(crate::ResolvedDownload::new(stream, None));
         }
 
-        let StreamQuality::MaxBitrateKbps(kbps) = request.quality else {
+        let StreamQuality::MaxBitrateKbps(kbps) = quality else {
             unreachable!("original downloads return before transcoding")
         };
-        let raw_track_id = raw_item_id(&request.track_object_id);
+        let raw_track_id = raw_item_id(track_object_id);
         let bitrate = kbps
             .min(super::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)
             .saturating_mul(1_000)
@@ -510,7 +570,11 @@ impl JellyfinSource {
 }
 
 impl JellyfinSource {
-    pub(crate) async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
+    pub(crate) async fn report_playback(
+        &self,
+        track_object_id: &str,
+        report: &SourceReportFact,
+    ) -> SourceResult<()> {
         let path = match report.phase {
             SourceReportPhase::Started => "Sessions/Playing",
             SourceReportPhase::Progress => "Sessions/Playing/Progress",
@@ -518,7 +582,7 @@ impl JellyfinSource {
             SourceReportPhase::Ended => "Sessions/Playing/Stopped",
         };
         let url = endpoint(&self.base_url, path)?;
-        let body = PlaybackReportDto::from_report(report);
+        let body = PlaybackReportDto::from_report(track_object_id, report);
         self.send_unit(self.client.post(url).json(&body)).await
     }
 }
@@ -605,11 +669,11 @@ pub(super) fn stream_descriptor(
     device_id: &str,
     access_token: &str,
     trust_invalid_certificate: bool,
-    request: &StreamRequest,
+    track_object_id: &str,
+    quality: StreamQuality,
 ) -> SourceResult<ResolvedStream> {
-    let raw_track_id = raw_item_id(&request.track_object_id);
-    let max_bitrate = request
-        .quality
+    let raw_track_id = raw_item_id(track_object_id);
+    let max_bitrate = quality
         .max_bitrate_kbps()
         .map(|kbps| kbps.saturating_mul(1_000).to_string());
 
@@ -703,9 +767,6 @@ pub(super) fn raw_track_ids(track_ids: &[String]) -> Vec<String> {
         .iter()
         .map(|id| raw_item_id(id.as_str()).to_string())
         .collect()
-}
-pub(super) fn stable_source_id(input: &str) -> String {
-    format!("{:016x}", stable_hash(input))
 }
 pub(super) fn ticks_to_millis(ticks: Option<i64>) -> Option<u64> {
     ticks.map(|value| (value.max(0) / 10_000) as u64)
@@ -940,11 +1001,11 @@ pub(super) struct PlaybackReportDto {
 }
 
 impl PlaybackReportDto {
-    pub(super) fn from_report(report: &SourceReportFact) -> Self {
+    pub(super) fn from_report(track_object_id: &str, report: &SourceReportFact) -> Self {
         let position_seconds = (report.position_millis / 1_000).min(u64::from(u32::MAX)) as u32;
         Self {
             can_seek: true,
-            item_id: raw_item_id(&report.track_object_id).to_string(),
+            item_id: raw_item_id(track_object_id).to_string(),
             is_paused: report.paused,
             is_muted: report.muted,
             position_ticks: i64::from(position_seconds) * 10_000_000,
@@ -995,6 +1056,54 @@ mod tests {
         assert_eq!((entries[0].2, entries[1].2), (0, 1));
     }
 
+    #[tokio::test]
+    async fn song_only_search_keeps_album_text_and_existing_relationship() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/Items")).and(query_param("IncludeItemTypes", "Audio"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"Items":[{
+                "Id":"song","Name":"Match","Type":"Audio","Album":"Nonmatching album","AlbumId":"album","ImageTags":{"Primary":"song-cover"}
+            }],"TotalRecordCount":1}))).mount(&server).await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server".into()),
+                user_id: "user".into(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        for cached in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let database = library::Database::open(root.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let source_id = crate::SourceId::new("song-search");
+            let mut scan =
+                library::Scan::begin(&database, source_id.as_str(), "Search", "search", None)
+                    .await
+                    .unwrap();
+            if cached {
+                stage_album(&mut scan, album_from_item(serde_json::from_value(serde_json::json!({"Id":"album","Name":"Nonmatching album","Type":"MusicAlbum","ImageTags":{"Primary":"album-cover"}})).unwrap())).await.unwrap();
+            }
+            scan.finish().await.unwrap();
+            let (results, outcome) = source
+                .live_search(&source_id, &database, "Match", 10)
+                .await
+                .unwrap();
+            assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+            assert!(results.albums.is_empty());
+            assert_eq!(results.tracks.len(), 1);
+            let track = &results.tracks[0];
+            assert_eq!(track.album, "Nonmatching album");
+            assert_eq!(track.album_key.is_some(), cached);
+            assert!(track.artwork_binding.is_some());
+        }
+    }
+
     #[test]
     fn playlist_entries_reject_missing_or_empty_provider_occurrences() {
         for item in [
@@ -1018,7 +1127,8 @@ mod tests {
             "device-one",
             "secret-token",
             false,
-            &playback::StreamRequest::original("jellyfin:track:track-one"),
+            "track-one",
+            playback::StreamQuality::Original,
         )
         .expect("stream descriptor");
 

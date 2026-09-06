@@ -57,6 +57,7 @@ pub fn build(
 
     let loaded_at = std::time::Instant::now();
     let RuntimeInputs {
+        temporary_store,
         diagnostics,
         products,
         settings: settings_handle,
@@ -68,12 +69,10 @@ pub fn build(
     let settings = settings_handle.load();
     appearance.apply(&settings);
     info!(
-        first_run = configured_sources.first_run,
         elapsed_ms = loaded_at.elapsed().as_millis(),
         "loaded music source presentation"
     );
-    let first_run = configured_sources.first_run;
-    let defer_initial_route = !first_run;
+    let defer_initial_route = configured_sources.selected_source_id.is_some();
     let settings_state = SettingsState {
         current: RefCell::new(settings.clone()),
         persistence: settings_handle,
@@ -138,9 +137,9 @@ pub fn build(
     let shell_root_builder = crate::ui_resource::builder(shell_root_resource);
     crate::ui_resource::objects!(shell_root_builder, shell_root_resource, {
         root_stack: gtk::Stack,
-        login_host: gtk::Box,
         app_root_overlay: gtk::Overlay,
         app_root: gtk::Box,
+        temporary_storage_banner: adw::Banner,
         app_content_overlay: gtk::Overlay,
         app_content_stack: gtk::Stack,
         split_view: adw::OverlaySplitView,
@@ -157,6 +156,13 @@ pub fn build(
         operation_feedback_action: gtk::Button,
         startup_loading_host: gtk::Box,
     });
+    temporary_storage_banner.set_revealed(temporary_store);
+    let fresh_start_banner: adw::Banner = crate::ui_resource::object(
+        &shell_root_builder,
+        shell_root_resource,
+        "fresh_start_banner",
+    );
+    fresh_start_banner.set_revealed(products.library.fresh_start());
     root_stack.set_width_request(MIN_APP_WINDOW_WIDTH);
     root_stack.set_height_request(MIN_APP_WINDOW_HEIGHT);
     left_resize_handle.set_cursor_from_name(Some("col-resize"));
@@ -276,7 +282,6 @@ pub fn build(
         root_stack,
         app_root_overlay,
         app_content_stack,
-        login_host,
         startup_loading_host,
     };
     let navigation_view = NavigationWidgets {
@@ -349,6 +354,12 @@ pub fn build(
     });
 
     shell.connect_operation_feedback();
+    let weak = Rc::downgrade(&shell);
+    fresh_start_banner.connect_button_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            crate::preferences::backup::import_dialog(&shell);
+        }
+    });
     normal_primary_menu_button(
         &shell.navigation_view.normal_main_menu.button,
         &shell.navigation_view.normal_main_menu.popover,
@@ -377,6 +388,7 @@ pub fn build(
     connect_transient_entry_focus_dismissal(&shell);
     connect_fullscreen_player_controls(&shell);
     connect_player_controls(&shell);
+    shell.attach_selected_ui_roots();
     warm_audio_output_cache(&shell);
     shell.update_layout();
     if defer_initial_route {
@@ -386,7 +398,6 @@ pub fn build(
     }
     shell.render_queue_panel();
     shell.render_lyrics_panel();
-    shell.sync_bottom_player_favorite();
     shell.update_bottom_player();
     shell.update_right_panel_button();
     apply_sidebar_media_visibility(Rc::clone(&shell));
@@ -399,6 +410,18 @@ pub fn build(
         shell.chrome.window.connect_map(move |_| {
             if let Some(presented) = presented.borrow_mut().take() {
                 presented();
+            }
+        });
+    }
+    if shell.source.configured.borrow().sources.is_empty() {
+        let pending = Cell::new(true);
+        let weak = Rc::downgrade(&shell);
+        shell.chrome.window.connect_map(move |_| {
+            if !pending.replace(false) {
+                return;
+            }
+            if let Some(shell) = weak.upgrade() {
+                shell.present_onboarding();
             }
         });
     }

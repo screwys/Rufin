@@ -3,19 +3,17 @@ use std::path::{Path, PathBuf};
 use std::rc::Rc;
 
 use crate::runtime::source::{
-    ConfiguredSources, CredentialInput, CredentialPreset, DiscoveryStatus, EditableSource,
-    OpenSubsonicAuthentication, OpenSubsonicKind, SourceHandle, SourceOperation,
-    SourceSettingsChange, SourceSetup, SourceSummary,
+    CredentialInput, CredentialPreset, DiscoveryStatus, EditableSource, OpenSubsonicAuthentication,
+    OpenSubsonicKind, SourceHandle, SourceOperation, SourceSettingsChange, SourceSetup,
 };
 use adw::prelude::*;
 
 use super::{
     field_layout::{
-        compact_field_row_group, install_compact_field_row_responsiveness, style_compact_field_row,
+        compact_field_row_group, install_compact_field_row_responsiveness_at,
+        style_compact_field_row,
     },
-    folder_selected_text,
-    local_access::confirm_forget_source,
-    source_operation_text,
+    folder_selected_text, source_operation_text,
 };
 use crate::layout::large_popup_content_width;
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
@@ -76,23 +74,11 @@ fn source_presentations() -> &'static [&'static SourcePresentation] {
     &SOURCE_PRESENTATIONS
 }
 
-fn default_source_presentation() -> &'static SourcePresentation {
-    &JELLYFIN
-}
-
 fn source_presentation(kind: &str) -> Option<&'static SourcePresentation> {
     source_presentations()
         .iter()
         .copied()
         .find(|presentation| presentation.kind == kind)
-}
-
-fn selected_source(configured: &ConfiguredSources) -> Option<&SourceSummary> {
-    let selected = configured.selected_source_id.as_ref()?;
-    configured
-        .sources
-        .iter()
-        .find(|source| &source.id == selected)
 }
 
 pub(crate) fn source_kind_title(kind: &str) -> Option<&'static str> {
@@ -118,16 +104,16 @@ pub(crate) trait SourceSetupFlow {
 }
 
 pub(crate) struct SourceSetupViewHandle {
+    onboarding: bool,
     context: Option<SetupViewContext>,
     flow: Rc<RefCell<Rc<dyn SourceSetupFlow>>>,
-    first_run: bool,
 }
 
 impl SourceSetupViewHandle {
     fn new(context: SetupViewContext) -> Self {
         Self {
+            onboarding: context.onboarding,
             flow: Rc::clone(&context.flow),
-            first_run: context.is_first_run(),
             context: Some(context),
         }
     }
@@ -135,6 +121,7 @@ impl SourceSetupViewHandle {
 
 #[derive(Clone)]
 pub(crate) struct SetupViewContext {
+    onboarding: bool,
     content: gtk::Box,
     surface: gtk::Stack,
     form: gtk::Box,
@@ -166,16 +153,8 @@ enum SetupSurfaceState<'a> {
 }
 
 impl SetupViewContext {
-    fn is_first_run(&self) -> bool {
-        self.preferences_dialog.is_none()
-    }
-
     fn is_mounted(&self) -> bool {
-        if self.is_first_run() {
-            self.content.parent().is_some()
-        } else {
-            self.content.root().is_some()
-        }
+        self.content.root().is_some()
     }
 }
 
@@ -192,7 +171,7 @@ struct CredentialSetupFlow {
     presentation: &'static SourcePresentation,
     draft: Rc<RefCell<CredentialHostDraft>>,
     authentication: Rc<Cell<OpenSubsonicAuthentication>>,
-    offer_api_key: bool,
+    offer_authentication: bool,
     submit: Rc<dyn Fn(&SourceHandle, CredentialInput, OpenSubsonicAuthentication)>,
 }
 
@@ -201,6 +180,14 @@ struct JellyfinSetupFlow {
     draft: Rc<RefCell<CredentialHostDraft>>,
     use_instant_mix: Rc<Cell<bool>>,
     submit: Rc<dyn Fn(&SourceHandle, CredentialInput, bool)>,
+}
+
+struct SourceChoiceFlow;
+
+impl SourceSetupFlow for SourceChoiceFlow {
+    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
+        source_choice_selector(shell, context)
+    }
 }
 
 struct LocalSetupFlow {
@@ -220,7 +207,7 @@ struct CredentialHost {
     password: adw::PasswordEntryRow,
     cert_verify: adw::SwitchRow,
     authentication: Option<Rc<Cell<OpenSubsonicAuthentication>>>,
-    api_key: Option<adw::SwitchRow>,
+    authentication_toggles: Option<[adw::SwitchRow; 2]>,
 }
 
 impl CredentialHost {
@@ -240,13 +227,52 @@ impl CredentialHost {
             &self.username,
             &self.password,
             self.authentication.as_ref().is_none_or(|authentication| {
-                authentication.get() == OpenSubsonicAuthentication::Password
+                authentication.get() != OpenSubsonicAuthentication::ApiKey
             }),
         )
     }
 }
 
 impl Shell {
+    pub(crate) fn present_onboarding(self: &Rc<Self>) {
+        let context = self
+            .source
+            .add_server
+            .borrow()
+            .as_ref()
+            .and_then(|handle| handle.context.clone())
+            .filter(|context| context.onboarding);
+        if let Some(context) = context {
+            if let Some(dialog) = context.preferences_dialog {
+                dialog.present(Some(&self.chrome.window));
+                return;
+            }
+        }
+        let resource = crate::ui_resource::ONBOARDING_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            dialog: adw::Dialog, toolbar: adw::ToolbarView,
+        });
+        let flow = self
+            .source
+            .add_server
+            .borrow()
+            .as_ref()
+            .filter(|handle| handle.onboarding)
+            .map(|handle| Rc::clone(&handle.flow));
+        let context = self.setup_view_context(Some(dialog.clone()), flow, true);
+        mount_setup_flow(self, &context);
+        toolbar.set_content(Some(&context.content));
+        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle::new(context));
+        let weak = Rc::downgrade(self);
+        dialog.connect_closed(move |_| {
+            if let Some(shell) = weak.upgrade() {
+                shell.release_inactive_add_server_form();
+            }
+        });
+        dialog.present(Some(&self.chrome.window));
+    }
+
     pub(crate) fn add_server_navigation_page(
         self: &Rc<Self>,
         preferences_dialog: &adw::Dialog,
@@ -258,49 +284,12 @@ impl Shell {
             .add_server
             .borrow()
             .as_ref()
-            .filter(|handle| !handle.first_run)
+            .filter(|handle| !handle.onboarding)
             .map(|handle| Rc::clone(&handle.flow));
-        let context = self.setup_view_context(Some(preferences_dialog.clone()), flow);
+        let context = self.setup_view_context(Some(preferences_dialog.clone()), flow, false);
         mount_setup_flow(self, &context);
         *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle::new(context.clone()));
-        adw::NavigationPage::new(&context.content, &tr("Add server"))
-    }
-
-    pub(crate) fn add_server_view(self: &Rc<Self>) -> gtk::Widget {
-        let retained = self
-            .source
-            .add_server
-            .borrow()
-            .as_ref()
-            .filter(|handle| handle.first_run)
-            .and_then(|handle| handle.context.clone());
-        if let Some(context) = retained {
-            update_setup_surface(self, &context);
-            return context.content.upcast();
-        }
-        let context = self.setup_view_context(None, None);
-        mount_setup_flow(self, &context);
-        *self.source.add_server.borrow_mut() = Some(SourceSetupViewHandle::new(context.clone()));
-        context.content.upcast()
-    }
-
-    pub(crate) fn first_run_setup_mounted(&self) -> bool {
-        self.mounted_add_server_context()
-            .is_some_and(|context| context.is_first_run())
-    }
-
-    pub(crate) fn take_first_run_setup_view(&self) -> Option<gtk::Widget> {
-        let context = {
-            let mut handle = self.source.add_server.borrow_mut();
-            if !handle.as_ref().is_some_and(|handle| handle.first_run) {
-                return None;
-            }
-            let Some(handle) = handle.take() else {
-                return None;
-            };
-            handle.context?
-        };
-        Some(context.content.upcast())
+        adw::NavigationPage::new(&context.content, &tr("Add Source"))
     }
 
     pub(crate) fn update_add_server_dialog(self: &Rc<Self>) {
@@ -322,9 +311,6 @@ impl Shell {
     pub(crate) fn complete_add_server_dialog(&self) {
         let preferences_dialog = {
             let mut handle = self.source.add_server.borrow_mut();
-            if !handle.as_ref().is_some_and(|handle| !handle.first_run) {
-                return;
-            }
             handle
                 .take()
                 .and_then(|handle| handle.context)
@@ -346,29 +332,36 @@ impl Shell {
 
     pub(crate) fn release_inactive_add_server_form(&self) {
         let mut handle = self.source.add_server.borrow_mut();
-        let Some(handle) = handle.as_mut().filter(|handle| !handle.first_run) else {
+        let Some(handle) = handle.as_mut() else {
             return;
         };
         handle.context.take();
     }
 
     pub(crate) fn has_retained_add_server_form(&self) -> bool {
-        self.source
-            .add_server
-            .borrow()
-            .as_ref()
-            .is_some_and(|handle| !handle.first_run)
+        self.source.add_server.borrow().is_some()
     }
 
     pub(crate) fn restore_add_server_dialog_after_failure(self: &Rc<Self>) -> bool {
-        let context = self.source.add_server.borrow().as_ref().and_then(|handle| {
-            (!handle.first_run)
-                .then(|| handle.context.clone())
-                .flatten()
-        });
+        let context = self
+            .source
+            .add_server
+            .borrow()
+            .as_ref()
+            .and_then(|handle| handle.context.clone());
         let Some(context) = context else {
             if self.has_retained_add_server_form() {
-                crate::preferences::present_add_server_preferences_dialog(self);
+                if self
+                    .source
+                    .add_server
+                    .borrow()
+                    .as_ref()
+                    .is_some_and(|handle| handle.onboarding)
+                {
+                    self.present_onboarding();
+                } else {
+                    crate::preferences::present_add_server_preferences_dialog(self);
+                }
                 return true;
             }
             return false;
@@ -376,8 +369,12 @@ impl Shell {
         let Some(dialog) = context.preferences_dialog.clone() else {
             return false;
         };
-        self.preferences.set_active_dialog(&dialog);
-        present_light_dismiss_dialog(&dialog, &self.chrome.window);
+        if context.onboarding {
+            dialog.present(Some(&self.chrome.window));
+        } else {
+            self.preferences.set_active_dialog(&dialog);
+            present_light_dismiss_dialog(&dialog, &self.chrome.window);
+        }
         update_setup_surface(self, &context);
         true
     }
@@ -386,6 +383,7 @@ impl Shell {
         self: &Rc<Self>,
         preferences_dialog: Option<adw::Dialog>,
         flow: Option<Rc<RefCell<Rc<dyn SourceSetupFlow>>>>,
+        onboarding: bool,
     ) -> SetupViewContext {
         let resource = crate::ui_resource::CONNECTION_PROGRESS_RESOURCE;
         let builder = crate::ui_resource::builder(resource);
@@ -398,6 +396,7 @@ impl Shell {
         status.set_label(&self.source_connection_progress_text());
         let flow = flow.unwrap_or_else(|| Rc::new(RefCell::new(self.default_source_setup_flow())));
         SetupViewContext {
+            onboarding,
             content,
             surface,
             form,
@@ -411,41 +410,7 @@ impl Shell {
     }
 
     fn default_source_setup_flow(self: &Rc<Self>) -> Rc<dyn SourceSetupFlow> {
-        let source_setup_active = self.source.operation.borrow().add_form_active();
-        let registration = {
-            let configured = self.source.configured.borrow();
-            (configured.first_run || source_setup_active)
-                .then(|| selected_source(&configured))
-                .flatten()
-                .and_then(|source| source_presentation(&source.kind))
-                .unwrap_or_else(default_source_presentation)
-        };
-        (registration.setup_flow)(self, registration)
-    }
-
-    fn reconnect_saved_source(
-        &self,
-        registration: &'static SourcePresentation,
-    ) -> Option<EditableSource> {
-        let configured = self.source.configured.borrow();
-        if !configured.first_run && !self.source.operation.borrow().add_form_active() {
-            return None;
-        }
-        let source = selected_source(&configured)?;
-        let resolved = source_presentation(&source.kind)?;
-        same_registration(resolved, registration)
-            .then(|| self.products.source.configured_source(&source.id).ok())
-            .flatten()
-            .flatten()
-    }
-
-    fn begin_source_add_loading(self: &Rc<Self>) {
-        let first_run = self.source.configured.borrow().first_run;
-        self.cancel_startup_route_reveal();
-        if !first_run {
-            self.close_preferences_dialog();
-            self.enter_startup_loading();
-        }
+        Rc::new(SourceChoiceFlow)
     }
 
     fn source_connection_progress_text(&self) -> String {
@@ -488,21 +453,13 @@ fn local_setup_flow(
 }
 
 fn jellyfin_setup_flow(
-    shell: &Rc<Shell>,
+    _shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
-    let saved = shell.reconnect_saved_source(presentation);
     Rc::new(JellyfinSetupFlow {
         presentation,
-        draft: Rc::new(RefCell::new(credential_draft(
-            saved.as_ref().map(|saved| saved.credentials.clone()),
-        ))),
-        use_instant_mix: Rc::new(Cell::new(
-            saved
-                .as_ref()
-                .and_then(|saved| saved.jellyfin_use_instant_mix)
-                .unwrap_or(false),
-        )),
+        draft: Rc::new(RefCell::new(credential_draft(None))),
+        use_instant_mix: Rc::new(Cell::new(false)),
         submit: Rc::new(move |source, credentials, use_instant_mix| {
             source.configure_source(SourceSetup::Jellyfin {
                 credentials,
@@ -513,24 +470,18 @@ fn jellyfin_setup_flow(
 }
 
 fn subsonic_setup_flow_for(
-    shell: &Rc<Shell>,
+    _shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
     kind: OpenSubsonicKind,
 ) -> Rc<dyn SourceSetupFlow> {
-    let preset = shell
-        .reconnect_saved_source(presentation)
-        .as_ref()
-        .map(|saved| saved.credentials.clone());
-    let authentication = preset
-        .as_ref()
-        .and_then(|preset| preset.open_subsonic_authentication)
-        .unwrap_or(OpenSubsonicAuthentication::Password);
-    let offer_api_key = kind == OpenSubsonicKind::OpenSubsonic;
+    let preset = None;
+    let authentication = OpenSubsonicAuthentication::Password;
+    let offer_authentication = kind == OpenSubsonicKind::OpenSubsonic;
     Rc::new(CredentialSetupFlow {
         presentation,
         draft: Rc::new(RefCell::new(credential_draft(preset))),
         authentication: Rc::new(Cell::new(authentication)),
-        offer_api_key,
+        offer_authentication,
         submit: Rc::new(move |source, input, authentication| {
             source.configure_source(SourceSetup::OpenSubsonic {
                 kind,
@@ -690,8 +641,9 @@ impl SourceSetupFlow for CredentialSetupFlow {
             setup_scaffold(shell, context, self.presentation);
         let host = credential_host(
             &self.draft,
-            !context.is_first_run(),
-            self.offer_api_key.then(|| Rc::clone(&self.authentication)),
+            true,
+            self.offer_authentication
+                .then(|| Rc::clone(&self.authentication)),
         );
         content.append(&host.widget);
         let submit = Rc::clone(&self.submit);
@@ -707,7 +659,7 @@ impl SourceSetupFlow for CredentialSetupFlow {
                 submit(source, input, authentication.get());
             },
         );
-        finish_setup_scaffold(shell, scroller, content, context.is_first_run())
+        scroller.upcast()
     }
 }
 
@@ -716,7 +668,7 @@ impl SourceSetupFlow for JellyfinSetupFlow {
         shell.start_server_discovery_once();
         let (scroller, content, actions, status) =
             setup_scaffold(shell, context, self.presentation);
-        let host = credential_host(&self.draft, !context.is_first_run(), None);
+        let host = credential_host(&self.draft, true, None);
         content.append(&host.widget);
 
         let instant_mix = adw::SwitchRow::builder()
@@ -746,12 +698,24 @@ impl SourceSetupFlow for JellyfinSetupFlow {
                 submit(source, credentials, use_instant_mix.get());
             },
         );
-        finish_setup_scaffold(shell, scroller, content, context.is_first_run())
+        scroller.upcast()
     }
 }
 
 impl SourceSetupFlow for LocalSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
+        if shell
+            .source
+            .configured
+            .borrow()
+            .sources
+            .iter()
+            .any(|source| source.kind == LOCAL_SOURCE_KIND)
+        {
+            if let Some(dialog) = &context.preferences_dialog {
+                return crate::preferences::library::local_sources_page(shell, dialog).upcast();
+            }
+        }
         let (scroller, content, actions, status) =
             setup_scaffold(shell, context, self.presentation);
         let resource = crate::ui_resource::LOCAL_SETUP_RESOURCE;
@@ -810,7 +774,6 @@ impl SourceSetupFlow for LocalSetupFlow {
 
         let source = shell.products.source.clone();
         let folders = Rc::clone(&self.folders);
-        let shell_for_login = Rc::downgrade(shell);
         let status_for_login = status.clone();
         let submit = Rc::clone(&self.submit);
         login.connect_clicked(move |login| {
@@ -820,26 +783,22 @@ impl SourceSetupFlow for LocalSetupFlow {
                 status_for_login.set_visible(true);
                 return;
             }
-            let Some(shell) = shell_for_login.upgrade() else {
-                return;
-            };
             let message = tr("Caching local library...");
             begin_connect_attempt(&status_for_login, login, &message);
-            shell.begin_source_add_loading();
             submit(&source, roots);
         });
         source_enter_controller(&login);
 
-        finish_setup_scaffold(shell, scroller, content, context.is_first_run())
+        scroller.upcast()
     }
 }
 
 fn setup_scaffold(
     shell: &Rc<Shell>,
-    context: &SetupViewContext,
+    _context: &SetupViewContext,
     registration: &'static SourcePresentation,
 ) -> (gtk::ScrolledWindow, gtk::Box, gtk::Box, gtk::Label) {
-    let compact = !context.is_first_run();
+    let compact = true;
     let resource = crate::ui_resource::SETUP_SCAFFOLD_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     crate::ui_resource::objects!(builder, resource, {
@@ -848,6 +807,7 @@ fn setup_scaffold(
         content: gtk::Box,
         actions: gtk::Box,
         status: gtk::Label,
+        source_summary: gtk::Box, source_icon: gtk::Image, source_title: gtk::Label, change_source: gtk::Button,
     });
     clamp.set_maximum_size(large_popup_content_width(ADD_SERVER_CLAMP_WIDTH));
     clamp.set_margin_top(if compact { 8 } else { 36 });
@@ -856,10 +816,18 @@ fn setup_scaffold(
     if compact {
         content.add_css_class("add-server-compact-content");
     }
-    if let Some(saved_sources) = saved_source_recovery_group(shell, compact) {
-        content.append(&saved_sources);
-    }
-    content.append(&source_choice_selector(shell, registration, compact));
+    source_icon.set_icon_name(Some(registration.icon_name));
+    source_title.set_label(&tr(registration.title));
+    let weak = Rc::downgrade(shell);
+    change_source.connect_clicked(move |_| {
+        let Some(shell) = weak.upgrade() else { return };
+        let Some(context) = shell.mounted_add_server_context() else {
+            return;
+        };
+        *context.flow.borrow_mut() = Rc::new(SourceChoiceFlow);
+        mount_setup_flow(&shell, &context);
+    });
+    content.append(&source_summary);
     if let SourceOperation::Failed {
         message,
         add_form: true,
@@ -873,182 +841,76 @@ fn setup_scaffold(
     (scroller, content, actions, status)
 }
 
-fn saved_source_recovery_group(shell: &Rc<Shell>, compact: bool) -> Option<adw::PreferencesGroup> {
-    if compact {
-        return None;
-    }
-    let sources = {
-        let configured = shell.source.configured.borrow();
-        let selected_registration =
-            selected_source(&configured).and_then(|source| source_presentation(&source.kind));
-        if configured.first_run && selected_registration.is_none() {
-            configured.sources.to_vec()
-        } else {
-            Vec::new()
-        }
-    };
-    if sources.is_empty() {
-        return None;
-    }
-    let group = adw::PreferencesGroup::builder()
-        .title(tr("Saved Sources"))
-        .build();
-    for source in sources {
-        let registration = source_presentation(&source.kind);
-        let fallback_title = registration
-            .map(|registration| tr(registration.title))
-            .unwrap_or_else(|| source.kind.clone());
-        let title = source.name.trim();
-        let row = adw::ActionRow::builder()
-            .title(if title.is_empty() {
-                fallback_title.as_str()
-            } else {
-                title
-            })
-            .subtitle(fallback_title.as_str())
-            .activatable(registration.is_some())
-            .build();
-        let icon = gtk::Image::from_icon_name(
-            registration.map_or("rufin-network-server-symbolic", |registration| {
-                registration.icon_name
-            }),
-        );
-        row.add_prefix(&icon);
-        let forget = gtk::Button::from_icon_name("rufin-window-close-symbolic");
-        forget.set_tooltip_text(Some(&tr("Forget Server")));
-        forget.set_valign(gtk::Align::Center);
-        forget.add_css_class("flat");
-        forget.add_css_class("destructive-action");
-        let forget_shell = Rc::downgrade(shell);
-        let forgotten_source_id = source.id.clone();
-        let forgotten_source_name = if title.is_empty() {
-            fallback_title.clone()
-        } else {
-            title.to_string()
-        };
-        forget.connect_clicked(move |_| {
-            let Some(shell) = forget_shell.upgrade() else {
-                return;
-            };
-            confirm_forget_source(
-                &shell,
-                forgotten_source_id.clone(),
-                &forgotten_source_name,
-                Rc::new(|| {}),
-            );
-        });
-        row.add_suffix(&forget);
-        if registration.is_some() {
-            let source_id = source.id;
-            let source = shell.products.source.clone();
-            row.connect_activated(move |_| {
-                source.select_source(source_id.clone());
-            });
-        }
-        group.add(&row);
-    }
-    Some(group)
-}
-
-fn finish_setup_scaffold(
-    shell: &Rc<Shell>,
-    scroller: gtk::ScrolledWindow,
-    content: gtk::Box,
-    embedded: bool,
-) -> gtk::Widget {
-    if embedded {
-        let privacy_group = adw::PreferencesGroup::builder()
-            .title(tr("Privacy and Security"))
-            .build();
-        let private_mode = adw::SwitchRow::builder()
-            .title(tr("Private mode"))
-            .active(shell.settings.current.borrow().private_mode)
-            .build();
-        let private_shell = Rc::downgrade(shell);
-        private_mode.connect_active_notify(move |row| {
-            if let Some(shell) = private_shell.upgrade() {
-                shell.set_private_mode(row.is_active());
-            }
-        });
-        privacy_group.add(&private_mode);
-        content.append(&privacy_group);
-    }
-    let view = scroller.upcast::<gtk::Widget>();
-    view
-}
-
-fn source_choice_selector(
-    shell: &Rc<Shell>,
-    selected: &'static SourcePresentation,
-    compact: bool,
-) -> gtk::Box {
+fn source_choice_selector(shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
     let resource = crate::ui_resource::SOURCE_CHOICE_SELECTOR_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
-    let wrapper: gtk::Box = crate::ui_resource::object(&builder, resource, "wrapper");
-    wrapper.set_spacing(if compact { 4 } else { 8 });
-    if compact {
-        wrapper.add_css_class("compact-source-choice-list");
-    }
-    for (presentation, id) in
-        source_presentations()
-            .iter()
-            .zip(["jellyfin", "navidrome", "subsonic", "local"])
-    {
-        let button: gtk::Button =
-            crate::ui_resource::object(&builder, resource, &format!("{id}_button"));
-        let content: gtk::Box =
-            crate::ui_resource::object(&builder, resource, &format!("{id}_content"));
-        let icon: gtk::Image =
-            crate::ui_resource::object(&builder, resource, &format!("{id}_icon"));
-        let label: gtk::Label =
-            crate::ui_resource::object(&builder, resource, &format!("{id}_label"));
-        if compact {
-            button.add_css_class("compact-source-choice-button");
-        }
-        set_source_choice_active(&button, same_registration(presentation, selected));
-        button.update_property(&[gtk::accessible::Property::Label(&tr(presentation.title))]);
-        content.set_spacing(if compact { 2 } else { 4 });
+    crate::ui_resource::objects!(builder, resource, {
+        wrapper: gtk::ScrolledWindow, device_sources: adw::PreferencesGroup,
+        server_sources: adw::PreferencesGroup, import_backup: gtk::Button,
+        privacy: adw::PreferencesGroup, external_metadata: adw::SwitchRow,
+        external_lyrics: adw::SwitchRow, discord_presence: adw::SwitchRow,
+    });
+    for &presentation in source_presentations() {
+        let resource = crate::ui_resource::SOURCE_CHOICE_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        crate::ui_resource::objects!(builder, resource, {
+            row: adw::ActionRow, icon: gtk::Image,
+        });
+        row.set_title(&tr(presentation.title));
         icon.set_icon_name(Some(presentation.icon_name));
-        let icon_size = if compact { 24 } else { 34 };
-        icon.set_pixel_size(icon_size);
-        label.set_label(&tr(presentation.title));
-        if !same_registration(presentation, selected) {
-            let shell = Rc::downgrade(shell);
-            let presentation = *presentation;
-            button.connect_clicked(move |_| {
-                let Some(shell) = shell.upgrade() else {
-                    return;
-                };
-                let Some(context) = shell
-                    .source
-                    .add_server
-                    .borrow()
-                    .as_ref()
-                    .and_then(|handle| handle.context.clone())
-                else {
-                    return;
-                };
-                *context.flow.borrow_mut() = (presentation.setup_flow)(&shell, presentation);
-                mount_setup_flow(&shell, &context);
+        row.update_property(&[gtk::accessible::Property::Label(&tr(presentation.title))]);
+        let weak = Rc::downgrade(shell);
+        row.connect_activated(move |_| {
+            let Some(shell) = weak.upgrade() else { return };
+            let Some(context) = shell.mounted_add_server_context() else {
+                return;
+            };
+            *context.flow.borrow_mut() = (presentation.setup_flow)(&shell, presentation);
+            mount_setup_flow(&shell, &context);
+        });
+        if presentation.kind == LOCAL_SOURCE_KIND {
+            device_sources.add(&row);
+        } else {
+            server_sources.add(&row);
+        }
+    }
+    privacy.set_visible(context.onboarding);
+    {
+        let settings = shell.settings.current.borrow();
+        external_metadata.set_active(settings.external_metadata_enabled);
+        external_lyrics.set_active(settings.lyrics.external_lyrics_enabled);
+        discord_presence.set_active(settings.rich_presence.enabled);
+    }
+    let weak = Rc::downgrade(shell);
+    external_metadata.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.set_external_metadata_enabled(row.is_active());
+        }
+    });
+    let weak = Rc::downgrade(shell);
+    external_lyrics.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.set_external_lyrics_enabled(row.is_active());
+        }
+    });
+    let weak = Rc::downgrade(shell);
+    discord_presence.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.set_app_setting("Discord presence setting", row.is_active(), |settings| {
+                &mut settings.rich_presence.enabled
             });
         }
-    }
-    wrapper
-}
+    });
 
-fn set_source_choice_active(button: &gtk::Button, active: bool) {
-    if active {
-        button.add_css_class("active");
-    } else {
-        button.remove_css_class("active");
-    }
-}
+    import_backup.set_visible(context.onboarding);
 
-fn same_registration(
-    left: &'static SourcePresentation,
-    right: &'static SourcePresentation,
-) -> bool {
-    std::ptr::eq(left, right)
+    let weak = Rc::downgrade(shell);
+    import_backup.connect_clicked(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            crate::preferences::backup::import_dialog(&shell);
+        }
+    });
+    wrapper.upcast()
 }
 
 fn mount_setup_flow(shell: &Rc<Shell>, context: &SetupViewContext) {
@@ -1188,6 +1050,7 @@ fn credential_host_view(
         username: adw::EntryRow,
         password: adw::PasswordEntryRow,
         cert_verify: adw::SwitchRow,
+        api_key: adw::SwitchRow, legacy_password: adw::SwitchRow,
     });
     name.set_text(&snapshot.name);
     style_compact_field_row(&name);
@@ -1198,7 +1061,7 @@ fn credential_host_view(
     fields.set_hexpand(true);
     fields.append(&compact_field_row_group(&name));
     fields.append(&compact_field_row_group(&url));
-    let fields = install_compact_field_row_responsiveness(&fields);
+    let fields = install_compact_field_row_responsiveness_at(&fields, 440);
     if !compact {
         fields_group.set_title(&tr("Server"));
     }
@@ -1209,14 +1072,20 @@ fn credential_host_view(
     password.set_text(&snapshot.password);
     style_compact_field_row(&password);
     cert_verify.set_active(snapshot.cert_verify);
-    let api_key = authentication.as_ref().map(|authentication| {
-        open_subsonic_authentication_switch(Rc::clone(authentication), &username, &password)
-    });
-    if let Some(api_key) = api_key.as_ref() {
-        rows.add(api_key);
-    }
     rows.add(&username);
     rows.add(&password);
+    let authentication_toggles = authentication.as_ref().map(|authentication| {
+        bind_open_subsonic_authentication(
+            &api_key,
+            &legacy_password,
+            Rc::clone(authentication),
+            &username,
+            &password,
+        );
+        rows.add(&api_key);
+        rows.add(&legacy_password);
+        [api_key, legacy_password]
+    });
     rows.add(&cert_verify);
 
     CredentialHost {
@@ -1229,7 +1098,7 @@ fn credential_host_view(
         password,
         cert_verify,
         authentication,
-        api_key,
+        authentication_toggles,
     }
 }
 
@@ -1247,31 +1116,51 @@ pub(super) fn update_open_subsonic_authentication_fields(
     });
 }
 
-pub(super) fn open_subsonic_authentication_switch(
+fn bind_open_subsonic_authentication(
+    api_key: &adw::SwitchRow,
+    legacy_password: &adw::SwitchRow,
     authentication: Rc<Cell<OpenSubsonicAuthentication>>,
     username: &adw::EntryRow,
     secret: &adw::PasswordEntryRow,
-) -> adw::SwitchRow {
+) {
     update_open_subsonic_authentication_fields(authentication.get(), username, secret);
-    let api_key = adw::SwitchRow::builder()
-        .title(tr("Use API key"))
-        .subtitle(tr("Recommended when your server provides one"))
-        .active(authentication.get() == OpenSubsonicAuthentication::ApiKey)
-        .build();
-    let username = username.downgrade();
-    let secret = secret.downgrade();
-    api_key.connect_active_notify(move |row| {
-        let next = if row.is_active() {
-            OpenSubsonicAuthentication::ApiKey
-        } else {
-            OpenSubsonicAuthentication::Password
-        };
-        authentication.set(next);
-        if let (Some(username), Some(secret)) = (username.upgrade(), secret.upgrade()) {
-            update_open_subsonic_authentication_fields(next, &username, &secret);
-        }
-    });
-    api_key
+    api_key.set_active(authentication.get() == OpenSubsonicAuthentication::ApiKey);
+    legacy_password.set_active(authentication.get() == OpenSubsonicAuthentication::LegacyPassword);
+    legacy_password.set_visible(!api_key.is_active());
+    for (row, other, mode) in [
+        (api_key, legacy_password, OpenSubsonicAuthentication::ApiKey),
+        (
+            legacy_password,
+            api_key,
+            OpenSubsonicAuthentication::LegacyPassword,
+        ),
+    ] {
+        let other = other.downgrade();
+        let authentication = Rc::clone(&authentication);
+        let username = username.downgrade();
+        let secret = secret.downgrade();
+        row.connect_active_notify(move |row| {
+            if mode == OpenSubsonicAuthentication::ApiKey {
+                if let Some(legacy) = other.upgrade() {
+                    legacy.set_visible(!row.is_active());
+                }
+            }
+            let next = if row.is_active() {
+                if let Some(other) = other.upgrade() {
+                    other.set_active(false);
+                }
+                mode
+            } else if other.upgrade().is_some_and(|other| other.is_active()) {
+                return;
+            } else {
+                OpenSubsonicAuthentication::Password
+            };
+            authentication.set(next);
+            if let (Some(username), Some(secret)) = (username.upgrade(), secret.upgrade()) {
+                update_open_subsonic_authentication_fields(next, &username, &secret);
+            }
+        });
+    }
 }
 
 fn bind_credential_draft(
@@ -1326,7 +1215,7 @@ fn append_credential_connect(
                 &username,
                 &password,
                 authentication.as_ref().is_none_or(|authentication| {
-                    authentication.get() == OpenSubsonicAuthentication::Password
+                    authentication.get() != OpenSubsonicAuthentication::ApiKey
                 }),
             )
         })
@@ -1352,8 +1241,11 @@ fn append_credential_connect(
         let update_ready = Rc::clone(&update_ready);
         host.password.connect_text_notify(move |_| update_ready());
     }
-    if let Some(api_key) = host.api_key.as_ref() {
-        api_key.connect_active_notify(move |_| update_ready());
+    if let Some(toggles) = host.authentication_toggles.as_ref() {
+        for toggle in toggles {
+            let update_ready = Rc::clone(&update_ready);
+            toggle.connect_active_notify(move |_| update_ready());
+        }
     }
     *context.actions.borrow_mut() = Some(SetupActions {
         status: status.clone(),
@@ -1362,7 +1254,6 @@ fn append_credential_connect(
     });
 
     let source = shell.products.source.clone();
-    let shell_for_login = Rc::downgrade(shell);
     let status_for_login = status.clone();
     let host_for_click = host.clone();
     login.connect_clicked(move |login| {
@@ -1381,12 +1272,8 @@ fn append_credential_connect(
             status_for_login.set_visible(true);
             return;
         }
-        let Some(shell) = shell_for_login.upgrade() else {
-            return;
-        };
         let message = tr("Connecting to music server...");
         begin_connect_attempt(&status_for_login, login, &message);
-        shell.begin_source_add_loading();
         submit(&source, host_for_click.input());
     });
     actions.append(&login);

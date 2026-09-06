@@ -374,9 +374,7 @@ impl ArtworkKey {
         if link_type == LinkType::None {
             return None;
         }
-        let track = &view.transport.current.as_ref()?.track;
-        let musicbrainz_album_id = track.musicbrainz_album_id.clone();
-        let musicbrainz_release_group_id = track.musicbrainz_release_group_id.clone();
+        let track = &view.transport.current.as_ref()?;
         let lastfm_api_key = if matches!(link_type, LinkType::LastFm | LinkType::MusicBrainzLastFm)
         {
             lastfm_api_key
@@ -396,8 +394,8 @@ impl ArtworkKey {
             album: metadata_lookup::AlbumCover::new(
                 album_artist,
                 &track.album,
-                musicbrainz_release_group_id.as_deref(),
-                musicbrainz_album_id.as_deref(),
+                track.musicbrainz_release_group_id.as_deref(),
+                track.musicbrainz_album_id.as_deref(),
             )?,
             policy: metadata_lookup::AlbumCoverPolicy::new(lastfm_api_key, allow_musicbrainz),
         })
@@ -431,10 +429,9 @@ fn unix_now_millis() -> u64 {
 pub(crate) mod tests {
     use std::sync::Arc;
 
-    use library::SourceKey;
     use playback::{
-        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackMedia, PlaybackView,
-        Provenance, QueueSummaryView, RepeatMode, RunId, SourceSessionEpoch, TransportStatus,
+        ControlsView, CurrentMedia, CurrentMediaId, OccurrenceId, PlaybackView, Provenance,
+        QueueItem, QueueOccurrence, QueueSummaryView, RepeatMode, RunId, TransportStatus,
         TransportView,
     };
 
@@ -445,48 +442,42 @@ pub(crate) mod tests {
         position_millis: u64,
     ) -> PlaybackView {
         let occurrence = OccurrenceId::new(format!("presence:{run}"));
-        let source = SourceKey::from_raw(1);
         let current = Arc::new(CurrentMedia {
             id: CurrentMediaId {
-                source_key: source,
-                source_session_epoch: SourceSessionEpoch::new(1),
                 run: Some(RunId::new(run)),
                 occurrence: occurrence.clone(),
             },
-            track: PlaybackMedia {
-                source_id: "source".to_string(),
-                track_key: Some(library::TrackKey::from_raw(1)),
-                track_object_id: "track".to_string(),
-                title: "Track".to_string(),
-                artist: "Artist".to_string(),
-                album: album.to_string(),
-                album_display_artist: Some("Album Artist".to_string()),
-                album_key: None,
-                primary_artist_key: None,
-                media_uri: None,
-                artwork_binding: None,
-                duration_millis: 42_500,
-                disc_number: Some(1),
-                track_number: Some(1),
-                year: Some(2026),
-                release_date: None,
-                favorite: Some(false),
-                rating: None,
-                is_downloaded: false,
-                source_format: None,
-                musicbrainz_recording_id: Some("recording-id".to_string()),
-                musicbrainz_release_track_id: Some("track-id".to_string()),
-                musicbrainz_album_id: None,
-                musicbrainz_release_group_id: None,
-                primary_artist_musicbrainz_id: Some("artist-id".to_string()),
-                cue_path: None,
-                cue_start_millis: None,
-                cue_end_millis: None,
-                artist_links: Vec::new(),
-            },
-            provenance: Provenance::Manual,
+            occurrence: Arc::new(QueueOccurrence {
+                occurrence: occurrence.clone(),
+                item: QueueItem {
+                    media_uri: library::source_entity_uri(
+                        &library::SourceId::new("source"),
+                        "track",
+                        "track",
+                    ),
+                    title: "Track".to_string(),
+                    artist: "Artist".to_string(),
+                    album: album.to_string(),
+                    album_display_artist: Some("Album Artist".to_string()),
+                    artwork_binding: None,
+                    duration_millis: 42_500,
+                    disc_number: Some(1),
+                    track_number: Some(1),
+                    year: Some(2026),
+                    release_date: None,
+                    source_format: None,
+                    musicbrainz_recording_id: Some("recording-id".to_string()),
+                    musicbrainz_release_track_id: Some("track-id".to_string()),
+                    musicbrainz_album_id: Some("album-id".to_string()),
+                    musicbrainz_release_group_id: Some("release-group-id".to_string()),
+                    primary_artist_musicbrainz_id: Some("artist-id".to_string()),
+                },
+                canonical_position: 0,
+                provenance: Provenance::Manual,
+            }),
         });
         PlaybackView {
+            prepared_queue: None,
             queue: QueueSummaryView {
                 revision: run,
                 total: 1,
@@ -496,7 +487,6 @@ pub(crate) mod tests {
                 next_occurrence: None,
             },
             transport: TransportView {
-                source_id: source,
                 current: Some(current),
                 state,
                 desired_playing: matches!(

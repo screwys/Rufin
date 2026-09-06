@@ -1,34 +1,41 @@
 //! Decodes one already-selected opaque Library artwork binding.
 
-use std::sync::Arc;
-
-use sources::{ExternalAlbumImageRef, LocalImageRef, NativeImageRef};
+use sources::{ExternalAlbumImageRef, LocalImageRef, NativeArtworkBinding};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum Candidate {
-    Native(NativeImageRef),
+    Native(NativeArtworkBinding),
     Local(LocalImageRef),
     Album(metadata_lookup::AlbumCover),
 }
 
 impl Candidate {
     pub(crate) fn stable_identity(&self) -> String {
-        match self {
+        let mut identity = match self {
             Self::Native(image) => format!(
-                "native\0{}\0{}",
-                image.item_id,
-                image.tag.as_deref().unwrap_or_default()
+                "native\0{}\0{}\0{}",
+                image.source_id,
+                image.image.item_id,
+                image.image.tag.as_deref().unwrap_or_default()
             ),
-            Self::Local(LocalImageRef::File { path, revision }) => {
+            Self::Local(LocalImageRef::File { path, revision, .. }) => {
                 format!("local-file\0{path}\0{revision}")
             }
             Self::Local(LocalImageRef::Embedded {
                 path,
                 picture_index,
                 revision,
+                ..
             }) => format!("local-embedded\0{path}\0{picture_index}\0{revision}"),
             Self::Album(album) => album.stable_identity(),
+        };
+        if let Self::Local(binding) = self
+            && binding.source_id().as_str() != sources::LOCAL_LIBRARY_SOURCE_ID
+        {
+            identity.push('\0');
+            identity.push_str(binding.source_id().as_str());
         }
+        identity
     }
 
     pub(crate) const fn is_external(&self) -> bool {
@@ -38,13 +45,13 @@ impl Candidate {
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ArtworkBinding {
-    candidates: Arc<[Candidate]>,
-    stable_identity: Arc<str>,
+    candidate: Option<Candidate>,
+    stable_identity: String,
 }
 
 impl ArtworkBinding {
     pub fn opaque(binding: &[u8]) -> Self {
-        let candidate = serde_json::from_slice::<NativeImageRef>(binding)
+        let candidate = serde_json::from_slice::<NativeArtworkBinding>(binding)
             .ok()
             .map(Candidate::Native)
             .or_else(|| {
@@ -62,13 +69,12 @@ impl ArtworkBinding {
                 )
                 .map(Candidate::Album)
             });
-        let stable_identity: Arc<str> = candidate
+        let stable_identity = candidate
             .as_ref()
             .map(Candidate::stable_identity)
-            .unwrap_or_default()
-            .into();
+            .unwrap_or_default();
         Self {
-            candidates: candidate.into_iter().collect(),
+            candidate,
             stable_identity,
         }
     }
@@ -77,12 +83,12 @@ impl ArtworkBinding {
         Self::default()
     }
 
-    pub(crate) fn candidates(&self) -> &[Candidate] {
-        &self.candidates
+    pub(crate) fn candidate(&self) -> Option<&Candidate> {
+        self.candidate.as_ref()
     }
 
     pub(crate) fn has_external(&self) -> bool {
-        self.candidates.iter().any(Candidate::is_external)
+        self.candidate.as_ref().is_some_and(Candidate::is_external)
     }
 
     pub fn stable_identity(&self) -> &str {
@@ -96,10 +102,38 @@ mod tests {
 
     #[test]
     fn opaque_binding_decodes_exactly_one_selected_source_request() {
-        let encoded = serde_json::to_vec(&NativeImageRef::new("album", Some("tag".to_string())))
-            .expect("encode binding");
+        let encoded = sources::native_artwork_binding(
+            "source",
+            &sources::NativeImageRef::new("album", Some("tag".to_string())),
+        )
+        .expect("encode binding");
         let binding = ArtworkBinding::opaque(&encoded);
-        assert_eq!(binding.candidates().len(), 1);
+        assert!(binding.candidate().is_some());
         assert!(binding.stable_identity().contains("album"));
+    }
+
+    #[test]
+    fn released_local_bindings_keep_their_cache_identity() {
+        for (encoded, identity) in [
+            (
+                br#"{"File":{"path":"/music/cover.jpg","revision":"one"}}"#.as_slice(),
+                "local-file\0/music/cover.jpg\0one",
+            ),
+            (
+                br#"{"Embedded":{"path":"/music/track.flac","picture_index":2,"revision":"two"}}"#
+                    .as_slice(),
+                "local-embedded\0/music/track.flac\x002\0two",
+            ),
+        ] {
+            let binding = ArtworkBinding::opaque(encoded);
+            assert_eq!(binding.stable_identity(), identity);
+            let Some(Candidate::Local(reference)) = binding.candidate() else {
+                panic!("released Local binding");
+            };
+            assert_eq!(
+                reference.source_id().as_str(),
+                sources::LOCAL_LIBRARY_SOURCE_ID
+            );
+        }
     }
 }

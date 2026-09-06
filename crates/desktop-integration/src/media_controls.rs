@@ -390,11 +390,11 @@ mod freedesktop {
         };
         let mut builder = Metadata::builder()
             .trackid(mpris_track_id(entry.id.occurrence.as_str()))
-            .title(entry.track.title.clone())
-            .artist([entry.track.artist.clone()])
-            .album(entry.track.album.clone())
+            .title(entry.title.clone())
+            .artist([entry.artist.clone()])
+            .album(entry.album.clone())
             .length(Time::from_micros(
-                entry.track.duration_millis.saturating_mul(1_000),
+                entry.duration_millis.saturating_mul(1_000),
             ));
         if let Some(art_url) = art_url {
             builder = builder.art_url(art_url);
@@ -658,9 +658,9 @@ mod windows {
         let can_next =
             playback.queue.next_occurrence.is_some() || playback.controls.auto_dj_enabled;
         Some(WindowsMediaState {
-            title: media.track.title.clone(),
-            artist: media.track.artist.clone(),
-            album: media.track.album.clone(),
+            title: media.title.clone(),
+            artist: media.artist.clone(),
+            album: media.album.clone(),
             duration_millis: playback.transport.duration_millis,
             position_millis: playback.transport.position_millis,
             art_url,
@@ -1077,9 +1077,9 @@ mod macos {
             let artwork = art_url.and_then(load_artwork);
             {
                 let mut state = self.state.borrow_mut();
-                state.title.clone_from(&media.track.title);
-                state.artist.clone_from(&media.track.artist);
-                state.album.clone_from(&media.track.album);
+                state.title.clone_from(&media.title);
+                state.artist.clone_from(&media.artist);
+                state.album.clone_from(&media.album);
                 state.duration_millis = playback.transport.duration_millis;
                 state.position_millis = playback.transport.position_millis;
                 state.playback = playback_state(playback);

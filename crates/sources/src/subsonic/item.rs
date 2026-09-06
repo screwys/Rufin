@@ -8,7 +8,7 @@ pub(super) async fn stage_album(
     let artwork = album
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_album(
         &album.id,
@@ -63,13 +63,11 @@ pub(super) async fn stage_album(
 pub(super) async fn stage_track(
     scan: &mut library::Scan,
     track: Track,
-) -> library::LibraryResult<()> {
+) -> library::LibraryResult<bool> {
     let artwork = track
-        .album_id
-        .is_none()
-        .then_some(track.image_ref.as_ref())
-        .flatten()
-        .map(serde_json::to_vec)
+        .image_ref
+        .as_ref()
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     let mut hash = blake3::Hasher::new();
     hash.update(b"rufin-subsonic-audio-v1\0");
@@ -91,40 +89,41 @@ pub(super) async fn stage_track(
         track.comment.as_deref().unwrap_or_default()
     )
     .to_lowercase();
-    scan.write_track(
-        &track.id,
-        track.album_id.as_deref(),
-        &track.title,
-        &normalized,
-        &track.album,
-        &track.artist,
-        &track.title.to_lowercase(),
-        i64::from(track.duration_seconds) * 1000,
-        i64::from(track.disc_number),
-        i64::from(track.track_number),
-        Some(i64::from(track.year)).filter(|year| *year > 0),
-        track.release_date.as_deref(),
-        track.date_added.as_deref(),
-        None,
-        track.source_format.as_deref(),
-        track.comment.as_deref(),
-        track.bpm.map(i64::from),
-        track.musicbrainz_recording_id.as_deref(),
-        track.musicbrainz_release_track_id.as_deref(),
-        None,
-        None,
-        None,
-        artwork.as_deref(),
-        track.favorite,
-        track.user_rating.map(i64::from),
-        None,
-        track.play_count.map(i64::from),
-        track.skip_count.map(i64::from),
-        track.last_played,
-        track.source_path.as_deref(),
-        *hash.finalize().as_bytes(),
-    )
-    .await?;
+    let inserted = scan
+        .write_track(
+            &track.id,
+            track.album_id.as_deref(),
+            &track.title,
+            &normalized,
+            &track.album,
+            &track.artist,
+            &track.title.to_lowercase(),
+            i64::from(track.duration_seconds) * 1000,
+            i64::from(track.disc_number),
+            i64::from(track.track_number),
+            Some(i64::from(track.year)).filter(|year| *year > 0),
+            track.release_date.as_deref(),
+            track.date_added.as_deref(),
+            None,
+            track.source_format.as_deref(),
+            track.comment.as_deref(),
+            track.bpm.map(i64::from),
+            track.musicbrainz_recording_id.as_deref(),
+            track.musicbrainz_release_track_id.as_deref(),
+            None,
+            None,
+            None,
+            artwork.as_deref(),
+            track.favorite,
+            track.user_rating.map(i64::from),
+            None,
+            track.play_count.map(i64::from),
+            track.skip_count.map(i64::from),
+            track.last_played,
+            track.source_path.as_deref(),
+            *hash.finalize().as_bytes(),
+        )
+        .await?;
     if track.replay_gain_track_db.is_some() {
         scan.write_track_source_loudness(
             &track.id,
@@ -186,7 +185,7 @@ pub(super) async fn stage_track(
             .collect::<Vec<_>>(),
     )
     .await?;
-    Ok(())
+    Ok(inserted)
 }
 
 pub(super) async fn stage_artist(
@@ -196,7 +195,7 @@ pub(super) async fn stage_artist(
     let artwork = artist
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_artist(
         &artist.id,
@@ -205,7 +204,7 @@ pub(super) async fn stage_artist(
         &artist.name.to_lowercase(),
         artist.musicbrainz_artist_id.as_deref(),
         artwork.as_deref(),
-        artist.favorite,
+        Some(artist.favorite),
         artist.user_rating.map(i64::from),
     )
     .await
@@ -217,7 +216,7 @@ pub(super) async fn stage_genre(
     let artwork = genre
         .image_ref
         .as_ref()
-        .map(serde_json::to_vec)
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
         .transpose()?;
     scan.write_genre(
         &genre.id,
@@ -239,7 +238,7 @@ async fn stage_artist_credit(
         &artist.name.to_lowercase(),
         artist.musicbrainz_artist_id.as_deref(),
         None,
-        false,
+        None,
         None,
     )
     .await

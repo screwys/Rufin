@@ -20,7 +20,7 @@ use super::route_layout::{
     PRIMARY_ROUTE_HORIZONTAL_INSET, ROUTE_TOP_MARGIN, detail_route_scroller,
 };
 use super::route_shell::LibraryToolbarProjection;
-use super::sparse_model::SparseRouteModel;
+use super::sparse_model::{SparseItem, SparseObjectItem, SparseRouteModel, connect_sparse_bind};
 
 const ARTIST_RELEASE_SECTION_GAP: i32 = 18;
 const ARTIST_RELEASE_HEADER_GAP: i32 = 10;
@@ -35,7 +35,7 @@ pub(super) struct ArtistReleaseRoutePreamble {
 pub(super) struct ArtistReleaseProjections {
     sections: Rc<Vec<Rc<ArtistAlbumProjection>>>,
     orders: RefCell<[Vec<library::AlbumKey>; 6]>,
-    sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
+    pub(super) sparse: Rc<SparseRouteModel<library::AlbumKey, library::AlbumRow>>,
     lane: Rc<super::named_detail::NamedOrderLane>,
     surface: gtk::Widget,
     layout: Rc<Cell<LibraryLayout>>,
@@ -340,6 +340,10 @@ impl ArtistAlbumProjection {
             .collect()
     }
 
+    #[expect(
+        clippy::arc_with_non_send_sync,
+        reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
+    )]
     fn refresh_grid_range(self: &Rc<Self>, position: u32, count: u32) {
         if self.layout.get() != LibraryLayout::Grid || self.source_is_empty() {
             return;
@@ -364,13 +368,15 @@ impl ArtistAlbumProjection {
             .div_ceil(columns)
             .min(row_count)
             .max(first + 1);
-        let additions = self
-            .grid_rows(first, end)
-            .into_iter()
-            .map(glib::BoxedAnyObject::new)
-            .collect::<Vec<_>>();
-        self.rows
-            .splice((first + 1) as u32, (end - first) as u32, &additions);
+        for (offset, row) in self.grid_rows(first, end).into_iter().enumerate() {
+            if let Some(item) = self
+                .rows
+                .item((first + offset + 1) as u32)
+                .and_downcast::<SparseObjectItem>()
+            {
+                item.replace(SparseItem::<String, _>::Ready(Arc::new(row)), true);
+            }
+        }
     }
 
     fn apply_settings(self: &Rc<Self>, settings: &LibraryListSettings) {
@@ -383,7 +389,7 @@ impl ArtistAlbumProjection {
 impl ArtistReleaseProjections {
     pub(super) fn new(
         shell: &Rc<Shell>,
-        selected: &crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
         preamble: ArtistReleaseRoutePreamble,
         titles: [&'static str; 6],
         orders: [Vec<library::AlbumKey>; 6],
@@ -398,9 +404,8 @@ impl ArtistReleaseProjections {
         let layout = Rc::new(Cell::new(normalized_artist_layout(settings.layout)));
         let columns = Rc::new(Cell::new(1));
         let flat_order = orders.iter().flatten().copied().collect::<Vec<_>>();
-        let database = Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
+        let database = Arc::clone(&shell.products.library);
+        let folder = None;
         let load = Arc::new(
             move |keys: Vec<library::AlbumKey>, cancellation: library::ReadCancellation| {
                 let database = Arc::clone(&database);
@@ -412,7 +417,7 @@ impl ArtistReleaseProjections {
                 }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
             },
         );
-        let sparse = SparseRouteModel::new(flat_order, 32, selected.runtime.clone(), load);
+        let sparse = SparseRouteModel::new(flat_order, 32, shell.products.runtime.clone(), load);
         sparse.seed_matching_at(first_row_position, first_rows, |row| row.album_key);
         let orders = RefCell::new(orders);
         let mut start = 0_usize;
@@ -452,7 +457,7 @@ impl ArtistReleaseProjections {
         });
         let favorite_rows = favorite_widget
             .as_ref()
-            .map_or_else(gio::ListStore::new::<glib::BoxedAnyObject>, |widget| {
+            .map_or_else(gio::ListStore::new::<SparseObjectItem>, |widget| {
                 static_artist_route_model(widget.clone())
             });
         empty.set_visible(
@@ -643,23 +648,32 @@ fn normalized_artist_layout(layout: LibraryLayout) -> LibraryLayout {
     }
 }
 
+#[expect(
+    clippy::arc_with_non_send_sync,
+    reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
+)]
 fn static_artist_route_model(widget: gtk::Widget) -> gio::ListStore {
-    let model = gio::ListStore::new::<glib::BoxedAnyObject>();
-    model.append(&glib::BoxedAnyObject::new(ArtistRouteRow::Static {
-        widget,
-    }));
+    let model = gio::ListStore::new::<SparseObjectItem>();
+    model.append(&SparseObjectItem::new(
+        SparseItem::<String, _>::Ready(Arc::new(ArtistRouteRow::Static { widget })),
+        true,
+    ));
     model
 }
 
+#[expect(
+    clippy::arc_with_non_send_sync,
+    reason = "GTK-only presentation rows reuse the existing SparseItem notification owner"
+)]
 fn replace_artist_release_body(model: &gio::ListStore, rows: Vec<ArtistRouteRow>) {
     let additions = rows
         .into_iter()
-        .map(glib::BoxedAnyObject::new)
+        .map(|row| SparseObjectItem::new(SparseItem::<String, _>::Ready(Arc::new(row)), true))
         .collect::<Vec<_>>();
     replace_artist_release_objects(model, &additions);
 }
 
-fn replace_artist_release_objects(model: &gio::ListStore, additions: &[glib::BoxedAnyObject]) {
+fn replace_artist_release_objects(model: &gio::ListStore, additions: &[SparseObjectItem]) {
     model.splice(1, model.n_items().saturating_sub(1), additions);
 }
 
@@ -679,20 +693,18 @@ fn artist_route_list(
             return;
         };
         let root = ArtistRouteListCell::new();
+        item.set_activatable(false);
+        item.set_selectable(false);
         item.set_child(Some(&root));
         setup_cells.borrow_mut().push(root.downgrade());
     });
     let bind_fields = Rc::clone(&fields);
     let bind_shell = Rc::clone(shell);
-    factory.connect_bind(move |_, item| {
+    connect_sparse_bind(&factory, move |item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
             return;
         };
-        let Some(row) = item
-            .item()
-            .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
-            .map(|item| item.borrow::<ArtistRouteRow>().clone())
-        else {
+        let Some(row) = super::library_fields::item_at_from_item::<ArtistRouteRow>(item) else {
             return;
         };
         let Some(state) = item.child().and_downcast::<ArtistRouteListCell>() else {
@@ -729,6 +741,7 @@ fn artist_route_list(
                     state.add_css_class("album-grid");
                     for _ in 0..columns {
                         let cell = AlbumGridCell::new(&bind_shell, &bind_fields.borrow(), None);
+                        cell.enable_card_activation();
                         let widget = cell.widget();
                         let wrapper = cards::collection_grid_card_inset(
                             &widget,
@@ -877,10 +890,10 @@ mod tests {
 
     #[test]
     fn section_body_updates_leave_header_item_in_place() {
-        let rows = gio::ListStore::new::<glib::BoxedAnyObject>();
-        rows.append(&glib::BoxedAnyObject::new(0_u8));
+        let rows = gio::ListStore::new::<SparseObjectItem>();
+        rows.append(&SparseObjectItem::new(0_u8, true));
         let identity = rows.item(0).unwrap();
-        replace_artist_release_objects(&rows, &[glib::BoxedAnyObject::new(1_u8)]);
+        replace_artist_release_objects(&rows, &[SparseObjectItem::new(1_u8, true)]);
         assert_eq!(rows.item(0).unwrap(), identity);
         assert_eq!(rows.n_items(), 2);
         replace_artist_release_objects(&rows, &[]);

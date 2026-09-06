@@ -1,64 +1,31 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
-
-  <object class="GtkBox" id="wrapper">
-    <property name="homogeneous">true</property>
-    <property name="hexpand">true</property>
-    <style>
-      <class name="source-choice-list"/>
-    </style>
-    <child>
-      <object class="GtkButton" id="jellyfin_button">
-        <style><class name="flat"/><class name="source-choice-button"/></style>
-        <child>
-          <object class="GtkBox" id="jellyfin_content">
-            <property name="orientation">vertical</property>
-            <property name="halign">center</property>
-            <child><object class="GtkImage" id="jellyfin_icon"/></child>
-            <child><object class="GtkLabel" id="jellyfin_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
-          </object>
-        </child>
-      </object>
-    </child>
-    <child>
-      <object class="GtkButton" id="navidrome_button">
-        <style><class name="flat"/><class name="source-choice-button"/></style>
-        <child>
-          <object class="GtkBox" id="navidrome_content">
-            <property name="orientation">vertical</property>
-            <property name="halign">center</property>
-            <child><object class="GtkImage" id="navidrome_icon"/></child>
-            <child><object class="GtkLabel" id="navidrome_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
-          </object>
-        </child>
-      </object>
-    </child>
-    <child>
-      <object class="GtkButton" id="subsonic_button">
-        <style><class name="flat"/><class name="source-choice-button"/></style>
-        <child>
-          <object class="GtkBox" id="subsonic_content">
-            <property name="orientation">vertical</property>
-            <property name="halign">center</property>
-            <child><object class="GtkImage" id="subsonic_icon"/></child>
-            <child><object class="GtkLabel" id="subsonic_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
-          </object>
-        </child>
-      </object>
-    </child>
-    <child>
-      <object class="GtkButton" id="local_button">
-        <style><class name="flat"/><class name="source-choice-button"/></style>
-        <child>
-          <object class="GtkBox" id="local_content">
-            <property name="orientation">vertical</property>
-            <property name="halign">center</property>
-            <child><object class="GtkImage" id="local_icon"/></child>
-            <child><object class="GtkLabel" id="local_label"><property name="ellipsize">end</property><property name="max-width-chars">14</property></object></child>
-          </object>
-        </child>
-      </object>
-    </child>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="GtkScrolledWindow" id="wrapper">
+    <property name="hscrollbar-policy">never</property>
+    <property name="vexpand">true</property>
+    <property name="child"><object class="AdwClamp">
+      <property name="maximum-size">640</property><property name="tightening-threshold">360</property>
+      <property name="margin-start">24</property><property name="margin-end">24</property>
+      <property name="margin-top">4</property><property name="margin-bottom">12</property>
+      <property name="child"><object class="GtkBox">
+        <property name="orientation">vertical</property><property name="spacing">16</property>
+        <child><object class="GtkLabel"><property name="label" translatable="yes">Add Source</property><property name="xalign">0</property><property name="wrap">true</property><style><class name="title-1"/></style></object></child>
+        <child><object class="AdwPreferencesGroup" id="device_sources">
+          <property name="title" translatable="yes">On this device</property>
+        </object></child>
+        <child><object class="AdwPreferencesGroup" id="server_sources">
+          <property name="title" translatable="yes">Servers</property>
+        </object></child>
+        <child><object class="AdwPreferencesGroup" id="privacy">
+          <property name="title" translatable="yes">Privacy and Security</property>
+          <child><object class="AdwSwitchRow" id="external_metadata"><property name="title" translatable="yes">External metadata lookup</property></object></child>
+          <child><object class="AdwSwitchRow" id="external_lyrics"><property name="title" translatable="yes">External lyrics lookup</property></object></child>
+          <child><object class="AdwSwitchRow" id="discord_presence"><property name="title" translatable="yes">Discord Rich Presence</property></object></child>
+        </object></child>
+        <child><object class="GtkButton" id="import_backup"><property name="label" translatable="yes">Import Backup</property><property name="halign">center</property><style><class name="flat"/></style></object></child>
+      </object></property>
+    </object></property>
   </object>
 </interface>

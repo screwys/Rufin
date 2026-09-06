@@ -45,32 +45,14 @@ impl JellyfinSource {
             .into_iter()
             .enumerate()
             .map(|(position, item)| {
-                let (entity_object_id, title, subtitle, artwork_binding) = match kind {
+                let (entity_object_id, title, subtitle) = match kind {
                     library::HomeEntryKind::Track => {
                         let track = track_from_item(item);
-                        (
-                            track.id,
-                            track.title,
-                            track.artist,
-                            track
-                                .image_ref
-                                .as_ref()
-                                .map(serde_json::to_vec)
-                                .transpose()?,
-                        )
+                        (track.id, track.title, track.artist)
                     }
                     library::HomeEntryKind::Album => {
                         let album = album_from_item(item);
-                        (
-                            album.id,
-                            album.title,
-                            album.artist,
-                            album
-                                .image_ref
-                                .as_ref()
-                                .map(serde_json::to_vec)
-                                .transpose()?,
-                        )
+                        (album.id, album.title, album.artist)
                     }
                     _ => unreachable!(),
                 };
@@ -81,7 +63,6 @@ impl JellyfinSource {
                     entity_object_id,
                     title,
                     subtitle,
-                    artwork_binding,
                 })
             })
             .collect()
@@ -134,7 +115,7 @@ impl JellyfinSource {
                 let artwork = playlist
                     .image_ref
                     .as_ref()
-                    .map(serde_json::to_vec)
+                    .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                     .transpose()?;
                 scan.begin_batch().await?;
                 scan.write_playlist(
@@ -185,7 +166,7 @@ impl JellyfinSource {
             let folder_id = jellyfin_id("music-folder", &folder.id);
             let artwork = primary_image_ref("music-folder", &folder.id, &folder.image_tags)
                 .as_ref()
-                .map(serde_json::to_vec)
+                .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                 .transpose()?;
             scan.write_folder(
                 &folder_id,
@@ -294,14 +275,46 @@ impl JellyfinSource {
             }
         }
 
+        loop {
+            check_cancelled(cancelled)?;
+            let missing = scan.unresolved_artist_ids().await?;
+            if missing.is_empty() {
+                break;
+            }
+            for id in missing {
+                check_cancelled(cancelled)?;
+                let mut url = endpoint(&self.base_url, &format!("Items/{}", raw_item_id(&id)))?;
+                url.query_pairs_mut()
+                    .append_pair("UserId", &self.user_id)
+                    .append_pair("Fields", MIXED_ITEM_FIELDS);
+                let artist = self.get_json::<JellyfinItem>(url).await?;
+                stage_artist(scan, artist_from_item(artist)).await?;
+            }
+        }
+
         let mut pages = PageState::default();
         loop {
             check_cancelled(cancelled)?;
-            let page = self
+            let page = match self
                 .music_genre_page(pages.offset(), COLLECTION_PAGE_SIZE)
-                .await?;
+                .await
+            {
+                Ok(page) => page,
+                Err(error) => {
+                    crate::source::optional_collection_error(error)?;
+                    scan.retain_genres().await?;
+                    break;
+                }
+            };
             let count = page.items.len();
-            let finished = pages.advance(count, page.total_record_count)?;
+            let finished = match pages.advance(count, page.total_record_count) {
+                Ok(finished) => finished,
+                Err(error) => {
+                    crate::source::optional_collection_error(error)?;
+                    scan.retain_genres().await?;
+                    break;
+                }
+            };
             scan.begin_batch().await?;
             for item in page.items {
                 stage_genre(scan, genre_from_item(item)).await?;
@@ -317,7 +330,10 @@ impl JellyfinSource {
             }
         }
 
-        self.stage_playlists(scan, progress, cancelled).await?;
+        if let Err(error) = self.stage_playlists(scan, progress, cancelled).await {
+            crate::source::optional_collection_error(error)?;
+            scan.retain_playlists().await?;
+        }
         self.stage_home(scan).await?;
         progress(stage(SourceReadStage::Finalizing, 1, Some(1)));
         Ok(())
@@ -344,7 +360,7 @@ impl JellyfinSource {
             let id = jellyfin_id("music-folder", &item.id);
             let artwork = primary_image_ref("music-folder", &item.id, &item.image_tags)
                 .as_ref()
-                .map(serde_json::to_vec)
+                .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                 .transpose()?;
             scan.write_folder(
                 &id,
@@ -427,7 +443,7 @@ impl JellyfinSource {
                 let artwork = playlist
                     .image_ref
                     .as_ref()
-                    .map(serde_json::to_vec)
+                    .map(|image| crate::native_artwork_binding(scan.source_id(), image))
                     .transpose()?;
                 scan.begin_batch().await?;
                 scan.write_playlist(
@@ -459,7 +475,14 @@ impl JellyfinSource {
             crate::SourceHomeSection::RecentlyPlayed,
             crate::SourceHomeSection::RecentlyReleased,
         ] {
-            let entries = self.home_section(section).await?;
+            let entries = match self.home_section(section).await {
+                Ok(entries) => entries,
+                Err(error) => {
+                    crate::source::optional_collection_error(error)?;
+                    scan.retain_home_section(section.id()).await?;
+                    continue;
+                }
+            };
             scan.begin_batch().await?;
             for entry in entries {
                 scan.write_home_entry(&entry).await?;
@@ -487,6 +510,15 @@ impl PageState {
 
     pub(super) fn advance(&mut self, count: usize, total: Option<usize>) -> SourceResult<bool> {
         if count == 0 {
+            if self
+                .total
+                .or(total)
+                .is_some_and(|total| self.offset < total)
+            {
+                return Err(SourceError::Other(
+                    "Jellyfin omitted a catalog page".to_string(),
+                ));
+            }
             return Ok(true);
         }
         self.offset = self
@@ -519,6 +551,182 @@ mod tests {
         assert!(!pages.advance(1, Some(3)).expect("grown total"));
         assert_eq!(pages.offset(), 2);
         assert!(pages.advance(1, Some(3)).expect("final page"));
+    }
+
+    #[tokio::test]
+    async fn catalog_sync_resolves_artist_credits_and_preserves_optional_collections() {
+        let server = MockServer::start().await;
+        for endpoint in ["/Users/user/Views", "/Artists", "/Artists/AlbumArtists"] {
+            Mock::given(method("GET"))
+                .and(path(endpoint))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(if endpoint == "/Users/user/Views" {
+                            serde_json::json!({"Items":[],"TotalRecordCount":0})
+                        } else {
+                            serde_json::json!({"Items":[{"Id":"listed","Name":"Artist","UserData":{"IsFavorite":false}}],"TotalRecordCount":1})
+                        }),
+                )
+                .mount(&server)
+                .await;
+        }
+        for (kind, item) in [
+            (
+                "MusicAlbum",
+                serde_json::json!({"Id":"album","Name":"Album","Type":"MusicAlbum"}),
+            ),
+            (
+                "Audio",
+                serde_json::json!({"Id":"kept","Name":"Track","Type":"Audio","AlbumId":"album","Album":"Album","ArtistItems":[{"Id":"credited","Name":"Artist"},{"Id":"listed","Name":"Artist"}]}),
+            ),
+        ] {
+            Mock::given(method("GET"))
+                .and(path("/Items"))
+                .and(query_param("IncludeItemTypes", kind))
+                .and(query_param("Limit", "500"))
+                .respond_with(
+                    ResponseTemplate::new(200)
+                        .set_body_json(serde_json::json!({"Items":[item],"TotalRecordCount":1})),
+                )
+                .mount(&server)
+                .await;
+        }
+        Mock::given(method("GET"))
+            .and(path("/Items/credited"))
+            .and(query_param("UserId", "user"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "Id":"credited","Name":"Artist","UserData":{"IsFavorite":true}
+            })))
+            .expect(2)
+            .mount(&server)
+            .await;
+        let source = JellyfinSource::open(
+            JellyfinSourceConfig {
+                base_url: server.uri(),
+                server_id: Some("server".into()),
+                user_id: "user".into(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        let root = tempfile::tempdir().unwrap();
+        let database = library::Database::open(root.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut previous = Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
+            .await
+            .unwrap();
+        super::stage_album(
+            &mut previous,
+            super::album_from_item(
+                serde_json::from_value(
+                    serde_json::json!({"Id":"album","Name":"Album","Type":"MusicAlbum"}),
+                )
+                .unwrap(),
+            ),
+        )
+        .await
+        .unwrap();
+        super::stage_track(&mut previous, super::track_from_item(serde_json::from_value(serde_json::json!({"Id":"removed","Name":"Removed","Type":"Audio","AlbumId":"album"})).unwrap())).await.unwrap();
+        previous
+            .write_genre("cached-genre", "Cached", "cached", "cached", None)
+            .await
+            .unwrap();
+        previous
+            .write_playlist("cached-playlist", "Cached", "cached", "cached", None)
+            .await
+            .unwrap();
+        previous
+            .write_playlist_entry("cached-playlist", "occurrence", "jellyfin:track:removed", 0)
+            .await
+            .unwrap();
+        previous
+            .write_home_entry(&library::HomeEntryInput {
+                section_id: "recently-played".into(),
+                position: 0,
+                kind: library::HomeEntryKind::Album,
+                entity_object_id: "jellyfin:album:album".into(),
+                title: "Album".into(),
+                subtitle: String::new(),
+            })
+            .await
+            .unwrap();
+        previous.finish().await.unwrap();
+        let mut scan = Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
+            .await
+            .unwrap();
+        source
+            .stage_catalog(&mut scan, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("core changed");
+        };
+        let cancellation = library::ReadCancellation::new();
+        for (id, favorite) in [("credited", true), ("listed", false)] {
+            let uri = library::source_entity_uri(
+                &crate::SourceId::new("source"),
+                "artist",
+                &format!("jellyfin:artist:{id}"),
+            );
+            let artist = database
+                .artist_row_by_media_uri(&uri, &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(artist.favorite, favorite);
+        }
+        let removed = library::source_entity_uri(
+            &crate::SourceId::new("source"),
+            "track",
+            "jellyfin:track:removed",
+        );
+        assert!(
+            database
+                .track_row_by_uri(&removed, &cancellation)
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            database
+                .genre_key_by_object(publication.source, "cached-genre", &cancellation)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert!(
+            database
+                .playlist_key_by_object(publication.source, "cached-playlist", &cancellation)
+                .await
+                .unwrap()
+                .is_some()
+        );
+        assert_eq!(
+            database
+                .home_page(publication.source, None, 0, 0, &cancellation)
+                .await
+                .unwrap()
+                .recently_played
+                .albums
+                .len(),
+            1
+        );
+        let mut identical = Scan::begin(&database, "source", "Jellyfin", "jellyfin", None)
+            .await
+            .unwrap();
+        source
+            .stage_catalog(&mut identical, &|_| {}, &|| false)
+            .await
+            .unwrap();
+        assert!(matches!(
+            identical.finish().await.unwrap(),
+            ScanOutcome::Identical(_)
+        ));
     }
 
     #[tokio::test]

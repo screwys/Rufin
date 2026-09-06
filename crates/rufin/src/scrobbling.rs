@@ -65,11 +65,31 @@ impl ScrobblingOwner {
         })
     }
 
-    pub(crate) fn private_mode_changed(&self, private_mode: bool) {
-        let settings = load_scrobbling_settings(&self.settings, &self.secrets);
-        if let Err(error) = self.scrobbler.update_settings(settings, private_mode) {
+    pub(crate) fn settings_changed(&self, credentials_changed: bool) {
+        let stored = self.settings.load();
+        if let Err(error) = self.scrobbler.update_preferences(
+            &stored.scrobbling_runtime_settings(),
+            stored.ui.private_mode,
+        ) {
             warn!(%error, "could not update external scrobbling settings");
         }
+        if credentials_changed {
+            let settings = load_scrobbling_settings(&self.settings, &self.secrets);
+            if let Err(error) = self.scrobbler.update_credentials(settings) {
+                warn!(%error, "could not update external scrobbling credentials");
+            }
+        }
+    }
+
+    pub(crate) fn start(self: &Arc<Self>) {
+        let owner = Arc::clone(self);
+        self.runtime.spawn_blocking(move || {
+            if let Err(error) = owner.scrobbler.load_credentials(|| {
+                crate::settings::startup_scrobbling_settings(&owner.settings, &owner.secrets)
+            }) {
+                warn!(%error, "could not load saved scrobbling credentials");
+            }
+        });
     }
 
     fn save_preferences(

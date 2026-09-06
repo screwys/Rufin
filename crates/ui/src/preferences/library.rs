@@ -10,9 +10,7 @@ use playback::StreamQuality;
 use localization::{msgid, tr, trn_with};
 
 use super::{
-    PreferencesNavigationControls,
-    layout::button_row,
-    quality_selection_row, row_action_content,
+    PreferencesNavigationControls, quality_selection_row, row_action_content,
     source::{
         configured_source_display_name, configured_source_icon_name,
         configured_source_kind_display_name, half_stars_row,
@@ -86,6 +84,7 @@ fn library_sources_page(
         empty_remote_row: adw::ActionRow,
         downloads_group: adw::PreferencesGroup,
         download_folder_row: adw::ActionRow,
+        open_folder: gtk::Button,
         reset_folder: gtk::Button,
         choose_folder: gtk::Button,
         downloaded_badge: adw::SwitchRow,
@@ -94,11 +93,7 @@ fn library_sources_page(
         remove_all: gtk::Button,
         download_queue_header: adw::PreferencesRow,
         pause_downloads: gtk::Button,
-        local_group: adw::PreferencesGroup,
-        empty_local_row: adw::ActionRow,
-        local_actions_row: adw::PreferencesRow,
-        add_local: gtk::Button,
-        resync_local: gtk::Button,
+        local_source_row: adw::ActionRow, add_source: gtk::Button,
     });
 
     let configured = shell.source.configured.borrow().clone();
@@ -114,7 +109,7 @@ fn library_sources_page(
         .cloned()
         .collect::<Vec<_>>();
 
-    if remote_sources.is_empty() {
+    if configured.sources.is_empty() {
         servers_group.add(&empty_remote_row);
     } else {
         for server in &remote_sources {
@@ -184,12 +179,34 @@ fn library_sources_page(
         }
     }
 
-    let add_server = button_row("Add server", "rufin-list-add-symbolic");
+    if local_source.is_some() || !configured.local_folders.is_empty() {
+        local_source_row.set_subtitle(&super::source::folder_selected_text(
+            configured.local_folders.len() as u64,
+        ));
+        let local_shell = Rc::downgrade(shell);
+        let local_dialog = dialog.downgrade();
+        let local_navigation = navigation.downgrade();
+        let controls = navigation_controls.clone();
+        local_source_row.connect_activated(move |_| {
+            let (Some(shell), Some(dialog), Some(navigation)) = (
+                local_shell.upgrade(),
+                local_dialog.upgrade(),
+                local_navigation.upgrade(),
+            ) else {
+                return;
+            };
+            let page = local_sources_page(&shell, &dialog);
+            navigation.push(&adw::NavigationPage::new(&page, &page.title()));
+            controls.set_nested_page_visible(true);
+        });
+        servers_group.add(&local_source_row);
+    }
+
     let add_shell = Rc::clone(shell);
     let add_navigation = navigation.downgrade();
     let add_navigation_controls = navigation_controls.clone();
     let add_server_dialog = dialog.downgrade();
-    add_server.connect_activated(move |_| {
+    add_source.connect_clicked(move |_| {
         let Some(add_server_dialog) = add_server_dialog.upgrade() else {
             return;
         };
@@ -200,7 +217,7 @@ fn library_sources_page(
         add_navigation.push(&page);
         add_navigation_controls.set_nested_page_visible(true);
     });
-    servers_group.add(&add_server);
+    servers_group.set_header_suffix(Some(&add_source));
 
     if let Some(server) = remote_sources
         .iter()
@@ -219,6 +236,18 @@ fn library_sources_page(
                 .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
         );
         reset_folder.set_visible(download_settings.directory.is_some());
+        let weak = Rc::downgrade(shell);
+        let source_id = server.id.clone();
+        open_folder.connect_clicked(move |_| {
+            let Some(shell) = weak.upgrade() else { return };
+            let directory = shell
+                .settings
+                .current
+                .borrow()
+                .download_directory(&source_id)
+                .unwrap_or_else(|| shell.products.downloads.default_directory().to_path_buf());
+            super::open_folder(&shell, gio::File::for_path(directory));
+        });
         let choose_shell = Rc::clone(shell);
         let choose_source_id = server.id.clone();
         let choose_row = download_folder_row.downgrade();
@@ -346,6 +375,28 @@ fn library_sources_page(
         library_page.add(&downloads_group);
     }
 
+    for group in super::backup::groups(shell, navigation, navigation_controls) {
+        library_page.add(&group);
+    }
+    library_page
+}
+
+pub(crate) fn local_sources_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage {
+    let resource = crate::ui_resource::LIBRARY_PREFERENCES_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, {
+        local_page: adw::PreferencesPage, local_group: adw::PreferencesGroup,
+        empty_local_row: adw::ActionRow, local_actions_row: adw::PreferencesRow,
+        add_local: gtk::Button, resync_local: gtk::Button,
+        forget_local: gtk::Button,
+        forget_local_confirm: adw::AlertDialog,
+    });
+    let configured = shell.source.configured.borrow().clone();
+    let local_source = configured
+        .sources
+        .iter()
+        .find(|source| source.kind == "local")
+        .cloned();
     if let Some(half_stars) = local_source
         .as_ref()
         .and_then(|source| half_stars_row(shell, source))
@@ -405,12 +456,40 @@ fn library_sources_page(
             dialog.close();
         });
     });
+    forget_local.set_visible(local_source.is_some());
+    if let Some(local) = &local_source {
+        let source_id = local.id.clone();
+        let source = shell.products.source.clone();
+        let dialog = dialog.downgrade();
+        let window = shell.chrome.window.downgrade();
+        forget_local.connect_clicked(move |_| {
+            let Some(window) = window.upgrade() else {
+                return;
+            };
+            let source = source.clone();
+            let source_id = source_id.clone();
+            let dialog = dialog.clone();
+            forget_local_confirm.clone().choose(
+                Some(&window),
+                None::<&gio::Cancellable>,
+                move |response| {
+                    if response == "forget" {
+                        source.forget_source(source_id);
+                        if let Some(dialog) = dialog.upgrade() {
+                            dialog.close();
+                        }
+                    }
+                },
+            );
+        });
+    }
     let local_source_id = local_source.map(|source| source.id);
     resync_local.set_sensitive(!configured.local_folders.is_empty() && local_source_id.is_some());
     let source = shell.products.source.clone();
     let resync_dialog = dialog.downgrade();
+    let resync_source_id = local_source_id.clone();
     resync_local.connect_clicked(move |_| {
-        if let Some(source_id) = local_source_id.clone() {
+        if let Some(source_id) = resync_source_id.clone() {
             source.refresh_source(source_id);
         }
         if let Some(dialog) = resync_dialog.upgrade() {
@@ -418,9 +497,9 @@ fn library_sources_page(
         }
     });
     local_group.add(&local_actions_row);
-    library_page.add(&local_group);
+    local_page.add(&local_group);
 
-    library_page
+    local_page
 }
 
 fn add_download_rules(
@@ -437,7 +516,7 @@ fn add_download_rules(
             .subtitle(tr(download_rule_subtitle(rule)))
             .build();
         row.set_visible(rules.contains(rule));
-        let artwork = shell.download_subject_artwork(&downloads::DownloadSubject::Rule(rule), 48);
+        let artwork = shell.download_rule_artwork(source_id.clone(), rule, 48);
         artwork.set_margin_top(6);
         artwork.set_margin_bottom(6);
         row.add_prefix(&artwork);
@@ -646,7 +725,7 @@ fn add_download_queue(
             .downloads
             .snapshots
             .borrow()
-            .get(&pause_source_id)
+            .get(&Some(pause_source_id.clone()))
             .is_some_and(|snapshot| snapshot.paused);
         downloads.set_paused(!paused);
     });
@@ -663,7 +742,7 @@ fn add_download_queue(
             .downloads
             .snapshots
             .borrow()
-            .get(&source_id)
+            .get(&Some(source_id.clone()))
             .cloned()
             .unwrap_or_default();
         pause_downloads.set_visible(!snapshot.jobs.is_empty());
@@ -727,6 +806,9 @@ fn add_download_queue(
             return;
         }
         for (index, job) in snapshot.jobs.iter().enumerate() {
+            let Some(queue_source_id) = job.source_id.clone() else {
+                continue;
+            };
             let row = adw::ActionRow::builder()
                 .title(shell.download_subject_title(&job.subject))
                 .subtitle(download_queue_item_subtitle(job))
@@ -735,7 +817,7 @@ fn add_download_queue(
             let drag = gtk::Image::from_icon_name("rufin-list-drag-handle-symbolic");
             drag.add_css_class("dim-label");
             drag.set_tooltip_text(Some(&tr("Drag to reorder")));
-            let artwork = shell.download_subject_artwork(&job.subject, 48);
+            let artwork = shell.media_artwork(&job.preview_uris, 48);
             artwork.set_margin_top(6);
             artwork.set_margin_bottom(6);
             row.add_prefix(&artwork);
@@ -746,7 +828,7 @@ fn add_download_queue(
             up.set_tooltip_text(Some(&tr("Move up")));
             up.set_sensitive(index > 0);
             let move_shell = Rc::clone(&shell);
-            let job_source_id = job.source_id.clone();
+            let job_source_id = queue_source_id.clone();
             let job_id = job.id.clone();
             let target_job_id = (index > 0).then(|| snapshot.jobs[index - 1].id.clone());
             up.connect_clicked(move |_| {
@@ -766,7 +848,7 @@ fn add_download_queue(
             down.set_tooltip_text(Some(&tr("Move down")));
             down.set_sensitive(index + 1 < snapshot.jobs.len());
             let move_shell = Rc::clone(&shell);
-            let job_source_id = job.source_id.clone();
+            let job_source_id = queue_source_id.clone();
             let job_id = job.id.clone();
             let target_job_id = snapshot.jobs.get(index + 1).map(|job| job.id.clone());
             down.connect_clicked(move |_| {
@@ -785,7 +867,7 @@ fn add_download_queue(
             cancel.set_valign(gtk::Align::Center);
             cancel.set_tooltip_text(Some(&tr("Cancel download")));
             let downloads = shell.products.downloads.clone();
-            let job_source_id = job.source_id.clone();
+            let job_source_id = queue_source_id.clone();
             let job_id = job.id.clone();
             cancel.connect_clicked(move |_| {
                 downloads.cancel(job_source_id.clone(), job_id.clone());
@@ -797,7 +879,7 @@ fn add_download_queue(
             clear.set_valign(gtk::Align::Center);
             clear.set_tooltip_text(Some(&tr("Cancel download and clear downloaded items")));
             let downloads = shell.products.downloads.clone();
-            let job_source_id = job.source_id.clone();
+            let job_source_id = queue_source_id.clone();
             let job_id = job.id.clone();
             clear.connect_clicked(move |_| {
                 downloads.clear_job(job_source_id.clone(), job_id.clone());
@@ -816,7 +898,7 @@ fn add_download_queue(
             let drop_target =
                 gtk::DropTarget::new(String::static_type(), gtk::gdk::DragAction::MOVE);
             let move_shell = Rc::clone(&shell);
-            let job_source_id = job.source_id.clone();
+            let job_source_id = queue_source_id.clone();
             let target_job_id = job.id.clone();
             let row_for_drop = row.downgrade();
             drop_target.connect_drop(move |_, value, _, y| {

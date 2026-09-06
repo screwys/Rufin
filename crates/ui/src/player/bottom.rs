@@ -7,7 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use crate::format_duration;
-use crate::routes::detail_links::DetailLinkBinding;
+use crate::routes::detail_links::{DetailLinkBinding, DetailLinks, track_artist_links};
 use crate::routes::route::Route;
 use adw::prelude::*;
 use gtk::glib;
@@ -34,7 +34,7 @@ use crate::ratings::RatingControl;
 use crate::routes::collection_context::{
     install_current_track_context_menu, present_current_track_context_menu,
 };
-use crate::routes::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
+use crate::routes::playlist_picker::{MediaDragSource, install_compact_media_drag_source};
 use crate::shell::Shell;
 use crate::shell::actions::set_active_class;
 use crate::shell::cover::ArtworkTile;
@@ -459,19 +459,6 @@ fn set_waveform_source(context: &gtk::cairo::Context, color: &gtk::gdk::RGBA, op
 }
 
 impl Shell {
-    pub(crate) fn sync_bottom_player_favorite(&self) {
-        let player = self.selected_playback();
-        let current = player
-            .as_ref()
-            .and_then(|player| player.transport.current.as_ref());
-        let favorite = current.is_some_and(|entry| {
-            entry.track.track_key.is_some_and(|track| {
-                self.projected_track_favorite(&track, entry.track.favorite.unwrap_or(false))
-            })
-        });
-        set_favorite_button_active(&self.player_view.player_controls.favorite_button, favorite);
-    }
-
     pub(crate) fn update_bottom_player(self: &Rc<Self>) {
         let player = self.selected_playback().as_deref().cloned();
         let presentation = NowPlayingPresentation::new(player.as_ref());
@@ -554,7 +541,10 @@ impl Shell {
 
         set_play_icon(
             &controls.play_icon,
-            matches!(state, TransportStatus::Playing | TransportStatus::Buffering),
+            matches!(
+                state,
+                TransportStatus::Resolving | TransportStatus::Playing | TransportStatus::Buffering
+            ),
         );
         controls
             .play_button
@@ -659,10 +649,9 @@ impl Shell {
             presentation.current.then_some(presentation.artist.as_str()),
         );
         self.chrome.window.set_title(Some(&window_title));
-        if let Some(source_id) = presentation.source_id.as_ref() {
+        if presentation.current {
             self.bind_playback_artwork_tile(
                 &controls.cover,
-                source_id,
                 presentation.artwork.clone(),
                 MEDIUM_COVER_SIZE as i32,
                 MEDIUM_COVER_SIZE,
@@ -690,17 +679,141 @@ impl Shell {
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
         controls.favorite_button.set_sensitive(presentation.current);
+        set_favorite_button_active(&controls.favorite_button, false);
         let rating_visible =
-            self.settings.current.borrow().show_bottom_bar_rating && presentation.has_track_key;
-        controls
-            .rating
-            .set_rating(presentation.rating, self.half_stars_enabled());
+            self.settings.current.borrow().show_bottom_bar_rating && presentation.current;
+        controls.rating.set_rating(None, false);
         controls.rating.widget().set_visible(rating_visible);
         controls.rating.widget().set_sensitive(rating_visible);
         controls.action_buttons.set_margin_top(if rating_visible {
             BOTTOM_PLAYER_ACTION_ROW_OFFSET_Y * 2
         } else {
             0
+        });
+        self.refresh_bottom_player_owner_details();
+    }
+
+    pub(crate) fn refresh_bottom_player_owner_details(self: &Rc<Self>) {
+        let player = self.selected_playback();
+        let Some(current) = player
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+        else {
+            set_favorite_button_active(&self.player_view.player_controls.favorite_button, false);
+            self.player_view
+                .player_controls
+                .rating
+                .set_rating(None, false);
+            return;
+        };
+        let media_uri = current.media_uri.clone();
+        let database = self.products.library.clone();
+        let request_uri = media_uri.clone();
+        let task = self.products.runtime.spawn(async move {
+            let cancellation = library::ReadCancellation::new();
+            let track = database
+                .track_row_by_uri(&request_uri, &cancellation)
+                .await?;
+            let state = if track.is_none() {
+                database
+                    .user_media_state(&request_uri, &cancellation)
+                    .await?
+            } else {
+                None
+            };
+            Ok::<_, library::LibraryError>((track, state))
+        });
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let Ok(Ok((track, state))) = task.await else {
+                return;
+            };
+            let Some(shell) = shell.upgrade() else { return };
+            if shell
+                .selected_playback()
+                .as_ref()
+                .and_then(|view| view.transport.current.as_ref())
+                .is_none_or(|current| current.media_uri != media_uri)
+            {
+                return;
+            }
+            let controls = &shell.player_view.player_controls;
+            let (favorite, rating) = track
+                .as_ref()
+                .map(|track| {
+                    (
+                        track.favorite,
+                        track.rating.and_then(|value| u8::try_from(value).ok()),
+                    )
+                })
+                .unwrap_or_else(|| {
+                    state
+                        .map(|(favorite, rating)| (favorite.unwrap_or(false), rating))
+                        .unwrap_or_default()
+                });
+            set_favorite_button_active(
+                &controls.favorite_button,
+                shell.projected_track_favorite(&media_uri, favorite),
+            );
+            controls.rating.set_rating(
+                rating,
+                shell.half_stars_enabled(
+                    &media_uri,
+                    track.as_ref().map(|track| track.source_id.as_str()),
+                ),
+            );
+            if let Some(track) = track {
+                if let Some(binding) = controls.artist_links.borrow().as_ref() {
+                    binding.bind(track_artist_links(&track));
+                }
+                if let Some(binding) = controls.album_links.borrow().as_ref() {
+                    binding.bind(DetailLinks::route(
+                        &track.album,
+                        track.album_media_uri.clone().map(Route::AlbumDetail),
+                    ));
+                }
+            }
+        });
+    }
+
+    pub(crate) fn set_bottom_player_favorite(&self, target: &library::FavoriteTarget, value: bool) {
+        let library::FavoriteTarget::Track(media_uri) = target else {
+            return;
+        };
+        let current_matches = self
+            .selected_playback()
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+            .is_some_and(|current| current.media_uri == *media_uri);
+        if current_matches {
+            set_favorite_button_active(&self.player_view.player_controls.favorite_button, value);
+        }
+    }
+
+    fn navigate_current_track_album(self: &Rc<Self>) {
+        let Some(current) = self
+            .selected_playback()
+            .as_deref()
+            .and_then(|player| player.transport.current.as_ref())
+            .cloned()
+        else {
+            return;
+        };
+        let database = self.products.library.clone();
+        let task = self.products.runtime.spawn(async move {
+            database
+                .track_row_by_uri(&current.media_uri, &library::ReadCancellation::new())
+                .await
+        });
+        let shell = Rc::downgrade(self);
+        gtk::glib::spawn_future_local(async move {
+            let Ok(Ok(Some(track))) = task.await else {
+                return;
+            };
+            let Some(shell) = shell.upgrade() else { return };
+            if let Some(album) = track.album_media_uri {
+                shell.navigate(Route::AlbumDetail(album));
+            }
         });
     }
 
@@ -1719,14 +1832,7 @@ pub(crate) fn connect_player_controls(shell: &Rc<Shell>) {
     install_now_playing_drag_source(&controls.title, &drag_artwork, shell);
     let title_shell = Rc::clone(shell);
     add_widget_click(controls.title.upcast_ref(), move || {
-        let album = title_shell
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.transport.current.as_ref())
-            .and_then(|current| current.track.album_key);
-        if let Some(album) = album {
-            title_shell.navigate(Route::AlbumDetail(album));
-        }
+        title_shell.navigate_current_track_album();
     });
     install_current_track_context_menu(&shell.player_view.player_controls.cover.area, shell);
     let menu_shell = Rc::clone(shell);
@@ -1951,17 +2057,12 @@ fn install_now_playing_drag_source(
     shell: &Rc<Shell>,
 ) {
     let drag_shell = Rc::downgrade(shell);
-    install_compact_playlist_drag_source(target, artwork, move || {
+    install_compact_media_drag_source(target, artwork, move || {
         let shell = drag_shell.upgrade()?;
         let player = shell.selected_playback()?;
         let current = player.transport.current.as_ref()?;
-        let track = current.track.track_key?;
-        let source = PlaylistTrackSource::track(
-            current.id.source_key,
-            current.id.source_session_epoch,
-            track,
-        );
-        Some((source, current.track.title.clone()))
+        let source = MediaDragSource::media_uris([current.media_uri.clone()]);
+        Some((source, current.title.clone()))
     });
 }
 

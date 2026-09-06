@@ -8,14 +8,14 @@
     <property name="icon-name">rufin-library-music-symbolic</property>
     <child>
       <object class="AdwPreferencesGroup" id="servers_group">
-        <property name="title" translatable="yes">Servers</property>
+        <property name="title" translatable="yes">Sources</property>
       </object>
     </child>
   </object>
 
   <object class="AdwActionRow" id="empty_remote_row">
-    <property name="title" translatable="yes">No remote sources configured</property>
-    <property name="subtitle" translatable="yes">Jellyfin, Navidrome, or OpenSubsonic</property>
+    <property name="title" translatable="yes">No sources configured</property>
+
   </object>
 
   <object class="AdwPreferencesGroup" id="downloads_group">
@@ -24,6 +24,7 @@
   </object>
   <object class="AdwActionRow" id="download_folder_row">
     <property name="title" translatable="yes">Download Folder</property>
+
     <child type="suffix">
       <object class="GtkButton" id="reset_folder">
         <property name="icon-name">rufin-view-refresh-symbolic</property>
@@ -32,7 +33,12 @@
         <style><class name="flat"/></style>
       </object>
     </child>
-    <child type="suffix">
+    <child type="suffix"><object class="GtkButton" id="open_folder">
+      <property name="icon-name">rufin-document-open-symbolic</property>
+      <property name="tooltip-text" translatable="yes">Open Folder</property>
+      <property name="valign">center</property><style><class name="flat"/></style>
+    </object></child>
+<child type="suffix">
       <object class="GtkButton" id="choose_folder">
         <property name="label" translatable="yes">Choose</property>
         <property name="valign">center</property>
@@ -196,7 +202,24 @@
             </property>
           </object>
         </child>
+        <child>
+              <object class="GtkButton" id="forget_local">
+                <property name="tooltip-text" translatable="yes">Forget Source</property><property name="halign">fill</property><property name="hexpand">true</property>
+                <style><class name="flat"/><class name="destructive-action"/></style>
+                <property name="child"><object class="GtkBox"><property name="orientation">horizontal</property><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-window-close-symbolic</property></object></child><child><object class="GtkLabel"><property name="label" translatable="yes">Forget Source</property><property name="ellipsize">end</property><property name="width-chars">0</property><property name="max-width-chars">18</property><property name="wrap">true</property><property name="wrap-mode">word-char</property><property name="lines">2</property></object></child></object></property>
+              </object>
+        </child>
       </object>
     </property>
+  </object>
+  <object class="AdwPreferencesPage" id="local_page"><property name="title" translatable="yes">Local</property></object>
+  <object class="AdwActionRow" id="local_source_row"><property name="title" translatable="yes">Local</property><property name="activatable">true</property><child type="prefix"><object class="GtkImage"><property name="icon-name">rufin-folders-symbolic</property><property name="pixel-size">28</property></object></child><child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child></object>
+  <object class="GtkButton" id="add_source"><property name="label" translatable="yes">Add Source</property></object>
+  <object class="AdwAlertDialog" id="forget_local_confirm">
+    <property name="heading" translatable="yes">Forget Source</property>
+    <property name="body" translatable="yes">Remove Local and its cached library from Rufin? Your music files will not be deleted.</property>
+    <property name="close-response">cancel</property>
+    <property name="default-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="forget" appearance="destructive" translatable="yes">Forget Source</response></responses>
   </object>
 </interface>

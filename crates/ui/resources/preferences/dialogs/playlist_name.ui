@@ -7,8 +7,31 @@
     <property name="heading" translatable="yes">New Playlist</property>
     <property name="close-response">cancel</property>
     <property name="extra-child">
-      <object class="GtkEntry" id="new_entry">
-        <property name="placeholder-text" translatable="yes">Playlist name</property>
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <child>
+          <object class="GtkOverlay">
+            <property name="child">
+              <object class="GtkEntry" id="new_entry">
+                <property name="placeholder-text" translatable="yes">Playlist name</property>
+                <style><class name="playlist-name-owner-entry"/></style>
+              </object>
+            </property>
+            <child type="overlay">
+              <object class="GtkToggleButton" id="new_owner">
+                <property name="halign">end</property>
+                <property name="valign">center</property>
+                <property name="margin-end">4</property>
+                <style>
+                  <class name="flat"/>
+                  <class name="circular"/>
+                  <class name="playlist-name-owner"/>
+                </style>
+              </object>
+            </child>
+          </object>
+        </child>
       </object>
     </property>
     <responses>

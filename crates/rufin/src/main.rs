@@ -2,6 +2,7 @@
 
 mod album_release;
 mod app;
+mod backup;
 mod diagnostics;
 mod loudness;
 mod paths;

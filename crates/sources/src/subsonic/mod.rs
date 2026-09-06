@@ -6,7 +6,7 @@ use crate::{
     NativeLyricsDocument, NativeLyricsRole, SourceConfiguration, SourceEditResult, SourceError,
     SourceResult,
 };
-use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality, StreamRequest};
+use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
@@ -198,6 +198,7 @@ struct SubsonicSourcePayload {
 pub enum SubsonicAuthentication {
     #[default]
     Password,
+    LegacyPassword,
     ApiKey,
 }
 
@@ -249,12 +250,6 @@ impl SubsonicSourceConfig {
             "authentication": self.authentication,
         })
     }
-
-    pub(crate) fn same_account(&self, other: &Self) -> SourceResult<bool> {
-        let current = rest_endpoint_identity(&normalize_base_url(&self.base_url)?);
-        let next = rest_endpoint_identity(&normalize_base_url(&other.base_url)?);
-        Ok(self.username == other.username && current == next)
-    }
 }
 
 struct AuthenticatedSubsonic {
@@ -264,22 +259,20 @@ struct AuthenticatedSubsonic {
 }
 
 impl AuthenticatedSubsonic {
-    fn connected(mut self, source_id: Option<SourceId>) -> ConnectedSource {
-        if let Some(source_id) = source_id {
-            self.configuration.source_id = source_id;
-        }
+    fn connected(self) -> ConnectedSource {
         ConnectedSource::subsonic(self.configuration, self.source, Some(self.credential))
     }
 }
 
 pub(crate) async fn connect(
+    source_id: SourceId,
     flavor: SubsonicFlavor,
     authentication: SubsonicAuthentication,
     credentials: CredentialHostInput,
 ) -> SourceResult<ConnectedSource> {
-    SubsonicSource::authenticate(flavor, authentication, credentials)
+    SubsonicSource::authenticate(source_id, flavor, authentication, credentials)
         .await
-        .map(|authenticated| authenticated.connected(None))
+        .map(AuthenticatedSubsonic::connected)
 }
 
 pub(crate) fn open(
@@ -321,6 +314,7 @@ pub(crate) async fn edit(
 
     if has_password {
         let authenticated = SubsonicSource::authenticate(
+            current.source_id,
             flavor,
             authentication,
             CredentialHostInput {
@@ -332,14 +326,8 @@ pub(crate) async fn edit(
             },
         )
         .await?;
-        let next = SubsonicSourceConfig::from_configuration(&authenticated.configuration)?;
-        let source_id = if saved.same_account(&next)? {
-            Some(current.source_id)
-        } else {
-            None
-        };
         return Ok(SourceEditResult::Connected(Box::new(
-            authenticated.connected(source_id),
+            authenticated.connected(),
         )));
     }
 
@@ -367,24 +355,6 @@ pub(crate) async fn edit(
     Ok(SourceEditResult::Connected(Box::new(
         ConnectedSource::subsonic(configuration, source, None),
     )))
-}
-
-async fn require_api_key_authentication(client: &Client, base_url: &Url) -> SourceResult<()> {
-    let url = unauthenticated_url(base_url, "getOpenSubsonicExtensions")?;
-    let response = subsonic_json::<OpenSubsonicExtensionsBody>(client.get(url)).await?;
-    let supported = response
-        .body
-        .open_subsonic_extensions
-        .iter()
-        .any(|extension| {
-            extension.name == "apiKeyAuthentication" && extension.versions.contains(&1)
-        });
-    if !supported {
-        return Err(SourceError::Auth(
-            "The server does not advertise OpenSubsonic API key authentication.".to_string(),
-        ));
-    }
-    Ok(())
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -472,6 +442,7 @@ impl SubsonicSource {
 
     #[instrument(skip(credentials), fields(base_url = %credentials.server_url, username = %credentials.username, source_kind = flavor.source_id(), trust_invalid_cert = credentials.trust_invalid_cert))]
     async fn authenticate(
+        source_id: SourceId,
         flavor: SubsonicFlavor,
         authentication: SubsonicAuthentication,
         credentials: CredentialHostInput,
@@ -489,7 +460,7 @@ impl SubsonicSource {
             (SubsonicFlavor::Navidrome, SubsonicAuthentication::Password) => {
                 SubsonicCredential::from_navidrome_password(&password)
             }
-            (SubsonicFlavor::Navidrome, SubsonicAuthentication::ApiKey) => {
+            (SubsonicFlavor::Navidrome, _) => {
                 return Err(SourceError::InvalidRequest(
                     "Navidrome requires password authentication",
                 ));
@@ -497,20 +468,57 @@ impl SubsonicSource {
             (SubsonicFlavor::Subsonic, SubsonicAuthentication::Password) => {
                 SubsonicCredential::from_password(&password)
             }
+            (SubsonicFlavor::Subsonic, SubsonicAuthentication::LegacyPassword) => {
+                SubsonicCredential::LegacyPassword(password)
+            }
             (SubsonicFlavor::Subsonic, SubsonicAuthentication::ApiKey) => {
                 SubsonicCredential::from_api_key(&password)?
             }
         };
-        let canonical_username = match authentication {
-            SubsonicAuthentication::Password => username,
+        let (canonical_username, metadata_editing, provider_name) = match authentication {
+            SubsonicAuthentication::Password | SubsonicAuthentication::LegacyPassword => {
+                let mut ping_url = endpoint(&base_url, "ping")?;
+                ping_url
+                    .query_pairs_mut()
+                    .extend_pairs(credential.common_query(&username, &[]));
+                let response = subsonic_json::<SubsonicEmpty>(client.get(ping_url)).await?;
+                let observed = async {
+                    let mut user_url = endpoint(&base_url, "getUser")?;
+                    user_url.query_pairs_mut().extend_pairs(
+                        credential.common_query(&username, &[("username", username.as_str())]),
+                    );
+                    subsonic_json::<AuthenticateBody>(client.get(user_url)).await
+                }
+                .await
+                .ok();
+                let canonical = observed
+                    .as_ref()
+                    .map(|value| value.body.user.username.trim())
+                    .filter(|value| !value.is_empty())
+                    .unwrap_or(username.trim())
+                    .to_string();
+                let editing = observed
+                    .as_ref()
+                    .is_some_and(|value| value.body.user.admin_role);
+                let name = observed
+                    .and_then(|value| value.server_type)
+                    .or(response.server_type)
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| flavor.display_name().to_string());
+                (canonical, editing, name)
+            }
             SubsonicAuthentication::ApiKey => {
-                require_api_key_authentication(&client, &base_url).await?;
                 let mut token_url = endpoint(&base_url, "tokenInfo")?;
                 token_url
                     .query_pairs_mut()
                     .extend_pairs(credential.common_query("", &[]));
                 let response = subsonic_json::<TokenInfoBody>(client.get(token_url)).await?;
-                response.body.token_info.username
+                let canonical = response.body.token_info.username;
+                let name = response
+                    .server_type
+                    .filter(|name| !name.trim().is_empty())
+                    .unwrap_or_else(|| flavor.display_name().to_string());
+                (canonical, false, name)
             }
         };
         if canonical_username.trim().is_empty() {
@@ -518,32 +526,10 @@ impl SubsonicSource {
                 "OpenSubsonic returned an empty canonical username".to_string(),
             ));
         }
-        let mut auth_url = endpoint(&base_url, "getUser")?;
-        auth_url
-            .query_pairs_mut()
-            .extend_pairs(credential.common_query(
-                &canonical_username,
-                &[("username", canonical_username.as_str())],
-            ));
-        let response = subsonic_json::<AuthenticateBody>(client.get(auth_url)).await?;
-        let body = response.body;
-        if body.user.username.trim().is_empty() {
-            return Err(SourceError::Auth(
-                "OpenSubsonic returned an empty canonical username".to_string(),
-            ));
-        }
-        let canonical_username = body.user.username;
-        let provider_name = response
-            .server_type
-            .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| flavor.display_name().to_string());
-        let metadata_editing = body.user.admin_role;
         let source_kind = flavor.source_id();
-        let rest_endpoint = rest_endpoint_identity(&base_url);
-        let source_hash = stable_source_id(source_kind, &rest_endpoint, &canonical_username);
         let serialized_credential = credential.serialize();
         let configuration = crate::config::encode_provider_payload(
-            SourceId::new(format!("{source_kind}:server:{source_hash}")),
+            source_id,
             source_kind,
             crate::source::configured_source_name(submitted_name, provider_name),
             SubsonicSourceConfig {

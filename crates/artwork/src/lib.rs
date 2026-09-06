@@ -5,10 +5,10 @@
 //! disk.
 
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex};
 
-use sources::{ImageBytes, Source, SourceId, SourceImageRequest, SourceResult};
+use sources::{Source, SourceId};
 use thiserror::Error;
 use tokio::runtime::Handle;
 use tokio::sync::oneshot;
@@ -22,40 +22,7 @@ mod selection;
 pub use decode::{DecodedImage, RgbaImage, decode_rgba, square_thumbnail_png};
 pub use selection::ArtworkBinding;
 
-#[derive(Clone)]
-pub struct SourceImages {
-    pub source_id: SourceId,
-    source: Option<Arc<Source>>,
-}
-
-impl SourceImages {
-    pub fn new(source: Arc<Source>) -> Self {
-        Self {
-            source_id: source.source_id().clone(),
-            source: Some(source),
-        }
-    }
-
-    pub fn cache_only(source_id: SourceId) -> Self {
-        Self {
-            source_id,
-            source: None,
-        }
-    }
-
-    fn can_fetch(&self) -> bool {
-        self.source.is_some()
-    }
-
-    async fn image(&self, request: SourceImageRequest) -> SourceResult<ImageBytes> {
-        if let Some(source) = &self.source {
-            return source.image(request).await;
-        }
-        Err(sources::SourceError::InvalidRequest(
-            "artwork source is not connected",
-        ))
-    }
-}
+pub(crate) type SourceResolver = dyn Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct ExternalPolicy {
@@ -115,16 +82,44 @@ impl ArtworkRequest {
 }
 
 #[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub(crate) struct ArtworkKey(String);
-
-impl ArtworkKey {
-    fn new(identity: String) -> Self {
-        Self(format!("{:x}", md5::compute(identity.as_bytes())))
-    }
+pub struct ArtworkKey {
+    binding: String,
+    variant: String,
+    fetch_size: u32,
+    render_size: u32,
 }
 
-#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
-pub struct DecodedImageIdentity(ArtworkKey);
+impl ArtworkKey {
+    fn derive(
+        identity: &str,
+        sizes: (u32, u32),
+        external: Option<&ExternalPolicy>,
+        allow_fetch: bool,
+        epochs: (u64, u64),
+    ) -> Self {
+        let policy = external
+            .map(|policy| format!("{policy:?}\0{}", epochs.1))
+            .unwrap_or_default();
+        Self {
+            binding: Self::binding_digest(identity),
+            variant: Self::binding_digest(&format!("{policy}\0{allow_fetch}\0{}", epochs.0)),
+            fetch_size: sizes.0,
+            render_size: sizes.1,
+        }
+    }
+
+    fn binding_digest(identity: &str) -> String {
+        format!("{:x}", md5::compute(identity.as_bytes()))
+    }
+
+    fn reuse_group(&self) -> (String, String) {
+        (self.binding.clone(), self.variant.clone())
+    }
+
+    pub fn same_image(&self, other: &Self) -> bool {
+        self.binding == other.binding && self.variant == other.variant
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq)]
 pub(crate) struct RequestId(u64);
@@ -176,36 +171,11 @@ pub(crate) struct ArtworkPreparation {
     pub failed: usize,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ArtworkVisualIdentity(String);
-
-impl ArtworkVisualIdentity {
-    fn new(identity: String) -> Self {
-        Self(format!("{:x}", md5::compute(identity.as_bytes())))
-    }
-}
-
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-pub struct ArtworkRequestIdentity(String);
-
-impl ArtworkRequestIdentity {
-    fn new(identity: String) -> Self {
-        Self(format!("{:x}", md5::compute(identity.as_bytes())))
-    }
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ArtworkBindingIdentity {
-    pub visual: ArtworkVisualIdentity,
-    pub request: ArtworkRequestIdentity,
-}
-
 pub struct PreparedArtwork {
-    pub identity: ArtworkBindingIdentity,
-    pub decoded_identities: Vec<DecodedImageIdentity>,
+    pub key: ArtworkKey,
     pub ready: Option<Arc<DecodedImage>>,
-    source: SourceImages,
     request: ArtworkRequest,
+    allow_fetch: bool,
 }
 
 #[derive(Debug, Error)]
@@ -227,6 +197,7 @@ pub enum ArtworkError {
 #[derive(Clone)]
 pub struct Artwork {
     pipeline: Arc<pipeline::Pipeline>,
+    source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
 }
 
 struct SourceManifest {
@@ -266,29 +237,48 @@ impl Artwork {
     }
     pub fn new(cache_root: impl AsRef<Path>, runtime: Handle) -> Result<Self, ArtworkError> {
         let cache_root = cache::current_layout(cache_root.as_ref())?;
-        let pipeline = pipeline::Pipeline::new(&cache_root, runtime)?;
+        let source_resolver = Arc::new(Mutex::new(None));
+        let pipeline = pipeline::Pipeline::new(&cache_root, runtime, Arc::clone(&source_resolver))?;
         Ok(Self {
             pipeline: Arc::new(pipeline),
+            source_resolver,
         })
     }
 
-    pub fn prepare(&self, source: SourceImages, request: ArtworkRequest) -> PreparedArtwork {
-        let (identity, decoded_identities, ready) =
-            self.pipeline.binding_identity_and_image(&source, &request);
+    pub fn install_source_resolver(
+        &self,
+        resolver: impl Fn(&SourceId) -> Option<Arc<Source>> + Send + Sync + 'static,
+    ) {
+        *self
+            .source_resolver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(Arc::new(resolver));
+    }
+
+    fn prepare_request(&self, request: ArtworkRequest, allow_fetch: bool) -> PreparedArtwork {
+        let (key, ready) = self.pipeline.key_and_image(&request, allow_fetch);
         PreparedArtwork {
-            identity,
-            decoded_identities,
+            key,
             ready,
-            source,
             request,
+            allow_fetch,
         }
     }
 
-    pub fn request_prepared(&self, prepared: PreparedArtwork) -> Result<ArtworkLoad, ArtworkError> {
-        self.pipeline.request(prepared.source, prepared.request)
+    pub fn prepare(&self, request: ArtworkRequest) -> PreparedArtwork {
+        self.prepare_request(request, true)
     }
 
-    fn source_preparation_complete(
+    pub fn prepare_cache_only(&self, request: ArtworkRequest) -> PreparedArtwork {
+        self.prepare_request(request, false)
+    }
+
+    pub fn request_prepared(&self, prepared: PreparedArtwork) -> Result<ArtworkLoad, ArtworkError> {
+        self.pipeline
+            .request(prepared.request, prepared.allow_fetch)
+    }
+
+    pub fn source_preparation_complete(
         &self,
         source_id: &SourceId,
         revision: u64,
@@ -301,42 +291,19 @@ impl Artwork {
         &self,
         database: &library::Database,
         source_key: library::SourceKey,
-        source: SourceImages,
+        source_id: &SourceId,
         accepted_digest: [u8; 32],
         progress: &(dyn Fn(u64, usize) + Send + Sync),
         cancelled: Arc<AtomicBool>,
     ) -> Result<Option<u64>, ArtworkError> {
         let accepted_revision = digest_revision(&accepted_digest);
-        if self.source_preparation_complete(&source.source_id, accepted_revision)? {
+        if self.source_preparation_complete(source_id, accepted_revision)? {
             return Ok(None);
         }
         let mut completed = 0_usize;
         let mut visible_progress = false;
-        if let Some(provider) = source.source.as_ref() {
-            let mut after = None;
-            loop {
-                if cancelled.load(Ordering::Acquire) {
-                    return Err(ArtworkError::Cancelled);
-                }
-                let page = provider
-                    .prepare_local_artwork_page(database, source_key, after)
-                    .await?;
-                completed = completed.saturating_add(page.completed);
-                if page.completed > 0 {
-                    visible_progress = true;
-                    progress(accepted_revision, completed);
-                }
-                after = page.next_album;
-                if after.is_none() {
-                    break;
-                }
-            }
-        }
-        let revision = digest_revision(&database.finalize_artwork_digest(source_key).await?);
-        if self.source_preparation_complete(&source.source_id, revision)? {
-            return Ok(Some(revision));
-        }
-        let manifest = self.begin_source_manifest(source.source_id.clone(), revision)?;
+        let revision = accepted_revision;
+        let manifest = self.begin_source_manifest(source_id.clone(), revision)?;
         let mut after_binding = None;
         loop {
             if cancelled.load(Ordering::Acquire) {
@@ -356,11 +323,9 @@ impl Artwork {
             after_binding = page.last().cloned();
             manifest.record_page(&page)?;
             let pipeline = Arc::clone(&self.pipeline);
-            let images = source.clone();
-            let bindings: Arc<[Vec<u8>]> = page.into();
             let page_cancelled = Arc::clone(&cancelled);
             let summary = tokio::task::spawn_blocking(move || {
-                pipeline.prefetch_source_artwork(images, bindings, &|_, _| {}, &move || {
+                pipeline.prefetch_source_artwork(page.into(), &|_, _| {}, &|| {
                     page_cancelled.load(Ordering::Acquire)
                 })
             })
@@ -378,12 +343,8 @@ impl Artwork {
         Ok(Some(revision))
     }
 
-    pub fn cache_only_file(
-        &self,
-        source_id: &SourceId,
-        request: &ArtworkRequest,
-    ) -> Option<PathBuf> {
-        self.pipeline.cache_only_file(source_id, request)
+    pub fn cache_only_file(&self, request: &ArtworkRequest) -> Option<PathBuf> {
+        self.pipeline.cache_only_file(request)
     }
 
     pub fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -403,6 +364,195 @@ fn digest_revision(digest: &[u8; 32]) -> u64 {
 mod preparation_tests {
     use super::*;
     use std::sync::atomic::AtomicUsize;
+
+    #[test]
+    fn preparing_a_binding_does_not_construct_its_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let artwork =
+            Artwork::new(directory.path().join("covers"), runtime.handle().clone()).unwrap();
+        let encoded =
+            sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
+                .unwrap();
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64);
+        let identity_without_resolver = artwork.prepare(request.clone()).key;
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        artwork.install_source_resolver(move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        });
+
+        let identity_with_resolver = artwork.prepare(request.clone()).key;
+        let _cache_only = artwork.prepare_cache_only(request.clone());
+        let _cached_file = artwork.cache_only_file(&request);
+
+        assert_eq!(identity_without_resolver, identity_with_resolver);
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn cached_native_artwork_reuses_pixels_without_resolving_a_provider() {
+        let directory = tempfile::tempdir().unwrap();
+        let root = directory.path().join("covers");
+        let artwork = Artwork::new(&root, Handle::current()).unwrap();
+        let encoded = sources::native_artwork_binding(
+            "source",
+            &sources::NativeImageRef::new("cover", Some("revision".into())),
+        )
+        .unwrap();
+        let binding = ArtworkBinding::opaque(&encoded);
+        let cache = cache::FilesystemCache::new(root.join("v1")).unwrap();
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            32,
+            32,
+            image::Rgba([40, 80, 120, 255]),
+        ))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+        cache
+            .write_ready(binding.candidate().unwrap(), 256, png.get_ref())
+            .unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        artwork.install_source_resolver(move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        });
+
+        let prepared = artwork.prepare(ArtworkRequest::new(binding.clone(), 256, 128));
+        let key = prepared.key.clone();
+        let ArtworkLoad::Pending(pending) = artwork.request_prepared(prepared).unwrap() else {
+            panic!("disk cache requires worker decoding");
+        };
+        let ArtworkOutcome::Ready(image) = pending.finish().await else {
+            panic!("cached image must decode");
+        };
+        assert_eq!(image.key(), &key);
+        let smaller = artwork.prepare(ArtworkRequest::new(binding.clone(), 96, 64));
+        assert!(Arc::ptr_eq(smaller.ready.as_ref().unwrap(), &image));
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+
+        artwork.invalidate_source(&SourceId::new("source")).unwrap();
+        let invalidated = artwork.prepare(ArtworkRequest::new(binding, 256, 128));
+        assert_ne!(invalidated.key, key);
+        assert!(invalidated.ready.is_none());
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_native_cache_miss_resolves_its_source_in_the_worker() {
+        let directory = tempfile::tempdir().unwrap();
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        artwork.install_source_resolver(move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        });
+        let encoded =
+            sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
+                .unwrap();
+        let prepared = artwork.prepare(ArtworkRequest::new(
+            ArtworkBinding::opaque(&encoded),
+            128,
+            64,
+        ));
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+
+        let ArtworkLoad::Pending(pending) = artwork.request_prepared(prepared).unwrap() else {
+            panic!("uncached native artwork should enter the worker");
+        };
+        assert!(matches!(pending.finish().await, ArtworkOutcome::Failed(_)));
+        assert_eq!(resolutions.load(Ordering::Relaxed), 1);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_cache_only_miss_never_resolves_a_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        artwork.install_source_resolver(move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        });
+        let encoded =
+            sources::native_artwork_binding("source", &sources::NativeImageRef::new("cover", None))
+                .unwrap();
+        let prepared = artwork.prepare_cache_only(ArtworkRequest::new(
+            ArtworkBinding::opaque(&encoded),
+            128,
+            64,
+        ));
+
+        let ArtworkLoad::Pending(pending) = artwork.request_prepared(prepared).unwrap() else {
+            panic!("uncached artwork should check the cache worker");
+        };
+        assert!(matches!(pending.finish().await, ArtworkOutcome::Missing));
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+    }
+
+    #[tokio::test(flavor = "multi_thread")]
+    async fn a_local_binding_reads_its_locator_without_a_source() {
+        let directory = tempfile::tempdir().unwrap();
+        let image = directory.path().join("cover.png");
+        let mut encoded_image = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgb8(image::RgbImage::from_pixel(1, 1, image::Rgb([255, 0, 0])))
+            .write_to(&mut encoded_image, image::ImageFormat::Png)
+            .unwrap();
+        std::fs::write(&image, encoded_image.into_inner()).unwrap();
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        let resolutions = Arc::new(AtomicUsize::new(0));
+        let observed = Arc::clone(&resolutions);
+        artwork.install_source_resolver(move |_| {
+            observed.fetch_add(1, Ordering::Relaxed);
+            None
+        });
+        let encoded = serde_json::to_vec(&sources::LocalImageRef::File {
+            source_id: SourceId::new("configured-local"),
+            path: image.to_string_lossy().into_owned(),
+            revision: "fixture".to_string(),
+        })
+        .unwrap();
+        let request = ArtworkRequest::new(ArtworkBinding::opaque(&encoded), 128, 64);
+        let prepared = artwork.prepare(request.clone());
+        let key = prepared.key.clone();
+
+        let ArtworkLoad::Pending(pending) = artwork.request_prepared(prepared).unwrap() else {
+            panic!("uncached Local artwork should enter the worker");
+        };
+        let ArtworkOutcome::Ready(decoded) = pending.finish().await else {
+            panic!("Local image must decode");
+        };
+        assert!(Arc::ptr_eq(
+            artwork.prepare(request.clone()).ready.as_ref().unwrap(),
+            &decoded
+        ));
+        let cached = artwork.cache_only_file(&request).unwrap();
+        assert!(cached.is_file());
+        let manifest = artwork
+            .begin_source_manifest(SourceId::new("configured-local"), 1)
+            .unwrap();
+        manifest.record_page(&[encoded]).unwrap();
+        manifest.finish().unwrap();
+        assert!(
+            cached.is_file(),
+            "current Local bindings survive manifest reconciliation"
+        );
+        artwork
+            .invalidate_source(&SourceId::new("configured-local"))
+            .unwrap();
+        assert!(!cached.exists());
+        let invalidated = artwork.prepare(request);
+        assert_ne!(invalidated.key, key);
+        assert!(
+            invalidated.ready.is_none(),
+            "Forget must remove even a still-live decoded binding"
+        );
+        assert_eq!(resolutions.load(Ordering::Relaxed), 0);
+    }
 
     #[tokio::test]
     async fn completed_database_source_emits_no_preparation_progress() {
@@ -431,7 +581,7 @@ mod preparation_tests {
             .prepare_database_source(
                 &database,
                 publication.source,
-                SourceImages::cache_only(source),
+                &source,
                 publication.artwork_digest,
                 &|_, _| {
                     progress.fetch_add(1, Ordering::Relaxed);
@@ -465,7 +615,7 @@ mod preparation_tests {
             .prepare_database_source(
                 &database,
                 publication.source,
-                SourceImages::cache_only(SourceId::new("source")),
+                &SourceId::new("source"),
                 publication.artwork_digest,
                 &|_, _| {
                     progress.fetch_add(1, Ordering::Relaxed);

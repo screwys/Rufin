@@ -23,11 +23,19 @@ const EDITOR_MAX_HEIGHT: i32 = 720;
 const EDITOR_FIELD_STACK_WIDTH: i32 = 520;
 const FIELD_COLUMN_SPACING: i32 = 18;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum MetadataItemId {
-    Track(library::TrackKey),
-    Album(library::AlbumKey),
-    Artist(library::ArtistKey),
+    Track(String),
+    Album(String),
+    Artist(String),
+}
+
+impl MetadataItemId {
+    fn media_uri(&self) -> &str {
+        match self {
+            Self::Track(uri) | Self::Album(uri) | Self::Artist(uri) => uri,
+        }
+    }
 }
 
 #[derive(Clone)]
@@ -69,7 +77,6 @@ struct MetadataEntry {
 }
 
 struct Editor {
-    dialog: gtk::glib::WeakRef<adw::Dialog>,
     draft: MetadataDraft,
     entries: Vec<MetadataEntry>,
     locked: Option<adw::SwitchRow>,
@@ -84,30 +91,41 @@ struct Editor {
 }
 
 pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
-    let Some(selected) = shell.selected_library().as_deref().cloned() else {
-        return;
-    };
-    let receiver = match item {
-        MetadataItemId::Track(key) => {
-            MetadataReceiver::Track(selected.operations.track_metadata(key))
+    let receiver = match &item {
+        MetadataItemId::Track(uri) => {
+            MetadataReceiver::Track(shell.products.source.track_metadata(uri.clone()))
         }
-        MetadataItemId::Album(key) => {
-            MetadataReceiver::Album(selected.operations.album_metadata(key))
+        MetadataItemId::Album(uri) => {
+            MetadataReceiver::Album(shell.products.source.album_metadata(uri.clone()))
         }
-        MetadataItemId::Artist(key) => {
-            MetadataReceiver::Artist(selected.operations.artist_metadata(key))
+        MetadataItemId::Artist(uri) => {
+            MetadataReceiver::Artist(shell.products.source.artist_metadata(uri.clone()))
         }
     };
-    let shell = Rc::downgrade(shell);
-    gtk::glib::spawn_future_local(async move {
+    if let Some(load) = shell.selected_ui.metadata_load.borrow_mut().take() {
+        load.abort();
+    }
+    let weak_shell = Rc::downgrade(shell);
+    let load = gtk::glib::spawn_future_local(async move {
         let draft = receiver.recv().await;
-        let Some(shell) = shell.upgrade() else { return };
-        if !selected_metadata_source_is_current(&shell, &selected) {
+        let Some(shell) = weak_shell.upgrade() else {
             return;
-        }
+        };
         match draft {
-            Ok(draft) => build_dialog(&shell, selected, item, draft),
-            Err(SourceMetadataError::LocalAccessRequired { source_path }) => {
+            Ok(draft) => build_dialog(&shell, item, draft),
+            Err(SourceMetadataError::LocalAccessRequired {
+                source_id,
+                source_path,
+            }) => {
+                let Some(selected) = shell
+                    .selected_library()
+                    .as_deref()
+                    .filter(|selected| selected.source_id == source_id)
+                    .cloned()
+                else {
+                    shell.show_feedback_toast(tr(msgid("Metadata editing requires Local access")));
+                    return;
+                };
                 let retry_shell = Rc::downgrade(&shell);
                 present_local_access_recovery(
                     &shell,
@@ -115,7 +133,7 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                     &source_path,
                     Rc::new(move || {
                         if let Some(shell) = retry_shell.upgrade() {
-                            present_metadata_dialog(&shell, item);
+                            present_metadata_dialog(&shell, item.clone());
                         }
                     }),
                 );
@@ -126,6 +144,7 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
             Err(error) => present_metadata_error(&shell, &error.to_string()),
         }
     });
+    shell.selected_ui.metadata_load.replace(Some(load));
 }
 
 fn present_metadata_error(shell: &Rc<Shell>, message: &str) {
@@ -208,12 +227,7 @@ fn present_local_access_recovery(
     shell.present_selected_dialog(&recovery_dialog);
 }
 
-fn build_dialog(
-    shell: &Rc<Shell>,
-    selected: crate::runtime::SelectedLibrary,
-    item: MetadataItemId,
-    draft: MetadataDraft,
-) {
+fn build_dialog(shell: &Rc<Shell>, item: MetadataItemId, draft: MetadataDraft) {
     let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
     crate::ui_resource::objects!(builder, resource, {
@@ -251,7 +265,6 @@ fn build_dialog(
     );
 
     let editor = Rc::new(Editor {
-        dialog: editor_dialog.downgrade(),
         draft,
         entries,
         locked,
@@ -276,8 +289,8 @@ fn build_dialog(
             dialog.close();
         }
     });
-    connect_identify(shell, selected.clone(), item, &editor);
-    connect_save(shell, selected, item, &editor_dialog, &editor);
+    connect_identify(shell, item.clone(), &editor);
+    connect_save(shell, item, &editor_dialog, &editor);
     shell.present_selected_dialog(&editor_dialog);
 }
 
@@ -837,14 +850,7 @@ fn refresh_save_state(editor: &Editor) {
     editor
         .save
         .set_sensitive(!editor.touched.borrow().is_empty() || editor.token.borrow().is_some());
-    if let Ok(values) = current_values(
-        match &editor.draft {
-            MetadataDraft::Track(value) => MetadataItemId::Track(value.track_key),
-            MetadataDraft::Album(value) => MetadataItemId::Album(value.album_key),
-            MetadataDraft::Artist(value) => MetadataItemId::Artist(value.artist_key),
-        },
-        editor,
-    ) {
+    if let Ok(values) = current_draft_values(editor) {
         editor.identify.set_sensitive(identification_available(
             editor.draft.source_search(),
             editor.external_lookup_allowed,
@@ -862,12 +868,7 @@ fn identification_available(
         || external_lookup_allowed && values.has_exact_musicbrainz_identity()
 }
 
-fn connect_identify(
-    shell: &Rc<Shell>,
-    selected: crate::runtime::SelectedLibrary,
-    item: MetadataItemId,
-    editor: &Rc<Editor>,
-) {
+fn connect_identify(shell: &Rc<Shell>, item: MetadataItemId, editor: &Rc<Editor>) {
     let shell = Rc::downgrade(shell);
     let identify = editor.identify.clone();
     let editor = Rc::downgrade(editor);
@@ -878,11 +879,7 @@ fn connect_identify(
         let Some(editor) = editor.upgrade() else {
             return;
         };
-        if !selected_metadata_source_is_current(&shell, &selected) {
-            editor.force_close();
-            return;
-        }
-        let values = match current_values(item, &editor) {
+        let values = match current_values(&item, &editor) {
             Ok(values) => values,
             Err(error) => {
                 editor.show_error(&error);
@@ -897,38 +894,24 @@ fn connect_identify(
             return;
         }
         editor.set_busy(true, &tr("Identifying..."));
+        let source = shell.products.source.clone();
         let receiver = match values {
             CurrentValues::Track(values) => IdentifyReceiver::Track(
-                selected
-                    .operations
-                    .identify_track_metadata(track_key(item), values),
+                source.identify_track_metadata(item.media_uri().to_string(), values),
             ),
             CurrentValues::Album(values) => IdentifyReceiver::Album(
-                selected
-                    .operations
-                    .identify_album_metadata(album_key(item), values),
+                source.identify_album_metadata(item.media_uri().to_string(), values),
             ),
             CurrentValues::Artist(values) => IdentifyReceiver::Artist(
-                selected
-                    .operations
-                    .identify_artist_metadata(artist_key(item), values),
+                source.identify_artist_metadata(item.media_uri().to_string(), values),
             ),
         };
         let editor = Rc::downgrade(&editor);
-        let shell = Rc::downgrade(&shell);
-        let selected = selected.clone();
         gtk::glib::spawn_future_local(async move {
             let response = receiver.recv().await;
             let Some(editor) = editor.upgrade() else {
                 return;
             };
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
-            if !selected_metadata_source_is_current(&shell, &selected) {
-                editor.force_close();
-                return;
-            }
             match response {
                 Ok(Some(Identified::Track(values, token))) => {
                     apply_track_values(&editor, &values);
@@ -953,7 +936,6 @@ fn connect_identify(
 
 fn connect_save(
     shell: &Rc<Shell>,
-    selected: crate::runtime::SelectedLibrary,
     item: MetadataItemId,
     dialog: &adw::Dialog,
     editor: &Rc<Editor>,
@@ -969,11 +951,7 @@ fn connect_save(
         let Some(editor) = editor.upgrade() else {
             return;
         };
-        if !selected_metadata_source_is_current(&shell, &selected) {
-            editor.force_close();
-            return;
-        }
-        let edit = match metadata_edit(item, &editor) {
+        let edit = match metadata_edit(&item, &editor) {
             Ok(edit) => edit,
             Err(error) => {
                 editor.show_error(&error);
@@ -983,26 +961,23 @@ fn connect_save(
         editor.set_busy(true, &tr("Saving..."));
         let revision = editor.draft.revision();
         let token = editor.token.borrow().clone();
+        let source = shell.products.source.clone();
         let receiver = match edit {
-            MetadataEdit::Track(edit) => {
-                SaveReceiver::Track(selected.operations.write_reviewed_track_metadata(
-                    track_key(item),
-                    revision,
-                    token,
-                    edit,
-                ))
-            }
-            MetadataEdit::Album(edit) => {
-                SaveReceiver::Album(selected.operations.write_reviewed_album_metadata(
-                    album_key(item),
-                    revision,
-                    token,
-                    edit,
-                ))
-            }
+            MetadataEdit::Track(edit) => SaveReceiver::Track(source.write_reviewed_track_metadata(
+                item.media_uri().to_string(),
+                revision,
+                token,
+                edit,
+            )),
+            MetadataEdit::Album(edit) => SaveReceiver::Album(source.write_reviewed_album_metadata(
+                item.media_uri().to_string(),
+                revision,
+                token,
+                edit,
+            )),
             MetadataEdit::Artist(edit) => {
-                SaveReceiver::Artist(selected.operations.write_reviewed_artist_metadata(
-                    artist_key(item),
+                SaveReceiver::Artist(source.write_reviewed_artist_metadata(
+                    item.media_uri().to_string(),
                     revision,
                     token,
                     edit,
@@ -1012,7 +987,7 @@ fn connect_save(
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
         let shell = Rc::downgrade(&shell);
-        let selected = selected.clone();
+        let retry_item = item.clone();
         gtk::glib::spawn_future_local(async move {
             let response = receiver.recv().await;
             let Some(editor) = editor.upgrade() else {
@@ -1021,17 +996,15 @@ fn connect_save(
             let Some(shell) = shell.upgrade() else {
                 return;
             };
-            if !selected_metadata_source_is_current(&shell, &selected) {
-                editor.force_close();
-                return;
-            }
             match response {
                 Ok(()) => {
                     if let Some(dialog) = dialog.upgrade() {
                         dialog.force_close();
                     }
                     let shell = Rc::clone(&shell);
-                    gtk::glib::idle_add_local_once(move || present_metadata_dialog(&shell, item));
+                    gtk::glib::idle_add_local_once(move || {
+                        present_metadata_dialog(&shell, retry_item)
+                    });
                 }
                 Err(error @ SourceMetadataError::SavedRefreshFailed(_)) => {
                     editor.show_error(&error.to_string());
@@ -1046,32 +1019,7 @@ fn connect_save(
     });
 }
 
-fn track_key(item: MetadataItemId) -> library::TrackKey {
-    let MetadataItemId::Track(key) = item else {
-        unreachable!()
-    };
-    key
-}
-fn album_key(item: MetadataItemId) -> library::AlbumKey {
-    let MetadataItemId::Album(key) = item else {
-        unreachable!()
-    };
-    key
-}
-fn artist_key(item: MetadataItemId) -> library::ArtistKey {
-    let MetadataItemId::Artist(key) = item else {
-        unreachable!()
-    };
-    key
-}
-
 impl Editor {
-    fn force_close(&self) {
-        if let Some(dialog) = self.dialog.upgrade() {
-            dialog.force_close();
-        }
-    }
-
     fn entry(&self, field: MetadataField) -> &adw::EntryRow {
         &self
             .entries
@@ -1182,14 +1130,21 @@ enum MetadataEdit {
     Artist(ArtistMetadataEdit),
 }
 
-fn current_values(item: MetadataItemId, editor: &Editor) -> Result<CurrentValues, String> {
+fn current_values(item: &MetadataItemId, editor: &Editor) -> Result<CurrentValues, String> {
     match item {
         MetadataItemId::Track(_) => Ok(CurrentValues::Track(track_values(editor)?)),
         MetadataItemId::Album(_) => Ok(CurrentValues::Album(album_values(editor)?)),
         MetadataItemId::Artist(_) => Ok(CurrentValues::Artist(artist_values(editor)?)),
     }
 }
-fn metadata_edit(item: MetadataItemId, editor: &Editor) -> Result<MetadataEdit, String> {
+fn current_draft_values(editor: &Editor) -> Result<CurrentValues, String> {
+    match &editor.draft {
+        MetadataDraft::Track(_) => Ok(CurrentValues::Track(track_values(editor)?)),
+        MetadataDraft::Album(_) => Ok(CurrentValues::Album(album_values(editor)?)),
+        MetadataDraft::Artist(_) => Ok(CurrentValues::Artist(artist_values(editor)?)),
+    }
+}
+fn metadata_edit(item: &MetadataItemId, editor: &Editor) -> Result<MetadataEdit, String> {
     match item {
         MetadataItemId::Track(_) => Ok(MetadataEdit::Track(TrackMetadataEdit {
             values: track_values(editor)?,
@@ -1706,51 +1661,9 @@ impl SaveReceiver {
     }
 }
 
-fn selected_metadata_source_is_current(
-    shell: &Shell,
-    expected: &crate::runtime::SelectedLibrary,
-) -> bool {
-    shell.selected_library().as_deref().is_some_and(|selected| {
-        metadata_source_matches(
-            expected.source_key,
-            expected.source_session_epoch,
-            selected.source_key,
-            selected.source_session_epoch,
-        )
-    })
-}
-
-fn metadata_source_matches(
-    expected_source: library::SourceKey,
-    expected_epoch: playback::SourceSessionEpoch,
-    actual_source: library::SourceKey,
-    actual_epoch: playback::SourceSessionEpoch,
-) -> bool {
-    expected_source == actual_source && expected_epoch == actual_epoch
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn metadata_completion_requires_the_same_source_session() {
-        let source = library::SourceKey::from_raw(1);
-        let epoch = playback::SourceSessionEpoch::new(7);
-        assert!(metadata_source_matches(source, epoch, source, epoch));
-        assert!(!metadata_source_matches(
-            source,
-            epoch,
-            library::SourceKey::from_raw(2),
-            epoch
-        ));
-        assert!(!metadata_source_matches(
-            source,
-            epoch,
-            source,
-            playback::SourceSessionEpoch::new(8)
-        ));
-    }
 
     #[test]
     fn private_mode_keeps_provider_source_search_available() {

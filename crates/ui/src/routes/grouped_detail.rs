@@ -31,11 +31,9 @@ pub(crate) struct GroupedDetailData {
     pub(super) seed: u32,
     pub(super) summary_items: Vec<(&'static str, String)>,
     pub(super) context_menu: Option<Rc<dyn Fn(&gtk::Widget, Option<(f64, f64)>, CollectionPlay)>>,
-    pub(super) selected: crate::runtime::SelectedLibrary,
-    pub(super) tracks: Vec<library::TrackKey>,
+    pub(super) tracks: Vec<String>,
     pub(super) first_row_position: usize,
     pub(super) first_rows: Vec<library::TrackRow>,
-    pub(super) play_order: Option<Vec<library::TrackKey>>,
     pub(super) table_context: &'static str,
     pub(super) playback_context: String,
     pub(super) play_label: &'static str,
@@ -85,11 +83,9 @@ impl Shell {
             seed,
             summary_items,
             context_menu,
-            selected,
             tracks,
             first_row_position,
             first_rows,
-            play_order,
             table_context,
             playback_context,
             play_label,
@@ -116,7 +112,6 @@ impl Shell {
         }
         showcase_view.replace_summary(&summary_items);
         let track_projection = self.searchable_track_collection(
-            &selected,
             tracks,
             first_row_position,
             first_rows,
@@ -131,55 +126,10 @@ impl Shell {
         );
         let controller = self.products.playback.queue.clone();
         let play_context = playback_context;
-        let play: CollectionPlay = if let Some(order) = play_order {
-            let database = std::sync::Arc::clone(&selected.database);
-            let source = selected.source_key;
-            let epoch = selected.source_session_epoch;
-            let runtime = selected.runtime.clone();
-            let order: std::sync::Arc<[library::TrackKey]> = order.into();
-            Rc::new(move |placement, shuffled_start| {
-                let Some(anchor_key) = order.first().copied() else {
-                    return;
-                };
-                let database = std::sync::Arc::clone(&database);
-                let controller = controller.clone();
-                let order = std::sync::Arc::clone(&order);
-                let context = play_context.clone();
-                runtime.spawn(async move {
-                    let cancellation = library::ReadCancellation::new();
-                    let Some(anchor) = database
-                        .track_rows(source, &[anchor_key], &cancellation)
-                        .await
-                        .ok()
-                        .and_then(|mut rows| rows.pop())
-                    else {
-                        return;
-                    };
-                    if let Some(request) = playback::LoadedPlayRequest::context(
-                        source,
-                        epoch,
-                        order,
-                        playback::PlaybackMedia::from(anchor),
-                        0,
-                        placement,
-                        context,
-                        shuffled_start,
-                    ) {
-                        controller.play_loaded(request);
-                    }
-                });
-            })
-        } else {
-            let play_tracks = track_projection.clone();
-            Rc::new(move |placement, shuffled_start| {
-                play_tracks.play_source(
-                    controller.clone(),
-                    placement,
-                    play_context.clone(),
-                    shuffled_start,
-                );
-            })
-        };
+        let play_tracks = track_projection.clone();
+        let play: CollectionPlay = Rc::new(move |placement| {
+            play_tracks.play_source(controller.clone(), placement, play_context.clone());
+        });
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let cover_controls =

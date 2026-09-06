@@ -3,27 +3,22 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use library::{SourceKey, TrackKey};
 use thiserror::Error;
 
 use crate::{
-    BackendEvent, BackendFailure, Batch, ClockSample, LoadedPlayRequest, MaterializationId,
-    MaterializationReservation, Placement, PlaybackBackend, PlaybackNotice,
+    BackendEvent, BackendFailure, Batch, ClockSample, MaterializationId,
+    MaterializationReservation, Placement, PlayRequest, PlaybackBackend, PlaybackNotice,
     PlaybackOutput as SelectedPlaybackOutput, PlaybackProjection, PlaybackSession,
-    PlaybackSettings, PreparedStream, RunId, Sequence, SequenceEntry, SequenceError,
-    SessionCommand, SessionEffect, SessionUpdate, SourceSessionEpoch,
+    PlaybackSettings, PreparedStream, QueueItem, RunId, Sequence, SequenceError, SessionCommand,
+    SessionEffect, SessionUpdate,
 };
 
 const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(33);
-const QUEUE_PERSISTENCE_PAGE_LIMIT: usize = 128;
 
 #[derive(Clone, Debug)]
 pub struct QueuePersistence {
-    source_key: SourceKey,
     revision: u64,
-    total: usize,
     current: Option<crate::OccurrenceId>,
-    prepared_next: Option<crate::OccurrenceId>,
     progress_millis: u64,
     repeat_mode: crate::RepeatMode,
     shuffled: bool,
@@ -32,38 +27,23 @@ pub struct QueuePersistence {
 impl QueuePersistence {
     pub(crate) fn capture(sequence: &Sequence) -> Self {
         Self {
-            source_key: sequence.source_key(),
             revision: sequence.revision(),
-            total: sequence.entries().len(),
             current: sequence.selected().map(|entry| entry.occurrence.clone()),
-            prepared_next: sequence
-                .peek_next_eos()
-                .map(|entry| entry.occurrence.clone()),
             progress_millis: sequence.progress_millis(),
             repeat_mode: sequence.repeat_mode(),
             shuffled: sequence.shuffle_enabled(),
         }
     }
     pub fn coalesce(&mut self, newer: Self) {
-        if self.source_key != newer.source_key || newer.revision < self.revision {
-            return;
+        if newer.revision >= self.revision {
+            *self = newer;
         }
-        *self = newer;
-    }
-    pub const fn source_key(&self) -> SourceKey {
-        self.source_key
     }
     pub const fn revision(&self) -> u64 {
         self.revision
     }
-    pub const fn total(&self) -> usize {
-        self.total
-    }
     pub fn current(&self) -> Option<&crate::OccurrenceId> {
         self.current.as_ref()
-    }
-    pub fn prepared_next(&self) -> Option<&crate::OccurrenceId> {
-        self.prepared_next.as_ref()
     }
     pub const fn progress_millis(&self) -> u64 {
         self.progress_millis
@@ -80,8 +60,6 @@ impl QueuePersistence {
 pub enum PlaybackError {
     #[error("playback runtime state is unavailable")]
     Unavailable,
-    #[error("the loaded music selection belongs to an inactive source session")]
-    InactiveSourceSession,
     #[error("could not start the playback worker: {0}")]
     WorkerStart(String),
     #[error("the playback worker stopped unexpectedly")]
@@ -165,10 +143,8 @@ enum RuntimeCommand {
         command: SessionCommand,
         reply: Reply<()>,
     },
-    AdmitLoaded {
-        source_id: SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        activation: Option<(String, library::TrackKey, usize)>,
+    AdmitPlay {
+        activation: Option<(String, String, usize)>,
         placement: Placement,
         reply: Reply<Option<MaterializationReservation>>,
     },
@@ -178,22 +154,18 @@ enum RuntimeCommand {
     },
     CompleteMaterialization {
         id: MaterializationId,
-        source_id: SourceKey,
         batch: Batch,
         placement: Placement,
-        anchor: Box<Option<crate::PlaybackMedia>>,
         reply: Reply<bool>,
     },
     FailMaterialization {
         id: MaterializationId,
-        source_id: SourceKey,
         placement: Placement,
         message: String,
         reply: Reply<bool>,
     },
     CancelMaterialization {
         id: MaterializationId,
-        source_id: SourceKey,
         placement: Placement,
         reply: Reply<bool>,
     },
@@ -203,15 +175,13 @@ enum RuntimeCommand {
         reply: Reply<()>,
     },
     CompleteAutoDj {
-        source_id: SourceKey,
         seed_occurrence: crate::OccurrenceId,
-        candidates: Vec<TrackKey>,
+        candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
         reply: Reply<bool>,
     },
     AutoDjUnavailable {
-        source_id: SourceKey,
         seed_occurrence: crate::OccurrenceId,
         error: Option<String>,
         reply: Reply<bool>,
@@ -221,12 +191,6 @@ enum RuntimeCommand {
     },
     Projection {
         reply: Reply<PlaybackProjection>,
-    },
-    QueuePersistencePage {
-        revision: u64,
-        offset: usize,
-        limit: usize,
-        reply: Reply<Option<Vec<SequenceEntry>>>,
     },
     ReplaceBackend {
         output: SelectedPlaybackOutput,
@@ -260,7 +224,6 @@ impl Playback {
     #[allow(clippy::too_many_arguments)]
     pub fn start(
         sequence: Sequence,
-        source_session_epoch: SourceSessionEpoch,
         play_id_prefix: impl Into<Arc<str>>,
         settings: PlaybackSettings,
         auto_dj_enabled: bool,
@@ -272,7 +235,6 @@ impl Playback {
     ) -> PlaybackResult<(Self, PlaybackProjection)> {
         let runtime = PlaybackRuntime::new(
             sequence,
-            source_session_epoch,
             play_id_prefix,
             settings,
             auto_dj_enabled,
@@ -312,15 +274,13 @@ impl Playback {
         self.request(|reply| RuntimeCommand::Session { command, reply })
     }
 
-    pub fn admit_loaded(
+    pub fn admit_play(
         &self,
-        request: &LoadedPlayRequest,
+        request: &PlayRequest,
     ) -> PlaybackResult<Option<MaterializationReservation>> {
-        self.request(|reply| RuntimeCommand::AdmitLoaded {
-            source_id: request.source_key,
-            source_session_epoch: request.source_session_epoch,
+        self.request(|reply| RuntimeCommand::AdmitPlay {
             activation: request.activation_context(),
-            placement: request.placement(),
+            placement: request.placement,
             reply,
         })
     }
@@ -336,17 +296,13 @@ impl Playback {
     pub fn complete_materialization(
         &self,
         id: MaterializationId,
-        source_id: SourceKey,
         batch: Batch,
         placement: Placement,
-        anchor: Option<crate::PlaybackMedia>,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::CompleteMaterialization {
             id,
-            source_id,
             batch,
             placement,
-            anchor: Box::new(anchor),
             reply,
         })
     }
@@ -354,13 +310,11 @@ impl Playback {
     pub fn fail_materialization(
         &self,
         id: MaterializationId,
-        source_id: SourceKey,
         placement: Placement,
         message: String,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::FailMaterialization {
             id,
-            source_id,
             placement,
             message,
             reply,
@@ -370,12 +324,10 @@ impl Playback {
     pub fn cancel_materialization(
         &self,
         id: MaterializationId,
-        source_id: SourceKey,
         placement: Placement,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::CancelMaterialization {
             id,
-            source_id,
             placement,
             reply,
         })
@@ -392,14 +344,12 @@ impl Playback {
     #[allow(clippy::too_many_arguments)]
     pub fn complete_auto_dj_candidates(
         &self,
-        source_id: SourceKey,
         seed_occurrence: crate::OccurrenceId,
-        candidates: Vec<TrackKey>,
+        candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::CompleteAutoDj {
-            source_id,
             seed_occurrence,
             candidates,
             requested_count,
@@ -410,12 +360,10 @@ impl Playback {
 
     pub fn auto_dj_unavailable(
         &self,
-        source_id: SourceKey,
         seed_occurrence: crate::OccurrenceId,
         error: Option<String>,
     ) -> PlaybackResult<bool> {
         self.request(|reply| RuntimeCommand::AutoDjUnavailable {
-            source_id,
             seed_occurrence,
             error,
             reply,
@@ -428,20 +376,6 @@ impl Playback {
 
     pub fn projection(&self) -> PlaybackResult<PlaybackProjection> {
         self.request(|reply| RuntimeCommand::Projection { reply })
-    }
-
-    pub fn queue_persistence_page(
-        &self,
-        revision: u64,
-        offset: usize,
-        limit: usize,
-    ) -> PlaybackResult<Option<Vec<SequenceEntry>>> {
-        self.request(|reply| RuntimeCommand::QueuePersistencePage {
-            revision,
-            offset,
-            limit,
-            reply,
-        })
     }
 
     pub fn replace_backend(
@@ -547,25 +481,17 @@ fn apply_runtime_command(
         RuntimeCommand::Session { command, reply } => {
             reply_update(runtime.command(command, &sample), outputs, reply);
         }
-        RuntimeCommand::AdmitLoaded {
-            source_id,
-            source_session_epoch,
+        RuntimeCommand::AdmitPlay {
             activation,
             placement,
             reply,
         } => {
-            let value = runtime
-                .admit_loaded(
-                    &source_id,
-                    source_session_epoch,
-                    activation,
-                    placement,
-                    &sample,
-                )
-                .and_then(|(reservation, update)| {
+            let value = runtime.admit_play(activation, placement, &sample).and_then(
+                |(reservation, update)| {
                     publish_optional_update(outputs, update)?;
                     Ok(reservation)
-                });
+                },
+            );
             let _ = reply.send(value);
         }
         RuntimeCommand::ReserveMaterialization { placement, reply } => {
@@ -573,42 +499,37 @@ fn apply_runtime_command(
         }
         RuntimeCommand::CompleteMaterialization {
             id,
-            source_id,
             batch,
             placement,
-            anchor,
             reply,
         } => {
             let value = runtime
-                .complete_materialization(id, &source_id, batch, placement, *anchor, &sample)
+                .complete_materialization(id, batch, placement, &sample)
                 .and_then(|update| publish_optional_update(outputs, update));
             let _ = reply.send(value);
         }
         RuntimeCommand::FailMaterialization {
             id,
-            source_id,
             placement,
             message,
             reply,
         } => {
             let value = runtime
-                .fail_materialization(id, &source_id, placement, message, &sample)
+                .fail_materialization(id, placement, message, &sample)
                 .and_then(|update| publish_optional_update(outputs, update));
             let _ = reply.send(value);
         }
         RuntimeCommand::CancelMaterialization {
             id,
-            source_id,
             placement,
             reply,
         } => {
-            let _ = reply.send(runtime.cancel_materialization(id, &source_id, placement));
+            let _ = reply.send(runtime.cancel_materialization(id, placement));
         }
         RuntimeCommand::ResolveStream { run, stream, reply } => {
             reply_update(runtime.resolve_stream(run, stream, &sample), outputs, reply);
         }
         RuntimeCommand::CompleteAutoDj {
-            source_id,
             seed_occurrence,
             candidates,
             requested_count,
@@ -617,7 +538,6 @@ fn apply_runtime_command(
         } => {
             let value = runtime
                 .complete_auto_dj_candidates(
-                    &source_id,
                     &seed_occurrence,
                     candidates,
                     requested_count,
@@ -628,13 +548,12 @@ fn apply_runtime_command(
             let _ = reply.send(value);
         }
         RuntimeCommand::AutoDjUnavailable {
-            source_id,
             seed_occurrence,
             error,
             reply,
         } => {
             let value = runtime
-                .auto_dj_unavailable(&source_id, &seed_occurrence, error, &sample)
+                .auto_dj_unavailable(&seed_occurrence, error, &sample)
                 .and_then(|update| publish_optional_update(outputs, update));
             let _ = reply.send(value);
         }
@@ -643,24 +562,6 @@ fn apply_runtime_command(
         }
         RuntimeCommand::Projection { reply } => {
             let _ = reply.send(Ok(runtime.initial_projection()));
-        }
-        RuntimeCommand::QueuePersistencePage {
-            revision,
-            offset,
-            limit,
-            reply,
-        } => {
-            let sequence = runtime.session.sequence();
-            let page = (sequence.revision() == revision).then(|| {
-                sequence
-                    .entries()
-                    .iter()
-                    .skip(offset)
-                    .take(limit.clamp(1, QUEUE_PERSISTENCE_PAGE_LIMIT))
-                    .cloned()
-                    .collect()
-            });
-            let _ = reply.send(Ok(page));
         }
         RuntimeCommand::ReplaceBackend {
             output,
@@ -763,33 +664,63 @@ fn run_playback_outputs(
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
-    use crate::{BatchItem, Placement, Provenance};
-
-    #[test]
-    fn traversal_coalesces_into_one_pending_structural_order() {
-        let mut sequence = Sequence::new(SourceKey::from_raw(1));
-        sequence
-            .apply_batch_with_change(
-                Batch::new(
-                    (1..=4)
-                        .map(|key| BatchItem::new(TrackKey::from_raw(key), Provenance::Manual))
-                        .collect(),
-                ),
-                Placement::Replace { anchor_index: 0 },
+    #[tokio::test]
+    async fn persistence_coalesces_latest_queue_metadata() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("queue.sqlite3"))
+            .await
+            .unwrap();
+        let window = database
+            .edit_queue_with_preview(
+                library::QueueEdit::Apply {
+                    input: library::QueueInput::Uris {
+                        order: (1..=4)
+                            .map(|key| format!("https://example.test/{key}"))
+                            .collect::<Vec<_>>()
+                            .into(),
+                        context_id: "test".into(),
+                        source_start: 0,
+                    },
+                    placement: Placement::Now,
+                    shuffle_seed: None,
+                    random_start: false,
+                    identity: None,
+                },
+                None,
+                crate::RepeatMode::Off,
+                false,
+                0,
+                |_| {},
             )
-            .expect("batch");
+            .await
+            .unwrap();
+        let sequence = Sequence::from_window(window, 1).unwrap();
         let mut pending = QueuePersistence::capture(&sequence);
-        sequence.set_shuffle_seed(true, 7);
-        let newer = QueuePersistence::capture(&sequence);
-        let expected_revision = newer.revision();
+        let window = database
+            .edit_queue_with_preview(
+                library::QueueEdit::Shuffle {
+                    enabled: true,
+                    seed: 7,
+                },
+                sequence.selected().map(|row| &row.occurrence),
+                crate::RepeatMode::All,
+                false,
+                42000,
+                |_| {},
+            )
+            .await
+            .unwrap();
+        let newer = QueuePersistence::capture(&Sequence::from_window(window, 2).unwrap());
         pending.coalesce(newer);
-        assert_eq!(pending.revision(), expected_revision);
-        assert_eq!(pending.total(), 4);
+        assert_eq!(pending.revision(), 2);
+        assert_eq!(pending.progress_millis(), 42000);
+        assert_eq!(pending.repeat_mode(), crate::RepeatMode::All);
         assert!(pending.shuffled());
     }
 }
 
 struct PlaybackRuntime {
+    requested_streams: std::collections::HashSet<RunId>,
     session: PlaybackSession,
     backend: Box<dyn PlaybackBackend>,
 }
@@ -797,7 +728,6 @@ struct PlaybackRuntime {
 impl PlaybackRuntime {
     fn new(
         sequence: Sequence,
-        source_session_epoch: SourceSessionEpoch,
         play_id_prefix: impl Into<Arc<str>>,
         settings: PlaybackSettings,
         auto_dj_enabled: bool,
@@ -806,9 +736,9 @@ impl PlaybackRuntime {
         backend: Box<dyn PlaybackBackend>,
     ) -> Self {
         Self {
+            requested_streams: std::collections::HashSet::new(),
             session: PlaybackSession::new(
                 sequence,
-                source_session_epoch,
                 play_id_prefix,
                 settings,
                 playback_output,
@@ -835,23 +765,16 @@ impl PlaybackRuntime {
         self.finish(update, sample)
     }
 
-    fn admit_loaded(
+    fn admit_play(
         &mut self,
-        source_id: &SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        activation: Option<(String, library::TrackKey, usize)>,
+        activation: Option<(String, String, usize)>,
         placement: Placement,
         sample: &ClockSample,
     ) -> PlaybackResult<(Option<MaterializationReservation>, Option<PlaybackUpdate>)> {
-        if self.session.sequence().source_key() != *source_id
-            || self.session.source_session_epoch() != source_session_epoch
-        {
-            return Err(PlaybackError::InactiveSourceSession);
-        }
-        if let Some((context_id, track_id, source_rank)) = activation
+        if let Some((context_id, media_uri, source_rank)) = activation
             && let Some(update) =
                 self.session
-                    .activate_context(&context_id, &track_id, source_rank, sample)
+                    .activate_context(&context_id, &media_uri, source_rank, sample)
         {
             return Ok((None, Some(self.finish(update, sample)?)));
         }
@@ -868,15 +791,13 @@ impl PlaybackRuntime {
     fn complete_materialization(
         &mut self,
         id: MaterializationId,
-        source_id: &SourceKey,
         batch: Batch,
         placement: Placement,
-        anchor: Option<crate::PlaybackMedia>,
         sample: &ClockSample,
     ) -> PlaybackResult<Option<PlaybackUpdate>> {
         let update = self
             .session
-            .apply_materialization(id, source_id, batch, placement, anchor, sample)?
+            .apply_materialization(id, batch, placement, sample)?
             .map(|update| self.finish(update, sample))
             .transpose()?;
         Ok(update)
@@ -885,13 +806,12 @@ impl PlaybackRuntime {
     fn fail_materialization(
         &mut self,
         id: MaterializationId,
-        source_id: &SourceKey,
         placement: Placement,
         message: String,
         sample: &ClockSample,
     ) -> PlaybackResult<Option<PlaybackUpdate>> {
         self.session
-            .fail_materialization(id, source_id, placement, message)
+            .fail_materialization(id, placement, message)
             .map(|update| self.finish(update, sample))
             .transpose()
     }
@@ -899,12 +819,9 @@ impl PlaybackRuntime {
     fn cancel_materialization(
         &mut self,
         id: MaterializationId,
-        source_id: &SourceKey,
         placement: Placement,
     ) -> PlaybackResult<bool> {
-        Ok(self
-            .session
-            .cancel_materialization(id, source_id, placement))
+        Ok(self.session.cancel_materialization(id, placement))
     }
 
     fn resolve_stream(
@@ -922,9 +839,8 @@ impl PlaybackRuntime {
 
     fn complete_auto_dj_candidates(
         &mut self,
-        source_id: &SourceKey,
         seed_occurrence: &crate::OccurrenceId,
-        candidates: Vec<TrackKey>,
+        candidates: Vec<QueueItem>,
         requested_count: usize,
         shuffle_seed: u64,
         sample: &ClockSample,
@@ -932,7 +848,6 @@ impl PlaybackRuntime {
         let update = self
             .session
             .complete_auto_dj_candidates(
-                source_id,
                 seed_occurrence,
                 candidates,
                 requested_count,
@@ -946,14 +861,13 @@ impl PlaybackRuntime {
 
     fn auto_dj_unavailable(
         &mut self,
-        source_id: &SourceKey,
         seed_occurrence: &crate::OccurrenceId,
         error: Option<String>,
         sample: &ClockSample,
     ) -> PlaybackResult<Option<PlaybackUpdate>> {
         let update = self
             .session
-            .auto_dj_unavailable(source_id, seed_occurrence, error)
+            .auto_dj_unavailable(seed_occurrence, error)
             .map(|update| self.finish(update, sample))
             .transpose()?;
         Ok(update)
@@ -1021,6 +935,9 @@ impl PlaybackRuntime {
         sample: &ClockSample,
     ) -> PlaybackResult<PlaybackUpdate> {
         let mut output = self.commit(update);
+        if let Some(effect) = self.session.refill_queue() {
+            output.effects.push(effect);
+        }
         let mut backend_failures = Vec::new();
         for effect in std::mem::take(&mut output.effects) {
             match effect {
@@ -1050,7 +967,7 @@ impl PlaybackRuntime {
         Ok(output)
     }
 
-    fn commit(&self, update: SessionUpdate) -> PlaybackUpdate {
+    fn commit(&mut self, update: SessionUpdate) -> PlaybackUpdate {
         let queue_persistence = update
             .queue_persistence_changed
             .then(|| QueuePersistence::capture(self.session.sequence()));
@@ -1074,6 +991,24 @@ impl PlaybackRuntime {
                     current_media_changed = true;
                 }
                 _ => effects.push(effect),
+            }
+        }
+        let live = self.session.stream_runs();
+        effects.retain(|effect| match effect {
+            SessionEffect::ResolveStream { run, .. } => live.contains(&Some(*run)),
+            _ => true,
+        });
+        self.requested_streams.retain(|run| {
+            if live.contains(&Some(*run)) {
+                true
+            } else {
+                effects.push(SessionEffect::CancelStream(*run));
+                false
+            }
+        });
+        for effect in &effects {
+            if let SessionEffect::ResolveStream { run, .. } = effect {
+                self.requested_streams.insert(*run);
             }
         }
         let projection = (update.view_changed || !notices.is_empty()).then(|| PlaybackProjection {

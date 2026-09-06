@@ -10,27 +10,24 @@ use artwork::Artwork;
 use async_channel::{Receiver, Sender};
 use downloads::Downloads;
 use library::{
-    AlbumKey, ArtistKey, Database, FavoriteTarget, FolderKey, FolderRow, PlaylistEntryKey,
-    PlaylistKey, ReadCancellation, ScanOutcome, SourceKey, TrackKey,
+    Database, FavoriteTarget, FolderKey, FolderRow, PlaylistEntryKey, PlaylistKey,
+    ReadCancellation, ScanOutcome, SourceKey,
 };
-use playback::{QueuePlacement, SourceSessionEpoch};
-use scrobbling::Scrobbler;
-use secrets::{SecretStorageMode, SwitchableSecretStore};
+use secrets::{SecretStorageMode, SecretStore, SwitchableSecretStore};
 use sources::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataValues, ArtistMetadata, ArtistMetadataEdit,
     ArtistMetadataValues, CredentialHostInput, CredentialSettingsInput, JellyfinSettingsInput,
-    JellyfinSetupInput, LiveFolderPage, LiveSearchResults, LocalFolderHostInput, SelectedFeed,
-    Source, SourceConfiguration, SourceEntityKind, SourceError, SourceId, SourceMetadataError,
-    SourceReadProgress, SourceReadStage, SourceSettingsInput, SourceSetupInput,
-    SubsonicAuthentication, SubsonicFlavor, TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
+    JellyfinSetupInput, LiveFolderPage, LocalFolderHostInput, SelectedFeed, Source,
+    SourceConfiguration, SourceEntityKind, SourceError, SourceId, SourceMetadataError,
+    SourceReadProgress, SourceReadStage, SourceSettingsInput, SourceSetupInput, SubsonicFlavor,
+    TrackMetadata, TrackMetadataEdit, TrackMetadataValues,
 };
 use tracing::{info, warn};
 use ui::runtime::source::{
     ConfiguredSources, CredentialInput, CredentialPreset, DiscoveredServer, DiscoveryStatus,
-    DiscoveryUpdate, EditableSource, LiveSearchCollectionTarget, LocalAccessStatus, LocalFolder,
-    OpenSubsonicAuthentication, OpenSubsonicKind, SelectedSourcePort, SourceLocalAccess,
-    SourceLocalAccessSummary, SourceOperation, SourcePort, SourceProgress, SourceProgressStage,
-    SourceSettingsChange, SourceSetup, SourceSummary,
+    DiscoveryUpdate, EditableSource, LocalAccessStatus, LocalFolder, OpenSubsonicKind,
+    SelectedSourcePort, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourcePort,
+    SourceProgress, SourceProgressStage, SourceSettingsChange, SourceSetup, SourceSummary,
 };
 use ui::runtime::{
     CatalogChange, CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent,
@@ -40,8 +37,8 @@ use ui::runtime::{
 use crate::playback::PlaybackOwner;
 use crate::settings::{
     ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, all_secret_keys,
-    delete_provider_secret, fresh_credential_ref, fresh_secret_scope_id, load_provider_secret,
-    load_scrobbling_settings, platform_secret_store, save_provider_secret,
+    delete_provider_secret, fresh_credential_ref, fresh_source_id, load_provider_secret,
+    platform_secret_store, save_provider_secret,
 };
 
 const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -52,7 +49,6 @@ pub(crate) struct SelectedSourceState {
     pub(crate) source: Option<Arc<Source>>,
     pub(crate) source_key: SourceKey,
     pub(crate) artwork_digest: [u8; 32],
-    pub(crate) source_session_epoch: SourceSessionEpoch,
     pub(crate) database: Arc<Database>,
     pub(crate) runtime: tokio::runtime::Handle,
     pub(crate) music_folder_key: Option<FolderKey>,
@@ -72,28 +68,60 @@ impl SelectedSourceState {
 
 pub(crate) struct ActiveSource {
     shared: Weak<Shared>,
-    source_id: SourceId,
-    source_session_epoch: SourceSessionEpoch,
+    current: Mutex<Option<Arc<SelectedSourceState>>>,
     retirement: tokio::sync::watch::Sender<bool>,
 }
 
 pub(crate) type WeakActiveSource = Weak<ActiveSource>;
 
 impl ActiveSource {
-    fn new(shared: &Arc<Shared>, state: &SelectedSourceState) -> Arc<Self> {
+    fn new(shared: &Arc<Shared>, current: Arc<SelectedSourceState>) -> Arc<Self> {
         let (retirement, _) = tokio::sync::watch::channel(false);
         Arc::new(Self {
             shared: Arc::downgrade(shared),
-            source_id: state.source_id().clone(),
-            source_session_epoch: state.source_session_epoch,
+            current: Mutex::new(Some(current)),
             retirement,
         })
     }
 
     pub(crate) fn resolve(&self) -> Option<Arc<SelectedSourceState>> {
-        self.shared
-            .upgrade()?
-            .resolve_selected(&self.source_id, self.source_session_epoch)
+        if *self.retirement.borrow() {
+            return None;
+        }
+        self.current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+    }
+
+    fn replace(&self, current: Arc<SelectedSourceState>) {
+        let mut slot = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if slot.is_some() {
+            *slot = Some(current);
+        }
+    }
+
+    fn update(
+        &self,
+        source: SourceKey,
+        change: impl FnOnce(&mut SelectedSourceState),
+    ) -> Option<Arc<SelectedSourceState>> {
+        let mut current = self
+            .current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        let selected = current.as_ref()?;
+        if selected.source_key != source {
+            return None;
+        }
+        let mut replacement = (**selected).clone();
+        change(&mut replacement);
+        let replacement = Arc::new(replacement);
+        *current = Some(Arc::clone(&replacement));
+        Some(replacement)
     }
 
     pub(crate) fn downgrade(self: &Arc<Self>) -> WeakActiveSource {
@@ -102,6 +130,10 @@ impl ActiveSource {
 
     fn retire(&self) {
         self.retirement.send_replace(true);
+        self.current
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .take();
     }
 
     fn spawn_reply<T, F, Work>(&self, work: F) -> Receiver<T>
@@ -114,15 +146,20 @@ impl ActiveSource {
         let Some(shared) = self.shared.upgrade() else {
             return receiver;
         };
-        let source_id = self.source_id.clone();
-        let epoch = self.source_session_epoch;
+        let Some(selected) = self.resolve() else {
+            return receiver;
+        };
+        let mut retired = self.retirement.subscribe();
         let runtime = shared.runtime.clone();
         runtime.spawn(async move {
-            let Some(selected) = shared.resolve_selected(&source_id, epoch) else {
+            if *retired.borrow() {
                 return;
+            }
+            let value = tokio::select! {
+                value = work(selected) => value,
+                _ = retired.changed() => return,
             };
-            let value = work(selected).await;
-            if shared.resolve_selected(&source_id, epoch).is_some() {
+            if !*retired.borrow() {
                 let _ = sender.send(value).await;
             }
         });
@@ -137,30 +174,23 @@ impl ActiveSource {
         let Some(shared) = self.shared.upgrade() else {
             return;
         };
-        let source_id = self.source_id.clone();
-        let epoch = self.source_session_epoch;
+        let Some(selected) = self.resolve() else {
+            return;
+        };
+        let mut retired = self.retirement.subscribe();
         let runtime = shared.runtime.clone();
         runtime.spawn(async move {
-            let lane_owner = Arc::clone(&shared);
-            let _lane = lane_owner.lane.lock().await;
-            let Some(selected) = shared.resolve_selected(&source_id, epoch) else {
+            if *retired.borrow() {
                 return;
-            };
-            work(SourceOwner { shared }, selected).await;
-        });
-    }
-
-    fn playlist_change<F, Work>(&self, change: F)
-    where
-        F: FnOnce(Arc<Source>, Arc<SelectedSourceState>) -> Work + Send + 'static,
-        Work: Future<Output = Result<(bool, Option<ScanOutcome>), SourceError>> + Send + 'static,
-    {
-        self.spawn_selected(move |owner, selected| async move {
-            let result = match selected.source.as_ref().cloned() {
-                Some(source) => change(source, Arc::clone(&selected)).await,
-                None => Err(SourceError::InvalidRequest("Source is unavailable")),
-            };
-            owner.accept_playlist_result(&selected, result).await;
+            }
+            tokio::select! {
+                _ = async move {
+                    let lane_owner = Arc::clone(&shared);
+                    let _lane = lane_owner.lane.lock().await;
+                    work(SourceOwner { shared }, selected).await;
+                } => {},
+                _ = retired.changed() => {},
+            }
         });
     }
 }
@@ -182,15 +212,9 @@ pub(crate) struct SourceOwner {
     shared: Arc<Shared>,
 }
 
-struct SelectedSlot {
-    session: Arc<ActiveSource>,
-    current: Arc<SelectedSourceState>,
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 struct ArtworkPreparationKey {
     source: SourceKey,
-    epoch: SourceSessionEpoch,
     digest: [u8; 32],
 }
 
@@ -274,41 +298,21 @@ struct Shared {
     downloads: Downloads,
     settings: SettingsFile,
     secrets: Arc<SwitchableSecretStore>,
-    scrobbler: Arc<Scrobbler>,
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
-    selected: Mutex<Option<SelectedSlot>>,
+    selected: Mutex<Option<Arc<ActiveSource>>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
     acquisition: Mutex<Weak<AtomicBool>>,
     artwork_preparation: Mutex<ArtworkPreparationOwner>,
     lane: tokio::sync::Mutex<()>,
     playback: Mutex<Weak<PlaybackOwner>>,
-    next_epoch: AtomicU64,
     started: AtomicBool,
 }
 
 impl Shared {
-    fn resolve_selected(
-        &self,
-        source_id: &SourceId,
-        epoch: SourceSessionEpoch,
-    ) -> Option<Arc<SelectedSourceState>> {
-        self.selected
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .as_ref()
-            .filter(|slot| {
-                slot.current.source_id() == source_id && slot.current.source_session_epoch == epoch
-            })
-            .map(|slot| Arc::clone(&slot.current))
-    }
-
     fn selected(&self) -> Option<Arc<SelectedSourceState>> {
-        self.selected
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .as_ref()
-            .map(|slot| Arc::clone(&slot.current))
+        self.selected_session()
+            .and_then(|session| session.resolve())
     }
 
     fn selected_session(&self) -> Option<Arc<ActiveSource>> {
@@ -316,7 +320,7 @@ impl Shared {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .as_ref()
-            .map(|slot| Arc::clone(&slot.session))
+            .cloned()
     }
 
     async fn send(&self, event: SourceEvent) {
@@ -401,7 +405,6 @@ impl SourceOwner {
         downloads: Downloads,
         settings: SettingsFile,
         secrets: Arc<SwitchableSecretStore>,
-        scrobbler: Arc<Scrobbler>,
         runtime: tokio::runtime::Handle,
         outputs: SourceOutputs,
     ) -> SourceBootstrap {
@@ -421,7 +424,6 @@ impl SourceOwner {
             downloads,
             settings,
             secrets,
-            scrobbler,
             runtime,
             outputs,
             selected: Mutex::new(None),
@@ -430,7 +432,6 @@ impl SourceOwner {
             artwork_preparation: Mutex::new(ArtworkPreparationOwner::default()),
             lane: tokio::sync::Mutex::new(()),
             playback: Mutex::new(Weak::new()),
-            next_epoch: AtomicU64::new(1),
             started: AtomicBool::new(false),
         });
         SourceBootstrap {
@@ -468,6 +469,59 @@ impl SourceOwner {
         Ok(())
     }
 
+    pub(crate) async fn restore_user_state<F, Work, T>(
+        &self,
+        setup: bool,
+        restore: F,
+    ) -> Result<T, String>
+    where
+        F: FnOnce() -> Work,
+        Work: Future<Output = Result<T, String>>,
+    {
+        let _lane = self.shared.lane.lock().await;
+        let result = restore().await;
+        if result.is_ok() && setup {
+            self.release_selected(true).await;
+            let current = self.shared.settings.load();
+            if let Some(source) = current.sources.selected_source_id.filter(|id| {
+                current
+                    .sources
+                    .configured
+                    .iter()
+                    .any(|source| source.configuration.source_id == *id)
+            }) {
+                self.select_source(source);
+            }
+        }
+        self.shared
+            .send(SourceEvent::Configured(configured_sources(
+                &self.shared.settings.load(),
+                self.shared.selected().as_deref(),
+            )))
+            .await;
+        self.publish_operation(SourceOperation::Idle).await;
+        result
+    }
+
+    async fn remove_source_resources(
+        &self,
+        source_id: &SourceId,
+        credential_ref: Option<crate::settings::CredentialRef>,
+    ) {
+        self.shared.downloads.clear(source_id.clone(), false);
+        if let Ok(playback) = self.shared.playback() {
+            if let Err(error) = playback.remove_waveform_cache(source_id) {
+                self.shared.warn_nonfatal(&error);
+            }
+        }
+        if let Err(error) = self.shared.artwork.invalidate_source(source_id) {
+            self.shared.warn_nonfatal(&error.to_string());
+        }
+        if let Some(reference) = credential_ref {
+            let _ = delete_provider_secret(&self.shared.secrets, &reference);
+        }
+    }
+
     fn spawn_serialized<F, Work>(&self, work: F)
     where
         F: FnOnce(SourceOwner) -> Work + Send + 'static,
@@ -478,6 +532,27 @@ impl SourceOwner {
             let lane_owner = Arc::clone(&shared);
             let _lane = lane_owner.lane.lock().await;
             work(SourceOwner { shared }).await;
+        });
+    }
+
+    fn playlist_change<F, Work>(&self, playlist: PlaylistKey, change: F)
+    where
+        F: FnOnce(Option<(Arc<Source>, SourceKey)>, Arc<Database>) -> Work + Send + 'static,
+        Work: Future<Output = Result<(bool, Option<ScanOutcome>), String>> + Send + 'static,
+    {
+        self.spawn_serialized(move |owner| async move {
+            let target = owner.playlist_source(playlist).await;
+            let source_key = target
+                .as_ref()
+                .ok()
+                .and_then(|target| target.as_ref().map(|(_, source_key)| *source_key));
+            let result = match target {
+                Ok(target) => change(target, Arc::clone(&owner.shared.database)).await,
+                Err(error) => Err(error),
+            };
+            owner
+                .accept_playlist_result(source_key, Some(playlist), result)
+                .await;
         });
     }
 
@@ -494,12 +569,6 @@ impl SourceOwner {
             return Ok(());
         }
         let configured = configured_source(&self.shared.settings.load().sources, &source_id)?;
-        let credential = configured
-            .credential_ref
-            .as_ref()
-            .map(|reference| load_provider_secret(&self.shared.secrets, reference))
-            .transpose()?
-            .flatten();
         let cached = self
             .shared
             .database
@@ -507,75 +576,95 @@ impl SourceOwner {
             .await
             .map_err(string_error)?;
         let cached_start = cached.is_some();
-        let source = match Source::open(
-            configured.configuration.clone(),
-            credential,
-            Some(self.shared.settings.load().jellyfin_device_id),
-        ) {
-            Ok(source) => Some(Arc::new(source)),
-            Err(error) if cached.is_some() && source_error_allows_cache(&error) => None,
-            Err(error) => return Err(error.to_string()),
-        };
-        let publication = if let Some(cached) = cached {
-            library::Publication {
-                source: cached.source,
-                catalog_revision: u64::try_from(cached.catalog_revision)
-                    .map_err(|_| "cached catalog revision is invalid".to_string())?,
-                artwork_digest: cached
-                    .artwork_digest
-                    .try_into()
-                    .map_err(|_| "cached artwork digest is invalid".to_string())?,
-            }
-        } else {
-            let source = source.as_ref().ok_or_else(source_access_unavailable)?;
-            let events = self.shared.outputs.events.clone();
-            let target = source_id.clone();
-            let progress = move |value: SourceReadProgress| {
-                let _ = events.try_send(SourceEvent::Operation(SourceOperation::Switching {
-                    target: target.clone(),
-                    progress: source_progress(value),
-                }));
-            };
-            acquire_required_catalog(
-                source,
-                &self.shared.database,
-                &configured.configuration.name,
-                &progress,
-                Arc::clone(&cancelled),
-            )
-            .await?
-        };
+        let publication = self
+            .shared
+            .database
+            .reconcile_source(&source_id)
+            .await
+            .map_err(string_error)?;
         if cancelled.load(Ordering::Acquire) {
             return Ok(());
         }
         self.install_selected(
-            configured,
-            source,
+            configured.clone(),
+            None,
             publication,
-            cached_start,
-            cancelled,
-            || Ok(()),
+            false,
+            Arc::clone(&cancelled),
         )
-        .await
+        .await?;
+        if !self.shared.acquisition_is_current(&cancelled) {
+            return Ok(());
+        }
+        let Some(session) = self.shared.selected_session() else {
+            return Ok(());
+        };
+        let secrets = Arc::clone(&self.shared.secrets);
+        let device = self.shared.settings.load().jellyfin_device_id;
+        let owner = self.clone();
+        self.shared.runtime.spawn(async move {
+            let opened = owner
+                .shared
+                .runtime
+                .spawn_blocking(move || {
+                    let credential = configured
+                        .credential_ref
+                        .as_ref()
+                        .map(|reference| load_provider_secret(&secrets, reference))
+                        .transpose()?
+                        .flatten();
+                    Source::open(configured.configuration, credential, Some(device))
+                        .map(Arc::new)
+                        .map_err(string_error)
+                })
+                .await
+                .map_err(string_error)
+                .and_then(|opened| opened);
+            let _lane = owner.shared.lane.lock().await;
+            if !owner.shared.acquisition_is_current(&cancelled) || session.resolve().is_none() {
+                return;
+            }
+            let source = match opened {
+                Ok(source) => source,
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error);
+                    return;
+                }
+            };
+            let Some(selected) = session.update(publication.source, |selected| {
+                selected.source = Some(source);
+            }) else {
+                return;
+            };
+            if let Err(error) = owner
+                .shared
+                .downloads
+                .attach(
+                    selected.source_id().clone(),
+                    selected.source_key,
+                    selected.source.clone(),
+                    selected.music_folder_key,
+                )
+                .await
+            {
+                owner.shared.warn_nonfatal(&error);
+            }
+            owner.start_observer(session, Arc::clone(&selected), cached_start);
+            if !cached_start {
+                owner
+                    .manual_refresh_selected(&selected, "cold-select", cancelled)
+                    .await;
+            }
+        });
+        Ok(())
     }
 
-    async fn install_selected<Commit>(
+    async fn selected_state(
         &self,
         configured: ConfiguredSource,
         source: Option<Arc<Source>>,
         publication: library::Publication,
-        catch_up: bool,
-        acquisition: Arc<AtomicBool>,
-        commit: Commit,
-    ) -> Result<(), String>
-    where
-        Commit: FnOnce() -> Result<(), String>,
-    {
-        self.shared
-            .database
-            .ensure_default_smart_playlists(publication.source)
-            .await
-            .map_err(string_error)?;
+    ) -> Result<Arc<SelectedSourceState>, String> {
         let cancellation = ReadCancellation::new();
         let folder_order = self
             .shared
@@ -628,14 +717,11 @@ impl SourceOwner {
             .map_err(string_error)?
             .pop()
             .map(|track| track.source_path);
-        let selected = Arc::new(SelectedSourceState {
+        Ok(Arc::new(SelectedSourceState {
             configuration: configured.configuration.clone(),
             source,
             source_key: publication.source,
             artwork_digest: publication.artwork_digest,
-            source_session_epoch: SourceSessionEpoch::new(
-                self.shared.next_epoch.fetch_add(1, Ordering::AcqRel),
-            ),
             database: Arc::clone(&self.shared.database),
             runtime: self.shared.runtime.clone(),
             music_folder_key: folder_key,
@@ -645,18 +731,23 @@ impl SourceOwner {
             track_count,
             formula_match_count,
             sample_source_path,
-        });
-        let session = ActiveSource::new(&self.shared, &selected);
-        let playback = self.shared.playback()?;
-        let prepared = playback
-            .prepare_selected(Arc::clone(&session), Arc::clone(&selected))
-            .await?;
+        }))
+    }
+
+    async fn install_selected(
+        &self,
+        configured: ConfiguredSource,
+        source: Option<Arc<Source>>,
+        publication: library::Publication,
+        catch_up: bool,
+        acquisition: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        let selected = self.selected_state(configured, source, publication).await?;
+        let session = ActiveSource::new(&self.shared, Arc::clone(&selected));
         if !self.shared.acquisition_is_current(&acquisition) {
             return Ok(());
         }
-        commit()?;
         self.release_selected(false).await;
-        let cutover = playback.stop_for_source_switch();
         self.shared
             .downloads
             .attach(
@@ -670,11 +761,7 @@ impl SourceOwner {
             .shared
             .selected
             .lock()
-            .unwrap_or_else(|p| p.into_inner()) = Some(SelectedSlot {
-            session: Arc::clone(&session),
-            current: Arc::clone(&selected),
-        });
-        let projection = playback.install_prepared(prepared, cutover);
+            .unwrap_or_else(|p| p.into_inner()) = Some(Arc::clone(&session));
         self.shared.settings.update(|stored| {
             stored.sources.selected_source_id = Some(selected.source_id().clone());
             Ok(())
@@ -684,7 +771,6 @@ impl SourceOwner {
             .send(SourceEvent::Selected {
                 configured: configured_sources(&stored, Some(&selected)),
                 selected: ui_selected(Arc::clone(&selected), Arc::clone(&session)),
-                playback: Box::new(projection),
             })
             .await;
         self.publish_operation(SourceOperation::Idle).await;
@@ -709,7 +795,7 @@ impl SourceOwner {
             .unwrap_or_else(|p| p.into_inner())
             .take();
         if let Some(slot) = slot {
-            slot.session.retire();
+            slot.retire();
             let (acknowledged, receiver) = async_channel::bounded(1);
             self.shared
                 .send(SourceEvent::ReleaseSelected { acknowledged })
@@ -764,7 +850,7 @@ impl SourceOwner {
             };
             match observer.apply_pending().await {
                 Ok(Some(outcome)) => {
-                    self.accept_scan(&selected, outcome, CatalogChange::Broad)
+                    self.accept_scan(selected.source_id(), outcome, CatalogChange::Broad)
                         .await;
                     continue;
                 }
@@ -806,7 +892,7 @@ impl SourceOwner {
             .await
         {
             Ok(outcome) => {
-                self.accept_scan(&selected, outcome, CatalogChange::Broad)
+                self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
                     .await
             }
             Err(error) => warn!(%error, "Local startup catch-up failed"),
@@ -819,6 +905,9 @@ impl SourceOwner {
         trigger: &'static str,
         acquisition: Arc<AtomicBool>,
     ) {
+        if !self.shared.acquisition_is_current(&acquisition) {
+            return;
+        }
         info!(trigger, source_key = %selected.source_key, "starting explicit source acquisition");
         let Some(source) = selected.source.as_ref() else {
             self.shared.warn_nonfatal(&source_access_unavailable());
@@ -843,7 +932,7 @@ impl SourceOwner {
             .await;
         match outcome {
             Ok(outcome) => {
-                self.accept_scan(selected, outcome, CatalogChange::Broad)
+                self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
                     .await
             }
             Err(SourceError::Cancelled) => {}
@@ -862,45 +951,53 @@ impl SourceOwner {
     ) -> Result<(), String> {
         let (configuration, source, credential) = (*connected).into_parts();
         let source = Arc::new(source);
-        self.publish_operation(SourceOperation::Refreshing {
-            source_id: configuration.source_id.clone(),
-            progress: initial_progress(),
-        })
-        .await;
-        let progress = refreshing_progress(
-            self.shared.outputs.events.clone(),
-            configuration.source_id.clone(),
-        );
         let result = async {
-            let publication = acquire_required_catalog(
-                &source,
-                &self.shared.database,
-                &configuration.name,
-                &progress,
-                Arc::clone(&cancelled),
-            )
-            .await?;
             if !self.shared.acquisition_is_current(&cancelled) {
                 return Ok(());
             }
             let mut replacement = configured;
             replacement.configuration = configuration;
+            self.persist_connected_source(&replacement, credential)?;
+            let publication = self
+                .shared
+                .database
+                .reconcile_source(&replacement.configuration.source_id)
+                .await
+                .map_err(string_error)?;
             let selected = self.shared.selected().is_some_and(|selected| {
                 selected.source_id() == &replacement.configuration.source_id
             });
             if selected {
-                let committed = replacement.clone();
                 self.install_selected(
                     replacement,
-                    Some(source),
+                    Some(Arc::clone(&source)),
                     publication,
                     false,
-                    cancelled,
-                    move || self.persist_connected_source(&committed, credential),
+                    Arc::clone(&cancelled),
                 )
                 .await?;
+                if let Some(selected) = self.shared.selected() {
+                    self.manual_refresh_selected(&selected, "source-edit", Arc::clone(&cancelled))
+                        .await;
+                }
             } else {
-                self.persist_connected_source(&replacement, credential)?;
+                if replacement.configuration.is_local() {
+                    let outcome = source
+                        .manual_refresh(
+                            &self.shared.database,
+                            &replacement.configuration.name,
+                            &|_| {},
+                            Arc::clone(&cancelled),
+                        )
+                        .await
+                        .map_err(string_error)?;
+                    self.accept_scan(
+                        &replacement.configuration.source_id,
+                        outcome,
+                        CatalogChange::Broad,
+                    )
+                    .await;
+                }
                 self.publish_operation(SourceOperation::Idle).await;
             }
             Ok(())
@@ -958,7 +1055,7 @@ impl SourceOwner {
             return Ok(());
         }
         match edit {
-            sources::SourceEditResult::Unchanged => Ok(()),
+            sources::SourceEditResult::Unchanged => return Ok(()),
             sources::SourceEditResult::ConfigurationOnly(configuration) => {
                 self.shared.settings.update(|stored| {
                     if let Some(item) = stored
@@ -976,52 +1073,78 @@ impl SourceOwner {
                 self.install_connected_edit(configured, connected, cancelled)
                     .await
             }
-        }
+        }?;
+        self.shared
+            .send(SourceEvent::Configured(configured_sources(
+                &self.shared.settings.load(),
+                self.shared.selected().as_deref(),
+            )))
+            .await;
+        Ok(())
     }
 
-    async fn accept_scan(
-        &self,
-        selected: &SelectedSourceState,
-        outcome: ScanOutcome,
-        change: CatalogChange,
-    ) {
+    async fn accept_scan(&self, source_id: &SourceId, outcome: ScanOutcome, change: CatalogChange) {
+        let refresh_summary =
+            matches!(outcome, ScanOutcome::Changed(_)) && change == CatalogChange::Acquired;
         let (publication, catalog_changed, change) = match outcome {
             ScanOutcome::Changed(publication) => (publication, true, change),
             ScanOutcome::PlaylistsChanged(publication) => {
-                (publication, true, CatalogChange::Playlists)
+                let change = match change {
+                    CatalogChange::Playlists(_) => change,
+                    _ => CatalogChange::Playlists(None),
+                };
+                (publication, true, change)
             }
             ScanOutcome::ArtworkChanged(publication) => (publication, false, change),
             ScanOutcome::Identical(_) | ScanOutcome::Stale | ScanOutcome::Failed => return,
         };
-        if let Some(slot) = self
-            .shared
-            .selected
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .as_mut()
-            && slot.current.source_session_epoch == selected.source_session_epoch
-        {
-            let mut replacement = (*slot.current).clone();
-            replacement.artwork_digest = publication.artwork_digest;
-            slot.current = Arc::new(replacement);
+        let mut event = SourceEvent::CatalogPublished(CatalogPublication {
+            source_key: Some(publication.source),
+            favorite: None,
+            change,
+        });
+        if let Some(session) = self.shared.selected_session() {
+            session.update(publication.source, |current| {
+                current.artwork_digest = publication.artwork_digest;
+            });
+            if refresh_summary
+                && let Some(selected) = session.resolve()
+                && selected.source_key == publication.source
+                && let Ok(configured) =
+                    configured_source(&self.shared.settings.load().sources, source_id)
+            {
+                match self
+                    .selected_state(configured, selected.source.clone(), publication)
+                    .await
+                {
+                    Ok(selected) => {
+                        session.replace(selected);
+                        if let Some(selected) = session.resolve() {
+                            event = SourceEvent::CatalogReplaced {
+                                configured: configured_sources(
+                                    &self.shared.settings.load(),
+                                    Some(&selected),
+                                ),
+                                selected: ui_selected(selected, session.clone()),
+                            };
+                        }
+                    }
+                    Err(error) => self.shared.warn_nonfatal(&error),
+                }
+            }
         }
         if catalog_changed {
-            self.shared
-                .downloads
-                .library_changed(selected.source_id().clone());
-            if let Ok(playback) = self.shared.playback() {
-                playback.catalog_changed();
-            }
-            self.shared
-                .send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key: publication.source,
-                    source_session_epoch: selected.source_session_epoch,
-                    favorite: None,
-                    change,
-                }))
-                .await;
+            self.shared.downloads.library_changed(source_id.clone());
         }
-        if let Some(session) = self.shared.selected_session() {
+        if let Ok(playback) = self.shared.playback() {
+            playback.catalog_changed();
+        }
+        self.shared.send(event).await;
+        if let Some(session) = self.shared.selected_session()
+            && session
+                .resolve()
+                .is_some_and(|selected| selected.source_key == publication.source)
+        {
             self.start_artwork_preparation(session);
         }
     }
@@ -1059,7 +1182,7 @@ impl SourceOwner {
             )
             .await
         {
-            self.accept_scan(&selected, outcome, CatalogChange::Broad)
+            self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
                 .await;
         }
         if progressed.load(Ordering::Acquire) {
@@ -1067,22 +1190,69 @@ impl SourceOwner {
         }
     }
 
+    async fn prune_imported_playlist_files(&self) {
+        if let Some(local) = self
+            .shared
+            .settings
+            .load()
+            .sources
+            .configured
+            .iter()
+            .find(|item| item.configuration.is_local())
+        {
+            if let Ok(client) = self.client(&local.configuration.source_id) {
+                match client.prune_imported_files(&self.shared.database).await {
+                    Ok(Some(outcome)) => {
+                        if let Some(selected) = self
+                            .shared
+                            .selected()
+                            .filter(|selected| selected.source_id() == client.source_id())
+                        {
+                            self.accept_scan(selected.source_id(), outcome, CatalogChange::Broad)
+                                .await;
+                        }
+                    }
+                    Err(error) => self.shared.warn_nonfatal(&error.to_string()),
+                    Ok(None) => {}
+                }
+            }
+        }
+    }
+
     async fn accept_playlist_result(
         &self,
-        selected: &SelectedSourceState,
-        result: Result<(bool, Option<ScanOutcome>), SourceError>,
+        source: Option<SourceKey>,
+        playlist: Option<PlaylistKey>,
+        result: Result<(bool, Option<ScanOutcome>), String>,
     ) {
-        match result {
-            Ok((true, Some(outcome))) => {
-                self.accept_scan(selected, outcome, CatalogChange::Playlists)
-                    .await
+        let outcome = match result {
+            Ok((true, outcome)) => outcome,
+            Ok((false, _)) => return,
+            Err(error) => {
+                self.shared.warn_nonfatal(&error);
+                return;
             }
-            Ok((true, None)) => {
-                self.publish_catalog(selected, None, CatalogChange::Playlists)
-                    .await
-            }
-            Ok((false, _)) => {}
-            Err(error) => self.shared.warn_nonfatal(&error.to_string()),
+        };
+        if let Some(outcome) = outcome
+            && let Some(selected) = self
+                .shared
+                .selected()
+                .filter(|selected| Some(selected.source_key) == source)
+        {
+            self.accept_scan(
+                selected.source_id(),
+                outcome,
+                CatalogChange::Playlists(playlist),
+            )
+            .await;
+        } else {
+            self.shared
+                .send(SourceEvent::CatalogPublished(CatalogPublication {
+                    source_key: source,
+                    favorite: None,
+                    change: CatalogChange::Playlists(playlist),
+                }))
+                .await;
         }
     }
 
@@ -1092,25 +1262,17 @@ impl SourceOwner {
         formula_match_count: usize,
     ) -> Result<(), String> {
         let current = {
-            let mut slots = self
-                .shared
-                .selected
-                .lock()
-                .unwrap_or_else(|poisoned| poisoned.into_inner());
-            let Some(slot) = slots
-                .as_mut()
-                .filter(|slot| slot.current.source_session_epoch == selected.source_session_epoch)
-            else {
+            let Some(session) = self.shared.selected_session() else {
                 return Ok(());
             };
-            let mut replacement = (*slot.current).clone();
-            replacement.formula_match_count = formula_match_count;
-            slot.current = Arc::new(replacement);
-            Arc::clone(&slot.current)
+            let Some(current) = session.update(selected.source_key, |current| {
+                current.formula_match_count = formula_match_count;
+            }) else {
+                return Ok(());
+            };
+            current
         };
-        self.shared
-            .playback()?
-            .stream_inputs_changed(current.source_key, current.source_session_epoch)?;
+        self.shared.playback()?.stream_inputs_changed()?;
         self.shared
             .send(SourceEvent::Configured(configured_sources(
                 &self.shared.settings.load(),
@@ -1128,16 +1290,36 @@ impl SourceOwner {
     ) {
         self.shared
             .send(SourceEvent::CatalogPublished(CatalogPublication {
-                source_key: selected.source_key,
-                source_session_epoch: selected.source_session_epoch,
+                source_key: Some(selected.source_key),
                 favorite,
                 change,
             }))
             .await;
     }
+
+    async fn publish_current_catalog(
+        &self,
+        favorite: Option<FavoriteSettlement>,
+        change: CatalogChange,
+    ) {
+        if let Some(selected) = self.shared.selected() {
+            self.publish_catalog(&selected, favorite, change).await;
+        }
+    }
 }
 
 impl SourcePort for SourceOwner {
+    fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
+        self.reply(move |owner, database| async move {
+            owner
+                .media_client(&media_uri)
+                .await?
+                .prepare_collection(&database, &media_uri)
+                .await
+                .map_err(string_error)
+        })
+    }
+
     fn configured_source(&self, source_id: &SourceId) -> Result<Option<EditableSource>, String> {
         self.shared
             .settings
@@ -1200,7 +1382,9 @@ impl SourcePort for SourceOwner {
             let input = source_setup_input(input, &owner.shared.settings.load().jellyfin_device_id);
             let mut persisted_source_id = None;
             let result = async {
-                let connected = Source::connect(input).await.map_err(string_error)?;
+                let connected = Source::connect(fresh_source_id()?, input)
+                    .await
+                    .map_err(string_error)?;
                 let (configuration, source, credential) = connected.into_parts();
                 let source = Arc::new(source);
                 if !owner.shared.acquisition_is_current(&cancelled) {
@@ -1226,33 +1410,30 @@ impl SourcePort for SourceOwner {
                         owner.shared.selected().as_deref(),
                     )))
                     .await;
-                let events = owner.shared.outputs.events.clone();
-                let progress = move |value: SourceReadProgress| {
-                    let _ = events.try_send(SourceEvent::Operation(SourceOperation::Adding {
-                        progress: source_progress(value),
-                    }));
-                };
-                let publication = acquire_required_catalog(
-                    &source,
-                    &owner.shared.database,
-                    &configuration.name,
-                    &progress,
-                    Arc::clone(&cancelled),
-                )
-                .await?;
+                let publication = owner
+                    .shared
+                    .database
+                    .reconcile_source(&configuration.source_id)
+                    .await
+                    .map_err(string_error)?;
                 if !owner.shared.acquisition_is_current(&cancelled) {
                     return Ok(());
                 }
                 owner
                     .install_selected(
                         configured,
-                        Some(source),
+                        Some(Arc::clone(&source)),
                         publication,
                         false,
                         Arc::clone(&cancelled),
-                        || Ok(()),
                     )
-                    .await
+                    .await?;
+                if let Some(selected) = owner.shared.selected() {
+                    owner
+                        .manual_refresh_selected(&selected, "source-add", Arc::clone(&cancelled))
+                        .await;
+                }
+                Ok(())
             }
             .await;
             if let Err(error) = result
@@ -1343,34 +1524,52 @@ impl SourcePort for SourceOwner {
             let result = if previous.ui.secret_storage_mode == mode {
                 Ok(())
             } else {
-                let keys = all_secret_keys(&previous);
-                let update = owner.shared.settings.update(|stored| {
-                    stored.ui.secret_storage_mode = mode;
-                    stored.secret_scope_id = fresh_secret_scope_id()?;
-                    for descriptor in scrobbling::secret_descriptors() {
-                        descriptor.value_mut(&mut stored.scrobbling).clear();
-                    }
-                    stored.scrobbling_secrets_present = false;
-                    Ok(stored.clone())
-                });
-                match update {
-                    Ok(changed) => {
-                        let old = owner
-                            .shared
-                            .secrets
-                            .replace(platform_secret_store(&changed));
-                        for key in keys {
-                            let _ = old.delete_secret(&key);
+                let settings = owner.shared.settings.clone();
+                let secrets = Arc::clone(&owner.shared.secrets);
+                tokio::task::spawn_blocking(move || {
+                    let mut destination = previous.clone();
+                    destination.ui.secret_storage_mode = mode;
+                    let store = platform_secret_store(&destination);
+                    for key in all_secret_keys(&previous) {
+                        match secrets.load_secret(&key).map_err(string_error)? {
+                            Some(value) => store.save_secret(&key, &value).map_err(string_error)?,
+                            None => store.delete_secret(&key).map_err(string_error)?,
                         }
-                        let scrobbling =
-                            load_scrobbling_settings(&owner.shared.settings, &owner.shared.secrets);
-                        owner
-                            .shared
-                            .scrobbler
-                            .update_settings(scrobbling, changed.ui.private_mode)
                     }
-                    Err(error) => Err(error),
-                }
+                    for descriptor in scrobbling::secret_descriptors() {
+                        let value = descriptor.value(&previous.scrobbling);
+                        if !value.is_empty() {
+                            store
+                                .save_secret(
+                                    &crate::settings::scrobbling_secret_key(*descriptor),
+                                    value,
+                                )
+                                .map_err(string_error)?;
+                        }
+                    }
+                    let password = crate::settings::backup_password_key();
+                    let destination_password = crate::settings::backup_password_store(&destination);
+                    match crate::settings::backup_password_store(&previous)
+                        .load_secret(&password)
+                        .map_err(string_error)?
+                    {
+                        Some(value) => destination_password
+                            .save_secret(&password, &value)
+                            .map_err(string_error)?,
+                        None => destination_password
+                            .delete_secret(&password)
+                            .map_err(string_error)?,
+                    }
+                    settings.update(|stored| {
+                        stored.ui.secret_storage_mode = mode;
+                        Ok(())
+                    })?;
+                    secrets.replace(store);
+                    Ok(())
+                })
+                .await
+                .map_err(string_error)
+                .and_then(|result| result)
             };
             let _ = sender.send(result).await;
         });
@@ -1539,21 +1738,15 @@ impl SourcePort for SourceOwner {
                     .database
                     .clear_mapping_access(selected.source_key)
                     .await;
-                if let Some(slot) = owner
-                    .shared
-                    .selected
-                    .lock()
-                    .unwrap_or_else(|p| p.into_inner())
-                    .as_mut()
-                {
-                    let mut replacement = (*slot.current).clone();
-                    replacement.formula_match_count = 0;
-                    slot.current = Arc::new(replacement);
+                if let Some(session) = owner.shared.selected_session() {
+                    session.update(selected.source_key, |current| {
+                        current.formula_match_count = 0;
+                    });
                 }
-                let _ = owner.shared.playback().and_then(|playback| {
-                    playback
-                        .stream_inputs_changed(selected.source_key, selected.source_session_epoch)
-                });
+                let _ = owner
+                    .shared
+                    .playback()
+                    .and_then(|playback| playback.stream_inputs_changed());
             }
             let _ = owner.shared.settings.update(|stored| {
                 if let Some(configured) = stored
@@ -1589,35 +1782,34 @@ impl SourcePort for SourceOwner {
                 .shared
                 .selected()
                 .filter(|selected| selected.source_id() == &source_id);
-            let playback = owner.shared.playback().ok();
             if selected.is_some() {
                 owner.release_selected(true).await;
-                if let Some(playback) = playback.as_ref() {
-                    playback.stop_for_source_switch();
-                }
             }
-            owner.shared.downloads.clear(source_id.clone(), false);
-            let cached = owner
+            let playback = owner.shared.playback().ok();
+            let identity = owner
                 .shared
                 .database
-                .cached_source(source_id.as_str(), &ReadCancellation::new())
+                .source_identity_key(&source_id)
                 .await
                 .ok()
                 .flatten();
-            if let Some(cached) = cached {
-                if let Some(playback) = playback.as_ref()
-                    && let Err(error) = playback.remove_waveform_cache(cached.source)
-                {
-                    owner.shared.warn_nonfatal(&error);
+            if let Some(source_key) = identity {
+                if let Some(playback) = playback.as_ref() {
+                    if let Err(error) = playback.forget_source(source_key).await {
+                        owner.shared.warn_nonfatal(&error);
+                        return;
+                    }
                 }
-                let _ = owner.shared.database.remove_source(cached.source).await;
             }
-            if let Err(error) = owner.shared.artwork.invalidate_source(&source_id) {
+            if let Err(error) = owner.shared.database.remove_source(&source_id).await {
                 owner.shared.warn_nonfatal(&error.to_string());
             }
-            if let Some(reference) = configured.and_then(|item| item.credential_ref) {
-                let _ = delete_provider_secret(&owner.shared.secrets, &reference);
-            }
+            owner
+                .remove_source_resources(
+                    &source_id,
+                    configured.and_then(|item| item.credential_ref),
+                )
+                .await;
             let _ = owner.shared.settings.update(|stored| {
                 stored
                     .sources
@@ -1637,6 +1829,580 @@ impl SourcePort for SourceOwner {
                 .await;
         });
     }
+
+    fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
+        self.spawn_serialized(move |owner| async move {
+            let mut source_ids = media_uris
+                .iter()
+                .filter_map(|media_uri| {
+                    library::source_entity_parts(media_uri)
+                        .and_then(|(source_id, kind, _)| (kind == "track").then_some(source_id))
+                })
+                .collect::<Vec<_>>();
+            source_ids.sort();
+            source_ids.dedup();
+            for source_id in source_ids {
+                let (source, source_key) = match owner.source_target(&source_id).await {
+                    Ok(target) => target,
+                    Err(error) => {
+                        owner.shared.warn_nonfatal(&error);
+                        continue;
+                    }
+                };
+                if let Err(error) = owner
+                    .shared
+                    .downloads
+                    .attach(source_id, source_key, Some(source), None)
+                    .await
+                {
+                    owner.shared.warn_nonfatal(&error);
+                }
+            }
+            owner.shared.downloads.download(subject, media_uris);
+        });
+    }
+
+    fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
+        self.spawn_serialized(move |owner| async move {
+            owner.set_favorite(target, favorite).await;
+        });
+    }
+
+    fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
+        self.spawn_serialized(move |owner| async move {
+            owner.set_rating(target, rating).await;
+        });
+    }
+
+    fn import_playlist(
+        &self,
+        path: PathBuf,
+    ) -> Receiver<Result<library::PlaylistImportReport, String>> {
+        let current = self
+            .shared
+            .settings
+            .load()
+            .sources
+            .selected_source_id
+            .as_ref()
+            .and_then(|source_id| self.configuration(source_id));
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_serialized(move |owner| async move {
+            let result = async {
+                let file = std::fs::File::open(&path).map_err(string_error)?;
+                let report = owner
+                    .shared
+                    .database
+                    .import_playlist_m3u(std::io::BufReader::new(file), &path, |locator| {
+                        current
+                            .as_ref()
+                            .and_then(|source| source.recognize_media_locator(locator))
+                    })
+                    .await
+                    .map_err(string_error)?;
+                owner
+                    .accept_playlist_result(None, Some(report.playlist), Ok((true, None)))
+                    .await;
+                Ok(report)
+            }
+            .await;
+            match result {
+                Ok(report) => {
+                    let playlist = report.playlist;
+                    let _ = sender.send(Ok(report)).await;
+                    if let Err(error) = owner.enrich_imported_playlist(playlist).await {
+                        owner.shared.warn_nonfatal(&error);
+                    }
+                }
+                Err(error) => {
+                    let _ = sender.send(Err(error)).await;
+                }
+            }
+        });
+        receiver
+    }
+
+    fn create_playlist(
+        &self,
+        source_id: Option<SourceId>,
+        name: String,
+        media_uris: Vec<String>,
+    ) -> Receiver<Result<Option<String>, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_serialized(move |owner| async move {
+            let (source_key, result) = match source_id {
+                Some(source_id) => match owner.source_target(&source_id).await {
+                    Ok((source, source_key)) => (
+                        Some(source_key),
+                        async {
+                            let (changed, outcome, object_id) = source
+                                .create_playlist(
+                                    &owner.shared.database,
+                                    source_key,
+                                    &name,
+                                    &media_uris,
+                                )
+                                .await
+                                .map_err(string_error)?;
+                            let playlist = if let Some(object_id) = object_id.as_deref() {
+                                match owner
+                                    .shared
+                                    .database
+                                    .playlist_key_by_object(
+                                        source_key,
+                                        object_id,
+                                        &ReadCancellation::new(),
+                                    )
+                                    .await
+                                {
+                                    Ok(playlist) => playlist,
+                                    Err(error) => {
+                                        owner.shared.warn_nonfatal(&error.to_string());
+                                        None
+                                    }
+                                }
+                            } else {
+                                None
+                            };
+                            Ok((changed, outcome, playlist, object_id))
+                        }
+                        .await,
+                    ),
+                    Err(error) => (None, Err(error)),
+                },
+                None => (
+                    None,
+                    owner
+                        .shared
+                        .database
+                        .create_playlist(None, &name, &media_uris)
+                        .await
+                        .map(|playlist| {
+                            let (playlist, object_id) = playlist.unzip();
+                            (playlist.is_some(), None, playlist, object_id)
+                        })
+                        .map_err(string_error),
+                ),
+            };
+            let reply = match result {
+                Ok((changed, outcome, playlist, object_id)) => {
+                    owner
+                        .accept_playlist_result(source_key, playlist, Ok((changed, outcome)))
+                        .await;
+                    Ok(object_id)
+                }
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error);
+                    Err(error)
+                }
+            };
+            let _ = sender.send(reply).await;
+        });
+        receiver
+    }
+
+    fn rename_playlist(&self, playlist: PlaylistKey, name: String) {
+        self.playlist_change(playlist, move |target, database| async move {
+            match target {
+                None => database
+                    .rename_playlist(None, playlist, &name)
+                    .await
+                    .map(|changed| (changed, None))
+                    .map_err(string_error),
+                Some((source, source_key)) => source
+                    .rename_playlist(&database, source_key, playlist, &name)
+                    .await
+                    .map_err(string_error),
+            }
+        });
+    }
+
+    fn delete_playlist(&self, playlist: PlaylistKey) {
+        let owner = self.clone();
+        self.playlist_change(playlist, move |target, database| async move {
+            let result = match target {
+                None => database
+                    .delete_playlist(None, playlist)
+                    .await
+                    .map(|changed| (changed, None))
+                    .map_err(string_error),
+                Some((source, source_key)) => source
+                    .delete_playlist(&database, source_key, playlist)
+                    .await
+                    .map_err(string_error),
+            };
+            if matches!(result, Ok((true, _))) {
+                owner.prune_imported_playlist_files().await;
+            }
+            result
+        });
+    }
+
+    fn add_playlist_tracks(
+        &self,
+        playlist: PlaylistKey,
+        media_uris: Vec<String>,
+        skip_duplicates: bool,
+    ) -> Receiver<Result<usize, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_serialized(move |owner| async move {
+            let target = owner.playlist_source(playlist).await;
+            let source_key = target
+                .as_ref()
+                .ok()
+                .and_then(|target| target.as_ref().map(|(_, source_key)| *source_key));
+            let result = match target {
+                Ok(None) => owner
+                    .shared
+                    .database
+                    .add_playlist_media(None, playlist, &media_uris, skip_duplicates)
+                    .await
+                    .map(|accepted| (accepted, None))
+                    .map_err(string_error),
+                Ok(Some((source, source_key))) => source
+                    .add_playlist_tracks(
+                        &owner.shared.database,
+                        source_key,
+                        playlist,
+                        &media_uris,
+                        skip_duplicates,
+                    )
+                    .await
+                    .map_err(string_error),
+                Err(error) => Err(error),
+            };
+            let reply = match result {
+                Ok((accepted, outcome)) => {
+                    owner
+                        .accept_playlist_result(
+                            source_key,
+                            Some(playlist),
+                            Ok((accepted > 0, outcome)),
+                        )
+                        .await;
+                    Ok(accepted)
+                }
+                Err(error) => {
+                    owner.shared.warn_nonfatal(&error);
+                    Err(error)
+                }
+            };
+            let _ = sender.send(reply).await;
+        });
+        receiver
+    }
+
+    fn remove_playlist_entries(&self, playlist: PlaylistKey, entries: Vec<PlaylistEntryKey>) {
+        let owner = self.clone();
+        self.playlist_change(playlist, move |target, database| async move {
+            let result = match target {
+                None => database
+                    .remove_playlist_entries(None, playlist, &entries)
+                    .await
+                    .map(|removed| (removed > 0, None))
+                    .map_err(string_error),
+                Some((source, source_key)) => source
+                    .remove_playlist_entries(&database, source_key, playlist, &entries)
+                    .await
+                    .map_err(string_error),
+            };
+            if matches!(result, Ok((true, _))) {
+                owner.prune_imported_playlist_files().await;
+            }
+            result
+        });
+    }
+
+    fn move_playlist_entry(&self, playlist: PlaylistKey, entry: PlaylistEntryKey, position: usize) {
+        self.playlist_change(playlist, move |target, database| async move {
+            match target {
+                None => database
+                    .move_playlist_entry(None, playlist, entry, position)
+                    .await
+                    .map(|changed| (changed, None))
+                    .map_err(string_error),
+                Some((source, source_key)) => source
+                    .move_playlist_entry(&database, source_key, playlist, entry, position)
+                    .await
+                    .map_err(string_error),
+            }
+        });
+    }
+
+    fn track_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<TrackMetadata, SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            match target {
+                Ok(source) => source.read_track_metadata(&database, &media_uri).await,
+                Err(_) => Source::read_direct_file_metadata(&media_uri),
+            }
+        })
+    }
+
+    fn album_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<AlbumMetadata, SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            target
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .read_album_metadata(&database, &media_uri)
+                .await
+        })
+    }
+
+    fn artist_metadata(
+        &self,
+        media_uri: String,
+    ) -> Receiver<Result<ArtistMetadata, SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            target
+                .map_err(|_| SourceMetadataError::Unavailable)?
+                .read_artist_metadata(&database, &media_uri)
+                .await
+        })
+    }
+
+    fn write_reviewed_track_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        token: Option<String>,
+        edit: TrackMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            let _lane = owner.shared.lane.lock().await;
+            let source = match target {
+                Ok(source) => source,
+                Err(_) => {
+                    return Source::write_direct_file_metadata(
+                        &media_uri,
+                        revision.as_deref().unwrap_or_default(),
+                        &edit,
+                    );
+                }
+            };
+            let outcome = source
+                .write_track_metadata(
+                    &database,
+                    &media_uri,
+                    revision.as_deref().unwrap_or_default(),
+                    token.as_deref(),
+                    edit,
+                )
+                .await?;
+            owner
+                .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                .await;
+            Ok(())
+        })
+    }
+
+    fn write_reviewed_album_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        token: Option<String>,
+        edit: AlbumMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            let _lane = owner.shared.lane.lock().await;
+            let source = target.map_err(|_| SourceMetadataError::Unavailable)?;
+            let outcome = source
+                .write_album_metadata(
+                    &database,
+                    &media_uri,
+                    revision.as_deref().unwrap_or_default(),
+                    token.as_deref(),
+                    edit,
+                )
+                .await?;
+            owner
+                .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                .await;
+            Ok(())
+        })
+    }
+
+    fn write_reviewed_artist_metadata(
+        &self,
+        media_uri: String,
+        revision: Option<String>,
+        token: Option<String>,
+        edit: ArtistMetadataEdit,
+    ) -> Receiver<Result<(), SourceMetadataError>> {
+        self.reply(move |owner, database| async move {
+            let target = owner.media_client(&media_uri).await;
+            let _lane = owner.shared.lane.lock().await;
+            let source = target.map_err(|_| SourceMetadataError::Unavailable)?;
+            let outcome = source
+                .write_artist_metadata(
+                    &database,
+                    &media_uri,
+                    revision.as_deref().unwrap_or_default(),
+                    token.as_deref(),
+                    edit,
+                )
+                .await?;
+            owner
+                .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                .await;
+            Ok(())
+        })
+    }
+
+    fn identify_track_metadata(
+        &self,
+        _media_uri: String,
+        values: TrackMetadataValues,
+    ) -> Receiver<Result<Option<(TrackMetadataValues, Option<String>)>, String>> {
+        let external = self
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup();
+        self.reply(move |_, _| async move {
+            if external {
+                tokio::task::spawn_blocking(move || {
+                    metadata_lookup::identify_track_metadata(&values)
+                })
+                .await
+                .map_err(string_error)
+                .and_then(|result| result)
+                .map(|found| found.map(|values| (values, None)))
+            } else {
+                Ok(None)
+            }
+        })
+    }
+
+    fn identify_album_metadata(
+        &self,
+        media_uri: String,
+        values: AlbumMetadataValues,
+    ) -> Receiver<Result<Option<(AlbumMetadataValues, Option<String>)>, String>> {
+        let external = self
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup();
+        self.reply(move |owner, database| async move {
+            let exact = external
+                && (values
+                    .musicbrainz_album_id
+                    .as_deref()
+                    .is_some_and(|id| !id.trim().is_empty())
+                    || values
+                        .musicbrainz_release_group_id
+                        .as_deref()
+                        .is_some_and(|id| !id.trim().is_empty()));
+            if exact {
+                let copy = values.clone();
+                if let Some(values) = tokio::task::spawn_blocking(move || {
+                    metadata_lookup::identify_album_metadata(&copy)
+                })
+                .await
+                .map_err(string_error)??
+                {
+                    return Ok(Some((values, None)));
+                }
+            }
+            let native_source = library::source_entity_parts(&media_uri)
+                .map(|(id, _, _)| id)
+                .filter(|id| {
+                    owner
+                        .configuration(id)
+                        .is_some_and(|configuration| configuration.kind == "jellyfin")
+                });
+            let source = match native_source {
+                Some(id) => tokio::task::spawn_blocking(move || owner.client(&id).ok())
+                    .await
+                    .map_err(string_error)?,
+                None => None,
+            };
+            if let Some(source) = source
+                && let Some((values, token)) = source
+                    .identify_album_metadata(&database, &media_uri, &values)
+                    .await?
+            {
+                return Ok(Some((values, Some(token))));
+            }
+            if !external {
+                return Ok(None);
+            }
+            tokio::task::spawn_blocking(move || metadata_lookup::identify_album_metadata(&values))
+                .await
+                .map_err(string_error)?
+                .map(|found| found.map(|values| (values, None)))
+        })
+    }
+
+    fn identify_artist_metadata(
+        &self,
+        media_uri: String,
+        values: ArtistMetadataValues,
+    ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>> {
+        let external = self
+            .shared
+            .settings
+            .load()
+            .ui
+            .allows_external_metadata_lookup();
+        self.reply(move |owner, database| async move {
+            let exact = external
+                && values
+                    .musicbrainz_artist_id
+                    .as_deref()
+                    .is_some_and(|id| !id.trim().is_empty());
+            if exact {
+                let copy = values.clone();
+                if let Some(values) = tokio::task::spawn_blocking(move || {
+                    metadata_lookup::identify_artist_metadata(&copy)
+                })
+                .await
+                .map_err(string_error)??
+                {
+                    return Ok(Some((values, None)));
+                }
+            }
+            let native_source = library::source_entity_parts(&media_uri)
+                .map(|(id, _, _)| id)
+                .filter(|id| {
+                    owner
+                        .configuration(id)
+                        .is_some_and(|configuration| configuration.kind == "jellyfin")
+                });
+            let source = match native_source {
+                Some(id) => tokio::task::spawn_blocking(move || owner.client(&id).ok())
+                    .await
+                    .map_err(string_error)?,
+                None => None,
+            };
+            if let Some(source) = source
+                && let Some((values, token)) = source
+                    .identify_artist_metadata(&database, &media_uri, &values)
+                    .await?
+            {
+                return Ok(Some((values, Some(token))));
+            }
+            if !external {
+                return Ok(None);
+            }
+            tokio::task::spawn_blocking(move || metadata_lookup::identify_artist_metadata(&values))
+                .await
+                .map_err(string_error)?
+                .map(|found| found.map(|values| (values, None)))
+        })
+    }
 }
 
 impl SelectedSourcePort for ActiveSource {
@@ -1653,16 +2419,10 @@ impl SelectedSourcePort for ActiveSource {
         let settings = shared.settings.clone();
         let events = shared.outputs.events.clone();
         let source_key = selected.source_key;
-        let epoch = selected.source_session_epoch;
         let weak = session.downgrade();
         shared.runtime.spawn(async move {
             crate::album_release::run_selected_album_release_lookup(
-                settings,
-                events,
-                source_key,
-                epoch,
-                weak,
-                Arc::new(AtomicBool::new(false)),
+                settings, events, source_key, weak,
             )
             .await;
         });
@@ -1773,14 +2533,8 @@ impl SelectedSourcePort for ActiveSource {
                 Ok(())
             });
             let replacement = Arc::new(replacement);
-            if let Some(slot) = owner
-                .shared
-                .selected
-                .lock()
-                .unwrap_or_else(|p| p.into_inner())
-                .as_mut()
-            {
-                slot.current = Arc::clone(&replacement);
+            if let Some(session) = owner.shared.selected_session() {
+                session.replace(Arc::clone(&replacement));
             }
             let _ = owner
                 .shared
@@ -1806,175 +2560,6 @@ impl SelectedSourcePort for ActiveSource {
         });
     }
 
-    fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
-        self.spawn_selected(move |owner, selected| async move {
-            let remote = selected.source.is_some() && !selected.configuration.is_local();
-            let changed = if remote {
-                selected
-                    .database
-                    .queue_remote_favorite(selected.source_key, target, favorite, unix_seconds())
-                    .await
-            } else {
-                selected
-                    .database
-                    .set_favorite(selected.source_key, target, favorite)
-                    .await
-            }
-            .unwrap_or(false);
-            if changed {
-                owner
-                    .publish_catalog(
-                        &selected,
-                        Some(FavoriteSettlement {
-                            target,
-                            requested: favorite,
-                            effective: favorite,
-                        }),
-                        CatalogChange::Broad,
-                    )
-                    .await;
-                if remote {
-                    owner.deliver_favorite(selected, target, favorite).await;
-                }
-            }
-        });
-    }
-
-    fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
-        self.spawn_selected(move |owner, selected| async move {
-            let changed = selected
-                .database
-                .set_rating(selected.source_key, target, rating)
-                .await
-                .unwrap_or(false);
-            if changed {
-                owner
-                    .publish_catalog(&selected, None, CatalogChange::Broad)
-                    .await;
-                if let Some(source) = selected.source.as_ref() {
-                    match target {
-                        FavoriteTarget::Track(key) if selected.configuration.is_local() => {
-                            if let Err(error) = source
-                                .write_local_track_rating(
-                                    &selected.database,
-                                    selected.source_key,
-                                    key,
-                                    rating,
-                                )
-                                .await
-                            {
-                                warn!(%error, "could not write Local Track rating");
-                            }
-                        }
-                        _ if !selected.configuration.is_local() => {
-                            if let Some((_, object_id)) = favorite_object(&selected, target).await {
-                                if let Err(error) = source.set_rating(&object_id, rating).await {
-                                    warn!(%error, "could not write source rating");
-                                }
-                            }
-                        }
-                        _ => {}
-                    }
-                }
-            }
-        });
-    }
-
-    fn create_playlist(
-        &self,
-        name: String,
-        tracks: Vec<TrackKey>,
-    ) -> Receiver<Result<Option<String>, String>> {
-        let (sender, receiver) = async_channel::bounded(1);
-        self.spawn_selected(move |owner, selected| async move {
-            let result = match selected.source.as_ref().cloned() {
-                Some(source) => {
-                    source
-                        .create_playlist(&selected.database, selected.source_key, &name, &tracks)
-                        .await
-                }
-                None => Err(SourceError::InvalidRequest("Source is unavailable")),
-            };
-            match result {
-                Ok((changed, outcome, object_id)) => {
-                    owner
-                        .accept_playlist_result(&selected, Ok((changed, outcome)))
-                        .await;
-                    let _ = sender.send(Ok(object_id)).await;
-                }
-                Err(error) => {
-                    owner.shared.warn_nonfatal(&error.to_string());
-                    let _ = sender.send(Err(error.to_string())).await;
-                }
-            }
-        });
-        receiver
-    }
-
-    fn rename_playlist(&self, playlist: PlaylistKey, name: String) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .rename_playlist(&selected.database, selected.source_key, playlist, &name)
-                .await
-        });
-    }
-
-    fn delete_playlist(&self, playlist: PlaylistKey) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .delete_playlist(&selected.database, selected.source_key, playlist)
-                .await
-        });
-    }
-
-    fn add_playlist_tracks(
-        &self,
-        playlist: PlaylistKey,
-        tracks: Vec<TrackKey>,
-        skip_duplicates: bool,
-    ) -> usize {
-        let count = tracks.len();
-        self.playlist_change(move |source, selected| async move {
-            source
-                .add_playlist_tracks(
-                    &selected.database,
-                    selected.source_key,
-                    playlist,
-                    &tracks,
-                    skip_duplicates,
-                )
-                .await
-        });
-        count
-    }
-
-    fn remove_playlist_entries(&self, playlist: PlaylistKey, entries: Vec<PlaylistEntryKey>) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .remove_playlist_entries(
-                    &selected.database,
-                    selected.source_key,
-                    playlist,
-                    &entries,
-                )
-                .await
-        });
-    }
-
-    fn move_playlist_entry(&self, playlist: PlaylistKey, entry: PlaylistEntryKey, position: usize) {
-        self.playlist_change(move |source, selected| async move {
-            source
-                .move_playlist_entry(
-                    &selected.database,
-                    selected.source_key,
-                    playlist,
-                    entry,
-                    position,
-                )
-                .await
-        });
-    }
-
     fn folder(
         &self,
         folder_object_id: Option<String>,
@@ -1995,374 +2580,312 @@ impl SelectedSourcePort for ActiveSource {
         })
     }
 
-    fn search(&self, query: String, limit: usize) -> Receiver<Result<LiveSearchResults, String>> {
+    fn search(
+        &self,
+        query: String,
+        limit: usize,
+    ) -> Receiver<Result<library::SearchResults, String>> {
+        let shared = self.shared.clone();
         self.spawn_reply(move |selected| async move {
             let source = selected
                 .source
                 .clone()
                 .ok_or_else(source_access_unavailable)?;
-            source
-                .live_search(&query, limit)
+            let (rows, outcome) = source
+                .live_search(&selected.database, &query, limit)
                 .await
-                .map_err(string_error)
-        })
-    }
-
-    fn play_live_search_collection(
-        &self,
-        target: LiveSearchCollectionTarget,
-        placement: QueuePlacement,
-    ) {
-        self.spawn_selected(move |owner, selected| async move {
-            let (source_collection, context_id) = match &target {
-                LiveSearchCollectionTarget::Album(id) => (
-                    sources::SourceCollection::Album(id.clone()),
-                    format!("search:album:{id}"),
-                ),
-                LiveSearchCollectionTarget::Artist(id) => (
-                    sources::SourceCollection::Artist(id.clone()),
-                    format!("search:artist:{id}"),
-                ),
-            };
-            let mut order = if let Some(source) = selected.source.as_ref() {
-                match source
-                    .collection_track_object_ids(&source_collection, 500)
-                    .await
-                {
-                    Ok(ids) => selected
-                        .database
-                        .track_keys_by_objects(selected.source_key, &ids, &ReadCancellation::new())
-                        .await
-                        .unwrap_or_default(),
-                    Err(_) => Vec::new(),
-                }
-            } else {
-                Vec::new()
-            };
-            if order.is_empty() {
-                order = match target {
-                    LiveSearchCollectionTarget::Album(id) => match selected
-                        .database
-                        .album_key_by_object(selected.source_key, &id, &ReadCancellation::new())
-                        .await
-                        .ok()
-                        .flatten()
-                    {
-                        Some(album) => selected
-                            .database
-                            .album_track_order(
-                                selected.source_key,
-                                album,
-                                selected.music_folder_key,
-                                "",
-                                library::TrackSort::Title,
-                                false,
-                                &ReadCancellation::new(),
-                            )
-                            .await
-                            .unwrap_or_default(),
-                        None => Vec::new(),
-                    },
-                    LiveSearchCollectionTarget::Artist(id) => match selected
-                        .database
-                        .artist_key_by_object(selected.source_key, &id, &ReadCancellation::new())
-                        .await
-                        .ok()
-                        .flatten()
-                    {
-                        Some(artist) => selected
-                            .database
-                            .artist_track_order(
-                                selected.source_key,
-                                artist,
-                                false,
-                                selected.music_folder_key,
-                                "",
-                                library::TrackSort::Title,
-                                false,
-                                &ReadCancellation::new(),
-                            )
-                            .await
-                            .unwrap_or_default(),
-                        None => Vec::new(),
-                    },
-                };
-            }
-            let Some(first) = order.first().copied() else {
-                return;
-            };
-            let Some(anchor) = selected
-                .database
-                .track_rows(selected.source_key, &[first], &ReadCancellation::new())
-                .await
-                .ok()
-                .and_then(|mut rows| rows.pop())
-            else {
-                return;
-            };
-            let request = playback::LoadedPlayRequest::context(
-                selected.source_key,
-                selected.source_session_epoch,
-                order.into(),
-                anchor.into(),
-                0,
-                placement,
-                context_id,
-                false,
-            );
-            if let (Some(request), Ok(playback)) = (request, owner.shared.playback()) {
-                playback::QueueCommandPort::play_loaded(&*playback, request);
-            }
-        });
-    }
-
-    fn track_metadata(
-        &self,
-        track: TrackKey,
-    ) -> Receiver<Result<TrackMetadata, SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .read_track_metadata(&selected.database, selected.source_key, track)
-                .await
-        })
-    }
-
-    fn album_metadata(
-        &self,
-        album: AlbumKey,
-    ) -> Receiver<Result<AlbumMetadata, SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .read_album_metadata(&selected.database, selected.source_key, album)
-                .await
-        })
-    }
-
-    fn artist_metadata(
-        &self,
-        artist: ArtistKey,
-    ) -> Receiver<Result<ArtistMetadata, SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .read_artist_metadata(&selected.database, selected.source_key, artist)
-                .await
-        })
-    }
-
-    fn write_reviewed_track_metadata(
-        &self,
-        track: TrackKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: TrackMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .write_track_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    track,
-                    revision.as_deref().unwrap_or_default(),
-                    application_token.as_deref(),
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
-    fn write_reviewed_album_metadata(
-        &self,
-        album: AlbumKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: AlbumMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .write_album_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    album,
-                    revision.as_deref().unwrap_or_default(),
-                    application_token.as_deref(),
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
-    fn write_reviewed_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        revision: Option<String>,
-        application_token: Option<String>,
-        edit: ArtistMetadataEdit,
-    ) -> Receiver<Result<(), SourceMetadataError>> {
-        self.spawn_reply(move |selected| async move {
-            let source = selected
-                .source
-                .clone()
-                .ok_or(SourceMetadataError::Unavailable)?;
-            source
-                .write_artist_metadata(
-                    &selected.database,
-                    selected.source_key,
-                    artist,
-                    revision.as_deref().unwrap_or_default(),
-                    application_token.as_deref(),
-                    edit,
-                )
-                .await
-                .map(|_| ())
-        })
-    }
-
-    fn identify_track_metadata(
-        &self,
-        _track: TrackKey,
-        values: TrackMetadataValues,
-    ) -> Receiver<Result<Option<(TrackMetadataValues, Option<String>)>, String>> {
-        let external = self
-            .shared
-            .upgrade()
-            .is_some_and(|shared| shared.settings.load().ui.allows_external_metadata_lookup());
-        self.spawn_reply(move |_| async move {
-            if !external {
-                return Ok(None);
-            }
-            tokio::task::spawn_blocking(move || metadata_lookup::identify_track_metadata(&values))
-                .await
-                .map_err(string_error)?
-                .map(|identified| identified.map(|values| (values, None)))
-        })
-    }
-
-    fn identify_album_metadata(
-        &self,
-        album: AlbumKey,
-        values: AlbumMetadataValues,
-    ) -> Receiver<Result<Option<(AlbumMetadataValues, Option<String>)>, String>> {
-        let external = self
-            .shared
-            .upgrade()
-            .is_some_and(|shared| shared.settings.load().ui.allows_external_metadata_lookup());
-        self.spawn_reply(move |selected| async move {
-            let exact_external = external
-                && (values
-                    .musicbrainz_album_id
-                    .as_deref()
-                    .is_some_and(|id| !id.trim().is_empty())
-                    || values
-                        .musicbrainz_release_group_id
-                        .as_deref()
-                        .is_some_and(|id| !id.trim().is_empty()));
-            if exact_external {
-                let external_values = values.clone();
-                match tokio::task::spawn_blocking(move || {
-                    metadata_lookup::identify_album_metadata(&external_values)
-                })
-                .await
-                .map_err(string_error)??
-                {
-                    Some(values) => return Ok(Some((values, None))),
-                    None => {}
-                }
-            }
-            if let Some(source) = selected.source.clone()
-                && let Some((values, token)) = source
-                    .identify_album_metadata(
-                        &selected.database,
-                        selected.source_key,
-                        album,
-                        &values,
-                    )
-                    .await?
+                .map_err(string_error)?;
+            if let Some(shared) = shared.upgrade()
+                && let Some(outcome) = outcome
             {
-                return Ok(Some((values, Some(token))));
+                SourceOwner { shared }
+                    .accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                    .await;
             }
-            if !external {
-                return Ok(None);
-            }
-            tokio::task::spawn_blocking(move || metadata_lookup::identify_album_metadata(&values))
-                .await
-                .map_err(string_error)?
-                .map(|identified| identified.map(|values| (values, None)))
-        })
-    }
-
-    fn identify_artist_metadata(
-        &self,
-        artist: ArtistKey,
-        values: ArtistMetadataValues,
-    ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>> {
-        let external = self
-            .shared
-            .upgrade()
-            .is_some_and(|shared| shared.settings.load().ui.allows_external_metadata_lookup());
-        self.spawn_reply(move |selected| async move {
-            let exact_external = external
-                && values
-                    .musicbrainz_artist_id
-                    .as_deref()
-                    .is_some_and(|id| !id.trim().is_empty());
-            if exact_external {
-                let external_values = values.clone();
-                match tokio::task::spawn_blocking(move || {
-                    metadata_lookup::identify_artist_metadata(&external_values)
-                })
-                .await
-                .map_err(string_error)??
-                {
-                    Some(values) => return Ok(Some((values, None))),
-                    None => {}
-                }
-            }
-            if let Some(source) = selected.source.clone()
-                && let Some((values, token)) = source
-                    .identify_artist_metadata(
-                        &selected.database,
-                        selected.source_key,
-                        artist,
-                        &values,
-                    )
-                    .await?
-            {
-                return Ok(Some((values, Some(token))));
-            }
-            if !external {
-                return Ok(None);
-            }
-            tokio::task::spawn_blocking(move || metadata_lookup::identify_artist_metadata(&values))
-                .await
-                .map_err(string_error)?
-                .map(|identified| identified.map(|values| (values, None)))
+            Ok(rows)
         })
     }
 }
 
 impl SourceOwner {
+    async fn enrich_imported_playlist(&self, playlist: library::PlaylistKey) -> Result<(), String> {
+        let mut after = -1;
+        let mut readable = false;
+        loop {
+            let page = self
+                .shared
+                .database
+                .playlist_file_uri_page(playlist, after)
+                .await
+                .map_err(string_error)?;
+            if page.is_empty() {
+                break;
+            }
+            after = page.last().unwrap().0;
+            if page
+                .iter()
+                .any(|(_, uri)| library::file_media_path(uri).is_some_and(|path| path.is_file()))
+            {
+                readable = true;
+                break;
+            }
+        }
+        if readable {
+            let stored = self.shared.settings.load();
+            let local = stored
+                .sources
+                .configured
+                .iter()
+                .find(|item| item.configuration.is_local());
+            let source = if let Some(local) = local {
+                self.client(&local.configuration.source_id)?
+            } else {
+                let connected = Source::connect(
+                    fresh_source_id()?,
+                    SourceSetupInput::Local(sources::LocalFolderHostInput { roots: Vec::new() }),
+                )
+                .await
+                .map_err(string_error)?;
+                let (configuration, source, credential) = connected.into_parts();
+                self.persist_connected_source(
+                    &ConfiguredSource {
+                        configuration: configuration.clone(),
+                        credential_ref: None,
+                        music_folder_id: None,
+                        local_access: None,
+                        enable_half_stars: false,
+                    },
+                    credential,
+                )?;
+                library::Scan::begin(
+                    &self.shared.database,
+                    configuration.source_id.as_str(),
+                    &configuration.name,
+                    "local",
+                    None,
+                )
+                .await
+                .map_err(string_error)?
+                .finish()
+                .await
+                .map_err(string_error)?;
+                self.shared
+                    .send(SourceEvent::Configured(configured_sources(
+                        &self.shared.settings.load(),
+                        self.shared.selected().as_deref(),
+                    )))
+                    .await;
+                Arc::new(source)
+            };
+            let outcome = source
+                .import_playlist_files(&self.shared.database, playlist)
+                .await
+                .map_err(string_error)?;
+            self.accept_scan(source.source_id(), outcome, CatalogChange::Broad)
+                .await;
+        }
+        Ok(())
+    }
+
+    async fn source_target(
+        &self,
+        source_id: &SourceId,
+    ) -> Result<(Arc<Source>, SourceKey), String> {
+        let source = self.client(source_id)?;
+        let publication = self
+            .shared
+            .database
+            .cached_source(source_id.as_str(), &ReadCancellation::new())
+            .await
+            .map_err(string_error)?
+            .ok_or_else(source_access_unavailable)?;
+        Ok((source, publication.source))
+    }
+
+    async fn playlist_source(
+        &self,
+        playlist: PlaylistKey,
+    ) -> Result<Option<(Arc<Source>, SourceKey)>, String> {
+        match self
+            .shared
+            .database
+            .playlist_owner(playlist, &ReadCancellation::new())
+            .await
+            .map_err(string_error)?
+        {
+            Some((None, None)) => Ok(None),
+            Some((Some(source_key), Some(source_id))) => self
+                .client(&SourceId::new(source_id))
+                .map(|source| Some((source, source_key))),
+            Some(_) => Err("Playlist owner is unavailable".to_string()),
+            None => Err("Playlist no longer exists".to_string()),
+        }
+    }
+
+    async fn favorite_source(
+        &self,
+        target: &FavoriteTarget,
+    ) -> Option<(SourceId, SourceKey, bool)> {
+        let source_id = match library::source_entity_parts(target.media_uri()) {
+            Some((source_id, kind, _)) if kind == target.kind() => source_id,
+            _ => match target {
+                FavoriteTarget::Track(media_uri) => SourceId::new(
+                    self.shared
+                        .database
+                        .track_row_by_uri(media_uri, &ReadCancellation::new())
+                        .await
+                        .ok()
+                        .flatten()?
+                        .source_id,
+                ),
+                FavoriteTarget::Album(_) | FavoriteTarget::Artist(_) => return None,
+            },
+        };
+        let source_key = self
+            .shared
+            .database
+            .cached_source(source_id.as_str(), &ReadCancellation::new())
+            .await
+            .ok()
+            .flatten()?
+            .source;
+        let local = self.configuration(&source_id)?.is_local();
+        Some((source_id, source_key, local))
+    }
+
+    async fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
+        let source = self.favorite_source(&target).await;
+        let changed = if source.as_ref().is_some_and(|(_, _, local)| !local) {
+            self.shared
+                .database
+                .queue_remote_favorite(&target, favorite, unix_seconds())
+                .await
+        } else {
+            self.shared.database.set_favorite(&target, favorite).await
+        }
+        .unwrap_or(false);
+        if !changed {
+            return;
+        }
+        self.publish_current_catalog(
+            Some(FavoriteSettlement {
+                target: target.clone(),
+                requested: favorite,
+                effective: favorite,
+            }),
+            CatalogChange::Broad,
+        )
+        .await;
+        if let Some((source_id, source_key, false)) = source {
+            self.deliver_favorite(source_id, source_key, target, favorite)
+                .await;
+        }
+    }
+
+    async fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
+        if !self
+            .shared
+            .database
+            .set_rating(&target, rating)
+            .await
+            .unwrap_or(false)
+        {
+            return;
+        }
+        self.publish_current_catalog(None, CatalogChange::Broad)
+            .await;
+        let Some((source_id, source_key, local)) = self.favorite_source(&target).await else {
+            return;
+        };
+        let Ok(source) = self.client(&source_id) else {
+            return;
+        };
+        match &target {
+            FavoriteTarget::Track(media_uri) if local => {
+                if let Err(error) = source
+                    .write_local_track_rating(&self.shared.database, source_key, media_uri, rating)
+                    .await
+                {
+                    warn!(%error, "could not write Local Track rating");
+                }
+            }
+            _ if !local => {
+                if let Some((_, object_id)) = favorite_object(&source_id, &target)
+                    && let Err(error) = source.set_rating(&object_id, rating).await
+                {
+                    warn!(%error, "could not write source rating");
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn reply<T, F, Work>(&self, work: F) -> Receiver<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(SourceOwner, Arc<Database>) -> Work + Send + 'static,
+        Work: Future<Output = T> + Send + 'static,
+    {
+        let (sender, receiver) = async_channel::bounded(1);
+        let owner = self.clone();
+        let database = Arc::clone(&self.shared.database);
+        self.shared.runtime.spawn(async move {
+            let _ = sender.send(work(owner, database).await).await;
+        });
+        receiver
+    }
+
+    async fn media_client(&self, media_uri: &str) -> Result<Arc<Source>, String> {
+        let source_id = match library::source_entity_parts(media_uri) {
+            Some((source_id, _, _)) => Some(source_id),
+            None => self
+                .shared
+                .database
+                .track_row_by_uri(media_uri, &ReadCancellation::new())
+                .await
+                .map_err(string_error)?
+                .map(|row| SourceId::new(row.source_id)),
+        }
+        .ok_or_else(source_access_unavailable)?;
+        self.client(&source_id)
+    }
+
+    pub(crate) fn client(&self, source_id: &SourceId) -> Result<Arc<Source>, String> {
+        if let Some(source) = self
+            .shared
+            .selected()
+            .filter(|selected| selected.source_id() == source_id)
+            .and_then(|selected| selected.source.clone())
+        {
+            return Ok(source);
+        }
+        let configured = configured_source(&self.shared.settings.load().sources, source_id)?;
+        let credential = configured
+            .credential_ref
+            .as_ref()
+            .map(|reference| load_provider_secret(&self.shared.secrets, reference))
+            .transpose()?
+            .flatten();
+        Ok(Arc::new(
+            Source::open(
+                configured.configuration,
+                credential,
+                Some(self.shared.settings.load().jellyfin_device_id),
+            )
+            .map_err(string_error)?,
+        ))
+    }
+
+    pub(crate) fn configuration(&self, source_id: &SourceId) -> Option<SourceConfiguration> {
+        configured_source(&self.shared.settings.load().sources, source_id)
+            .ok()
+            .map(|configured| configured.configuration)
+    }
+
+    pub(crate) fn current_session(&self) -> Option<Arc<ActiveSource>> {
+        self.shared.selected_session()
+    }
+
     async fn fail_artwork_preparation(
         &self,
         key: ArtworkPreparationKey,
@@ -2392,7 +2915,6 @@ impl SourceOwner {
         };
         let key = ArtworkPreparationKey {
             source: selected.source_key,
-            epoch: selected.source_session_epoch,
             digest: selected.artwork_digest,
         };
         let Some((token, cancelled)) = self
@@ -2407,10 +2929,6 @@ impl SourceOwner {
         let owner = self.clone();
         let task = self.shared.runtime.spawn(async move {
             let initial_revision = artwork_digest_revision(&selected.artwork_digest);
-            let images = selected.source.as_ref().map_or_else(
-                || artwork::SourceImages::cache_only(selected.source_id().clone()),
-                |source| artwork::SourceImages::new(Arc::clone(source)),
-            );
             let current_revision = Arc::new(AtomicU64::new(initial_revision));
             let progress_revision = Arc::clone(&current_revision);
             let progress_owner = owner.clone();
@@ -2426,18 +2944,21 @@ impl SourceOwner {
                     progress: Some(artwork_preparation_progress(completed)),
                 });
             };
-            let result = progress_owner
-                .shared
-                .artwork
-                .prepare_database_source(
-                    &selected.database,
-                    selected.source_key,
-                    images,
-                    selected.artwork_digest,
-                    &progress,
-                    Arc::clone(&cancelled),
-                )
-                .await;
+            let result = async {
+                progress_owner
+                    .shared
+                    .artwork
+                    .prepare_database_source(
+                        &selected.database,
+                        selected.source_key,
+                        selected.source_id(),
+                        selected.artwork_digest,
+                        &progress,
+                        Arc::clone(&cancelled),
+                    )
+                    .await
+            }
+            .await;
             let revision = current_revision.load(Ordering::Acquire);
             let completed = match result {
                 Ok(completed) => completed,
@@ -2479,42 +3000,40 @@ impl SourceOwner {
 
     async fn deliver_favorite(
         &self,
-        selected: Arc<SelectedSourceState>,
+        source_id: SourceId,
+        source_key: SourceKey,
         target: FavoriteTarget,
         favorite: bool,
     ) {
-        let Some(source) = selected.source.as_ref() else {
+        let Ok(source) = self.client(&source_id) else {
             return;
         };
-        let Some((kind, object_id)) = favorite_object(&selected, target).await else {
+        let Some((kind, object_id)) = favorite_object(&source_id, &target) else {
             return;
         };
         match source.set_favorite(kind, &object_id, favorite).await {
             Ok(()) => {
-                let _ = selected
+                let _ = self
+                    .shared
                     .database
-                    .acknowledge_remote_favorite(selected.source_key, target, favorite)
+                    .acknowledge_remote_favorite(&target, favorite)
                     .await;
             }
             Err(error) if source_error_is_temporary(&error) => {
-                let _ = selected
+                let _ = self
+                    .shared
                     .database
-                    .defer_remote_favorite(
-                        selected.source_key,
-                        target,
-                        favorite,
-                        unix_seconds().saturating_add(30),
-                    )
+                    .defer_remote_favorite(&target, favorite, unix_seconds().saturating_add(30))
                     .await;
             }
             Err(_) => {
-                if let Ok(Some(previous)) = selected
+                if let Ok(Some(previous)) = self
+                    .shared
                     .database
-                    .reject_remote_favorite(selected.source_key, target, favorite)
+                    .reject_remote_favorite(&target, favorite)
                     .await
                 {
-                    self.publish_catalog(
-                        &selected,
+                    self.publish_current_catalog(
                         Some(FavoriteSettlement {
                             target,
                             requested: favorite,
@@ -2525,8 +3044,10 @@ impl SourceOwner {
                     .await;
                     self.shared
                         .send(SourceEvent::Notice(SourceNotice {
-                            source_key: selected.source_key,
-                            source_session_epoch: selected.source_session_epoch,
+                            source_key: self
+                                .shared
+                                .selected()
+                                .map_or(source_key, |selected| selected.source_key),
                             kind: SourceNoticeKind::FavoriteRejected,
                         }))
                         .await;
@@ -2536,34 +3057,20 @@ impl SourceOwner {
     }
 }
 
-async fn favorite_object(
-    selected: &SelectedSourceState,
-    target: FavoriteTarget,
+fn favorite_object(
+    source: &SourceId,
+    target: &FavoriteTarget,
 ) -> Option<(SourceEntityKind, String)> {
-    let cancel = ReadCancellation::new();
-    match target {
-        FavoriteTarget::Track(key) => selected
-            .database
-            .track_rows(selected.source_key, &[key], &cancel)
-            .await
-            .ok()?
-            .pop()
-            .map(|row| (SourceEntityKind::Track, row.object_id)),
-        FavoriteTarget::Album(key) => selected
-            .database
-            .album_rows(selected.source_key, &[key], None, &cancel)
-            .await
-            .ok()?
-            .pop()
-            .map(|row| (SourceEntityKind::Album, row.object_id)),
-        FavoriteTarget::Artist(key) => selected
-            .database
-            .artist_rows(selected.source_key, &[key], false, None, &cancel)
-            .await
-            .ok()?
-            .pop()
-            .map(|row| (SourceEntityKind::Artist, row.object_id)),
+    let (source_id, kind, object_id) = library::source_entity_parts(target.media_uri())?;
+    if &source_id != source || kind != target.kind() {
+        return None;
     }
+    let kind = match target {
+        FavoriteTarget::Track(_) => SourceEntityKind::Track,
+        FavoriteTarget::Album(_) => SourceEntityKind::Album,
+        FavoriteTarget::Artist(_) => SourceEntityKind::Artist,
+    };
+    Some((kind, object_id))
 }
 
 fn source_error_is_temporary(error: &SourceError) -> bool {
@@ -2593,28 +3100,6 @@ fn half_stars_enabled(configured: &ConfiguredSource) -> bool {
     configured.configuration.kind == "jellyfin" || configured.enable_half_stars
 }
 
-async fn acquire_required_catalog(
-    source: &Source,
-    database: &Database,
-    display_name: &str,
-    progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
-    cancelled: Arc<AtomicBool>,
-) -> Result<library::Publication, String> {
-    match source
-        .manual_refresh(database, display_name, progress, cancelled)
-        .await
-        .map_err(string_error)?
-    {
-        ScanOutcome::Changed(publication)
-        | ScanOutcome::PlaylistsChanged(publication)
-        | ScanOutcome::ArtworkChanged(publication)
-        | ScanOutcome::Identical(publication) => Ok(publication),
-        ScanOutcome::Stale | ScanOutcome::Failed => {
-            Err("the source catalog was not published".to_string())
-        }
-    }
-}
-
 fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + Send + 'static) {
     let stored = owner.shared.settings.load();
     let Some(local) = stored
@@ -2629,10 +3114,6 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     };
     let mut roots = local_roots(&local.configuration).unwrap_or_default();
     edit(&mut roots);
-    if roots.is_empty() {
-        SourcePort::forget_source(owner, local.configuration.source_id);
-        return;
-    }
     let input = SourceSettingsInput::Local { roots };
     let source_id = local.configuration.source_id;
     let cancelled = owner.shared.begin_acquisition();
@@ -2722,8 +3203,6 @@ fn configured_sources(
         selected_source_id: stored.sources.selected_source_id.clone(),
         local_folders: local_folders.into(),
         local_access: local_access.into(),
-        first_run: stored.sources.configured.is_empty()
-            || stored.sources.selected_source_id.is_none(),
     }
 }
 
@@ -2731,18 +3210,12 @@ fn ui_selected(
     selected: Arc<SelectedSourceState>,
     operations: Arc<ActiveSource>,
 ) -> SelectedLibrary {
-    let artwork = selected.source.as_ref().map_or_else(
-        || artwork::SourceImages::cache_only(selected.source_id().clone()),
-        |source| artwork::SourceImages::new(Arc::clone(source)),
-    );
     SelectedLibrary {
+        source_id: selected.source_id().clone(),
         source_key: selected.source_key,
-        source_session_epoch: selected.source_session_epoch,
         music_folder_key: selected.music_folder_key,
         music_folder_object_id: selected.music_folder_object_id.clone(),
         music_folders: Arc::clone(&selected.music_folders),
-        playlist_tracks_can_repeat: selected.configuration.playlist_tracks_can_repeat(),
-        artwork,
         database: Arc::clone(&selected.database),
         runtime: selected.runtime.clone(),
         operations,
@@ -2781,8 +3254,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 server_url: credentials.server_url,
                 username: credentials.username,
                 trust_invalid_cert: credentials.trust_invalid_cert,
-                open_subsonic_authentication: subsonic_authentication
-                    .map(open_subsonic_authentication),
+                open_subsonic_authentication: subsonic_authentication,
             },
             jellyfin_use_instant_mix,
         }),
@@ -2808,7 +3280,7 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
             credentials,
         } => SourceSetupInput::Subsonic {
             flavor: subsonic_flavor(kind),
-            authentication: subsonic_authentication(authentication),
+            authentication,
             credentials: credential_host_input(credentials),
         },
         SourceSetup::Local { roots } => SourceSetupInput::Local(LocalFolderHostInput { roots }),
@@ -2831,7 +3303,7 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
             authentication,
             credentials,
         } => SourceSettingsInput::Subsonic {
-            authentication: subsonic_authentication(authentication),
+            authentication,
             credentials: credential_settings_input(credentials),
         },
     }
@@ -2868,22 +3340,6 @@ fn subsonic_flavor(kind: OpenSubsonicKind) -> SubsonicFlavor {
     match kind {
         OpenSubsonicKind::Navidrome => SubsonicFlavor::Navidrome,
         OpenSubsonicKind::OpenSubsonic => SubsonicFlavor::Subsonic,
-    }
-}
-
-fn subsonic_authentication(authentication: OpenSubsonicAuthentication) -> SubsonicAuthentication {
-    match authentication {
-        OpenSubsonicAuthentication::Password => SubsonicAuthentication::Password,
-        OpenSubsonicAuthentication::ApiKey => SubsonicAuthentication::ApiKey,
-    }
-}
-
-fn open_subsonic_authentication(
-    authentication: SubsonicAuthentication,
-) -> OpenSubsonicAuthentication {
-    match authentication {
-        SubsonicAuthentication::Password => OpenSubsonicAuthentication::Password,
-        SubsonicAuthentication::ApiKey => OpenSubsonicAuthentication::ApiKey,
     }
 }
 
@@ -2976,12 +3432,392 @@ fn unix_seconds() -> i64 {
 mod artwork_preparation_tests {
     use super::*;
 
+    #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+    async fn cached_selection_is_published_while_credentials_are_held() {
+        struct HeldSecrets {
+            started: Sender<()>,
+            release: Mutex<std::sync::mpsc::Receiver<()>>,
+        }
+        impl SecretStore for HeldSecrets {
+            fn load_secret(&self, _: &secrets::SecretKey) -> secrets::SecretResult<Option<String>> {
+                let _ = self.started.try_send(());
+                let _ = self.release.lock().unwrap().recv();
+                Ok(Some("salt:token".into()))
+            }
+            fn save_secret(&self, _: &secrets::SecretKey, _: &str) -> secrets::SecretResult<()> {
+                Ok(())
+            }
+            fn delete_secret(&self, _: &secrets::SecretKey) -> secrets::SecretResult<()> {
+                Ok(())
+            }
+        }
+        for switch_while_held in [false, true] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = Arc::new(
+                Database::open(directory.path().join("library.sqlite"))
+                    .await
+                    .unwrap(),
+            );
+            let source_id = SourceId::new("held-credential-source");
+            let mut scan =
+                library::Scan::begin(&database, source_id.as_str(), "Music", "music", None)
+                    .await
+                    .unwrap();
+            scan.write_album(
+                "album",
+                "Cached Album",
+                "cached album",
+                "Artist",
+                "cached album",
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+                None,
+            )
+            .await
+            .unwrap();
+            let ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+                panic!("initial catalog");
+            };
+            let settings = SettingsFile::memory();
+            settings.update(|stored| {
+            stored.sources.configured.push(ConfiguredSource {
+                configuration: SourceConfiguration {
+                    source_id: source_id.clone(),
+                    kind: "subsonic".into(),
+                    name: "Music".into(),
+                    provider_payload: serde_json::json!({ "version": 1, "base_url": "http://127.0.0.1:9", "username": "listener", "trust_invalid_cert": false }).to_string(),
+                },
+                credential_ref: Some(crate::settings::CredentialRef::new("held")),
+                music_folder_id: None,
+                local_access: None,
+                enable_half_stars: false,
+            });
+            Ok(())
+        }).unwrap();
+            let runtime = tokio::runtime::Handle::current();
+            let (started, started_receiver) = async_channel::bounded(1);
+            let (release, release_receiver) = std::sync::mpsc::channel();
+            let secrets = Arc::new(SwitchableSecretStore::new(Arc::new(HeldSecrets {
+                started,
+                release: Mutex::new(release_receiver),
+            })));
+            let (events, receiver) = async_channel::unbounded();
+            let owner = SourceOwner::open_dormant(
+                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Arc::clone(&database),
+                Downloads::new(
+                    directory.path().join("downloads"),
+                    database.as_ref().clone(),
+                    runtime.clone(),
+                    async_channel::unbounded().0,
+                    Vec::new(),
+                ),
+                settings,
+                secrets,
+                runtime,
+                SourceOutputs {
+                    events,
+                    discovery: async_channel::unbounded().0,
+                },
+            )
+            .owner;
+            owner.select_source(source_id.clone());
+            let published = tokio::time::timeout(Duration::from_secs(2), async {
+                loop {
+                    if let SourceEvent::Selected { selected, .. } = receiver.recv().await.unwrap() {
+                        break selected;
+                    }
+                }
+            })
+            .await
+            .expect("cached selection must not wait for credentials");
+            assert_eq!(published.source_id, source_id);
+            assert_eq!(published.source_key, publication.source);
+            assert_eq!(owner.shared.selected().unwrap().album_count, 1);
+            tokio::time::timeout(Duration::from_secs(2), started_receiver.recv())
+                .await
+                .unwrap()
+                .unwrap();
+            let session = owner.shared.selected_session().unwrap();
+            assert!(session.resolve().unwrap().source.is_none());
+            owner
+                .shared
+                .settings
+                .update(|stored| {
+                    stored.ui.external_metadata_enabled = false;
+                    Ok(())
+                })
+                .unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                assert!(
+                    owner
+                        .identify_track_metadata(
+                            "file:///music/song.flac".into(),
+                            TrackMetadataValues::default()
+                        )
+                        .recv()
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(
+                    owner
+                        .identify_album_metadata(
+                            library::source_entity_uri(&source_id, "album", "album"),
+                            AlbumMetadataValues::default()
+                        )
+                        .recv()
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_none()
+                );
+                assert!(
+                    owner
+                        .identify_artist_metadata(
+                            library::source_entity_uri(&source_id, "artist", "artist"),
+                            ArtistMetadataValues::default()
+                        )
+                        .recv()
+                        .await
+                        .unwrap()
+                        .unwrap()
+                        .is_none()
+                );
+            })
+            .await
+            .expect("non-native identification does not acquire a provider");
+            let mut scan = library::Scan::begin_items(&database, source_id.as_str())
+                .await
+                .unwrap();
+            scan.write_folder("new-folder", "New Folder", "new folder", "new folder", None)
+                .await
+                .unwrap();
+            scan.write_track(
+                "new-track",
+                Some("album"),
+                "New Track",
+                "new track",
+                "Cached Album",
+                "Artist",
+                "new track",
+                1_000,
+                1,
+                1,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                false,
+                None,
+                None,
+                None,
+                None,
+                None,
+                None,
+                [0; 32],
+            )
+            .await
+            .unwrap();
+            scan.write_track_folders(&[library::ScanLink {
+                owner_id: "new-track",
+                related_id: "new-folder",
+                position: 0,
+            }])
+            .await
+            .unwrap();
+            let outcome = scan.finish().await.unwrap();
+            let ScanOutcome::Changed(updated_publication) = outcome else {
+                panic!("new folder publication")
+            };
+            owner
+                .accept_scan(&source_id, outcome, CatalogChange::Acquired)
+                .await;
+            assert!(Arc::ptr_eq(
+                &session,
+                &owner.shared.selected_session().unwrap()
+            ));
+            assert!(
+                session.resolve().unwrap().source.is_none(),
+                "summary refresh does not obtain credentials"
+            );
+            assert_eq!(
+                session.resolve().unwrap().music_folders[0].object_id,
+                "new-folder"
+            );
+            let mut summary_published = false;
+            while let Ok(event) = receiver.try_recv() {
+                if let SourceEvent::CatalogReplaced { selected, .. } = event {
+                    assert_eq!(selected.music_folders[0].object_id, "new-folder");
+                    summary_published = true;
+                }
+            }
+            assert!(
+                summary_published,
+                "the UI receives the updated folder snapshot"
+            );
+            if switch_while_held {
+                let old_state = Arc::downgrade(&session.resolve().unwrap());
+                drop(published);
+                let local_id = SourceId::new("local-replacement");
+                owner
+                    .shared
+                    .settings
+                    .update(|stored| {
+                        stored.sources.configured.push(ConfiguredSource {
+                            configuration: SourceConfiguration::local(
+                                local_id.clone(),
+                                "Local",
+                                Vec::new(),
+                            )
+                            .unwrap(),
+                            credential_ref: None,
+                            music_folder_id: None,
+                            local_access: None,
+                            enable_half_stars: false,
+                        });
+                        Ok(())
+                    })
+                    .unwrap();
+                library::Scan::begin(&database, local_id.as_str(), "Local", "local", None)
+                    .await
+                    .unwrap()
+                    .finish()
+                    .await
+                    .unwrap();
+                owner.select_source(local_id.clone());
+                let replacement = tokio::time::timeout(Duration::from_secs(2), async {
+                    loop {
+                        match receiver.recv().await.unwrap() {
+                            SourceEvent::ReleaseSelected { acknowledged } => {
+                                acknowledged.send(()).await.unwrap()
+                            }
+                            SourceEvent::Selected { selected, .. } => break selected,
+                            _ => {}
+                        }
+                    }
+                })
+                .await
+                .expect("another cached source can be selected during unlock");
+                assert_eq!(replacement.source_id, local_id);
+                assert!(session.resolve().is_none());
+                assert!(old_state.upgrade().is_none());
+                release.send(()).unwrap();
+                tokio::time::timeout(Duration::from_secs(2), async {
+                    while Arc::strong_count(&session) > 1 {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("retired credential continuation releases its session");
+                assert!(session.resolve().is_none());
+                assert_eq!(owner.shared.selected().unwrap().source_id(), &local_id);
+                continue;
+            }
+            release.send(()).unwrap();
+            tokio::time::timeout(Duration::from_secs(2), async {
+                while session.resolve().unwrap().source.is_none() {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("provider attaches after unlock");
+            assert!(Arc::ptr_eq(
+                &session,
+                &owner.shared.selected_session().unwrap()
+            ));
+            assert_eq!(
+                database
+                    .cached_source(source_id.as_str(), &ReadCancellation::new())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .catalog_revision as u64,
+                updated_publication.catalog_revision
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn retired_source_handles_release_their_client_graph_before_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Arc::new(
+            Database::open(directory.path().join("library.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let mut stale_handles = Vec::new();
+        for index in 0..16 {
+            let configuration = SourceConfiguration {
+                source_id: SourceId::new(format!("instance-{index}")),
+                kind: "subsonic".into(),
+                name: "Music".into(),
+                provider_payload:
+                    serde_json::json!({ "version": 1, "base_url": "http://127.0.0.1:9",
+                    "username": "listener", "trust_invalid_cert": false })
+                    .to_string(),
+            };
+            let source = Arc::new(
+                Source::open(configuration.clone(), Some("salt:token".into()), None).unwrap(),
+            );
+            let weak_source = Arc::downgrade(&source);
+            let selected = Arc::new(SelectedSourceState {
+                configuration,
+                source: Some(source),
+                source_key: SourceKey::from_raw(index + 1),
+                artwork_digest: [0; 32],
+                database: Arc::clone(&database),
+                runtime: tokio::runtime::Handle::current(),
+                music_folder_key: None,
+                music_folder_object_id: None,
+                music_folders: Arc::from([]),
+                album_count: 0,
+                track_count: 0,
+                formula_match_count: 0,
+                sample_source_path: None,
+            });
+            let weak_selected = Arc::downgrade(&selected);
+            let (retirement, _) = tokio::sync::watch::channel(false);
+            let session = Arc::new(ActiveSource {
+                shared: Weak::new(),
+                current: Mutex::new(Some(selected)),
+                retirement,
+            });
+            assert!(session.resolve().is_some());
+            session.retire();
+            stale_handles.push(session);
+            assert!(weak_source.upgrade().is_none());
+            assert!(weak_selected.upgrade().is_none());
+            assert!(
+                stale_handles
+                    .iter()
+                    .all(|session| session.resolve().is_none())
+            );
+        }
+    }
+
     fn key(revision: u64) -> ArtworkPreparationKey {
         let mut digest = [0; 32];
         digest[..8].copy_from_slice(&revision.to_le_bytes());
         ArtworkPreparationKey {
             source: SourceKey::from_raw(1),
-            epoch: SourceSessionEpoch::new(1),
             digest,
         }
     }

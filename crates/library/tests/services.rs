@@ -1,7 +1,7 @@
 use library::{
     ListenDeliveryTarget, ListenWrite, LocalAccessWrite, LocalFileKind, LocalFileState,
-    LocalFileWrite, LoudnessMeasurement, QueueCompactOccurrence, QueueProvenance, QueueRepeatMode,
-    ReadCancellation,
+    LocalFileWrite, LoudnessMeasurement, OccurrenceId, QueueOccurrence, QueueProvenance,
+    QueueRepeatMode, ReadCancellation,
 };
 
 use super::support::{connection, fixture, persist_queue};
@@ -103,7 +103,6 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 year: Some(2020),
                 release_date: None,
                 date_added: Some("2024-01-02".to_string()),
-                media_uri: Some("file:///track.flac".to_string()),
                 source_format: Some("FLAC".to_string()),
                 comment: Some("Note".to_string()),
                 bpm: Some(100),
@@ -112,12 +111,10 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 cue_path: Some("/music/changed.cue".to_string()),
                 cue_start_millis: Some(1_000),
                 cue_end_millis: Some(181_000),
-                loudness_analysis_key: [42; 32],
             },
         )
         .await
-        .expect("change Track CUE identity")
-        .unwrap();
+        .expect("change Track CUE identity");
     let changed = fixture
         .database
         .next_missing_track_loudness(fixture.source, &cancel)
@@ -215,9 +212,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     fixture
         .database
         .upsert_local_access(
-            fixture.source,
+            Some(fixture.source),
             &LocalAccessWrite {
-                track_object_id: Some("track-1".to_string()),
+                media_uri: fixture.track_uris[1].clone(),
                 origin: library::LocalAccessOrigin::Mapping,
                 path: "/generic/local-track.flac".to_string(),
                 root: "/generic".to_string(),
@@ -233,8 +230,8 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
                 disc_number: 1,
                 track_number: 2,
                 duration_millis: 181_000,
-                media_uri: "file:///generic/local-track.flac".to_string(),
-                loudness_analysis_key: [77; 32],
+                access_uri: "file:///generic/local-track.flac".to_string(),
+                loudness_analysis_key: Some([77; 32]),
             },
         )
         .await
@@ -290,7 +287,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
             Some(2020 + index),
             None,
             Some("2024-01-02"),
-            Some("file:///track.flac"),
+            None,
             Some("FLAC"),
             Some("Note"),
             Some(100 + index),
@@ -399,15 +396,9 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 }
 
 #[tokio::test]
-async fn loudness_keeps_provider_identity_when_remote_media_has_no_direct_uri() {
+async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("UPDATE tracks SET media_uri=NULL")
-        .execute(&mut raw)
-        .await
-        .expect("remove direct remote media URIs");
-
     let track = fixture
         .database
         .next_missing_track_loudness(fixture.source, &cancel)
@@ -415,8 +406,7 @@ async fn loudness_keeps_provider_identity_when_remote_media_has_no_direct_uri() 
         .expect("select provider-resolved Track loudness")
         .expect("provider Track loudness work");
     assert_eq!(track.track_key, fixture.tracks[0]);
-    assert_eq!(track.track_object_id, "track-0");
-    assert_eq!(track.media_uri, None);
+    assert_eq!(track.media_uri, fixture.track_uris[0]);
 
     let album = fixture
         .database
@@ -425,8 +415,7 @@ async fn loudness_keeps_provider_identity_when_remote_media_has_no_direct_uri() 
         .expect("select provider-resolved Album loudness")
         .expect("provider Album loudness work");
     assert_eq!(album.tracks.len(), 2);
-    assert!(album.tracks.iter().all(|track| track.media_uri.is_none()));
-    assert_eq!(album.tracks[0].track_object_id, "track-0");
+    assert_eq!(album.tracks[0].media_uri, fixture.track_uris[0]);
 }
 
 #[tokio::test]
@@ -538,7 +527,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
     assert_eq!(identity.path, "/music/album.cue");
     assert_eq!(identity.dependencies, dependencies);
     let metadata = LocalAccessWrite {
-        track_object_id: None,
+        media_uri: "rufin://source/track/not-catalogued".to_string(),
         origin: library::LocalAccessOrigin::Mapping,
         path: "/downloads/metadata.flac".to_string(),
         root: "/downloads".to_string(),
@@ -554,25 +543,25 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         disc_number: 1,
         track_number: 1,
         duration_millis: 180_000,
-        media_uri: "file:///downloads/metadata.flac".to_string(),
-        loudness_analysis_key: [7; 32],
+        access_uri: "file:///downloads/metadata.flac".to_string(),
+        loudness_analysis_key: Some([7; 32]),
     };
     fixture
         .database
-        .upsert_local_access(fixture.source, &metadata)
+        .upsert_local_access(Some(fixture.source), &metadata)
         .await
         .expect("write metadata Local access");
     let exact = LocalAccessWrite {
-        track_object_id: Some("track-0".to_string()),
+        media_uri: fixture.track_uris[0].clone(),
         origin: library::LocalAccessOrigin::Mapping,
         path: "/downloads/exact.flac".to_string(),
-        media_uri: "file:///downloads/exact.flac".to_string(),
-        loudness_analysis_key: [8; 32],
+        access_uri: "file:///downloads/exact.flac".to_string(),
+        loudness_analysis_key: Some([8; 32]),
         ..metadata.clone()
     };
     fixture
         .database
-        .upsert_local_access(fixture.source, &exact)
+        .upsert_local_access(Some(fixture.source), &exact)
         .await
         .expect("write exact Local access");
     let local_loudness = fixture
@@ -587,7 +576,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .database
         .resolve_local_access(
             fixture.source,
-            Some("track-0"),
+            &fixture.track_uris[0],
             "Alpha",
             "Album A",
             "Artist A",
@@ -598,12 +587,12 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .await
         .expect("resolve exact Local access")
         .unwrap();
-    assert_eq!(resolved.media_uri, "file:///downloads/exact.flac");
+    assert_eq!(resolved.access_uri, "file:///downloads/exact.flac");
     let matched = fixture
         .database
         .resolve_local_access(
             fixture.source,
-            None,
+            "rufin://source/track/missing",
             "Alpha",
             "Album A",
             "Artist A",
@@ -614,7 +603,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .await
         .expect("resolve metadata Local access")
         .unwrap();
-    assert_eq!(matched.media_uri, "file:///downloads/metadata.flac");
+    assert_eq!(matched.access_uri, "file:///downloads/metadata.flac");
 
     let mut raw = connection(&fixture.path).await;
     let identity_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_file_key FROM local_files WHERE source_key=?1 AND device_id=?2 AND inode=?3")
@@ -623,16 +612,17 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         identity_plan.contains("local_files_identity_idx"),
         "{identity_plan}"
     );
-    let access_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND track_object_id=?2")
-        .bind(fixture.source).bind("track-0").fetch_all(&mut raw).await.expect("Local access plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
+    let access_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE media_uri=?1")
+        .bind(&fixture.track_uris[0]).fetch_all(&mut raw).await.expect("Local access plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(
-        access_plan.contains("local_access_precedence_idx"),
+        access_plan
+            .contains("SEARCH locator USING INDEX local_locators_precedence_idx (media_uri=?)"),
         "{access_plan}"
     );
-    let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT local_access_file_key FROM local_access_files WHERE source_key=?1 AND normalized_title=?2 AND normalized_album=?3 AND normalized_artist=?4 AND disc_number=?5 AND track_number=?6 AND duration_millis=?7")
+    let match_plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT locator.local_access_file_key FROM catalog.local_access_metadata metadata JOIN local_access_files locator USING(access_uri) WHERE locator.source_key=?1 AND metadata.normalized_title=?2 AND metadata.normalized_album=?3 AND metadata.normalized_artist=?4 AND metadata.disc_number=?5 AND metadata.track_number=?6 AND metadata.duration_millis=?7")
         .bind(fixture.source).bind("alpha").bind("album a").bind("artist a").bind(1_i64).bind(1_i64).bind(180_000_i64).fetch_all(&mut raw).await.expect("Local metadata match plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(
-        match_plan.contains("local_access_match_idx"),
+        match_plan.contains("local_access_match_uri_idx"),
         "{match_plan}"
     );
 }
@@ -707,8 +697,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     fixture
         .database
         .write_lyrics_cache(
-            fixture.source,
-            fixture.tracks[0],
+            &fixture.track_uris[0],
             "source",
             "lyrics",
             "en",
@@ -722,8 +711,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     fixture
         .database
         .write_lyrics_cache(
-            fixture.source,
-            fixture.tracks[0],
+            &fixture.track_uris[0],
             "external",
             "lyrics",
             "en",
@@ -737,8 +725,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let row = fixture
         .database
         .lyrics_cache_for_role(
-            fixture.source,
-            fixture.tracks[0],
+            &fixture.track_uris[0],
             "lyrics",
             "en",
             "Latn",
@@ -753,8 +740,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     let external = fixture
         .database
         .lyrics_cache_for_role(
-            fixture.source,
-            fixture.tracks[0],
+            &fixture.track_uris[0],
             "lyrics",
             "en",
             "Latn",
@@ -770,8 +756,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         fixture
             .database
             .lyrics_cache_for_role(
-                fixture.source,
-                fixture.tracks[0],
+                &fixture.track_uris[0],
                 "lyrics",
                 "en",
                 "Latn",
@@ -786,8 +771,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     fixture
         .database
         .write_lyrics_cache(
-            fixture.source,
-            fixture.tracks[1],
+            &fixture.track_uris[1],
             "source",
             "lyrics",
             "",
@@ -802,8 +786,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         fixture
             .database
             .lyrics_cache_for_role(
-                fixture.source,
-                fixture.tracks[1],
+                &fixture.track_uris[1],
                 "lyrics",
                 "",
                 "",
@@ -824,8 +807,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
         fixture
             .database
             .write_lyrics_cache(
-                fixture.source,
-                fixture.tracks[2],
+                &fixture.track_uris[2],
                 "source",
                 "lyrics",
                 "",
@@ -840,14 +822,7 @@ async fn lyrics_cache_identity_includes_input_digest_and_evicts_bounded_rows() {
     assert!(
         fixture
             .database
-            .remove_lyrics_cache(
-                fixture.source,
-                fixture.tracks[1],
-                "source",
-                "lyrics",
-                "",
-                ""
-            )
+            .remove_lyrics_cache(&fixture.track_uris[1], "source", "lyrics", "", "")
             .await
             .expect("remove lyrics")
     );
@@ -859,17 +834,22 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
     fixture
         .database
         .record_listen(
-            fixture.source,
             &ListenWrite {
-                external_id: "remove-play".to_string(),
-                track_key: Some(fixture.tracks[0]),
-                track_object_id: "track-0".to_string(),
-                track_title: "Track".to_string(),
-                artist_name: "Artist".to_string(),
-                album_title: "Album".to_string(),
+                external_id: Some("remove-play".to_string()),
+                media_uri: fixture.track_uris[0].clone(),
+                title: "Track".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                duration_millis: 180_000,
+                disc_number: None,
+                track_number: None,
+                year: None,
+                release_date: None,
+                source_format: None,
+                musicbrainz_recording_id: None,
+                musicbrainz_release_track_id: None,
                 started_at: 100,
                 local_period: "1970-01".to_string(),
-                duration_millis: 180_000,
                 listened_millis: 1000,
                 skipped: false,
             },
@@ -884,8 +864,7 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
     fixture
         .database
         .write_lyrics_cache(
-            fixture.source,
-            fixture.tracks[0],
+            &fixture.track_uris[0],
             "source",
             "lyrics",
             "",
@@ -911,39 +890,43 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         )
         .await
         .expect("write source loudness");
+    let queue_media = fixture
+        .database
+        .queue_items_for_uris(&fixture.track_uris[..1], &ReadCancellation::new())
+        .await
+        .expect("materialize Queue media")
+        .remove(0);
     persist_queue(
         &fixture.database,
         fixture.source,
-        &[QueueCompactOccurrence {
-            object_id: "remove-queue".to_string(),
-            track_key: Some(fixture.tracks[0]),
+        &[QueueOccurrence {
+            occurrence: OccurrenceId::new("remove-queue"),
+            item: queue_media,
             canonical_position: 0,
-            traversal_position: 0,
             provenance: QueueProvenance::Manual,
         }],
         Some("remove-queue"),
-        None,
         0,
-        QueueRepeatMode::None,
+        QueueRepeatMode::Off,
         false,
     )
     .await;
     assert!(
         fixture
             .database
-            .remove_source(fixture.source)
+            .remove_source(&library::SourceId::new("source"))
             .await
             .expect("remove source")
     );
     let mut raw = connection(&fixture.path).await;
     assert_eq!(
-        sqlx::query_as::<_, (Option<i64>, Option<i64>)>(
-            "SELECT source_key,track_key FROM listens WHERE external_id='remove-play'"
+        sqlx::query_as::<_, (Option<String>, String)>(
+            "SELECT source_id,media_uri FROM listens WHERE external_id='remove-play'"
         )
         .fetch_one(&mut raw)
         .await
         .expect("retained listen identity"),
-        (None, None)
+        (Some("source".to_string()), fixture.track_uris[0].clone())
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM listen_outbox")
@@ -952,5 +935,5 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
             .unwrap(),
         1
     );
-    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64)>("SELECT (SELECT count(*) FROM sources),(SELECT count(*) FROM tracks),(SELECT count(*) FROM queue_occurrences),(SELECT count(*) FROM lyrics_cache),(SELECT count(*) FROM loudness_measurements)").fetch_one(&mut raw).await.unwrap(),(0,0,0,0,0));
+    assert_eq!(sqlx::query_as::<_,(i64,i64,i64,i64,i64)>("SELECT (SELECT count(*) FROM sources),(SELECT count(*) FROM tracks),(SELECT count(*) FROM queue_occurrences),(SELECT count(*) FROM lyrics_cache),(SELECT count(*) FROM loudness_measurements)").fetch_one(&mut raw).await.unwrap(),(0,0,1,0,0));
 }
