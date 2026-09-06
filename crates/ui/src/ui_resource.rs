@@ -82,6 +82,8 @@ pub(crate) const LYRICS_COLOR_CHOOSER_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/player/lyrics/color_chooser.ui";
 pub(crate) const LYRICS_EDIT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/edit.ui";
 pub(crate) const LYRICS_PANE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/pane.ui";
+pub(crate) const LYRICS_DICTIONARY_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/player/lyrics/dictionary.ui";
 pub(crate) const LYRICS_SEARCH_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/player/lyrics/search.ui";
 pub(crate) const LYRICS_SETTINGS_RESOURCE: &str =
@@ -181,6 +183,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     LYRICS_COLOR_CHOOSER_RESOURCE,
     LYRICS_EDIT_RESOURCE,
     LYRICS_PANE_RESOURCE,
+    LYRICS_DICTIONARY_RESOURCE,
     LYRICS_SEARCH_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
     RIGHT_PANEL_RESOURCE,

@@ -45,7 +45,6 @@ fn print_usage() {
         "Usage:
   cargo run --locked -p xtask -- generate flatpak-sources [--check]
   cargo run --locked -p xtask -- generate i18n-template [--check] [--output PATH]
-  cargo run --locked -p xtask -- generate japanese-readings SOURCE [--check]
   cargo run --locked -p xtask -- generate linux-packaging [--check]
   cargo run --locked -p xtask -- generate media-verification-files OUTPUT
   cargo run --locked -p xtask -- generate rpm-srpm TAG --output PATH

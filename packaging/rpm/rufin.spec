@@ -80,10 +80,8 @@ appstreamcli validate --no-net data/io.github.screwys.Rufin.metainfo.xml
 %license LICENSE
 %license LICENSE.dependencies
 %license cargo-vendor.txt
-%license %{_datadir}/licenses/rufin/japanese-readings.LICENSE
 %doc README.md
 %{_bindir}/rufin
-%{_datadir}/rufin/japanese-readings.dic
 %{_datadir}/applications/io.github.screwys.Rufin.desktop
 %{_metainfodir}/io.github.screwys.Rufin.metainfo.xml
 

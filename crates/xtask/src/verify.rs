@@ -66,8 +66,6 @@ fn package_layout(args: Vec<String>) -> Result<()> {
         "share/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png",
         "share/icons/hicolor/scalable/apps/io.github.screwys.Rufin.svg",
         "share/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg",
-        "share/licenses/rufin/japanese-readings.LICENSE",
-        "share/rufin/japanese-readings.dic",
     ] {
         require_file(&package_path(&root, &prefix, path))?;
     }

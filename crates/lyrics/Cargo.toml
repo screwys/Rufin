@@ -20,11 +20,10 @@ serde_json.workspace = true
 sources.workspace = true
 tokio = { workspace = true, features = ["rt", "sync"] }
 tracing.workspace = true
-vibrato-rkyv.workspace = true
+lindera.workspace = true
 wana_kana.workspace = true
-
-[dev-dependencies]
 tempfile.workspace = true
+zip.workspace = true
 
 [lints]
 workspace = true

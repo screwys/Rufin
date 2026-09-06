@@ -142,6 +142,7 @@ pub(crate) fn runtime_inputs(
         stored.ui.lyrics.clone(),
         stored.ui.private_mode,
         lyrics_events,
+        paths::data_dir().join("japanese-readings"),
     );
     let playback = PlaybackOwner::new(
         library.clone(),

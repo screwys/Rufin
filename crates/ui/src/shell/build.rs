@@ -108,6 +108,7 @@ pub fn build(
     };
     let lyrics_state = LyricsState {
         panel_visible: Cell::new(settings.lyrics_panel_visible),
+        dictionary_toast: RefCell::new(None),
     };
     let preferences = PreferencesState {
         dialog: gtk::glib::WeakRef::new(),

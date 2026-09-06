@@ -127,6 +127,7 @@
     <file compressed="true">player/lyrics/color_chooser.ui</file>
     <file compressed="true">player/lyrics/edit.ui</file>
     <file compressed="true">player/lyrics/pane.ui</file>
+    <file compressed="true">player/lyrics/dictionary.ui</file>
     <file compressed="true">player/lyrics/search.ui</file>
     <file compressed="true">player/lyrics/settings.ui</file>
     <file compressed="true">preferences/appearance.ui</file>

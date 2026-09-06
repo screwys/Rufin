@@ -244,9 +244,7 @@ jobs:
           bsdtar -xf "$pkgfile" -C "$pkgroot"
           test -x "$pkgroot/usr/bin/rufin"
           test -f "$pkgroot/usr/share/applications/io.github.screwys.Rufin.desktop"
-          test -f "$pkgroot/usr/share/licenses/rufin/japanese-readings.LICENSE"
           test -f "$pkgroot/usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml"
-          test -f "$pkgroot/usr/share/rufin/japanese-readings.dic"
           pacman -U --noconfirm "$pkgfile"
           desktop-file-validate /usr/share/applications/io.github.screwys.Rufin.desktop
           appstreamcli validate --no-net /usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml
@@ -345,9 +343,7 @@ jobs:
           bsdtar -xf "$pkgfile" -C "$pkgroot"
           test -x "$pkgroot/usr/bin/rufin"
           test -f "$pkgroot/usr/share/applications/io.github.screwys.Rufin.desktop"
-          test -f "$pkgroot/usr/share/licenses/rufin/japanese-readings.LICENSE"
           test -f "$pkgroot/usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml"
-          test -f "$pkgroot/usr/share/rufin/japanese-readings.dic"
           pacman -U --noconfirm "$pkgfile"
           desktop-file-validate /usr/share/applications/io.github.screwys.Rufin.desktop
           appstreamcli validate --no-net /usr/share/metainfo/io.github.screwys.Rufin.metainfo.xml

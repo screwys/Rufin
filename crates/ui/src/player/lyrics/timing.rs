@@ -1,11 +1,61 @@
 use crate::shell::Shell;
 use gtk::glib;
-use lyrics::{LyricsCueLine, LyricsLine};
+use lyrics::{LyricsCue, LyricsCueLine, LyricsLine};
 use playback::{PlaybackOutput, TransportStatus};
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 use std::rc::Rc;
 use std::time::Duration;
+
+#[derive(Clone)]
+pub(super) struct KaraokeTiming {
+    start_millis: u64,
+    end_millis: Option<u64>,
+    from: f64,
+    to: f64,
+    weight: f64,
+}
+
+impl KaraokeTiming {
+    pub(super) fn for_text_range(
+        text: &str,
+        range: std::ops::Range<usize>,
+        cue: &LyricsCue,
+        end_millis: Option<u64>,
+    ) -> Option<Self> {
+        let start = range.start.max(cue.byte_start);
+        let end = range.end.min(cue.byte_end_exclusive);
+        if start >= end {
+            return None;
+        }
+        let cue_length = text
+            .get(cue.byte_start..cue.byte_end_exclusive)?
+            .chars()
+            .count() as f64;
+        let length = text.get(range)?.chars().count() as f64;
+        let offset = text.get(cue.byte_start..start)?.chars().count() as f64;
+        let overlap = text.get(start..end)?.chars().count() as f64;
+        Some(Self {
+            start_millis: cue.start_millis,
+            end_millis,
+            from: offset / cue_length,
+            to: (offset + overlap) / cue_length,
+            weight: overlap / length,
+        })
+    }
+
+    pub(super) fn progress(&self, position_millis: i128) -> f64 {
+        let start = i128::from(self.start_millis);
+        let progress = if position_millis <= start {
+            0.0
+        } else if let Some(end) = self.end_millis.filter(|end| *end > self.start_millis) {
+            ((position_millis - start) as f64 / (i128::from(end) - start) as f64).clamp(0.0, 1.0)
+        } else {
+            1.0
+        };
+        ((progress - self.from) / (self.to - self.from)).clamp(0.0, 1.0) * self.weight
+    }
+}
 
 #[derive(Default)]
 pub(super) struct LyricsTiming {
@@ -180,7 +230,72 @@ mod tests {
     use lyrics::{LyricsCue, LyricsCueLine, LyricsLine};
     use playback::{PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus};
 
-    use super::{LyricsTiming, effective_cue_end, lyrics_follow_local_clock};
+    use super::{KaraokeTiming, LyricsTiming, effective_cue_end, lyrics_follow_local_clock};
+
+    #[test]
+    fn compound_reading_keeps_each_characters_original_timing_after_seeks() {
+        let text = "正気";
+        let cues = [
+            LyricsCue {
+                text: "正".into(),
+                byte_start: 0,
+                byte_end_exclusive: 3,
+                start_millis: 1000,
+                end_millis: Some(1100),
+            },
+            LyricsCue {
+                text: "気".into(),
+                byte_start: 3,
+                byte_end_exclusive: 6,
+                start_millis: 1100,
+                end_millis: Some(1500),
+            },
+        ];
+        let timings = cues
+            .iter()
+            .map(|cue| {
+                KaraokeTiming::for_text_range(text, 0..text.len(), cue, cue.end_millis).unwrap()
+            })
+            .collect::<Vec<_>>();
+        for (position, expected) in [
+            (1000, 0.0),
+            (1050, 0.25),
+            (1100, 0.5),
+            (1300, 0.75),
+            (1500, 1.0),
+            (900, 0.0),
+            (1300, 0.75),
+        ] {
+            assert_eq!(
+                timings
+                    .iter()
+                    .map(|timing| timing.progress(position))
+                    .sum::<f64>(),
+                expected
+            );
+        }
+        let second =
+            KaraokeTiming::for_text_range(text, 3..6, &cues[1], cues[1].end_millis).unwrap();
+        assert_eq!(second.progress(1100), 0.0);
+        assert_eq!(second.progress(1300), 0.5);
+    }
+
+    #[test]
+    fn one_cue_advances_through_reading_segments_using_characters_not_bytes() {
+        let text = "A正気";
+        let cue = LyricsCue {
+            text: text.into(),
+            byte_start: 0,
+            byte_end_exclusive: text.len(),
+            start_millis: 1000,
+            end_millis: Some(1600),
+        };
+        let compound =
+            KaraokeTiming::for_text_range(text, 1..text.len(), &cue, cue.end_millis).unwrap();
+        assert_eq!(compound.progress(1200), 0.0);
+        assert!((compound.progress(1400) - 0.5).abs() < 1e-9);
+        assert_eq!(compound.progress(1600), 1.0);
+    }
 
     fn line(start: Option<u64>, end: Option<u64>, cues: &[(u64, Option<u64>)]) -> LyricsLine {
         LyricsLine {

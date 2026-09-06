@@ -877,6 +877,9 @@ fn apply_waveform(shell: &Rc<Shell>, waveform: WaveformProjection) {
 
 fn apply_lyrics_event(shell: &Rc<Shell>, event: lyrics::LyricsEvent) {
     match event {
+        lyrics::LyricsEvent::JapaneseDictionaryChanged(status) => {
+            shell.apply_japanese_dictionary_status(status)
+        }
         lyrics::LyricsEvent::Current(projection) => shell.apply_current_lyrics(projection),
         lyrics::LyricsEvent::SearchFinished {
             media_id,
