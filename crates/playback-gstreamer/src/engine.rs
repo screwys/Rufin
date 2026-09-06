@@ -585,7 +585,7 @@ impl GstEngine {
     }
 
     fn prepare_incoming(&mut self, next: &PreparedNext) {
-        if !next.stream.allows_preloading {
+        if !next.stream.allows_preloading || !self.active_pipeline().allows_preloading() {
             self.clear_incoming();
             return;
         }
@@ -678,6 +678,13 @@ impl GstEngine {
     }
 
     fn handle_incoming_async_done(&mut self, slot: Slot, id: PipelineId) {
+        if self.incoming_matches(slot, id) && !self.pipeline_for_slot(slot).allows_preloading() {
+            if let Some(next) = lock_recover(&self.shared).next.as_mut() {
+                next.stream.allows_preloading = false;
+            }
+            self.clear_incoming();
+            return;
+        }
         let needs_initial_rate_seek = self.pipeline_for_slot(slot).needs_initial_rate_seek();
         let Some(incoming) = self
             .incoming
@@ -2249,19 +2256,13 @@ impl GstEngine {
             {
                 return;
             }
-            if self.current_allows_timing_queries() {
-                if let Some(position) = self.active_pipeline().position() {
-                    self.push_position(clock_millis(position));
-                }
-                if self.pending_seek.is_none()
-                    && let Some(duration) = self.active_pipeline().duration()
-                {
-                    self.push_physical_duration(clock_millis(duration));
-                }
-            } else if self.state == BackendState::Playing
-                && let Some(position) = self.active_pipeline().running_time()
+            if let Some(position) = self.active_pipeline().position() {
+                self.push_position(clock_millis(position));
+            }
+            if self.pending_seek.is_none()
+                && let Some(duration) = self.active_pipeline().duration()
             {
-                self.push_logical_position(clock_millis(position));
+                self.push_physical_duration(clock_millis(duration));
             }
         }
     }
@@ -2370,27 +2371,10 @@ impl GstEngine {
         let Some(run) = self.timing_run_id() else {
             return;
         };
-        if !self.current_allows_timing_queries() {
-            push_event(
-                &self.events,
-                BackendEvent::Seekable {
-                    run,
-                    seekable: false,
-                },
-            );
-            return;
-        }
         let Some(seekable) = self.active_pipeline().seekable() else {
             return;
         };
         push_event(&self.events, BackendEvent::Seekable { run, seekable });
-    }
-
-    fn current_allows_timing_queries(&self) -> bool {
-        lock_recover(&self.shared)
-            .current
-            .as_ref()
-            .is_some_and(|current| current.stream.allows_timing_queries)
     }
 
     fn push_physical_duration(&self, millis: u64) {

@@ -150,6 +150,9 @@ jobs:
                 .github/workflows/aur-build.yml)
                   add_jobs aur_bin aur_git
                   ;;
+                cmake/RufinMacOSAudio.cmake)
+                  add_jobs workspace_macos macos
+                  ;;
                 cmake/RufinMacOS*)
                   add_jobs macos
                   ;;
@@ -157,7 +160,7 @@ jobs:
                   add_jobs windows
                   ;;
                 CMakeLists.txt|CMakePresets.json|cmake/*)
-                  add_jobs workspace aur_bin aur_git flatpak macos nix rpm windows
+                  add_jobs "${workspace_jobs[@]}" aur_bin aur_git flatpak macos nix rpm windows
                   ;;
                 .github/workflows/rpm-source.yml|packaging/rpm/*)
                   add_jobs rpm
@@ -477,7 +480,9 @@ jobs:
 
       - name: Install test dependencies
         run: |
-          brew install gettext gstreamer gtk4 libadwaita pkgconf
+          brew install adwaita-icon-theme cmake gettext game-music-emu gstreamer \
+            gtk4 libadwaita libopenmpt libsoup librsvg meson ninja openssl@3 \
+            pkgconf shared-mime-info wavpack
           gettext_prefix="$(brew --prefix gettext)"
           echo "GETTEXT_DIR=$gettext_prefix" >> "$GITHUB_ENV"
           echo "$gettext_prefix/bin" >> "$GITHUB_PATH"
@@ -497,6 +502,12 @@ jobs:
           sdk_version="$(DEVELOPER_DIR="$developer_dir" xcrun --sdk macosx --show-sdk-version)"
           [[ "$sdk_version" == 26.* ]]
           echo "Using $xcode_app with macOS SDK $sdk_version."
+
+      - name: Prepare playback runtime
+        run: |
+          cmake --preset development
+          cmake --build --preset development --target rufin-runtime-check
+          echo "GST_PLUGIN_PATH=$GITHUB_WORKSPACE/.local/build/cmake/development/gst-plugins" >> "$GITHUB_ENV"
 
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
@@ -544,24 +555,38 @@ jobs:
             base-devel
             git
             mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-adwaita-icon-theme
+            mingw-w64-ucrt-x86_64-gdk-pixbuf2
             mingw-w64-ucrt-x86_64-gettext-runtime
             mingw-w64-ucrt-x86_64-gettext-tools
+            mingw-w64-ucrt-x86_64-gst-libav
+            mingw-w64-ucrt-x86_64-gst-plugins-bad
             mingw-w64-ucrt-x86_64-gst-plugins-base
             mingw-w64-ucrt-x86_64-gst-plugins-good
+            mingw-w64-ucrt-x86_64-gst-plugins-ugly
             mingw-w64-ucrt-x86_64-gstreamer
             mingw-w64-ucrt-x86_64-gtk4
+            mingw-w64-ucrt-x86_64-hicolor-icon-theme
             mingw-w64-ucrt-x86_64-libadwaita
             mingw-w64-ucrt-x86_64-ninja
             mingw-w64-ucrt-x86_64-perl
             mingw-w64-ucrt-x86_64-pkgconf
             mingw-w64-ucrt-x86_64-rust
+            mingw-w64-ucrt-x86_64-shared-mime-info
             mingw-w64-ucrt-x86_64-toolchain
+            mingw-w64-ucrt-x86_64-wavpack
 
       - name: Configure Rust paths
         shell: msys2 {0}
         run: |
           echo "CARGO_HOME=$(cygpath -m "$GITHUB_WORKSPACE/.local/cargo")" >> "$GITHUB_ENV"
           echo "CARGO_TARGET_DIR=$(cygpath -m "$GITHUB_WORKSPACE/.local/target")" >> "$GITHUB_ENV"
+
+      - name: Prepare playback runtime
+        shell: msys2 {0}
+        run: |
+          cmake --preset development
+          cmake --build --preset development --target rufin-runtime-check
 
       - name: Restore Rust build cache
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2

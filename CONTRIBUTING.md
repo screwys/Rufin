@@ -87,6 +87,26 @@ To run the broader testing suite:
 just check
 ```
 
+Before running tests on macOS or Windows, prepare and verify the playback plugins
+from the repository root:
+
+```bash
+cmake --preset development
+cmake --build --preset development --target rufin-runtime-check
+```
+
+On macOS, set these variables in the terminal used to run tests or direct Cargo
+commands:
+
+```bash
+export GETTEXT_DIR="$(brew --prefix gettext)"
+export GST_PLUGIN_PATH="$PWD/.local/build/cmake/development/gst-plugins"
+```
+
+This selects the same gettext runtime as GTK and loads the GME, OpenMPT, and
+WavPack plugins built by CMake. Installed macOS app bundles include and load
+these plugins automatically.
+
 Run `just deps` after changing Linux package dependencies or AUR metadata; `just check deps`
 validates the generated metadata. Direct `makepkg --printsrcinfo` also works on
 Arch-based systems, while `just deps` handles a Nix-provided `makepkg` without

@@ -206,7 +206,6 @@ pub struct PreparedStream {
     pub occurrence: Option<std::sync::Arc<crate::QueueOccurrence>>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
-    pub allows_timing_queries: bool,
 }
 
 impl PreparedStream {
@@ -217,7 +216,6 @@ impl PreparedStream {
             occurrence: None,
             artwork_path: None,
             allows_preloading: true,
-            allows_timing_queries: true,
         }
     }
 

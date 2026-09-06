@@ -246,9 +246,6 @@ just build
 just debug
 ```
 
-On macOS, direct `cargo` commands outside these `just` recipes also need
-`GETTEXT_DIR="$(brew --prefix gettext)"` so Rust and GTK link the same gettext runtime.
-
 Local builds are shown as `Rufin (Development)` and use the isolated `Rufin.Devel` application
 identity. The first macOS `just debug` or
 `just build` automatically creates the persistent local `Rufin Development` signing identity on macOS. The first signing operation may ask for access to the certificate's private
