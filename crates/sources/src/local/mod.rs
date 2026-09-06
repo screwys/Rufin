@@ -34,6 +34,23 @@ pub fn read_embedded_lyrics(path: &Path) -> Result<Option<String>, crate::Source
     metadata::read_embedded_lyrics(path)
 }
 
+pub fn read_local_image(reference: &crate::LocalImageRef) -> SourceResult<ImageBytes> {
+    let reference = match reference {
+        crate::LocalImageRef::File { path, .. } => {
+            artwork::ArtworkReference::File(PathBuf::from(path))
+        }
+        crate::LocalImageRef::Embedded {
+            path,
+            picture_index,
+            ..
+        } => artwork::ArtworkReference::Embedded {
+            path: PathBuf::from(path),
+            picture_index: *picture_index,
+        },
+    };
+    artwork::read_image(&reference)
+}
+
 pub(super) fn write_embedded_lyrics(
     path: &Path,
     lyrics: &str,
@@ -84,11 +101,6 @@ impl LocalSourceConfig {
             && let Some(root) = payload.legacy_root.filter(|root| !root.trim().is_empty())
         {
             roots.push(PathBuf::from(root));
-        }
-        if roots.is_empty() {
-            return Err(SourceError::InvalidConfig(
-                "a Local source must contain at least one folder".to_string(),
-            ));
         }
         Ok(Self { roots })
     }
@@ -144,6 +156,21 @@ impl LocalSource {
             reuse_unchanged,
         )
         .await
+    }
+
+    pub(crate) async fn import_playlist_files(
+        &self,
+        database: &library::Database,
+        source_id: &str,
+        playlist: library::PlaylistKey,
+    ) -> SourceResult<library::ScanOutcome> {
+        database
+            .import_local_playlist_paths(source_id, playlist)
+            .await?;
+        let mut scan = library::Scan::begin_items(database, source_id).await?;
+        scan::stage_imported_paths(database, &mut scan).await?;
+        scan::stage_artwork(database, &mut scan, &|| false).await?;
+        Ok(scan.finish().await?)
     }
 
     pub(super) async fn publish_metadata_paths(
@@ -219,56 +246,6 @@ impl LocalSource {
         }
     }
 
-    pub(crate) async fn prepare_artwork_page(
-        &self,
-        database: &library::Database,
-        source: library::SourceKey,
-        after: Option<library::AlbumKey>,
-    ) -> SourceResult<crate::ArtworkPreparationProgress> {
-        let cancellation = library::ReadCancellation::new();
-        let candidates = database
-            .local_album_artwork_page(source, after, 128, &cancellation)
-            .await?;
-        let mut discoverer = discovery::Reader::default();
-        let mut completed = 0;
-        let mut next_album = None;
-        let mut writes = Vec::with_capacity(candidates.len());
-        for candidate in candidates {
-            next_album = Some(candidate.album_key);
-            let path = PathBuf::from(
-                candidate
-                    .media_uri
-                    .strip_prefix("file://")
-                    .unwrap_or(&candidate.media_uri),
-            );
-            let media_revision =
-                observation_revision_values(candidate.media_size_bytes, candidate.media_mtime_ns);
-            let sidecar = candidate.sidecar_path.map(|path| {
-                artwork::file_reference(
-                    &PathBuf::from(path),
-                    observation_revision_values(
-                        candidate.sidecar_size_bytes,
-                        candidate.sidecar_mtime_ns.unwrap_or_default(),
-                    ),
-                )
-            });
-            let binding = sidecar
-                .or_else(|| artwork::inspect_embedded(&mut discoverer, &path, media_revision))
-                .map(|binding| serde_json::to_vec(&binding))
-                .transpose()?
-                .unwrap_or_else(|| br#"{"no_art":true}"#.to_vec());
-            writes.push((candidate.album_key, binding));
-            completed += 1;
-        }
-        database
-            .write_album_artwork_bindings(source, &writes)
-            .await?;
-        Ok(crate::ArtworkPreparationProgress {
-            completed,
-            next_album,
-        })
-    }
-
     pub(crate) fn watch(
         &self,
         on_ready: &mut dyn FnMut(bool) -> bool,
@@ -283,14 +260,13 @@ impl LocalSource {
     }
 }
 
-fn observation_revision_values(size_bytes: Option<i64>, mtime_ns: i64) -> String {
-    format!("{}-{mtime_ns}", size_bytes.unwrap_or_default())
-}
-
-pub(crate) fn connect(input: LocalFolderHostInput) -> SourceResult<ConnectedSource> {
+pub(crate) fn connect(
+    source_id: crate::SourceId,
+    input: LocalFolderHostInput,
+) -> SourceResult<ConnectedSource> {
     let source = LocalSource::from_roots(input.roots)?;
     let configuration = crate::config::encode_provider_payload(
-        crate::SourceId::new(LOCAL_LIBRARY_SOURCE_ID),
+        source_id,
         LOCAL_SOURCE_ID,
         "Local",
         LocalSourceConfig {
@@ -356,11 +332,6 @@ pub(crate) fn configured_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>
             configured.push(root);
         }
     }
-    if configured.is_empty() {
-        return Err(SourceError::InvalidConfig(
-            "a Local source must contain at least one folder".to_string(),
-        ));
-    }
     Ok(configured)
 }
 
@@ -383,11 +354,6 @@ fn normalize_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {
             normalized.push(root);
         }
     }
-    if normalized.is_empty() {
-        return Err(SourceError::InvalidRequest(
-            "at least one Local music folder is required",
-        ));
-    }
     Ok(normalized)
 }
 
@@ -399,7 +365,6 @@ pub(super) fn metadata_file_available(path: &Path, source_format: Option<&str>) 
 }
 
 pub(super) fn read_track_metadata(
-    track_key: library::TrackKey,
     path: &Path,
     source_format: Option<&str>,
 ) -> Result<crate::TrackMetadata, crate::SourceMetadataError> {
@@ -476,7 +441,6 @@ pub(super) fn read_track_metadata(
         .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
         .map_or(0, |value| value.as_nanos());
     Ok(crate::TrackMetadata {
-        track_key,
         writable,
         source_search: false,
         revision: Some(format!("{}:{modified}", metadata.len())),

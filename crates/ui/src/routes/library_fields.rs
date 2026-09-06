@@ -13,6 +13,144 @@ use localization::{msgid, tr};
 
 use super::sparse_model::{SparseItem, SparseObjectItem};
 
+pub(crate) trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
+    fn media_uri(&self) -> &str;
+    fn title(&self) -> &str;
+    fn artist(&self) -> &str;
+    fn artwork(&self) -> Option<&[u8]>;
+    fn favorite(&self) -> bool;
+    fn set_favorite(&mut self, value: bool);
+    fn downloaded(&self) -> bool;
+    fn set_downloaded(&mut self, value: bool);
+    fn field(&self, field: LibraryField) -> String;
+    fn links(&self, field: LibraryField) -> super::detail_links::DetailLinks {
+        super::detail_links::DetailLinks::text(&self.field(field))
+    }
+}
+
+macro_rules! track_presentation_fields {
+    () => {
+        fn media_uri(&self) -> &str {
+            &self.media_uri
+        }
+        fn title(&self) -> &str {
+            &self.title
+        }
+        fn artist(&self) -> &str {
+            &self.artist
+        }
+        fn artwork(&self) -> Option<&[u8]> {
+            self.artwork_binding.as_deref()
+        }
+        fn favorite(&self) -> bool {
+            self.favorite
+        }
+        fn set_favorite(&mut self, value: bool) {
+            self.favorite = value;
+        }
+        fn downloaded(&self) -> bool {
+            self.is_downloaded
+        }
+        fn set_downloaded(&mut self, value: bool) {
+            self.is_downloaded = value;
+        }
+    };
+}
+
+impl TrackPresentation for TrackRow {
+    track_presentation_fields!();
+    fn field(&self, field: LibraryField) -> String {
+        track_field(self, field)
+    }
+    fn links(&self, field: LibraryField) -> super::detail_links::DetailLinks {
+        super::detail_links::metadata_links(
+            field,
+            &self.field(field),
+            self.album_media_uri.as_deref(),
+            &self.artists,
+            &self.album_artists,
+        )
+    }
+}
+
+impl TrackPresentation for library::HistoryRow {
+    track_presentation_fields!();
+    fn links(&self, field: LibraryField) -> super::detail_links::DetailLinks {
+        super::detail_links::metadata_links(
+            field,
+            &self.field(field),
+            self.album_media_uri.as_deref(),
+            &self.artists,
+            &self.album_artists,
+        )
+    }
+    fn field(&self, field: LibraryField) -> String {
+        match field {
+            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
+            LibraryField::Artist => self.artist.clone(),
+            LibraryField::Album => self.album.clone(),
+            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
+            LibraryField::Year => optional_year(self.year),
+            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
+            LibraryField::DateAdded => self.date_added.clone().unwrap_or_default(),
+            LibraryField::LastPlayed => display_unix_date(self.last_played),
+            LibraryField::PlayCount => count(self.play_count),
+            LibraryField::Genre => self.genre.clone(),
+            LibraryField::Bpm => self.bpm.map(|value| value.to_string()).unwrap_or_default(),
+            LibraryField::UserRating => stored_rating(self.rating),
+            LibraryField::DiscNumber => self
+                .disc_number
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
+            LibraryField::Duration => {
+                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
+            }
+            LibraryField::Favorite => favorite_text(self.favorite),
+            _ => String::new(),
+        }
+    }
+}
+
+impl TrackPresentation for library::SmartPlaylistTrackRow {
+    track_presentation_fields!();
+    fn links(&self, field: LibraryField) -> super::detail_links::DetailLinks {
+        super::detail_links::metadata_links(
+            field,
+            &self.field(field),
+            self.album_media_uri.as_deref(),
+            &self.artists,
+            &self.album_artists,
+        )
+    }
+    fn field(&self, field: LibraryField) -> String {
+        match field {
+            LibraryField::Title | LibraryField::TitleMerged => self.title.clone(),
+            LibraryField::Artist => self.artist.clone(),
+            LibraryField::Album => self.album.clone(),
+            LibraryField::AlbumArtist => self.album_display_artist.clone().unwrap_or_default(),
+            LibraryField::Year => optional_year(self.year),
+            LibraryField::ReleaseDate => self.release_date.clone().unwrap_or_default(),
+            LibraryField::DateAdded => self.date_added.clone().unwrap_or_default(),
+            LibraryField::LastPlayed => display_unix_date(self.last_played),
+            LibraryField::PlayCount => count(self.play_count),
+            LibraryField::UserRating => stored_rating(self.rating),
+            LibraryField::Genre => self.genre.clone(),
+            LibraryField::Bpm => self.bpm.map(|value| value.to_string()).unwrap_or_default(),
+            LibraryField::DiscNumber => self
+                .disc_number
+                .map(|value| value.to_string())
+                .unwrap_or_default(),
+            LibraryField::TrackNumber => optional_track_number(self.disc_number, self.track_number),
+            LibraryField::Duration => {
+                crate::format_duration((self.duration_millis.max(0) / 1_000) as u32)
+            }
+            LibraryField::Favorite => favorite_text(self.favorite),
+            _ => String::new(),
+        }
+    }
+}
+
 pub(crate) fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryField) {
     if field == LibraryField::Duration {
         widget.add_css_class("tabular-numeric");
@@ -134,9 +272,9 @@ pub(crate) fn smart_playlist_field(playlist: &SmartPlaylistRow, field: LibraryFi
 pub(crate) fn track_field(track: &TrackRow, field: LibraryField) -> String {
     match field {
         LibraryField::Title | LibraryField::TitleMerged => track.title.clone(),
-        LibraryField::Artist => track.display_artist.clone(),
+        LibraryField::Artist => track.artist.clone(),
         LibraryField::AlbumArtist => joined_credits(&track.album_artists),
-        LibraryField::Album => track.display_album.clone(),
+        LibraryField::Album => track.album.clone(),
         LibraryField::Year => optional_year(track.year),
         LibraryField::ReleaseDate => track.release_date.clone().unwrap_or_default(),
         LibraryField::DateAdded => track.date_added.clone().unwrap_or_default(),
@@ -151,7 +289,9 @@ pub(crate) fn track_field(track: &TrackRow, field: LibraryField) -> String {
             .join(", "),
         LibraryField::Bpm => track.bpm.map(|bpm| bpm.to_string()).unwrap_or_default(),
         LibraryField::DiscNumber => track.disc_number.to_string(),
-        LibraryField::TrackNumber => format!("{}-{:02}", track.disc_number, track.track_number),
+        LibraryField::TrackNumber => {
+            optional_track_number(Some(track.disc_number), Some(track.track_number))
+        }
         LibraryField::Duration => {
             crate::format_duration((track.duration_millis.max(0) / 1_000) as u32)
         }
@@ -159,6 +299,15 @@ pub(crate) fn track_field(track: &TrackRow, field: LibraryField) -> String {
         _ => String::new(),
     }
 }
+
+pub(super) fn optional_track_number(disc: Option<i64>, track: Option<i64>) -> String {
+    match (disc, track) {
+        (Some(disc), Some(track)) => format!("{disc}-{track:02}"),
+        (_, Some(track)) => track.to_string(),
+        _ => String::new(),
+    }
+}
+
 fn boxed_item<T: Clone + 'static>(boxed: &glib::BoxedAnyObject) -> Option<T> {
     boxed.try_borrow::<T>().ok().map(|item| item.clone())
 }
@@ -174,7 +323,6 @@ pub(super) fn sparse_item<T: Clone + 'static>(item: &SparseObjectItem) -> Option
             }
         };
     }
-    ready!(library::TrackKey);
     ready!(library::AlbumKey);
     ready!(library::ArtistKey);
     ready!(library::GenreKey);
@@ -183,10 +331,11 @@ pub(super) fn sparse_item<T: Clone + 'static>(item: &SparseObjectItem) -> Option
     ready!(library::PlaylistEntryKey);
     ready!(library::SmartPlaylistKey);
     ready!(super::folders::FolderLink);
+    ready!(String);
     None
 }
 
-fn object_item<T: Clone + 'static>(item: glib::Object) -> Option<T> {
+pub(super) fn object_item<T: Clone + 'static>(item: glib::Object) -> Option<T> {
     match item.downcast::<glib::BoxedAnyObject>() {
         Ok(boxed) => boxed_item(&boxed),
         Err(item) => item
@@ -205,16 +354,6 @@ pub(crate) fn item_at<T: Clone + 'static>(
 pub(crate) fn item_at_from_item<T: Clone + 'static>(item: &gtk::ListItem) -> Option<T> {
     item.item().and_then(object_item)
 }
-pub(crate) fn track_artwork_at_from_item(item: &gtk::ListItem) -> Option<ArtworkBinding> {
-    item_at_from_item::<TrackRow>(item).map(|track| {
-        track
-            .artwork_binding
-            .as_deref()
-            .map(ArtworkBinding::opaque)
-            .unwrap_or_default()
-    })
-}
-
 pub(crate) fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
 }
@@ -631,23 +770,23 @@ pub(crate) fn play_count_column_width() -> i32 {
 pub(crate) fn compact_header_column_width(header: &str, min_width: i32) -> i32 {
     super::table_sizing::compact_header_text_width(&tr(header), min_width)
 }
-fn count(value: i64) -> String {
+pub(super) fn count(value: i64) -> String {
     value.max(0).to_string()
 }
 
-fn stored_rating(value: Option<i64>) -> String {
+pub(super) fn stored_rating(value: Option<i64>) -> String {
     value
         .map(|value| format!("{:.1}", value as f64 / 2.0))
         .unwrap_or_default()
 }
 
-fn optional_year(year: Option<i64>) -> String {
+pub(super) fn optional_year(year: Option<i64>) -> String {
     year.filter(|year| *year != 0)
         .map(|year| year.to_string())
         .unwrap_or_default()
 }
 
-fn display_unix_date(value: Option<i64>) -> String {
+pub(super) fn display_unix_date(value: Option<i64>) -> String {
     value
         .and_then(|value| glib::DateTime::from_unix_local(value).ok())
         .and_then(|value| value.format("%Y-%m-%d").ok())

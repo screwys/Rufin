@@ -12,19 +12,6 @@
     <style><class name="app-root"/></style>
     <child>
       <object class="GtkStackPage">
-        <property name="name">login</property>
-        <property name="child">
-          <object class="GtkBox" id="login_host">
-            <property name="orientation">vertical</property>
-            <property name="hexpand">true</property>
-            <property name="vexpand">true</property>
-            <style><class name="login-root"/></style>
-          </object>
-        </property>
-      </object>
-    </child>
-    <child>
-      <object class="GtkStackPage">
         <property name="name">app</property>
         <property name="child">
           <object class="GtkOverlay" id="app_root_overlay">
@@ -36,6 +23,19 @@
                 <property name="hexpand">true</property>
                 <property name="vexpand">true</property>
                 <style><class name="app-root"/></style>
+                <child>
+                  <object class="AdwBanner" id="temporary_storage_banner">
+                    <property name="title" translatable="yes">Temporary library storage is in use. Changes may be lost when Rufin closes.</property>
+                    <property name="revealed">false</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwBanner" id="fresh_start_banner">
+                    <property name="title" translatable="yes">Rufin started with fresh user state because the saved database could not be used. Your settings and saved logins are unchanged.</property>
+                    <property name="button-label" translatable="yes">Import Backup</property>
+                    <property name="revealed">false</property>
+                  </object>
+                </child>
                 <child>
                   <object class="GtkOverlay" id="app_content_overlay">
                     <property name="hexpand">true</property>

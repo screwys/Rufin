@@ -17,9 +17,6 @@
           <object class="GtkBox" id="content">
             <property name="orientation">vertical</property>
             <property name="hexpand">true</property>
-            <style>
-              <class name="first-run-content"/>
-            </style>
           </object>
         </property>
       </object>
@@ -37,5 +34,11 @@
     <property name="wrap">true</property>
     <property name="xalign">0</property>
     <style><class name="muted"/></style>
+  </object>
+  <object class="GtkBox" id="source_summary">
+    <property name="spacing">12</property>
+    <child><object class="GtkImage" id="source_icon"><property name="pixel-size">32</property></object></child>
+    <child><object class="GtkLabel" id="source_title"><property name="hexpand">true</property><property name="xalign">0</property><property name="wrap">true</property><style><class name="title-2"/></style></object></child>
+    <child><object class="GtkButton" id="change_source"><property name="label" translatable="yes">Change Source</property><property name="valign">center</property></object></child>
   </object>
 </interface>

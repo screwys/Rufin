@@ -70,6 +70,8 @@
     <file>hicolor/scalable/actions/rufin-document-edit-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-document-save-disk-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-document-open-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-document-send-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-download-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-edit-undo-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-folder-download-symbolic.svg</file>
@@ -137,10 +139,14 @@
     <file compressed="true">preferences/dialogs/smart_playlist.ui</file>
     <file compressed="true">preferences/integrations.ui</file>
     <file compressed="true">preferences/library.ui</file>
+    <file compressed="true">preferences/backup.ui</file>
+    <file compressed="true">preferences/dialogs/backup.ui</file>
     <file compressed="true">preferences/playback.ui</file>
     <file compressed="true">preferences/reorder_row.ui</file>
     <file compressed="true">preferences/source/connection_progress.ui</file>
     <file compressed="true">preferences/source/choice_selector.ui</file>
+    <file compressed="true">preferences/source/choice.ui</file>
+    <file compressed="true">preferences/source/onboarding.ui</file>
     <file compressed="true">preferences/source/credential_host.ui</file>
     <file compressed="true">preferences/source/local_setup.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>

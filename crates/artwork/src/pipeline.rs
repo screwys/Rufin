@@ -15,9 +15,8 @@ use crate::decode::{decode_cached, decode_normalized, normalize_for_cache};
 use crate::fetch::{FetchContext, FetchOutcome};
 use crate::selection::Candidate;
 use crate::{
-    ArtworkBinding, ArtworkBindingIdentity, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkOutcome,
-    ArtworkPreparation, ArtworkRequest, ArtworkRequestIdentity, ArtworkVisualIdentity,
-    DecodedImage, ExternalPolicy, PendingArtwork, RequestId, SourceImages,
+    ArtworkBinding, ArtworkError, ArtworkKey, ArtworkLoad, ArtworkOutcome, ArtworkPreparation,
+    ArtworkRequest, DecodedImage, ExternalPolicy, PendingArtwork, RequestId, SourceResolver,
 };
 
 pub(crate) const WORKERS: usize = 4;
@@ -46,18 +45,14 @@ struct State {
     next_preparation: u64,
     external_epoch: u64,
     source_epochs: HashMap<SourceId, u64>,
-    foreground: VecDeque<JobKey>,
-    preparations: VecDeque<JobKey>,
-    jobs: HashMap<JobKey, JobRecord>,
+    foreground: VecDeque<ArtworkKey>,
+    preparations: VecDeque<ArtworkKey>,
+    jobs: HashMap<ArtworkKey, JobRecord>,
     projections: HashMap<RequestId, ProjectionRecord>,
     decoded_index: DecodedIndex,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct JobKey(String);
-
 struct JobRecord {
-    source: SourceImages,
     request: CandidateRequest,
     subscribers: HashSet<RequestId>,
     foreground_subscribers: HashSet<RequestId>,
@@ -69,8 +64,7 @@ struct JobRecord {
 
 #[derive(Clone)]
 struct Work {
-    key: JobKey,
-    source: SourceImages,
+    key: ArtworkKey,
     request: CandidateRequest,
     source_epoch: u64,
     external_epoch: u64,
@@ -83,6 +77,7 @@ struct CandidateRequest {
     fetch_size: u32,
     render_size: u32,
     external: ExternalPolicy,
+    allow_fetch: bool,
 }
 
 struct PreparationSubscriber {
@@ -105,27 +100,22 @@ enum JobPriority {
 }
 
 struct ProjectionRecord {
-    source: SourceImages,
-    request: ArtworkRequest,
+    request: CandidateRequest,
     priority: JobPriority,
-    candidate_index: usize,
-    failures: Vec<Arc<str>>,
-    job: JobKey,
+    job: ArtworkKey,
     completion: oneshot::Sender<ArtworkOutcome>,
 }
 
 #[derive(Default)]
 struct DecodedIndex {
     entries: HashMap<ArtworkKey, DecodedEntry>,
-    families: HashMap<DecodedFamily, BTreeMap<u32, HashSet<ArtworkKey>>>,
+    sizes: HashMap<(String, String), BTreeMap<u32, HashSet<ArtworkKey>>>,
     eviction_order: BTreeSet<DecodedAccess>,
     next_access: u64,
 }
 
 struct DecodedEntry {
-    source_id: SourceId,
-    family: DecodedFamily,
-    render_size: u32,
+    source_id: Option<SourceId>,
     image: Weak<DecodedImage>,
     last_used: u64,
 }
@@ -136,14 +126,8 @@ struct DecodedAccess {
     key: ArtworkKey,
 }
 
-#[derive(Clone, Debug, Eq, Hash, PartialEq)]
-struct DecodedFamily(String);
-
 enum Resolution {
-    Ready {
-        image: Arc<DecodedImage>,
-        family: DecodedFamily,
-    },
+    Ready { image: Arc<DecodedImage> },
     Cached,
     Missing,
     Failed(Arc<str>),
@@ -166,7 +150,7 @@ impl Pipeline {
         bindings: &[Vec<u8>],
     ) -> std::io::Result<()> {
         for binding in bindings {
-            if let Some(candidate) = ArtworkBinding::opaque(binding).candidates().first() {
+            if let Some(candidate) = ArtworkBinding::opaque(binding).candidate() {
                 self.shared
                     .cache
                     .mark_source_manifest_identity(staging, &candidate.stable_identity())?;
@@ -186,9 +170,13 @@ impl Pipeline {
             .cache
             .complete_source_manifest_staging(source_id, revision, staging)
     }
-    pub(crate) fn new(cache_root: &Path, runtime: Handle) -> Result<Self, ArtworkError> {
+    pub(crate) fn new(
+        cache_root: &Path,
+        runtime: Handle,
+        source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+    ) -> Result<Self, ArtworkError> {
         let cache = FilesystemCache::new(cache_root.to_path_buf())?;
-        let fetch = FetchContext::new().map_err(ArtworkError::FetchSetup)?;
+        let fetch = FetchContext::new(source_resolver);
         let shared = Arc::new(Shared {
             runtime,
             cache,
@@ -213,44 +201,37 @@ impl Pipeline {
 
     pub(crate) fn request(
         self: &Arc<Self>,
-        source: SourceImages,
         request: ArtworkRequest,
+        allow_fetch: bool,
     ) -> Result<ArtworkLoad, ArtworkError> {
-        self.request_with_priority(source, request, JobPriority::Foreground)
+        self.request_with_priority(request, allow_fetch, JobPriority::Foreground)
     }
 
     fn request_with_priority(
         self: &Arc<Self>,
-        source: SourceImages,
         request: ArtworkRequest,
+        allow_fetch: bool,
         priority: JobPriority,
     ) -> Result<ArtworkLoad, ArtworkError> {
         let mut state = lock_state(&self.shared);
         let request_id = RequestId(state.next_request);
         state.next_request = state.next_request.wrapping_add(1).max(1);
-        let ready = decoded_from_memory(&mut state, &source, &request);
+        let key = request_key(&state, &request, allow_fetch);
+        let ready = decoded_from_memory(&mut state, &request, &key);
         if let Some(image) = ready {
             return Ok(ArtworkLoad::Ready(image));
         }
-        let Some(candidate) = request.binding.candidates().first().cloned() else {
+        let Some(candidate) = request.binding.candidate().cloned() else {
             return Ok(ArtworkLoad::Missing);
         };
+        let request = candidate_request(&request, candidate, allow_fetch);
         let (completion, receiver) = oneshot::channel();
-        let job = enqueue_projection(
-            &mut state,
-            source.clone(),
-            candidate_request(&request, candidate),
-            request_id,
-            priority,
-        );
+        let job = enqueue_projection(&mut state, request.clone(), request_id, priority);
         state.projections.insert(
             request_id,
             ProjectionRecord {
-                source,
                 request,
                 priority,
-                candidate_index: 0,
-                failures: Vec::new(),
                 job,
                 completion,
             },
@@ -277,17 +258,15 @@ impl Pipeline {
 
     pub(crate) fn prefetch_source_artwork(
         &self,
-        source: SourceImages,
         artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> Result<ArtworkPreparation, ArtworkError> {
-        self.prepare_source_artwork_jobs(source, artwork, progress, cancelled)
+        self.prepare_source_artwork_jobs(artwork, progress, cancelled)
     }
 
     fn prepare_source_artwork_jobs(
         &self,
-        source: SourceImages,
         artwork: Arc<[Vec<u8>]>,
         progress: &(dyn Fn(usize, usize) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -329,19 +308,17 @@ impl Pipeline {
                         SOURCE_ARTWORK_SIZE,
                         SOURCE_ARTWORK_SIZE,
                     );
-                    if request.binding.candidates().is_empty() {
+                    if request.binding.candidate().is_none() {
                         let _ = completion.send(BackgroundResult::Missing);
                         continue;
                     }
-                    if decoded_for_request(&mut state, &self.shared.cache, &source, &request)
-                        .is_some()
-                    {
+                    let key = request_key(&state, &request, true);
+                    if decoded_from_memory(&mut state, &request, &key).is_some() {
                         let _ = completion.send(BackgroundResult::Cached);
                         continue;
                     }
                     enqueue_background(
                         &mut state,
-                        source.clone(),
                         request,
                         PreparationSubscriber {
                             id: preparation_id,
@@ -388,37 +365,26 @@ impl Pipeline {
         self.shared.wake.notify_all();
     }
 
-    pub(crate) fn cache_only_file(
-        &self,
-        source_id: &SourceId,
-        request: &ArtworkRequest,
-    ) -> Option<std::path::PathBuf> {
-        for candidate in request.binding.candidates() {
-            if candidate.is_external() && !request.external.allow_cached {
-                continue;
-            }
-            if let Some(entry) =
-                self.shared
-                    .cache
-                    .ready_entry(source_id, candidate, request.fetch_size)
-            {
-                return Some(entry.path);
-            }
+    pub(crate) fn cache_only_file(&self, request: &ArtworkRequest) -> Option<std::path::PathBuf> {
+        let candidate = request.binding.candidate()?;
+        if candidate.is_external() && !request.external.allow_cached {
+            return None;
         }
-        None
+        self.shared
+            .cache
+            .ready_entry(candidate, request.fetch_size)
+            .map(|entry| entry.path)
     }
 
-    pub(crate) fn binding_identity_and_image(
+    pub(crate) fn key_and_image(
         &self,
-        source: &SourceImages,
         request: &ArtworkRequest,
-    ) -> (
-        ArtworkBindingIdentity,
-        Vec<crate::DecodedImageIdentity>,
-        Option<Arc<DecodedImage>>,
-    ) {
+        allow_fetch: bool,
+    ) -> (ArtworkKey, Option<Arc<DecodedImage>>) {
         let mut state = lock_state(&self.shared);
-        binding_identity_and_image_from_state(&mut state, source, request)
+        let key = request_key(&state, request, allow_fetch);
+        let ready = decoded_from_memory(&mut state, request, &key);
+        (key, ready)
     }
 
     pub(crate) fn retry_external(&self) -> Result<(), ArtworkError> {
@@ -426,10 +392,9 @@ impl Pipeline {
         self.shared.cache.retry_external()?;
         let mut state = lock_state(&self.shared);
         state.external_epoch = state.external_epoch.wrapping_add(1);
-        let completions = reconcile_inactive_external_jobs(&mut state);
+        reconcile_inactive_external_jobs(&mut state);
         drop(state);
         drop(commit);
-        send_completions(completions);
         self.shared.wake.notify_all();
         Ok(())
     }
@@ -448,7 +413,7 @@ impl Pipeline {
         let invalidated = state
             .projections
             .iter()
-            .filter(|(_, record)| record.source.source_id == *source_id)
+            .filter(|(_, record)| candidate_belongs_to_source(&record.request.candidate, source_id))
             .map(|(request_id, _)| *request_id)
             .collect::<HashSet<_>>();
         let completions = invalidated
@@ -457,7 +422,7 @@ impl Pipeline {
             .map(|record| record.completion)
             .collect::<Vec<_>>();
         for record in state.jobs.values_mut() {
-            if record.source.source_id == *source_id {
+            if candidate_belongs_to_source(&record.request.candidate, source_id) {
                 record
                     .subscribers
                     .retain(|request_id| !invalidated.contains(request_id));
@@ -469,7 +434,9 @@ impl Pipeline {
         let removable = state
             .jobs
             .iter()
-            .filter(|(_, record)| record.source.source_id == *source_id && !record.active)
+            .filter(|(_, record)| {
+                candidate_belongs_to_source(&record.request.candidate, source_id) && !record.active
+            })
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         for key in &removable {
@@ -484,165 +451,31 @@ impl Pipeline {
     }
 }
 
-fn binding_identity_from_state(
-    state: &State,
-    source: &SourceImages,
-    request: &ArtworkRequest,
-) -> ArtworkBindingIdentity {
-    let source_epoch = source_epoch(state, &source.source_id);
-    let external_epoch = request
+fn request_key(state: &State, request: &ArtworkRequest, allow_fetch: bool) -> ArtworkKey {
+    let source_epoch = request
         .binding
-        .has_external()
-        .then_some(state.external_epoch)
-        .unwrap_or_default();
-    let visual = artwork_visual_identity(source, request, source_epoch);
-    let request = request_identity(source, request, source_epoch, external_epoch);
-    ArtworkBindingIdentity {
-        visual,
-        request: ArtworkRequestIdentity::new(request),
-    }
-}
-
-fn binding_identity_and_image_from_state(
-    state: &mut State,
-    source: &SourceImages,
-    request: &ArtworkRequest,
-) -> (
-    ArtworkBindingIdentity,
-    Vec<crate::DecodedImageIdentity>,
-    Option<Arc<DecodedImage>>,
-) {
-    let identity = binding_identity_from_state(state, source, request);
-    let decoded_identities = decoded_identities_for_request(state, source, request);
-    let ready = decoded_from_memory(state, source, request);
-    (identity, decoded_identities, ready)
-}
-
-fn decoded_identities_for_request(
-    state: &State,
-    source: &SourceImages,
-    request: &ArtworkRequest,
-) -> Vec<crate::DecodedImageIdentity> {
-    let source_epoch = source_epoch(state, &source.source_id);
-    request
-        .binding
-        .candidates()
-        .iter()
-        .filter(|candidate| !candidate.is_external() || request.external.allow_cached)
-        .map(|candidate| {
-            let external_epoch = candidate
-                .is_external()
-                .then_some(state.external_epoch)
-                .unwrap_or(0);
-            let family = decoded_candidate_family(
-                &source.source_id,
-                candidate,
-                source_epoch,
-                external_epoch,
-            );
-            crate::DecodedImageIdentity(decoded_key(
-                &family,
-                request.fetch_size,
-                request.render_size,
-            ))
-        })
-        .collect()
+        .candidate()
+        .map(|candidate| source_epoch(state, candidate))
+        .unwrap_or(0);
+    ArtworkKey::derive(
+        request.binding.stable_identity(),
+        (request.fetch_size, request.render_size),
+        request.binding.has_external().then_some(&request.external),
+        allow_fetch,
+        (source_epoch, state.external_epoch),
+    )
 }
 
 fn decoded_from_memory(
     state: &mut State,
-    source: &SourceImages,
     request: &ArtworkRequest,
+    key: &ArtworkKey,
 ) -> Option<Arc<DecodedImage>> {
-    let source_epoch = source_epoch(state, &source.source_id);
-    let candidate = request.binding.candidates().first()?;
-    let external = candidate.is_external();
-    if external && !request.external.allow_cached && !request.external.allow_network {
+    let candidate = request.binding.candidate()?;
+    if candidate.is_external() && !request.external.allow_cached {
         return None;
     }
-    let external_epoch = if external { state.external_epoch } else { 0 };
-    let family =
-        decoded_candidate_family(&source.source_id, candidate, source_epoch, external_epoch);
-    let exact = decoded_key(&family, request.fetch_size, request.render_size);
-    state
-        .decoded_index
-        .get_for_request(&exact, &family, request.render_size)
-}
-
-fn artwork_visual_identity(
-    source: &SourceImages,
-    request: &ArtworkRequest,
-    source_epoch: u64,
-) -> ArtworkVisualIdentity {
-    let cached_external = request.binding.has_external() && request.external.allow_cached;
-    ArtworkVisualIdentity::new(format!(
-        "{}\0{}\0{}\0{}",
-        source.source_id,
-        request.binding.stable_identity(),
-        cached_external,
-        source_epoch,
-    ))
-}
-
-fn decoded_for_request(
-    state: &mut State,
-    cache: &FilesystemCache,
-    source: &SourceImages,
-    request: &ArtworkRequest,
-) -> Option<Arc<DecodedImage>> {
-    let source_epoch = source_epoch(state, &source.source_id);
-    for candidate in request.binding.candidates() {
-        let external = candidate.is_external();
-        let may_read_cache = !external || request.external.allow_cached;
-        let external_epoch = if external { state.external_epoch } else { 0 };
-        let family =
-            decoded_candidate_family(&source.source_id, candidate, source_epoch, external_epoch);
-        let exact = decoded_key(&family, request.fetch_size, request.render_size);
-        if may_read_cache {
-            if let Some(image) =
-                state
-                    .decoded_index
-                    .get_for_request(&exact, &family, request.render_size)
-            {
-                return Some(image);
-            }
-            if cache
-                .ready_entry(&source.source_id, candidate, request.fetch_size)
-                .is_some()
-            {
-                return None;
-            }
-            if cache.is_missing(&source.source_id, candidate, request.fetch_size) {
-                continue;
-            }
-        }
-        if external && !request.external.allow_network {
-            continue;
-        }
-        if source.can_fetch() {
-            return None;
-        }
-    }
-    None
-}
-
-fn decoded_candidate_family(
-    source_id: &SourceId,
-    candidate: &Candidate,
-    source_epoch: u64,
-    external_epoch: u64,
-) -> DecodedFamily {
-    DecodedFamily(format!(
-        "{}\0{}\0{}\0{}",
-        source_id,
-        candidate.stable_identity(),
-        source_epoch,
-        external_epoch
-    ))
-}
-
-fn decoded_key(family: &DecodedFamily, fetch_size: u32, render_size: u32) -> ArtworkKey {
-    ArtworkKey::new(format!("{}\0{fetch_size}\0{render_size}", family.0))
+    state.decoded_index.get_for_request(key)
 }
 
 impl DecodedIndex {
@@ -670,20 +503,15 @@ impl DecodedIndex {
         Some(image)
     }
 
-    fn get_for_request(
-        &mut self,
-        exact_key: &ArtworkKey,
-        family: &DecodedFamily,
-        render_size: u32,
-    ) -> Option<Arc<DecodedImage>> {
+    fn get_for_request(&mut self, exact_key: &ArtworkKey) -> Option<Arc<DecodedImage>> {
         if let Some(image) = self.get(exact_key) {
             return Some(image);
         }
         let reusable = self
-            .families
-            .get(family)
+            .sizes
+            .get(&exact_key.reuse_group())
             .into_iter()
-            .flat_map(|sizes| sizes.range(render_size..))
+            .flat_map(|sizes| sizes.range(exact_key.render_size..))
             .flat_map(|(_, keys)| keys.iter().cloned())
             .collect::<Vec<_>>();
         reusable
@@ -691,47 +519,29 @@ impl DecodedIndex {
             .find_map(|reusable| self.get(&reusable))
     }
 
-    fn insert(
-        &mut self,
-        key: ArtworkKey,
-        source_id: SourceId,
-        family: DecodedFamily,
-        render_size: u32,
-        image: Arc<DecodedImage>,
-    ) {
-        self.insert_with_limit(
-            key,
-            source_id,
-            family,
-            render_size,
-            image,
-            MAX_DECODED_INDEX_ENTRIES,
-        );
+    fn insert(&mut self, key: ArtworkKey, source_id: Option<SourceId>, image: Arc<DecodedImage>) {
+        self.insert_with_limit(key, source_id, image, MAX_DECODED_INDEX_ENTRIES);
     }
 
     fn insert_with_limit(
         &mut self,
         key: ArtworkKey,
-        source_id: SourceId,
-        family: DecodedFamily,
-        render_size: u32,
+        source_id: Option<SourceId>,
         image: Arc<DecodedImage>,
         max_entries: usize,
     ) {
         self.remove_entry(&key);
         let last_used = self.next_access();
-        self.families
-            .entry(family.clone())
+        self.sizes
+            .entry(key.reuse_group())
             .or_default()
-            .entry(render_size)
+            .entry(key.render_size)
             .or_default()
             .insert(key.clone());
         self.entries.insert(
             key.clone(),
             DecodedEntry {
                 source_id,
-                family,
-                render_size,
                 image: Arc::downgrade(&image),
                 last_used,
             },
@@ -744,7 +554,7 @@ impl DecodedIndex {
         let stale = self
             .entries
             .iter()
-            .filter(|(_, entry)| entry.source_id == *source_id)
+            .filter(|(_, entry)| entry.source_id.as_ref() == Some(source_id))
             .map(|(key, _)| key.clone())
             .collect::<Vec<_>>();
         for key in stale {
@@ -758,17 +568,17 @@ impl DecodedIndex {
             last_used: removed.last_used,
             key: key.clone(),
         });
-        let remove_family = self.families.get_mut(&removed.family).is_some_and(|sizes| {
-            if let Some(keys) = sizes.get_mut(&removed.render_size) {
+        let remove_family = self.sizes.get_mut(&key.reuse_group()).is_some_and(|sizes| {
+            if let Some(keys) = sizes.get_mut(&key.render_size) {
                 keys.remove(key);
                 if keys.is_empty() {
-                    sizes.remove(&removed.render_size);
+                    sizes.remove(&key.render_size);
                 }
             }
             sizes.is_empty()
         });
         if remove_family {
-            self.families.remove(&removed.family);
+            self.sizes.remove(&key.reuse_group());
         }
         Some(removed)
     }
@@ -788,7 +598,7 @@ impl DecodedIndex {
     }
 }
 
-fn reconcile_inactive_external_jobs(state: &mut State) -> Vec<LeaseCompletion> {
+fn reconcile_inactive_external_jobs(state: &mut State) {
     let stale = state
         .jobs
         .iter()
@@ -804,23 +614,14 @@ fn reconcile_inactive_external_jobs(state: &mut State) -> Vec<LeaseCompletion> {
         .filter_map(|key| remove_job(state, key))
         .collect::<Vec<_>>();
 
-    let mut completions = Vec::new();
     for record in stale {
         for request_id in record.subscribers {
-            if let Some(completion) = restart_projection(state, request_id) {
-                completions.push(completion);
-            }
+            restart_projection(state, request_id);
         }
         for subscriber in record.preparations {
-            enqueue_background_candidate(
-                state,
-                record.source.clone(),
-                record.request.clone(),
-                subscriber,
-            );
+            enqueue_background_candidate(state, record.request.clone(), subscriber);
         }
     }
-    completions
 }
 
 impl JobRecord {
@@ -839,22 +640,18 @@ impl JobRecord {
 
 fn enqueue_projection(
     state: &mut State,
-    source: SourceImages,
     request: CandidateRequest,
     subscriber: RequestId,
     priority: JobPriority,
-) -> JobKey {
-    let source_epoch = source_epoch(state, &source.source_id);
+) -> ArtworkKey {
+    let source_epoch = source_epoch(state, &request.candidate);
     let external_epoch = request
         .candidate
         .is_external()
         .then_some(state.external_epoch)
         .unwrap_or_default();
-    let key = job_key(&source, &request, source_epoch, external_epoch);
+    let key = job_key(&request, source_epoch, external_epoch);
     if let Some(record) = state.jobs.get_mut(&key) {
-        if source.can_fetch() && !record.source.can_fetch() {
-            record.source = source;
-        }
         record.subscribers.insert(subscriber);
         if matches!(priority, JobPriority::Foreground) {
             record.foreground_subscribers.insert(subscriber);
@@ -872,7 +669,6 @@ fn enqueue_projection(
     state.jobs.insert(
         key.clone(),
         JobRecord {
-            source,
             request,
             subscribers,
             foreground_subscribers,
@@ -888,36 +684,30 @@ fn enqueue_projection(
 
 fn enqueue_background(
     state: &mut State,
-    source: SourceImages,
     request: ArtworkRequest,
     subscriber: PreparationSubscriber,
-) -> Option<JobKey> {
-    let candidate = request.binding.candidates().first()?.clone();
+) -> Option<ArtworkKey> {
+    let candidate = request.binding.candidate()?.clone();
     Some(enqueue_background_candidate(
         state,
-        source,
-        candidate_request(&request, candidate),
+        candidate_request(&request, candidate, true),
         subscriber,
     ))
 }
 
 fn enqueue_background_candidate(
     state: &mut State,
-    source: SourceImages,
     request: CandidateRequest,
     subscriber: PreparationSubscriber,
-) -> JobKey {
-    let source_epoch = source_epoch(state, &source.source_id);
+) -> ArtworkKey {
+    let source_epoch = source_epoch(state, &request.candidate);
     let external_epoch = request
         .candidate
         .is_external()
         .then_some(state.external_epoch)
         .unwrap_or_default();
-    let key = job_key(&source, &request, source_epoch, external_epoch);
+    let key = job_key(&request, source_epoch, external_epoch);
     if let Some(record) = state.jobs.get_mut(&key) {
-        if source.can_fetch() && !record.source.can_fetch() {
-            record.source = source;
-        }
         record.preparations.push(subscriber);
         if !record.active {
             queue(state, key.clone(), false);
@@ -927,7 +717,6 @@ fn enqueue_background_candidate(
     state.jobs.insert(
         key.clone(),
         JobRecord {
-            source,
             request,
             subscribers: HashSet::new(),
             foreground_subscribers: HashSet::new(),
@@ -954,7 +743,7 @@ fn cancel_preparation(shared: &Shared, id: u64) {
     shared.wake.notify_all();
 }
 
-fn reschedule_or_remove(state: &mut State, key: &JobKey, front: bool) {
+fn reschedule_or_remove(state: &mut State, key: &ArtworkKey, front: bool) {
     let Some((active, has_interest)) = state
         .jobs
         .get(key)
@@ -972,12 +761,12 @@ fn reschedule_or_remove(state: &mut State, key: &JobKey, front: bool) {
     }
 }
 
-fn remove_job(state: &mut State, key: &JobKey) -> Option<JobRecord> {
+fn remove_job(state: &mut State, key: &ArtworkKey) -> Option<JobRecord> {
     remove_queued(state, key);
     state.jobs.remove(key)
 }
 
-fn queue(state: &mut State, key: JobKey, front: bool) {
+fn queue(state: &mut State, key: ArtworkKey, front: bool) {
     remove_queued(state, &key);
     let Some(priority) = state.jobs.get(&key).map(JobRecord::priority) else {
         return;
@@ -993,70 +782,51 @@ fn queue(state: &mut State, key: JobKey, front: bool) {
     }
 }
 
-fn remove_queued(state: &mut State, key: &JobKey) {
+fn remove_queued(state: &mut State, key: &ArtworkKey) {
     state.foreground.retain(|queued| queued != key);
     state.preparations.retain(|queued| queued != key);
 }
 
-fn job_key(
-    source: &SourceImages,
-    request: &CandidateRequest,
-    source_epoch: u64,
-    external_epoch: u64,
-) -> JobKey {
-    let identity = format!(
-        "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{:x}",
-        source.source_id,
-        request.candidate.stable_identity(),
-        request.fetch_size,
-        request.render_size,
-        request.external.allow_cached,
-        request.external.allow_network,
-        request.external.allow_musicbrainz,
-        source_epoch,
-        md5::compute(request.external.lastfm_api_key.as_bytes())
-    );
-    JobKey(format!(
-        "{:x}-{external_epoch}",
-        md5::compute(identity.as_bytes())
-    ))
+fn job_key(request: &CandidateRequest, source_epoch: u64, external_epoch: u64) -> ArtworkKey {
+    ArtworkKey::derive(
+        &request.candidate.stable_identity(),
+        (request.fetch_size, request.render_size),
+        request.candidate.is_external().then_some(&request.external),
+        request.allow_fetch,
+        (source_epoch, external_epoch),
+    )
 }
 
-fn candidate_request(request: &ArtworkRequest, candidate: Candidate) -> CandidateRequest {
+fn candidate_request(
+    request: &ArtworkRequest,
+    candidate: Candidate,
+    allow_fetch: bool,
+) -> CandidateRequest {
     CandidateRequest {
         candidate,
         fetch_size: request.fetch_size,
         render_size: request.render_size,
         external: request.external.clone(),
+        allow_fetch,
     }
 }
 
-fn request_identity(
-    source: &SourceImages,
-    request: &ArtworkRequest,
-    source_epoch: u64,
-    external_epoch: u64,
-) -> String {
-    let identity = format!(
-        "{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{}\0{:x}",
-        source.source_id,
-        request.binding.stable_identity(),
-        request.fetch_size,
-        request.render_size,
-        request.external.allow_cached,
-        request.external.allow_network,
-        request.external.allow_musicbrainz,
-        source.can_fetch(),
-        source_epoch,
-        md5::compute(request.external.lastfm_api_key.as_bytes())
-    );
-    format!("{:x}-{external_epoch}", md5::compute(identity.as_bytes()))
+fn candidate_source(candidate: &Candidate) -> Option<SourceId> {
+    match candidate {
+        Candidate::Native(binding) => Some(binding.source_id.clone()),
+        Candidate::Local(binding) => Some(binding.source_id().clone()),
+        Candidate::Album(_) => None,
+    }
 }
 
-fn source_epoch(state: &State, source_id: &SourceId) -> u64 {
-    state
-        .source_epochs
-        .get(source_id)
+fn candidate_belongs_to_source(candidate: &Candidate, source_id: &SourceId) -> bool {
+    candidate_source(candidate).as_ref() == Some(source_id)
+}
+
+fn source_epoch(state: &State, candidate: &Candidate) -> u64 {
+    candidate_source(candidate)
+        .as_ref()
+        .and_then(|source_id| state.source_epochs.get(source_id))
         .copied()
         .unwrap_or_default()
 }
@@ -1090,7 +860,6 @@ fn next_work(shared: &Shared, foreground_reserved: bool) -> Work {
             record.active = true;
             let work = Work {
                 key,
-                source: record.source.clone(),
                 request: record.request.clone(),
                 source_epoch: record.source_epoch,
                 external_epoch: record.external_epoch,
@@ -1110,25 +879,14 @@ fn resolve(shared: &Shared, work: &Work) -> Resolution {
 }
 
 fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
-    let source = &work.source;
     let request = &work.request;
     let candidate = &request.candidate;
     let mut failures = Vec::new();
     let external = candidate.is_external();
-    let family = decoded_candidate_family(
-        &source.source_id,
-        candidate,
-        work.source_epoch,
-        if external { work.external_epoch } else { 0 },
-    );
-    let artwork_key = decoded_key(&family, request.fetch_size, request.render_size);
+    let artwork_key = work.key.clone();
     let may_read_cache = !external || request.external.allow_cached;
     if may_read_cache {
-        if let Some(entry) =
-            shared
-                .cache
-                .ready_entry(&source.source_id, candidate, request.fetch_size)
-        {
+        if let Some(entry) = shared.cache.ready_entry(candidate, request.fetch_size) {
             if !work.decode {
                 return Resolution::Cached;
             }
@@ -1136,7 +894,6 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 Ok(image) => {
                     return Resolution::Ready {
                         image: Arc::new(image),
-                        family,
                     };
                 }
                 Err(error) => {
@@ -1145,22 +902,15 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 }
             }
         }
-        if shared
-            .cache
-            .is_missing(&source.source_id, candidate, request.fetch_size)
-        {
+        if shared.cache.is_missing(candidate, request.fetch_size) {
             return Resolution::Missing;
         }
     }
-    if external && !request.external.allow_network {
-        return Resolution::Missing;
-    }
-    if !external && !source.can_fetch() {
+    if !request.allow_fetch || (external && !request.external.allow_network) {
         return Resolution::Missing;
     }
     match shared.fetch.fetch(
         &shared.runtime,
-        source,
         candidate,
         request.fetch_size,
         &request.external,
@@ -1180,7 +930,6 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 ) {
                     Ok(image) => Resolution::Ready {
                         image: Arc::new(image),
-                        family,
                     },
                     Err(error) => {
                         shared.cache.remove_ready(&path);
@@ -1223,12 +972,7 @@ fn write_ready(
     drop(state);
     shared
         .cache
-        .write_ready(
-            &work.source.source_id,
-            &work.request.candidate,
-            work.request.fetch_size,
-            bytes,
-        )
+        .write_ready(&work.request.candidate, work.request.fetch_size, bytes)
         .map(Some)
 }
 
@@ -1239,16 +983,14 @@ fn mark_missing(shared: &Shared, work: &Work) -> std::io::Result<bool> {
         return Ok(false);
     }
     drop(state);
-    shared.cache.mark_missing(
-        &work.source.source_id,
-        &work.request.candidate,
-        work.request.fetch_size,
-    )?;
+    shared
+        .cache
+        .mark_missing(&work.request.candidate, work.request.fetch_size)?;
     Ok(true)
 }
 
 fn work_is_current(state: &State, work: &Work) -> bool {
-    source_epoch(state, &work.source.source_id) == work.source_epoch
+    source_epoch(state, &work.request.candidate) == work.source_epoch
         && (!work.request.candidate.is_external() || state.external_epoch == work.external_epoch)
 }
 
@@ -1259,124 +1001,47 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         shared.wake.notify_all();
         return;
     };
-    if source_epoch(&state, &work.source.source_id) != work.source_epoch {
+    if source_epoch(&state, &work.request.candidate) != work.source_epoch {
         drop(state);
         shared.wake.notify_all();
         return;
     }
     if work.request.candidate.is_external() && state.external_epoch != work.external_epoch {
-        let mut completions = Vec::new();
         for request_id in record.subscribers {
-            if let Some(completion) = restart_projection(&mut state, request_id) {
-                completions.push(completion);
-            }
+            restart_projection(&mut state, request_id);
         }
         for subscriber in record.preparations {
-            enqueue_background_candidate(
-                &mut state,
-                record.source.clone(),
-                record.request.clone(),
-                subscriber,
-            );
-        }
-        drop(state);
-        send_completions(completions);
-        shared.wake.notify_all();
-        return;
-    }
-    if !work.source.can_fetch()
-        && record.source.can_fetch()
-        && matches!(&resolution, Resolution::Missing | Resolution::Failed(_))
-    {
-        for request_id in record.subscribers {
-            let priority = state
-                .projections
-                .get(&request_id)
-                .map(|projection| projection.priority)
-                .unwrap_or(JobPriority::Preparation);
-            let job = enqueue_projection(
-                &mut state,
-                record.source.clone(),
-                record.request.clone(),
-                request_id,
-                priority,
-            );
-            if let Some(projection) = state.projections.get_mut(&request_id) {
-                projection.job = job;
-            }
-        }
-        for subscriber in record.preparations {
-            enqueue_background_candidate(
-                &mut state,
-                record.source.clone(),
-                record.request.clone(),
-                subscriber,
-            );
+            enqueue_background_candidate(&mut state, record.request.clone(), subscriber);
         }
         drop(state);
         shared.wake.notify_all();
         return;
     }
     if record.has_interest()
-        && let Resolution::Ready { image, family } = &resolution
+        && let Resolution::Ready { image } = &resolution
     {
         state.decoded_index.insert(
             image.key().clone(),
-            work.source.source_id.clone(),
-            family.clone(),
-            work.request.render_size,
+            candidate_source(&work.request.candidate),
             Arc::clone(image),
         );
     }
     let mut completions = Vec::new();
     for request_id in record.subscribers {
-        match &resolution {
-            Resolution::Ready { image, .. } => {
-                let Some(projection) = state.projections.remove(&request_id) else {
-                    continue;
-                };
-                completions.push((
-                    projection.completion,
-                    ArtworkOutcome::Ready(Arc::clone(image)),
-                ));
-            }
-            Resolution::Cached => {
-                let candidate_index = state
-                    .projections
-                    .get(&request_id)
-                    .map_or(0, |projection| projection.candidate_index);
-                if let Some(completion) =
-                    continue_projection(&mut state, request_id, candidate_index, None)
-                {
-                    completions.push(completion);
-                }
-            }
-            Resolution::Missing => {
-                let candidate_index = state
-                    .projections
-                    .get(&request_id)
-                    .map_or(0, |projection| projection.candidate_index);
-                if let Some(completion) =
-                    continue_projection(&mut state, request_id, candidate_index + 1, None)
-                {
-                    completions.push(completion);
-                }
-            }
-            Resolution::Failed(error) => {
-                let candidate_index = state
-                    .projections
-                    .get(&request_id)
-                    .map_or(0, |projection| projection.candidate_index);
-                if let Some(completion) = continue_projection(
-                    &mut state,
-                    request_id,
-                    candidate_index + 1,
-                    Some(Arc::clone(error)),
-                ) {
-                    completions.push(completion);
-                }
-            }
+        if matches!(&resolution, Resolution::Cached) {
+            restart_projection(&mut state, request_id);
+            continue;
         }
+        let Some(projection) = state.projections.remove(&request_id) else {
+            continue;
+        };
+        let outcome = match &resolution {
+            Resolution::Ready { image, .. } => ArtworkOutcome::Ready(Arc::clone(image)),
+            Resolution::Missing => ArtworkOutcome::Missing,
+            Resolution::Failed(error) => ArtworkOutcome::Failed(Arc::clone(error)),
+            Resolution::Cached => unreachable!(),
+        };
+        completions.push((projection.completion, outcome));
     }
     let background_result = match &resolution {
         Resolution::Ready { .. } => BackgroundResult::Ready,
@@ -1392,7 +1057,7 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         && let Resolution::Failed(error) = &resolution
     {
         warn!(
-            source_id = %work.source.source_id,
+            source_id = ?candidate_source(&work.request.candidate),
             %error,
             "could not prepare one source artwork image"
         );
@@ -1406,61 +1071,18 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
     shared.wake.notify_all();
 }
 
-fn restart_projection(state: &mut State, request_id: RequestId) -> Option<LeaseCompletion> {
-    if let Some(projection) = state.projections.get_mut(&request_id) {
-        projection.failures.clear();
-    }
-    continue_projection(state, request_id, 0, None)
-}
-
-fn continue_projection(
-    state: &mut State,
-    request_id: RequestId,
-    candidate_index: usize,
-    failure: Option<Arc<str>>,
-) -> Option<LeaseCompletion> {
-    if let Some(failure) = failure
-        && let Some(projection) = state.projections.get_mut(&request_id)
-    {
-        projection.failures.push(failure);
-    }
-    let next = state.projections.get(&request_id).and_then(|projection| {
-        projection
-            .request
-            .binding
-            .candidates()
-            .get(candidate_index)
-            .cloned()
-            .map(|candidate| {
-                (
-                    projection.source.clone(),
-                    candidate_request(&projection.request, candidate),
-                    projection.priority,
-                )
-            })
-    });
-    if let Some((source, request, priority)) = next {
-        let job = enqueue_projection(state, source, request, request_id, priority);
-        if let Some(projection) = state.projections.get_mut(&request_id) {
-            projection.candidate_index = candidate_index;
-            projection.job = job;
-        }
-        return None;
-    }
-
-    let projection = state.projections.remove(&request_id)?;
-    let outcome = if projection.failures.is_empty() {
-        ArtworkOutcome::Missing
-    } else {
-        let message = projection
-            .failures
-            .iter()
-            .map(AsRef::as_ref)
-            .collect::<Vec<_>>()
-            .join("; ");
-        ArtworkOutcome::Failed(message.into())
+fn restart_projection(state: &mut State, request_id: RequestId) {
+    let Some((request, priority)) = state
+        .projections
+        .get(&request_id)
+        .map(|projection| (projection.request.clone(), projection.priority))
+    else {
+        return;
     };
-    Some((projection.completion, outcome))
+    let job = enqueue_projection(state, request, request_id, priority);
+    if let Some(projection) = state.projections.get_mut(&request_id) {
+        projection.job = job;
+    }
 }
 
 fn lock_state(shared: &Shared) -> MutexGuard<'_, State> {
@@ -1488,10 +1110,14 @@ mod tests {
         let runtime = tokio::runtime::Builder::new_current_thread()
             .build()
             .expect("runtime");
-        let pipeline = Pipeline::new(directory.path(), runtime.handle().clone()).expect("pipeline");
+        let pipeline = Pipeline::new(
+            directory.path(),
+            runtime.handle().clone(),
+            Arc::new(Mutex::new(None)),
+        )
+        .expect("pipeline");
         let summary = pipeline
             .prefetch_source_artwork(
-                SourceImages::cache_only(SourceId::new("source")),
                 Arc::from([br#"{"no_art":true}"#.to_vec()]),
                 &|_, _| {},
                 &|| false,
@@ -1504,27 +1130,23 @@ mod tests {
     #[test]
     fn identical_foreground_requests_share_one_fetch_job() {
         let mut state = State::default();
-        let source = SourceImages::cache_only(SourceId::new("source"));
         let request = CandidateRequest {
-            candidate: Candidate::Native(NativeImageRef::new("album", Some("tag".to_string()))),
+            candidate: Candidate::Native(sources::NativeArtworkBinding {
+                source_id: SourceId::new("source"),
+                image: NativeImageRef::new("album", Some("tag".to_string())),
+            }),
             fetch_size: 256,
             render_size: 144,
             external: ExternalPolicy::default(),
+            allow_fetch: true,
         };
         let first = enqueue_projection(
             &mut state,
-            source.clone(),
             request.clone(),
             RequestId(1),
             JobPriority::Foreground,
         );
-        let second = enqueue_projection(
-            &mut state,
-            source,
-            request,
-            RequestId(2),
-            JobPriority::Foreground,
-        );
+        let second = enqueue_projection(&mut state, request, RequestId(2), JobPriority::Foreground);
 
         assert_eq!(first, second);
         assert_eq!(state.jobs.len(), 1);

@@ -308,7 +308,7 @@ impl Activity {
 }
 
 fn duration_millis(media: &CurrentMedia) -> u64 {
-    u64::try_from(media.track.duration_millis.max(0)).unwrap_or(u64::MAX)
+    u64::try_from(media.duration_millis.max(0)).unwrap_or(u64::MAX)
 }
 
 pub(crate) fn visible_playback_state(
@@ -495,7 +495,7 @@ fn worker_ipc_paths() -> Vec<PathBuf> {
 }
 
 fn activity_json(activity: &Activity) -> Value {
-    let track = &activity.media.track;
+    let track = &activity.media;
     let mut value = json!({
         "details": discord_text(&track.title, "Idle"),
         "state": discord_text(&track.artist, "Unknown artist"),
@@ -533,11 +533,10 @@ const fn status_display_type(display_type: DisplayType) -> u8 {
 }
 
 fn activity_urls(activity: &Activity) -> (Option<String>, Option<String>) {
-    let track = &activity.media.track;
+    let track = &activity.media;
     let track_artist = track.artist.trim();
     let album_artist = activity
         .media
-        .track
         .album_display_artist
         .as_deref()
         .map(str::trim)
@@ -700,6 +699,32 @@ mod tests {
             Some("https://www.last.fm/music/Album%20Artist/Album/Track")
         );
         assert_eq!(state.as_deref(), Some("https://www.last.fm/music/Artist"));
+    }
+
+    #[test]
+    fn musicbrainz_links_use_the_queue_snapshot_ids() {
+        let view = super::super::tests::test_view(1, "Album", TransportStatus::Playing, 0);
+        let activity = Activity {
+            settings: Settings {
+                link_type: LinkType::MusicBrainz,
+                ..Settings::default()
+            },
+            media: view.transport.current.expect("current media"),
+            playback_state: PlaybackState::Playing,
+            started_at_millis: None,
+            ended_at_millis: None,
+            large_image: APP_ICON_URL.to_string(),
+        };
+
+        let (details, state) = activity_urls(&activity);
+        assert_eq!(
+            details.as_deref(),
+            Some("https://musicbrainz.org/track/track-id")
+        );
+        assert_eq!(
+            state.as_deref(),
+            Some("https://musicbrainz.org/artist/artist-id")
+        );
     }
 
     #[cfg(unix)]

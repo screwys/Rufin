@@ -10,9 +10,7 @@ impl Shell {
         playlist_id: PlaylistKey,
         current_name: String,
     ) {
-        let Some(source) = self.selected_source_operations() else {
-            return;
-        };
+        let source = self.products.source.clone();
         self.rename_playlist_dialog_inner(current_name, move |name| {
             source.rename_playlist(playlist_id, name);
         });

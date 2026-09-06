@@ -1,4 +1,4 @@
-use library::{AlbumKey, ArtistKey, GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey};
+use library::{GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey};
 use localization::msgid;
 use serde::{Deserialize, Deserializer, Serialize, Serializer, de::Error as _};
 
@@ -37,18 +37,18 @@ pub(crate) enum Route {
     Favorites,
     History,
     Albums,
-    AlbumDetail(AlbumKey),
+    AlbumDetail(String),
     Tracks,
     Artists,
-    ArtistDetail(ArtistKey),
-    ArtistDiscography(ArtistKey),
-    ArtistTracks(ArtistKey),
-    ArtistFavoriteTracks(ArtistKey),
+    ArtistDetail(String),
+    ArtistDiscography(String),
+    ArtistTracks(String),
+    ArtistFavoriteTracks(String),
     AlbumArtists,
-    AlbumArtistDetail(ArtistKey),
-    AlbumArtistDiscography(ArtistKey),
-    AlbumArtistTracks(ArtistKey),
-    AlbumArtistFavoriteTracks(ArtistKey),
+    AlbumArtistDetail(String),
+    AlbumArtistDiscography(String),
+    AlbumArtistTracks(String),
+    AlbumArtistFavoriteTracks(String),
     Genres,
     GenreDetail(GenreKey),
     Moods,

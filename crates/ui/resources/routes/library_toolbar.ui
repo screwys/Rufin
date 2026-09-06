@@ -27,6 +27,13 @@
               </object>
             </child>
             <child>
+              <object class="GtkButton" id="import_button">
+                <property name="visible">false</property>
+                <property name="icon-name">rufin-document-open-symbolic</property>
+                <property name="tooltip-text" translatable="yes">Import Playlist</property>
+              </object>
+            </child>
+            <child>
               <object class="GtkDropDown" id="sort_dropdown">
                 <property name="halign">end</property>
               </object>

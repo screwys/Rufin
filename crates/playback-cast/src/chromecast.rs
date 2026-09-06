@@ -269,9 +269,9 @@ impl GoogleCastController {
         let published = relay.publish(stream)?;
         let duration_millis = stream_duration_millis(stream);
         let title = stream
-            .track
+            .occurrence
             .as_ref()
-            .map(|track| track.title.trim())
+            .map(|occurrence| occurrence.item.title.trim())
             .filter(|title| !title.is_empty())
             .map(str::to_string);
         let metadata = (title.is_some() || published.artwork_uri.is_some()).then(|| Metadata {
@@ -455,9 +455,9 @@ fn stream_duration_millis(stream: &PreparedStream) -> Option<u64> {
         .map(|end| end.saturating_sub(stream.start_millis()))
         .or_else(|| {
             stream
-                .track
+                .occurrence
                 .as_ref()
-                .and_then(|track| u64::try_from(track.duration_millis).ok())
+                .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
         })
 }
 

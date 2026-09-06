@@ -30,6 +30,7 @@ desktop-integration.workspace = true
 downloads.workspace = true
 getrandom.workspace = true
 glib.workspace = true
+gio.workspace = true
 md5.workspace = true
 playback.workspace = true
 playback-cast.workspace = true

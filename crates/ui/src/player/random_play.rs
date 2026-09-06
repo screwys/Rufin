@@ -87,7 +87,7 @@ fn present_random_play_dialog_loaded(
     ];
     let saved = shell.settings.current.borrow().random_play.clone();
     let selected_genre = saved.selected_genre_id(
-        &selected.artwork.source_id,
+        &selected.source_id,
         selected.music_folder_object_id.as_deref(),
     );
 
@@ -240,7 +240,7 @@ fn connect_action(
         let Some(settings) = settings_from_controls(
             &controls,
             &genres,
-            selected.artwork.source_id.clone(),
+            selected.source_id.clone(),
             selected.music_folder_object_id.clone(),
         ) else {
             return;
@@ -248,7 +248,7 @@ fn connect_action(
         let request = request_from_settings(
             &settings,
             &genres,
-            &selected.artwork.source_id,
+            &selected.source_id,
             selected.music_folder_object_id.as_deref(),
             placement,
         );
@@ -332,7 +332,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
     let source = selected.source_key;
     let genre_object_id = settings
         .selected_genre_id(
-            &selected.artwork.source_id,
+            &selected.source_id,
             selected.music_folder_object_id.as_deref(),
         )
         .map(str::to_owned);
@@ -401,33 +401,19 @@ async fn execute_random_task(
         )
         .await
     {
-        Ok(order) => Arc::<[library::TrackKey]>::from(order),
+        Ok(order) => Arc::<[String]>::from(order),
         Err(error) => {
             warn!(%error, "failed to select Random Play tracks");
             return;
         }
     };
-    let Some(anchor_key) = order.first().copied() else {
-        return;
-    };
-    let Some(anchor) = selected
+    let media = selected
         .database
-        .track_rows(selected.source_key, &[anchor_key], &cancellation)
+        .queue_items_for_uris(&order, &cancellation)
         .await
-        .ok()
-        .and_then(|mut rows| rows.pop())
-        .map(playback::PlaybackMedia::from)
-    else {
-        return;
-    };
-    if let Some(request) = playback::LoadedPlayRequest::random(
-        selected.source_key,
-        selected.source_session_epoch,
-        order,
-        anchor,
-        request.placement,
-    ) {
-        queue.play_loaded(request);
+        .unwrap_or_default();
+    if let Some(request) = playback::PlayRequest::random(media.into(), request.placement) {
+        queue.play(request);
     }
 }
 

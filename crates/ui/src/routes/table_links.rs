@@ -1,6 +1,5 @@
 use std::rc::Rc;
 
-use ::library::TrackRow;
 use adw::prelude::*;
 
 use crate::interactions::install_context_menu_openers;
@@ -13,20 +12,25 @@ use super::library_fields::item_at_from_item;
 use super::recycled_cells::{RecycledTextCell, list_cell};
 use super::sparse_model::connect_sparse_bind;
 
-pub(crate) fn track_link_column<F>(
+pub(crate) fn mapped_track_link_column<T, TrackValue, Value>(
     shell: &Rc<Shell>,
     title: &'static str,
     width: i32,
-    value: F,
+    track_value: TrackValue,
+    value: Value,
 ) -> gtk::ColumnViewColumn
 where
-    F: Fn(&TrackRow) -> DetailLinks + 'static,
+    T: Clone + 'static,
+    TrackValue: Fn(&T) -> Option<String> + 'static,
+    Value: Fn(&T) -> DetailLinks + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     let value = Rc::new(value);
     let shell = Rc::clone(shell);
+    let track_value: Rc<dyn Fn(&T) -> Option<String>> = Rc::new(track_value);
 
     let setup_shell = Rc::clone(&shell);
+    let setup_track_value = Rc::clone(&track_value);
     factory.connect_setup(move |_, list_item| {
         let Some(list_item) = list_item.downcast_ref::<gtk::ListItem>() else {
             return;
@@ -38,13 +42,16 @@ where
         cell.enable_links(&setup_shell);
         let weak_item = list_item.downgrade();
         let weak_shell = Rc::downgrade(&setup_shell);
+        let item_track_value = Rc::clone(&setup_track_value);
         install_context_menu_openers(
             &cell,
             Rc::new(move |target, position| {
                 let (Some(item), Some(shell)) = (weak_item.upgrade(), weak_shell.upgrade()) else {
                     return;
                 };
-                if let Some(track) = item_at_from_item::<TrackRow>(&item) {
+                if let Some(track) =
+                    item_at_from_item::<T>(&item).and_then(|value| item_track_value(&value))
+                {
                     present_track_context_menu(target, &shell, track, position);
                 }
             }),
@@ -59,11 +66,11 @@ where
         let Some(cell) = list_cell::<RecycledTextCell>(list_item) else {
             return;
         };
-        let Some(track) = item_at_from_item::<TrackRow>(list_item) else {
+        let Some(data) = item_at_from_item::<T>(list_item) else {
             cell.clear();
             return;
         };
-        cell.bind_links(value(&track));
+        cell.bind_links(value(&data));
     });
 
     factory.connect_unbind(move |_, list_item| {

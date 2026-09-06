@@ -4,7 +4,7 @@ use std::{
     sync::Arc,
 };
 
-use ::library::{AlbumDetail, AlbumKey, AlbumRow, FavoriteTarget};
+use ::library::{AlbumDetail, AlbumRow, FavoriteTarget};
 use adw::prelude::*;
 
 use crate::LibraryListKey;
@@ -48,11 +48,9 @@ struct AlbumDetailReadRequest {
 impl Shell {
     pub(crate) fn album_detail_view(
         self: &Rc<Self>,
-        album_id: AlbumKey,
         detail: Option<AlbumDetail>,
         first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
-        selected: crate::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(
@@ -60,6 +58,8 @@ impl Shell {
             );
         };
         let album = detail.album.clone();
+        let album_id = album.album_key;
+        let album_uri = album.media_uri.clone();
         let tracks = detail.track_order.clone();
         let current_album = Rc::new(RefCell::new(detail.album.clone()));
         let context_id = format!("album:{album_id}");
@@ -89,7 +89,6 @@ impl Shell {
             set_library_table_content_height(&resize_scroller, row_count, None);
         });
         let track_projection = self.searchable_track_collection(
-            &selected,
             tracks,
             first_row_position,
             first_rows,
@@ -160,13 +159,8 @@ impl Shell {
         let play_controller = self.products.playback.queue.clone();
         let play_tracks = track_projection.clone();
         let play_context_id = context_id.clone();
-        let play: CollectionPlay = Rc::new(move |placement, shuffled_start| {
-            play_tracks.play_source(
-                play_controller.clone(),
-                placement,
-                play_context_id.clone(),
-                shuffled_start,
-            );
+        let play: CollectionPlay = Rc::new(move |placement| {
+            play_tracks.play_source(play_controller.clone(), placement, play_context_id.clone());
         });
         let cover_controls = detail_playback_controls(
             &actions,
@@ -185,13 +179,14 @@ impl Shell {
             .as_ref()
             .expect("album detail has a Favorite cover control")
             .clone();
+        let favorite_media_uri = album.media_uri.clone();
         for button in [favorite, hover_favorite] {
-            self.register_favorite_button(album_favorite_key(&album.album_key), &button);
+            self.register_favorite_button(album_favorite_key(&favorite_media_uri), &button);
             let shell = Rc::clone(self);
-            let favorite_album_id = album.album_key;
+            let favorite_media_uri = favorite_media_uri.clone();
             button.connect_clicked(move |button| {
                 shell.set_favorite_with_feedback(
-                    FavoriteTarget::Album(favorite_album_id),
+                    FavoriteTarget::Album(favorite_media_uri.clone()),
                     !favorite_button_is_active(button),
                     Some(button),
                 );
@@ -258,7 +253,7 @@ impl Shell {
         let apply = {
             let shell = Rc::downgrade(self);
             let track_projection = track_projection.clone();
-            let route = Route::AlbumDetail(album_id);
+            let route = Route::AlbumDetail(album_uri.clone());
             Rc::new(
                 move |_: AlbumDetailReadRequest,
                       result: Result<PreparedTrackProjection, String>| {
@@ -277,9 +272,9 @@ impl Shell {
                 },
             )
         };
-        let database = Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
+        let database = Arc::clone(&self.products.library);
+        let source = album.source_key;
+        let folder = None;
         let load = Arc::new(move |request: AlbumDetailReadRequest| {
             let database = Arc::clone(&database);
             Box::pin(async move {
@@ -306,7 +301,7 @@ impl Shell {
             }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
         });
         let read = LatestMountedRouteRead::new_with_request(
-            selected.runtime.clone(),
+            self.products.runtime.clone(),
             apply,
             load,
             "mounted Album route",
@@ -351,7 +346,17 @@ impl Shell {
                 });
             })
         };
+        let download_target = current_album.borrow().media_uri.clone();
+        let download_album = Rc::clone(&current_album);
+        let downloads = self.collection_download_change(move |identity, downloaded| {
+            if identity.strip_prefix("album:") == Some(download_target.as_str()) {
+                let mut row = download_album.borrow_mut();
+                row.downloaded_count = if downloaded { row.track_count } else { 0 };
+            }
+        });
         MountedRoute::new(route_stack.upcast(), resume)
+            .with_download_change(downloads)
+            .with_download_change(track_projection.download_change())
             .with_search(track_projection.search())
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(item_navigation)

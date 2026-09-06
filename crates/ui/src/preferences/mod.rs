@@ -1,3 +1,4 @@
+pub(crate) mod backup;
 use crate::layout::{
     LARGE_POPUP_BASE_HEIGHT, LARGE_POPUP_BASE_WIDTH, large_popup_content_height,
     large_popup_content_width, width_allocation_owner,
@@ -237,13 +238,32 @@ pub(crate) fn present_library_preferences_dialog(shell: &Rc<Shell>) {
     present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, false, false);
 }
 pub(crate) fn present_add_server_preferences_dialog(shell: &Rc<Shell>) {
-    present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, true, false);
+    if shell.source.configured.borrow().sources.is_empty() {
+        shell.present_onboarding();
+    } else {
+        present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, true, false);
+    }
 }
 pub(crate) fn present_downloads_preferences_dialog(shell: &Rc<Shell>) {
     present_preferences_dialog_with_page(shell, PreferencesPageKind::Library, false, true);
 }
 
 impl Shell {
+    pub(crate) fn set_external_metadata_enabled(self: &Rc<Self>, enabled: bool) {
+        if self
+            .set_app_setting("metadata setting", enabled, |settings| {
+                &mut settings.external_metadata_enabled
+            })
+            .is_some()
+        {
+            if enabled {
+                self.retry_external_artwork("metadata setting");
+            } else {
+                self.update_media_controls();
+            }
+        }
+    }
+
     pub(crate) fn close_preferences_dialog(&self) {
         if let Some(dialog) = self.preferences.active_dialog() {
             dialog.close();
@@ -1055,7 +1075,9 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
         notifications_row: adw::SwitchRow,
         release_notifications_row: adw::SwitchRow,
         prefer_server_playlist_row: adw::SwitchRow,
+        prefer_distinct_track_covers_row: adw::SwitchRow,
         external_metadata_row: adw::SwitchRow,
+        external_lyrics_row: adw::SwitchRow,
         external_links_row: adw::SwitchRow,
         lastfm_links_row: adw::SwitchRow,
         musicbrainz_links_row: adw::SwitchRow,
@@ -1216,21 +1238,32 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
         }
     });
 
-    external_metadata_row.set_active(settings.external_metadata_enabled);
-    let metadata_shell = Rc::clone(shell);
-    external_metadata_row.connect_active_notify(move |row| {
-        let enabled = row.is_active();
-        if metadata_shell
-            .set_app_setting("metadata setting", enabled, |settings| {
-                &mut settings.external_metadata_enabled
+    prefer_distinct_track_covers_row.set_active(settings.prefer_distinct_track_covers);
+    let distinct_track_covers_shell = Rc::clone(shell);
+    prefer_distinct_track_covers_row.connect_active_notify(move |row| {
+        if distinct_track_covers_shell
+            .set_app_setting("track cover setting", row.is_active(), |settings| {
+                &mut settings.prefer_distinct_track_covers
             })
             .is_some()
         {
-            if enabled {
-                metadata_shell.retry_external_artwork("metadata setting");
-            } else {
-                metadata_shell.update_media_controls();
+            if let Some(source) = distinct_track_covers_shell.selected_source_operations() {
+                source.refresh_library(crate::runtime::LibraryRefreshTrigger::GlobalAction);
             }
+        }
+    });
+
+    external_metadata_row.set_active(settings.external_metadata_enabled);
+    let metadata_shell = Rc::clone(shell);
+    external_metadata_row.connect_active_notify(move |row| {
+        metadata_shell.set_external_metadata_enabled(row.is_active());
+    });
+
+    external_lyrics_row.set_active(settings.lyrics.external_lyrics_enabled);
+    let weak = Rc::downgrade(shell);
+    external_lyrics_row.connect_active_notify(move |row| {
+        if let Some(shell) = weak.upgrade() {
+            shell.set_external_lyrics_enabled(row.is_active());
         }
     });
 
@@ -1816,4 +1849,34 @@ fn sidebar_route_item_subtitle(entry: &SidebarRouteItemSettings, position: usize
     } else {
         state
     }
+}
+
+fn open_folder(shell: &Rc<Shell>, folder: gtk::gio::File) {
+    let shell = Rc::clone(shell);
+    gtk::glib::spawn_future_local(async move {
+        let result = async {
+            if let Err(error) = folder
+                .make_directory_future(gtk::glib::Priority::DEFAULT)
+                .await
+            {
+                if !error.matches(gtk::gio::IOErrorEnum::Exists) {
+                    return Err(error);
+                }
+            }
+            gtk::FileLauncher::new(Some(&folder))
+                .launch_future(Some(&shell.chrome.window))
+                .await
+        }
+        .await;
+        if let Err(error) = result {
+            if !error.matches(gtk::DialogError::Dismissed)
+                && !error.matches(gtk::DialogError::Cancelled)
+            {
+                shell.show_feedback_toast(localization::tr_with(
+                    "Could not open folder: {error}",
+                    &[("error", &error.to_string())],
+                ));
+            }
+        }
+    });
 }

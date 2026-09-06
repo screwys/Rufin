@@ -455,12 +455,11 @@ impl Shell {
     }
 
     fn apply_resolved_layout_for_allocation(self: &Rc<Self>, resolved: ResolvedLayout) {
-        let login_active = self.source.login_screen_active();
-        let presentation = root_presentation(login_active, self.startup.route_revealed.get());
+        let startup_loading = !self.startup.route_revealed.get();
         let previous_left = self.left_sidebar_mode();
         let previous_right_visible = self.right_sidebar_visible();
 
-        let app_active = presentation.app_active;
+        let app_active = true;
         let full_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Full;
         let hidden_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Hidden;
         let right_visible = app_active && resolved.right_sidebar.is_visible();
@@ -480,17 +479,7 @@ impl Shell {
             resolved.left_sidebar_width
         };
         self.preview_left_sidebar_width(overlay_sidebar_width);
-        let root_changed =
-            self.chrome.root_stack.visible_child_name().as_deref() != Some(presentation.root_page);
-        if root_changed {
-            self.chrome
-                .root_stack
-                .set_visible_child_name(presentation.root_page);
-        }
-        set_widget_visible(
-            &self.chrome.startup_loading_host,
-            presentation.startup_loading,
-        );
+        set_widget_visible(&self.chrome.startup_loading_host, startup_loading);
         if self
             .chrome
             .app_content_stack
@@ -693,28 +682,6 @@ fn position_left_resize_handle(handle: &gtk::Box, sidebar_width: i32) {
 fn set_widget_visible(widget: &impl IsA<gtk::Widget>, visible: bool) {
     if widget.get_visible() != visible {
         widget.set_visible(visible);
-    }
-}
-
-pub(crate) fn startup_loading_screen_active(
-    login_active: bool,
-    startup_route_revealed: bool,
-) -> bool {
-    !login_active && !startup_route_revealed
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-struct RootPresentation {
-    root_page: &'static str,
-    app_active: bool,
-    startup_loading: bool,
-}
-
-fn root_presentation(login_active: bool, startup_route_revealed: bool) -> RootPresentation {
-    RootPresentation {
-        root_page: if login_active { "login" } else { "app" },
-        app_active: !login_active,
-        startup_loading: startup_loading_screen_active(login_active, startup_route_revealed),
     }
 }
 
@@ -1034,34 +1001,6 @@ mod tests {
     use crate::{LayoutSettings, LeftSidebarMode, RightSidebarMode};
 
     use super::*;
-
-    #[test]
-    fn preparing_library_keeps_the_app_allocated_under_the_overlay() {
-        assert_eq!(
-            root_presentation(false, false),
-            RootPresentation {
-                root_page: "app",
-                app_active: true,
-                startup_loading: true,
-            }
-        );
-        assert_eq!(
-            root_presentation(false, true),
-            RootPresentation {
-                root_page: "app",
-                app_active: true,
-                startup_loading: false,
-            }
-        );
-        assert_eq!(
-            root_presentation(true, false),
-            RootPresentation {
-                root_page: "login",
-                app_active: false,
-                startup_loading: false,
-            }
-        );
-    }
 
     #[test]
     fn layout_compacts_left_before_hiding_requested_right_sidebar() {

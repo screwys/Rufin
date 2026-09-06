@@ -8,7 +8,7 @@ use lofty::file::{AudioFile, TaggedFileExt};
 use lofty::prelude::{Accessor, ItemKey};
 use lofty::probe::Probe;
 use lofty::tag::{Tag, TagType};
-use sources::{LocalFolderHostInput, LocalLiveChange, Source, SourceSetupInput};
+use sources::{LocalFolderHostInput, LocalLiveChange, Source, SourceId, SourceSetupInput};
 
 #[tokio::test]
 async fn one_local_path_republishes_only_its_component() {
@@ -20,7 +20,7 @@ async fn one_local_path_republishes_only_its_component() {
     let store = tempfile::tempdir().expect("Store root");
     let database_path = store.path().join("library.sqlite");
     let database = Database::open(&database_path).await.expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -50,13 +50,13 @@ async fn one_local_path_republishes_only_its_component() {
         .expect("before order");
     assert_eq!(before.len(), 2);
 
-    write_silent_wav(&first, 2).expect("edit one WAV");
+    write_silent_wav(&second, 2).expect("edit second WAV");
     let changed = source
         .apply_local_change(
             &database,
             first_publication.source,
             LocalLiveChange::Paths {
-                paths: vec![first.clone()],
+                paths: vec![second.clone()],
                 rename: None,
             },
         )
@@ -93,7 +93,7 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -124,10 +124,9 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
         .await
         .expect("Album order")
         .0[0];
-    database
-        .write_album_artwork_bindings(initial.source, &[(album, b"accepted-art".to_vec())])
-        .await
-        .expect("binding");
+    let before = database.album_rows(initial.source, &[album], None, &ReadCancellation::new())
+        .await.expect("initial Album artwork")[0].artwork_binding.clone();
+    assert!(before.is_some());
     fs::write(&image, b"changed-image").expect("change image");
     let outcome = source
         .apply_local_change(
@@ -157,13 +156,13 @@ async fn local_image_change_publishes_artwork_without_catalog_revision() {
             .artwork_digest,
         publication.artwork_digest
     );
-    assert_eq!(
+    assert_ne!(
         database
             .album_rows(initial.source, &[album], None, &ReadCancellation::new())
             .await
             .expect("Album row")[0]
             .artwork_binding,
-        None
+        before
     );
 }
 
@@ -176,7 +175,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -206,7 +205,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
         .expect("Track order");
     assert_eq!(
         database
-            .track_rows(initial.source, &order, &ReadCancellation::new())
+            .track_rows_by_uri(&order, &ReadCancellation::new())
             .await
             .expect("initial Track row")[0]
             .duration_millis,
@@ -228,7 +227,7 @@ async fn restart_catch_up_detects_an_in_place_file_edit() {
     assert_eq!(changed.catalog_revision, initial.catalog_revision + 1);
     assert_eq!(
         database
-            .track_rows(changed.source, &order, &ReadCancellation::new())
+            .track_rows_by_uri(&order, &ReadCancellation::new())
             .await
             .expect("changed Track row")[0]
             .duration_millis,
@@ -245,7 +244,7 @@ async fn restart_catch_up_accepts_file_bookkeeping_without_catalog_change() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -301,7 +300,7 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -333,15 +332,6 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .expect("Album order")
         .0;
     assert_eq!(albums.len(), 2);
-    let bindings = albums
-        .iter()
-        .map(|album| (*album, b"accepted-art".to_vec()))
-        .collect::<Vec<_>>();
-    database
-        .write_album_artwork_bindings(initial.source, &bindings)
-        .await
-        .expect("prepared artwork binding");
-
     write_silent_wav(&media, 3).expect("edit CUE backing media");
     let changed = publication(
         source
@@ -354,10 +344,6 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
             .await
             .expect("first catch-up"),
     );
-    database
-        .write_album_artwork_bindings(changed.source, &bindings)
-        .await
-        .expect("repeat artwork preparation");
     let repeated = source
         .catch_up_local(
             &database,
@@ -369,6 +355,168 @@ async fn cue_catch_up_advances_a_shared_backing_media_observation() {
         .expect("second catch-up");
 
     assert!(matches!(repeated, ScanOutcome::Identical(_)));
+}
+
+#[tokio::test]
+async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
+    let music = tempfile::tempdir().unwrap();
+    let root = music.path().join("Müzik 100% saved");
+    let disc = root.join("Disc 1");
+    fs::create_dir_all(&disc).unwrap();
+    let path = disc.join("01 café %.wav");
+    write_tagged_wav(&path, "Track", "Artist", "Album", "Rock").unwrap();
+    let cover = root.join("cover.jpg");
+    fs::write(&cover, b"first image").unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
+    let connected = Source::connect(SourceId::new("local-art"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root] })).await.unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    let first = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap());
+    let uri = library::normalize_direct_media_uri(url::Url::from_file_path(path.canonicalize().unwrap()).unwrap().as_str()).unwrap();
+    assert!(uri.contains("%25"));
+    let row = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
+    let binding: sources::LocalImageRef = serde_json::from_slice(row.artwork_binding.as_ref().unwrap()).unwrap();
+    assert_eq!(binding.source_id(), source.source_id());
+    assert!(matches!(binding, sources::LocalImageRef::File { path, .. } if path == cover.canonicalize().unwrap().to_string_lossy()));
+    assert!(matches!(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap(), ScanOutcome::Identical(_)));
+    fs::write(&cover, b"changed image bytes").unwrap();
+    assert!(matches!(source.apply_local_change(&database, first.source, LocalLiveChange::Paths { paths: vec![cover], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
+    let changed = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
+    assert_ne!(row.artwork_binding, changed.artwork_binding);
+    assert_eq!(row.track_key, changed.track_key);
+}
+
+#[tokio::test]
+async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_group_fallback() {
+    let root = tempfile::tempdir().unwrap();
+    let mut paths = Vec::new();
+    for number in 1..=3 {
+        let path = root.path().join(format!("{number} café %.wav"));
+        write_tagged_wav(&path, &format!("Track {number}"), "Artist", "Album", "Rock").unwrap();
+        let mut tagged = Probe::open(&path).unwrap().read().unwrap();
+        let tag = tagged.primary_tag_mut().unwrap();
+        tag.set_track(number);
+        if number > 1 {
+            tag.push_picture(lofty::picture::Picture::unchecked(vec![number as u8; 32]).pic_type(lofty::picture::PictureType::CoverFront).mime_type(lofty::picture::MimeType::Png).build());
+        }
+        tagged.save_to_path(&path, WriteOptions::default()).unwrap();
+        paths.push(path.canonicalize().unwrap());
+    }
+    let store = tempfile::tempdir().unwrap();
+    let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
+    let connected = Source::connect(SourceId::new("local-art"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.path().to_path_buf()] })).await.unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    let mut expected_group = None;
+    for distinct in [false, true, false] {
+        database.set_distinct_track_covers(distinct);
+        source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap();
+        for (index, path) in paths.iter().enumerate() {
+            let uri = url::Url::from_file_path(path).unwrap().to_string();
+            let row = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
+            let bytes = row.artwork_binding.unwrap();
+            let binding: sources::LocalImageRef = serde_json::from_slice(&bytes).unwrap();
+            assert_eq!(binding.source_id(), source.source_id());
+            let expected = if distinct && index == 2 { &paths[2] } else { &paths[1] };
+            assert!(matches!(binding, sources::LocalImageRef::Embedded { path, .. } if path == expected.to_string_lossy()));
+            if index == 0 {
+                if let Some(group) = &expected_group { assert_eq!(&bytes, group); }
+                expected_group = Some(bytes);
+            }
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_artist_cover_keeps_album_order_across_point_updates() {
+    let root = tempfile::tempdir().unwrap();
+    let mut covers = Vec::new();
+    for album in ["First", "Second"] {
+        let directory = root.path().join(album);
+        fs::create_dir(&directory).unwrap();
+        write_tagged_wav(&directory.join("track.wav"), "Track", "Artist", album, "Rock").unwrap();
+        let cover = directory.join("cover.jpg");
+        fs::write(&cover, album.as_bytes()).unwrap();
+        covers.push(cover.canonicalize().unwrap());
+    }
+    let store = tempfile::tempdir().unwrap();
+    let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
+    let connected = Source::connect(SourceId::new("local-art"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.path().to_path_buf()] })).await.unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    let initial = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap());
+    let artist = database.artist_route_page(initial.source, None, false, false, "", library::ArtistSort::Title, false, library::RouteSeedWindow::top(), &ReadCancellation::new()).await.unwrap().2.remove(0);
+    for changed in [&covers[1], &covers[0]] {
+        fs::write(changed, b"replacement artwork").unwrap();
+        assert!(matches!(source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![changed.clone()], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
+        let current = database.artist_row_by_media_uri(&artist.media_uri, &ReadCancellation::new()).await.unwrap().unwrap();
+        let binding: sources::LocalImageRef = serde_json::from_slice(current.artwork_binding.as_ref().unwrap()).unwrap();
+        assert_eq!(binding.source_id(), source.source_id());
+        assert!(matches!(binding, sources::LocalImageRef::File { path, .. } if path == covers[0].to_string_lossy()));
+        if changed == &covers[1] {
+            assert_eq!(current.artwork_binding, artist.artwork_binding);
+        } else {
+            assert_ne!(current.artwork_binding, artist.artwork_binding);
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_borrowed_album_cover_follows_replacement_and_removal() {
+    let root = tempfile::tempdir().unwrap();
+    let mut paths = Vec::new();
+    for album in ["First", "Borrower"] {
+        let directory = root.path().join(album);
+        fs::create_dir(&directory).unwrap();
+        let path = directory.join("track.wav");
+        write_tagged_wav(&path, "Track", "Artist", album, "Rock").unwrap();
+        paths.push(path.canonicalize().unwrap());
+    }
+    let cover = root.path().join("First/cover.jpg");
+    fs::write(&cover, b"first image").unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
+    let connected = Source::connect(SourceId::new("local-art"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.path().to_path_buf()] })).await.unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    let initial = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap());
+    let borrower_uri = url::Url::from_file_path(&paths[1]).unwrap().to_string();
+    let before = database.track_row_by_uri(&borrower_uri, &ReadCancellation::new()).await.unwrap().unwrap();
+    assert!(before.artwork_binding.is_some());
+    for remove in [false, true] {
+        if remove { fs::remove_file(&cover).unwrap(); } else { fs::write(&cover, b"replacement image").unwrap(); }
+        assert!(matches!(source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![cover.clone()], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
+        let borrower = database.track_row_by_uri(&borrower_uri, &ReadCancellation::new()).await.unwrap().unwrap();
+        assert_eq!(borrower.track_key, before.track_key);
+        assert_ne!(borrower.artwork_binding, before.artwork_binding);
+        assert_eq!(borrower.artwork_binding.is_none(), remove);
+        for path in &paths {
+            let uri = url::Url::from_file_path(path).unwrap().to_string();
+            assert_eq!(database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap().artwork_binding, borrower.artwork_binding);
+        }
+    }
+}
+
+#[tokio::test]
+async fn local_metadata_save_returns_publication_after_album_identity_changes() {
+    let root = tempfile::tempdir().unwrap();
+    let path = root.path().canonicalize().unwrap().join("café %.wav");
+    write_tagged_wav(&path, "Track", "Artist", "Before", "Rock").unwrap();
+    let store = tempfile::tempdir().unwrap();
+    let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
+    let connected = Source::connect(SourceId::new("local-metadata"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.path().to_path_buf()] })).await.unwrap();
+    let (configuration, source, _) = connected.into_parts();
+    let initial = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap());
+    let uri = url::Url::from_file_path(&path).unwrap().to_string();
+    let track = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
+    let album = database.album_rows(initial.source, &[track.album_key.unwrap()], None, &ReadCancellation::new()).await.unwrap().remove(0);
+    let mut metadata = source.read_album_metadata(&database, &album.media_uri).await.unwrap();
+    metadata.values.title = "After".to_string();
+    let outcome = source.write_album_metadata(&database, &album.media_uri, metadata.revision.as_deref().unwrap(), None, sources::AlbumMetadataEdit { values: metadata.values, changed: sources::AlbumMetadataWritable { title: true, ..Default::default() } }).await.unwrap();
+    assert!(matches!(outcome, ScanOutcome::Changed(_)));
+    let current = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
+    assert_eq!(current.track_key, track.track_key);
+    assert_eq!(current.album, "After");
+    let metadata = source.read_track_metadata(&database, &uri).await.unwrap();
+    let unchanged = source.write_track_metadata(&database, &uri, metadata.revision.as_deref().unwrap(), None, sources::TrackMetadataEdit { values: metadata.values, changed: Default::default() }).await.unwrap();
+    assert!(matches!(unchanged, ScanOutcome::Identical(_)), "{unchanged:?}");
 }
 
 #[tokio::test]
@@ -386,7 +534,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -453,7 +601,7 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -514,13 +662,13 @@ async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
 #[tokio::test]
 async fn explicit_rename_preserves_track_identity_without_native_file_identity() {
     let root = tempfile::tempdir().expect("music root");
-    let old = root.path().join("old.wav");
-    let new = root.path().join("new.wav");
+    let old = root.path().join("old café %.wav");
+    let new = root.path().join("new café %.wav");
     write_tagged_wav(&old, "Track", "Artist", "Album", "Genre").expect("tagged WAV");
     let store = tempfile::tempdir().expect("Store");
     let database_path = store.path().join("library.sqlite");
     let database = Database::open(&database_path).await.expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await
@@ -549,7 +697,7 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         .await
         .expect("Track order");
     let object_id = database
-        .track_rows(initial.source, &order, &ReadCancellation::new())
+        .track_rows_by_uri(&order, &ReadCancellation::new())
         .await
         .expect("Track row")[0]
         .object_id
@@ -613,12 +761,20 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
         .expect("changed Track order");
     assert_eq!(
         database
-            .track_rows(changed.source, &changed_order, &ReadCancellation::new())
+            .track_rows_by_uri(&changed_order, &ReadCancellation::new())
             .await
             .expect("changed Track row")[0]
             .object_id,
         object_id
     );
+    let uri = &changed_order[0];
+    let mut metadata = source.read_track_metadata(&database, uri).await.unwrap();
+    metadata.values.title = "After rename".into();
+    source.write_track_metadata(&database, uri, metadata.revision.as_deref().unwrap(), None, sources::TrackMetadataEdit {
+        values: metadata.values,
+        changed: sources::TrackMetadataWritable { title: true, ..Default::default() },
+    }).await.unwrap();
+    assert_eq!(database.track_row_by_uri(uri, &ReadCancellation::new()).await.unwrap().unwrap().object_id, object_id);
 }
 
 #[tokio::test]
@@ -630,7 +786,7 @@ async fn initial_local_walk_reports_real_total_free_file_progress() {
     let database = Database::open(store.path().join("library.sqlite"))
         .await
         .expect("Database");
-    let connected = Source::connect(SourceSetupInput::Local(LocalFolderHostInput {
+    let connected = Source::connect(SourceId::new("test-source"), SourceSetupInput::Local(LocalFolderHostInput {
         roots: vec![root.path().to_path_buf()],
     }))
     .await

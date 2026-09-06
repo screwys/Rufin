@@ -1,9 +1,9 @@
-//! Owns one bounded lyrics cache row keyed by Track, authority, role, language, and script.
+//! Owns one bounded lyrics cache row keyed by media URI, authority, role, language, and script.
 //! Fetching and provider policy remain outside Library.
 
 use sqlx::FromRow;
 
-use crate::{Database, LibraryError, LibraryResult, ReadCancellation, SourceKey, TrackKey};
+use crate::{Database, LibraryError, LibraryResult, ReadCancellation};
 
 const LYRICS_PAYLOAD_BYTES: usize = 8 * 1024 * 1024;
 
@@ -49,8 +49,7 @@ impl TryFrom<LyricsScalar> for LyricsCacheRow {
 impl Database {
     pub async fn lyrics_cache_for_role(
         &self,
-        source: SourceKey,
-        track: TrackKey,
+        media_uri: &str,
         role: &str,
         language: &str,
         script: &str,
@@ -61,12 +60,11 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let result = sqlx::query_as::<_, LyricsScalar>(
             "SELECT authority,role,language,script,cache_input_digest,lyrics,updated_at
-             FROM lyrics_cache WHERE source_key=?1 AND track_key=?2 AND role=?3
-               AND language=?4 AND script=?5 AND cache_input_digest=?6
-               AND authority=?7 LIMIT 1",
+             FROM lyrics_cache WHERE media_uri=?1 AND role=?2
+               AND language=?3 AND script=?4 AND cache_input_digest=?5
+               AND authority=?6 LIMIT 1",
         )
-        .bind(source)
-        .bind(track)
+        .bind(media_uri)
         .bind(role)
         .bind(language)
         .bind(script)
@@ -81,8 +79,7 @@ impl Database {
     #[allow(clippy::too_many_arguments)]
     pub async fn write_lyrics_cache(
         &self,
-        source: SourceKey,
-        track: TrackKey,
+        media_uri: &str,
         authority: &str,
         role: &str,
         language: &str,
@@ -102,8 +99,8 @@ impl Database {
         }
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        sqlx::query("INSERT INTO lyrics_cache(source_key,track_key,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9) ON CONFLICT(source_key,track_key,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at")
-            .bind(source).bind(track).bind(authority).bind(role).bind(language).bind(script)
+        sqlx::query("INSERT INTO lyrics_cache(media_uri,authority,role,language,script,cache_input_digest,lyrics,updated_at) VALUES (?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(media_uri,authority,role,language,script) DO UPDATE SET cache_input_digest=excluded.cache_input_digest,lyrics=excluded.lyrics,updated_at=excluded.updated_at")
+            .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
             .bind(cache_input_digest.as_slice()).bind(lyrics).bind(updated_at).execute(connection).await?;
         Ok(())
     }
@@ -111,8 +108,7 @@ impl Database {
     #[allow(clippy::too_many_arguments)]
     pub async fn remove_lyrics_cache(
         &self,
-        source: SourceKey,
-        track: TrackKey,
+        media_uri: &str,
         authority: &str,
         role: &str,
         language: &str,
@@ -120,27 +116,25 @@ impl Database {
     ) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query("DELETE FROM lyrics_cache WHERE source_key=?1 AND track_key=?2 AND authority=?3 AND role=?4 AND language=?5 AND script=?6")
-            .bind(source).bind(track).bind(authority).bind(role).bind(language).bind(script)
+        Ok(sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2 AND role=?3 AND language=?4 AND script=?5")
+            .bind(media_uri).bind(authority).bind(role).bind(language).bind(script)
             .execute(connection).await?.rows_affected()==1)
     }
 
     pub async fn remove_track_lyrics_by_authority(
         &self,
-        source: SourceKey,
-        track: TrackKey,
+        media_uri: &str,
         authority: &str,
     ) -> LibraryResult<u64> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        Ok(sqlx::query(
-            "DELETE FROM lyrics_cache WHERE source_key=?1 AND track_key=?2 AND authority=?3",
+        Ok(
+            sqlx::query("DELETE FROM lyrics_cache WHERE media_uri=?1 AND authority=?2")
+                .bind(media_uri)
+                .bind(authority)
+                .execute(connection)
+                .await?
+                .rows_affected(),
         )
-        .bind(source)
-        .bind(track)
-        .bind(authority)
-        .execute(connection)
-        .await?
-        .rows_affected())
     }
 }

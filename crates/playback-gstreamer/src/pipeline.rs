@@ -601,3 +601,107 @@ pub(super) fn configure_playbin_for_audio(pipeline: &gst::Element) {
     };
     pipeline.set_property_from_value("flags", &flags);
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn repeated_tracks_release_retired_pipelines() {
+        ensure_gstreamer_initialized().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("track.wav");
+        let producer =
+            gst::parse::launch("audiotestsrc num-buffers=100 ! wavenc ! filesink name=output")
+                .unwrap();
+        producer
+            .downcast_ref::<gst::Bin>()
+            .unwrap()
+            .by_name("output")
+            .unwrap()
+            .set_property("location", &path);
+        producer.set_state(gst::State::Playing).unwrap();
+        let done = producer
+            .bus()
+            .unwrap()
+            .timed_pop_filtered(
+                gst::ClockTime::from_seconds(10),
+                &[gst::MessageType::Eos, gst::MessageType::Error],
+            )
+            .unwrap();
+        producer.set_state(gst::State::Null).unwrap();
+        assert!(matches!(done.view(), gst::MessageView::Eos(_)));
+        drop(done);
+        drop(producer);
+        let uri = glib::filename_to_uri(&path, None).unwrap();
+        let shared = Arc::new(Mutex::new(SharedBackendState::new()));
+        let mut player = PlayerPipeline::new("retention-check", shared);
+        let settings = BackendAudioSettings {
+            audio_output: Some("fakesink".to_string()),
+            ..BackendAudioSettings::default()
+        };
+        let mut retired: Vec<(String, glib::WeakRef<gst::Object>)> = Vec::new();
+        for index in 1..=100 {
+            let item = PreparedRun {
+                run: RunId::new(index),
+                stream: ResolvedStream::new(uri.as_str()).into(),
+            };
+            player
+                .play_item(
+                    PipelineId(index),
+                    Slot::Primary,
+                    &item,
+                    &settings,
+                    1.0,
+                    false,
+                    1.0,
+                    gst::State::Playing,
+                )
+                .unwrap();
+            let session = player.session.as_ref().unwrap();
+            session
+                .pipeline
+                .state(gst::ClockTime::from_seconds(5))
+                .0
+                .unwrap();
+            let remaining: Vec<_> = retired
+                .iter()
+                .filter_map(|(name, weak)| {
+                    weak.upgrade().map(|element| (name, element.ref_count()))
+                })
+                .collect();
+            assert!(
+                remaining.is_empty(),
+                "track {index}: retained {remaining:?}"
+            );
+            retired.clear();
+            retired.push((
+                session.pipeline.name().to_string(),
+                session.pipeline.upcast_ref::<gst::Object>().downgrade(),
+            ));
+            retired.push((
+                session.bus.name().to_string(),
+                session.bus.upcast_ref::<gst::Object>().downgrade(),
+            ));
+            let bin = session.pipeline.clone().downcast::<gst::Bin>().unwrap();
+            for element in bin.iterate_recurse().into_iter().map(Result::unwrap) {
+                retired.push((
+                    element.name().to_string(),
+                    element.upcast_ref::<gst::Object>().downgrade(),
+                ));
+                for pad in element.pads() {
+                    retired.push((
+                        pad.path_string().to_string(),
+                        pad.upcast_ref::<gst::Object>().downgrade(),
+                    ));
+                }
+            }
+        }
+        player.stop();
+        let remaining: Vec<_> = retired
+            .iter()
+            .filter_map(|(name, weak)| weak.upgrade().map(|element| (name, element.ref_count())))
+            .collect();
+        assert!(remaining.is_empty(), "after stop: retained {remaining:?}");
+    }
+}

@@ -1,14 +1,14 @@
 use std::cell::{Cell, RefCell};
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::ops::Range;
 use std::rc::{Rc, Weak};
 use std::sync::Arc;
 
 use adw::prelude::*;
 use gtk::glib;
-use library::{AlbumDetailRouteKey, AlbumKey, AlbumRow, TrackRow};
+use library::{AlbumKey, AlbumRow, TrackRow};
 use localization::track_count_text;
-use playback::{PlaybackMedia, QueuePlacement};
+use playback::QueuePlacement;
 
 use crate::favorites::{
     FAVORITE_ADD_ICON, FAVORITE_COLUMN_WIDTH, favorite_button_is_active, row_favorite_icon_button,
@@ -46,7 +46,11 @@ struct AlbumDetailRowMetrics {
 
 pub(crate) enum AlbumCollectionOrder {
     Rows(Vec<AlbumKey>),
-    Detail(Vec<AlbumDetailRouteKey>),
+    Detail {
+        media_uris: Vec<String>,
+        albums: Vec<String>,
+        albums_with_genres: Vec<String>,
+    },
 }
 
 #[derive(Clone, Debug)]
@@ -59,47 +63,51 @@ pub(crate) enum AlbumDetailRouteRow {
     Track(TrackRow),
 }
 
-pub(crate) fn album_detail_rows_for_keys(
-    keys: Vec<AlbumDetailRouteKey>,
+pub(crate) fn album_detail_rows_for_items(
+    items: Vec<String>,
     albums: Vec<AlbumRow>,
     tracks: Vec<TrackRow>,
 ) -> Result<Vec<AlbumDetailRouteRow>, String> {
     let mut albums = albums
         .into_iter()
-        .map(|row| (row.album_key, row))
+        .map(|row| (row.media_uri.clone(), row))
         .collect::<BTreeMap<_, _>>();
     let mut tracks = tracks
         .into_iter()
-        .map(|row| (row.track_key, row))
+        .map(|row| (row.media_uri.clone(), row))
         .collect::<BTreeMap<_, _>>();
-    keys.into_iter()
-        .map(|key| {
-            if let Some(album) = key.album_key() {
-                albums.remove(&album).map(AlbumDetailRouteRow::Album)
-            } else if let Some(track) = key.track_key() {
-                tracks.remove(&track).map(AlbumDetailRouteRow::Track)
-            } else {
-                None
-            }
-            .ok_or_else(|| "Album detail row is no longer current".to_string())
+    items
+        .into_iter()
+        .map(|media_uri| {
+            albums
+                .remove(&media_uri)
+                .map(AlbumDetailRouteRow::Album)
+                .or_else(|| tracks.remove(&media_uri).map(AlbumDetailRouteRow::Track))
+                .ok_or_else(|| "Album detail row is no longer current".to_string())
         })
         .collect()
 }
 
 #[derive(Clone)]
 pub(crate) struct AlbumCollectionModels {
-    rows: Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>>,
+    pub(super) rows: Option<Rc<SparseRouteModel<AlbumKey, AlbumRow>>>,
     detail: AlbumDetailModel,
 }
 
 #[derive(Clone)]
 pub(crate) struct AlbumDetailModel {
-    sparse: Option<Rc<SparseRouteModel<AlbumDetailRouteKey, AlbumDetailRouteRow>>>,
+    sparse: Option<Rc<SparseRouteModel<String, AlbumDetailRouteRow>>>,
+    albums: Rc<RefCell<BTreeSet<String>>>,
+    albums_with_genres: Rc<RefCell<BTreeSet<String>>>,
 }
 
 impl AlbumDetailModel {
     fn empty() -> Self {
-        Self { sparse: None }
+        Self {
+            sparse: None,
+            albums: Rc::new(RefCell::new(BTreeSet::new())),
+            albums_with_genres: Rc::new(RefCell::new(BTreeSet::new())),
+        }
     }
 
     pub(crate) fn list_model(&self) -> SparseObjectModel {
@@ -126,34 +134,41 @@ impl AlbumCollectionModels {
         let source = selected.source_key;
         let folder = selected.music_folder_key;
         if layout == LibraryLayout::Detail {
-            let AlbumCollectionOrder::Detail(order) = order else {
+            let AlbumCollectionOrder::Detail {
+                media_uris,
+                albums,
+                albums_with_genres,
+            } = order
+            else {
                 unreachable!("Album detail layout requires its flattened identity order")
             };
             let database = Arc::clone(&selected.database);
             let load = Arc::new(
-                move |keys: Vec<AlbumDetailRouteKey>, cancellation: library::ReadCancellation| {
+                move |items: Vec<String>, cancellation: library::ReadCancellation| {
                     let database = Arc::clone(&database);
                     Box::pin(async move {
                         let (albums, tracks) = database
-                            .album_detail_route_rows(source, &keys, folder, &cancellation)
+                            .album_detail_route_rows(source, &items, folder, &cancellation)
                             .await
                             .map_err(|error| error.to_string())?;
-                        album_detail_rows_for_keys(keys, albums, tracks)
+                        album_detail_rows_for_items(items, albums, tracks)
                     })
                         as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
                 },
             );
-            let sparse = SparseRouteModel::new(order, 24, selected.runtime.clone(), load);
+            let sparse = SparseRouteModel::new(media_uris, 24, selected.runtime.clone(), load);
             sparse.seed_matching_at(first_row_position, first_detail_rows, |row| match row {
-                AlbumDetailRouteRow::Album(row) => AlbumDetailRouteKey::album(row.album_key)
-                    .expect("Album detail Album row has an identity"),
-                AlbumDetailRouteRow::Track(row) => AlbumDetailRouteKey::track(row.track_key)
-                    .expect("Album detail Track row has an identity"),
+                AlbumDetailRouteRow::Album(row) => row.media_uri.clone(),
+                AlbumDetailRouteRow::Track(row) => row.media_uri.clone(),
             });
             return Self {
                 rows: None,
                 detail: AlbumDetailModel {
                     sparse: Some(sparse),
+                    albums: Rc::new(RefCell::new(albums.into_iter().collect())),
+                    albums_with_genres: Rc::new(RefCell::new(
+                        albums_with_genres.into_iter().collect(),
+                    )),
                 },
             };
         }
@@ -216,9 +231,17 @@ impl AlbumCollectionModels {
                 rows.replace_order(order);
             }
         } else if let Some(detail) = &self.detail.sparse
-            && let AlbumCollectionOrder::Detail(order) = order
+            && let AlbumCollectionOrder::Detail {
+                media_uris,
+                albums,
+                albums_with_genres,
+            } = order
         {
-            detail.replace_order(order);
+            self.detail.albums.replace(albums.into_iter().collect());
+            self.detail
+                .albums_with_genres
+                .replace(albums_with_genres.into_iter().collect());
+            detail.replace_order(media_uris);
         }
     }
 
@@ -242,16 +265,23 @@ impl AlbumCollectionModels {
         true
     }
 
-    pub(crate) fn update_favorite(&self, album: AlbumKey, favorite: bool) -> bool {
+    pub(crate) fn update_favorite(&self, media_uri: &str, favorite: bool) -> bool {
         if let Some(rows) = &self.rows {
+            let Some(position) = rows.ready_position(|row| row.media_uri == media_uri) else {
+                return false;
+            };
+            let Some(album) = rows.order().get(position as usize).copied() else {
+                return false;
+            };
             rows.update_ready(&album, |row| row.favorite = favorite)
         } else if let Some(detail) = &self.detail.sparse {
-            let Some(key) = detail
-                .order()
-                .iter()
-                .find(|key| key.album_key() == Some(album))
-                .copied()
+            let Some(position) = detail.ready_position(|row| {
+                matches!(row, AlbumDetailRouteRow::Album(album) if album.media_uri == media_uri)
+            })
             else {
+                return false;
+            };
+            let Some(key) = detail.order().get(position as usize).cloned() else {
                 return false;
             };
             detail.update_ready(&key, |row| {
@@ -379,10 +409,20 @@ impl AlbumDetailLayout {
             .as_ref()
             .map(|sparse| sparse.order())
             .unwrap_or_else(|| Arc::new([]));
-        Self::from_order(&order, width)
+        Self::from_order(
+            &order,
+            &model.albums.borrow(),
+            &model.albums_with_genres.borrow(),
+            width,
+        )
     }
 
-    fn from_order(order: &[AlbumDetailRouteKey], width: i32) -> Self {
+    fn from_order(
+        order: &[String],
+        albums: &BTreeSet<String>,
+        albums_with_genres: &BTreeSet<String>,
+        width: i32,
+    ) -> Self {
         let cover_size = album_detail_row_metrics_for_width(width).cover_size;
         let mut position = 0_usize;
         let mut first_visual_row = 0_usize;
@@ -390,20 +430,21 @@ impl AlbumDetailLayout {
         let mut spans = Vec::new();
         while position < order.len() {
             let album_position = position;
-            let Some(album_key) = order[position].album_key() else {
+            if !albums.contains(&order[position]) {
                 position = position.saturating_add(1);
                 continue;
-            };
+            }
+            let has_genres = albums_with_genres.contains(&order[position]);
             position = position.saturating_add(1);
             let first_track_position = position;
-            while position < order.len() && order[position].track_key().is_some() {
+            while position < order.len() && !albums.contains(&order[position]) {
                 position = position.saturating_add(1);
             }
             let track_count = position.saturating_sub(first_track_position);
             let inline_count = track_count.min(ALBUM_DETAIL_INLINE_TRACK_ROWS);
             let lead_height = album_detail_lead_content_height(
                 cover_size,
-                3 + usize::from(order[album_position].album_has_genres()),
+                3 + usize::from(has_genres),
                 inline_count,
             )
             .saturating_add(12)
@@ -423,7 +464,6 @@ impl AlbumDetailLayout {
             first_visual_row = first_visual_row.saturating_add(span.visual_row_count());
             top = span.bottom();
             spans.push(span);
-            let _ = album_key;
         }
         Self {
             spans,
@@ -560,37 +600,42 @@ impl AlbumDetailLayout {
 
 #[derive(Clone, Default)]
 struct AlbumDetailTrackSelection {
-    selected: Rc<RefCell<Option<library::TrackKey>>>,
+    selected: Rc<RefCell<Option<String>>>,
     paused: Rc<Cell<bool>>,
     visible: Rc<RefCell<Vec<AlbumDetailTrackBinding>>>,
 }
 
 struct AlbumDetailTrackBinding {
-    track: library::TrackKey,
+    media_uri: String,
     row: glib::WeakRef<gtk::Widget>,
 }
 
 impl AlbumDetailTrackSelection {
-    fn bind(&self, row: &gtk::Widget, track: library::TrackKey) {
+    fn bind(&self, row: &gtk::Widget, media_uri: &str) {
         apply_album_detail_track_selection(
             row,
-            self.selected.borrow().as_ref() == Some(&track),
+            self.selected.borrow().as_deref() == Some(media_uri),
             self.paused.get(),
         );
         self.visible.borrow_mut().push(AlbumDetailTrackBinding {
-            track,
+            media_uri: media_uri.to_string(),
             row: row.downgrade(),
         });
     }
 
-    fn update(&self, track: Option<library::TrackKey>, paused: bool) {
-        self.selected.replace(track);
+    fn update(&self, media_uri: Option<&str>, paused: bool) {
+        self.selected
+            .replace(media_uri.map(std::string::ToString::to_string));
         self.paused.set(paused);
         self.visible.borrow_mut().retain(|binding| {
             let Some(row) = binding.row.upgrade() else {
                 return false;
             };
-            apply_album_detail_track_selection(&row, track == Some(binding.track), paused);
+            apply_album_detail_track_selection(
+                &row,
+                media_uri == Some(binding.media_uri.as_str()),
+                paused,
+            );
             true
         });
     }
@@ -681,18 +726,13 @@ impl AlbumDetailVirtualList {
             });
         }
 
-        let selected_source = shell
-            .selected_library()
-            .as_deref()
-            .map(|selected| selected.source_key);
         let weak = Rc::downgrade(&inner);
         shell.register_current_route_track_selection(Rc::new(move |current| {
             let Some(inner) = weak.upgrade() else {
                 return false;
             };
-            let current = current.filter(|current| selected_source == Some(current.source_id));
             inner.selection.update(
-                current.map(|current| current.track_id),
+                current.map(|current| current.media_uri.as_str()),
                 current.is_some_and(|current| current.paused),
             );
             true
@@ -1235,7 +1275,7 @@ fn album_track_cells(
     row.add_css_class("album-detail-track-row");
     row.set_height_request(ALBUM_TRACK_HEIGHT);
     row.set_hexpand(true);
-    selection.bind(row.upcast_ref(), track.track_key);
+    selection.bind(row.upcast_ref(), &track.media_uri);
     for (field, width) in field_widths {
         row.append(&album_track_cell(shell, track, index, *field, *width));
     }
@@ -1244,7 +1284,7 @@ fn album_track_cells(
     install_context_menu_openers(
         &row,
         Rc::new(move |target, position| {
-            present_track_context_menu(target, &menu_shell, menu_track.clone(), position);
+            present_track_context_menu(target, &menu_shell, menu_track.media_uri.clone(), position);
         }),
     );
     let click_shell = Rc::clone(shell);
@@ -1278,14 +1318,14 @@ fn album_track_cell(
             let button = row_favorite_icon_button("Favorite track");
             set_favorite_button_active(&button, track.favorite);
             shell.register_favorite_button(
-                crate::favorites::track_favorite_key(&track.track_key),
+                crate::favorites::track_favorite_key(&track.media_uri),
                 &button,
             );
             let favorite_shell = Rc::clone(shell);
-            let key = track.track_key;
+            let media_uri = track.media_uri.clone();
             button.connect_clicked(move |button| {
                 favorite_shell.set_favorite_with_feedback(
-                    library::FavoriteTarget::Track(key),
+                    library::FavoriteTarget::Track(media_uri.clone()),
                     !favorite_button_is_active(button),
                     Some(button),
                 );
@@ -1436,35 +1476,35 @@ fn play_album_track(shell: &Rc<Shell>, anchor: TrackRow) {
         .library_list(LibraryListKey::AlbumDetailTracks);
     selected.runtime.spawn(async move {
         let cancellation = library::ReadCancellation::new();
-        let Ok(order) = database
-            .album_track_order(
+        let Ok(page) = database
+            .album_track_route_page(
                 selected.source_key,
                 album,
                 selected.music_folder_key,
                 "",
                 settings.sort_key.track_sort(),
                 settings.descending,
+                library::RouteSeedWindow::top(),
                 &cancellation,
             )
             .await
         else {
             return;
         };
-        let Some(position) = order.iter().position(|key| *key == anchor.track_key) else {
+        let order = page.order;
+        let Some(position) = order.iter().position(|uri| uri == &anchor.media_uri) else {
             return;
         };
-        if let Some(request) = playback::LoadedPlayRequest::context(
-            selected.source_key,
-            selected.source_session_epoch,
-            order.into(),
-            PlaybackMedia::from(anchor),
+        queue.play(playback::PlayRequest::ordered(
+            library::QueueInput::Uris {
+                order: order.into(),
+                context_id: format!("album:{album}").into(),
+                source_start: 0,
+            },
             position,
             QueuePlacement::Now,
-            format!("album:{album}"),
             false,
-        ) {
-            queue.play_loaded(request);
-        }
+        ));
     });
 }
 
@@ -1532,24 +1572,34 @@ mod tests {
         assert!(album_detail_play_click(4));
     }
 
-    fn two_album_order(first_tracks: i64, second_tracks: i64) -> Vec<AlbumDetailRouteKey> {
-        let mut order = vec![AlbumDetailRouteKey::album(AlbumKey::from_raw(1)).unwrap()];
+    fn two_album_order(
+        first_tracks: i64,
+        second_tracks: i64,
+    ) -> (Vec<String>, BTreeSet<String>, BTreeSet<String>) {
+        let source = library::SourceId::new("source");
+        let first_album = library::source_entity_uri(&source, "album", "first");
+        let second_album = library::source_entity_uri(&source, "album", "second");
+        let mut order = vec![first_album.clone()];
         order.extend(
             (1..=first_tracks)
-                .filter_map(|key| AlbumDetailRouteKey::track(library::TrackKey::from_raw(key))),
+                .map(|index| library::source_entity_uri(&source, "track", &index.to_string())),
         );
-        order.push(AlbumDetailRouteKey::album(AlbumKey::from_raw(2)).unwrap());
+        order.push(second_album.clone());
         order.extend(
             (first_tracks + 1..=first_tracks + second_tracks)
-                .filter_map(|key| AlbumDetailRouteKey::track(library::TrackKey::from_raw(key))),
+                .map(|index| library::source_entity_uri(&source, "track", &index.to_string())),
         );
-        order
+        (
+            order,
+            [first_album, second_album.clone()].into_iter().collect(),
+            [second_album].into_iter().collect(),
+        )
     }
 
     #[test]
     fn album_detail_layout_keeps_full_order_and_one_compact_span_per_album() {
-        let order = two_album_order(240, 3);
-        let layout = AlbumDetailLayout::from_order(&order, 720);
+        let (order, albums, albums_with_genres) = two_album_order(240, 3);
+        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
         assert_eq!(order.len(), 245);
         assert_eq!(layout.spans.len(), 2);
         assert_eq!(layout.spans[0].album_position, 0);
@@ -1577,9 +1627,9 @@ mod tests {
 
     #[test]
     fn album_detail_layout_preserves_exact_extent_with_arithmetic_continuations() {
-        let order = two_album_order(10, 2);
+        let (order, albums, albums_with_genres) = two_album_order(10, 2);
         let width = 720;
-        let layout = AlbumDetailLayout::from_order(&order, width);
+        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, width);
         assert_eq!(layout.spans.len(), 2);
         assert_eq!(layout.visual_row_count, 4);
         assert_eq!(layout.total_height, layout.spans[1].bottom());
@@ -1600,8 +1650,8 @@ mod tests {
 
     #[test]
     fn album_detail_visible_range_is_bounded_and_tracks_scroll_height() {
-        let order = two_album_order(256, 3);
-        let layout = AlbumDetailLayout::from_order(&order, 720);
+        let (order, albums, albums_with_genres) = two_album_order(256, 3);
+        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
         let range = layout.visible_range(100.0, 100_000.0);
         assert_eq!(range.len(), ALBUM_DETAIL_MAX_RENDERED_ROWS);
         assert!(range.end <= layout.visual_row_count);
@@ -1615,8 +1665,8 @@ mod tests {
 
     #[test]
     fn album_detail_two_window_demand_is_exact_and_each_page_is_at_most_64() {
-        let order = two_album_order(130, 1);
-        let layout = AlbumDetailLayout::from_order(&order, 720);
+        let (order, albums, albums_with_genres) = two_album_order(130, 1);
+        let layout = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 720);
         let demanded = layout.demand_positions(54..66);
         let windows = demanded
             .iter()
@@ -1641,9 +1691,9 @@ mod tests {
 
     #[test]
     fn album_detail_layout_uses_current_width_and_same_width_is_settled() {
-        let order = two_album_order(8, 2);
-        let narrow = AlbumDetailLayout::from_order(&order, 420);
-        let wide = AlbumDetailLayout::from_order(&order, 1_200);
+        let (order, albums, albums_with_genres) = two_album_order(8, 2);
+        let narrow = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 420);
+        let wide = AlbumDetailLayout::from_order(&order, &albums, &albums_with_genres, 1_200);
         assert_ne!(narrow.total_height, wide.total_height);
         assert!(!album_detail_window_changed(Some(&(0..2)), &(0..2)));
         assert!(!album_detail_geometry_changes(720, 800));

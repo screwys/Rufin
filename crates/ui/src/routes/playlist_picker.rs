@@ -7,7 +7,6 @@ use downloads::DownloadSubject;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
 use gtk::{gio, glib};
 use localization::{msgid, tr};
-use playback::SourceSessionEpoch;
 
 use crate::downloads::{OperationFeedback, OperationFeedbackKind};
 use crate::interactions::{ADD_TO_PLAYLIST_ICON, ContextMenuSurface, popdown_native_menu};
@@ -17,7 +16,9 @@ use crate::shell::cover::{ArtworkTile, THUMB_COVER_SIZE};
 
 use super::collections::PlaybackTarget;
 use super::library_fields::playlist_artwork;
-use super::track_selection::{TrackSelection, TrackSelectionSnapshot};
+use super::track_selection::{
+    PlaylistEntrySelectionSnapshot, TrackSelection, TrackSelectionSnapshot,
+};
 
 const PLAYLIST_DRAG_ICON_COVER_SIZE: i32 = 36;
 const PLAYLIST_DRAG_ICON_WIDTH: i32 = 180;
@@ -38,7 +39,7 @@ crate::ui_resource::composite_box!(
 );
 
 #[derive(Clone, Default)]
-pub(crate) struct PlaylistDragPreviewBinding {
+pub(crate) struct MediaDragPreviewBinding {
     prepared: Rc<RefCell<Option<PlaylistDragPreview>>>,
     active_tile: Rc<RefCell<Option<ArtworkTile>>>,
 }
@@ -58,7 +59,7 @@ enum PlaylistDragPreviewArtwork {
     },
 }
 
-impl PlaylistDragPreviewBinding {
+impl MediaDragPreviewBinding {
     pub(crate) fn connect(&self, source: &gtk::DragSource) {
         let prepared = Rc::clone(&self.prepared);
         let active_tile = Rc::clone(&self.active_tile);
@@ -129,72 +130,56 @@ impl PlaylistDragPreviewBinding {
 }
 
 #[derive(Clone)]
-pub(crate) enum PlaylistTrackSource {
+pub(crate) enum MediaDragSource {
+    LiveCollection {
+        media_uri: String,
+        operations: crate::runtime::source::SourceHandle,
+    },
     Target {
-        source_key: library::SourceKey,
-        source_session_epoch: SourceSessionEpoch,
+        source_key: Option<library::SourceKey>,
+        folder: Option<library::FolderKey>,
         target: PlaybackTarget,
     },
+    Targets {
+        source_key: Option<library::SourceKey>,
+        folder: Option<library::FolderKey>,
+        targets: Vec<PlaybackTarget>,
+    },
     Selection(TrackSelectionSnapshot),
+    PlaylistEntries(PlaylistEntrySelectionSnapshot),
+    MediaUris(std::sync::Arc<[String]>),
+    Queue {
+        occurrences: std::sync::Arc<[playback::OccurrenceId]>,
+        media_uris: std::sync::Arc<[String]>,
+    },
 }
 
-impl PlaylistTrackSource {
-    pub(crate) fn current_target(shell: &Shell, target: PlaybackTarget) -> Option<Self> {
-        let selected = shell.selected_library()?;
-        Some(Self::Target {
-            source_key: selected.source_key,
-            source_session_epoch: selected.source_session_epoch,
+impl MediaDragSource {
+    pub(crate) fn capture_target(shell: &Shell, target: PlaybackTarget) -> Self {
+        let selected = shell.selected_library();
+        Self::Target {
+            source_key: selected.as_ref().map(|selected| selected.source_key),
+            folder: selected
+                .as_ref()
+                .and_then(|selected| selected.music_folder_key),
             target,
-        })
+        }
     }
 
     pub(crate) fn selection(selection: TrackSelectionSnapshot) -> Self {
         Self::Selection(selection)
     }
 
-    pub(crate) fn current_track(shell: &Shell, track: library::TrackKey) -> Option<Self> {
-        let selected = shell.selected_library()?;
-        Some(Self::track(
-            selected.source_key,
-            selected.source_session_epoch,
-            track,
-        ))
+    pub(crate) fn track(media_uri: String) -> Self {
+        Self::media_uris([media_uri])
     }
 
-    pub(crate) fn track(
-        source_key: library::SourceKey,
-        source_session_epoch: SourceSessionEpoch,
-        track: library::TrackKey,
-    ) -> Self {
-        Self::Selection(TrackSelectionSnapshot {
-            source_key,
-            source_session_epoch,
-            tracks: [track].into(),
-        })
+    pub(crate) fn media_uris(media_uris: impl IntoIterator<Item = String>) -> Self {
+        Self::MediaUris(media_uris.into_iter().collect::<Vec<_>>().into())
     }
 
-    pub(crate) fn is_current(&self, shell: &Shell) -> bool {
-        shell.selected_library().as_deref().is_some_and(|selected| {
-            let (source_key, source_session_epoch) = match self {
-                Self::Target {
-                    source_key,
-                    source_session_epoch,
-                    ..
-                } => (*source_key, *source_session_epoch),
-                Self::Selection(selection) => {
-                    (selection.source_key, selection.source_session_epoch)
-                }
-            };
-            selected.source_key == source_key
-                && selected.source_session_epoch == source_session_epoch
-        })
-    }
-
-    pub(crate) fn ready_selection(&self) -> Option<TrackSelectionSnapshot> {
-        match self {
-            Self::Selection(selection) => Some(selection.clone()),
-            Self::Target { .. } => None,
-        }
+    pub(crate) fn playlist_entries(selection: PlaylistEntrySelectionSnapshot) -> Self {
+        Self::PlaylistEntries(selection)
     }
 }
 
@@ -207,55 +192,208 @@ struct PlaylistChoice {
 
 #[derive(Clone)]
 struct ReadyPlaylistTracks {
-    source_key: library::SourceKey,
-    source_session_epoch: SourceSessionEpoch,
-    tracks: Rc<[library::TrackKey]>,
+    media_uris: Rc<[String]>,
     subject: DownloadSubject,
-}
-
-pub(crate) fn context_menu_can_add_to_playlist(shell: &Rc<Shell>) -> bool {
-    shell.selected_source_operations().is_some()
 }
 
 pub(crate) fn refresh_context_playlist_picker(shell: &Rc<Shell>) {
     shell.refresh_playlist_picker();
 }
 
-pub(crate) fn playlist_drag_content_provider(
-    source: PlaylistTrackSource,
-) -> gtk::gdk::ContentProvider {
+pub(crate) fn media_drag_content_provider(source: MediaDragSource) -> gtk::gdk::ContentProvider {
     let payload = glib::BoxedAnyObject::new(source);
     gtk::gdk::ContentProvider::for_value(&payload.to_value())
 }
 
-pub(crate) fn playlist_drag_source(value: &glib::Value) -> Option<PlaylistTrackSource> {
+pub(crate) fn media_drag_source(value: &glib::Value) -> Option<MediaDragSource> {
     let payload = value.get::<glib::BoxedAnyObject>().ok()?;
-    Some(payload.try_borrow::<PlaylistTrackSource>().ok()?.clone())
+    Some(payload.try_borrow::<MediaDragSource>().ok()?.clone())
 }
 
-pub(crate) fn install_compact_playlist_drag_source(
+pub(crate) fn install_compact_media_drag_source(
     target: &impl IsA<gtk::Widget>,
-    artwork: &gtk::Picture,
-    current: impl Fn() -> Option<(PlaylistTrackSource, String)> + 'static,
+    artwork: &impl IsA<gtk::Widget>,
+    current: impl Fn() -> Option<(MediaDragSource, String)> + 'static,
 ) {
-    let preview = PlaylistDragPreviewBinding::default();
+    let preview = MediaDragPreviewBinding::default();
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY)
         .build();
     source.set_propagation_phase(gtk::PropagationPhase::Capture);
     let prepare_preview = preview.clone();
-    let weak_artwork = artwork.downgrade();
+    let weak_artwork = artwork.as_ref().downgrade();
+    let drag_widget = target.as_ref().downgrade();
     source.connect_prepare(move |_, _, _| {
         prepare_preview.clear();
         let (source, title) = current()?;
-        let artwork = weak_artwork
-            .upgrade()
-            .and_then(|artwork| artwork.paintable());
+        let artwork = weak_artwork.upgrade().and_then(|artwork| {
+            match artwork.downcast::<gtk::Picture>() {
+                Ok(picture) => picture.paintable(),
+                // Freeze the displayed collage without retaining the recycled cell.
+                Err(widget) => Some(gtk::WidgetPaintable::new(Some(&widget)).current_image()),
+            }
+        });
         prepare_preview.prepare(title, artwork);
-        Some(playlist_drag_content_provider(source))
+        Some(media_drag_content_provider(capture_collection_selection(
+            source,
+            &drag_widget,
+        )))
     });
     preview.connect(&source);
     target.as_ref().add_controller(source);
+}
+
+pub(crate) fn install_media_drag_source(
+    target: &impl IsA<gtk::Widget>,
+    current: impl Fn() -> Option<(MediaDragSource, String)> + 'static,
+) {
+    let preview = MediaDragPreviewBinding::default();
+    let source = gtk::DragSource::builder()
+        .actions(gtk::gdk::DragAction::COPY)
+        .build();
+    source.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let prepare_preview = preview.clone();
+    let drag_widget = target.as_ref().downgrade();
+    source.connect_prepare(move |_, _, _| {
+        prepare_preview.clear();
+        let (source, title) = current()?;
+        prepare_preview.prepare(title, None);
+        Some(media_drag_content_provider(capture_collection_selection(
+            source,
+            &drag_widget,
+        )))
+    });
+    preview.connect(&source);
+    target.as_ref().add_controller(source);
+}
+
+fn capture_collection_selection(
+    source: MediaDragSource,
+    widget: &glib::WeakRef<gtk::Widget>,
+) -> MediaDragSource {
+    let MediaDragSource::Target {
+        source_key,
+        folder,
+        target,
+    } = &source
+    else {
+        return source;
+    };
+    let Some(widget) = widget.upgrade() else {
+        return source;
+    };
+    let selection = widget
+        .ancestor(gtk::GridView::static_type())
+        .and_downcast::<gtk::GridView>()
+        .and_then(|grid| grid.model())
+        .or_else(|| {
+            widget
+                .ancestor(gtk::ColumnView::static_type())
+                .and_downcast::<gtk::ColumnView>()
+                .and_then(|table| table.model())
+        });
+    let Some(selection) = selection else {
+        return source;
+    };
+    let positions = selection.selection();
+    if positions.size() < 2 {
+        return source;
+    }
+    let Some((iter, first)) = gtk::BitsetIter::init_first(&positions) else {
+        return source;
+    };
+    let target = match target {
+        PlaybackTarget::Contextual { target, .. } => target.as_ref(),
+        target => target,
+    };
+    let mut contains_dragged = false;
+    let targets = std::iter::once(first)
+        .chain(iter)
+        .map(|position| {
+            let object = selection.item(position)?;
+            let (target, dragged) = selected_collection_target(&object, target)?;
+            contains_dragged |= dragged;
+            Some(target)
+        })
+        .collect::<Option<Vec<_>>>();
+    match targets {
+        Some(targets) if contains_dragged => MediaDragSource::Targets {
+            source_key: *source_key,
+            folder: *folder,
+            targets,
+        },
+        _ => source,
+    }
+}
+
+fn selected_collection_target(
+    object: &glib::Object,
+    dragged: &PlaybackTarget,
+) -> Option<(PlaybackTarget, bool)> {
+    use super::sparse_model::{SparseItem, SparseObjectItem};
+    // Sparse placeholders already carry collection keys. A large selection needs no row hydration.
+    macro_rules! selected {
+        ($row:ty, $key:ty, $field:ident, $target:expr, $matches:expr) => {{
+            if let Some(row) = super::library_fields::object_item::<$row>(object.clone()) {
+                Some(($target(row.$field), $matches(&row)))
+            } else if let Some(SparseItem::Placeholder(key)) = object
+                .downcast_ref::<SparseObjectItem>()?
+                .value::<SparseItem<$key, $row>>()
+            {
+                Some(($target(key), false))
+            } else {
+                None
+            }
+        }};
+    }
+    match dragged {
+        PlaybackTarget::Album(uri) => selected!(
+            library::AlbumRow,
+            library::AlbumKey,
+            album_key,
+            PlaybackTarget::AlbumKey,
+            |row: &library::AlbumRow| &row.media_uri == uri
+        ),
+        PlaybackTarget::Artist(uri) | PlaybackTarget::AlbumArtist(uri) => {
+            let album_artist = matches!(dragged, PlaybackTarget::AlbumArtist(_));
+            selected!(
+                library::ArtistRow,
+                library::ArtistKey,
+                artist_key,
+                |key| PlaybackTarget::ArtistKey(key, album_artist),
+                |row: &library::ArtistRow| &row.media_uri == uri
+            )
+        }
+        PlaybackTarget::Genre(key) => selected!(
+            library::GenreRow,
+            library::GenreKey,
+            genre_key,
+            PlaybackTarget::Genre,
+            |row: &library::GenreRow| row.genre_key == *key
+        ),
+        PlaybackTarget::Mood(key) => selected!(
+            library::MoodRow,
+            library::MoodKey,
+            mood_key,
+            PlaybackTarget::Mood,
+            |row: &library::MoodRow| row.mood_key == *key
+        ),
+        PlaybackTarget::Playlist(key) => selected!(
+            library::PlaylistRow,
+            library::PlaylistKey,
+            playlist_key,
+            PlaybackTarget::Playlist,
+            |row: &library::PlaylistRow| row.playlist_key == *key
+        ),
+        PlaybackTarget::SmartPlaylist(key) => selected!(
+            library::SmartPlaylistRow,
+            library::SmartPlaylistKey,
+            smart_playlist_key,
+            PlaybackTarget::SmartPlaylist,
+            |row: &library::SmartPlaylistRow| row.smart_playlist_key == *key
+        ),
+        _ => None,
+    }
 }
 
 fn compact_playlist_drag_icon(cover: Option<gtk::Widget>, title: &str) -> gtk::Widget {
@@ -314,10 +452,10 @@ pub(crate) fn install_track_drag_source(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
     selection: TrackSelection,
-    current_track: impl Fn() -> Option<(library::TrackKey, String, ArtworkBinding)> + 'static,
+    current_track: impl Fn() -> Option<(String, String, ArtworkBinding)> + 'static,
 ) {
     target.as_ref().set_valign(gtk::Align::Fill);
-    let preview = PlaylistDragPreviewBinding::default();
+    let preview = MediaDragPreviewBinding::default();
     let source = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::COPY)
         .build();
@@ -329,9 +467,9 @@ pub(crate) fn install_track_drag_source(
         let shell = preview_shell.upgrade()?;
         let (track, title, artwork) = current_track()?;
         prepare_preview.prepare_cache_only(&shell, title, artwork);
-        Some(playlist_drag_content_provider(
-            PlaylistTrackSource::selection(selection.dragged_tracks_for(track)),
-        ))
+        Some(media_drag_content_provider(MediaDragSource::selection(
+            selection.dragged_tracks_for(&track),
+        )))
     });
     preview.connect(&source);
     target.as_ref().add_controller(source);
@@ -342,9 +480,7 @@ pub(crate) fn append_context_menu_picker(
     shell: &Rc<Shell>,
     target: PlaybackTarget,
 ) {
-    let Some(source) = PlaylistTrackSource::current_target(shell, target) else {
-        return;
-    };
+    let source = MediaDragSource::capture_target(shell, target);
     append_context_menu_picker_source(surface, shell, source);
 }
 
@@ -353,13 +489,44 @@ pub(crate) fn append_context_menu_picker_selection(
     shell: &Rc<Shell>,
     selection: TrackSelectionSnapshot,
 ) {
-    append_context_menu_picker_source(surface, shell, PlaylistTrackSource::selection(selection));
+    append_context_menu_picker_source(surface, shell, MediaDragSource::selection(selection));
+}
+
+pub(crate) fn append_context_menu_picker_media(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    media_uri: String,
+) {
+    append_context_menu_picker_source(surface, shell, MediaDragSource::media_uris([media_uri]));
+}
+
+pub(crate) fn append_context_menu_picker_media_uris(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    media_uris: impl IntoIterator<Item = String>,
+) {
+    append_context_menu_picker_source(surface, shell, MediaDragSource::media_uris(media_uris));
+}
+
+pub(crate) fn present_playlist_picker_media_uris(
+    shell: &Rc<Shell>,
+    media_uris: impl IntoIterator<Item = String>,
+) {
+    open_full_playlist_picker(shell, MediaDragSource::media_uris(media_uris));
+}
+
+pub(crate) fn append_context_menu_picker_entries(
+    surface: &ContextMenuSurface,
+    shell: &Rc<Shell>,
+    selection: PlaylistEntrySelectionSnapshot,
+) {
+    append_context_menu_picker_source(surface, shell, MediaDragSource::playlist_entries(selection));
 }
 
 fn append_context_menu_picker_source(
     surface: &ContextMenuSurface,
     shell: &Rc<Shell>,
-    source: PlaylistTrackSource,
+    source: MediaDragSource,
 ) {
     let picker = context_playlist_picker(shell, source.clone(), surface.popover());
     let click_shell = Rc::downgrade(shell);
@@ -381,37 +548,44 @@ pub(crate) fn present_playlist_picker_selection(
     shell: &Rc<Shell>,
     selection: TrackSelectionSnapshot,
 ) {
-    open_full_playlist_picker(shell, PlaylistTrackSource::selection(selection));
+    open_full_playlist_picker(shell, MediaDragSource::selection(selection));
 }
 
-fn open_full_playlist_picker(shell: &Rc<Shell>, source: PlaylistTrackSource) {
-    let Some(selected) = shell.selected_library().as_deref().cloned() else {
-        return;
-    };
-    let runtime = selected.runtime.clone();
-    let selected_for_load = selected.clone();
-    let task = runtime.spawn(async move {
-        let (tracks, subject) = source.resolve(&selected).await?;
-        let playlists = load_playlist_rows(&selected).await?;
+pub(crate) fn present_playlist_picker_entries(
+    shell: &Rc<Shell>,
+    selection: PlaylistEntrySelectionSnapshot,
+) {
+    open_full_playlist_picker(shell, MediaDragSource::playlist_entries(selection));
+}
+
+fn open_full_playlist_picker(shell: &Rc<Shell>, source: MediaDragSource) {
+    let source_key = shell
+        .selected_library()
+        .as_deref()
+        .map(|selected| selected.source_key);
+    let database = shell.products.library.clone();
+    let task = shell.products.runtime.spawn(async move {
+        let (tracks, subject) = source.resolve(&database).await?;
+        let playlists = database
+            .playlist_destinations(source_key, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
         Ok::<_, String>((playlists, tracks, subject))
     });
     let shell = Rc::downgrade(shell);
     gtk::glib::spawn_future_local(async move {
-        let Some(shell) = shell.upgrade() else {
-            return;
-        };
         let Some((playlists, tracks, subject)) = task.await.ok().and_then(Result::ok) else {
             return;
         };
-        if picker_source_is_current(&shell, &selected_for_load) {
-            present_playlist_picker(&shell, selected_for_load, playlists, tracks, subject);
+        if let Some(shell) = shell.upgrade() {
+            present_playlist_picker(&shell, source_key, playlists, tracks, subject);
         }
     });
 }
 
 fn context_playlist_picker(
     shell: &Rc<Shell>,
-    source: PlaylistTrackSource,
+    source: MediaDragSource,
     popover: &gtk::PopoverMenu,
 ) -> gtk::Box {
     let root = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -437,7 +611,7 @@ fn context_playlist_picker(
 fn populate_context_playlist_picker(
     root: &gtk::Box,
     shell: &Rc<Shell>,
-    source: PlaylistTrackSource,
+    source: MediaDragSource,
     popover: &gtk::PopoverMenu,
 ) {
     let resource = crate::ui_resource::PLAYLIST_PICKER_CONTEXT_RESOURCE;
@@ -453,12 +627,6 @@ fn populate_context_playlist_picker(
     let skip_duplicates_label = tr("Don't duplicate");
     skip_duplicates.set_tooltip_text(Some(&skip_duplicates_label));
     skip_duplicates.update_property(&[gtk::accessible::Property::Label(&skip_duplicates_label)]);
-    skip_duplicates.set_visible(
-        shell
-            .selected_library()
-            .as_deref()
-            .is_some_and(|selected| selected.playlist_tracks_can_repeat),
-    );
     root.append(&content);
 
     let store = gio::ListStore::new::<glib::BoxedAnyObject>();
@@ -528,9 +696,6 @@ fn populate_context_playlist_picker(
         let Some(ready) = activate_ready.borrow().clone() else {
             return;
         };
-        if !ready.is_current(&shell) {
-            return;
-        }
         let Some(choice) = activate_model
             .item(position)
             .and_then(|item| item.downcast::<glib::BoxedAnyObject>().ok())
@@ -538,52 +703,54 @@ fn populate_context_playlist_picker(
         else {
             return;
         };
-        let Some(operations) = shell.selected_source_operations() else {
-            return;
-        };
-        let scheduled = operations.add_playlist_tracks(
+        let subject = ready.subject.clone();
+        let preview_uris = ready.media_uris.iter().take(4).cloned().collect::<Vec<_>>();
+        let destination = choice.name;
+        let feedback_shell = Rc::downgrade(&shell);
+        shell.add_media_to_playlist(
             choice.key,
-            ready.tracks.to_vec(),
+            ready.media_uris.to_vec(),
             activate_skip.is_active(),
+            Rc::new(move |accepted| {
+                if accepted > 0
+                    && let Some(shell) = feedback_shell.upgrade()
+                {
+                    shell.show_operation_feedback(&OperationFeedback {
+                        subject: subject.clone(),
+                        preview_uris: preview_uris.clone(),
+                        item_count: accepted,
+                        kind: OperationFeedbackKind::PlaylistAdded {
+                            destination: destination.clone(),
+                        },
+                    });
+                }
+            }),
         );
-        if scheduled > 0 {
-            shell.show_operation_feedback(&OperationFeedback {
-                subject: ready.subject,
-                item_count: scheduled,
-                kind: OperationFeedbackKind::PlaylistAdded {
-                    destination: choice.name,
-                },
-            });
-        }
         if let Some(popover) = activate_popover.upgrade() {
             popdown_native_menu(&popover);
         }
     });
 
-    let Some(selected) = shell.selected_library().as_deref().cloned() else {
-        return;
-    };
-    let runtime = selected.runtime.clone();
-    let selected_for_load = selected.clone();
-    let task = runtime.spawn(async move {
-        let (tracks, subject) = source.resolve(&selected).await?;
-        let playlists = load_playlist_destinations(&selected).await?;
+    let source_key = shell
+        .selected_library()
+        .as_deref()
+        .map(|selected| selected.source_key);
+    let database = shell.products.library.clone();
+    let task = shell.products.runtime.spawn(async move {
+        let (tracks, subject) = source.resolve(&database).await?;
+        let playlists = database
+            .playlist_destinations(source_key, &library::ReadCancellation::new())
+            .await
+            .map_err(|error| error.to_string())?;
         Ok::<_, String>((playlists, tracks, subject))
     });
-    let shell = Rc::downgrade(shell);
     let root = root.downgrade();
     let spinner = spinner.downgrade();
     gtk::glib::spawn_future_local(async move {
-        let Some(shell) = shell.upgrade() else {
-            return;
-        };
-        if root.upgrade().is_none() {
-            return;
-        }
         let Some((playlists, tracks, subject)) = task.await.ok().and_then(Result::ok) else {
             return;
         };
-        if !picker_source_is_current(&shell, &selected_for_load) {
+        if root.upgrade().is_none() {
             return;
         }
         let choices = playlists
@@ -598,9 +765,7 @@ fn populate_context_playlist_picker(
             .collect::<Vec<_>>();
         store.splice(0, 0, &choices);
         ready.replace(Some(ReadyPlaylistTracks {
-            source_key: selected_for_load.source_key,
-            source_session_epoch: selected_for_load.source_session_epoch,
-            tracks: tracks.into(),
+            media_uris: tracks.into(),
             subject,
         }));
         if let Some(spinner) = spinner.upgrade() {
@@ -620,9 +785,9 @@ struct PickerRow {
 
 fn present_playlist_picker(
     shell: &Rc<Shell>,
-    selected: crate::runtime::SelectedLibrary,
+    source_key: Option<library::SourceKey>,
     playlists: Vec<library::PlaylistRow>,
-    tracks: Vec<library::TrackKey>,
+    media_uris: Vec<String>,
     subject: DownloadSubject,
 ) {
     let resource = crate::ui_resource::PLAYLIST_PICKER_RESOURCE;
@@ -637,7 +802,6 @@ fn present_playlist_picker(
         add: gtk::Button,
     });
     let rows = Rc::new(RefCell::new(Vec::<PickerRow>::new()));
-    skip.set_visible(selected.playlist_tracks_can_repeat);
     replace_picker_rows(shell, &list, &create, &rows, &add, playlists);
 
     let close_shell = Rc::downgrade(shell);
@@ -668,59 +832,70 @@ fn present_playlist_picker(
         filter_add.set_sensitive(filter_rows.borrow().iter().any(|row| row.check.is_active()));
     });
     let create_shell = Rc::downgrade(shell);
-    let create_selected = selected.clone();
-    let create_tracks = tracks.clone();
+    let create_tracks = media_uris.clone();
     let create_search = search.clone();
-    create.connect_clicked(move |button| {
+    create.connect_clicked(move |_| {
         let Some(shell) = create_shell.upgrade() else {
             return;
         };
-        if !picker_source_is_current(&shell, &create_selected) {
-            button.set_sensitive(false);
-            return;
-        }
         let name = create_search.text().trim().to_string();
         if !name.is_empty() {
-            shell.create_playlist_and_pin(name, create_tracks.clone());
+            shell.new_playlist_dialog_with(name, create_tracks.clone());
             create_search.set_text("");
         }
     });
-    let operations = selected.operations.clone();
     let add_shell = Rc::downgrade(shell);
-    let add_selected = selected.clone();
     let add_rows = Rc::clone(&rows);
     let add_dialog = dialog.downgrade();
-    add.connect_clicked(move |button| {
+    add.connect_clicked(move |_| {
         let Some(shell) = add_shell.upgrade() else {
             return;
         };
-        if !picker_source_is_current(&shell, &add_selected) {
-            button.set_sensitive(false);
-            return;
-        }
-        let mut added = 0;
-        let mut destinations = Vec::new();
-        for row in add_rows.borrow().iter().filter(|row| row.check.is_active()) {
-            let scheduled = operations.add_playlist_tracks(
-                row.playlist.playlist_key,
-                tracks.clone(),
+        let destinations = add_rows
+            .borrow()
+            .iter()
+            .filter(|row| row.check.is_active())
+            .map(|row| row.playlist.clone())
+            .collect::<Vec<_>>();
+        let pending = Rc::new(Cell::new(destinations.len()));
+        let accepted = Rc::new(Cell::new(0));
+        let accepted_names = Rc::new(RefCell::new(Vec::new()));
+        for playlist in destinations {
+            let pending = Rc::clone(&pending);
+            let accepted = Rc::clone(&accepted);
+            let accepted_names = Rc::clone(&accepted_names);
+            let feedback_shell = Rc::downgrade(&shell);
+            let feedback_subject = subject.clone();
+            let preview_uris = media_uris.iter().take(4).cloned().collect::<Vec<_>>();
+            let name = playlist.name.clone();
+            shell.add_media_to_playlist(
+                playlist.playlist_key,
+                media_uris.clone(),
                 skip.is_active(),
+                Rc::new(move |count| {
+                    accepted.set(accepted.get() + count);
+                    if count > 0 {
+                        accepted_names.borrow_mut().push(name.clone());
+                    }
+                    pending.set(pending.get().saturating_sub(1));
+                    if pending.get() == 0
+                        && accepted.get() > 0
+                        && let Some(shell) = feedback_shell.upgrade()
+                    {
+                        let names = accepted_names.borrow();
+                        let destination = match names.as_slice() {
+                            [name] => name.clone(),
+                            _ => format!("{} {}", names.len(), tr("Playlists")),
+                        };
+                        shell.show_operation_feedback(&OperationFeedback {
+                            subject: feedback_subject.clone(),
+                            preview_uris: preview_uris.clone(),
+                            item_count: accepted.get(),
+                            kind: OperationFeedbackKind::PlaylistAdded { destination },
+                        });
+                    }
+                }),
             );
-            if scheduled > 0 {
-                added += scheduled;
-                destinations.push(row.playlist.name.clone());
-            }
-        }
-        if added > 0 {
-            let destination = match destinations.as_slice() {
-                [name] => name.clone(),
-                _ => format!("{} {}", destinations.len(), tr("Playlists")),
-            };
-            shell.show_operation_feedback(&OperationFeedback {
-                subject: subject.clone(),
-                item_count: added,
-                kind: OperationFeedbackKind::PlaylistAdded { destination },
-            });
         }
         if let Some(dialog) = add_dialog.upgrade() {
             dialog.close();
@@ -728,7 +903,6 @@ fn present_playlist_picker(
     });
     let refresh_dialog = dialog.downgrade();
     let refresh_shell = Rc::downgrade(shell);
-    let refresh_selected = selected.clone();
     let refresh_list = list.clone();
     let refresh_create = create.clone();
     let refresh_rows = Rc::clone(&rows);
@@ -740,29 +914,25 @@ fn present_playlist_picker(
         let Some(shell_now) = refresh_shell.upgrade() else {
             return;
         };
-        if !picker_source_is_current(&shell_now, &refresh_selected) {
-            if let Some(dialog) = refresh_dialog.upgrade() {
-                dialog.close();
-            }
-            return;
-        }
-        let selected = refresh_selected.clone();
-        let runtime = selected.runtime.clone();
-        let task = runtime.spawn(async move { load_playlist_rows(&selected).await });
+        let database = shell_now.products.library.clone();
+        let task = shell_now.products.runtime.spawn(async move {
+            database
+                .playlist_destinations(source_key, &library::ReadCancellation::new())
+                .await
+        });
         let shell = refresh_shell.clone();
         let list = refresh_list.clone();
         let create = refresh_create.clone();
         let rows = Rc::clone(&refresh_rows);
         let add = refresh_add.clone();
-        let current = refresh_selected.clone();
+        let dialog = refresh_dialog.clone();
         gtk::glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else {
-                return;
-            };
             let Some(playlists) = task.await.ok().and_then(Result::ok) else {
                 return;
             };
-            if picker_source_is_current(&shell, &current) {
+            if dialog.upgrade().is_some()
+                && let Some(shell) = shell.upgrade()
+            {
                 replace_picker_rows(&shell, &list, &create, &rows, &add, playlists);
             }
         });
@@ -842,98 +1012,124 @@ fn replace_picker_rows(
     }
 }
 
-impl PlaylistTrackSource {
-    pub(crate) async fn resolve(
-        &self,
-        selected: &crate::runtime::SelectedLibrary,
-    ) -> Result<(Vec<library::TrackKey>, DownloadSubject), String> {
-        match self {
+impl MediaDragSource {
+    pub(crate) async fn queue_input(&self) -> Result<library::QueueInput, String> {
+        Ok(match self {
+            Self::LiveCollection {
+                media_uri,
+                operations,
+            } => prepare_live_collection(operations, media_uri)
+                .await?
+                .queue_input(None, None),
             Self::Target {
                 source_key,
-                source_session_epoch,
+                folder,
                 target,
-            } if *source_key == selected.source_key
-                && *source_session_epoch == selected.source_session_epoch =>
-            {
+            } => target.queue_input(*source_key, *folder),
+            Self::Targets {
+                source_key,
+                folder,
+                targets,
+            } => library::QueueInput::Groups(
+                targets
+                    .iter()
+                    .map(|target| target.queue_input(*source_key, *folder))
+                    .collect(),
+            ),
+            Self::Selection(selection) => library::QueueInput::MediaUris {
+                order: selection.media_uris.clone(),
+                provenance: library::QueueProvenance::Manual,
+            },
+            Self::PlaylistEntries(selection) => library::QueueInput::PlaylistEntries {
+                order: selection.entries.clone(),
+                context_id: format!("playlist-selection:{}", selection.playlist).into(),
+            },
+            Self::MediaUris(order)
+            | Self::Queue {
+                media_uris: order, ..
+            } => library::QueueInput::MediaUris {
+                order: order.clone(),
+                provenance: library::QueueProvenance::Manual,
+            },
+        })
+    }
+
+    pub(crate) async fn resolve(
+        &self,
+        database: &library::Database,
+    ) -> Result<(Vec<String>, DownloadSubject), String> {
+        match self {
+            Self::LiveCollection {
+                media_uri,
+                operations,
+            } => {
+                let target = prepare_live_collection(operations, media_uri).await?;
+                let media_uris = target.resolve_media_uris(database, None, None).await?;
                 let subject = target.download_subject();
-                let (tracks, _) = target.resolve_order(selected).await?;
-                Ok((tracks.to_vec(), subject))
+                Ok((media_uris, subject))
             }
-            Self::Target { .. } => Err("playlist source is no longer current".to_string()),
-            Self::Selection(selection)
-                if selection.source_key == selected.source_key
-                    && selection.source_session_epoch == selected.source_session_epoch =>
-            {
-                Ok((selection.tracks.to_vec(), selection.download_subject()))
+            Self::Target {
+                source_key,
+                folder,
+                target,
+            } => {
+                let media_uris = target
+                    .resolve_media_uris(database, *source_key, *folder)
+                    .await?;
+                let subject = target.download_subject();
+                Ok((media_uris, subject))
             }
-            Self::Selection(_) => Err("playlist source is no longer current".to_string()),
+            Self::Selection(selection) => {
+                Ok((selection.media_uris.to_vec(), selection.download_subject()))
+            }
+            Self::Targets {
+                source_key,
+                folder,
+                targets,
+            } => {
+                let mut media_uris = Vec::new();
+                for target in targets {
+                    media_uris.extend(
+                        target
+                            .resolve_media_uris(database, *source_key, *folder)
+                            .await?,
+                    );
+                }
+                let subject = DownloadSubject::for_media_uris("collections", None, &media_uris);
+                Ok((media_uris, subject))
+            }
+            Self::PlaylistEntries(selection) => {
+                let media_uris = selection.media_uris(database).await?;
+                let subject =
+                    DownloadSubject::for_media_uris("playlist", Some("Playlist"), &media_uris);
+                Ok((media_uris, subject))
+            }
+            Self::MediaUris(media_uris) | Self::Queue { media_uris, .. } => {
+                let media_uris = media_uris.to_vec();
+                let subject = DownloadSubject::for_media_uris("playlist-media", None, &media_uris);
+                Ok((media_uris, subject))
+            }
         }
     }
 }
 
-impl ReadyPlaylistTracks {
-    fn is_current(&self, shell: &Shell) -> bool {
-        shell.selected_library().as_deref().is_some_and(|selected| {
-            selected.source_key == self.source_key
-                && selected.source_session_epoch == self.source_session_epoch
-        })
-    }
-}
-
-async fn load_playlist_rows(
-    selected: &crate::runtime::SelectedLibrary,
-) -> Result<Vec<library::PlaylistRow>, String> {
-    let cancellation = library::ReadCancellation::new();
-    let order = selected
-        .database
-        .playlist_order(
-            selected.source_key,
-            selected.music_folder_key,
-            library::PlaylistSort::Title,
-            false,
-            "",
-            &cancellation,
-        )
+async fn prepare_live_collection(
+    operations: &crate::runtime::source::SourceHandle,
+    media_uri: &str,
+) -> Result<PlaybackTarget, String> {
+    operations
+        .prepare_collection(media_uri.to_string())
+        .recv()
         .await
-        .map_err(|error| error.to_string())?;
-    let mut playlists = Vec::with_capacity(order.len());
-    for keys in order.chunks(128) {
-        playlists.extend(
-            selected
-                .database
-                .playlist_rows(
-                    selected.source_key,
-                    keys,
-                    selected.music_folder_key,
-                    &cancellation,
-                )
-                .await
-                .map_err(|error| error.to_string())?,
-        );
+        .map_err(|error| error.to_string())??;
+    match library::source_entity_parts(media_uri)
+        .map(|(_, kind, _)| kind)
+        .as_deref()
+    {
+        Some("album") => Ok(PlaybackTarget::Album(media_uri.to_string())),
+        Some("artist") => Ok(PlaybackTarget::Artist(media_uri.to_string())),
+        _ => Err("Collection is no longer available".to_string()),
     }
-    Ok(playlists)
-}
-
-async fn load_playlist_destinations(
-    selected: &crate::runtime::SelectedLibrary,
-) -> Result<Vec<library::PlaylistDestination>, String> {
-    selected
-        .database
-        .playlist_destinations(
-            selected.source_key,
-            selected.music_folder_key,
-            &library::ReadCancellation::new(),
-        )
-        .await
-        .map_err(|error| error.to_string())
-}
-
-fn picker_source_is_current(shell: &Shell, expected: &crate::runtime::SelectedLibrary) -> bool {
-    shell.selected_library().as_deref().is_some_and(|selected| {
-        selected.source_key == expected.source_key
-            && selected.source_session_epoch == expected.source_session_epoch
-            && selected.music_folder_key == expected.music_folder_key
-    })
 }
 
 #[cfg(test)]
@@ -952,23 +1148,16 @@ mod tests {
     }
 
     #[test]
-    fn playlist_drag_value_roundtrips_the_scoped_source() {
-        let expected = TrackSelectionSnapshot {
-            source_key: library::SourceKey::from_raw(7),
-            source_session_epoch: SourceSessionEpoch::new(11),
-            tracks: std::sync::Arc::from([
-                library::TrackKey::from_raw(3),
-                library::TrackKey::from_raw(5),
-            ]),
-        };
-        let payload = glib::BoxedAnyObject::new(PlaylistTrackSource::selection(expected.clone()));
-        let decoded =
-            playlist_drag_source(&payload.to_value()).expect("scoped playlist drag source");
-        let PlaylistTrackSource::Selection(decoded) = decoded else {
+    fn playlist_drag_value_roundtrips_the_media_uris() {
+        let expected = std::sync::Arc::<[String]>::from([
+            "https://example.test/three".to_string(),
+            "https://example.test/five".to_string(),
+        ]);
+        let payload = glib::BoxedAnyObject::new(MediaDragSource::MediaUris(expected.clone()));
+        let decoded = media_drag_source(&payload.to_value()).expect("scoped playlist drag source");
+        let MediaDragSource::MediaUris(decoded) = decoded else {
             panic!("track selection source");
         };
-        assert_eq!(decoded.source_key, expected.source_key);
-        assert_eq!(decoded.source_session_epoch, expected.source_session_epoch);
-        assert_eq!(decoded.tracks, expected.tracks);
+        assert_eq!(decoded, expected);
     }
 }

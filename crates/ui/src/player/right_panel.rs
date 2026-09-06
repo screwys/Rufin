@@ -75,15 +75,27 @@ pub(crate) fn build_right_panel(
             return None;
         }
         let top = positioned_top.height().max(0);
+        let bottom = if positioned_split
+            .end_child()
+            .is_some_and(|child| child.is_visible())
+        {
+            positioned_split.position()
+        } else {
+            overlay.height()
+        };
         Some(gtk::gdk::Rectangle::new(
             0,
             top,
             overlay.width().max(0),
-            positioned_split.position().saturating_sub(top).max(0),
+            bottom.saturating_sub(top).max(0),
         ))
     });
-    let allocate_queue = queue_lyrics_overlay.clone();
-    queue_lyrics_split.connect_position_notify(move |_| allocate_queue.queue_allocate());
+    let allocate_queue = queue_lyrics_overlay.downgrade();
+    queue_lyrics_split.connect_position_notify(move |_| {
+        if let Some(overlay) = allocate_queue.upgrade() {
+            overlay.queue_allocate();
+        }
+    });
     root.append(&queue_lyrics_overlay);
 
     RightPanelParts {

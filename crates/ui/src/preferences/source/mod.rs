@@ -1,7 +1,9 @@
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
-use localization::{tr, trn_with};
+use adw::prelude::*;
+use app_identity::{DISPLAY_NAME, STABLE_APP_ID};
+use localization::{tr, tr_with, trn_with};
 
 use crate::runtime::source::{
     ConfiguredSources, DiscoveredServer, DiscoveryStatus, SourceOperation, SourceProgress,
@@ -25,12 +27,6 @@ pub(crate) struct SourceState {
     pub(crate) artwork_preparation_revision: Cell<Option<u64>>,
 }
 
-impl SourceState {
-    pub(crate) fn login_screen_active(&self) -> bool {
-        self.configured.borrow().first_run
-    }
-}
-
 pub(crate) fn configured_source_display_name(source: &SourceSummary) -> String {
     let name = source.name.trim();
     if name.is_empty() {
@@ -46,6 +42,38 @@ pub(crate) fn configured_source_kind_display_name(kind: &str) -> String {
 
 pub(crate) fn configured_source_icon_name(source: &SourceSummary) -> &'static str {
     login::source_kind_icon_name(&source.kind).unwrap_or("rufin-network-server-symbolic")
+}
+
+pub(crate) fn configure_ownership_toggle(
+    button: &gtk::ToggleButton,
+    source: Option<&SourceSummary>,
+    belongs_to_source: bool,
+) {
+    let source_icon = source.map(configured_source_icon_name);
+    let source_name = source.map(configured_source_display_name);
+    button.set_sensitive(source.is_some());
+    button.set_active(belongs_to_source && source.is_some());
+    let update = move |button: &gtk::ToggleButton| {
+        let current = button.is_active() && source_icon.is_some();
+        button.set_icon_name(if current {
+            source_icon.unwrap_or(STABLE_APP_ID)
+        } else {
+            STABLE_APP_ID
+        });
+        button.set_tooltip_text(Some(&tr_with(
+            "Ownership of this item belongs to {source}",
+            &[(
+                "source",
+                if current {
+                    source_name.as_deref().unwrap_or(DISPLAY_NAME)
+                } else {
+                    DISPLAY_NAME
+                },
+            )],
+        )));
+    };
+    update(button);
+    button.connect_toggled(update);
 }
 
 pub(crate) fn half_stars_row(

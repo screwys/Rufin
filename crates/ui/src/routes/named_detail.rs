@@ -179,7 +179,7 @@ impl Shell {
         self: &Rc<Self>,
         id: NamedDetailId,
         summary: Option<NamedDetailSummary>,
-        order: Vec<library::TrackKey>,
+        order: Vec<String>,
         first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
         selected: crate::runtime::SelectedLibrary,
@@ -211,11 +211,9 @@ impl Shell {
             seed,
             summary_items,
             context_menu,
-            selected: selected.clone(),
             tracks: order,
             first_row_position,
             first_rows,
-            play_order: None,
             table_context: id.table_context(),
             playback_context: id.context_id(),
             play_label: id.play_label(),
@@ -259,7 +257,26 @@ impl Shell {
                 );
             })
         };
+        let download_summary = Rc::clone(&current);
+        let downloads =
+            self.collection_download_change(
+                move |identity, downloaded| match &mut *download_summary.borrow_mut() {
+                    NamedDetailSummary::Genre(row)
+                        if identity == format!("genre:{}", row.genre_key) =>
+                    {
+                        row.downloaded_count = if downloaded { row.track_count } else { 0 };
+                    }
+                    NamedDetailSummary::Mood(row)
+                        if identity == format!("mood:{}", row.mood_key) =>
+                    {
+                        row.downloaded_count = if downloaded { row.track_count } else { 0 };
+                    }
+                    _ => {}
+                },
+            );
         MountedRoute::new(grouped.widget(), resume)
+            .with_download_change(downloads)
+            .with_download_change(tracks.download_change())
             .with_search(grouped.search())
             .with_layout_cycle(grouped.layout_cycle())
             .with_item_navigation(grouped.item_navigation())

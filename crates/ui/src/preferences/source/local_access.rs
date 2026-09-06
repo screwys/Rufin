@@ -483,7 +483,7 @@ pub(crate) fn mount_metadata_local_access_mapping(
         .borrow()
         .local_access
         .iter()
-        .find(|summary| summary.source_id == selected.artwork.source_id)
+        .find(|summary| summary.source_id == selected.source_id)
         .cloned();
     let access = summary.as_ref().and_then(|summary| summary.access.clone());
     let folder = access.as_ref().map(|access| access.root_path.clone());
@@ -541,7 +541,7 @@ pub(crate) fn mount_metadata_local_access_mapping(
 
     let editor = LocalAccessEditor::new(
         shell,
-        selected.artwork.source_id.clone(),
+        selected.source_id.clone(),
         folder,
         &server_prefix,
         Some(&local_prefix),
@@ -738,7 +738,7 @@ pub(crate) fn confirm_forget_source(
     after_forget: Rc<dyn Fn()>,
 ) {
     let dialog = adw::AlertDialog::builder()
-        .heading(tr("Forget Server"))
+        .heading(tr("Forget Source"))
         .body(format!(
             "{} {}",
             tr("This removes the server, cached library metadata, queue snapshot, and saved token for"),
@@ -746,7 +746,7 @@ pub(crate) fn confirm_forget_source(
         ))
         .build();
     let cancel = tr("Cancel");
-    let forget = tr("Forget Server");
+    let forget = tr("Forget Source");
     dialog.add_responses(&[("cancel", cancel.as_str()), ("forget", forget.as_str())]);
     dialog.set_default_response(Some("cancel"));
     dialog.set_close_response("cancel");

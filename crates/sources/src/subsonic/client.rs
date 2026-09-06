@@ -111,14 +111,16 @@ impl SubsonicSource {
 
     pub(crate) async fn live_search(
         &self,
+        source_id: &SourceId,
+        database: &library::Database,
         query: &str,
         limit: usize,
-    ) -> SourceResult<crate::LiveSearchResults> {
+    ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
         if query.trim().is_empty() {
-            return Ok(crate::LiveSearchResults::default());
+            return Ok((library::SearchResults::default(), None));
         }
         let count = limit.clamp(1, 100).to_string();
-        let body: SearchBody = self
+        let body: serde_json::Value = self
             .get_json(
                 "search3",
                 &[
@@ -132,101 +134,121 @@ impl SubsonicSource {
                 ],
             )
             .await?;
-        let results = body.search_result.unwrap_or_default();
-        Ok(crate::LiveSearchResults {
-            artists: results
-                .artist
-                .unwrap_or_default()
-                .into_iter()
-                .map(|value| artist_from_dto(self, value))
-                .map(|artist| {
-                    Ok(crate::LiveSearchArtist {
-                        object_id: artist.id,
-                        name: artist.name,
-                        artwork_binding: artist
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-            albums: results
-                .album
-                .unwrap_or_default()
-                .into_iter()
-                .map(|value| album_from_dto(self, value))
-                .map(|album| {
-                    Ok(crate::LiveSearchAlbum {
-                        object_id: album.id,
-                        title: album.title,
-                        artist: album.artist,
-                        artwork_binding: album
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-            tracks: results
-                .song
-                .unwrap_or_default()
-                .into_iter()
-                .map(|value| track_from_dto(self, value))
-                .map(|track| {
-                    Ok(crate::LiveSearchTrack {
-                        object_id: track.id,
-                        title: track.title,
-                        artist: track.artist,
-                        album: track.album,
-                        artwork_binding: track
-                            .image_ref
-                            .as_ref()
-                            .map(serde_json::to_vec)
-                            .transpose()?,
-                    })
-                })
-                .collect::<SourceResult<_>>()?,
-        })
+        let results = &body["searchResult3"];
+        let mut scan = library::Scan::begin_items(database, source_id.as_str()).await?;
+        let source = scan
+            .existing_source()
+            .ok_or(SourceError::InvalidRequest("Search source is unavailable"))?;
+        scan.begin_batch().await?;
+        let mut artist_ids = Vec::new();
+        let mut album_ids = Vec::new();
+        let mut track_ids = Vec::new();
+        for artist in results["artist"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value::<SubsonicArtist>(value.clone()).ok())
+            .take(limit.clamp(1, 100))
+            .map(|value| artist_from_dto(self, value))
+        {
+            if raw_item_id(&artist.id).trim().is_empty() {
+                continue;
+            }
+            artist_ids.push(artist.id.clone());
+            stage_artist(&mut scan, artist).await?;
+        }
+        for album in results["album"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value::<SubsonicAlbum>(value.clone()).ok())
+            .take(limit.clamp(1, 100))
+            .map(|value| album_from_dto(self, value))
+        {
+            if raw_item_id(&album.id).trim().is_empty() {
+                continue;
+            }
+            album_ids.push(album.id.clone());
+            stage_album(&mut scan, album).await?;
+        }
+        for track in results["song"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .filter_map(|value| serde_json::from_value::<SubsonicSong>(value.clone()).ok())
+            .take(limit.clamp(1, 100))
+            .map(|value| track_from_dto(self, value))
+        {
+            if raw_item_id(&track.id).trim().is_empty() {
+                continue;
+            }
+            track_ids.push(track.id.clone());
+            stage_track(&mut scan, track).await?;
+        }
+        scan.finish_batch().await?;
+        let outcome = scan.finish().await?;
+        let rows = database
+            .search_rows_by_objects(
+                source,
+                None,
+                false,
+                &track_ids,
+                &album_ids,
+                &artist_ids,
+                &library::ReadCancellation::new(),
+            )
+            .await?;
+        Ok((rows, Some(outcome)))
     }
 }
 
 impl SubsonicSource {
-    pub(crate) async fn collection_track_object_ids(
+    pub(crate) async fn stage_collection(
         &self,
+        scan: &mut library::Scan,
         collection: &crate::SourceCollection,
-        limit: usize,
-    ) -> SourceResult<Vec<String>> {
-        let limit = limit.clamp(1, 500);
+    ) -> SourceResult<()> {
         let album_ids = match collection {
             crate::SourceCollection::Album(id) => vec![raw_item_id(id).to_string()],
             crate::SourceCollection::Artist(id) => {
                 let body: ArtistBody = self
                     .get_json("getArtist", &[("id", raw_item_id(id).to_string())])
                     .await?;
-                body.artist
-                    .album
-                    .into_iter()
-                    .map(|album| raw_id_string(&album.id))
-                    .collect()
+                let mut ids = Vec::new();
+                for page in body.artist.album.chunks(100) {
+                    scan.begin_batch().await?;
+                    for album in page {
+                        ids.push(raw_id_string(&album.id));
+                        stage_album(scan, album_from_dto(self, album.clone())).await?;
+                    }
+                    scan.finish_batch().await?;
+                }
+                ids
             }
         };
-        let mut tracks = Vec::new();
         for album_id in album_ids {
-            if tracks.len() >= limit {
-                break;
+            let body: serde_json::Value = self.get_json("getAlbum", &[("id", album_id)]).await?;
+            let album = body.get("album").cloned().unwrap_or_default();
+            let metadata = serde_json::from_value::<SubsonicAlbum>(album.clone())?;
+            scan.begin_batch().await?;
+            stage_album(scan, album_from_dto(self, metadata)).await?;
+            scan.finish_batch().await?;
+            let songs = album
+                .get("song")
+                .and_then(serde_json::Value::as_array)
+                .into_iter()
+                .flatten()
+                .filter_map(|song| serde_json::from_value::<SubsonicSong>(song.clone()).ok())
+                .collect::<Vec<_>>();
+            for page in songs.chunks(100) {
+                scan.begin_batch().await?;
+                for song in page {
+                    stage_track(scan, track_from_dto(self, song.clone())).await?;
+                }
+                scan.finish_batch().await?;
             }
-            let body: AlbumBody = self.get_json("getAlbum", &[("id", album_id)]).await?;
-            tracks.extend(
-                body.album
-                    .song
-                    .into_iter()
-                    .map(|song| String::from(self.id("track", &raw_id_string(&song.id)))),
-            );
         }
-        tracks.truncate(limit);
-        Ok(tracks)
+        Ok(())
     }
 
     pub(super) async fn read_track(&self, track_id: &str) -> SourceResult<Track> {
@@ -267,36 +289,30 @@ impl SubsonicSource {
 impl SubsonicSource {
     pub(crate) async fn resolve_stream(
         &self,
-        request: &StreamRequest,
+        track_object_id: &str,
+        quality: StreamQuality,
     ) -> SourceResult<ResolvedStream> {
-        let format = if request.quality.max_bitrate_kbps().is_some() {
+        let format = if quality.max_bitrate_kbps().is_some() {
             "mp3"
         } else {
             "raw"
         };
-        self.resolve_audio(
-            &request.track_object_id,
-            request.quality.max_bitrate_kbps(),
-            format,
-        )
+        self.resolve_audio(track_object_id, quality.max_bitrate_kbps(), format)
     }
 
     pub(crate) fn resolve_download(
         &self,
-        request: &StreamRequest,
+        track_object_id: &str,
+        quality: StreamQuality,
     ) -> SourceResult<crate::ResolvedDownload> {
-        let (format, extension) = match request.quality {
+        let (format, extension) = match quality {
             StreamQuality::Original => ("raw", None),
             StreamQuality::MaxBitrateKbps(_) if self.flavor == SubsonicFlavor::Navidrome => {
                 ("opus", Some("opus"))
             }
             StreamQuality::MaxBitrateKbps(_) => ("mp3", Some("mp3")),
         };
-        let stream = self.resolve_audio(
-            &request.track_object_id,
-            request.quality.max_bitrate_kbps(),
-            format,
-        )?;
+        let stream = self.resolve_audio(track_object_id, quality.max_bitrate_kbps(), format)?;
         Ok(crate::ResolvedDownload::new(stream, extension))
     }
 
@@ -601,13 +617,17 @@ fn normalize_native_language(language: String) -> Option<String> {
 }
 
 impl SubsonicSource {
-    pub(crate) async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
+    pub(crate) async fn report_playback(
+        &self,
+        track_object_id: &str,
+        report: &SourceReportFact,
+    ) -> SourceResult<()> {
         match report.phase {
             SourceReportPhase::Started => {
                 self.get_unit(
                     "scrobble",
                     &[
-                        ("id", raw_item_id(&report.track_object_id).to_string()),
+                        ("id", raw_item_id(track_object_id).to_string()),
                         ("submission", "false".to_string()),
                     ],
                 )
@@ -623,7 +643,7 @@ impl SubsonicSource {
                 self.get_unit(
                     "scrobble",
                     &[
-                        ("id", raw_item_id(&report.track_object_id).to_string()),
+                        ("id", raw_item_id(track_object_id).to_string()),
                         ("submission", "true".to_string()),
                         ("time", started_at_millis.to_string()),
                     ],
@@ -642,6 +662,7 @@ pub(super) enum SubsonicCredential {
         navidrome_password: Option<String>,
     },
     ApiKey(String),
+    LegacyPassword(String),
 }
 
 #[derive(Deserialize, Serialize)]
@@ -657,6 +678,12 @@ struct StoredSubsonicCredential {
 struct StoredApiKeyCredential {
     version: u32,
     api_key: String,
+}
+
+#[derive(Deserialize, Serialize)]
+struct StoredLegacyCredential {
+    version: u32,
+    password: String,
 }
 
 #[derive(Deserialize)]
@@ -680,6 +707,10 @@ impl fmt::Debug for SubsonicCredential {
                 .finish(),
             Self::ApiKey(_) => formatter
                 .debug_tuple("SubsonicCredential::ApiKey")
+                .field(&"<redacted>")
+                .finish(),
+            Self::LegacyPassword(_) => formatter
+                .debug_tuple("SubsonicCredential::LegacyPassword")
                 .field(&"<redacted>")
                 .finish(),
         }
@@ -738,6 +769,13 @@ impl SubsonicCredential {
                         .map_err(saved_credential_error)?;
                     Self::from_api_key(&stored.api_key)
                 }
+                3 => {
+                    let stored = serde_json::from_str::<StoredLegacyCredential>(raw)
+                        .map_err(saved_credential_error)?;
+                    let credential = Self::LegacyPassword(stored.password);
+                    credential.validate()?;
+                    Ok(credential)
+                }
                 version => Err(SourceError::Other(format!(
                     "saved Subsonic credential version {version} is not supported"
                 ))),
@@ -783,6 +821,11 @@ impl SubsonicCredential {
                 api_key: api_key.clone(),
             })
             .expect("the OpenSubsonic API key is a JSON string"),
+            Self::LegacyPassword(password) => serde_json::to_string(&StoredLegacyCredential {
+                version: 3,
+                password: password.clone(),
+            })
+            .expect("the legacy password is a JSON string"),
         }
     }
 
@@ -791,7 +834,7 @@ impl SubsonicCredential {
             Self::Token {
                 navidrome_password, ..
             } => navidrome_password.as_deref(),
-            Self::ApiKey(_) => None,
+            Self::ApiKey(_) | Self::LegacyPassword(_) => None,
         }
     }
 
@@ -799,6 +842,7 @@ impl SubsonicCredential {
         match self {
             Self::Token { .. } => SubsonicAuthentication::Password,
             Self::ApiKey(_) => SubsonicAuthentication::ApiKey,
+            Self::LegacyPassword(_) => SubsonicAuthentication::LegacyPassword,
         }
     }
 
@@ -815,7 +859,7 @@ impl SubsonicCredential {
                         .as_ref()
                         .is_some_and(|password| password.is_empty())
             }
-            Self::ApiKey(api_key) => api_key.is_empty(),
+            Self::ApiKey(secret) | Self::LegacyPassword(secret) => secret.is_empty(),
         };
         if invalid {
             return Err(SourceError::Other(
@@ -835,6 +879,7 @@ impl SubsonicCredential {
                 vec![("u", username), ("s", salt.as_str()), ("t", token.as_str())]
             }
             Self::ApiKey(api_key) => vec![("apiKey", api_key.as_str())],
+            Self::LegacyPassword(password) => vec![("u", username), ("p", password.as_str())],
         };
         query.extend_from_slice(&[("v", API_VERSION), ("c", CLIENT_NAME), ("f", "json")]);
         query.extend_from_slice(extra);
@@ -965,19 +1010,6 @@ pub(super) fn normalize_base_url(raw: &str) -> SourceResult<Url> {
     Ok(url)
 }
 
-pub(super) fn rest_endpoint_identity(base_url: &Url) -> String {
-    let mut url = base_url.clone();
-    let base_path = base_url.path().trim_end_matches('/');
-    let path = if base_path.is_empty() {
-        "/rest/".to_string()
-    } else {
-        format!("{base_path}/rest/")
-    };
-    url.set_path(&path);
-    url.set_query(None);
-    url.set_fragment(None);
-    url.to_string()
-}
 pub(super) fn endpoint(base_url: &Url, method: &str) -> SourceResult<Url> {
     let mut url = base_url.clone();
     let base_path = base_url.path().trim_end_matches('/');
@@ -992,12 +1024,6 @@ pub(super) fn endpoint(base_url: &Url, method: &str) -> SourceResult<Url> {
     Ok(url)
 }
 
-pub(super) fn unauthenticated_url(base_url: &Url, method: &str) -> SourceResult<Url> {
-    let mut url = endpoint(base_url, method)?;
-    url.query_pairs_mut()
-        .extend_pairs([("v", API_VERSION), ("c", CLIENT_NAME), ("f", "json")]);
-    Ok(url)
-}
 const CLIENT_NAME: &str = "Rufin";
 const API_VERSION: &str = "1.16.1";
 const SALT_BYTES: usize = 12;
@@ -1060,12 +1086,6 @@ pub(super) fn random_salt() -> String {
         }
     }
     bytes.iter().map(|byte| format!("{byte:02x}")).collect()
-}
-pub(super) fn stable_source_id(source_id: &str, base_url: &str, username: &str) -> String {
-    format!(
-        "{:016x}",
-        stable_hash(&format!("{source_id}:{base_url}:{username}"))
-    )
 }
 pub(super) fn color_seed(id: &str) -> u32 {
     (stable_hash(id) & 0xffff_ffff) as u32
@@ -1222,16 +1242,6 @@ pub(super) struct AlbumListBody {
     pub(super) album_list: AlbumList,
 }
 #[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct AlbumBody {
-    #[serde(default)]
-    pub(super) album: AlbumDetail,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct AlbumDetail {
-    #[serde(default)]
-    pub(super) song: Vec<SubsonicSong>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
 pub(super) struct ArtistBody {
     #[serde(default)]
     pub(super) artist: ArtistDetail,
@@ -1255,8 +1265,6 @@ pub(super) struct SearchBody {
 pub(super) struct SearchResult {
     #[serde(default)]
     pub(super) artist: Option<Vec<SubsonicArtist>>,
-    #[serde(default)]
-    pub(super) album: Option<Vec<SubsonicAlbum>>,
     #[serde(default)]
     pub(super) song: Option<Vec<SubsonicSong>>,
 }
@@ -1452,7 +1460,7 @@ pub(super) struct SubsonicAlbum {
     pub(super) played: Option<String>,
     #[serde(default, rename = "playCount")]
     pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating")]
+    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
     pub(super) user_rating: Option<u32>,
     #[serde(default)]
     pub(super) genre: Option<String>,
@@ -1502,7 +1510,7 @@ pub(super) struct SubsonicSong {
     pub(super) played: Option<String>,
     #[serde(default, rename = "playCount")]
     pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating")]
+    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
     pub(super) user_rating: Option<u32>,
     #[serde(default)]
     pub(super) genre: Option<String>,
@@ -1544,9 +1552,9 @@ pub(super) struct SubsonicReplayGain {
 fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
 where
     D: Deserializer<'de>,
-    T: Deserialize<'de> + Default,
+    T: DeserializeOwned + Default,
 {
-    Ok(Option::<T>::deserialize(deserializer)?.unwrap_or_default())
+    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).unwrap_or_default())
 }
 #[derive(Clone, Debug, Deserialize)]
 pub(super) struct SubsonicArtist {
@@ -1559,7 +1567,7 @@ pub(super) struct SubsonicArtist {
     pub(super) played: Option<String>,
     #[serde(default, rename = "playCount")]
     pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating")]
+    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
     pub(super) user_rating: Option<u32>,
     #[serde(default)]
     pub(super) starred: Option<serde_json::Value>,
@@ -1692,6 +1700,83 @@ mod tests {
         assert_eq!(replay_gain.album_peak, Some(0.95));
     }
 
+    #[tokio::test]
+    async fn explicit_authentication_modes_survive_reopen_and_optional_endpoint_failure() {
+        for authentication in [
+            SubsonicAuthentication::Password,
+            SubsonicAuthentication::LegacyPassword,
+            SubsonicAuthentication::ApiKey,
+        ] {
+            let server = MockServer::start().await;
+            let endpoint = if authentication == SubsonicAuthentication::ApiKey {
+                "tokenInfo"
+            } else {
+                "ping"
+            };
+            Mock::given(method("GET"))
+                .and(path(format!("/rest/{endpoint}.view")))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response": { "status": "ok", "version": "1.16.1", "type": "Nextcloud Music",
+                        "tokenInfo": { "username": "api-user" } }
+                })))
+                .expect(1)
+                .mount(&server).await;
+            let source_id = crate::SourceId::new("opaque-source-instance");
+            let authenticated = SubsonicSource::authenticate(
+                source_id.clone(),
+                SubsonicFlavor::Subsonic,
+                authentication,
+                crate::CredentialHostInput {
+                    server_name: None,
+                    server_url: server.uri(),
+                    username: "api-user".into(),
+                    password: "generated & password".into(),
+                    trust_invalid_cert: false,
+                },
+            )
+            .await
+            .expect("optional getUser must not reject a source");
+            assert_eq!(authenticated.configuration.source_id, source_id);
+            let saved =
+                SubsonicSourceConfig::from_configuration(&authenticated.configuration).unwrap();
+            assert_eq!(saved.authentication, authentication);
+            let restored = SubsonicCredential::parse(&authenticated.credential).unwrap();
+            assert_eq!(restored.authentication(), authentication);
+            assert!(!format!("{restored:?}").contains("generated & password"));
+            let requests = server.received_requests().await.unwrap();
+            let request = &requests[0];
+            let query = request
+                .url
+                .query_pairs()
+                .collect::<std::collections::HashMap<_, _>>();
+            match authentication {
+                SubsonicAuthentication::Password => {
+                    assert_eq!(query.get("u").unwrap(), "api-user");
+                    assert!(query.contains_key("s") && query.contains_key("t"));
+                    assert!(!query.contains_key("p") && !query.contains_key("apiKey"));
+                }
+                SubsonicAuthentication::LegacyPassword => {
+                    assert_eq!(query.get("u").unwrap(), "api-user");
+                    assert_eq!(query.get("p").unwrap(), "generated & password");
+                    assert!(
+                        !query.contains_key("t")
+                            && !query.contains_key("s")
+                            && !query.contains_key("apiKey")
+                    );
+                }
+                SubsonicAuthentication::ApiKey => {
+                    assert_eq!(query.get("apiKey").unwrap(), "generated & password");
+                    assert!(
+                        !query.contains_key("u")
+                            && !query.contains_key("p")
+                            && !query.contains_key("t")
+                    );
+                    assert_eq!(requests.len(), 1, "API key login uses tokenInfo directly");
+                }
+            }
+        }
+    }
+
     #[test]
     fn opensubsonic_song_accepts_absent_optional_metadata() {
         for value in [
@@ -1713,6 +1798,160 @@ mod tests {
             assert!(song.genres.is_empty());
             assert!(song.moods.is_empty());
             assert!(song.replay_gain.is_none());
+        }
+    }
+
+    #[tokio::test]
+    async fn live_search_publishes_prepared_uri_rows_and_skips_malformed_entries() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/search3.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": { "status": "ok", "version": "1.16.1", "searchResult3": {
+                    "artist": [{"id":"artist-one", "name":"Artist"}, {"name":"broken"}],
+                    "album": [{"id":"album-one", "name":"Album", "artist":"Artist", "artistId":"artist-one", "coverArt":"cover-one"}],
+                    "song": [{"id":"track-one", "title":"Track", "artist":"Artist", "artistId":"artist-one", "album":"Album", "albumId":"album-one", "coverArt":"cover-one"}, {"title":"broken"}]
+                }}
+            }))).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".to_string(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::Password,
+            },
+            SubsonicCredential::from_password("password").serialize(),
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.db"))
+            .await
+            .unwrap();
+        let source_id = crate::SourceId::new("search-source");
+        library::Scan::begin(&database, source_id.as_str(), "Search", "search", None)
+            .await
+            .unwrap()
+            .finish()
+            .await
+            .unwrap();
+        let (results, outcome) = source
+            .live_search(&source_id, &database, "Track", 60)
+            .await
+            .unwrap();
+        assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+        assert_eq!(
+            (
+                results.tracks.len(),
+                results.albums.len(),
+                results.artists.len()
+            ),
+            (1, 1, 1)
+        );
+        let row = &results.tracks[0];
+        assert_eq!(
+            row.media_uri,
+            library::source_entity_uri(&source_id, "track", "subsonic:track:track-one")
+        );
+        let stored = database
+            .track_row_by_uri(&row.media_uri, &library::ReadCancellation::new())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row, &stored);
+        assert_eq!(row.artwork_binding, results.albums[0].artwork_binding);
+        assert!(row.artwork_binding.is_some());
+        let album = database
+            .album_detail(
+                &results.albums[0].media_uri,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(album.track_order, vec![row.media_uri.clone()]);
+        let songs = (0..125).map(|index| serde_json::json!({
+            "id": format!("collection-{index}"), "title":format!("Track {index}"),
+            "albumId":"album-one", "album":"Album", "artistId":"artist-one", "artist":"Artist"
+        })).collect::<Vec<_>>();
+        Mock::given(method("GET")).and(path("/rest/getAlbum.view"))
+            .and(query_param("id", "album-one"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","version":"1.16.1","album":{"id":"album-one","name":"Album","artistId":"artist-one","artist":"Artist","song":songs}}
+            }))).mount(&server).await;
+        let mut scan = library::Scan::begin_items(&database, source_id.as_str())
+            .await
+            .unwrap();
+        source
+            .stage_collection(
+                &mut scan,
+                &crate::SourceCollection::Album("subsonic:album:album-one".to_string()),
+            )
+            .await
+            .unwrap();
+        scan.finish().await.unwrap();
+        let album = database
+            .album_detail(
+                &results.albums[0].media_uri,
+                &library::ReadCancellation::new(),
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(
+            album.track_order.len(),
+            126,
+            "explicit collection acquisition retains more than one presentation window and never removes unseen rows"
+        );
+    }
+
+    #[tokio::test]
+    async fn song_only_search_keeps_album_text_and_existing_relationship() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET")).and(path("/rest/search3.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","version":"1.16.1","searchResult3":{
+                    "song":[{"id":"song","title":"Match","album":"Nonmatching album","albumId":"album","coverArt":"song-cover"}]
+                }}
+            }))).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::Password,
+            },
+            SubsonicCredential::from_password("password").serialize(),
+        )
+        .unwrap();
+        for cached in [false, true] {
+            let root = tempfile::tempdir().unwrap();
+            let database = library::Database::open(root.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let source_id = crate::SourceId::new("song-search");
+            let mut scan =
+                library::Scan::begin(&database, source_id.as_str(), "Search", "search", None)
+                    .await
+                    .unwrap();
+            if cached {
+                super::stage_album(&mut scan, super::album_from_dto(&source, serde_json::from_value(serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap())).await.unwrap();
+            }
+            scan.finish().await.unwrap();
+            let (results, outcome) = source
+                .live_search(&source_id, &database, "Match", 10)
+                .await
+                .unwrap();
+            assert!(matches!(outcome, Some(library::ScanOutcome::Changed(_))));
+            assert!(results.albums.is_empty());
+            assert_eq!(results.tracks.len(), 1);
+            let track = &results.tracks[0];
+            assert_eq!(track.album, "Nonmatching album");
+            assert_eq!(track.album_key.is_some(), cached);
+            assert!(track.artwork_binding.is_some());
         }
     }
 

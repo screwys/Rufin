@@ -37,7 +37,6 @@ pub(crate) struct WindowChrome {
     pub(super) root_stack: gtk::Stack,
     pub(crate) app_root_overlay: gtk::Overlay,
     pub(crate) app_content_stack: gtk::Stack,
-    pub(super) login_host: gtk::Box,
     pub(super) startup_loading_host: gtk::Box,
 }
 

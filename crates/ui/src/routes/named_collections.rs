@@ -29,10 +29,13 @@ use super::columns::{artwork_column, column_fit_width, mapped_row_index_column, 
 use super::detail_links::DetailLinks;
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
-    collection_grid_with_demand, install_grid_context, install_grid_open, install_grid_play,
+    collection_grid_with_demand, install_grid_context, install_grid_play,
 };
 use super::library_fields::{
     item_at_from_item, playlist_artwork, playlist_field, smart_playlist_field,
+};
+use super::playlist_picker::{
+    MediaDragSource, install_compact_media_drag_source, install_media_drag_source,
 };
 use super::recycled_cells::{RecycledBadgedTextCell, list_cell};
 use super::route::Route;
@@ -106,7 +109,6 @@ impl Shell {
             first_row_position,
             first_rows,
             |row: &GenreRow| row.genre_key,
-            selected,
             row_load,
             order_load,
         )
@@ -160,7 +162,6 @@ impl Shell {
             first_row_position,
             first_rows,
             |row: &MoodRow| row.mood_key,
-            selected,
             row_load,
             order_load,
         )
@@ -176,7 +177,6 @@ impl Shell {
         first_row_position: usize,
         first_rows: Vec<R>,
         row_key: impl Fn(&R) -> K + 'static,
-        selected: crate::runtime::SelectedLibrary,
         row_load: super::sparse_model::SparseLoad<K, R>,
         order_load: NamedOrderLoad<K, R>,
     ) -> MountedRoute
@@ -184,7 +184,7 @@ impl Shell {
         K: Clone + Eq + Send + Sync + 'static,
         R: NamedCollectionRow<Key = K> + Send + Sync + 'static,
     {
-        let sparse = SparseRouteModel::new(order, 32, selected.runtime.clone(), row_load);
+        let sparse = SparseRouteModel::new(order, 32, self.products.runtime.clone(), row_load);
         let row_key = Rc::new(row_key);
         sparse.seed_matching_at(first_row_position, first_rows, {
             let row_key = Rc::clone(&row_key);
@@ -242,7 +242,7 @@ impl Shell {
             )
         };
         let read = LatestMountedRouteRead::new_with_request(
-            selected.runtime.clone(),
+            self.products.runtime.clone(),
             apply,
             order_load,
             "mounted named collection",
@@ -279,7 +279,16 @@ impl Shell {
                 });
             })
         };
+
+        let download_rows = Rc::clone(&sparse);
+        let downloads = self.collection_download_change(move |identity, downloaded| {
+            download_rows.update_matching(
+                |row| row.playback().context_id() == identity && row.downloaded() != downloaded,
+                |row| row.set_downloaded(downloaded),
+            );
+        });
         page.mounted_route(resume)
+            .with_download_change(downloads)
             .with_item_navigation(content.item_navigation())
             .with_initial_demand({
                 let sparse = Rc::clone(&sparse);
@@ -297,6 +306,7 @@ pub(super) trait NamedCollectionRow: Clone + PartialEq + 'static {
     fn playback(&self) -> super::collections::PlaybackTarget;
     fn field(&self, field: LibraryField) -> String;
     fn downloaded(&self) -> bool;
+    fn set_downloaded(&mut self, downloaded: bool);
     fn present_context(
         &self,
         target: &gtk::Widget,
@@ -329,6 +339,10 @@ pub(super) trait NamedCollectionRow: Clone + PartialEq + 'static {
 
 impl NamedCollectionRow for GenreRow {
     type Key = GenreKey;
+
+    fn set_downloaded(&mut self, downloaded: bool) {
+        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+    }
 
     fn name(&self) -> &str {
         &self.name
@@ -380,6 +394,10 @@ impl NamedCollectionRow for GenreRow {
 impl NamedCollectionRow for MoodRow {
     type Key = MoodKey;
 
+    fn set_downloaded(&mut self, downloaded: bool) {
+        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+    }
+
     fn name(&self) -> &str {
         &self.name
     }
@@ -426,6 +444,10 @@ impl NamedCollectionRow for MoodRow {
 
 impl NamedCollectionRow for PlaylistRow {
     type Key = PlaylistKey;
+
+    fn set_downloaded(&mut self, downloaded: bool) {
+        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+    }
 
     fn name(&self) -> &str {
         &self.name
@@ -474,6 +496,10 @@ impl NamedCollectionRow for PlaylistRow {
 
 impl NamedCollectionRow for SmartPlaylistRow {
     type Key = SmartPlaylistKey;
+
+    fn set_downloaded(&mut self, downloaded: bool) {
+        self.downloaded_count = if downloaded { self.track_count } else { 0 };
+    }
 
     fn name(&self) -> &str {
         &self.name
@@ -592,15 +618,12 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
     fn new(shell: Rc<Shell>, fields: &[LibraryField]) -> Self {
         let current = Rc::new(std::cell::RefCell::new(None::<T>));
         let controls = super::cards::CollectionGridCoverView::without_favorite(msgid("Play"));
-        let cover_button = controls.imp().cover_button.get();
+        let cover_host = controls.imp().cover_host.get();
         let cover = shell.elastic_cover_group_projection_for_artwork(
             &[],
             super::library_fields::COLLECTION_GRID_MAX_CARD_WIDTH,
         );
-        cover_button.set_child(Some(&cover.widget()));
-        install_grid_open(&shell, &current, &cover_button, |shell, item| {
-            shell.navigate(item.route());
-        });
+        cover_host.append(&cover.widget());
         let menu = controls.imp().menu.get();
         let overlay = controls.imp().overlay.get();
         install_grid_play(
@@ -612,12 +635,20 @@ impl<T: NamedCollectionRow> NamedCollectionGridCell<T> {
                 controls.imp().play_last.get(),
             ],
             |shell, item, placement| {
-                item.playback()
-                    .play(shell, placement, placement == playback::QueuePlacement::Now);
+                item.playback().play(shell, placement);
             },
         );
         let body = CollectionGridCardCell::new(&shell, fields, controls.upcast());
         body.set_download_badge(shell.download_badge(true));
+        let drag_current = Rc::clone(&current);
+        let drag_shell = Rc::downgrade(&shell);
+        install_compact_media_drag_source(&body.card, &cover.widget(), move || {
+            let shell = drag_shell.upgrade()?;
+            let item = drag_current.borrow();
+            let item = item.as_ref()?;
+            let source = MediaDragSource::capture_target(&shell, item.playback());
+            Some((source, item.name().to_string()))
+        });
         install_grid_context(
             &shell,
             &current,
@@ -729,6 +760,7 @@ fn named_collection_column<T: NamedCollectionRow>(
                         .next()
                         .unwrap_or_default()
                 },
+                Some(|item| (item.playback(), item.name().to_string())),
             )
         }
         LibraryField::Title | LibraryField::TitleMerged => {
@@ -750,6 +782,15 @@ fn named_collection_column<T: NamedCollectionRow>(
                         }
                     }),
                 );
+                let drag_item = item.downgrade();
+                let drag_shell = Rc::downgrade(&setup_shell);
+                install_media_drag_source(&cell, move || {
+                    let shell = drag_shell.upgrade()?;
+                    let item = drag_item.upgrade()?;
+                    let row = item_at_from_item::<T>(&item)?;
+                    let source = MediaDragSource::capture_target(&shell, row.playback());
+                    Some((source, row.name().to_string()))
+                });
                 item.set_child(Some(&cell));
             });
             let bind_shell = Rc::clone(shell);

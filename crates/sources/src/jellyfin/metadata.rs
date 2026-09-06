@@ -47,7 +47,6 @@ impl JellyfinSource {
             rufin_filled.musicbrainz_release_track_id = true;
         }
         Ok(TrackMetadata {
-            track_key: track.track_key,
             writable: track_writable(&editor),
             source_search: false,
             revision: Some(revision(&item)?),
@@ -77,7 +76,6 @@ impl JellyfinSource {
             rufin_filled.musicbrainz_release_group_id = true;
         }
         Ok(AlbumMetadata {
-            album_key: album.album_key,
             writable: album_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
@@ -103,7 +101,6 @@ impl JellyfinSource {
             rufin_filled.musicbrainz_artist_id = true;
         }
         Ok(ArtistMetadata {
-            artist_key: artist.artist_key,
             writable: artist_writable(&editor),
             source_search: true,
             revision: Some(revision(&item)?),
@@ -420,7 +417,7 @@ fn track_values(item: &Value, fallback: &library::TrackRow) -> TrackMetadataValu
         title: string(item, "Name").unwrap_or_else(|| fallback.title.clone()),
         sort_title: string(item, "ForcedSortName"),
         artist: named(item, "ArtistItems").or_else(|| string_array(item, "Artists")),
-        album: string(item, "Album").or_else(|| Some(fallback.display_album.clone())),
+        album: string(item, "Album").or_else(|| Some(fallback.album.clone())),
         album_artist: named(item, "AlbumArtists"),
         track_number: number(item, "IndexNumber"),
         disc_number: number(item, "ParentIndexNumber"),
@@ -862,16 +859,22 @@ mod tests {
             source_key: library::SourceKey::from_raw(1),
             object_id: "jellyfin:track:track".to_string(),
             album_key: None,
+            album_media_uri: None,
             title: "Fallback".to_string(),
-            display_album: "Album".to_string(),
-            display_artist: "Artist".to_string(),
+            album: "Album".to_string(),
+            album_display_artist: None,
+            artist: "Artist".to_string(),
             duration_millis: 180_000,
             disc_number: 1,
             track_number: 1,
             year: None,
             release_date: None,
             date_added: None,
-            media_uri: None,
+            media_uri: library::source_entity_uri(
+                &library::SourceId::new("source"),
+                "track",
+                "jellyfin:track:track",
+            ),
             source_format: None,
             comment: None,
             bpm: None,
@@ -888,6 +891,9 @@ mod tests {
             play_count: 0,
             skip_count: 0,
             is_downloaded: false,
+            musicbrainz_album_id: None,
+            musicbrainz_release_group_id: None,
+            primary_artist_musicbrainz_id: None,
             artists: Vec::new(),
             album_artists: Vec::new(),
             genres: Vec::new(),

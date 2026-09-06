@@ -1,50 +1,13 @@
-use library::{SourceKey, TrackKey};
+use crate::{QueueItem, RunId};
 
-use crate::{PlaybackMedia, RunId};
-
-/// The immutable submission facts captured for one playback run.
-///
-/// This is intentionally narrower than a library item. Later library or
-/// metadata changes must not rewrite a run that has already started.
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ListeningTrack {
-    pub source_key: SourceKey,
-    pub track_key: Option<TrackKey>,
-    pub track_object_id: String,
-    pub recording_id: Option<String>,
-    pub title: String,
-    pub artists: Vec<String>,
-    pub album: Option<String>,
-    pub track_number: Option<i64>,
-    pub disc_number: Option<i64>,
-    pub duration_millis: u64,
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct ActivityListen {
     pub play_id: String,
-    pub track: ListeningTrack,
+    pub item: QueueItem,
     pub started_at_unix_seconds: i64,
     pub local_period: String,
     pub listened_millis: u64,
     pub skipped: bool,
-}
-
-impl ListeningTrack {
-    pub fn capture(source_key: SourceKey, track: &PlaybackMedia) -> Self {
-        Self {
-            source_key,
-            track_key: track.track_key,
-            track_object_id: track.track_object_id.clone(),
-            recording_id: track.musicbrainz_recording_id.clone(),
-            title: track.title.clone(),
-            artists: vec![track.artist.clone()],
-            album: (!track.album.trim().is_empty()).then(|| track.album.clone()),
-            track_number: track.track_number.filter(|number| *number > 0),
-            disc_number: track.disc_number.filter(|number| *number > 0),
-            duration_millis: track.duration_millis.max(0) as u64,
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -56,13 +19,13 @@ pub enum RunEndReason {
     Failed,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum ListeningFact {
     Started {
         run: RunId,
         started_at_unix_seconds: i64,
         local_period: String,
-        track: ListeningTrack,
+        item: Box<QueueItem>,
     },
     Progress {
         run: RunId,
@@ -75,18 +38,6 @@ pub enum ListeningFact {
         audible_millis: u64,
         playhead_millis: u64,
     },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct ListeningOutcome {
-    pub play_id: String,
-    pub run: RunId,
-    pub source_key: SourceKey,
-    pub track_key: Option<TrackKey>,
-    pub local_period: String,
-    pub qualified_plays: u32,
-    pub skips: u32,
-    pub last_played_at_unix_seconds: Option<i64>,
 }
 
 pub fn qualified_play_threshold_millis(duration_millis: u64) -> u64 {

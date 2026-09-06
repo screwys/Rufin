@@ -6,7 +6,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use library::ListenWrite;
 use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
-use playback::{ListeningTrack, external_scrobble_threshold_millis};
+use playback::{QueueItem, external_scrobble_threshold_millis};
 use reqwest::blocking::Client;
 use tracing::warn;
 
@@ -28,27 +28,17 @@ pub(crate) struct SubmissionTrack {
 }
 
 impl SubmissionTrack {
-    fn capture(track: &ListeningTrack) -> Option<Self> {
+    fn capture(track: &QueueItem) -> Option<Self> {
         let title = track.title.trim();
-        let artists = track
-            .artists
-            .iter()
-            .map(|artist| artist.trim())
-            .filter(|artist| !artist.is_empty())
-            .collect::<Vec<_>>();
-        if title.is_empty() || artists.is_empty() {
+        let artist = track.artist.trim();
+        if title.is_empty() || artist.is_empty() {
             return None;
         }
         Some(Self {
             title: title.to_string(),
-            artist: artists.join(", "),
-            album: track
-                .album
-                .as_deref()
-                .unwrap_or_default()
-                .trim()
-                .to_string(),
-            duration_millis: track.duration_millis,
+            artist: artist.to_string(),
+            album: track.album.trim().to_string(),
+            duration_millis: track.duration_millis.max(0) as u64,
         })
     }
 
@@ -248,23 +238,97 @@ impl Scrobbler {
         })
     }
 
-    pub fn update_settings(
+    /// Apply preferences immediately using the already loaded account credentials.
+    pub fn update_preferences(
         &self,
-        mut settings: Settings,
+        settings: &Settings,
         private_mode: bool,
     ) -> Result<(), String> {
+        let mut current = self
+            .state
+            .lock()
+            .map_err(|_| "scrobbling settings lock was poisoned".to_string())?;
+        current.private_mode = private_mode;
+        current.settings.lastfm.enabled = settings.lastfm.enabled;
+        current.settings.lastfm.now_playing_enabled = settings.lastfm.now_playing_enabled;
+        current.settings.librefm.enabled = settings.librefm.enabled;
+        current.settings.librefm.now_playing_enabled = settings.librefm.now_playing_enabled;
+        current.settings.listenbrainz.enabled = settings.listenbrainz.enabled;
+        current.settings.listenbrainz.now_playing_enabled =
+            settings.listenbrainz.now_playing_enabled;
+        drop(current);
+        if !private_mode {
+            self.worker.wake();
+        }
+        Ok(())
+    }
+
+    pub fn update_settings(&self, settings: Settings, private_mode: bool) -> Result<(), String> {
+        self.replace_settings(settings, Some(private_mode), None)
+    }
+
+    pub fn update_credentials(&self, settings: Settings) -> Result<(), String> {
+        self.replace_settings(settings, None, None)
+    }
+
+    /// Load stored accounts without overwriting an account edited while storage unlocks.
+    pub fn load_credentials(&self, load: impl FnOnce() -> Settings) -> Result<(), String> {
+        let expected = self
+            .state
+            .lock()
+            .map_err(|_| "scrobbling settings lock was poisoned".to_string())?
+            .settings
+            .clone();
+        self.replace_settings(load(), None, Some(expected))
+    }
+
+    fn replace_settings(
+        &self,
+        mut settings: Settings,
+        private_mode: Option<bool>,
+        expected: Option<Settings>,
+    ) -> Result<(), String> {
         settings.sanitize();
-        let (previous_accounts, current_accounts, reauthorized) = {
+        let (previous_accounts, current_accounts, reauthorized, private_mode) = {
             let mut state = self
                 .state
                 .lock()
                 .map_err(|_| "scrobbling settings lock was poisoned".to_string())?;
+            if let Some(mut expected) = expected {
+                expected.lastfm.enabled = state.settings.lastfm.enabled;
+                expected.lastfm.now_playing_enabled = state.settings.lastfm.now_playing_enabled;
+                expected.librefm.enabled = state.settings.librefm.enabled;
+                expected.librefm.now_playing_enabled = state.settings.librefm.now_playing_enabled;
+                expected.listenbrainz.enabled = state.settings.listenbrainz.enabled;
+                expected.listenbrainz.now_playing_enabled =
+                    state.settings.listenbrainz.now_playing_enabled;
+                if expected.lastfm != state.settings.lastfm {
+                    settings.lastfm = state.settings.lastfm.clone();
+                }
+                if expected.librefm != state.settings.librefm {
+                    settings.librefm = state.settings.librefm.clone();
+                }
+                if expected.listenbrainz != state.settings.listenbrainz {
+                    settings.listenbrainz = state.settings.listenbrainz.clone();
+                }
+            }
+            if private_mode.is_none() {
+                settings.lastfm.enabled = state.settings.lastfm.enabled;
+                settings.lastfm.now_playing_enabled = state.settings.lastfm.now_playing_enabled;
+                settings.librefm.enabled = state.settings.librefm.enabled;
+                settings.librefm.now_playing_enabled = state.settings.librefm.now_playing_enabled;
+                settings.listenbrainz.enabled = state.settings.listenbrainz.enabled;
+                settings.listenbrainz.now_playing_enabled =
+                    state.settings.listenbrainz.now_playing_enabled;
+            }
             let previous = known_accounts(&state.settings);
             let current = known_accounts(&settings);
             let reauthorized = reauthorized_accounts(&state.settings, &settings);
             state.settings = settings;
-            state.private_mode = private_mode;
-            (previous, current, reauthorized)
+            if let Some(private_mode) = private_mode {
+                state.private_mode = private_mode;
+            }
+            (previous, current, reauthorized, state.private_mode)
         };
         for (service, account_id) in previous_accounts {
             if !current_accounts
@@ -294,7 +358,7 @@ impl Scrobbler {
         Ok(())
     }
 
-    pub fn now_playing(&self, track: &ListeningTrack) {
+    pub fn now_playing(&self, track: &QueueItem) {
         let enabled = self
             .state
             .lock()
@@ -304,7 +368,7 @@ impl Scrobbler {
         }
     }
 
-    pub fn listen_delivery_targets(&self, track: &ListeningTrack) -> Vec<ListenDeliveryTarget> {
+    pub fn listen_delivery_targets(&self, track: &QueueItem) -> Vec<ListenDeliveryTarget> {
         let targets = {
             let state = self.state.lock().ok();
             let Some(state) = state else {
@@ -313,7 +377,7 @@ impl Scrobbler {
             if state.private_mode {
                 return Vec::new();
             }
-            if external_scrobble_threshold_millis(track.duration_millis).is_some() {
+            if external_scrobble_threshold_millis(track.duration_millis.max(0) as u64).is_some() {
                 targets(&state.settings, false)
             } else {
                 Vec::new()
@@ -669,7 +733,7 @@ fn unix_seconds() -> i64 {
 
 #[cfg(test)]
 mod tests {
-    use library::{Database, ReadCancellation, Scan, ScanOutcome, TrackSort};
+    use library::{Database, ReadCancellation, Scan, ScanOutcome, SourceId, TrackSort};
 
     use super::*;
 
@@ -694,6 +758,38 @@ mod tests {
         let listenbrainz = opaque_account_id(DeliveryService::ListenBrainz, "secret");
         assert_ne!(lastfm, listenbrainz);
         assert!(!lastfm.contains("secret"));
+    }
+
+    #[test]
+    fn delayed_credentials_preserve_private_mode_preferences_and_new_account() {
+        let directory = tempfile::tempdir().unwrap();
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let database = runtime
+            .block_on(Database::open(directory.path().join("state.sqlite")))
+            .unwrap();
+        let scrobbler = Scrobbler::new(
+            database,
+            runtime.handle().clone(),
+            Settings::default(),
+            false,
+        )
+        .unwrap();
+        scrobbler
+            .load_credentials(|| {
+                let mut changed = Settings::default();
+                changed.listenbrainz.user_token = "new-account".into();
+                changed.listenbrainz.enabled = false;
+                scrobbler.update_settings(changed, true).unwrap();
+                let mut delayed = Settings::default();
+                delayed.listenbrainz.user_token = "old-account".into();
+                delayed.listenbrainz.enabled = true;
+                delayed
+            })
+            .unwrap();
+        let current = scrobbler.state.lock().unwrap();
+        assert!(current.private_mode);
+        assert!(!current.settings.listenbrainz.enabled);
+        assert_eq!(current.settings.listenbrainz.user_token, "new-account");
     }
 
     #[tokio::test(flavor = "multi_thread")]
@@ -744,7 +840,7 @@ mod tests {
             panic!("initial Scan must publish")
         };
         let cancellation = ReadCancellation::new();
-        let track_key = database
+        let track_uri = database
             .track_order(
                 publication.source,
                 None,
@@ -754,7 +850,8 @@ mod tests {
                 &cancellation,
             )
             .await
-            .expect("Track order")[0];
+            .expect("Track order")[0]
+            .clone();
         let settings = Settings {
             lastfm: AudioscrobblerSettings {
                 enabled: true,
@@ -780,45 +877,45 @@ mod tests {
             )
         })
         .expect("start Scrobbler");
-        let track = ListeningTrack {
-            source_key: publication.source,
-            track_key: Some(track_key),
-            track_object_id: "track".to_string(),
-            recording_id: None,
-            title: "Track".to_string(),
-            artists: vec!["Artist".to_string()],
-            album: Some("Album".to_string()),
-            track_number: Some(1),
-            disc_number: Some(1),
-            duration_millis: 180_000,
-        };
+        let track = database
+            .queue_items_for_uris(std::slice::from_ref(&track_uri), &cancellation)
+            .await
+            .expect("materialize Track")
+            .pop()
+            .expect("Track");
         let deliveries = scrobbler.listen_delivery_targets(&track);
         assert_eq!(deliveries.len(), 2);
         let listen = ListenWrite {
-            external_id: "play".to_string(),
-            track_key: track.track_key,
-            track_object_id: track.track_object_id.clone(),
-            track_title: track.title.clone(),
-            artist_name: track.artists.join(", "),
-            album_title: track.album.clone().unwrap_or_default(),
+            external_id: Some("play".to_string()),
+            media_uri: track.media_uri.clone(),
+            title: track.title.clone(),
+            artist: track.artist.clone(),
+            album: track.album.clone(),
+            duration_millis: track.duration_millis,
+            disc_number: track.disc_number,
+            track_number: track.track_number,
+            year: track.year,
+            release_date: track.release_date.clone(),
+            source_format: track.source_format.clone(),
+            musicbrainz_recording_id: track.musicbrainz_recording_id.clone(),
+            musicbrainz_release_track_id: track.musicbrainz_release_track_id.clone(),
             started_at: 100,
             local_period: "1970-01".to_string(),
-            duration_millis: 180_000,
             listened_millis: 90_000,
             skipped: false,
         };
         database
-            .record_listen(publication.source, &listen, &deliveries)
+            .record_listen(&listen, &deliveries)
             .await
             .expect("record Activity");
         database
-            .record_listen(publication.source, &listen, &deliveries)
+            .record_listen(&listen, &deliveries)
             .await
             .expect("record Activity idempotently");
 
         assert_eq!(
             database
-                .activity_history(publication.source, &cancellation)
+                .activity_history(Some(&SourceId::new("source")), "", &cancellation)
                 .await
                 .expect("Activity")
                 .len(),
@@ -864,7 +961,7 @@ mod tests {
         );
         assert_eq!(
             database
-                .activity_history(publication.source, &cancellation)
+                .activity_history(Some(&SourceId::new("source")), "", &cancellation)
                 .await
                 .expect("Activity after account removal")
                 .len(),

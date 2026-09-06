@@ -94,6 +94,10 @@ pub(crate) const GENERAL_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/general.ui";
 pub(crate) const INTEGRATIONS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/integrations.ui";
+pub(crate) const BACKUP_DIALOG_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/backup.ui";
+pub(crate) const BACKUP_PREFERENCES_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/backup.ui";
 pub(crate) const LIBRARY_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/library.ui";
 pub(crate) const METADATA_DIALOG_RESOURCE: &str =
@@ -112,6 +116,10 @@ pub(crate) const PREFERENCES_REORDER_ROW_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/reorder_row.ui";
 pub(crate) const CONNECTION_PROGRESS_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/connection_progress.ui";
+pub(crate) const ONBOARDING_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/onboarding.ui";
+pub(crate) const SOURCE_CHOICE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/choice.ui";
 pub(crate) const SOURCE_CHOICE_SELECTOR_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/choice_selector.ui";
 pub(crate) const CREDENTIAL_HOST_RESOURCE: &str =
@@ -191,6 +199,8 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     DIAGNOSTICS_RESOURCE,
     INTEGRATIONS_RESOURCE,
     LIBRARY_PREFERENCES_RESOURCE,
+    BACKUP_PREFERENCES_RESOURCE,
+    BACKUP_DIALOG_RESOURCE,
     METADATA_DIALOG_RESOURCE,
     PLAYLIST_NAME_DIALOG_RESOURCE,
     RELEASE_NOTE_ROW_RESOURCE,
@@ -200,6 +210,8 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     PREFERENCES_REORDER_ROW_RESOURCE,
     CONNECTION_PROGRESS_RESOURCE,
     SOURCE_CHOICE_SELECTOR_RESOURCE,
+    SOURCE_CHOICE_RESOURCE,
+    ONBOARDING_RESOURCE,
     CREDENTIAL_HOST_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     MANAGE_SERVER_RESOURCE,

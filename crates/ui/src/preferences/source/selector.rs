@@ -136,7 +136,7 @@ fn source_menu_content(
 
     let icon_name = configured_source_icon_name(&source);
     let music_folders = selected
-        .filter(|selected| selected.artwork.source_id == source.id)
+        .filter(|selected| selected.source_id == source.id)
         .map(|selected| Arc::clone(&selected.music_folders))
         .unwrap_or_else(|| Arc::from([]));
     let selected_music_folder_id = if music_folders.is_empty() {

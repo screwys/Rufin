@@ -2,6 +2,9 @@
 //!
 //! `rufin` constructs these handles; the crates behind them implement the behavior.
 
+use std::sync::Arc;
+
+mod backup;
 mod diagnostics;
 mod events;
 mod inputs;
@@ -11,6 +14,7 @@ pub mod source;
 mod waveform;
 
 pub use ::playback::PlaybackHandles;
+pub use backup::{BackupHandle, BackupPort, BackupPreview, BackupSettings};
 pub use diagnostics::{DiagnosticsHandle, DiagnosticsPort};
 pub use downloads::{
     DownloadEvent, DownloadQueueItem, DownloadQueueSnapshot, DownloadQueueState, DownloadSubject,
@@ -33,6 +37,9 @@ pub use waveform::WaveformProjection;
 
 #[derive(Clone)]
 pub struct ProductHandles {
+    pub backup: BackupHandle,
+    pub library: Arc<library::Database>,
+    pub runtime: tokio::runtime::Handle,
     pub source: SourceHandle,
     pub downloads: downloads::Downloads,
     pub playback: PlaybackHandles,

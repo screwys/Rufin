@@ -4,28 +4,7 @@ use serde::de::DeserializeOwned;
 use serde::{Deserialize, Serialize};
 
 use crate::{SourceError, SourceInputIdentity, SourceResult, subsonic::SubsonicFlavor};
-
-#[derive(Clone, Debug, Deserialize, Eq, Hash, Ord, PartialEq, PartialOrd, Serialize)]
-#[serde(transparent)]
-pub struct SourceId(String);
-
-impl SourceId {
-    pub fn new(value: impl Into<String>) -> Self {
-        let value = value.into();
-        assert!(!value.is_empty(), "SourceId cannot be empty");
-        Self(value)
-    }
-
-    pub fn as_str(&self) -> &str {
-        &self.0
-    }
-}
-
-impl std::fmt::Display for SourceId {
-    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        formatter.write_str(&self.0)
-    }
-}
+use library::SourceId;
 
 /// Credential-free source configuration persisted by Rufin Settings.
 ///
@@ -121,13 +100,6 @@ pub enum EditableSource {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum SourceCacheMatch {
-    Exact,
-    ReaderUpgrade,
-    Incompatible,
-}
-
 impl SourceConfiguration {
     pub fn is_local(&self) -> bool {
         self.kind == crate::local::LOCAL_SOURCE_ID
@@ -167,30 +139,6 @@ impl SourceConfiguration {
     /// validate an existing cache even when live source access is unavailable.
     pub fn input_identity(&self) -> SourceResult<SourceInputIdentity> {
         self.input_identity_with_reader_versions(None, true)
-    }
-
-    /// Classify an accepted cache against this source's current fact reader.
-    ///
-    /// Known reader upgrades may show their already-observed facts while an
-    /// authoritative refresh rebuilds the affected source representation.
-    pub fn cache_match(&self, cached: &SourceInputIdentity) -> SourceResult<SourceCacheMatch> {
-        if cached == &self.input_identity()? {
-            return Ok(SourceCacheMatch::Exact);
-        }
-        if self.kind == crate::jellyfin::JELLYFIN_SOURCE_ID
-            && cached == &self.input_identity_with_reader_versions(None, false)?
-        {
-            return Ok(SourceCacheMatch::ReaderUpgrade);
-        }
-        if self.kind == "navidrome" {
-            let config = crate::subsonic::SubsonicSourceConfig::from_configuration(self)?;
-            if config.navidrome_library_version > 0
-                && cached == &self.input_identity_with_reader_versions(Some(0), true)?
-            {
-                return Ok(SourceCacheMatch::ReaderUpgrade);
-            }
-        }
-        Ok(SourceCacheMatch::Incompatible)
     }
 
     fn input_identity_with_reader_versions(
@@ -469,39 +417,83 @@ mod tests {
     }
 
     #[test]
-    fn released_jellyfin_artist_cache_is_a_reader_upgrade_not_incompatible() {
-        let stored = migrated_source(
-            "jellyfin",
-            JellyfinSourceConfig {
-                base_url: "https://music.example".to_string(),
-                server_id: Some("server-one".to_string()),
-                user_id: "account-id".to_string(),
-                username: "listener".to_string(),
-                trust_invalid_cert: false,
-                use_instant_mix: false,
-            }
-            .into_payload(),
-        );
-        let released = stored
-            .input_identity_with_reader_versions(None, false)
-            .expect("released Jellyfin input identity");
-
-        assert_ne!(
-            stored.input_identity().expect("current Jellyfin identity"),
-            released
-        );
-        assert_eq!(
-            stored
-                .cache_match(&released)
-                .expect("classify released cache"),
-            SourceCacheMatch::ReaderUpgrade
-        );
-    }
-
-    #[test]
     fn jellyfin_playlist_adds_do_not_offer_repeated_tracks() {
         assert!(!migrated_source("jellyfin", serde_json::Value::Null).playlist_tracks_can_repeat());
         assert!(migrated_source("subsonic", serde_json::Value::Null).playlist_tracks_can_repeat());
         assert!(migrated_source("local", serde_json::Value::Null).playlist_tracks_can_repeat());
+    }
+}
+
+impl SourceConfiguration {
+    pub fn recognize_media_locator(&self, locator: &str) -> Option<String> {
+        let uri = url::Url::parse(locator).ok()?;
+        let payload: serde_json::Value = serde_json::from_str(&self.provider_payload).ok()?;
+        let base = url::Url::parse(payload.get("base_url")?.as_str()?).ok()?;
+        if uri.origin() != base.origin()
+            || !uri.path().starts_with(base.path().trim_end_matches('/'))
+        {
+            return None;
+        }
+        let path = uri.path().strip_prefix(base.path().trim_end_matches('/'))?;
+        let object = if self.kind == "jellyfin" {
+            let mut parts = path.trim_start_matches('/').split('/');
+            if !parts.next()?.eq_ignore_ascii_case("Audio") {
+                return None;
+            }
+            let id = parts.next()?;
+            if !parts.next()?.starts_with("stream") {
+                return None;
+            }
+            format!("jellyfin:track:{id}")
+        } else if matches!(self.kind.as_str(), "subsonic" | "navidrome") {
+            if !matches!(
+                path,
+                "/rest/stream" | "/rest/stream.view" | "/rest/download" | "/rest/download.view"
+            ) {
+                return None;
+            }
+            let id = uri.query_pairs().find(|(key, _)| key == "id")?.1;
+            format!("{}:track:{id}", self.kind)
+        } else {
+            return None;
+        };
+        Some(library::source_entity_uri(
+            &self.source_id,
+            "track",
+            &object,
+        ))
+    }
+}
+
+#[cfg(test)]
+mod locator_tests {
+    #[test]
+    fn only_captured_adapter_recognizes_its_provider_locator() {
+        let config = super::SourceConfiguration {
+            source_id: library::SourceId::new("one"),
+            kind: "navidrome".into(),
+            name: "Music".into(),
+            provider_payload: r#"{"version":1,"base_url":"https://music.test/server"}"#.into(),
+        };
+        assert_eq!(
+            config.recognize_media_locator(
+                "https://music.test/server/rest/stream.view?id=song&p=secret"
+            ),
+            Some(library::source_entity_uri(
+                &config.source_id,
+                "track",
+                "navidrome:track:song"
+            ))
+        );
+        assert!(
+            config
+                .recognize_media_locator("https://other.test/server/rest/stream.view?id=song")
+                .is_none()
+        );
+        assert!(
+            config
+                .recognize_media_locator("https://music.test/unrelated/song")
+                .is_none()
+        );
     }
 }

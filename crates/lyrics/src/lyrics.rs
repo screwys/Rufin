@@ -6,7 +6,6 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use playback::PlaybackMedia;
 use serde::Deserialize;
 use tracing::debug;
 
@@ -679,17 +678,6 @@ impl LyricsLookup {
         lookup
     }
 
-    fn from_track(track: &PlaybackMedia) -> Self {
-        let mut lookup = Self::from_search(
-            &track.artist,
-            &track.title,
-            u32::try_from(track.duration_millis.max(0) / 1_000).unwrap_or(u32::MAX),
-        );
-        lookup.push_artist_name(&track.artist);
-        lookup.push_primary_artist_variants();
-        lookup
-    }
-
     fn queries(&self) -> Vec<(String, String)> {
         let artists = if self.artist_names.is_empty() {
             vec![String::new()]
@@ -819,7 +807,7 @@ pub fn search_lyrics(
     Ok(results)
 }
 pub(crate) fn external_best_lyrics(
-    track: &PlaybackMedia,
+    lookup: &LyricsLookup,
     providers: &[ExternalLyricsProvider],
     require_word_timing: bool,
     prefer_translations: bool,
@@ -829,7 +817,6 @@ pub(crate) fn external_best_lyrics(
     if cancelled.load(Ordering::Acquire) {
         return Ok(None);
     }
-    let lookup = LyricsLookup::from_track(track);
     let mut results = Vec::new();
     let mut errors = Vec::new();
     let mut had_success = false;

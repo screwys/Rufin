@@ -3,6 +3,7 @@
 
 mod activity;
 mod artwork;
+mod backup;
 mod collections;
 mod db;
 mod favorites;
@@ -11,10 +12,11 @@ mod keys;
 mod local;
 mod loudness;
 mod lyrics;
+mod m3u;
+mod migration;
 mod playlists;
 mod queue;
 mod radio;
-mod recovery;
 mod scan;
 mod schema;
 mod search;
@@ -22,11 +24,15 @@ mod smart_playlists;
 mod tracks;
 
 pub use activity::{
-    ActivityAlbumRow, ActivityArtistRow, ActivityGenreRow, ActivityHistoryRow, ActivityTrackRow,
-    CalendarActivityPeriod, CalendarActivitySummary, ListenDeliveryTarget, ListenWrite,
-    PendingListenDelivery,
+    ActivityAlbumRow, ActivityArtistRow, ActivityCsvFormat, ActivityGenreRow, ActivityImportReport,
+    ActivityRecord, ActivityTrackRow, CalendarActivityPeriod, CalendarActivitySummary, HistoryRow,
+    ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
-pub use artwork::{LocalAlbumArtworkInput, RepresentativeArtworkScope};
+pub use artwork::RepresentativeArtworkScope;
+pub use backup::{
+    BackupContents, BackupFrequency, BackupManifest, BackupOptions, BackupRestoreReport,
+    BackupSchedule, StagedBackup, backup_filename, scheduled_backup_timestamp, stage_backup,
+};
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
@@ -34,39 +40,43 @@ pub use collections::{
     GenreSort, MoodDetail, MoodRow, MoodSort,
 };
 pub use db::{Database, ReadCancellation};
-pub use favorites::FavoriteTarget;
+pub use favorites::{FavoriteTarget, UserMediaStateWrite};
 pub use home::{
     HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage, HomeProviderSection,
     HomeSectionRows, HomeTrackRow,
 };
 pub use keys::{
-    AlbumDetailRouteKey, AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey,
-    LocalAccessFileKey, LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, QueueOccurrenceKey,
-    SmartPlaylistKey, SourceKey, TrackKey,
+    AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,
+    LocalFileKey, MoodKey, PlaylistEntryKey, PlaylistKey, SmartPlaylistKey, SourceId, SourceKey,
+    TrackKey, cue_media_parts, cue_media_uri, file_media_path, normalize_direct_media_uri,
+    source_entity_parts, source_entity_uri,
 };
 pub use local::{
-    LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind, LocalFileRow,
-    LocalFileState, LocalFileWrite, MappingTrackRow,
+    DownloadMetadata, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind,
+    LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, MappingTrackRow,
 };
-pub use loudness::{
-    AlbumLoudnessTrack, AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork,
-};
+pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;
+pub use m3u::PlaylistImportReport;
 pub use playlists::{
-    PlaylistDestination, PlaylistEntryOrder, PlaylistEntryRow, PlaylistEntrySort,
-    PlaylistGenreLink, PlaylistRow, PlaylistSort,
+    PlaylistDetailPage, PlaylistEntryRow, PlaylistEntrySort, PlaylistEntryWrite, PlaylistGenreLink,
+    PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    QueueCompactOccurrence, QueueMedia, QueuePageRow, QueueProvenance, QueueRepeatMode,
-    QueueRestore,
+    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueCollection, QueueEdit, QueueInput, QueueItem,
+    QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance, QueueReorderTarget,
+    QueueRepeatMode, QueueRestore,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
-pub use scan::{CachedSource, Freshness, Publication, Scan, ScanLink, ScanOutcome};
+pub use scan::{
+    CachedSource, Freshness, LocalArtworkCandidate, Publication, Scan, ScanLink, ScanOutcome,
+};
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
-    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
-    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistValueSuggestions,
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistDetailPage,
+    SmartPlaylistListSort, SmartPlaylistRow, SmartPlaylistRule, SmartPlaylistRuleField,
+    SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistRuleValueKind,
+    SmartPlaylistSort, SmartPlaylistTrackRow, SmartPlaylistValueSuggestions, SmartPlaylistWrite,
 };
 pub use tracks::{
     TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackRoutePage, TrackRow, TrackSort,
@@ -83,11 +93,8 @@ pub enum LibraryError {
     Io(#[from] std::io::Error),
     #[error("stored JSON failed: {0}")]
     Json(#[from] serde_json::Error),
-    #[error("unsupported Store (application ID {application_id}, schema {user_version})")]
-    UnsupportedStore {
-        application_id: i64,
-        user_version: i64,
-    },
+    #[error("known Store migration failed: {0}")]
+    Migration(String),
     #[error("invalid Library Store: {0}")]
     InvalidStore(String),
     #[error("scan input is invalid: {0}")]
@@ -108,8 +115,8 @@ pub type LibraryResult<T> = Result<T, LibraryError>;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RouteSeedWindow {
-    relative: f64,
-    limit: usize,
+    pub(crate) relative: f64,
+    pub(crate) limit: usize,
 }
 
 impl RouteSeedWindow {
@@ -144,6 +151,9 @@ impl RouteSeedWindow {
 impl LibraryError {
     pub fn is_store_path_io(&self) -> bool {
         matches!(self, Self::Io(_) | Self::Sqlite(sqlx::Error::Io(_)))
+            || matches!(self, Self::Sqlite(sqlx::Error::Database(error))
+                if error.code().as_deref().and_then(|code|code.parse::<i32>().ok())
+                    .is_some_and(|code|matches!(code & 0xff, 3 | 8 | 10 | 13 | 14)))
     }
 }
 

@@ -591,10 +591,6 @@ row:focus {
   opacity: 0.82;
 }
 
-.first-run-content statuspage {
-  margin-bottom: 4px;
-}
-
 .right-panel {
   background: color-mix(in srgb, var(--window-bg-color) 96%, var(--card-bg-color));
   color: var(--window-fg-color);
@@ -970,34 +966,12 @@ row.entry.password:focus-within {
   border-radius: 999px;
 }
 
-.source-choice-list {
-  padding: 4px;
-  border-radius: 8px;
-  background: var(--card-bg-color);
+.playlist-name-owner:checked:not(:hover) {
+  background: transparent;
+  box-shadow: none;
 }
 
-.compact-source-choice-list {
-  padding: 3px;
-}
 
-.source-choice-button {
-  padding: 4px;
-  border-radius: 4px;
-  min-height: 60px;
-}
-
-.compact-source-choice-button {
-  padding: 3px 4px;
-  min-height: 46px;
-}
-
-.source-choice-button:hover {
-  background: color-mix(in srgb, currentColor 8%, transparent);
-}
-
-.source-choice-button.active {
-  background: color-mix(in srgb, var(--window-fg-color) 10%, transparent);
-}
 
 .seeded-gradient-showcase {
   --showcase-primary: rgba(116, 82, 188, 0.78);
@@ -2206,6 +2180,14 @@ listview.queue-list row {
   color: var(--lyrics-highlight-color, var(--accent-color));
 }
 
+.lyrics-cue-base {
+  color: var(--window-fg-color);
+}
+
+.lyrics-cue-base.lyrics-furigana {
+  color: var(--dim-label-color, var(--window-fg-color));
+}
+
 .lyrics-agent-name {
   font-size: 0.72em;
   color: var(--dim-label-color);
@@ -2499,4 +2481,16 @@ modelbutton.rufin-menu-selected:dir(rtl) {
   background-repeat: no-repeat;
   background-size: 70% 14px;
   color: transparent;
+}
+.playlist-name-owner-entry {
+  padding-right: 42px;
+}
+
+preferencespage.backup-settings > scrolledwindow > viewport > clamp > box {
+  margin-top: 12px;
+  margin-bottom: 12px;
+}
+
+preferencespage.backup-settings row:not(.entry):not(.spin) > box.header {
+  min-height: 40px;
 }

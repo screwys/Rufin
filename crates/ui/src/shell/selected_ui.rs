@@ -8,7 +8,6 @@ use crate::favorites::FavoriteSessionState;
 use crate::player::lyrics::search::connect_lyrics_search_controls;
 use crate::player::lyrics::state::SelectedLyricsState;
 use crate::player::queue::QueueState;
-use crate::player::queue::clear_queue_panel_children;
 use crate::preferences::dialogs::popup::present_light_dismiss_dialog;
 use crate::runtime::{SelectedLibrary, WaveformProjection};
 
@@ -21,28 +20,16 @@ use super::Shell;
 /// own cleanup step.
 pub(crate) struct SelectedUiSession {
     pub(crate) library: SelectedLibrary,
-    pub(crate) playback: SelectedPlaybackState,
-    pub(crate) queue: QueueState,
-    pub(crate) lyrics: SelectedLyricsState,
     pub(crate) favorites: FavoriteSessionState,
     pub(crate) dialogs: SelectedDialogState,
-    playlist_picker_refresh: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl SelectedUiSession {
-    pub(crate) fn new(library: SelectedLibrary, player: PlaybackView) -> Self {
+    pub(crate) fn new(library: SelectedLibrary) -> Self {
         Self {
             library,
-            playback: SelectedPlaybackState {
-                player,
-                waveform: WaveformProjection::default(),
-                seek_preview_seconds: None,
-            },
-            queue: QueueState::new(),
-            lyrics: SelectedLyricsState::new(),
             favorites: FavoriteSessionState::default(),
             dialogs: SelectedDialogState::default(),
-            playlist_picker_refresh: RefCell::new(None),
         }
     }
 }
@@ -84,12 +71,22 @@ impl Drop for SelectedDialogState {
 
 pub(crate) struct SelectedUiState {
     session: RefCell<Option<SelectedUiSession>>,
+    pub(crate) metadata_load: RefCell<Option<gtk::glib::JoinHandle<()>>>,
+    playback: RefCell<Option<SelectedPlaybackState>>,
+    queue: RefCell<QueueState>,
+    lyrics: RefCell<SelectedLyricsState>,
+    playlist_picker_refresh: RefCell<Option<Rc<dyn Fn()>>>,
 }
 
 impl SelectedUiState {
     pub(crate) fn new() -> Self {
         Self {
             session: RefCell::new(None),
+            metadata_load: RefCell::new(None),
+            playback: RefCell::new(None),
+            queue: RefCell::new(QueueState::new()),
+            lyrics: RefCell::new(SelectedLyricsState::new()),
+            playlist_picker_refresh: RefCell::new(None),
         }
     }
 
@@ -111,7 +108,14 @@ impl SelectedUiState {
     }
 
     pub(crate) fn take(&self) -> Option<SelectedUiSession> {
-        self.session.borrow_mut().take()
+        if let Some(load) = self.metadata_load.borrow_mut().take() {
+            load.abort();
+        }
+        let session = self.session.borrow_mut().take();
+        if session.is_some() {
+            self.playlist_picker_refresh.borrow_mut().take();
+        }
+        session
     }
 
     pub(crate) fn replace_library(&self, library: SelectedLibrary) {
@@ -122,46 +126,54 @@ impl SelectedUiState {
     }
 
     pub(crate) fn replace_player(&self, player: PlaybackView) {
-        let mut session = self
-            .session_mut()
-            .expect("a PlaybackView replacement requires its selected UI session");
-        session.playback.player = player;
+        let mut playback = self.playback.borrow_mut();
+        match playback.as_mut() {
+            Some(playback) => playback.player = player,
+            None => {
+                *playback = Some(SelectedPlaybackState {
+                    player,
+                    waveform: WaveformProjection::default(),
+                    seek_preview_seconds: None,
+                });
+            }
+        }
     }
 
     pub(crate) fn waveform(&self) -> Option<WaveformProjection> {
-        self.session()
-            .map(|session| session.playback.waveform.clone())
+        self.playback
+            .borrow()
+            .as_ref()
+            .map(|playback| playback.waveform.clone())
     }
 
     pub(crate) fn set_waveform(&self, waveform: WaveformProjection) {
-        if let Some(mut session) = self.session_mut() {
-            session.playback.waveform = waveform;
+        if let Some(playback) = self.playback.borrow_mut().as_mut() {
+            playback.waveform = waveform;
         }
     }
 
     pub(crate) fn seek_preview_seconds(&self) -> Option<u32> {
-        self.session()
-            .and_then(|session| session.playback.seek_preview_seconds)
+        self.playback
+            .borrow()
+            .as_ref()
+            .and_then(|playback| playback.seek_preview_seconds)
     }
 
     pub(crate) fn set_seek_preview_seconds(&self, seconds: Option<u32>) {
-        if let Some(mut session) = self.session_mut() {
-            session.playback.seek_preview_seconds = seconds;
+        if let Some(playback) = self.playback.borrow_mut().as_mut() {
+            playback.seek_preview_seconds = seconds;
         }
     }
 }
 
 impl Shell {
     pub(crate) fn set_playlist_picker_refresh(&self, refresh: Option<Rc<dyn Fn()>>) {
-        if let Some(session) = self.selected_ui.session() {
-            session.playlist_picker_refresh.replace(refresh);
-        }
+        self.selected_ui.playlist_picker_refresh.replace(refresh);
     }
 
     pub(crate) fn refresh_playlist_picker(&self) {
-        if let Some(session) = self.selected_ui.session()
-            && let Some(refresh) = session.playlist_picker_refresh.borrow().as_ref()
-        {
+        let refresh = self.selected_ui.playlist_picker_refresh.borrow().clone();
+        if let Some(refresh) = refresh {
             refresh();
         }
     }
@@ -173,21 +185,18 @@ impl Shell {
     }
 
     pub(crate) fn selected_playback(&self) -> Option<Ref<'_, PlaybackView>> {
-        self.selected_ui
-            .session()
-            .map(|session| Ref::map(session, |session| &session.playback.player))
+        Ref::filter_map(self.selected_ui.playback.borrow(), |playback| {
+            playback.as_ref().map(|playback| &playback.player)
+        })
+        .ok()
     }
 
     pub(crate) fn selected_queue(&self) -> Option<Ref<'_, QueueState>> {
-        self.selected_ui
-            .session()
-            .map(|session| Ref::map(session, |session| &session.queue))
+        Some(self.selected_ui.queue.borrow())
     }
 
     pub(crate) fn selected_lyrics(&self) -> Option<Ref<'_, SelectedLyricsState>> {
-        self.selected_ui
-            .session()
-            .map(|session| Ref::map(session, |session| &session.lyrics))
+        Some(self.selected_ui.lyrics.borrow())
     }
 
     pub(crate) fn present_selected_dialog<D>(self: &Rc<Self>, dialog: &D)
@@ -195,45 +204,23 @@ impl Shell {
         D: IsA<adw::Dialog> + Clone + 'static,
     {
         let dialog = dialog.clone().upcast::<adw::Dialog>();
-        let Some(session) = self.selected_ui.session() else {
-            return;
-        };
-        session.dialogs.register(&dialog);
-        drop(session);
+        if let Some(session) = self.selected_ui.session() {
+            session.dialogs.register(&dialog);
+        }
 
         present_light_dismiss_dialog(&dialog, &self.chrome.window);
     }
 
     pub(crate) fn attach_selected_ui_roots(self: &Rc<Self>) {
-        let Some(session) = self.selected_ui.session() else {
-            return;
-        };
+        let lyrics = self.selected_ui.lyrics.borrow();
         self.right_panel
             .lyrics_host
-            .append(session.lyrics.right_pane.widget());
+            .append(lyrics.right_pane.widget());
         self.player_view
             .fullscreen_player
             .lyrics_host
-            .append(session.lyrics.fullscreen_pane.widget());
-        drop(session);
+            .append(lyrics.fullscreen_pane.widget());
+        drop(lyrics);
         connect_lyrics_search_controls(self);
-    }
-
-    pub(crate) fn detach_selected_ui_roots(&self) {
-        if let Some(session) = self.selected_ui.session() {
-            if session.lyrics.right_pane.widget().parent().is_some() {
-                self.right_panel
-                    .lyrics_host
-                    .remove(session.lyrics.right_pane.widget());
-            }
-            if session.lyrics.fullscreen_pane.widget().parent().is_some() {
-                self.player_view
-                    .fullscreen_player
-                    .lyrics_host
-                    .remove(session.lyrics.fullscreen_pane.widget());
-            }
-        }
-        clear_queue_panel_children(&self.right_panel.queue_panel);
-        clear_queue_panel_children(&self.player_view.fullscreen_player.queue_panel);
     }
 }

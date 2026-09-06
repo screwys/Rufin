@@ -9,10 +9,7 @@ use std::task::Poll;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use async_channel::{Receiver, Sender};
-use library::{
-    AlbumKey, ArtistKey, Database, FolderKey, GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey,
-    SourceKey, TrackKey, TrackSort,
-};
+use library::{Database, FolderKey, SourceKey, TrackKey, TrackSort};
 use playback::{ResolvedStream, StreamQuality, StreamRequest};
 use serde::{Deserialize, Serialize};
 use sources::{Source, SourceError, SourceId};
@@ -22,7 +19,7 @@ mod track_download;
 
 use track_download::*;
 
-const QUEUE_VERSION: u32 = 2;
+const QUEUE_VERSION: u32 = 3;
 const QUEUE_FILE: &str = "queue.json";
 const QUEUE_PART_FILE: &str = "queue.json.part";
 const RETRY_INTERVAL: Duration = Duration::from_secs(30);
@@ -34,6 +31,15 @@ pub struct Downloads {
     commands: Sender<Command>,
 }
 
+/// Holds the existing download actor at a completed command boundary during restore.
+pub struct DownloadSuspension(Sender<()>);
+
+impl Drop for DownloadSuspension {
+    fn drop(&mut self) {
+        let _ = self.0.try_send(());
+    }
+}
+
 enum Command {
     Attach {
         source_id: SourceId,
@@ -43,13 +49,11 @@ enum Command {
         response: Sender<Result<(), String>>,
     },
     Download {
-        source_id: SourceId,
         subject: DownloadSubject,
-        track_keys: Vec<TrackKey>,
+        media_uris: Vec<String>,
     },
     Remove {
-        source_id: SourceId,
-        track_keys: Vec<TrackKey>,
+        media_uris: Vec<String>,
         notify: bool,
     },
     LibraryChanged {
@@ -70,6 +74,10 @@ enum Command {
         job_id: String,
     },
     SetPaused(bool),
+    Suspend {
+        ready: Sender<()>,
+        resume: Receiver<()>,
+    },
     Move {
         source_id: SourceId,
         job_id: String,
@@ -123,30 +131,30 @@ struct DownloadJob {
     id: String,
     subject: DownloadSubject,
     quality: StreamQuality,
-    total_tracks: usize,
     #[serde(default)]
-    completed: Vec<TrackKey>,
-    remaining: Vec<TrackKey>,
+    completed: Vec<String>,
+    #[serde(default)]
+    failed: bool,
+    remaining: Vec<String>,
     state: DownloadQueueState,
 }
 
 #[derive(Debug, Deserialize, Serialize)]
 struct QueueFile {
     version: u32,
-    source_id: SourceId,
     jobs: Vec<DownloadJob>,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq)]
 enum ReleasedDownloadSubject {
     Rule(DownloadRule),
-    Track(String),
-    Album(String),
-    Artist(String),
-    Genre(String),
-    Mood(String),
-    Playlist(String),
-    SmartPlaylist(String),
+    Track(serde_json::Value),
+    Album(serde_json::Value),
+    Artist(serde_json::Value),
+    Genre(serde_json::Value),
+    Mood(serde_json::Value),
+    Playlist(serde_json::Value),
+    SmartPlaylist(serde_json::Value),
     Prepared {
         context_id: String,
         title: Option<String>,
@@ -167,8 +175,8 @@ struct ReleasedDownloadJob {
     #[serde(rename = "total_tracks")]
     _total_tracks: usize,
     #[serde(default)]
-    completed: Vec<String>,
-    remaining: Vec<String>,
+    completed: Vec<serde_json::Value>,
+    remaining: Vec<serde_json::Value>,
     state: DownloadQueueState,
 }
 
@@ -181,7 +189,7 @@ struct ReleasedQueueFile {
 
 async fn persist_queue(
     root: &Path,
-    source_id: &SourceId,
+    source_id: Option<&SourceId>,
     jobs: &[DownloadJob],
 ) -> Result<(), String> {
     let directory = source_directory(root, source_id);
@@ -197,7 +205,6 @@ async fn persist_queue(
     }
     let encoded = serde_json::to_vec(&QueueFile {
         version: QUEUE_VERSION,
-        source_id: source_id.clone(),
         jobs: jobs.to_vec(),
     })
     .map_err(|error| format!("could not encode the download queue: {error}"))?;
@@ -209,6 +216,24 @@ async fn persist_queue(
         .map_err(|error| format!("could not finish the download queue: {error}"))
 }
 
+fn read_queue_file(
+    root: &Path,
+    source_id: Option<&SourceId>,
+) -> Result<Option<(Vec<u8>, bool, PathBuf, PathBuf)>, String> {
+    let directory = source_directory(root, source_id);
+    let path = directory.join(QUEUE_FILE);
+    let part = directory.join(QUEUE_PART_FILE);
+    match std::fs::read(&path) {
+        Ok(bytes) => Ok(Some((bytes, false, path, part))),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match std::fs::read(&part) {
+            Ok(bytes) => Ok(Some((bytes, true, path, part))),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => Ok(None),
+            Err(error) => Err(format!("could not read {}: {error}", part.display())),
+        },
+        Err(error) => Err(format!("could not read {}: {error}", path.display())),
+    }
+}
+
 async fn load_queue(
     root: &Path,
     source_id: &SourceId,
@@ -216,72 +241,68 @@ async fn load_queue(
     source_key: SourceKey,
     custom_directory: Option<&Path>,
 ) -> Result<Vec<DownloadJob>, String> {
-    let directory = source_directory(root, source_id);
-    let path = directory.join(QUEUE_FILE);
-    let part = directory.join(QUEUE_PART_FILE);
-    let (bytes, recovered) = match std::fs::read(&path) {
-        Ok(bytes) => (bytes, false),
-        Err(error) if error.kind() == std::io::ErrorKind::NotFound => match std::fs::read(&part) {
-            Ok(bytes) => (bytes, true),
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(Vec::new()),
-            Err(error) => return Err(format!("could not read {}: {error}", part.display())),
-        },
-        Err(error) => return Err(format!("could not read {}: {error}", path.display())),
+    let Some((bytes, recovered, path, part)) = read_queue_file(root, Some(source_id))? else {
+        return Ok(Vec::new());
     };
     let jobs = if let Ok(queue) = serde_json::from_slice::<QueueFile>(&bytes) {
-        if queue.version != QUEUE_VERSION || queue.source_id != *source_id {
-            return Err("the saved download queue does not match this source".to_string());
+        if queue.version != QUEUE_VERSION {
+            return Err("the saved download queue has an unsupported version".to_string());
         }
         queue.jobs
     } else {
         let released = serde_json::from_slice::<ReleasedQueueFile>(&bytes)
             .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
-        if released.version != 1 || released.source_id != *source_id {
+        if !matches!(released.version, 1 | 2) || released.source_id != *source_id {
             return Err("the saved download queue does not match this source".to_string());
         }
         let cancellation = library::ReadCancellation::new();
         let mut rebound = Vec::new();
         for job in released.jobs {
-            let Some(subject) =
-                rebind_released_subject(database, source_key, job.subject, &cancellation).await?
-            else {
-                continue;
-            };
             let mut completed = Vec::new();
             let mut remaining = Vec::new();
-            for object_id in job.completed {
-                if let Some(key) = database
-                    .track_key_by_object(source_key, &object_id, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
+            for identity in job.completed {
+                if let Some((media_uri, _)) =
+                    released_queue_media_uri(database, source_key, &identity, &cancellation).await?
                 {
-                    completed.push(key);
+                    completed.push(media_uri);
                 }
             }
-            for object_id in job.remaining {
-                if let Some(key) = database
-                    .track_key_by_object(source_key, &object_id, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
+            for identity in job.remaining {
+                if let Some((media_uri, staging_identity)) =
+                    released_queue_media_uri(database, source_key, &identity, &cancellation).await?
                 {
-                    migrate_released_staging(root, source_id, &object_id, key, custom_directory)
-                        .await?;
-                    remaining.push(key);
+                    migrate_released_staging(
+                        root,
+                        source_id,
+                        &staging_identity,
+                        &media_uri,
+                        custom_directory,
+                    )
+                    .await?;
+                    remaining.push(media_uri);
                 }
             }
             if !remaining.is_empty() {
+                let subject = rebind_released_subject(
+                    job.subject,
+                    &completed
+                        .iter()
+                        .chain(&remaining)
+                        .cloned()
+                        .collect::<Vec<_>>(),
+                );
                 rebound.push(DownloadJob {
                     id: job.id,
                     subject,
                     quality: job.quality,
-                    total_tracks: completed.len() + remaining.len(),
                     completed,
+                    failed: false,
                     remaining,
                     state: job.state,
                 });
             }
         }
-        persist_queue(root, source_id, &rebound).await?;
+        persist_queue(root, Some(source_id), &rebound).await?;
         rebound
     };
     if recovered && let Err(error) = std::fs::rename(&part, &path) {
@@ -290,65 +311,107 @@ async fn load_queue(
     Ok(jobs)
 }
 
-async fn rebind_released_subject(
+async fn load_direct_queue(root: &Path) -> Result<Vec<DownloadJob>, String> {
+    let Some((bytes, recovered, path, part)) = read_queue_file(root, None)? else {
+        return Ok(Vec::new());
+    };
+    let queue: QueueFile = serde_json::from_slice(&bytes)
+        .map_err(|error| format!("could not decode {}: {error}", path.display()))?;
+    if queue.version != QUEUE_VERSION {
+        return Err("the saved direct download queue has an unsupported version".to_string());
+    }
+    if recovered && let Err(error) = std::fs::rename(&part, &path) {
+        warn!(%error, path=%part.display(), "could not finish recovering the direct download queue");
+    }
+    Ok(queue.jobs)
+}
+
+async fn media_uris_for_keys(
     database: &Database,
     source: SourceKey,
-    subject: ReleasedDownloadSubject,
+    keys: &[TrackKey],
     cancellation: &library::ReadCancellation,
-) -> Result<Option<DownloadSubject>, String> {
-    Ok(match subject {
-        ReleasedDownloadSubject::Rule(rule) => Some(DownloadSubject::Rule(rule)),
-        ReleasedDownloadSubject::Track(id) => database
-            .track_key_by_object(source, &id, cancellation)
+) -> Result<Vec<String>, String> {
+    database
+        .track_rows_for_source(source, keys, cancellation)
+        .await
+        .map(|media| media.into_iter().map(|item| item.media_uri).collect())
+        .map_err(|error| error.to_string())
+}
+
+async fn released_queue_media_uri(
+    database: &Database,
+    source: SourceKey,
+    identity: &serde_json::Value,
+    cancellation: &library::ReadCancellation,
+) -> Result<Option<(String, String)>, String> {
+    let (key, staging_identity) = if let Some(object_id) = identity.as_str() {
+        let Some(key) = database
+            .track_key_by_object(source, object_id, cancellation)
             .await
             .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Track),
-        ReleasedDownloadSubject::Album(id) => database
-            .album_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Album),
-        ReleasedDownloadSubject::Artist(id) => database
-            .artist_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Artist),
-        ReleasedDownloadSubject::Genre(id) => database
-            .genre_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Genre),
-        ReleasedDownloadSubject::Mood(id) => database
-            .mood_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Mood),
-        ReleasedDownloadSubject::Playlist(id) => database
-            .playlist_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::Playlist),
-        ReleasedDownloadSubject::SmartPlaylist(id) => database
-            .smart_playlist_key_by_object(source, &id, cancellation)
-            .await
-            .map_err(|error| error.to_string())?
-            .map(DownloadSubject::SmartPlaylist),
+        else {
+            return Ok(None);
+        };
+        (key, object_id.to_string())
+    } else if let Some(raw) = identity.as_i64() {
+        (TrackKey::from_raw(raw), raw.to_string())
+    } else {
+        return Err("the saved download queue has an invalid media identity".to_string());
+    };
+    Ok(media_uris_for_keys(database, source, &[key], cancellation)
+        .await?
+        .pop()
+        .map(|uri| (uri, staging_identity)))
+}
+
+fn media_source_id(media_uri: &str) -> Option<SourceId> {
+    library::source_entity_parts(media_uri).map(|(source, _, _)| source)
+}
+
+fn rebind_released_subject(
+    subject: ReleasedDownloadSubject,
+    media_uris: &[String],
+) -> DownloadSubject {
+    match subject {
+        ReleasedDownloadSubject::Rule(rule) => DownloadSubject::Rule(rule),
         ReleasedDownloadSubject::Prepared { context_id, title } => {
-            Some(DownloadSubject::Prepared { context_id, title })
+            DownloadSubject::Prepared { context_id, title }
         }
-    })
+        ReleasedDownloadSubject::Track(_) => {
+            DownloadSubject::for_media_uris("track", Some("Track"), media_uris)
+        }
+        ReleasedDownloadSubject::Album(_) => {
+            DownloadSubject::for_media_uris("album", Some("Album"), media_uris)
+        }
+        ReleasedDownloadSubject::Artist(_) => {
+            DownloadSubject::for_media_uris("artist", Some("Artist"), media_uris)
+        }
+        ReleasedDownloadSubject::Genre(_) => {
+            DownloadSubject::for_media_uris("genre", Some("Genre"), media_uris)
+        }
+        ReleasedDownloadSubject::Mood(_) => {
+            DownloadSubject::for_media_uris("mood", Some("Mood"), media_uris)
+        }
+        ReleasedDownloadSubject::Playlist(_) => {
+            DownloadSubject::for_media_uris("playlist", Some("Playlist"), media_uris)
+        }
+        ReleasedDownloadSubject::SmartPlaylist(_) => {
+            DownloadSubject::for_media_uris("smart-playlist", Some("Smart Playlist"), media_uris)
+        }
+    }
 }
 
 async fn migrate_released_staging(
     root: &Path,
     source_id: &SourceId,
     track_object_id: &str,
-    track_key: TrackKey,
+    media_uri: &str,
     custom_directory: Option<&Path>,
 ) -> Result<(), String> {
     let (old_part, old_checkpoint) =
         released_staging_paths(root, source_id, track_object_id, custom_directory);
-    let current = staging_paths(root, source_id, &track_key, custom_directory);
+    let current = staging_paths(root, Some(source_id), media_uri, custom_directory);
     for (old, new) in [
         (old_part, current.audio_part),
         (old_checkpoint, current.checkpoint),
@@ -375,9 +438,9 @@ enum DownloadFailure {
 }
 
 struct ActiveDownload {
-    source_id: SourceId,
+    source_id: Option<SourceId>,
     job_id: String,
-    track_id: TrackKey,
+    media_uri: String,
     subject: DownloadSubject,
     paths: DownloadPaths,
     cancellation: Option<tokio::sync::oneshot::Sender<()>>,
@@ -469,12 +532,12 @@ impl SourceDownloadSettings {
     }
 }
 
-async fn rule_track_ids(
+async fn rule_media_uris(
     database: &Database,
     source: SourceKey,
     folder: Option<FolderKey>,
     rule: DownloadRule,
-) -> library::LibraryResult<Vec<TrackKey>> {
+) -> library::LibraryResult<Vec<String>> {
     let cancellation = library::ReadCancellation::new();
     match rule {
         DownloadRule::EntireLibrary => {
@@ -507,7 +570,7 @@ async fn rule_track_ids(
     }
 }
 
-type PreparedRules = Result<Vec<(DownloadRule, Vec<TrackKey>)>, String>;
+type PreparedRules = Result<Vec<(DownloadRule, Vec<String>)>, String>;
 
 fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
     tokio::spawn(async move {
@@ -519,8 +582,8 @@ fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
         } = intent;
         let mut result = Vec::new();
         for rule in rules.active() {
-            match rule_track_ids(&database, source_key, folder, rule).await {
-                Ok(track_keys) => result.push((rule, track_keys)),
+            match rule_media_uris(&database, source_key, folder, rule).await {
+                Ok(media_uris) => result.push((rule, media_uris)),
                 Err(error) => {
                     drop(prepared.try_send(Err(error.to_string())));
                     return;
@@ -534,17 +597,20 @@ fn prepare_rules(intent: RuleIntent, prepared: Sender<PreparedRules>) {
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub enum DownloadSubject {
     Rule(DownloadRule),
-    Track(TrackKey),
-    Album(AlbumKey),
-    Artist(ArtistKey),
-    Genre(GenreKey),
-    Mood(MoodKey),
-    Playlist(PlaylistKey),
-    SmartPlaylist(SmartPlaylistKey),
     Prepared {
         context_id: String,
         title: Option<String>,
     },
+}
+
+impl DownloadSubject {
+    pub fn for_media_uris(context: &str, title: Option<&str>, media_uris: &[String]) -> Self {
+        let encoded = serde_json::to_vec(media_uris).unwrap_or_default();
+        Self::Prepared {
+            context_id: format!("{context}:{}", hash_id_bytes(&encoded)),
+            title: title.map(str::to_string),
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -558,8 +624,9 @@ pub enum DownloadQueueState {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DownloadQueueItem {
     pub id: String,
-    pub source_id: SourceId,
+    pub source_id: Option<SourceId>,
     pub subject: DownloadSubject,
+    pub preview_uris: Vec<String>,
     pub quality: StreamQuality,
     pub completed_tracks: usize,
     pub total_tracks: usize,
@@ -582,14 +649,23 @@ pub enum DownloadFeedbackKind {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DownloadFeedback {
     pub subject: DownloadSubject,
+    pub preview_uris: Vec<String>,
     pub item_count: usize,
     pub kind: DownloadFeedbackKind,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DownloadEvent {
+    SubjectChanged {
+        subject: DownloadSubject,
+        downloaded: bool,
+    },
+    Changed {
+        media_uri: String,
+        downloaded: bool,
+    },
     Queue {
-        source_id: SourceId,
+        source_id: Option<SourceId>,
         snapshot: Arc<DownloadQueueSnapshot>,
     },
     Feedback(DownloadFeedback),
@@ -603,16 +679,19 @@ struct Actor {
     transfers: Arc<TransferClients>,
     prepared_rules: Sender<PreparedRules>,
     attached: HashMap<SourceId, AttachedSource>,
-    selected: Option<SourceId>,
     settings: HashMap<SourceId, SourceDownloadSettings>,
     running_rules: Option<RuleIntent>,
     pending_rules: Option<RuleIntent>,
-    jobs: HashMap<SourceId, Vec<DownloadJob>>,
+    jobs: HashMap<Option<SourceId>, Vec<DownloadJob>>,
     paused: bool,
     next_job: u64,
 }
 
 impl Downloads {
+    pub fn default_directory(&self) -> &Path {
+        &self.root
+    }
+
     pub fn new(
         root: PathBuf,
         database: Database,
@@ -634,7 +713,6 @@ impl Downloads {
                 transfers: Arc::new(TransferClients::default()),
                 prepared_rules,
                 attached: HashMap::new(),
-                selected: None,
                 settings: settings
                     .into_iter()
                     .map(|settings| (settings.source_id.clone(), settings))
@@ -675,25 +753,15 @@ impl Downloads {
             .map_err(|_| "download attachment did not finish".to_string())?
     }
 
-    pub fn download(
-        &self,
-        source_id: SourceId,
-        subject: DownloadSubject,
-        track_keys: Vec<TrackKey>,
-    ) {
+    pub fn download(&self, subject: DownloadSubject, media_uris: Vec<String>) {
         self.send(Command::Download {
-            source_id,
             subject,
-            track_keys,
+            media_uris,
         });
     }
 
-    pub fn remove(&self, source_id: SourceId, track_keys: Vec<TrackKey>, notify: bool) {
-        self.send(Command::Remove {
-            source_id,
-            track_keys,
-            notify,
-        });
+    pub fn remove(&self, media_uris: Vec<String>, notify: bool) {
+        self.send(Command::Remove { media_uris, notify });
     }
 
     pub fn library_changed(&self, source_id: SourceId) {
@@ -718,6 +786,20 @@ impl Downloads {
 
     pub fn clear_job(&self, source_id: SourceId, job_id: String) {
         self.send(Command::ClearJob { source_id, job_id });
+    }
+
+    pub async fn suspend(&self) -> Result<DownloadSuspension, String> {
+        let (ready, completed) = async_channel::bounded(1);
+        let (resume, release) = async_channel::bounded(1);
+        self.commands
+            .send(Command::Suspend {
+                ready,
+                resume: release,
+            })
+            .await
+            .map_err(|error| error.to_string())?;
+        completed.recv().await.map_err(|error| error.to_string())?;
+        Ok(DownloadSuspension(resume))
     }
 
     pub fn set_paused(&self, paused: bool) {
@@ -751,6 +833,17 @@ impl Downloads {
 }
 
 async fn run(mut actor: Actor, receiver: Receiver<Command>, rule_results: Receiver<PreparedRules>) {
+    if let Err(error) = actor.restore_direct_download_access().await {
+        warn!(%error, "could not restore direct download access");
+    }
+    match load_direct_queue(&actor.root).await {
+        Ok(jobs) if !jobs.is_empty() => {
+            actor.jobs.insert(None, jobs);
+            actor.publish(None).await;
+        }
+        Ok(_) => {}
+        Err(error) => warn!(%error, "could not load the direct download queue"),
+    }
     let mut retry = tokio::time::interval(RETRY_INTERVAL);
     retry.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
     let mut active = Vec::new();
@@ -838,14 +931,14 @@ impl Actor {
                     .get(&source_id)
                     .is_some_and(|attached| !same_weak_target(&attached.source, &source));
                 self.discard_matching(active, !directory_changed, |download| {
-                    download.source_id == source_id && (source_changed || directory_changed)
+                    download.source_id.as_ref() == Some(&source_id)
+                        && (source_changed || directory_changed)
                 })
                 .await;
                 let result = self
                     .attach(source_id.clone(), source_key, source, folder, directory)
                     .await;
                 let ready = result.is_ok();
-                self.selected = Some(source_id.clone());
                 self.pending_rules = None;
                 let _ = response.send(result).await;
                 if ready {
@@ -853,34 +946,57 @@ impl Actor {
                 }
             }
             Command::Download {
-                source_id,
                 subject,
-                track_keys,
+                media_uris,
             } => {
-                if self.selected.as_ref() != Some(&source_id)
-                    || !self.attached.contains_key(&source_id)
-                {
-                    warn!("ignored a download from an inactive source");
-                    return;
+                let mut skipped = false;
+                let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
+                for media_uri in media_uris {
+                    grouped
+                        .entry(media_source_id(&media_uri))
+                        .or_default()
+                        .push(media_uri);
                 }
-                let quality = self.settings_for(&source_id).quality;
-                self.enqueue(source_id, subject, quality, track_keys).await;
+                for (source_id, media_uris) in grouped {
+                    if source_id
+                        .as_ref()
+                        .is_some_and(|source_id| !self.attached.contains_key(source_id))
+                    {
+                        warn!(source_id=?source_id, "ignored a download for an unattached source");
+                        skipped = true;
+                        continue;
+                    }
+                    let quality = source_id
+                        .as_ref()
+                        .map_or(StreamQuality::Original, |source_id| {
+                            self.settings_for(source_id).quality
+                        });
+                    self.enqueue(source_id, subject.clone(), quality, media_uris)
+                        .await;
+                }
+                if skipped {
+                    self.mark_subject_incomplete(&subject).await;
+                } else {
+                    self.publish_subject_complete(&subject);
+                }
             }
-            Command::Remove {
-                source_id,
-                track_keys,
-                notify,
-            } => {
-                if !self.attached.contains_key(&source_id) {
-                    warn!("ignored download removal from an inactive source");
-                    return;
+            Command::Remove { media_uris, notify } => {
+                let mut grouped = HashMap::<Option<SourceId>, Vec<String>>::new();
+                for media_uri in media_uris {
+                    grouped
+                        .entry(media_source_id(&media_uri))
+                        .or_default()
+                        .push(media_uri);
                 }
-                let remove = track_keys.iter().collect::<HashSet<_>>();
-                self.abort_matching(active, false, |download| {
-                    download.source_id == source_id && remove.contains(&download.track_id)
-                })
-                .await;
-                self.force_remove(&source_id, track_keys, notify).await;
+                for (source_id, media_uris) in grouped {
+                    let remove = media_uris.iter().collect::<HashSet<_>>();
+                    self.abort_matching(active, false, |download| {
+                        download.source_id == source_id && remove.contains(&download.media_uri)
+                    })
+                    .await;
+                    self.force_remove(source_id.as_ref(), media_uris, notify)
+                        .await;
+                }
             }
             Command::LibraryChanged { source_id } => {
                 self.reconcile_all_rules(&source_id);
@@ -894,7 +1010,7 @@ impl Actor {
                 delete_downloads,
             } => {
                 self.abort_matching(active, true, |download| {
-                    download.source_id == source_id
+                    download.source_id.as_ref() == Some(&source_id)
                         && download.subject == DownloadSubject::Rule(rule)
                 })
                 .await;
@@ -905,6 +1021,12 @@ impl Actor {
             }
             Command::ClearJob { source_id, job_id } => {
                 self.clear_job(&source_id, &job_id, active).await;
+            }
+            Command::Suspend { ready, resume } => {
+                self.abort_matching(active, true, |_| true).await;
+                if ready.send(()).await.is_ok() {
+                    let _ = resume.recv().await;
+                }
             }
             Command::SetPaused(paused) => {
                 if self.paused == paused {
@@ -930,8 +1052,10 @@ impl Actor {
                     settings.rules = DownloadRules::default();
                 }
                 self.reconcile_all_rules(&source_id);
-                self.abort_matching(active, false, |download| download.source_id == source_id)
-                    .await;
+                self.abort_matching(active, false, |download| {
+                    download.source_id.as_ref() == Some(&source_id)
+                })
+                .await;
                 self.clear(&source_id, notify).await;
             }
         }
@@ -964,8 +1088,10 @@ impl Actor {
                 .get(source_id)
                 .is_some_and(|attached| attached.directory != directory)
             {
-                self.abort_matching(active, false, |download| &download.source_id == source_id)
-                    .await;
+                self.abort_matching(active, false, |download| {
+                    download.source_id.as_ref() == Some(source_id)
+                })
+                .await;
                 self.discard_previous_directory(source_id, &directory).await;
                 if let Some(attached) = self.attached.get_mut(source_id) {
                     attached.directory = directory;
@@ -986,9 +1112,6 @@ impl Actor {
         let Some(attached) = self.attached.get(source_id).cloned() else {
             return;
         };
-        if self.selected.as_ref() != Some(source_id) {
-            return;
-        }
         let mut intent = RuleIntent {
             database: self.database.clone(),
             source_key: attached.source_key,
@@ -1048,14 +1171,13 @@ impl Actor {
             return;
         };
         let superseded = self.pending_rules.is_some();
-        let current = self.selected.as_ref() == Some(&source_id)
-            && self.attached[&source_id].folder == intent.folder;
-        if !superseded && current {
+        let same_context = self.attached[&source_id].folder == intent.folder;
+        if !superseded && same_context {
             match prepared {
                 Ok(prepared) => {
                     let quality = self.settings_for(&source_id).quality;
-                    for (rule, track_ids) in prepared {
-                        self.reconcile_rule(source_id.clone(), rule, quality, track_ids, active)
+                    for (rule, media_uris) in prepared {
+                        self.reconcile_rule(source_id.clone(), rule, quality, media_uris, active)
                             .await;
                     }
                 }
@@ -1091,13 +1213,14 @@ impl Actor {
                 directory: directory.clone(),
             },
         );
-        if unchanged && self.jobs.contains_key(&source_id) {
+        let group = Some(source_id.clone());
+        if unchanged && self.jobs.contains_key(&group) {
             self.retry_waiting();
-            self.publish(&source_id).await;
+            self.publish(Some(&source_id)).await;
             return Ok(());
         }
         let mut attachment_error = None;
-        match attach_downloaded_files(
+        if let Err(error) = attach_downloaded_files(
             &self.root,
             &self.database,
             source_key,
@@ -1106,17 +1229,10 @@ impl Actor {
         )
         .await
         {
-            Ok(stale) => {
-                for paths in stale {
-                    if let Err(error) = remove_download_files(&paths).await {
-                        attachment_error.get_or_insert(error);
-                    }
-                }
-            }
-            Err(error) => attachment_error = Some(error),
+            attachment_error = Some(error);
         }
         let source_available = source.as_ref().and_then(Weak::upgrade).is_some();
-        let mut jobs = if let Some(jobs) = self.jobs.get(&source_id) {
+        let mut jobs = if let Some(jobs) = self.jobs.get(&group) {
             jobs.clone()
         } else {
             match load_queue(
@@ -1135,24 +1251,7 @@ impl Actor {
                 }
             }
         };
-        let cancellation = library::ReadCancellation::new();
-        let mut current = HashSet::new();
-        let queued = jobs
-            .iter()
-            .flat_map(|job| job.remaining.iter().copied())
-            .collect::<Vec<_>>();
-        for page in queued.chunks(256) {
-            if let Ok(rows) = self
-                .database
-                .track_rows(source_key, page, &cancellation)
-                .await
-            {
-                current.extend(rows.into_iter().map(|track| track.track_key));
-            }
-        }
         jobs.retain_mut(|job| {
-            job.remaining
-                .retain(|track_key| current.contains(track_key));
             job.state = if source_available {
                 DownloadQueueState::Queued
             } else {
@@ -1164,58 +1263,66 @@ impl Actor {
             .iter()
             .flat_map(|job| job.remaining.iter().cloned())
             .collect::<HashSet<_>>();
-        if let Err(error) =
-            cleanup_staging(&self.root, &source_id, directory.as_deref(), &queued_tracks).await
+        if let Err(error) = cleanup_staging(
+            &self.root,
+            Some(&source_id),
+            directory.as_deref(),
+            &queued_tracks,
+        )
+        .await
         {
             attachment_error.get_or_insert_with(|| error.to_string());
         }
-        self.jobs.insert(source_id.clone(), jobs);
-        self.persist_and_publish(&source_id).await;
+        self.jobs.insert(group.clone(), jobs);
+        self.persist_and_publish(group.as_ref()).await;
         attachment_error.map_or(Ok(()), Err)
     }
 
     async fn enqueue(
         &mut self,
-        source_id: SourceId,
+        source_id: Option<SourceId>,
         subject: DownloadSubject,
         quality: StreamQuality,
-        track_ids: Vec<TrackKey>,
+        media_uris: Vec<String>,
     ) {
-        let Some(attached) = self.attached.get(&source_id) else {
-            warn!(%source_id, "ignored a download for an unattached source");
-            return;
-        };
-        let source_available = attached.source.as_ref().and_then(Weak::upgrade).is_some();
-        let custom_directory = attached.directory.clone();
+        let attached = source_id
+            .as_ref()
+            .and_then(|source_id| self.attached.get(source_id));
+        let source_available = source_id.is_none()
+            || attached
+                .and_then(|attached| attached.source.as_ref())
+                .and_then(Weak::upgrade)
+                .is_some();
+        let custom_directory = attached.and_then(|attached| attached.directory.clone());
         let can_start = !self.paused && source_available;
 
         let mut seen = HashSet::new();
-        let track_ids = track_ids
+        let media_uris = media_uris
             .into_iter()
-            .filter(|track_id| seen.insert(track_id.clone()))
+            .filter(|media_uri| !media_uri.is_empty() && seen.insert(media_uri.clone()))
             .collect::<Vec<_>>();
-        if track_ids.is_empty() {
+        if media_uris.is_empty() {
             return;
         }
 
         let owner = DownloadOwner::Subject(subject.clone());
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
-        for track_id in &track_ids {
+        for media_uri in &media_uris {
             match add_owner_to_existing_download(
                 &self.root,
-                &source_id,
-                track_id,
+                source_id.as_ref(),
+                media_uri,
                 &owner,
                 custom_directory.as_deref(),
             )
             .await
             {
-                Ok(true) => completed.push(track_id.clone()),
-                Ok(false) => remaining.push(track_id.clone()),
+                Ok(true) => completed.push(media_uri.clone()),
+                Ok(false) => remaining.push(media_uri.clone()),
                 Err(error) => {
-                    warn!(%error, %source_id, %track_id, "could not update download ownership");
-                    remaining.push(track_id.clone());
+                    warn!(%error, source_id=?source_id, %media_uri, "could not update download ownership");
+                    remaining.push(media_uri.clone());
                 }
             }
         }
@@ -1228,10 +1335,11 @@ impl Actor {
                 .position(|job| job.subject == subject && job.quality == quality)
             {
                 let existing = &mut jobs[existing_index];
-                let completed_now = completed.iter().cloned().collect::<HashSet<_>>();
+                existing.failed = false;
+                let completed_now = completed.iter().collect::<HashSet<_>>();
                 existing
                     .remaining
-                    .retain(|track_id| !completed_now.contains(track_id));
+                    .retain(|media_uri| !completed_now.contains(media_uri));
                 let mut known = existing
                     .completed
                     .iter()
@@ -1241,15 +1349,14 @@ impl Actor {
                 existing.completed.extend(
                     completed
                         .into_iter()
-                        .filter(|track_id| known.insert(track_id.clone())),
+                        .filter(|media_uri| known.insert(media_uri.clone())),
                 );
                 let additions = remaining
                     .into_iter()
-                    .filter(|track_id| known.insert(track_id.clone()))
+                    .filter(|media_uri| known.insert(media_uri.clone()))
                     .collect::<Vec<_>>();
                 scheduled_tracks = additions.len();
                 existing.remaining.extend(additions);
-                existing.total_tracks = existing.completed.len() + existing.remaining.len();
                 if existing.state != DownloadQueueState::Downloading {
                     existing.state = if source_available {
                         DownloadQueueState::Queued
@@ -1264,11 +1371,11 @@ impl Actor {
                 scheduled_tracks = remaining.len();
                 self.next_job = self.next_job.wrapping_add(1);
                 jobs.push(DownloadJob {
-                    id: job_id(&source_id, &subject, self.next_job),
+                    id: job_id(source_id.as_ref(), &subject, self.next_job),
                     subject: subject.clone(),
                     quality,
-                    total_tracks: track_ids.len(),
                     completed,
+                    failed: false,
                     remaining,
                     state: if source_available {
                         DownloadQueueState::Queued
@@ -1279,12 +1386,13 @@ impl Actor {
             }
         }
 
-        self.persist_and_publish(&source_id).await;
+        self.persist_and_publish(source_id.as_ref()).await;
         if scheduled_tracks > 0 {
             let _ = self
                 .events
                 .send(DownloadEvent::Feedback(DownloadFeedback {
                     subject,
+                    preview_uris: media_uris.iter().take(4).cloned().collect(),
                     item_count: scheduled_tracks,
                     kind: if can_start {
                         DownloadFeedbackKind::Started
@@ -1301,7 +1409,7 @@ impl Actor {
         source_id: SourceId,
         rule: DownloadRule,
         quality: StreamQuality,
-        track_ids: Vec<TrackKey>,
+        media_uris: Vec<String>,
         active: &mut Vec<ActiveDownload>,
     ) {
         let Some(attached) = self.attached.get(&source_id).cloned() else {
@@ -1312,25 +1420,28 @@ impl Actor {
         let can_start = !self.paused && source_available;
 
         let mut seen = HashSet::new();
-        let track_ids = track_ids
+        let media_uris = media_uris
             .into_iter()
-            .filter(|track_id| seen.insert(track_id.clone()))
+            .filter(|media_uri| seen.insert(media_uri.clone()))
             .collect::<Vec<_>>();
-        let desired = track_ids.iter().cloned().collect::<HashSet<_>>();
+        let desired = media_uris.iter().cloned().collect::<HashSet<_>>();
         let subject = DownloadSubject::Rule(rule);
-        let quality_changed = self.jobs.get(&source_id).is_some_and(|jobs| {
+        let group = Some(source_id.clone());
+        let quality_changed = self.jobs.get(&group).is_some_and(|jobs| {
             jobs.iter()
                 .any(|job| job.subject == subject && job.quality != quality)
         });
         self.abort_matching(active, true, |download| {
-            download.source_id == source_id
+            download.source_id.as_ref() == Some(&source_id)
                 && download.subject == subject
-                && (quality_changed || !desired.contains(&download.track_id))
+                && (quality_changed || !desired.contains(&download.media_uri))
         })
         .await;
         let active_job_id = active
             .iter()
-            .find(|download| download.source_id == source_id && download.subject == subject)
+            .find(|download| {
+                download.source_id.as_ref() == Some(&source_id) && download.subject == subject
+            })
             .map(|download| download.job_id.clone());
         let owner = DownloadOwner::Subject(subject.clone());
 
@@ -1338,61 +1449,60 @@ impl Actor {
             .attached
             .get(&source_id)
             .and_then(|attached| attached.directory.as_deref());
-        let records = match load_download_records(&self.root, &source_id, custom_directory) {
+        let records = match load_download_records(&self.root, Some(&source_id), custom_directory) {
             Ok(records) => records,
             Err(error) => {
                 warn!(%error, %source_id, "could not read rule downloads");
                 return;
             }
         };
-        for (track_id, mut record) in records {
-            if desired.contains(&track_id) || !record.owners.remove(&owner) {
+        for (identity, mut record) in records {
+            if desired.contains(&identity) || !record.owners.remove(&owner) {
                 continue;
             }
             record.owners.extend(self.queued_owners_for_track(
                 &source_id,
-                &track_id,
+                &identity,
                 Some(&subject),
             ));
             let Ok(paths) =
-                record_download_paths(&self.root, &source_id, &record, custom_directory)
+                record_download_paths(&self.root, Some(&source_id), &record, custom_directory)
             else {
                 continue;
             };
             if record.owners.is_empty() {
                 if let Err(error) = remove_download_files(&paths).await {
-                    warn!(%error, %source_id, %track_id, "could not remove stale rule download");
+                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not remove stale rule download");
                     continue;
                 }
-                self.remove_download_access(&source_id, track_id, &paths)
-                    .await;
+                self.remove_download_access(&record, &paths).await;
             } else if let Err(error) = write_record(&paths, &record).await {
-                warn!(%error, %source_id, %track_id, "could not update rule ownership");
+                warn!(%error, %source_id, media_uri=%record.media_uri, "could not update rule ownership");
             }
         }
 
         let mut completed = Vec::new();
         let mut remaining = Vec::new();
-        for track_id in &track_ids {
+        for media_uri in &media_uris {
             match add_owner_to_existing_download(
                 &self.root,
-                &source_id,
-                track_id,
+                Some(&source_id),
+                media_uri,
                 &owner,
                 custom_directory,
             )
             .await
             {
-                Ok(true) => completed.push(track_id.clone()),
-                Ok(false) => remaining.push(track_id.clone()),
+                Ok(true) => completed.push(media_uri.clone()),
+                Ok(false) => remaining.push(media_uri.clone()),
                 Err(error) => {
-                    warn!(%error, %source_id, %track_id, "could not update download ownership");
-                    remaining.push(track_id.clone());
+                    warn!(%error, %source_id, %media_uri, "could not update download ownership");
+                    remaining.push(media_uri.clone());
                 }
             }
         }
 
-        let jobs = self.jobs.entry(source_id.clone()).or_default();
+        let jobs = self.jobs.entry(group).or_default();
         let existing_index = jobs.iter().position(|job| job.subject == subject);
         let existing_id = existing_index.map(|index| jobs[index].id.clone());
         let old_remaining = jobs
@@ -1404,12 +1514,12 @@ impl Actor {
 
         let scheduled_tracks = remaining
             .iter()
-            .filter(|track_id| quality_changed || !old_remaining.contains(*track_id))
+            .filter(|media_uri| quality_changed || !old_remaining.contains(*media_uri))
             .count();
         if !remaining.is_empty() {
             let id = existing_id.unwrap_or_else(|| {
                 self.next_job = self.next_job.wrapping_add(1);
-                job_id(&source_id, &subject, self.next_job)
+                job_id(Some(&source_id), &subject, self.next_job)
             });
             let state = if active_job_id.as_deref() == Some(id.as_str()) {
                 DownloadQueueState::Downloading
@@ -1422,21 +1532,22 @@ impl Actor {
                 id,
                 subject: subject.clone(),
                 quality,
-                total_tracks: track_ids.len(),
                 completed,
+                failed: false,
                 remaining,
                 state,
             };
             jobs.insert(existing_index.unwrap_or(jobs.len()).min(jobs.len()), job);
         }
-        self.reconcile_staging(&source_id).await;
+        self.reconcile_staging(&Some(source_id.clone())).await;
 
-        self.persist_and_publish(&source_id).await;
+        self.persist_and_publish(Some(&source_id)).await;
         if scheduled_tracks > 0 {
             let _ = self
                 .events
                 .send(DownloadEvent::Feedback(DownloadFeedback {
                     subject,
+                    preview_uris: media_uris.iter().take(4).cloned().collect(),
                     item_count: scheduled_tracks,
                     kind: if can_start {
                         DownloadFeedbackKind::Started
@@ -1462,79 +1573,93 @@ impl Actor {
 
     async fn start_next(&mut self, active: &[ActiveDownload]) -> Option<ActiveDownload> {
         loop {
-            let (source_id, job_id, subject, quality, track_id, state) =
+            let (source_id, job_id, subject, quality, media_uri, state) =
                 self.next_candidate(active)?;
-            let Some(attached) = self.attached.get(&source_id).cloned() else {
-                self.jobs.remove(&source_id);
-                self.persist_and_publish(&source_id).await;
-                continue;
-            };
-            let Some(source) = attached.source.as_ref().and_then(Weak::upgrade) else {
+            let attached = source_id
+                .as_ref()
+                .and_then(|source_id| self.attached.get(source_id))
+                .cloned();
+            let source = attached
+                .as_ref()
+                .and_then(|attached| attached.source.as_ref())
+                .and_then(Weak::upgrade);
+            if source_id.is_some() && source.is_none() {
                 if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                     job.state = DownloadQueueState::WaitingForConnection;
                 }
-                self.persist_and_publish(&source_id).await;
+                self.persist_and_publish(source_id.as_ref()).await;
                 continue;
-            };
-            let cancellation = library::ReadCancellation::new();
-            let Some(track) = self
-                .database
-                .track_rows(attached.source_key, &[track_id], &cancellation)
-                .await
-                .ok()
-                .and_then(|mut rows| rows.pop())
-            else {
-                self.remove_job_track(&source_id, &job_id, &track_id, false);
-                self.persist_and_publish(&source_id).await;
-                continue;
-            };
+            }
+            let custom_directory = attached
+                .as_ref()
+                .and_then(|attached| attached.directory.as_deref());
             let owner = DownloadOwner::Subject(subject.clone());
             match add_owner_to_existing_download(
                 &self.root,
-                &source_id,
-                &track_id,
+                source_id.as_ref(),
+                &media_uri,
                 &owner,
-                attached.directory.as_deref(),
+                custom_directory,
             )
             .await
             {
                 Ok(true) => {
-                    self.remove_job_track(&source_id, &job_id, &track_id, true);
-                    self.persist_and_publish(&source_id).await;
+                    self.remove_job_track(&source_id, &job_id, &media_uri, true);
+                    self.persist_and_publish(source_id.as_ref()).await;
                     continue;
                 }
                 Ok(false) => {}
                 Err(error) => {
-                    warn!(%error, %source_id, %track_id, "could not update download ownership");
+                    warn!(%error, source_id=?source_id, %media_uri, "could not update download ownership");
                     if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                         job.state = DownloadQueueState::NeedsAttention;
                     }
-                    self.persist_and_publish(&source_id).await;
+                    self.persist_and_publish(source_id.as_ref()).await;
                     continue;
                 }
             }
-            let media = playback::PlaybackMedia::from(track.clone());
-            let request = StreamRequest::for_media(&media, quality);
-            let resolved = source.resolve_download(&request);
+            let request = StreamRequest::new(media_uri.clone(), quality);
+            let resolved = if let Some(source) = source {
+                source.resolve_download(&request).map(|download| {
+                    (
+                        download.transcoded_extension().map(str::to_string),
+                        download.into_stream(),
+                    )
+                })
+            } else {
+                Some(media_uri.as_str())
+                    .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
+                    .map(|uri| (None, ResolvedStream::new(uri)))
+                    .ok_or(SourceError::InvalidRequest(
+                        "Direct media is not downloadable",
+                    ))
+            };
             let (transcoded_extension, transfer) = match resolved {
-                Ok(download) => (download.transcoded_extension(), Ok(download.into_stream())),
+                Ok((extension, stream)) => (extension, Ok(stream)),
                 Err(error) => (None, Err(download_source_failure(error))),
             };
+            let metadata = self
+                .database
+                .download_metadata(&media_uri)
+                .await
+                .ok()
+                .flatten();
             let paths = new_download_paths(
                 &self.root,
-                &source_id,
-                &track,
-                attached.directory.as_deref(),
-                transcoded_extension,
+                source_id.as_ref(),
+                &media_uri,
+                metadata.as_ref(),
+                custom_directory,
+                transcoded_extension.as_deref(),
             );
             let entering_download = state != DownloadQueueState::Downloading;
             if let Some(job) = self.find_job_mut(&source_id, &job_id) {
                 job.state = DownloadQueueState::Downloading;
             }
             if entering_download {
-                self.persist_and_publish(&source_id).await;
+                self.persist_and_publish(source_id.as_ref()).await;
             } else {
-                self.publish(&source_id).await;
+                self.publish(source_id.as_ref()).await;
             }
             let task_paths = paths.clone();
             let transfers = Arc::clone(&self.transfers);
@@ -1556,7 +1681,7 @@ impl Actor {
             return Some(ActiveDownload {
                 source_id,
                 job_id,
-                track_id,
+                media_uri,
                 subject,
                 paths,
                 cancellation: Some(cancellation),
@@ -1569,11 +1694,11 @@ impl Actor {
         &self,
         active: &[ActiveDownload],
     ) -> Option<(
-        SourceId,
+        Option<SourceId>,
         String,
         DownloadSubject,
         StreamQuality,
-        TrackKey,
+        String,
         DownloadQueueState,
     )> {
         for (source_id, jobs) in &self.jobs {
@@ -1584,18 +1709,18 @@ impl Actor {
                 ) {
                     break;
                 }
-                let track_id = job.remaining.iter().find(|track_id| {
+                let media_uri = job.remaining.iter().find(|media_uri| {
                     !active.iter().any(|download| {
-                        download.source_id == *source_id && &download.track_id == *track_id
+                        download.source_id == *source_id && download.media_uri == **media_uri
                     })
                 });
-                if let Some(track_id) = track_id {
+                if let Some(media_uri) = media_uri {
                     return Some((
                         source_id.clone(),
                         job.id.clone(),
                         job.subject.clone(),
                         job.quality,
-                        track_id.clone(),
+                        media_uri.clone(),
                         job.state,
                     ));
                 }
@@ -1619,14 +1744,14 @@ impl Actor {
         let ActiveDownload {
             source_id,
             job_id,
-            track_id,
+            media_uri,
             subject,
             paths,
             ..
         } = active;
         let result = match joined {
             Ok(Ok(())) => {
-                self.commit_transfer(&source_id, &track_id, &subject, &paths)
+                self.commit_transfer(&source_id, &media_uri, &subject, &paths)
                     .await
             }
             Ok(Err(error)) => Err(error),
@@ -1636,14 +1761,15 @@ impl Actor {
         };
         match result {
             Ok(()) => {
-                self.remove_job_track(&source_id, &job_id, &track_id, true);
+                self.remove_job_track(&source_id, &job_id, &media_uri, true);
             }
             Err(DownloadFailure::Item(error)) => {
-                warn!(%error, %source_id, %track_id, "could not download track");
-                self.remove_job_track(&source_id, &job_id, &track_id, false);
+                warn!(%error, source_id=?source_id, %media_uri, "could not download track");
+                self.mark_subject_incomplete(&subject).await;
+                self.remove_job_track(&source_id, &job_id, &media_uri, false);
             }
             Err(DownloadFailure::Retry(error)) => {
-                warn!(%error, %source_id, "download is waiting for the server");
+                warn!(%error, source_id=?source_id, "download is waiting for the server");
                 self.abort_matching(remaining_active, true, |download| {
                     download.source_id == source_id && download.job_id == job_id
                 })
@@ -1653,7 +1779,7 @@ impl Actor {
                 }
             }
             Err(DownloadFailure::NeedsAttention(error)) => {
-                warn!(%error, %source_id, "download needs attention");
+                warn!(%error, source_id=?source_id, "download needs attention");
                 self.abort_matching(remaining_active, true, |download| {
                     download.source_id == source_id && download.job_id == job_id
                 })
@@ -1663,72 +1789,119 @@ impl Actor {
                 }
             }
         }
-        self.persist_and_publish(&source_id).await;
+        self.persist_and_publish(source_id.as_ref()).await;
     }
 
     async fn commit_transfer(
         &self,
-        source_id: &SourceId,
-        track_id: &TrackKey,
+        source_id: &Option<SourceId>,
+        media_uri: &str,
         subject: &DownloadSubject,
         paths: &DownloadPaths,
     ) -> Result<(), DownloadFailure> {
         finalize_download(
             paths,
-            source_id.clone(),
-            track_id.clone(),
+            media_uri.to_string(),
             DownloadOwner::Subject(subject.clone()),
         )
         .await
         .map_err(DownloadFailure::NeedsAttention)?;
-        if let Some(attached) = self.attached.get(source_id) {
-            let cancellation = library::ReadCancellation::new();
-            if let Some(track) = self
-                .database
-                .track_rows(attached.source_key, &[*track_id], &cancellation)
-                .await
-                .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?
-                .pop()
-            {
-                let metadata = std::fs::metadata(&paths.audio)
-                    .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
-                let (storage_root, relative_path) =
-                    local_access_projection(paths).map_err(DownloadFailure::NeedsAttention)?;
-                self.database
-                    .upsert_local_access(
-                        attached.source_key,
-                        &library::LocalAccessWrite {
-                            track_object_id: Some(track.object_id),
-                            origin: library::LocalAccessOrigin::Download,
-                            path: paths.audio.to_string_lossy().into_owned(),
-                            root: storage_root.to_string_lossy().into_owned(),
-                            relative_path: relative_path.to_string_lossy().into_owned(),
-                            size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
-                            mtime_ns: metadata
-                                .modified()
-                                .ok()
-                                .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
-                                .map_or(0, |value| {
-                                    i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
-                                }),
-                            device_id: None,
-                            inode: None,
-                            parser_version: RECORD_VERSION as i64,
-                            title: track.title,
-                            album: track.display_album,
-                            artist: track.display_artist,
-                            disc_number: track.disc_number,
-                            track_number: track.track_number,
-                            duration_millis: track.duration_millis,
-                            media_uri: format!("file://{}", paths.audio.to_string_lossy()),
-                            loudness_analysis_key: track.loudness_analysis_key,
-                        },
-                    )
-                    .await
-                    .map_err(|error| DownloadFailure::NeedsAttention(error.to_string()))?;
-            }
+        let source = source_id
+            .as_ref()
+            .and_then(|source_id| self.attached.get(source_id))
+            .map(|attached| attached.source_key);
+        self.store_download_access(source, media_uri, paths)
+            .await
+            .map_err(DownloadFailure::NeedsAttention)?;
+        let _ = self
+            .events
+            .send(DownloadEvent::Changed {
+                media_uri: media_uri.to_string(),
+                downloaded: true,
+            })
+            .await;
+        Ok(())
+    }
+
+    async fn restore_direct_download_access(&self) -> Result<(), String> {
+        for (_, record) in load_download_records(&self.root, None, None)? {
+            let paths = record_download_paths(&self.root, None, &record, None)?;
+            self.store_download_access(None, &record.media_uri, &paths)
+                .await?;
         }
         Ok(())
+    }
+
+    async fn store_download_access(
+        &self,
+        source: Option<SourceKey>,
+        media_uri: &str,
+        paths: &DownloadPaths,
+    ) -> Result<(), String> {
+        let catalog = self
+            .database
+            .download_metadata(media_uri)
+            .await
+            .map_err(|error| error.to_string())?;
+        let (title, album, artist, disc_number, track_number, duration_millis, loudness) =
+            if let Some(track) = catalog {
+                (
+                    track.title,
+                    track.album,
+                    track.artist,
+                    track.disc_number,
+                    track.track_number,
+                    track.duration_millis,
+                    track.loudness_analysis_key.try_into().ok(),
+                )
+            } else {
+                (
+                    "Untitled".to_string(),
+                    String::new(),
+                    String::new(),
+                    0,
+                    0,
+                    0,
+                    None,
+                )
+            };
+        let metadata = std::fs::metadata(&paths.audio).map_err(|error| error.to_string())?;
+        let (storage_root, relative_path) = local_access_projection(paths)?;
+        self.database
+            .upsert_local_access(
+                source,
+                &library::LocalAccessWrite {
+                    media_uri: media_uri.to_string(),
+                    origin: library::LocalAccessOrigin::Download,
+                    path: paths.audio.to_string_lossy().into_owned(),
+                    root: storage_root.to_string_lossy().into_owned(),
+                    relative_path: relative_path.to_string_lossy().into_owned(),
+                    size_bytes: i64::try_from(metadata.len()).unwrap_or(i64::MAX),
+                    mtime_ns: metadata
+                        .modified()
+                        .ok()
+                        .and_then(|value| value.duration_since(UNIX_EPOCH).ok())
+                        .map_or(0, |value| {
+                            i64::try_from(value.as_nanos()).unwrap_or(i64::MAX)
+                        }),
+                    device_id: None,
+                    inode: None,
+                    parser_version: RECORD_VERSION as i64,
+                    title,
+                    album,
+                    artist,
+                    disc_number,
+                    track_number,
+                    duration_millis,
+                    access_uri: reqwest::Url::from_file_path(&paths.audio)
+                        .map_err(|()| "Download path is not absolute".to_string())?
+                        .into(),
+                    loudness_analysis_key: loudness,
+                },
+            )
+            .await
+            .map(|_| ())
+            .map_err(|error| error.to_string())
     }
 
     async fn abort_matching(
@@ -1736,7 +1909,7 @@ impl Actor {
         active: &mut Vec<ActiveDownload>,
         preserve: bool,
         matches: impl Fn(&ActiveDownload) -> bool,
-    ) -> Vec<TrackKey> {
+    ) -> Vec<String> {
         self.settle_matching(active, preserve, true, matches).await
     }
 
@@ -1755,7 +1928,7 @@ impl Actor {
         preserve: bool,
         commit_completed: bool,
         matches: impl Fn(&ActiveDownload) -> bool,
-    ) -> Vec<TrackKey> {
+    ) -> Vec<String> {
         let mut settling = Vec::new();
         let mut index = 0;
         while index < active.len() {
@@ -1779,26 +1952,26 @@ impl Actor {
                 match self
                     .commit_transfer(
                         &download.source_id,
-                        &download.track_id,
+                        &download.media_uri,
                         &download.subject,
                         &download.paths,
                     )
                     .await
                 {
                     Ok(()) => {
-                        completed_tracks.push(download.track_id.clone());
+                        completed_tracks.push(download.media_uri.clone());
                         self.remove_job_track(
                             &download.source_id,
                             &download.job_id,
-                            &download.track_id,
+                            &download.media_uri,
                             true,
                         );
                     }
                     Err(DownloadFailure::NeedsAttention(error)) => {
                         warn!(
                             %error,
-                            source_id = %download.source_id,
-                            track_id = %download.track_id,
+                            source_id = ?download.source_id,
+                            media_uri = %download.media_uri,
                             "could not finish a completed download"
                         );
                         if let Some(job) = self.find_job_mut(&download.source_id, &download.job_id)
@@ -1814,8 +1987,8 @@ impl Actor {
             if !preserve && let Err(error) = discard_staging(&download.paths).await {
                 warn!(
                     %error,
-                    source_id = %download.source_id,
-                    track_id = %download.track_id,
+                    source_id = ?download.source_id,
+                    media_uri = %download.media_uri,
                     "could not settle an interrupted download"
                 );
             }
@@ -1835,7 +2008,7 @@ impl Actor {
         completed_tracks
     }
 
-    async fn reconcile_staging(&self, source_id: &SourceId) {
+    async fn reconcile_staging(&self, source_id: &Option<SourceId>) {
         let queued = self
             .jobs
             .get(source_id)
@@ -1843,12 +2016,14 @@ impl Actor {
             .flatten()
             .flat_map(|job| job.remaining.iter().cloned())
             .collect::<HashSet<_>>();
-        let directory = self
-            .attached
-            .get(source_id)
+        let directory = source_id
+            .as_ref()
+            .and_then(|source_id| self.attached.get(source_id))
             .and_then(|attached| attached.directory.as_deref());
-        if let Err(error) = cleanup_staging(&self.root, source_id, directory, &queued).await {
-            warn!(%error, %source_id, "could not reconcile download staging");
+        if let Err(error) =
+            cleanup_staging(&self.root, source_id.as_ref(), directory, &queued).await
+        {
+            warn!(%error, source_id=?source_id, "could not reconcile download staging");
         }
     }
 
@@ -1861,7 +2036,7 @@ impl Actor {
         }
         if let Err(error) = cleanup_staging(
             &self.root,
-            source_id,
+            Some(source_id),
             attached.directory.as_deref(),
             &HashSet::new(),
         )
@@ -1874,20 +2049,24 @@ impl Actor {
     fn queued_owners_for_track(
         &self,
         source_id: &SourceId,
-        track_id: &TrackKey,
+        identity: &str,
         excluded_subject: Option<&DownloadSubject>,
     ) -> HashSet<DownloadOwner> {
         self.jobs
-            .get(source_id)
+            .get(&Some(source_id.clone()))
             .into_iter()
             .flatten()
             .filter(|job| excluded_subject != Some(&job.subject))
-            .filter(|job| job.remaining.contains(track_id))
+            .filter(|job| job.remaining.iter().any(|media_uri| media_uri == identity))
             .map(|job| DownloadOwner::Subject(job.subject.clone()))
             .collect()
     }
 
-    fn find_job_mut(&mut self, source_id: &SourceId, job_id: &str) -> Option<&mut DownloadJob> {
+    fn find_job_mut(
+        &mut self,
+        source_id: &Option<SourceId>,
+        job_id: &str,
+    ) -> Option<&mut DownloadJob> {
         self.jobs
             .get_mut(source_id)?
             .iter_mut()
@@ -1896,9 +2075,9 @@ impl Actor {
 
     fn remove_job_track(
         &mut self,
-        source_id: &SourceId,
+        source_id: &Option<SourceId>,
         job_id: &str,
-        track_id: &TrackKey,
+        media_uri: &str,
         completed: bool,
     ) {
         let Some(jobs) = self.jobs.get_mut(source_id) else {
@@ -1908,25 +2087,63 @@ impl Actor {
             return;
         };
         let job = &mut jobs[job_index];
-        job.remaining.retain(|candidate| candidate != track_id);
+        job.remaining.retain(|candidate| candidate != media_uri);
         if completed {
-            job.completed.push(track_id.clone());
+            job.completed.push(media_uri.to_string());
         }
         if job.remaining.is_empty() {
-            jobs.remove(job_index);
+            let job = jobs.remove(job_index);
+            if completed && !job.failed {
+                self.publish_subject_complete(&job.subject);
+            }
         } else {
             job.state = DownloadQueueState::Downloading;
         }
     }
 
+    fn publish_subject_complete(&self, subject: &DownloadSubject) {
+        if !self
+            .jobs
+            .values()
+            .flatten()
+            .any(|job| &job.subject == subject)
+        {
+            let _ = self.events.try_send(DownloadEvent::SubjectChanged {
+                subject: subject.clone(),
+                downloaded: true,
+            });
+        }
+    }
+
+    async fn mark_subject_incomplete(&mut self, subject: &DownloadSubject) {
+        for (source, jobs) in &mut self.jobs {
+            let mut changed = false;
+            for job in jobs
+                .iter_mut()
+                .filter(|job| &job.subject == subject && !job.failed)
+            {
+                job.failed = true;
+                changed = true;
+            }
+            if changed && let Err(error) = persist_queue(&self.root, source.as_ref(), jobs).await {
+                warn!(%error, "could not save download progress");
+            }
+        }
+        let _ = self.events.try_send(DownloadEvent::SubjectChanged {
+            subject: subject.clone(),
+            downloaded: false,
+        });
+    }
+
     fn retry_waiting(&mut self) {
         for (source_id, jobs) in &mut self.jobs {
-            let attached = self.attached.get(source_id);
-            let available = attached.is_some_and(|attached| {
-                attached
-                    .source
-                    .as_ref()
-                    .is_some_and(|source| source.strong_count() > 0)
+            let available = source_id.as_ref().is_none_or(|source_id| {
+                self.attached.get(source_id).is_some_and(|attached| {
+                    attached
+                        .source
+                        .as_ref()
+                        .is_some_and(|source| source.strong_count() > 0)
+                })
             });
             if let Some(first) = jobs.first_mut()
                 && available
@@ -1937,20 +2154,43 @@ impl Actor {
         }
     }
 
-    async fn force_remove(&mut self, source_id: &SourceId, track_ids: Vec<TrackKey>, notify: bool) {
-        let remove = track_ids.iter().cloned().collect::<HashSet<_>>();
-        for job in self.jobs.entry(source_id.clone()).or_default().iter_mut() {
-            job.remaining.retain(|track_id| !remove.contains(track_id));
-            job.completed.retain(|track_id| !remove.contains(track_id));
-            job.total_tracks = job.remaining.len() + job.completed.len();
+    async fn force_remove(
+        &mut self,
+        source_id: Option<&SourceId>,
+        media_uris: Vec<String>,
+        notify: bool,
+    ) {
+        let group = source_id.cloned();
+        let remove = media_uris.iter().collect::<HashSet<_>>();
+        let subjects = self
+            .jobs
+            .get(&group)
+            .into_iter()
+            .flatten()
+            .filter(|job| {
+                job.remaining
+                    .iter()
+                    .chain(&job.completed)
+                    .any(|uri| remove.contains(uri))
+            })
+            .map(|job| job.subject.clone())
+            .collect::<HashSet<_>>();
+        for subject in subjects {
+            self.mark_subject_incomplete(&subject).await;
+        }
+        for job in self.jobs.entry(group.clone()).or_default().iter_mut() {
+            job.remaining
+                .retain(|media_uri| !remove.contains(media_uri));
+            job.completed
+                .retain(|media_uri| !remove.contains(media_uri));
         }
         self.jobs
-            .entry(source_id.clone())
+            .entry(group.clone())
             .or_default()
             .retain(|job| !job.remaining.is_empty());
-        self.reconcile_staging(source_id).await;
+        self.reconcile_staging(&group).await;
 
-        let (removed, failed) = self.delete_downloads(source_id, track_ids).await;
+        let (removed, failed) = self.delete_downloads(source_id, media_uris).await;
         self.persist_and_publish(source_id).await;
         if notify {
             self.send_removal_notice(removed, failed).await;
@@ -1959,79 +2199,74 @@ impl Actor {
 
     async fn delete_downloads(
         &self,
-        source_id: &SourceId,
-        track_ids: impl IntoIterator<Item = TrackKey>,
+        source_id: Option<&SourceId>,
+        media_uris: impl IntoIterator<Item = String>,
     ) -> (usize, usize) {
         let mut removed = 0usize;
         let mut failed = 0usize;
-        let custom_directory = self
-            .attached
-            .get(source_id)
-            .and_then(|attached| attached.directory.as_deref());
+        let custom_directory = source_id
+            .and_then(|source_id| self.settings.get(source_id))
+            .and_then(|settings| settings.directory.as_deref());
         let records =
             load_download_records(&self.root, source_id, custom_directory).unwrap_or_default();
-        for track_id in track_ids {
-            let paths = records
-                .get(&track_id)
-                .and_then(|record| {
-                    record_download_paths(&self.root, source_id, record, custom_directory).ok()
-                })
-                .unwrap_or_else(|| download_paths(&self.root, source_id, &track_id));
+        for media_uri in media_uris {
+            let Some(record) = records.get(&media_uri) else {
+                continue;
+            };
+            let Ok(paths) = record_download_paths(&self.root, source_id, record, custom_directory)
+            else {
+                failed += 1;
+                continue;
+            };
             match remove_download_files(&paths).await {
                 Ok(was_present) => {
-                    self.remove_download_access(source_id, track_id, &paths)
-                        .await;
+                    self.remove_download_access(&record, &paths).await;
                     removed += usize::from(was_present);
                 }
                 Err(error) => {
                     failed += 1;
-                    warn!(%error, %source_id, %track_id, "could not remove downloaded track");
+                    warn!(%error, source_id=?source_id, %media_uri, "could not remove downloaded track");
                 }
             }
         }
         (removed, failed)
     }
 
-    async fn remove_download_access(
-        &self,
-        source_id: &SourceId,
-        track_key: TrackKey,
-        paths: &DownloadPaths,
-    ) {
-        let Some(attached) = self.attached.get(source_id) else {
-            return;
-        };
-        let cancellation = library::ReadCancellation::new();
-        let Some(track) = self
+    async fn remove_download_access(&self, record: &DownloadRecord, paths: &DownloadPaths) {
+        let media_uri = record.media_uri.as_str();
+        let Ok(access) = self
             .database
-            .track_rows(attached.source_key, &[track_key], &cancellation)
+            .retaining_download_rows(&[media_uri.to_string()], &library::ReadCancellation::new())
             .await
-            .ok()
-            .and_then(|mut rows| rows.pop())
         else {
             return;
         };
-        let Ok(Some(access)) = self
-            .database
-            .resolve_local_access(
-                attached.source_key,
-                Some(&track.object_id),
-                &track.title,
-                &track.display_album,
-                &track.display_artist,
-                track.disc_number,
-                track.track_number,
-                track.duration_millis,
+        let Some(access) = access.into_iter().next() else {
+            return;
+        };
+        if Path::new(&access.path) == paths.audio
+            && matches!(
+                self.database
+                    .remove_local_access(access.local_access_file_key)
+                    .await,
+                Ok(true)
             )
-            .await
-        else {
-            return;
-        };
-        if Path::new(&access.path) == paths.audio {
+        {
             let _ = self
-                .database
-                .remove_local_access(attached.source_key, access.local_access_file_key)
+                .events
+                .send(DownloadEvent::Changed {
+                    media_uri: media_uri.to_string(),
+                    downloaded: false,
+                })
                 .await;
+            for owner in &record.owners {
+                if let DownloadOwner::Subject(subject) = owner {
+                    let _ = self.events.try_send(DownloadEvent::SubjectChanged {
+                        subject: subject.clone(),
+                        downloaded: false,
+                    });
+                }
+            }
         }
     }
 
@@ -2052,14 +2287,15 @@ impl Actor {
         delete_downloads: bool,
     ) {
         let subject = DownloadSubject::Rule(rule);
+        let group = Some(source_id.clone());
         self.jobs
-            .entry(source_id.clone())
+            .entry(group.clone())
             .or_default()
             .retain(|job| job.subject != subject);
-        self.reconcile_staging(source_id).await;
+        self.reconcile_staging(&group).await;
         self.release_owner(source_id, &subject, None, !delete_downloads)
             .await;
-        self.persist_and_publish(source_id).await;
+        self.persist_and_publish(Some(source_id)).await;
     }
 
     async fn cancel(
@@ -2068,23 +2304,24 @@ impl Actor {
         job_id: &str,
         active: &mut Vec<ActiveDownload>,
     ) {
-        let exists = self
+        let group = Some(source_id.clone());
+        let subject = self
             .jobs
-            .get(source_id)
-            .is_some_and(|jobs| jobs.iter().any(|job| job.id == job_id));
-        if !exists {
-            return;
-        }
+            .get(&group)
+            .and_then(|jobs| jobs.iter().find(|job| job.id == job_id))
+            .map(|job| job.subject.clone());
+        let Some(subject) = subject else { return };
+        self.mark_subject_incomplete(&subject).await;
         self.abort_matching(active, true, |download| {
-            download.source_id == *source_id && download.job_id == job_id
+            download.source_id.as_ref() == Some(source_id) && download.job_id == job_id
         })
         .await;
         self.jobs
-            .entry(source_id.clone())
+            .entry(group.clone())
             .or_default()
             .retain(|job| job.id != job_id);
-        self.reconcile_staging(source_id).await;
-        self.persist_and_publish(source_id).await;
+        self.reconcile_staging(&group).await;
+        self.persist_and_publish(Some(source_id)).await;
     }
 
     async fn clear_job(
@@ -2093,50 +2330,52 @@ impl Actor {
         job_id: &str,
         active: &mut Vec<ActiveDownload>,
     ) {
+        let group = Some(source_id.clone());
         let Some(job) = self
             .jobs
-            .get(source_id)
+            .get(&group)
             .and_then(|jobs| jobs.iter().find(|job| job.id == job_id))
             .cloned()
         else {
             return;
         };
+        self.mark_subject_incomplete(&job.subject).await;
         let completed = job
             .completed
             .into_iter()
             .chain(
                 self.abort_matching(active, true, |download| {
-                    download.source_id == *source_id && download.job_id == job_id
+                    download.source_id.as_ref() == Some(source_id) && download.job_id == job_id
                 })
                 .await,
             )
             .collect::<HashSet<_>>();
         let subject = job.subject;
         self.jobs
-            .entry(source_id.clone())
+            .entry(group.clone())
             .or_default()
             .retain(|job| job.id != job_id);
-        self.reconcile_staging(source_id).await;
+        self.reconcile_staging(&group).await;
         self.release_owner(source_id, &subject, Some(&completed), false)
             .await;
-        self.persist_and_publish(source_id).await;
+        self.persist_and_publish(Some(source_id)).await;
     }
 
     async fn release_owner(
         &self,
         source_id: &SourceId,
         subject: &DownloadSubject,
-        track_ids: Option<&HashSet<TrackKey>>,
+        media_ids: Option<&HashSet<String>>,
         retain: bool,
     ) {
-        if track_ids.is_some_and(HashSet::is_empty) {
+        if media_ids.is_some_and(HashSet::is_empty) {
             return;
         }
         let custom_directory = self
             .attached
             .get(source_id)
             .and_then(|attached| attached.directory.as_deref());
-        let records = match load_download_records(&self.root, source_id, custom_directory) {
+        let records = match load_download_records(&self.root, Some(source_id), custom_directory) {
             Ok(records) => records,
             Err(error) => {
                 warn!(%error, %source_id, "could not read download ownership");
@@ -2144,8 +2383,8 @@ impl Actor {
             }
         };
         let owner = DownloadOwner::Subject(subject.clone());
-        for (track_id, mut record) in records {
-            if track_ids.is_some_and(|track_ids| !track_ids.contains(&track_id)) {
+        for (identity, mut record) in records {
+            if media_ids.is_some_and(|media_ids| !media_ids.contains(&identity)) {
                 continue;
             }
             if !record.owners.remove(&owner) {
@@ -2156,20 +2395,20 @@ impl Actor {
             }
             record
                 .owners
-                .extend(self.queued_owners_for_track(source_id, &track_id, None));
-            let Ok(paths) = record_download_paths(&self.root, source_id, &record, custom_directory)
+                .extend(self.queued_owners_for_track(source_id, &identity, None));
+            let Ok(paths) =
+                record_download_paths(&self.root, Some(source_id), &record, custom_directory)
             else {
                 continue;
             };
             if record.owners.is_empty() {
                 if let Err(error) = remove_download_files(&paths).await {
-                    warn!(%error, %source_id, %track_id, "could not remove unowned download");
+                    warn!(%error, %source_id, media_uri=%record.media_uri, "could not remove unowned download");
                     continue;
                 }
-                self.remove_download_access(source_id, track_id, &paths)
-                    .await;
+                self.remove_download_access(&record, &paths).await;
             } else if let Err(error) = write_record(&paths, &record).await {
-                warn!(%error, %source_id, %track_id, "could not update download ownership");
+                warn!(%error, %source_id, media_uri=%record.media_uri, "could not update download ownership");
             }
         }
     }
@@ -2181,46 +2420,56 @@ impl Actor {
         target_job_id: &str,
         after: bool,
     ) {
+        let group = Some(source_id.clone());
         let changed = reorder_jobs(
-            self.jobs.entry(source_id.clone()).or_default(),
+            self.jobs.entry(group).or_default(),
             job_id,
             target_job_id,
             after,
         );
         if changed {
-            self.persist_and_publish(source_id).await;
+            self.persist_and_publish(Some(source_id)).await;
         } else {
-            self.publish(source_id).await;
+            self.publish(Some(source_id)).await;
         }
     }
 
     async fn clear(&mut self, source_id: &SourceId, notify: bool) {
+        let subjects = self
+            .jobs
+            .get(&Some(source_id.clone()))
+            .into_iter()
+            .flatten()
+            .map(|job| job.subject.clone())
+            .collect::<HashSet<_>>();
+        for subject in subjects {
+            self.mark_subject_incomplete(&subject).await;
+        }
         let staging_directory = self
             .attached
             .get(source_id)
             .and_then(|attached| attached.directory.clone());
-        self.jobs.remove(source_id);
-        let directory = source_directory(&self.root, source_id);
+        self.jobs.remove(&Some(source_id.clone()));
+        let directory = source_directory(&self.root, Some(source_id));
         let result = async {
             cleanup_staging(
                 &self.root,
-                source_id,
+                Some(source_id),
                 staging_directory.as_deref(),
                 &HashSet::new(),
             )
             .await
             .map_err(|error| error.to_string())?;
-            for record in
-                load_download_records(&self.root, source_id, staging_directory.as_deref())?
+            for (_, record) in
+                load_download_records(&self.root, Some(source_id), staging_directory.as_deref())?
             {
                 let paths = record_download_paths(
                     &self.root,
-                    source_id,
-                    &record.1,
+                    Some(source_id),
+                    &record,
                     staging_directory.as_deref(),
                 )?;
-                self.remove_download_access(source_id, record.0, &paths)
-                    .await;
+                self.remove_download_access(&record, &paths).await;
                 remove_download_files(&paths).await?;
             }
             match tokio::fs::remove_dir_all(&directory).await {
@@ -2232,7 +2481,7 @@ impl Actor {
         .await;
         match result {
             Ok(()) => {
-                self.publish(source_id).await;
+                self.publish(Some(source_id)).await;
                 if notify {
                     let _ = self
                         .events
@@ -2254,15 +2503,16 @@ impl Actor {
         }
     }
 
-    async fn persist_and_publish(&self, source_id: &SourceId) {
+    async fn persist_and_publish(&self, source_id: Option<&SourceId>) {
+        let group = source_id.cloned();
         if let Err(error) = persist_queue(
             &self.root,
             source_id,
-            self.jobs.get(source_id).map(Vec::as_slice).unwrap_or(&[]),
+            self.jobs.get(&group).map(Vec::as_slice).unwrap_or(&[]),
         )
         .await
         {
-            warn!(%error, %source_id, "could not save the download queue");
+            warn!(%error, source_id=?source_id, "could not save the download queue");
         }
         self.publish(source_id).await;
     }
@@ -2270,36 +2520,43 @@ impl Actor {
     async fn publish_all(&self) {
         let source_ids = self.jobs.keys().cloned().collect::<Vec<_>>();
         for source_id in source_ids {
-            self.publish(&source_id).await;
+            self.publish(source_id.as_ref()).await;
         }
     }
 
-    async fn publish(&self, source_id: &SourceId) {
-        let custom_directory = self
-            .attached
-            .get(source_id)
-            .and_then(|attached| attached.directory.as_deref());
-        let downloaded_tracks = load_download_records(&self.root, source_id, custom_directory)
-            .map_or(0, |records| records.len());
+    async fn publish(&self, source_id: Option<&SourceId>) {
+        let group = source_id.cloned();
+        let downloaded_tracks = self
+            .database
+            .downloaded_count(source_id.map(SourceId::as_str))
+            .await
+            .unwrap_or_default();
         let jobs = self
             .jobs
-            .get(source_id)
+            .get(&group)
             .into_iter()
             .flatten()
             .map(|job| DownloadQueueItem {
                 id: job.id.clone(),
-                source_id: source_id.clone(),
+                source_id: group.clone(),
                 subject: job.subject.clone(),
+                preview_uris: job
+                    .completed
+                    .iter()
+                    .chain(&job.remaining)
+                    .take(4)
+                    .cloned()
+                    .collect(),
                 quality: job.quality,
                 completed_tracks: job.completed.len(),
-                total_tracks: job.total_tracks,
+                total_tracks: job.completed.len() + job.remaining.len(),
                 state: job.state,
             })
             .collect::<Vec<_>>();
         let _ = self
             .events
             .send(DownloadEvent::Queue {
-                source_id: source_id.clone(),
+                source_id: group,
                 snapshot: Arc::new(DownloadQueueSnapshot {
                     jobs: jobs.into(),
                     downloaded_tracks,
@@ -2311,7 +2568,7 @@ impl Actor {
 }
 
 async fn download_track(
-    source_id: SourceId,
+    source_id: Option<SourceId>,
     request: StreamRequest,
     stream: ResolvedStream,
     paths: DownloadPaths,
@@ -2319,7 +2576,7 @@ async fn download_track(
     cancellation: tokio::sync::oneshot::Receiver<()>,
 ) -> Result<(), DownloadFailure> {
     run_transfer(
-        &source_id,
+        source_id.as_ref(),
         &request,
         &stream,
         &paths,
@@ -2349,7 +2606,7 @@ fn download_source_failure(error: SourceError) -> DownloadFailure {
     }
 }
 
-fn job_id(source_id: &SourceId, subject: &DownloadSubject, sequence: u64) -> String {
+fn job_id(source_id: Option<&SourceId>, subject: &DownloadSubject, sequence: u64) -> String {
     let now = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .unwrap_or_default()
@@ -2411,7 +2668,7 @@ mod tests {
             None,
             None,
             None,
-            Some("https://example.invalid/track"),
+            None,
             Some("FLAC"),
             None,
             None,
@@ -2449,35 +2706,255 @@ mod tests {
     }
 
     #[test]
-    fn queued_track_keys_survive_restart_serialization() {
+    fn queued_media_survives_restart_serialization() {
         let source_id = SourceId::new("source");
+        let media_uri = library::source_entity_uri(&source_id, "track", "track");
         let queue = QueueFile {
             version: QUEUE_VERSION,
-            source_id: source_id.clone(),
             jobs: vec![DownloadJob {
                 id: "job".to_string(),
-                subject: DownloadSubject::Track(TrackKey::from_raw(7)),
+                subject: DownloadSubject::for_media_uris(
+                    "track",
+                    Some("Track"),
+                    std::slice::from_ref(&media_uri),
+                ),
                 quality: StreamQuality::Original,
-                total_tracks: 1,
                 completed: Vec::new(),
-                remaining: vec![TrackKey::from_raw(7)],
+                failed: false,
+                remaining: vec![media_uri.clone()],
                 state: DownloadQueueState::Queued,
             }],
         };
         let restored: QueueFile =
             serde_json::from_slice(&serde_json::to_vec(&queue).expect("encode Queue"))
                 .expect("decode Queue");
-        assert_eq!(restored.source_id, source_id);
-        assert_eq!(restored.jobs[0].remaining, [TrackKey::from_raw(7)]);
+        assert_eq!(restored.jobs[0].remaining, [media_uri]);
+    }
+
+    #[tokio::test]
+    async fn direct_http_media_uses_the_application_download_queue_without_a_source() {
+        let (_library, database, source_key, _) = download_fixture("unused", "track").await;
+        let root = tempfile::Builder::new()
+            .prefix("downloads café %")
+            .tempdir()
+            .expect("Downloads root");
+        let source_id = SourceId::new("unused");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let media_uri = "https://media.example/direct.flac".to_string();
+        let (events, received) = async_channel::unbounded();
+        actor.events = events;
+        actor
+            .enqueue(
+                None,
+                DownloadSubject::Prepared {
+                    context_id: "direct".to_string(),
+                    title: Some("Direct".to_string()),
+                },
+                StreamQuality::Original,
+                vec![media_uri.clone()],
+            )
+            .await;
+
+        assert_eq!(
+            actor.jobs[&None][0].remaining,
+            std::slice::from_ref(&media_uri)
+        );
+        let queue = std::fs::read(source_directory(root.path(), None).join(QUEUE_FILE))
+            .expect("read direct Queue");
+        let queue: QueueFile = serde_json::from_slice(&queue).expect("decode direct Queue");
+        assert_eq!(queue.jobs[0].remaining, std::slice::from_ref(&media_uri));
+        let DownloadEvent::Queue {
+            source_id,
+            snapshot,
+        } = received.recv().await.unwrap()
+        else {
+            panic!("Queue event")
+        };
+        assert!(source_id.is_none());
+        assert_eq!(
+            snapshot.jobs[0].preview_uris,
+            std::slice::from_ref(&media_uri)
+        );
+        let DownloadEvent::Feedback(feedback) = received.recv().await.unwrap() else {
+            panic!("feedback event")
+        };
+        assert_eq!(feedback.preview_uris, std::slice::from_ref(&media_uri));
+
+        let paths = download_paths(root.path(), None, &media_uri);
+        std::fs::create_dir_all(&paths.directory).expect("create download directory");
+        std::fs::write(&paths.audio_part, b"complete bytes").expect("write completed transfer");
+        let job = actor.jobs[&None][0].clone();
+        let subject = job.subject.clone();
+        let active = ActiveDownload {
+            source_id: None,
+            job_id: job.id,
+            media_uri: media_uri.clone(),
+            subject: job.subject,
+            paths: paths.clone(),
+            cancellation: None,
+            task: tokio::spawn(async { Ok(()) }),
+        };
+        actor.finish(active, Ok(Ok(())), &mut Vec::new()).await;
+
+        assert_eq!(
+            received.recv().await.unwrap(),
+            DownloadEvent::Changed {
+                media_uri: media_uri.clone(),
+                downloaded: true,
+            }
+        );
+        let access = actor
+            .database
+            .playback_access_uri(&media_uri)
+            .await
+            .unwrap();
+        assert_eq!(
+            reqwest::Url::parse(access.as_deref().unwrap())
+                .unwrap()
+                .to_file_path()
+                .unwrap(),
+            paths.audio
+        );
+        assert_eq!(
+            received.recv().await.unwrap(),
+            DownloadEvent::SubjectChanged {
+                subject: subject.clone(),
+                downloaded: true,
+            }
+        );
+        let DownloadEvent::Queue { snapshot, .. } = received.recv().await.unwrap() else {
+            panic!("completed Queue event")
+        };
+        assert!(snapshot.jobs.is_empty());
+        assert_eq!(snapshot.downloaded_tracks, 1);
+        for source_id in ["unused", "missing"] {
+            let count = actor
+                .database
+                .downloaded_count(Some(source_id))
+                .await
+                .unwrap();
+            assert_eq!(count, 0);
+        }
+
+        actor
+            .apply(
+                Command::Remove {
+                    media_uris: vec![media_uri.clone()],
+                    notify: false,
+                },
+                &mut Vec::new(),
+            )
+            .await;
+        assert_eq!(
+            received.recv().await.unwrap(),
+            DownloadEvent::Changed {
+                media_uri: media_uri.clone(),
+                downloaded: false,
+            }
+        );
+        let access = actor
+            .database
+            .playback_access_uri(&media_uri)
+            .await
+            .unwrap();
+        assert!(access.is_none());
+        assert!(!paths.audio.exists());
+        assert_eq!(
+            received.recv().await.unwrap(),
+            DownloadEvent::SubjectChanged {
+                subject,
+                downloaded: false,
+            }
+        );
+        let DownloadEvent::Queue { snapshot, .. } = received.recv().await.unwrap() else {
+            panic!("removed Queue event")
+        };
+        assert_eq!(snapshot.downloaded_tracks, 0);
+    }
+
+    #[tokio::test]
+    async fn collection_completion_follows_its_download_jobs_across_sources() {
+        for fail_first in [false, true] {
+            let (_directory, database, source_key, _) = download_fixture("source", "track").await;
+            let root = tempfile::tempdir().unwrap();
+            let source = SourceId::new("source");
+            let mut actor = actor_for_test(root.path(), database, &source, source_key);
+            let (events, received) = async_channel::unbounded();
+            actor.events = events;
+            let subject = DownloadSubject::Prepared {
+                context_id: "playlist:1".into(),
+                title: None,
+            };
+            let remote = library::source_entity_uri(&source, "track", "track");
+            let direct = "https://example.org/track.flac".to_string();
+            actor
+                .apply(
+                    Command::Download {
+                        subject: subject.clone(),
+                        media_uris: vec![remote.clone(), direct.clone()],
+                    },
+                    &mut Vec::new(),
+                )
+                .await;
+            while received.try_recv().is_ok() {}
+
+            for (index, (group, uri)) in [(Some(source.clone()), remote), (None, direct)]
+                .into_iter()
+                .enumerate()
+            {
+                let job = actor.jobs[&group][0].clone();
+                let paths = download_paths(root.path(), group.as_ref(), &uri);
+                std::fs::create_dir_all(&paths.directory).unwrap();
+                std::fs::write(&paths.audio_part, b"completed transfer").unwrap();
+                let active = ActiveDownload {
+                    source_id: group,
+                    job_id: job.id,
+                    media_uri: uri,
+                    subject: job.subject,
+                    paths,
+                    cancellation: None,
+                    task: tokio::spawn(async { Ok(()) }),
+                };
+                let result = if index == 0 && fail_first {
+                    Err(DownloadFailure::Item("unavailable track".into()))
+                } else {
+                    Ok(())
+                };
+                actor.finish(active, Ok(result), &mut Vec::new()).await;
+                let mut completed = 0;
+                while let Ok(event) = received.try_recv() {
+                    if event
+                        == (DownloadEvent::SubjectChanged {
+                            subject: subject.clone(),
+                            downloaded: true,
+                        })
+                    {
+                        completed += 1;
+                    }
+                }
+                assert_eq!(completed, usize::from(index == 1 && !fail_first));
+                if index == 0 && fail_first {
+                    let saved: QueueFile = serde_json::from_slice(
+                        &std::fs::read(source_directory(root.path(), None).join(QUEUE_FILE))
+                            .unwrap(),
+                    )
+                    .unwrap();
+                    assert!(
+                        saved.jobs[0].failed,
+                        "failure remains part of the pending download after restart"
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]
     async fn released_completed_and_partial_downloads_rebind_on_attach() {
-        let (_database_directory, database, source_key, track_key) =
+        let (_database_directory, database, source_key, _track_key) =
             download_fixture("source", "track-object").await;
         let downloads = tempfile::tempdir().expect("temporary Downloads root");
         let source_id = SourceId::new("source");
-        let directory = source_directory(downloads.path(), &source_id);
+        let directory = source_directory(downloads.path(), Some(&source_id));
         std::fs::create_dir_all(&directory).expect("create source Downloads directory");
         let released_stem = hash_id_bytes(b"track-object");
         let audio = directory.join(format!("{released_stem}.{AUDIO_EXTENSION}"));
@@ -2518,14 +2995,16 @@ mod tests {
         )
         .expect("write released Queue");
 
-        let stale =
-            attach_downloaded_files(downloads.path(), &database, source_key, &source_id, None)
-                .await
-                .expect("attach released download");
-        assert!(stale.is_empty());
-        let records = load_download_records(downloads.path(), &source_id, None)
+        attach_downloaded_files(downloads.path(), &database, source_key, &source_id, None)
+            .await
+            .expect("attach released download");
+        let records = load_download_records(downloads.path(), Some(&source_id), None)
             .expect("load migrated records");
-        let migrated = records.get(&track_key).expect("migrated record");
+        let migrated = records.values().next().expect("migrated record");
+        assert_eq!(
+            migrated.media_uri,
+            library::source_entity_uri(&source_id, "track", "track-object")
+        );
         assert_eq!(migrated.completed_size, Some(14));
         assert_eq!(
             migrated.relative_audio_path.as_deref(),
@@ -2536,8 +3015,12 @@ mod tests {
         let jobs = load_queue(downloads.path(), &source_id, &database, source_key, None)
             .await
             .expect("migrate released Queue");
-        assert_eq!(jobs[0].remaining, [track_key]);
-        let current = staging_paths(downloads.path(), &source_id, &track_key, None);
+        assert_eq!(
+            jobs[0].remaining[0],
+            library::source_entity_uri(&source_id, "track", "track-object")
+        );
+        let identity = jobs[0].remaining[0].clone();
+        let current = staging_paths(downloads.path(), Some(&source_id), &identity, None);
         assert_eq!(
             std::fs::read(current.audio_part).expect("read migrated partial"),
             b"partial"
@@ -2550,12 +3033,12 @@ mod tests {
 
     #[tokio::test]
     async fn released_custom_download_is_authorized_by_current_configuration() {
-        let (_database_directory, database, source_key, track_key) =
+        let (_database_directory, database, source_key, _track_key) =
             download_fixture("custom-source", "custom-track").await;
         let downloads = tempfile::tempdir().expect("temporary Downloads root");
         let custom = tempfile::tempdir().expect("configured custom root");
         let source_id = SourceId::new("custom-source");
-        let directory = source_directory(downloads.path(), &source_id);
+        let directory = source_directory(downloads.path(), Some(&source_id));
         std::fs::create_dir_all(&directory).expect("create source Downloads directory");
         let relative = PathBuf::from("Artist/Album/custom.audio");
         let audio = custom.path().join(&relative);
@@ -2580,7 +3063,7 @@ mod tests {
         )
         .expect("write released custom record");
 
-        let stale = attach_downloaded_files(
+        attach_downloaded_files(
             downloads.path(),
             &database,
             source_key,
@@ -2589,10 +3072,14 @@ mod tests {
         )
         .await
         .expect("attach released custom download");
-        assert!(stale.is_empty());
-        let records = load_download_records(downloads.path(), &source_id, Some(custom.path()))
-            .expect("load migrated custom record");
-        let migrated = records.get(&track_key).expect("migrated custom record");
+        let records =
+            load_download_records(downloads.path(), Some(&source_id), Some(custom.path()))
+                .expect("load migrated custom record");
+        let migrated = records.values().next().expect("migrated custom record");
+        assert_eq!(
+            migrated.media_uri,
+            library::source_entity_uri(&source_id, "track", "custom-track")
+        );
         assert!(migrated.custom_storage);
         assert!(
             migrated
@@ -2632,7 +3119,6 @@ mod tests {
                     directory: None,
                 },
             )]),
-            selected: Some(source_id.clone()),
             settings: HashMap::new(),
             running_rules: None,
             pending_rules: None,
@@ -2642,14 +3128,22 @@ mod tests {
         }
     }
 
-    fn test_job(track: TrackKey) -> DownloadJob {
+    fn test_media(source_id: &SourceId, _source_key: SourceKey, _track: TrackKey) -> String {
+        library::source_entity_uri(source_id, "track", "track")
+    }
+
+    fn test_job(media_uri: String) -> DownloadJob {
         DownloadJob {
             id: "job".to_string(),
-            subject: DownloadSubject::Track(track),
+            subject: DownloadSubject::for_media_uris(
+                "track",
+                Some("Track"),
+                std::slice::from_ref(&media_uri),
+            ),
             quality: StreamQuality::Original,
-            total_tracks: 1,
             completed: Vec::new(),
-            remaining: vec![track],
+            failed: false,
+            remaining: vec![media_uri],
             state: DownloadQueueState::Downloading,
         }
     }
@@ -2660,18 +3154,25 @@ mod tests {
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("pause");
         let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
-        actor.jobs.insert(source_id.clone(), vec![test_job(track)]);
-        let paths = download_paths(root.path(), &source_id, &track);
+        let media_uri = test_media(&source_id, source_key, track);
+        actor
+            .jobs
+            .insert(Some(source_id.clone()), vec![test_job(media_uri.clone())]);
+        let paths = download_paths(root.path(), Some(&source_id), &media_uri);
         let (cancel, cancelled) = tokio::sync::oneshot::channel();
         let task = tokio::spawn(async move {
             let _ = cancelled.await;
             Err(DownloadFailure::Retry("cancelled".to_string()))
         });
         let mut active = vec![ActiveDownload {
-            source_id: source_id.clone(),
+            source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
-            track_id: track,
-            subject: DownloadSubject::Track(track),
+            media_uri: media_uri.clone(),
+            subject: DownloadSubject::for_media_uris(
+                "track",
+                Some("Track"),
+                std::slice::from_ref(&media_uri),
+            ),
             paths,
             cancellation: Some(cancel),
             task,
@@ -2681,7 +3182,72 @@ mod tests {
 
         assert!(actor.paused);
         assert!(active.is_empty());
-        assert_eq!(actor.jobs[&source_id][0].state, DownloadQueueState::Queued);
+        assert_eq!(
+            actor.jobs[&Some(source_id)][0].state,
+            DownloadQueueState::Queued
+        );
+    }
+
+    #[tokio::test]
+    async fn restore_suspension_drains_active_work_and_holds_following_commands() {
+        let (_library, database, source_key, track) = download_fixture("suspend", "track").await;
+        let root = tempfile::tempdir().expect("Downloads root");
+        let source_id = SourceId::new("suspend");
+        let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
+        let media_uri = test_media(&source_id, source_key, track);
+        actor
+            .jobs
+            .insert(Some(source_id.clone()), vec![test_job(media_uri.clone())]);
+        let paths = download_paths(root.path(), Some(&source_id), &media_uri);
+        let (cancel, cancelled) = tokio::sync::oneshot::channel();
+        let task = tokio::spawn(async move {
+            let _ = cancelled.await;
+            Err(DownloadFailure::Retry("cancelled".to_string()))
+        });
+        let mut active = vec![ActiveDownload {
+            source_id: Some(source_id.clone()),
+            job_id: "job".to_string(),
+            media_uri: media_uri.clone(),
+            subject: DownloadSubject::for_media_uris(
+                "track",
+                Some("Track"),
+                std::slice::from_ref(&media_uri),
+            ),
+            paths,
+            cancellation: Some(cancel),
+            task,
+        }];
+
+        let (ready, acknowledged) = async_channel::bounded(1);
+        let (resume, released) = async_channel::bounded(1);
+        let work = tokio::spawn(async move {
+            actor
+                .apply(
+                    Command::Suspend {
+                        ready,
+                        resume: released,
+                    },
+                    &mut active,
+                )
+                .await;
+            (actor, active)
+        });
+        acknowledged.recv().await.unwrap();
+        assert!(
+            !work.is_finished(),
+            "Store replacement retains the command boundary"
+        );
+        drop(DownloadSuspension(resume));
+        let (actor, active) = work.await.unwrap();
+        assert!(
+            !actor.paused,
+            "restoring does not change the user's pause preference"
+        );
+        assert!(active.is_empty());
+        assert_eq!(
+            actor.jobs[&Some(source_id)][0].state,
+            DownloadQueueState::Queued
+        );
     }
 
     #[tokio::test]
@@ -2690,8 +3256,11 @@ mod tests {
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("cancel");
         let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
-        actor.jobs.insert(source_id.clone(), vec![test_job(track)]);
-        let paths = download_paths(root.path(), &source_id, &track);
+        let media_uri = test_media(&source_id, source_key, track);
+        actor
+            .jobs
+            .insert(Some(source_id.clone()), vec![test_job(media_uri.clone())]);
+        let paths = download_paths(root.path(), Some(&source_id), &media_uri);
         std::fs::create_dir_all(paths.audio_part.parent().expect("staging parent"))
             .expect("create staging");
         std::fs::write(&paths.audio_part, b"partial").expect("write staging");
@@ -2701,10 +3270,14 @@ mod tests {
             Err(DownloadFailure::Retry("cancelled".to_string()))
         });
         let mut active = vec![ActiveDownload {
-            source_id: source_id.clone(),
+            source_id: Some(source_id.clone()),
             job_id: "job".to_string(),
-            track_id: track,
-            subject: DownloadSubject::Track(track),
+            media_uri: media_uri.clone(),
+            subject: DownloadSubject::for_media_uris(
+                "track",
+                Some("Track"),
+                std::slice::from_ref(&media_uri),
+            ),
             paths: paths.clone(),
             cancellation: Some(cancel),
             task,
@@ -2712,7 +3285,7 @@ mod tests {
 
         actor.cancel(&source_id, "job", &mut active).await;
 
-        assert!(actor.jobs[&source_id].is_empty());
+        assert!(actor.jobs[&Some(source_id)].is_empty());
         assert!(active.is_empty());
         assert!(!paths.audio_part.exists());
     }
@@ -2723,15 +3296,20 @@ mod tests {
         let root = tempfile::tempdir().expect("Downloads root");
         let source_id = SourceId::new("stale");
         let mut actor = actor_for_test(root.path(), database, &source_id, source_key);
-        let paths = download_paths(root.path(), &source_id, &track);
+        let media_uri = test_media(&source_id, source_key, track);
+        let paths = download_paths(root.path(), Some(&source_id), &media_uri);
         std::fs::create_dir_all(paths.audio_part.parent().expect("staging parent"))
             .expect("create staging");
         std::fs::write(&paths.audio_part, b"complete bytes").expect("write completed staging");
         let active = ActiveDownload {
-            source_id: source_id.clone(),
+            source_id: Some(source_id.clone()),
             job_id: "removed".to_string(),
-            track_id: track,
-            subject: DownloadSubject::Track(track),
+            media_uri: media_uri.clone(),
+            subject: DownloadSubject::for_media_uris(
+                "track",
+                Some("Track"),
+                std::slice::from_ref(&media_uri),
+            ),
             paths: paths.clone(),
             cancellation: None,
             task: tokio::spawn(async { Ok(()) }),

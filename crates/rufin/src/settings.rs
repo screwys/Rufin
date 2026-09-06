@@ -1,4 +1,3 @@
-use std::collections::HashSet;
 use std::ffi::OsString;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
@@ -38,8 +37,8 @@ pub(crate) fn fresh_credential_ref() -> Result<CredentialRef, String> {
     random_identity("source-").map(CredentialRef::new)
 }
 
-pub(crate) fn fresh_secret_scope_id() -> Result<String, String> {
-    random_identity("")
+pub(crate) fn fresh_source_id() -> Result<sources::SourceId, String> {
+    random_identity("rufin-source-").map(sources::SourceId::new)
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -179,26 +178,6 @@ impl StoredSettings {
         self.migrate_home_blocks();
         self.migrate_legacy_track_table();
         self.ui.sanitize();
-        self.ui.downloads.retain(|download| {
-            self.sources
-                .configured
-                .iter()
-                .any(|source| source.configuration.source_id == download.source_id)
-        });
-        let configured_source_ids = self
-            .sources
-            .configured
-            .iter()
-            .map(|source| source.configuration.source_id.clone())
-            .collect::<HashSet<_>>();
-        self.ui
-            .sidebar
-            .pins
-            .retain(|pin| configured_source_ids.contains(pin.source_id()));
-        self.ui
-            .sidebar
-            .playlist_pin_imported_sources
-            .retain(|source_id| configured_source_ids.contains(source_id));
         for download in &mut self.ui.downloads {
             let limit = self
                 .sources
@@ -353,6 +332,22 @@ impl SettingsFile {
         let mut next = current.clone();
         let output = operation(&mut next)?;
         next.migrate_defaults();
+        if next.ui.backup.schedule.frequency != library::BackupFrequency::Off
+            && next.ui.backup.schedule.schedule_id.is_empty()
+        {
+            next.ui.backup.schedule.schedule_id = random_identity("schedule-")?;
+        }
+        next.ui.backup.schedule.retention = 2;
+        if next.ui.backup.enabled
+            && next.ui.backup.schedule.frequency == library::BackupFrequency::Off
+        {
+            next.ui.backup.schedule.frequency = library::BackupFrequency::Daily;
+            if next.ui.backup.schedule.schedule_id.is_empty() {
+                next.ui.backup.schedule.schedule_id = random_identity("schedule-")?;
+            }
+        }
+        next.ui.backup.schedule.hour = next.ui.backup.schedule.hour.min(23);
+        next.ui.backup.schedule.weekday = next.ui.backup.schedule.weekday.min(6);
         if let Some(path) = &self.path {
             write_settings(path, &next)?;
         }
@@ -372,15 +367,16 @@ impl SettingsFile {
     }
 }
 
+#[derive(Clone)]
 pub(crate) struct SettingsUiPort {
     file: SettingsFile,
-    on_change: Arc<dyn Fn(&StoredSettings, &StoredSettings) + Send + Sync>,
+    on_change: Arc<dyn Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync>,
 }
 
 impl SettingsUiPort {
     pub(crate) fn new(
         file: SettingsFile,
-        on_change: impl Fn(&StoredSettings, &StoredSettings) + Send + Sync + 'static,
+        on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
     ) -> Rc<Self> {
         Rc::new(Self {
             file,
@@ -395,8 +391,19 @@ impl SettingsUiPort {
             Ok(())
         })?;
         let current = self.file.load();
-        (self.on_change)(&previous, &current);
+        (self.on_change)(&previous, &current, false);
         Ok(current.ui)
+    }
+
+    pub(crate) fn restore(
+        &self,
+        restore: impl FnOnce(&mut StoredSettings) -> Result<(), String>,
+        credentials_changed: bool,
+    ) -> Result<(), String> {
+        let previous = self.file.load();
+        self.file.update(restore)?;
+        (self.on_change)(&previous, &self.file.load(), credentials_changed);
+        Ok(())
     }
 }
 
@@ -447,6 +454,20 @@ pub(crate) fn all_secret_keys(settings: &StoredSettings) -> Vec<SecretKey> {
             .map(|descriptor| scrobbling_secret_key(*descriptor)),
     );
     keys
+}
+
+pub(crate) fn backup_password_key() -> SecretKey {
+    SecretKey::namespaced("backup", "password", "Rufin scheduled backup password")
+}
+
+pub(crate) fn backup_password_store(settings: &StoredSettings) -> Arc<dyn SecretStore> {
+    match settings.ui.secret_storage_mode {
+        SecretStorageMode::ConfigFile => Arc::new(ConfigSecretStore::with_scope(
+            crate::paths::backup_password_file(),
+            settings.secret_scope_id.clone(),
+        )),
+        SecretStorageMode::SystemKeyring => system_keyring_secret_store(&settings.secret_scope_id),
+    }
 }
 
 pub(crate) fn persist_scrobbling_settings(
@@ -542,6 +563,7 @@ pub(crate) fn load_scrobbling_settings(
             Err(error) => {
                 loaded = false;
                 warn!(%error, "failed to load a scrobbling secret");
+                break;
             }
         }
     }
@@ -585,20 +607,39 @@ pub(crate) fn startup_scrobbling_settings(
         return settings;
     }
 
-    let settings = load_scrobbling_settings(file, secrets);
-    if !has_inline_secrets {
-        return settings;
-    }
-    match persist_scrobbling_settings(file, secrets, &settings) {
-        Ok(settings) => settings,
-        Err(error) => {
-            warn!(%error, "could not move scrobbling credentials to secret storage");
-            settings
+    if has_inline_secrets {
+        for descriptor in scrobbling::secret_descriptors() {
+            let value = descriptor.value(&stored.scrobbling);
+            if value.is_empty() {
+                continue;
+            }
+            if descriptor.value(&file.load().scrobbling) != value {
+                continue;
+            }
+            let result = save_secret(
+                Arc::clone(secrets),
+                scrobbling_secret_key(*descriptor),
+                value.to_owned(),
+            )
+            .and_then(|()| {
+                file.update(|current| {
+                    if descriptor.value(&current.scrobbling) == value {
+                        descriptor.value_mut(&mut current.scrobbling).clear();
+                        current.scrobbling_secrets_present = true;
+                    }
+                    Ok(())
+                })
+            });
+            if let Err(error) = result {
+                warn!(%error, "could not move scrobbling credentials to secret storage");
+                return settings;
+            }
         }
     }
+    load_scrobbling_settings(file, secrets)
 }
 
-fn scrobbling_secret_key(descriptor: scrobbling::SecretDescriptor) -> SecretKey {
+pub(crate) fn scrobbling_secret_key(descriptor: scrobbling::SecretDescriptor) -> SecretKey {
     SecretKey::namespaced(
         descriptor.namespace(),
         descriptor.kind(),
@@ -739,62 +780,35 @@ fn preserve_unreadable_settings(path: &Path) -> Result<PathBuf, String> {
 }
 
 pub(crate) fn write_settings(path: &Path, value: &StoredSettings) -> Result<(), String> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent).map_err(|error| error.to_string())?;
-    }
-    let json = serde_json::to_string_pretty(value).map_err(|error| error.to_string())?;
-    let temporary = path.with_extension("json.tmp");
-    let mut file = fs::File::create(&temporary).map_err(|error| error.to_string())?;
-    restrict_file(&temporary).map_err(|error| error.to_string())?;
-    file.write_all(format!("{json}\n").as_bytes())
-        .and_then(|()| file.sync_all())
+    let mut json = serde_json::to_vec_pretty(value).map_err(|error| error.to_string())?;
+    json.push(b'\n');
+    write_private(path, &json)
+}
+
+pub(crate) fn write_private(path: &Path, bytes: &[u8]) -> Result<(), String> {
+    let parent = path
+        .parent()
+        .filter(|p| !p.as_os_str().is_empty())
+        .unwrap_or_else(|| Path::new("."));
+    fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    let mut temporary =
+        tempfile::NamedTempFile::new_in(parent).map_err(|error| error.to_string())?;
+    temporary
+        .write_all(bytes)
+        .and_then(|()| temporary.as_file().sync_all())
         .map_err(|error| error.to_string())?;
-    commit_settings_file(&temporary, path)?;
+    temporary.persist(path).map_err(|error| error.to_string())?;
+    if let Err(error) = sync_settings_directory(parent) {
+        warn!(%error,path=%path.display(),"could not sync the settings directory after saving");
+    }
     Ok(())
 }
-
-fn commit_settings_file(temporary: &Path, path: &Path) -> Result<(), String> {
-    commit_settings_file_with(temporary, path, sync_settings_directory)
-}
-
 #[cfg(unix)]
 fn sync_settings_directory(parent: &Path) -> std::io::Result<()> {
     fs::File::open(parent).and_then(|directory| directory.sync_all())
 }
-
 #[cfg(not(unix))]
 fn sync_settings_directory(_parent: &Path) -> std::io::Result<()> {
-    Ok(())
-}
-
-fn commit_settings_file_with(
-    temporary: &Path,
-    path: &Path,
-    sync_directory: impl FnOnce(&Path) -> std::io::Result<()>,
-) -> Result<(), String> {
-    fs::rename(temporary, path).map_err(|error| error.to_string())?;
-    if let Some(parent) = path.parent() {
-        if let Err(error) = sync_directory(parent) {
-            warn!(
-                %error,
-                path = %path.display(),
-                "could not sync the settings directory after saving"
-            );
-        }
-    }
-    Ok(())
-}
-
-#[cfg(unix)]
-fn restrict_file(path: &Path) -> std::io::Result<()> {
-    use std::os::unix::fs::PermissionsExt as _;
-
-    fs::set_permissions(path, fs::Permissions::from_mode(0o600))?;
-    Ok(())
-}
-
-#[cfg(not(unix))]
-fn restrict_file(_path: &Path) -> std::io::Result<()> {
     Ok(())
 }
 
@@ -832,6 +846,55 @@ mod tests {
         let store = Arc::new(CountingSecretStore::default());
         let backend: Arc<dyn SecretStore> = store.clone();
         (store, Arc::new(SwitchableSecretStore::new(backend)))
+    }
+
+    #[test]
+    fn backup_schedule_identity_and_private_settings_survive_replacement() {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("settings.json");
+        let file = SettingsFile {
+            path: Some(path.clone()),
+            value: Arc::new(Mutex::new(StoredSettings::default())),
+        };
+        assert!(!file.load().ui.backup.enabled);
+        file.update(|stored| {
+            stored.ui.backup.schedule.frequency = library::BackupFrequency::Daily;
+            Ok(())
+        })
+        .unwrap();
+        let identity = file.load().ui.backup.schedule.schedule_id;
+        assert!(!identity.is_empty());
+        file.update(|stored| {
+            stored.ui.backup.contents.saved_logins = true;
+            stored.ui.backup.schedule.retention = 0;
+            Ok(())
+        })
+        .unwrap();
+        let restored = read_startup_settings(&path).unwrap();
+        assert_eq!(restored.ui.backup.schedule.schedule_id, identity);
+        assert_eq!(restored.ui.backup.schedule.retention, 2);
+        assert!(restored.ui.backup.contents.saved_logins);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&path).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
+        assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 1);
+        let secrets = directory.path().join("secrets.json");
+        fs::write(&secrets, b"old").unwrap();
+        write_private(&secrets, br#"{"restored": "secret"}"#).unwrap();
+        assert_eq!(fs::read(&secrets).unwrap(), br#"{"restored": "secret"}"#);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            assert_eq!(
+                fs::metadata(&secrets).unwrap().permissions().mode() & 0o777,
+                0o600
+            );
+        }
     }
 
     #[test]

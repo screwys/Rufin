@@ -1,4 +1,4 @@
-use library::{PlaylistEntrySort, ReadCancellation};
+use library::ReadCancellation;
 use proptest::prelude::*;
 
 use super::support::fixture;
@@ -21,23 +21,19 @@ proptest! {
             let fixture = fixture().await;
             let expected = selected
                 .iter()
-                .map(|index| fixture.tracks[*index])
+                .map(|index| fixture.track_uris[*index].clone())
                 .collect::<Vec<_>>();
             let playlist = fixture
                 .database
-                .create_playlist(fixture.source, "Property Playlist", &expected)
+                .create_playlist(Some(fixture.source), "Property Playlist", &expected)
                 .await
                 .expect("create property Playlist")
-                .expect("all property Tracks exist");
+                .expect("all property Tracks exist")
+                .0;
             let projection = fixture
                 .database
-                .playlist_entry_order(
-                    fixture.source,
-                    playlist,
+                .playlist_media_uri_order(playlist,
                     None,
-                    PlaylistEntrySort::Position,
-                    false,
-                    "",
                     &ReadCancellation::new(),
                 )
                 .await
@@ -45,11 +41,7 @@ proptest! {
             (expected, projection)
         });
 
-        prop_assert_eq!(projection.tracks, expected);
-        prop_assert_eq!(
-            projection.track_positions,
-            (0..selected.len()).collect::<Vec<_>>()
-        );
-        prop_assert_eq!(projection.entries.len(), selected.len());
+        prop_assert_eq!(&projection, &expected);
+        prop_assert_eq!(projection.len(), selected.len());
     }
 }

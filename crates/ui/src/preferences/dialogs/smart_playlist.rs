@@ -4,6 +4,7 @@ use std::{
 };
 
 use crate::layout::large_popup_content_width;
+use crate::preferences::source::configure_ownership_toggle;
 use crate::shell::Shell;
 use crate::shell::actions::REMOVE_ICON;
 use ::library::{
@@ -40,16 +41,11 @@ impl Shell {
         change: SmartPlaylistChange,
         settled: Option<Rc<dyn Fn(Result<(), String>)>>,
     ) {
-        let Some(selected) = self.selected_library().as_deref().cloned() else {
-            return;
-        };
-        let database = std::sync::Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let epoch = selected.source_session_epoch;
-        let task = selected.runtime.spawn(async move {
+        let database = std::sync::Arc::clone(&self.products.library);
+        let task = self.products.runtime.spawn(async move {
             let accepted = match change {
                 SmartPlaylistChange::Create { name, definition } => database
-                    .create_smart_playlist(source, &name, &definition)
+                    .create_smart_playlist(&name, &definition)
                     .await
                     .map(|_| true),
                 SmartPlaylistChange::Update {
@@ -58,14 +54,12 @@ impl Shell {
                     definition,
                 } => {
                     database
-                        .update_smart_playlist(source, key, &name, &definition)
+                        .update_smart_playlist(key, &name, &definition)
                         .await
                 }
-                SmartPlaylistChange::Delete(key) => {
-                    database.delete_smart_playlist(source, key).await
-                }
+                SmartPlaylistChange::Delete(key) => database.delete_smart_playlist(key).await,
                 SmartPlaylistChange::Move { dragged, target } => {
-                    database.move_smart_playlist(source, dragged, target).await
+                    database.move_smart_playlist(dragged, target).await
                 }
             };
             accepted
@@ -83,10 +77,7 @@ impl Shell {
                 .map_err(|error| error.to_string())
                 .and_then(|result| result);
             let Some(shell) = shell.upgrade() else { return };
-            let still_current = shell.selected_library().as_deref().is_some_and(|selected| {
-                selected.source_key == source && selected.source_session_epoch == epoch
-            });
-            if result.is_ok() && still_current {
+            if result.is_ok() {
                 shell.refresh_mounted_catalog();
                 crate::routes::playlist_picker::refresh_context_playlist_picker(&shell);
                 crate::shell::navigation::refresh_sidebar_pins(&shell);
@@ -111,6 +102,7 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
     let most_played = |name, activity_period| SmartPlaylistTemplate {
         name,
         definition: SmartPlaylistDefinition {
+            current: false,
             match_all: vec![SmartPlaylistRule {
                 field: SmartPlaylistRuleField::PlayCount,
                 operator: SmartPlaylistRuleOperator::Above,
@@ -140,6 +132,7 @@ fn smart_playlist_templates() -> Vec<SmartPlaylistTemplate> {
         SmartPlaylistTemplate {
             name: msgid("Never Played"),
             definition: SmartPlaylistDefinition {
+                current: false,
                 match_all: vec![SmartPlaylistRule {
                     field: SmartPlaylistRuleField::Played,
                     operator: SmartPlaylistRuleOperator::Is,
@@ -166,6 +159,7 @@ struct RuleValueSuggestions {
 #[derive(Clone)]
 struct SmartPlaylistEditor {
     name: gtk::Entry,
+    owner: gtk::ToggleButton,
     match_all: Rc<RefCell<Vec<SmartPlaylistRule>>>,
     match_any: Rc<RefCell<Vec<SmartPlaylistRule>>>,
     sort: gtk::DropDown,
@@ -202,6 +196,7 @@ impl Shell {
         playlist: Option<library::SmartPlaylistRow>,
     ) {
         let Some(selected) = self.selected_library().as_deref().cloned() else {
+            self.present_smart_playlist_dialog(playlist, RuleValueSuggestions::default());
             return;
         };
         let database = std::sync::Arc::clone(&selected.database);
@@ -242,11 +237,24 @@ impl Shell {
         } else {
             (msgid("New Smart Playlist"), msgid("Create"))
         };
+        let configured = self.source.configured.borrow();
+        let source = configured
+            .selected_source_id
+            .as_ref()
+            .and_then(|selected| {
+                configured
+                    .sources
+                    .iter()
+                    .find(|source| &source.id == selected)
+            })
+            .cloned();
+        drop(configured);
         let surface = smart_playlist_dialog(
             title,
             submit_label,
             playlist.as_ref().map(|playlist| playlist.name.as_str()),
             playlist.as_ref().map(|playlist| &playlist.definition),
+            source.as_ref(),
         );
         configure_smart_playlist_editor(&surface, &templates, value_suggestions);
         let SmartPlaylistDialog {
@@ -322,6 +330,7 @@ impl SmartPlaylistEditor {
             .copied()
             .unwrap_or(SmartPlaylistSort::Title);
         let definition = SmartPlaylistDefinition {
+            current: self.owner.is_active(),
             match_all: self.match_all.borrow().clone(),
             match_any: self.match_any.borrow().clone(),
             sort_field,
@@ -346,6 +355,7 @@ fn smart_playlist_dialog(
     submit_label: &str,
     name: Option<&str>,
     definition: Option<&SmartPlaylistDefinition>,
+    source: Option<&crate::runtime::source::SourceSummary>,
 ) -> SmartPlaylistDialog {
     let resource = crate::ui_resource::SMART_PLAYLIST_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
@@ -356,6 +366,7 @@ fn smart_playlist_dialog(
         template_dropdown: gtk::DropDown,
         apply_template: gtk::Button,
         name_entry: gtk::Entry,
+        owner: gtk::ToggleButton,
         sort: gtk::DropDown,
         descending: gtk::CheckButton,
         activity_period: gtk::DropDown,
@@ -374,7 +385,11 @@ fn smart_playlist_dialog(
     if let Some(name) = name {
         name_entry.set_text(name);
     }
-    let definition = definition.cloned().unwrap_or_default();
+    let mut definition = definition.cloned().unwrap_or_default();
+    if name.is_none() {
+        definition.current = source.is_some();
+    }
+    configure_ownership_toggle(&owner, source, definition.current);
     set_dropdown_labels(&sort, &sort_labels(), sort_index(definition.sort_field));
     descending.set_active(definition.descending);
     set_dropdown_titles(
@@ -396,6 +411,7 @@ fn smart_playlist_dialog(
         dialog,
         editor: SmartPlaylistEditor {
             name: name_entry,
+            owner,
             match_all: Rc::new(RefCell::new(definition.match_all)),
             match_any: Rc::new(RefCell::new(definition.match_any)),
             sort,

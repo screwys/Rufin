@@ -1,11 +1,9 @@
 //! Bounded Album release enrichment over exact Database candidates.
 
 use std::sync::Arc;
-use std::sync::atomic::{AtomicBool, Ordering};
 
 use async_channel::Sender;
 use library::{AlbumReleaseResult, ReadCancellation, SourceKey};
-use playback::SourceSessionEpoch;
 use tracing::{info, warn};
 use ui::runtime::{CatalogChange, CatalogPublication, SourceEvent};
 
@@ -18,9 +16,7 @@ pub(crate) async fn run_selected_album_release_lookup(
     settings: SettingsFile,
     events: Sender<SourceEvent>,
     source_key: SourceKey,
-    source_session_epoch: SourceSessionEpoch,
     selected: WeakActiveSource,
-    cancelled: Arc<AtomicBool>,
 ) {
     let mut requested = 0;
     let mut found = 0;
@@ -29,14 +25,12 @@ pub(crate) async fn run_selected_album_release_lookup(
     let Some(current) = selected.upgrade().and_then(|session| session.resolve()) else {
         return;
     };
-    if current.source_key != source_key
-        || current.source_session_epoch != source_session_epoch
-        || !lookup_allowed(&settings, &cancelled)
-    {
+    if current.source_key != source_key || !settings.load().ui.allows_external_metadata_lookup() {
         return;
     }
-    let candidates = match current
-        .database
+    let database = Arc::clone(&current.database);
+    drop(current);
+    let candidates = match database
         .album_release_candidates(source_key, LOOKUP_LIMIT, &ReadCancellation::new())
         .await
     {
@@ -47,7 +41,12 @@ pub(crate) async fn run_selected_album_release_lookup(
         }
     };
     for candidate in candidates {
-        if !lookup_allowed(&settings, &cancelled) {
+        if selected
+            .upgrade()
+            .and_then(|session| session.resolve())
+            .is_none()
+            || !settings.load().ui.allows_external_metadata_lookup()
+        {
             break;
         }
         requested += 1;
@@ -84,17 +83,22 @@ pub(crate) async fn run_selected_album_release_lookup(
                 break;
             }
         };
-        match current
-            .database
+        if selected
+            .upgrade()
+            .and_then(|session| session.resolve())
+            .is_none()
+        {
+            break;
+        }
+        match database
             .accept_album_release_result(source_key, candidate.album_key, identity.as_str(), result)
             .await
         {
             Ok(Some(_)) => {
                 let _ = events.try_send(SourceEvent::CatalogPublished(CatalogPublication {
-                    source_key,
-                    source_session_epoch,
+                    source_key: Some(source_key),
                     favorite: None,
-                    change: CatalogChange::Album(candidate.album_key),
+                    change: CatalogChange::Album(candidate.media_uri.clone()),
                 }));
             }
             Ok(None) => {}
@@ -106,8 +110,4 @@ pub(crate) async fn run_selected_album_release_lookup(
         }
     }
     info!(%source_key, requested, found, missing, errors, "completed Album release lookup");
-}
-
-fn lookup_allowed(settings: &SettingsFile, cancelled: &AtomicBool) -> bool {
-    !cancelled.load(Ordering::Acquire) && settings.load().ui.allows_external_metadata_lookup()
 }

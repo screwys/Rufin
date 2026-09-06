@@ -4,8 +4,8 @@ use library::{
     Database, Freshness, LocalFileKind, LocalFileState, LocalFileWrite, ReadCancellation, Scan,
     ScanOutcome,
 };
-use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
-use sqlx::{Connection, FromRow};
+use sqlx::FromRow;
+use sqlx::sqlite::SqliteConnection;
 
 const PRIVATE_TRACK_COUNT: usize = 100_000;
 
@@ -103,13 +103,7 @@ async fn local_component_paths_page_beyond_one_batch() {
 }
 
 async fn connection(path: &Path) -> SqliteConnection {
-    SqliteConnection::connect_with(
-        &SqliteConnectOptions::new()
-            .filename(path)
-            .create_if_missing(false),
-    )
-    .await
-    .expect("open test connection")
+    super::support::connection(path).await
 }
 
 async fn write_small_catalog(
@@ -154,7 +148,7 @@ async fn write_small_catalog(
         "artist one",
         Some("artist-mbid-one"),
         Some(b"artist-art"),
-        false,
+        Some(false),
         None,
     )
     .await
@@ -205,6 +199,7 @@ async fn write_small_catalog(
 
 async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i64) {
     let normalized = format!("{} album one artist one note", title.to_lowercase());
+    let media_uri = format!("file:///music/{object_id}.flac");
     scan.write_track(
         object_id,
         Some("album-one"),
@@ -219,7 +214,7 @@ async fn write_track(scan: &mut Scan, object_id: &str, title: &str, position: i6
         Some(2025),
         Some("2025-01-01"),
         Some("2025-01-02"),
-        Some("file:///music/track.flac"),
+        Some(&media_uri),
         Some("FLAC"),
         Some("Note"),
         Some(120),
@@ -304,10 +299,13 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         .expect("read initial provider Activity baseline"),
         (20, 0, Some(1_700_000_000))
     );
-    sqlx::query("UPDATE tracks SET user_favorite=1, user_rating=90 WHERE object_id='track-one'")
-        .execute(&mut outside)
-        .await
-        .expect("write user overrides");
+    sqlx::query(
+        "INSERT INTO user_media_state(media_uri,favorite,rating)
+         SELECT media_uri,1,90 FROM tracks WHERE object_id='track-one'",
+    )
+    .execute(&mut outside)
+    .await
+    .expect("write user overrides");
 
     assert_eq!(
         write_small_catalog(&database, "fresh-two", "Track One", true, b"genre-art").await,
@@ -344,8 +342,8 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
              (SELECT track_key FROM tracks WHERE object_id='track-one'),
              (SELECT playlist_entry_key FROM playlist_entries
               WHERE object_id='entry-track-one'),
-             (SELECT user_favorite FROM tracks WHERE object_id='track-one'),
-             (SELECT user_rating FROM tracks WHERE object_id='track-one')",
+             (SELECT state.favorite FROM user_media_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one'),
+             (SELECT state.rating FROM user_media_state state JOIN tracks track USING(media_uri) WHERE track.object_id='track-one')",
     )
     .fetch_one(&mut outside)
     .await
@@ -421,12 +419,13 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
         )
     );
     let artwork_before = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT artwork_digest FROM sources WHERE object_id='source-one'",
+        "SELECT artwork_digest FROM sources
+         WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
     )
     .fetch_one(&mut outside)
     .await
     .expect("read artwork digest before Genre change");
-    let ScanOutcome::Changed(artwork_change) = write_small_catalog(
+    let ScanOutcome::ArtworkChanged(artwork_change) = write_small_catalog(
         &database,
         "fresh-four",
         "Changed Track",
@@ -437,15 +436,341 @@ async fn canonical_publication_preserves_identity_and_user_overrides() {
     else {
         panic!("Genre artwork change must publish");
     };
-    assert_eq!(artwork_change.catalog_revision, 3);
+    assert_eq!(artwork_change.catalog_revision, 2);
     let artwork_after = sqlx::query_scalar::<_, Vec<u8>>(
-        "SELECT artwork_digest FROM sources WHERE object_id='source-one'",
+        "SELECT artwork_digest FROM sources
+         WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
     )
     .fetch_one(&mut outside)
     .await
     .expect("read artwork digest after Genre change");
     assert_ne!(artwork_after, artwork_before);
     assert_eq!(artwork_change.artwork_digest.as_slice(), artwork_after);
+}
+
+#[tokio::test]
+async fn artwork_publication_keeps_one_effective_binding_per_entity() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+
+    write_small_catalog(&database, "shared", "Track One", false, b"genre-art").await;
+    let mut reader = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, Vec<u8>>(
+            "SELECT artwork_binding FROM artists WHERE object_id='artist-one'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .expect("Artist keeps its own image"),
+        b"artist-art"
+    );
+    let shared = sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>)>(
+        "SELECT album.artwork_binding,first.artwork_binding,second.artwork_binding
+         FROM albums album
+         JOIN tracks first ON first.object_id='track-one'
+         JOIN tracks second ON second.object_id='track-two'",
+    )
+    .fetch_one(&mut reader)
+    .await
+    .expect("read shared effective bindings");
+    assert_eq!(
+        shared,
+        (
+            b"album-art".to_vec(),
+            b"album-art".to_vec(),
+            b"album-art".to_vec()
+        )
+    );
+
+    database.set_distinct_track_covers(true);
+    assert_eq!(
+        Scan::accept_freshness(
+            &database,
+            "source-one",
+            &Freshness::new(b"shared".to_vec()).expect("freshness"),
+            &ReadCancellation::new(),
+        )
+        .await
+        .expect("check policy freshness"),
+        None
+    );
+    write_small_catalog(&database, "distinct", "Track One", false, b"genre-art").await;
+    let distinct = sqlx::query_as::<_, (Vec<u8>, Vec<u8>, Vec<u8>)>(
+        "SELECT album.artwork_binding,first.artwork_binding,second.artwork_binding
+         FROM albums album
+         JOIN tracks first ON first.object_id='track-one'
+         JOIN tracks second ON second.object_id='track-two'",
+    )
+    .fetch_one(&mut reader)
+    .await
+    .expect("read distinct effective bindings");
+    assert_eq!(
+        distinct,
+        (
+            b"album-art".to_vec(),
+            b"art-track-one".to_vec(),
+            b"art-track-two".to_vec(),
+        )
+    );
+}
+
+#[tokio::test]
+async fn point_album_artwork_updates_cached_members_without_replacing_distinct_covers() {
+    for distinct in [false, true] {
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("library.sqlite");
+        let database = Database::open(&path).await.unwrap();
+        database.set_distinct_track_covers(distinct);
+        write_small_catalog(&database, "first", "Track One", false, b"genre-art").await;
+        let mut reader = connection(&path).await;
+        for (title, artwork) in [
+            ("Album One", b"new-art".as_slice()),
+            ("Renamed Album", b"newer-art".as_slice()),
+            ("Renamed Album", b"newer-art".as_slice()),
+        ] {
+            let mut point = Scan::begin_items(&database, "source-one").await.unwrap();
+            point
+                .write_artist(
+                    "artist-one",
+                    "Artist One",
+                    "artist one",
+                    "artist one",
+                    Some("artist-mbid-one"),
+                    Some(b"artist-art"),
+                    Some(false),
+                    None,
+                )
+                .await
+                .unwrap();
+            point
+                .write_genre(
+                    "genre-one",
+                    "Genre One",
+                    "genre one",
+                    "genre one",
+                    Some(b"genre-art"),
+                )
+                .await
+                .unwrap();
+            point
+                .write_album(
+                    "album-one",
+                    title,
+                    "album one",
+                    "Artist One",
+                    "album one",
+                    Some(2025),
+                    Some("2025-01-01"),
+                    Some("2025-01-02"),
+                    Some("release-one"),
+                    Some("release-group-one"),
+                    Some(false),
+                    Some(artwork),
+                    false,
+                    Some(7),
+                    Some(10),
+                )
+                .await
+                .unwrap();
+            point
+                .write_album_relations(
+                    &[("album-one", "artist-one")],
+                    &[("album-one", "genre-one")],
+                    &[("album-one", "Album")],
+                )
+                .await
+                .unwrap();
+            let previous = sqlx::query_scalar::<_, Vec<u8>>(
+                "SELECT artwork_binding FROM albums WHERE object_id='album-one'",
+            )
+            .fetch_one(&mut reader)
+            .await
+            .unwrap();
+            let outcome = point.finish().await.unwrap();
+            assert!(match outcome {
+                ScanOutcome::ArtworkChanged(_) => title == "Album One",
+                ScanOutcome::Changed(_) => title == "Renamed Album" && previous != artwork,
+                ScanOutcome::Identical(_) => previous == artwork,
+                _ => false,
+            });
+            assert_eq!(
+                sqlx::query_scalar::<_, Vec<u8>>(
+                    "SELECT artwork_binding FROM tracks ORDER BY object_id"
+                )
+                .fetch_all(&mut reader)
+                .await
+                .unwrap(),
+                if distinct {
+                    vec![b"art-track-one".to_vec(), b"art-track-two".to_vec()]
+                } else {
+                    vec![artwork.to_vec(), artwork.to_vec()]
+                }
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn incomplete_collection_publishes_valid_pages_without_removal_authority() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    write_small_catalog(&database, "complete", "Track One", false, b"genre-art").await;
+
+    let mut scan = Scan::begin(
+        &database,
+        "source-one",
+        "Source One",
+        "source one",
+        Some(Freshness::new(b"incomplete".to_vec()).expect("freshness")),
+    )
+    .await
+    .expect("begin incomplete Scan");
+    scan.incomplete();
+    write_track(&mut scan, "track-one", "Changed From Valid Page", 0).await;
+    assert!(matches!(scan.finish().await, Ok(ScanOutcome::Changed(_))));
+
+    let mut outside = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut outside)
+            .await
+            .expect("count retained Tracks"),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT title FROM tracks WHERE object_id='track-one'")
+            .fetch_one(&mut outside)
+            .await
+            .expect("read accepted page"),
+        "Changed From Valid Page"
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT title FROM tracks WHERE object_id='track-two'")
+            .fetch_one(&mut outside)
+            .await
+            .expect("read retained unseen Track"),
+        "Track Two"
+    );
+}
+
+#[tokio::test]
+async fn incomplete_and_point_scans_do_not_certify_a_full_catalog_digest() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite");
+    let database = Database::open(&path).await.unwrap();
+    for (names, authoritative, expected_count) in [
+        (["a", "b"].as_slice(), true, 2),
+        (["a"].as_slice(), false, 2),
+        (["a"].as_slice(), true, 1),
+    ] {
+        let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        if !authoritative {
+            scan.incomplete();
+        }
+        for name in names {
+            scan.write_genre(name, name, name, name, None)
+                .await
+                .unwrap();
+        }
+        assert!(matches!(
+            scan.finish().await.unwrap(),
+            ScanOutcome::Changed(_)
+        ));
+        let mut reader = connection(&path).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM genres")
+                .fetch_one(&mut reader)
+                .await
+                .unwrap(),
+            expected_count,
+            "a complete scan must remove items retained by its incomplete predecessor"
+        );
+    }
+    let mut point = Scan::begin_items(&database, "source").await.unwrap();
+    point
+        .write_genre("a", "Live name", "live name", "live name", None)
+        .await
+        .unwrap();
+    point.finish().await.unwrap();
+    let mut complete = Scan::begin(&database, "source", "Source", "source", None)
+        .await
+        .unwrap();
+    complete
+        .write_genre("a", "a", "a", "a", None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        complete.finish().await.unwrap(),
+        ScanOutcome::Changed(_)
+    ));
+    let mut reader = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT name FROM genres WHERE object_id='a'")
+            .fetch_one(&mut reader)
+            .await
+            .unwrap(),
+        "a",
+        "a point update cannot leave the previous full-catalog digest valid"
+    );
+}
+
+#[tokio::test]
+async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite");
+    let database = Database::open(&path).await.unwrap();
+    let files = ["one.flac", "two.flac"].map(|name| {
+        (
+            LocalFileWrite {
+                path: format!("/music/{name}"),
+                root: "/music".into(),
+                relative_path: name.into(),
+                kind: LocalFileKind::Media,
+                size_bytes: Some(100),
+                mtime_ns: 1,
+                device_id: None,
+                inode: None,
+                parse_version: Some(1),
+                state: LocalFileState::Accepted,
+            },
+            Vec::new(),
+        )
+    });
+    for (index, artwork) in [b"first".as_slice(), b"first", b"second"]
+        .into_iter()
+        .enumerate()
+    {
+        let mut scan = Scan::begin(&database, "local", "Local", "local", None)
+            .await
+            .unwrap();
+        scan.write_genre("genre", "Genre", "genre", "genre", Some(artwork))
+            .await
+            .unwrap();
+        if index > 0 {
+            scan.incomplete();
+        }
+        scan.write_local_files(&files[..if index == 0 { 2 } else { 1 }])
+            .await
+            .unwrap();
+        let outcome = scan.finish().await.unwrap();
+        assert!(match index {
+            0 => matches!(outcome, ScanOutcome::Changed(_)),
+            1 => matches!(outcome, ScanOutcome::Identical(_)),
+            _ => matches!(outcome, ScanOutcome::ArtworkChanged(_)),
+        });
+        let mut reader = connection(&path).await;
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT count(*) FROM local_files")
+                .fetch_one(&mut reader)
+                .await
+                .unwrap(),
+            2
+        );
+    }
 }
 
 #[tokio::test]
@@ -550,11 +875,25 @@ async fn failed_and_stale_publications_are_atomic() {
             [1; 32],
         )
         .await
-        .expect("stage referentially invalid row");
-    invalid
-        .finish()
+        .expect("stage song with unavailable album relationship");
+    assert!(matches!(
+        invalid.finish().await.expect("publish useful song"),
+        ScanOutcome::Changed(_)
+    ));
+    let song = database
+        .track_row_by_uri(
+            &library::source_entity_uri(
+                &library::SourceId::new("source-four"),
+                "track",
+                "orphan-track",
+            ),
+            &ReadCancellation::new(),
+        )
         .await
-        .expect_err("invalid publication rolls back");
+        .expect("project song")
+        .expect("song admitted");
+    assert_eq!(song.album, "Missing");
+    assert!(song.album_key.is_none());
 
     let stale = Scan::begin(
         &database,
@@ -567,7 +906,8 @@ async fn failed_and_stale_publications_are_atomic() {
     .expect("begin stale scan");
     let mut outside = connection(&path).await;
     sqlx::query(
-        "UPDATE sources SET catalog_revision=catalog_revision+1 WHERE object_id='source-one'",
+        "UPDATE sources SET catalog_revision=catalog_revision+1
+         WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
     )
     .execute(&mut outside)
     .await
@@ -578,7 +918,8 @@ async fn failed_and_stale_publications_are_atomic() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT catalog_revision FROM sources WHERE object_id='source-one'",
+            "SELECT catalog_revision FROM sources
+             WHERE source_key=(SELECT source_key FROM sources WHERE object_id='source-one')",
         )
         .fetch_one(&mut outside)
         .await
@@ -587,7 +928,7 @@ async fn failed_and_stale_publications_are_atomic() {
     );
     assert_eq!(
         sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM sources WHERE object_id IN ('source-two', 'source-four')",
+            "SELECT count(*) FROM sources WHERE object_id='source-two' AND catalog_revision>0",
         )
         .fetch_one(&mut outside)
         .await
@@ -620,7 +961,7 @@ async fn ordinary_private_library_scan_is_bounded() {
             None,
             None,
             None,
-            Some("file:///music/track.flac"),
+            None,
             None,
             None,
             None,
@@ -836,6 +1177,42 @@ async fn repeated_source_playlist_and_folder_observations_coalesce() {
 }
 
 #[tokio::test]
+async fn duplicate_provider_positions_are_normalized_without_rejecting_occurrences() {
+    let directory = tempfile::tempdir().expect("temporary Store directory");
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.expect("open Library Store");
+    write_small_catalog(&database, "fresh-one", "Track One", false, b"genre-art").await;
+    let mut scan = Scan::begin_items(&database, "source-one")
+        .await
+        .expect("begin Playlist point Scan");
+    scan.begin_batch().await.expect("begin batch");
+    scan.write_playlist("playlist-one", "Playlist", "playlist", "playlist", None)
+        .await
+        .expect("stage Playlist");
+    scan.write_playlist_entry("playlist-one", "duplicate-a", "track-one", 7)
+        .await
+        .expect("stage first occurrence");
+    scan.write_playlist_entry("playlist-one", "duplicate-b", "track-two", 7)
+        .await
+        .expect("stage second occurrence");
+    scan.finish_batch().await.expect("finish batch");
+    scan.finish().await.expect("publish duplicate positions");
+
+    let mut outside = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT entry.position FROM playlist_entries entry
+             JOIN playlists playlist USING(playlist_key)
+             WHERE playlist.object_id='playlist-one' ORDER BY entry.position",
+        )
+        .fetch_all(&mut outside)
+        .await
+        .expect("read normalized occurrence order"),
+        [0, 1]
+    );
+}
+
+#[tokio::test]
 async fn playlist_point_update_preserves_playlist_scope() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
@@ -866,4 +1243,57 @@ async fn playlist_point_update_preserves_playlist_scope() {
         point.finish().await.unwrap(),
         ScanOutcome::PlaylistsChanged(_)
     ));
+}
+
+#[tokio::test]
+async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
+    let root = tempfile::tempdir().unwrap();
+    let database = Database::open(root.path().join("library.sqlite"))
+        .await
+        .unwrap();
+    write_small_catalog(&database, "fresh", "Track", false, b"genre").await;
+    let uri = library::source_entity_uri(
+        &library::SourceId::new("source-one"),
+        "artist",
+        "artist-one",
+    );
+    let cancel = ReadCancellation::new();
+    for (index, favorite) in [Some(true), None, Some(false), None]
+        .into_iter()
+        .enumerate()
+    {
+        let mut scan = Scan::begin_items(&database, "source-one").await.unwrap();
+        scan.write_artist(
+            "artist-one",
+            "Artist",
+            "artist",
+            "artist",
+            None,
+            None,
+            favorite,
+            None,
+        )
+        .await
+        .unwrap();
+        // A credit arriving after a complete record must not overwrite its state.
+        scan.write_artist(
+            "artist-one",
+            "Artist",
+            "artist",
+            "artist",
+            None,
+            None,
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        scan.finish().await.unwrap();
+        let row = database
+            .artist_row_by_media_uri(&uri, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(row.favorite, index < 2);
+    }
 }

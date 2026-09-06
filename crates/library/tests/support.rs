@@ -2,7 +2,7 @@ use std::path::PathBuf;
 
 use library::{
     AlbumKey, ArtistKey, Database, FolderKey, GenreKey, HomeEntryInput, HomeEntryKind, MoodKey,
-    QueueCompactOccurrence, QueueRepeatMode, Scan, ScanOutcome, SourceKey, TrackKey,
+    QueueOccurrence, QueueRepeatMode, Scan, ScanOutcome, SourceKey, TrackKey,
 };
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
@@ -13,8 +13,11 @@ pub struct Fixture {
     pub database: Database,
     pub source: SourceKey,
     pub tracks: Vec<TrackKey>,
+    pub track_uris: Vec<String>,
     pub albums: Vec<AlbumKey>,
+    pub album_uris: Vec<String>,
     pub artists: Vec<ArtistKey>,
+    pub artist_uris: Vec<String>,
     pub genre: GenreKey,
     pub mood: MoodKey,
     pub folder: FolderKey,
@@ -24,34 +27,23 @@ pub struct Fixture {
 pub async fn persist_queue(
     database: &Database,
     source: SourceKey,
-    occurrences: &[QueueCompactOccurrence],
+    occurrences: &[QueueOccurrence],
     current: Option<&str>,
-    prepared: Option<&str>,
     progress_millis: i64,
     repeat_mode: QueueRepeatMode,
     shuffled: bool,
 ) {
+    let _ = source;
+    let mut output=serde_json::to_vec(&serde_json::json!({"version":1,"current_occurrence":current,"progress_millis":progress_millis,"repeat_mode":repeat_mode,"shuffled":shuffled})).unwrap();
+    output.push(b'\n');
+    for occurrence in occurrences {
+        serde_json::to_writer(&mut output, occurrence).unwrap();
+        output.push(b'\n');
+    }
     database
-        .persist_compact_queue(
-            source,
-            occurrences.len(),
-            |offset, limit| {
-                let page = occurrences
-                    .iter()
-                    .skip(offset)
-                    .take(limit)
-                    .cloned()
-                    .collect();
-                async move { Ok(page) }
-            },
-            current,
-            prepared,
-            progress_millis,
-            repeat_mode,
-            shuffled,
-        )
+        .import_queue_jsonl(std::io::Cursor::new(output))
         .await
-        .expect("persist compact Queue");
+        .expect("persist Queue records");
 }
 
 pub async fn fixture() -> Fixture {
@@ -97,7 +89,7 @@ pub async fn fixture() -> Fixture {
             &name.to_lowercase(),
             None,
             None,
-            false,
+            Some(false),
             None,
         )
         .await
@@ -154,7 +146,7 @@ pub async fn fixture() -> Fixture {
             Some(2020 + index),
             None,
             Some("2024-01-02"),
-            Some("file:///track.flac"),
+            None,
             Some("FLAC"),
             Some("Note"),
             Some(100 + index),
@@ -196,7 +188,6 @@ pub async fn fixture() -> Fixture {
         entity_object_id: "track-0".to_string(),
         title: "Featured Track".to_string(),
         subtitle: "Featured".to_string(),
-        artwork_binding: None,
     })
     .await
     .expect("stage provider Home entry");
@@ -209,16 +200,31 @@ pub async fn fixture() -> Fixture {
             .fetch_all(&mut connection)
             .await
             .expect("read Track keys");
+    let track_uris =
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM tracks ORDER BY object_id")
+            .fetch_all(&mut connection)
+            .await
+            .expect("read Track URIs");
     let albums =
         sqlx::query_scalar::<_, AlbumKey>("SELECT album_key FROM albums ORDER BY object_id")
             .fetch_all(&mut connection)
             .await
             .expect("read Album keys");
+    let album_uris =
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM albums ORDER BY object_id")
+            .fetch_all(&mut connection)
+            .await
+            .expect("read Album URIs");
     let artists =
         sqlx::query_scalar::<_, ArtistKey>("SELECT artist_key FROM artists ORDER BY object_id")
             .fetch_all(&mut connection)
             .await
             .expect("read Artist keys");
+    let artist_uris =
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM artists ORDER BY object_id")
+            .fetch_all(&mut connection)
+            .await
+            .expect("read Artist URIs");
     let genre = sqlx::query_scalar("SELECT genre_key FROM genres")
         .fetch_one(&mut connection)
         .await
@@ -237,8 +243,11 @@ pub async fn fixture() -> Fixture {
         database,
         source: publication.source,
         tracks,
+        track_uris,
         albums,
+        album_uris,
         artists,
+        artist_uris,
         genre,
         mood,
         folder,
@@ -246,11 +255,18 @@ pub async fn fixture() -> Fixture {
 }
 
 pub async fn connection(path: &std::path::Path) -> SqliteConnection {
-    SqliteConnection::connect_with(
+    let mut connection = SqliteConnection::connect_with(
         &SqliteConnectOptions::new()
             .filename(path)
             .create_if_missing(false),
     )
     .await
-    .expect("open fixture connection")
+    .expect("open fixture connection");
+    let catalog = path.with_extension("catalog.sqlite");
+    if catalog.exists() {
+        super::production_schema::attach_catalog(&mut connection, &catalog)
+            .await
+            .expect("use production projections");
+    }
+    connection
 }

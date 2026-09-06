@@ -1,8 +1,10 @@
+use std::sync::{Arc, Mutex};
+
 use sources::{SourceError, SourceImageRequest};
 use tokio::runtime::Handle;
 
 use crate::selection::Candidate;
-use crate::{ExternalPolicy, SourceImages};
+use crate::{ExternalPolicy, SourceResolver};
 
 #[derive(Debug)]
 pub(crate) enum FetchOutcome {
@@ -11,29 +13,35 @@ pub(crate) enum FetchOutcome {
 }
 
 #[derive(Clone)]
-pub(crate) struct FetchContext;
+pub(crate) struct FetchContext {
+    source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>,
+}
 
 impl FetchContext {
-    pub(crate) fn new() -> Result<Self, String> {
-        Ok(Self)
+    pub(crate) fn new(source_resolver: Arc<Mutex<Option<Arc<SourceResolver>>>>) -> Self {
+        Self { source_resolver }
     }
 
     pub(crate) fn fetch(
         &self,
         runtime: &Handle,
-        source: &SourceImages,
         candidate: &Candidate,
         size: u32,
         policy: &ExternalPolicy,
     ) -> Result<FetchOutcome, String> {
         match candidate {
             Candidate::Native(image_ref) => {
-                if !source.can_fetch() {
-                    return Ok(FetchOutcome::Missing);
-                }
+                let resolver = self
+                    .source_resolver
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner())
+                    .clone()
+                    .ok_or_else(|| "artwork source is unavailable".to_string())?;
+                let source = resolver(&image_ref.source_id)
+                    .ok_or_else(|| "artwork source is unavailable".to_string())?;
                 runtime
                     .block_on(source.image(SourceImageRequest::Native {
-                        image_ref: image_ref.clone(),
+                        image_ref: image_ref.image.clone(),
                         size,
                     }))
                     .map(|image| {
@@ -45,21 +53,15 @@ impl FetchContext {
                     })
                     .or_else(source_result)
             }
-            Candidate::Local(reference) => {
-                if !source.can_fetch() {
-                    return Ok(FetchOutcome::Missing);
-                }
-                runtime
-                    .block_on(source.image(SourceImageRequest::Local(reference.clone())))
-                    .map(|image| {
-                        if image.bytes.is_empty() {
-                            FetchOutcome::Missing
-                        } else {
-                            FetchOutcome::Ready(image.bytes)
-                        }
-                    })
-                    .or_else(source_result)
-            }
+            Candidate::Local(reference) => sources::read_local_image(reference)
+                .map(|image| {
+                    if image.bytes.is_empty() {
+                        FetchOutcome::Missing
+                    } else {
+                        FetchOutcome::Ready(image.bytes)
+                    }
+                })
+                .or_else(source_result),
             Candidate::Album(album) => metadata_lookup::lookup_album_cover(
                 album,
                 size,

@@ -33,7 +33,7 @@ use super::track_model::{PreparedTrackProjection, TrackProjectionRequest};
 #[derive(Clone)]
 pub(crate) struct ArtistOverviewData {
     pub(crate) summary: ArtistRow,
-    pub(crate) favorite_tracks: Vec<library::TrackKey>,
+    pub(crate) favorite_tracks: Vec<String>,
     pub(crate) favorite_first_rows: Vec<library::TrackRow>,
     pub(crate) releases: ArtistReleaseOrders,
 }
@@ -41,7 +41,7 @@ pub(crate) struct ArtistOverviewData {
 #[derive(Clone)]
 pub(crate) struct ArtistTracksData {
     pub(crate) summary: ArtistRow,
-    pub(crate) tracks: Vec<library::TrackKey>,
+    pub(crate) tracks: Vec<String>,
     pub(crate) first_row_position: usize,
     pub(crate) first_rows: Vec<library::TrackRow>,
 }
@@ -68,7 +68,7 @@ const ARTIST_RELEASE_TITLES: [&str; 6] = [
     msgid("Appears On"),
 ];
 
-pub(crate) fn artist_detail_route(artist: ArtistKey, album_artist: bool) -> Route {
+pub(crate) fn artist_detail_route(artist: String, album_artist: bool) -> Route {
     if album_artist {
         Route::AlbumArtistDetail(artist)
     } else {
@@ -76,7 +76,7 @@ pub(crate) fn artist_detail_route(artist: ArtistKey, album_artist: bool) -> Rout
     }
 }
 
-fn artist_discography_route(artist: ArtistKey, album_artist: bool) -> Route {
+fn artist_discography_route(artist: String, album_artist: bool) -> Route {
     if album_artist {
         Route::AlbumArtistDiscography(artist)
     } else {
@@ -84,7 +84,7 @@ fn artist_discography_route(artist: ArtistKey, album_artist: bool) -> Route {
     }
 }
 
-fn artist_tracks_route(artist: ArtistKey, album_artist: bool) -> Route {
+fn artist_tracks_route(artist: String, album_artist: bool) -> Route {
     if album_artist {
         Route::AlbumArtistTracks(artist)
     } else {
@@ -92,7 +92,7 @@ fn artist_tracks_route(artist: ArtistKey, album_artist: bool) -> Route {
     }
 }
 
-fn artist_favorite_tracks_route(artist: ArtistKey, album_artist: bool) -> Route {
+fn artist_favorite_tracks_route(artist: String, album_artist: bool) -> Route {
     if album_artist {
         Route::AlbumArtistFavoriteTracks(artist)
     } else {
@@ -100,7 +100,7 @@ fn artist_favorite_tracks_route(artist: ArtistKey, album_artist: bool) -> Route 
     }
 }
 
-fn artist_playback_target(artist: ArtistKey, album_artist: bool) -> PlaybackTarget {
+fn artist_playback_target(artist: String, album_artist: bool) -> PlaybackTarget {
     if album_artist {
         PlaybackTarget::AlbumArtist(artist)
     } else {
@@ -114,7 +114,7 @@ impl Shell {
         artist: ArtistKey,
         album_artist: bool,
         detail: Option<ArtistOverviewData>,
-        selected: crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(
@@ -125,7 +125,6 @@ impl Shell {
         let header = artist_detail_header_restored(self, &summary, artist, album_artist);
         let favorite_count = detail.favorite_tracks.len();
         let favorite = self.searchable_track_collection(
-            &selected,
             detail.favorite_tracks,
             0,
             detail.favorite_first_rows,
@@ -173,7 +172,7 @@ impl Shell {
         } = detail.releases;
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
-            &selected,
+            source,
             ArtistReleaseRoutePreamble {
                 header: header.widget(),
                 favorite: Some((favorite_section.clone().upcast(), favorite.search())),
@@ -185,10 +184,10 @@ impl Shell {
             first_row_position,
             first_rows,
         ));
-        connect_artist_release_requests(self, &selected, artist, album_artist, &releases);
+        connect_artist_release_requests(self, source, artist, album_artist, &releases);
         let resume_releases = Rc::clone(&releases);
         let resume_shell = Rc::downgrade(self);
-        let resume_selected = selected.clone();
+        let resume_source = source;
         let resume_lane = releases.lane();
         let resume = Rc::new(move || {
             let Some(resume_shell) = resume_shell.upgrade() else {
@@ -201,7 +200,7 @@ impl Shell {
                 .library_list(LibraryListKey::ArtistAlbums);
             request_artist_release_orders(
                 Rc::downgrade(&resume_shell),
-                resume_selected.clone(),
+                resume_source,
                 artist,
                 album_artist,
                 Rc::clone(&resume_releases),
@@ -212,7 +211,6 @@ impl Shell {
         let refresh_lane = releases.lane();
         let refresh = {
             let shell = Rc::downgrade(self);
-            let selected = selected.clone();
             let favorite = favorite.clone();
             let favorite_scroller = favorite_scroller.clone();
             let releases = Rc::clone(&releases);
@@ -231,14 +229,14 @@ impl Shell {
                     .library_list(LibraryListKey::ArtistAlbums);
                 let request = favorite.projection_request();
                 let (generation, cancellation) = refresh_lane.begin();
-                let database = Arc::clone(&selected.database);
-                let selected_task = selected.clone();
+                let database = Arc::clone(&shell.products.library);
+                let source_task = source;
                 let task_album_settings = album_settings.clone();
-                let task = selected.runtime.spawn(async move {
+                let task = shell.products.runtime.spawn(async move {
                     load_artist_overview(
                         &database,
-                        selected_task.source_key,
-                        selected_task.music_folder_key,
+                        source_task,
+                        None,
                         artist,
                         album_artist,
                         &track_settings,
@@ -282,7 +280,33 @@ impl Shell {
                 });
             }) as Rc<dyn Fn()>
         };
+
+        let download_rows = Rc::clone(&releases.sparse);
+
+        let download_artist = Rc::clone(&header.current);
+        let downloads = self.collection_download_change(move |identity, downloaded| {
+            let prefix = if album_artist {
+                "album-artist:"
+            } else {
+                "artist:"
+            };
+            if identity.strip_prefix(prefix) == Some(download_artist.borrow().media_uri.as_str()) {
+                let mut row = download_artist.borrow_mut();
+                row.downloaded_count = if downloaded { row.track_count } else { 0 };
+            }
+            if let Some(uri) = identity.strip_prefix("album:") {
+                download_rows.update_matching(
+                    |row| {
+                        row.media_uri == uri
+                            && (row.downloaded_count == row.track_count) != downloaded
+                    },
+                    |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+                );
+            }
+        });
         MountedRoute::new(releases.widget(), resume)
+            .with_download_change(downloads)
+            .with_download_change(favorite.download_change())
             .with_search_provider({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || {
@@ -304,7 +328,7 @@ impl Shell {
         artist: ArtistKey,
         album_artist: bool,
         detail: Option<ArtistTracksData>,
-        selected: crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(
@@ -313,12 +337,12 @@ impl Shell {
         };
         self.artist_track_surface_restored(
             artist,
-            artist_tracks_route(artist, album_artist),
+            artist_tracks_route(detail.summary.media_uri.clone(), album_artist),
             detail.summary,
             detail.tracks,
             detail.first_row_position,
             detail.first_rows,
-            selected,
+            source,
             album_artist,
             false,
         )
@@ -329,7 +353,7 @@ impl Shell {
         artist: ArtistKey,
         album_artist: bool,
         detail: Option<ArtistTracksData>,
-        selected: crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(
@@ -338,12 +362,12 @@ impl Shell {
         };
         self.artist_track_surface_restored(
             artist,
-            artist_favorite_tracks_route(artist, album_artist),
+            artist_favorite_tracks_route(detail.summary.media_uri.clone(), album_artist),
             detail.summary,
             detail.tracks,
             detail.first_row_position,
             detail.first_rows,
-            selected,
+            source,
             album_artist,
             true,
         )
@@ -354,7 +378,7 @@ impl Shell {
         artist: ArtistKey,
         album_artist: bool,
         detail: Option<ArtistDiscographyData>,
-        selected: crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
     ) -> MountedRoute {
         let Some(detail) = detail else {
             return MountedRoute::static_widget(self.placeholder_view(
@@ -369,7 +393,7 @@ impl Shell {
         } = detail.releases;
         let releases = Rc::new(ArtistReleaseProjections::new(
             self,
-            &selected,
+            source,
             ArtistReleaseRoutePreamble {
                 header: artist_subroute_header(self, &detail.summary, msgid("Discography")),
                 favorite: None,
@@ -381,10 +405,10 @@ impl Shell {
             first_row_position,
             first_rows,
         ));
-        connect_artist_release_requests(self, &selected, artist, album_artist, &releases);
+        connect_artist_release_requests(self, source, artist, album_artist, &releases);
         let resume_releases = Rc::clone(&releases);
         let resume_shell = Rc::downgrade(self);
-        let resume_selected = selected.clone();
+        let resume_source = source;
         let resume_lane = releases.lane();
         let resume = Rc::new(move || {
             let Some(resume_shell) = resume_shell.upgrade() else {
@@ -397,7 +421,7 @@ impl Shell {
                 .library_list(LibraryListKey::ArtistAlbums);
             request_artist_release_orders(
                 Rc::downgrade(&resume_shell),
-                resume_selected.clone(),
+                resume_source,
                 artist,
                 album_artist,
                 Rc::clone(&resume_releases),
@@ -406,7 +430,6 @@ impl Shell {
             );
         });
         let refresh = {
-            let selected = selected.clone();
             let releases = Rc::clone(&releases);
             let shell = Rc::downgrade(self);
             let refresh_lane = releases.lane();
@@ -419,7 +442,7 @@ impl Shell {
                     .library_list(LibraryListKey::ArtistAlbums);
                 request_artist_release_orders(
                     Rc::downgrade(&shell),
-                    selected.clone(),
+                    source,
                     artist,
                     album_artist,
                     Rc::clone(&releases),
@@ -428,7 +451,21 @@ impl Shell {
                 );
             }) as Rc<dyn Fn()>
         };
+
+        let download_rows = Rc::clone(&releases.sparse);
+        let downloads = self.collection_download_change(move |identity, downloaded| {
+            let Some(uri) = identity.strip_prefix("album:") else {
+                return;
+            };
+            download_rows.update_matching(
+                |row| {
+                    row.media_uri == uri && (row.downloaded_count == row.track_count) != downloaded
+                },
+                |row| row.downloaded_count = if downloaded { row.track_count } else { 0 },
+            );
+        });
         MountedRoute::new(releases.widget(), resume)
+            .with_download_change(downloads)
             .with_search_provider({
                 let releases = Rc::downgrade(&releases);
                 Rc::new(move || {
@@ -450,10 +487,10 @@ impl Shell {
         artist: ArtistKey,
         route: Route,
         summary: ArtistRow,
-        order: Vec<library::TrackKey>,
+        order: Vec<String>,
         first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
-        selected: crate::runtime::SelectedLibrary,
+        source: library::SourceKey,
         album_artist: bool,
         favorites_only: bool,
     ) -> MountedRoute {
@@ -467,11 +504,17 @@ impl Shell {
         } else {
             "artist-tracks"
         };
-        let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
-            &selected,
+        let settings = self.settings.current.borrow().library_list(key);
+        let model = super::track_model::TrackCollectionModel::new(
+            Arc::clone(&self.products.library),
+            self.products.runtime.clone(),
             order,
             first_row_position,
             first_rows,
+            settings,
+        );
+        let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
+            model,
             key,
             context,
             format!(
@@ -499,14 +542,13 @@ impl Shell {
         {
             let shell = Rc::downgrade(self);
             let projection = Rc::downgrade(&tracks);
-            let selected = selected.clone();
             let route = route.clone();
             let lane = Rc::clone(&lane);
             tracks.connect_search_request(move |request| {
                 request_artist_order(
                     shell.clone(),
                     projection.clone(),
-                    selected.clone(),
+                    source,
                     artist,
                     route.clone(),
                     request,
@@ -520,7 +562,6 @@ impl Shell {
         let resume = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
-            let selected = selected.clone();
             let lane = Rc::clone(&lane);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
@@ -530,7 +571,7 @@ impl Shell {
                 request_artist_order(
                     Rc::downgrade(&shell),
                     Rc::downgrade(&projection),
-                    selected.clone(),
+                    source,
                     artist,
                     route.clone(),
                     projection.projection_request(),
@@ -541,6 +582,7 @@ impl Shell {
             })
         };
         MountedRoute::new(root.upcast(), resume)
+            .with_download_change(tracks.download_change())
             .with_search(tracks.search())
             .with_layout_cycle(layout_cycle)
             .with_item_navigation(tracks.item_navigation())
@@ -554,7 +596,7 @@ impl Shell {
 fn request_artist_order(
     shell: std::rc::Weak<Shell>,
     projection: std::rc::Weak<super::routes::TrackListProjection>,
-    selected: crate::runtime::SelectedLibrary,
+    source: library::SourceKey,
     artist: ArtistKey,
     route: Route,
     request: TrackProjectionRequest,
@@ -562,14 +604,14 @@ fn request_artist_order(
     favorites_only: bool,
     lane: Rc<super::named_detail::NamedOrderLane>,
 ) {
+    let Some(owner) = shell.upgrade() else { return };
     let (generation, cancellation) = lane.begin();
-    let database = Arc::clone(&selected.database);
-    let source = selected.source_key;
-    let folder = selected.music_folder_key;
+    let database = Arc::clone(&owner.products.library);
+    let folder = None;
     let query = request.query.clone();
     let sort = request.settings.sort_key.track_sort();
     let descending = request.settings.descending;
-    let task = selected.runtime.spawn(async move {
+    let task = owner.products.runtime.spawn(async move {
         database
             .artist_track_route_page(
                 source,
@@ -607,7 +649,7 @@ fn request_artist_order(
 
 fn connect_artist_release_requests(
     shell: &Rc<Shell>,
-    selected: &crate::runtime::SelectedLibrary,
+    source: library::SourceKey,
     artist: ArtistKey,
     album_artist: bool,
     releases: &Rc<ArtistReleaseProjections>,
@@ -617,7 +659,6 @@ fn connect_artist_release_requests(
             continue;
         };
         let weak_shell = Rc::downgrade(shell);
-        let selected = selected.clone();
         let releases = Rc::downgrade(releases);
         search.connect_search_changed(move |_| {
             let Some(shell) = weak_shell.upgrade() else {
@@ -633,7 +674,7 @@ fn connect_artist_release_requests(
                 .library_list(LibraryListKey::ArtistAlbums);
             request_artist_release_section(
                 Rc::downgrade(&shell),
-                selected.clone(),
+                source,
                 artist,
                 album_artist,
                 releases,
@@ -646,19 +687,19 @@ fn connect_artist_release_requests(
 
 fn request_artist_release_orders(
     shell: std::rc::Weak<Shell>,
-    selected: crate::runtime::SelectedLibrary,
+    source: library::SourceKey,
     artist: ArtistKey,
     album_artist: bool,
     releases: Rc<ArtistReleaseProjections>,
     settings: LibraryListSettings,
     lane: Rc<super::named_detail::NamedOrderLane>,
 ) {
+    let Some(owner) = shell.upgrade() else { return };
     releases.apply_library_list_settings(&settings);
     let (generation, cancellation) = lane.begin();
-    let database = Arc::clone(&selected.database);
-    let source = selected.source_key;
-    let folder = selected.music_folder_key;
-    let task = selected.runtime.spawn(async move {
+    let database = Arc::clone(&owner.products.library);
+    let folder = None;
+    let task = owner.products.runtime.spawn(async move {
         load_artist_release_orders(
             &database,
             source,
@@ -690,13 +731,14 @@ fn request_artist_release_orders(
 
 fn request_artist_release_section(
     shell: std::rc::Weak<Shell>,
-    selected: crate::runtime::SelectedLibrary,
+    source: library::SourceKey,
     artist: ArtistKey,
     album_artist: bool,
     releases: Rc<ArtistReleaseProjections>,
     index: usize,
     settings: LibraryListSettings,
 ) {
+    let Some(owner) = shell.upgrade() else { return };
     let Some(search) = releases.section_search(index) else {
         return;
     };
@@ -704,10 +746,9 @@ fn request_artist_release_section(
     let authoritative = query.is_empty();
     let lane = releases.lane();
     let (generation, cancellation) = lane.begin();
-    let database = Arc::clone(&selected.database);
-    let source = selected.source_key;
-    let folder = selected.music_folder_key;
-    let task = selected.runtime.spawn(async move {
+    let database = Arc::clone(&owner.products.library);
+    let folder = None;
+    let task = owner.products.runtime.spawn(async move {
         Ok::<_, library::LibraryError>(
             load_artist_release_orders(
                 &database,
@@ -972,7 +1013,7 @@ impl ArtistDetailHeaderProjection {
                 shell, &artist,
             ));
         shell.update_visible_favorite_buttons(
-            &library::FavoriteTarget::Artist(artist.artist_key),
+            &library::FavoriteTarget::Artist(artist.media_uri.clone()),
             artist.favorite,
         );
         self.current.replace(artist);
@@ -1022,8 +1063,9 @@ fn artist_detail_header_restored(
         &album_count_text(artist.album_count.max(0) as u64),
     );
     let album_shell = Rc::clone(shell);
+    let album_uri = artist.media_uri.clone();
     albums.connect_clicked(move |_| {
-        album_shell.navigate(artist_discography_route(artist_key, album_artist))
+        album_shell.navigate(artist_discography_route(album_uri.clone(), album_artist))
     });
     counts.append(&albums);
     let (tracks, track_count) = artist_count_button(
@@ -1031,8 +1073,9 @@ fn artist_detail_header_restored(
         &track_count_text(artist.track_count.max(0) as u64),
     );
     let track_shell = Rc::clone(shell);
+    let track_uri = artist.media_uri.clone();
     tracks.connect_clicked(move |_| {
-        track_shell.navigate(artist_tracks_route(artist_key, album_artist))
+        track_shell.navigate(artist_tracks_route(track_uri.clone(), album_artist))
     });
     counts.append(&tracks);
     showcase.append_detail(&counts);
@@ -1040,10 +1083,10 @@ fn artist_detail_header_restored(
     let actions = showcase.actions();
     actions.add_css_class("artist-detail-actions");
     actions.set_halign(gtk::Align::Start);
-    let target = artist_playback_target(artist_key, album_artist);
+    let target = artist_playback_target(artist.media_uri.clone(), album_artist);
     let play_shell = Rc::clone(shell);
-    let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-        target.play(&play_shell, placement, shuffled);
+    let play: CollectionPlay = Rc::new(move |placement| {
+        target.play(&play_shell, placement);
     });
     let controls = detail_playback_controls(
         &actions,
@@ -1061,12 +1104,14 @@ fn artist_detail_header_restored(
         .as_ref()
         .expect("artist detail has a Favorite cover control")
         .clone();
+    let favorite_media_uri = artist.media_uri.clone();
     for button in [favorite, hover_favorite] {
-        shell.register_favorite_button(artist_favorite_key(&artist_key), &button);
+        shell.register_favorite_button(artist_favorite_key(&favorite_media_uri), &button);
         let favorite_shell = Rc::clone(shell);
+        let favorite_media_uri = favorite_media_uri.clone();
         button.connect_clicked(move |button| {
             favorite_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Artist(artist_key),
+                library::FavoriteTarget::Artist(favorite_media_uri.clone()),
                 !favorite_button_is_active(button),
                 Some(button),
             );
@@ -1211,18 +1256,22 @@ mod tests {
 
     #[test]
     fn artist_and_album_artist_routes_keep_distinct_role_identity() {
-        let key = ArtistKey::from_raw(7);
-        assert_eq!(artist_detail_route(key, false), Route::ArtistDetail(key));
+        let key = library::source_entity_uri(&library::SourceId::new("source"), "artist", "7");
         assert_eq!(
-            artist_detail_route(key, true),
+            artist_detail_route(key.clone(), false),
+            Route::ArtistDetail(key.clone())
+        );
+        assert_eq!(
+            artist_detail_route(key.clone(), true),
             Route::AlbumArtistDetail(key)
         );
+        let key = library::source_entity_uri(&library::SourceId::new("source"), "artist", "7");
         assert!(matches!(
-            artist_playback_target(key, false),
+            artist_playback_target(key.clone(), false),
             PlaybackTarget::Artist(value) if value == key
         ));
         assert!(matches!(
-            artist_playback_target(key, true),
+            artist_playback_target(key.clone(), true),
             PlaybackTarget::AlbumArtist(value) if value == key
         ));
     }

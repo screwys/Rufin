@@ -38,19 +38,62 @@ pub(super) fn supported_image(path: &Path) -> bool {
         })
 }
 
-pub(super) fn file_reference(path: &Path, revision: String) -> LocalImageRef {
+pub(super) fn directory_image(directory: &Path) -> Option<PathBuf> {
+    let mut best = None;
+    let mut count = 0;
+    for entry in fs::read_dir(directory).ok()?.flatten() {
+        let path = entry.path();
+        if !supported_image(&path) || !path.is_file() {
+            continue;
+        }
+        count += 1;
+        let name = entry.file_name().to_string_lossy().to_ascii_lowercase();
+        let rank = [
+            "cover.jpg",
+            "cover.jpeg",
+            "cover.png",
+            "cover.webp",
+            "folder.jpg",
+            "folder.jpeg",
+            "folder.png",
+            "folder.webp",
+            "front.jpg",
+            "front.jpeg",
+            "front.png",
+            "front.webp",
+            "album.jpg",
+            "album.jpeg",
+            "album.png",
+            "album.webp",
+        ]
+        .iter()
+        .position(|candidate| *candidate == name)
+        .unwrap_or(usize::MAX);
+        let candidate = (rank, path);
+        if best.as_ref().is_none_or(|current| &candidate < current) {
+            best = Some(candidate);
+        }
+    }
+    best.filter(|(rank, _)| *rank != usize::MAX || count == 1)
+        .map(|(_, path)| path)
+}
+
+pub(super) fn file_reference(source_id: &str, path: &Path, revision: String) -> LocalImageRef {
     LocalImageRef::File {
+        source_id: crate::SourceId::new(source_id),
         path: path.to_string_lossy().into_owned(),
         revision,
     }
 }
 
 pub(super) fn embedded_reference(
+    source_id: &str,
     path: &Path,
     picture_index: u32,
     revision: String,
 ) -> LocalImageRef {
     LocalImageRef::Embedded {
+        source_id: crate::SourceId::new(source_id),
         path: path.to_string_lossy().into_owned(),
         picture_index,
         revision,
@@ -58,6 +101,7 @@ pub(super) fn embedded_reference(
 }
 
 pub(super) fn inspect_embedded(
+    source_id: &str,
     discoverer: &mut discovery::Reader,
     path: &Path,
     revision: String,
@@ -65,12 +109,12 @@ pub(super) fn inspect_embedded(
     if let Ok(Some(file)) = read_lofty(path, true) {
         let picture_index =
             best_picture_index(&file, file.primary_tag().or_else(|| file.first_tag()))?;
-        return Some(embedded_reference(path, picture_index, revision));
+        return Some(embedded_reference(source_id, path, picture_index, revision));
     }
     discoverer
         .read(path)
         .and_then(|metadata| metadata.artwork_index)
-        .map(|picture_index| embedded_reference(path, picture_index, revision))
+        .map(|picture_index| embedded_reference(source_id, path, picture_index, revision))
 }
 
 pub(super) fn best_picture_index(

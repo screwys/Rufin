@@ -13,40 +13,24 @@ use thiserror::Error;
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StreamRequest {
-    pub track_object_id: String,
+    pub media_uri: String,
     pub quality: StreamQuality,
-    pub media_uri: Option<String>,
-    pub cue_start_millis: Option<u64>,
-    pub cue_end_millis: Option<u64>,
 }
 
 impl StreamRequest {
-    pub fn original(track_object_id: impl Into<String>) -> Self {
-        Self::new(track_object_id, StreamQuality::Original)
+    pub fn original(media_uri: impl Into<String>) -> Self {
+        Self::new(media_uri, StreamQuality::Original)
     }
 
-    pub fn new(track_object_id: impl Into<String>, quality: StreamQuality) -> Self {
+    pub fn new(media_uri: impl Into<String>, quality: StreamQuality) -> Self {
         Self {
-            track_object_id: track_object_id.into(),
+            media_uri: media_uri.into(),
             quality,
-            media_uri: None,
-            cue_start_millis: None,
-            cue_end_millis: None,
         }
     }
 
-    pub fn for_media(media: &crate::PlaybackMedia, quality: StreamQuality) -> Self {
-        Self {
-            track_object_id: media.track_object_id.clone(),
-            quality,
-            media_uri: media.media_uri.clone(),
-            cue_start_millis: media
-                .cue_start_millis
-                .and_then(|value| u64::try_from(value).ok()),
-            cue_end_millis: media
-                .cue_end_millis
-                .and_then(|value| u64::try_from(value).ok()),
-        }
+    pub fn for_item(item: &crate::QueueItem, quality: StreamQuality) -> Self {
+        Self::new(item.media_uri.clone(), quality)
     }
 }
 
@@ -189,7 +173,7 @@ pub enum NextTransition {
 pub struct PreparedStream {
     pub stream: Box<ResolvedStream>,
     pub loudness: TrackLoudness,
-    pub track: Option<Box<crate::PlaybackMedia>>,
+    pub occurrence: Option<std::sync::Arc<crate::QueueOccurrence>>,
     pub content_type: Option<String>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
@@ -201,7 +185,7 @@ impl PreparedStream {
         Self {
             stream: Box::new(stream),
             loudness,
-            track: None,
+            occurrence: None,
             content_type: None,
             artwork_path: None,
             allows_preloading: true,
@@ -214,19 +198,13 @@ impl PreparedStream {
         self
     }
 
-    pub fn without_timing_queries(mut self) -> Self {
-        self.allows_timing_queries = false;
-        self
-    }
-
-    pub fn with_media(mut self, track: crate::PlaybackMedia, content_type: Option<String>) -> Self {
-        self.track = Some(Box::new(track));
+    pub fn with_occurrence(
+        mut self,
+        occurrence: std::sync::Arc<crate::QueueOccurrence>,
+        content_type: Option<String>,
+    ) -> Self {
+        self.occurrence = Some(occurrence);
         self.content_type = content_type;
-        self
-    }
-
-    pub fn with_artwork_path(mut self, artwork_path: Option<PathBuf>) -> Self {
-        self.artwork_path = artwork_path.map(Arc::new);
         self
     }
 }

@@ -141,9 +141,9 @@ impl QueuedMedia {
             .map(|end| end.saturating_sub(stream.start_millis()))
             .or_else(|| {
                 stream
-                    .track
+                    .occurrence
                     .as_ref()
-                    .and_then(|track| u64::try_from(track.duration_millis).ok())
+                    .and_then(|occurrence| u64::try_from(occurrence.item.duration_millis).ok())
             });
         let metadata = didl_metadata(&stream, &published);
         Self {
@@ -1056,9 +1056,10 @@ fn parse_upnp_time(value: &str) -> Option<u64> {
 }
 
 fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
-    let Some(track) = stream.track.as_ref() else {
+    let Some(occurrence) = stream.occurrence.as_ref() else {
         return String::new();
     };
+    let track = &occurrence.item;
     let duration_millis = media
         .resource_duration_millis
         .unwrap_or_else(|| u64::try_from(track.duration_millis).unwrap_or_default());
@@ -1110,7 +1111,7 @@ fn didl_metadata(stream: &PreparedStream, media: &PublishedResource) -> String {
             "<res protocolInfo=\"http-get:*:{}:{}\" duration=\"{}\"{}>{}</res>",
             "</item></DIDL-Lite>"
         ),
-        xml_escape(&track.track_object_id),
+        xml_escape(&track.media_uri),
         fields,
         xml_escape(&media.content_type),
         protocol_info,
@@ -1184,7 +1185,7 @@ mod tests {
         let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_media(test_track(), Some("audio/mpeg".to_string()));
+        .with_occurrence(test_occurrence().into(), Some("audio/mpeg".to_string()));
         (directory, stream)
     }
 
@@ -1320,7 +1321,7 @@ mod tests {
         let stream = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(path).expect("track URL").to_string(),
         ))
-        .with_media(test_track(), Some("audio/flac".to_string()));
+        .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
         let relay =
             RelayServer::start(address, Arc::new(AtomicBool::new(false)), None).expect("relay");
         let mut controller = UpnpController::new(device).expect("controller");
@@ -1929,7 +1930,7 @@ mod tests {
     #[test]
     fn didl_metadata_carries_standard_music_facts_artwork_and_resource() {
         let stream = PreparedStream::from(playback::ResolvedStream::new("file:///track.flac"))
-            .with_media(test_track(), Some("audio/flac".to_string()));
+            .with_occurrence(test_occurrence().into(), Some("audio/flac".to_string()));
         let media = PublishedResource {
             uri: "http://192.0.2.10:4000/media".to_string(),
             content_type: "audio/flac".to_string(),
@@ -1954,37 +1955,34 @@ mod tests {
         assert!(metadata.contains("DLNA.ORG_OP=01;DLNA.ORG_CI=0"));
     }
 
-    fn test_track() -> playback::PlaybackMedia {
-        playback::PlaybackMedia {
-            source_id: "source".to_string(),
-            track_key: Some(library::TrackKey::from_raw(1)),
-            track_object_id: "track-1".to_string(),
-            title: "Track & Title".to_string(),
-            artist: "Artist".to_string(),
-            album: "Album".to_string(),
-            album_display_artist: Some("Album Artist".to_string()),
-            album_key: None,
-            primary_artist_key: None,
-            media_uri: None,
-            artwork_binding: None,
-            duration_millis: 300_000,
-            disc_number: Some(1),
-            track_number: Some(2),
-            year: Some(2026),
-            release_date: Some("2026-08-17".to_string()),
-            favorite: Some(true),
-            rating: None,
-            is_downloaded: false,
-            source_format: Some("flac".to_string()),
-            musicbrainz_recording_id: None,
-            musicbrainz_release_track_id: None,
-            musicbrainz_album_id: None,
-            musicbrainz_release_group_id: None,
-            primary_artist_musicbrainz_id: None,
-            cue_path: None,
-            cue_start_millis: None,
-            cue_end_millis: None,
-            artist_links: Vec::new(),
+    fn test_occurrence() -> playback::QueueOccurrence {
+        playback::QueueOccurrence {
+            occurrence: playback::OccurrenceId::new("test-occurrence"),
+            canonical_position: 0,
+            provenance: playback::Provenance::Manual,
+            item: playback::QueueItem {
+                media_uri: library::source_entity_uri(
+                    &library::SourceId::new("source"),
+                    "track",
+                    "track-1",
+                ),
+                title: "Track & Title".to_string(),
+                artist: "Artist".to_string(),
+                album: "Album".to_string(),
+                album_display_artist: Some("Album Artist".to_string()),
+                artwork_binding: None,
+                duration_millis: 300_000,
+                disc_number: Some(1),
+                track_number: Some(2),
+                year: Some(2026),
+                release_date: Some("2026-08-17".to_string()),
+                source_format: Some("flac".to_string()),
+                musicbrainz_recording_id: None,
+                musicbrainz_release_track_id: None,
+                musicbrainz_album_id: None,
+                musicbrainz_release_group_id: None,
+                primary_artist_musicbrainz_id: None,
+            },
         }
     }
 

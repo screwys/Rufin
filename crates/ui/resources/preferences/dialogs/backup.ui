@@ -1,0 +1,46 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="GtkFileDialog" id="export_chooser">
+    <property name="title" translatable="yes">Export Backup</property>
+    <property name="initial-name">rufin.rufin-backup</property>
+  </object>
+  <object class="GtkFileDialog" id="restore_chooser"><property name="title" translatable="yes">Import Backup</property></object>
+  <object class="GtkFileDialog" id="activity_chooser"><property name="title" translatable="yes">Export Activity</property></object>
+  <object class="GtkFileDialog" id="folder_chooser"><property name="title" translatable="yes">Choose Folder</property></object>
+  <object class="AdwAlertDialog" id="restore_confirm">
+    <property name="heading" translatable="yes">Restore User State</property>
+    <property name="body" translatable="yes">Replace the selected contents with this backup? Local folder permissions may need to be selected again.</property>
+    <property name="close-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="restore" translatable="yes" appearance="destructive">Restore</response></responses>
+  </object>
+  <object class="AdwAlertDialog" id="export_options">
+    <property name="heading" translatable="yes">Backup Password</property>
+    <property name="body" translatable="yes">Backup file may contain sensitive information. Do you want to set a password?</property>
+    <property name="close-response">cancel</property>
+    <property name="extra-child"><object class="AdwPreferencesGroup">
+      <child><object class="AdwPasswordEntryRow" id="export_password"><property name="title" translatable="yes">Password</property></object></child>
+      <child><object class="AdwSwitchRow" id="do_not_encrypt"><property name="title" translatable="yes">Do not encrypt</property></object></child>
+    </object></property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="continue" translatable="yes" appearance="suggested">Continue</response></responses>
+  </object>
+  <object class="AdwAlertDialog" id="options">
+    <property name="heading" translatable="yes">Backup Password</property>
+    <property name="body" translatable="yes">For this import or export only. Leave empty for an unencrypted archive.</property>
+    <property name="close-response">cancel</property>
+    <property name="extra-child"><object class="GtkBox" id="options_box">
+      <property name="orientation">vertical</property><property name="spacing">12</property>
+      <child><object class="AdwPreferencesGroup"><child><object class="AdwPasswordEntryRow" id="password"><property name="title" translatable="yes">Password</property></object></child></object></child>
+    </object></property>
+    <responses><response id="cancel" translatable="yes">Cancel</response><response id="continue" translatable="yes" appearance="suggested">Continue</response></responses>
+  </object>
+  <object class="AdwPreferencesGroup" id="contents_group">
+    <property name="title" translatable="yes">Contents</property>
+    <child><object class="AdwSwitchRow" id="content_settings"><property name="title" translatable="yes">Settings and sources</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_saved_logins"><property name="title" translatable="yes">Saved logins</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_playlists"><property name="title" translatable="yes">Playlists</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_favorites"><property name="title" translatable="yes">Favorites and ratings</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_local_imports"><property name="title" translatable="yes">Local imports and access</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_activity"><property name="title" translatable="yes">Activity</property></object></child>
+    <child><object class="AdwSwitchRow" id="content_queue"><property name="title" translatable="yes">Queue</property></object></child>
+  </object>
+</interface>

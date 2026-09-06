@@ -38,35 +38,30 @@ pub struct HomeEntryInput {
     pub entity_object_id: String,
     pub title: String,
     pub subtitle: String,
-    pub artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeTrackRow {
     pub track: TrackRow,
     pub title: String,
-    pub artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct HomeAlbumRow {
     pub album: AlbumRow,
     pub title: String,
-    pub artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, FromRow)]
 struct HomeTrackFact {
     track_key: TrackKey,
     title: String,
-    artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, FromRow)]
 struct HomeAlbumFact {
     album_key: AlbumKey,
     title: String,
-    artwork_binding: Option<Vec<u8>>,
 }
 
 #[derive(Clone, Debug, FromRow, PartialEq)]
@@ -187,7 +182,7 @@ impl Database {
                     .await?,
                 };
             if let Some(key) = key {
-                sqlx::query("INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,artwork_binding) VALUES(?1,?2,?3,?4,?5,?6,?7,?8)").bind(source).bind(section_id).bind(entry.position).bind(entry.kind.as_str()).bind(key).bind(&entry.title).bind(&entry.subtitle).bind(entry.artwork_binding.as_deref()).execute(&mut *transaction).await?;
+                sqlx::query("INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle) VALUES(?1,?2,?3,?4,?5,?6,?7)").bind(source).bind(section_id).bind(entry.position).bind(entry.kind.as_str()).bind(key).bind(&entry.title).bind(&entry.subtitle).execute(&mut *transaction).await?;
             }
         }
         transaction.commit().await?;
@@ -220,7 +215,7 @@ impl Database {
             showcase_variation.rem_euclid(album_count)
         };
         let showcase = sqlx::query_as::<_, HomeAlbumFact>(
-            "SELECT album_key,title,artwork_binding FROM albums
+            "SELECT album_key,title FROM albums
              WHERE source_key=?1 AND (?3 IS NULL OR EXISTS (
                SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
                WHERE track.album_key=albums.album_key AND scope.folder_key=?3))
@@ -259,7 +254,7 @@ impl Database {
         let track_pivot =
             explore_track_pivot(source, explore_variation, first_track_key, last_track_key);
         let mut explore = sqlx::query_as::<_, HomeTrackFact>(
-            "SELECT track_key,title,artwork_binding FROM tracks
+            "SELECT track_key,title FROM tracks
              WHERE source_key=?1 AND track_key>=?2 AND (?3 IS NULL OR EXISTS (
                SELECT 1 FROM track_folders scope
                WHERE scope.track_key=tracks.track_key AND scope.folder_key=?3))
@@ -272,7 +267,7 @@ impl Database {
         .await?;
         if explore.len() < HOME_LIMIT as usize {
             let rest = sqlx::query_as::<_, HomeTrackFact>(
-                "SELECT track_key,title,artwork_binding FROM tracks
+                "SELECT track_key,title FROM tracks
                  WHERE source_key=?1 AND track_key<?2 AND (?4 IS NULL OR EXISTS (
                    SELECT 1 FROM track_folders scope
                    WHERE scope.track_key=tracks.track_key AND scope.folder_key=?4))
@@ -292,12 +287,15 @@ impl Database {
         if most_played.tracks.is_empty() && most_played.albums.is_empty() {
             most_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
                 "WITH listen_count AS (
-                   SELECT track_key,count(*) plays FROM listens
-                   WHERE source_key=?1 AND track_key IS NOT NULL GROUP BY track_key)
-                 SELECT track.track_key,track.title,track.artwork_binding
+                   SELECT listen.media_uri,count(*) plays FROM tracks track
+                   CROSS JOIN listens listen ON listen.media_uri=track.media_uri
+                   WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
+                     SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+                   GROUP BY listen.media_uri)
+                 SELECT track.track_key,track.title
                  FROM tracks track
                  LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'
-                 LEFT JOIN listen_count listen USING(track_key)
+                 LEFT JOIN listen_count listen USING(media_uri)
                  WHERE track.source_key=?1
                    AND COALESCE(baseline.play_count,0)+COALESCE(listen.plays,0)>0
                    AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
@@ -313,7 +311,7 @@ impl Database {
             provider_section(&mut transaction, source, folder, "newly-added").await?;
         if newly_added.tracks.is_empty() && newly_added.albums.is_empty() {
             newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title,artwork_binding FROM albums
+                "SELECT album_key,title FROM albums
                  WHERE source_key=?1 AND (?2 IS NULL OR EXISTS (
                    SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
                    WHERE track.album_key=albums.album_key AND scope.folder_key=?2))
@@ -330,11 +328,14 @@ impl Database {
         if recently_played.tracks.is_empty() && recently_played.albums.is_empty() {
             recently_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
                 "WITH latest AS (
-                   SELECT track_key,max(started_at) played_at FROM listens
-                   WHERE source_key=?1 AND track_key IS NOT NULL GROUP BY track_key)
-                 SELECT track.track_key,track.title,track.artwork_binding
-                 FROM latest JOIN tracks track USING(track_key)
-                 WHERE (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+                   SELECT listen.media_uri,max(listen.started_at) played_at FROM tracks track
+                   CROSS JOIN listens listen ON listen.media_uri=track.media_uri
+                   WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
+                     SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
+                   GROUP BY listen.media_uri)
+                 SELECT track.track_key,track.title
+                 FROM latest JOIN tracks track USING(media_uri)
+                 WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
                  ORDER BY latest.played_at DESC,track.track_key LIMIT 24",
             )
             .bind(source)
@@ -347,7 +348,7 @@ impl Database {
             provider_section(&mut transaction, source, folder, "recently-released").await?;
         if recently_released.tracks.is_empty() && recently_released.albums.is_empty() {
             recently_released.albums = sqlx::query_as::<_, HomeAlbumFact>(
-                "SELECT album_key,title,artwork_binding FROM albums
+                "SELECT album_key,title FROM albums
                  WHERE source_key=?1 AND (release_date IS NOT NULL OR COALESCE(year,0)<>0)
                    AND (?2 IS NULL OR EXISTS (
                      SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
@@ -474,7 +475,7 @@ async fn enrich_home_page(
 
     let mut tracks = BTreeMap::new();
     for keys in track_keys.chunks(128) {
-        for row in database.track_rows(source, keys, cancellation).await? {
+        for row in database.track_rows(keys, cancellation).await? {
             tracks.insert(row.track_key, row);
         }
     }
@@ -499,7 +500,6 @@ async fn enrich_home_page(
                     .map(|track| HomeTrackRow {
                         track,
                         title: fact.title,
-                        artwork_binding: fact.artwork_binding,
                     })
             })
             .collect(),
@@ -513,7 +513,6 @@ async fn enrich_home_page(
                     .map(|album| HomeAlbumRow {
                         album,
                         title: fact.title,
-                        artwork_binding: fact.artwork_binding,
                     })
             })
             .collect(),
@@ -526,7 +525,6 @@ async fn enrich_home_page(
                 .map(|album| HomeAlbumRow {
                     album,
                     title: fact.title,
-                    artwork_binding: fact.artwork_binding,
                 })
         }),
         explore: facts
@@ -539,7 +537,6 @@ async fn enrich_home_page(
                     .map(|track| HomeTrackRow {
                         track,
                         title: fact.title,
-                        artwork_binding: fact.artwork_binding,
                     })
             })
             .collect(),
@@ -566,8 +563,7 @@ async fn provider_section(
     section_id: &str,
 ) -> LibraryResult<HomeSectionFacts> {
     let tracks = sqlx::query_as::<_, HomeTrackFact>(
-        "SELECT track.track_key,entry.title,
-                COALESCE(entry.artwork_binding,track.artwork_binding) artwork_binding
+        "SELECT track.track_key,entry.title
          FROM home_entries entry JOIN tracks track ON track.track_key=entry.entity_key
          WHERE entry.source_key=?1 AND entry.section_id=?2 AND entry.entity_kind='track'
            AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
@@ -579,8 +575,7 @@ async fn provider_section(
     .fetch_all(&mut *connection)
     .await?;
     let albums = sqlx::query_as::<_, HomeAlbumFact>(
-        "SELECT album.album_key,entry.title,
-                COALESCE(entry.artwork_binding,album.artwork_binding) artwork_binding
+        "SELECT album.album_key,entry.title
          FROM home_entries entry JOIN albums album ON album.album_key=entry.entity_key
          WHERE entry.source_key=?1 AND entry.section_id=?2 AND entry.entity_kind='album'
            AND (?3 IS NULL OR EXISTS (

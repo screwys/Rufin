@@ -17,18 +17,17 @@
           <class name="context-menu-hover-owner"/>
         </style>
         <child>
-          <object class="GtkButton" id="cover_button">
+          <object class="GtkBox" id="cover_host">
             <property name="width-request">1</property>
             <property name="height-request">1</property>
             <property name="hexpand">true</property>
             <property name="vexpand">true</property>
             <property name="halign">fill</property>
             <property name="valign">fill</property>
-            <property name="focus-on-click">false</property>
+            <property name="can-target">false</property>
             <property name="overflow">hidden</property>
             <style>
-              <class name="album-cover-button"/>
-              <class name="flat"/>
+              <class name="cover-tile"/>
             </style>
           </object>
         </child>

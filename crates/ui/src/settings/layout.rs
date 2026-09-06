@@ -319,11 +319,11 @@ pub enum SidebarPin {
         genre_id: String,
     },
     Playlist {
-        source_id: SourceId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        source_id: Option<SourceId>,
         playlist_id: String,
     },
     SmartPlaylist {
-        source_id: SourceId,
         playlist_id: String,
     },
 }
@@ -332,14 +332,18 @@ fn is_false(value: &bool) -> bool {
     !*value
 }
 impl SidebarPin {
-    pub fn source_id(&self) -> &SourceId {
+    pub fn source_id(&self) -> Option<&SourceId> {
         match self {
             Self::Album { source_id, .. }
             | Self::Artist { source_id, .. }
-            | Self::Genre { source_id, .. }
-            | Self::Playlist { source_id, .. }
-            | Self::SmartPlaylist { source_id, .. } => source_id,
+            | Self::Genre { source_id, .. } => Some(source_id),
+            Self::Playlist { source_id, .. } => source_id.as_ref(),
+            Self::SmartPlaylist { .. } => None,
         }
+    }
+
+    pub fn visible_for(&self, source_id: Option<&SourceId>) -> bool {
+        self.source_id().is_none() || self.source_id() == source_id
     }
 }
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -459,7 +463,7 @@ impl SidebarSettings {
         for playlist_id in playlist_ids {
             self.set_pinned(
                 SidebarPin::Playlist {
-                    source_id: source_id.clone(),
+                    source_id: Some(source_id.clone()),
                     playlist_id,
                 },
                 true,
@@ -1204,7 +1208,7 @@ mod sidebar_tests {
 
     fn pin(id: &str) -> SidebarPin {
         SidebarPin::Playlist {
-            source_id: SourceId::new("test:source"),
+            source_id: Some(SourceId::new("test:source")),
             playlist_id: id.to_string(),
         }
     }

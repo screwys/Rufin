@@ -119,7 +119,10 @@ impl FilesystemCache {
         identity: &str,
     ) -> io::Result<()> {
         if !identity.is_empty() {
-            fs::write(staging.join(digest(identity)), [])?;
+            fs::write(
+                staging.join(crate::ArtworkKey::binding_digest(identity)),
+                [],
+            )?;
         }
         Ok(())
     }
@@ -176,12 +179,11 @@ impl FilesystemCache {
 
     pub(crate) fn ready_entry(
         &self,
-        source_id: &SourceId,
         candidate: &Candidate,
         requested_size: u32,
     ) -> Option<CacheEntry> {
         for size in reusable_sizes(requested_size) {
-            let path = self.ready_path(source_id, candidate, size);
+            let path = self.ready_path(candidate, size);
             let Ok(metadata) = fs::metadata(&path) else {
                 continue;
             };
@@ -195,7 +197,6 @@ impl FilesystemCache {
 
     pub(crate) fn write_ready(
         &self,
-        source_id: &SourceId,
         candidate: &Candidate,
         size: u32,
         bytes: &[u8],
@@ -206,13 +207,13 @@ impl FilesystemCache {
                 "artwork response was empty",
             ));
         }
-        let path = self.ready_path(source_id, candidate, size);
+        let path = self.ready_path(candidate, size);
         if candidate.is_external() {
             self.write_external_tracked(&path, bytes)?;
-            self.remove_file_external_tracked(&self.missing_path(source_id, candidate, size));
+            self.remove_file_external_tracked(&self.missing_path(candidate, size));
         } else {
             atomic_write(&path, bytes)?;
-            remove_file_if_present(&self.missing_path(source_id, candidate, size))?;
+            remove_file_if_present(&self.missing_path(candidate, size))?;
         }
         Ok(path)
     }
@@ -221,24 +222,14 @@ impl FilesystemCache {
         self.remove_file_tracked(path);
     }
 
-    pub(crate) fn is_missing(
-        &self,
-        source_id: &SourceId,
-        candidate: &Candidate,
-        size: u32,
-    ) -> bool {
+    pub(crate) fn is_missing(&self, candidate: &Candidate, size: u32) -> bool {
         reusable_sizes(size)
             .into_iter()
-            .any(|size| self.missing_path(source_id, candidate, size).is_file())
+            .any(|size| self.missing_path(candidate, size).is_file())
     }
 
-    pub(crate) fn mark_missing(
-        &self,
-        source_id: &SourceId,
-        candidate: &Candidate,
-        size: u32,
-    ) -> io::Result<()> {
-        let path = self.missing_path(source_id, candidate, size);
+    pub(crate) fn mark_missing(&self, candidate: &Candidate, size: u32) -> io::Result<()> {
+        let path = self.missing_path(candidate, size);
         if candidate.is_external() {
             self.write_external_tracked(&path, b"missing\n")
         } else {
@@ -269,12 +260,12 @@ impl FilesystemCache {
         }
     }
 
-    fn ready_path(&self, source_id: &SourceId, candidate: &Candidate, size: u32) -> PathBuf {
-        self.candidate_path("ready", source_id, candidate, size, "img")
+    fn ready_path(&self, candidate: &Candidate, size: u32) -> PathBuf {
+        self.candidate_path("ready", candidate, size, "img")
     }
 
-    fn missing_path(&self, source_id: &SourceId, candidate: &Candidate, size: u32) -> PathBuf {
-        self.candidate_path("missing", source_id, candidate, size, "missing")
+    fn missing_path(&self, candidate: &Candidate, size: u32) -> PathBuf {
+        self.candidate_path("missing", candidate, size, "missing")
     }
 
     fn source_manifest_path(&self, source_id: &SourceId) -> PathBuf {
@@ -287,26 +278,25 @@ impl FilesystemCache {
     fn candidate_path(
         &self,
         state: &str,
-        source_id: &SourceId,
         candidate: &Candidate,
         size: u32,
         extension: &str,
     ) -> PathBuf {
-        let identity = digest(&candidate.stable_identity());
-        if candidate.is_external() {
-            self.root
-                .join(state)
-                .join("external")
-                .join(identity)
-                .join(format!("{size}.{extension}"))
-        } else {
-            self.root
+        let identity = crate::ArtworkKey::binding_digest(&candidate.stable_identity());
+        let root = match candidate {
+            Candidate::Native(binding) => self
+                .root
                 .join(state)
                 .join("native")
-                .join(digest(source_id.as_str()))
-                .join(identity)
-                .join(format!("{size}.{extension}"))
-        }
+                .join(digest(binding.source_id.as_str())),
+            Candidate::Local(binding) => self
+                .root
+                .join(state)
+                .join("native")
+                .join(digest(binding.source_id().as_str())),
+            Candidate::Album(_) => self.root.join(state).join("external"),
+        };
+        root.join(identity).join(format!("{size}.{extension}"))
     }
 
     fn initialize_usage(&self) -> io::Result<()> {
@@ -569,23 +559,25 @@ fn atomic_write(path: &Path, bytes: &[u8]) -> io::Result<()> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use sources::NativeImageRef;
+    use sources::{NativeArtworkBinding, NativeImageRef};
 
     fn native() -> Candidate {
-        Candidate::Native(NativeImageRef::new("album", Some("tag".to_string())))
+        Candidate::Native(NativeArtworkBinding {
+            source_id: SourceId::new("source"),
+            image: NativeImageRef::new("album", Some("tag".to_string())),
+        })
     }
 
     #[test]
     fn a_ready_larger_cover_is_reused_for_a_smaller_preview() {
         let directory = tempfile::tempdir().expect("temporary artwork cache");
         let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
-        let source = SourceId::new("source");
         cache
-            .write_ready(&source, &native(), 256, b"normalized")
+            .write_ready(&native(), 256, b"normalized")
             .expect("cache cover");
 
-        assert!(cache.ready_entry(&source, &native(), 96).is_some());
-        assert!(cache.ready_entry(&source, &native(), 512).is_none());
+        assert!(cache.ready_entry(&native(), 96).is_some());
+        assert!(cache.ready_entry(&native(), 512).is_none());
     }
 
     #[test]
@@ -593,17 +585,61 @@ mod tests {
         let directory = tempfile::tempdir().expect("temporary artwork cache");
         let cache = FilesystemCache::new(directory.path().to_path_buf()).expect("open cache");
         let source = SourceId::new("source");
-        let other = SourceId::new("other");
+        let other = Candidate::Native(NativeArtworkBinding {
+            source_id: SourceId::new("other"),
+            image: NativeImageRef::new("album", Some("tag".to_string())),
+        });
         cache
-            .write_ready(&source, &native(), 256, b"source")
+            .write_ready(&native(), 256, b"source")
             .expect("cache source cover");
         cache
-            .write_ready(&other, &native(), 256, b"other")
+            .write_ready(&other, 256, b"other")
             .expect("cache other cover");
 
         cache.invalidate_source(&source).expect("invalidate source");
-        assert!(cache.ready_entry(&source, &native(), 256).is_none());
-        assert!(cache.ready_entry(&other, &native(), 256).is_some());
+        assert!(cache.ready_entry(&native(), 256).is_none());
+        assert!(cache.ready_entry(&other, 256).is_some());
+    }
+
+    #[test]
+    fn local_manifest_prunes_obsolete_bindings_in_their_configured_source_partition() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = FilesystemCache::new(directory.path().to_path_buf()).unwrap();
+        let source = SourceId::new("configured-local");
+        let current = Candidate::Local(sources::LocalImageRef::File {
+            source_id: source.clone(),
+            path: "/music/cover.png".into(),
+            revision: "new".into(),
+        });
+        let obsolete = Candidate::Local(sources::LocalImageRef::Embedded {
+            source_id: source.clone(),
+            path: "/music/track.flac".into(),
+            picture_index: 0,
+            revision: "old".into(),
+        });
+        let other = Candidate::Local(sources::LocalImageRef::File {
+            source_id: SourceId::new("other-local"),
+            path: "/music/cover.png".into(),
+            revision: "new".into(),
+        });
+        assert_ne!(current.stable_identity(), other.stable_identity());
+        for candidate in [&current, &obsolete, &other] {
+            cache.write_ready(candidate, 256, b"cached image").unwrap();
+            cache.mark_missing(candidate, 512).unwrap();
+        }
+        let staging = cache.begin_source_manifest(&source, 2).unwrap();
+        cache
+            .mark_source_manifest_identity(&staging, &current.stable_identity())
+            .unwrap();
+        cache
+            .complete_source_manifest_staging(&source, 2, &staging)
+            .unwrap();
+        assert!(cache.ready_entry(&current, 256).is_some());
+        assert!(cache.is_missing(&current, 512));
+        assert!(cache.ready_entry(&obsolete, 256).is_none());
+        assert!(!cache.is_missing(&obsolete, 512));
+        assert!(cache.ready_entry(&other, 256).is_some());
+        assert!(cache.is_missing(&other, 512));
     }
 }
 

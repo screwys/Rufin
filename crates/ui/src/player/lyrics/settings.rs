@@ -169,12 +169,7 @@ fn build_lyrics_settings(shell: &Rc<Shell>) -> (adw::PreferencesDialog, adw::Pre
     let external_prefer_server = prefer_server.clone();
     let external_save_automatically = save_automatically.clone();
     external.connect_active_notify(move |row| {
-        if !external_shell.set_lyrics_setting(
-            "lyrics setting",
-            false,
-            row.is_active(),
-            |settings| &mut settings.external_lyrics_enabled,
-        ) {
+        if !external_shell.set_external_lyrics_enabled(row.is_active()) {
             return;
         }
         external_prefer_server.set_sensitive(row.is_active());
@@ -330,7 +325,7 @@ fn selected_source_uses_local_lyrics_storage(shell: &Shell) -> bool {
     let Some(source_id) = shell
         .selected_library()
         .as_deref()
-        .map(|selected| selected.artwork.source_id.clone())
+        .map(|selected| selected.source_id.clone())
     else {
         return false;
     };
@@ -352,7 +347,7 @@ fn selected_source_has_local_access(shell: &Shell) -> bool {
     let Some(source_id) = shell
         .selected_library()
         .as_deref()
-        .map(|selected| selected.artwork.source_id.clone())
+        .map(|selected| selected.source_id.clone())
     else {
         return false;
     };
@@ -589,6 +584,12 @@ fn small_icon_button(icon: &str, label: &str) -> gtk::Button {
 }
 
 impl Shell {
+    pub(crate) fn set_external_lyrics_enabled(self: &Rc<Self>, enabled: bool) -> bool {
+        self.set_lyrics_setting("lyrics setting", false, enabled, |settings| {
+            &mut settings.external_lyrics_enabled
+        })
+    }
+
     pub(crate) fn set_save_lyrics_to_source(self: &Rc<Self>, enabled: bool) -> bool {
         self.update_lyrics_settings("save lyrics destination setting", false, |settings| {
             if settings.save_lyrics_to_source == enabled {

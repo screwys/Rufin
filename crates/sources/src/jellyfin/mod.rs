@@ -12,9 +12,7 @@ use item::{
     playlist_from_item, primary_image_ref, stage_album, stage_artist, stage_genre, stage_track,
     track_from_item,
 };
-use playback::{
-    RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality, StreamRequest,
-};
+use playback::{RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
 use std::sync::Arc;
@@ -94,16 +92,6 @@ impl JellyfinSourceConfig {
             "use_jellyfin_instant_mix": self.use_instant_mix,
         })
     }
-
-    pub(crate) fn same_account(&self, other: &Self) -> SourceResult<bool> {
-        if self.user_id != other.user_id {
-            return Ok(false);
-        }
-        match (&self.server_id, &other.server_id) {
-            (Some(current), Some(next)) => Ok(current == next),
-            _ => Ok(normalize_base_url(&self.base_url)? == normalize_base_url(&other.base_url)?),
-        }
-    }
 }
 
 struct AuthenticatedJellyfin {
@@ -113,18 +101,18 @@ struct AuthenticatedJellyfin {
 }
 
 impl AuthenticatedJellyfin {
-    fn connected(mut self, source_id: Option<SourceId>) -> ConnectedSource {
-        if let Some(source_id) = source_id {
-            self.configuration.source_id = source_id;
-        }
+    fn connected(self) -> ConnectedSource {
         ConnectedSource::jellyfin(self.configuration, self.source, Some(self.credential))
     }
 }
 
-pub(crate) async fn connect(input: JellyfinSetupInput) -> SourceResult<ConnectedSource> {
-    JellyfinSource::authenticate(input)
+pub(crate) async fn connect(
+    source_id: SourceId,
+    input: JellyfinSetupInput,
+) -> SourceResult<ConnectedSource> {
+    JellyfinSource::authenticate(source_id, input)
         .await
-        .map(|authenticated| authenticated.connected(None))
+        .map(AuthenticatedJellyfin::connected)
 }
 
 pub(crate) fn open(
@@ -172,26 +160,23 @@ pub(crate) async fn edit(
         let device_id = device_id.ok_or_else(|| {
             SourceError::InvalidConfig("the app-wide Jellyfin device ID is missing".to_string())
         })?;
-        let authenticated = JellyfinSource::authenticate(JellyfinSetupInput {
-            credentials: CredentialHostInput {
-                server_name: Some(name),
-                server_url: credentials.base_url,
-                username: credentials.username,
-                password: credentials.password,
-                trust_invalid_cert: credentials.trust_invalid_cert,
+        let authenticated = JellyfinSource::authenticate(
+            current.source_id,
+            JellyfinSetupInput {
+                credentials: CredentialHostInput {
+                    server_name: Some(name),
+                    server_url: credentials.base_url,
+                    username: credentials.username,
+                    password: credentials.password,
+                    trust_invalid_cert: credentials.trust_invalid_cert,
+                },
+                use_instant_mix,
+                device_id,
             },
-            use_instant_mix,
-            device_id,
-        })
+        )
         .await?;
-        let next = JellyfinSourceConfig::from_configuration(&authenticated.configuration)?;
-        let source_id = if saved.same_account(&next)? {
-            Some(current.source_id)
-        } else {
-            None
-        };
         return Ok(SourceEditResult::Connected(Box::new(
-            authenticated.connected(source_id),
+            authenticated.connected(),
         )));
     }
 
@@ -289,7 +274,10 @@ impl JellyfinSource {
     }
 
     #[instrument(skip(input), fields(base_url = %input.credentials.server_url, username = %input.credentials.username, trust_invalid_cert = input.credentials.trust_invalid_cert))]
-    async fn authenticate(input: JellyfinSetupInput) -> SourceResult<AuthenticatedJellyfin> {
+    async fn authenticate(
+        source_id: SourceId,
+        input: JellyfinSetupInput,
+    ) -> SourceResult<AuthenticatedJellyfin> {
         let CredentialHostInput {
             server_name: submitted_name,
             server_url,
@@ -314,19 +302,7 @@ impl JellyfinSource {
         let provider_name = public_server_name(&client, &base_url, &config)
             .await
             .unwrap_or_else(|| "Jellyfin".to_string());
-        let server_id = response
-            .server_id
-            .filter(|value| !value.trim().is_empty())
-            .unwrap_or_else(|| stable_source_id(base_url.as_str()));
-        if response.user.id.trim().is_empty() {
-            return Err(SourceError::Auth(
-                "Jellyfin returned an empty user ID".to_string(),
-            ));
-        }
-        let source_id = SourceId::new(format!(
-            "jellyfin:server:{server_id}:user:{}",
-            response.user.id
-        ));
+        let server_id = response.server_id.filter(|value| !value.trim().is_empty());
         let canonical_base_url = base_url.as_str().trim_end_matches('/').to_string();
         let user_id = response.user.id;
         let username = response.user.name;
@@ -338,7 +314,7 @@ impl JellyfinSource {
             crate::source::configured_source_name(submitted_name, provider_name),
             JellyfinSourceConfig {
                 base_url: canonical_base_url,
-                server_id: Some(server_id),
+                server_id,
                 user_id: user_id.clone(),
                 username,
                 trust_invalid_cert,

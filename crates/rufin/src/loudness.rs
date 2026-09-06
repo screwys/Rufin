@@ -3,13 +3,8 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use library::{
-    AlbumLoudnessTrack, LoudnessMeasurement, ReadCancellation, SourceKey, TrackLoudnessWork,
-};
-use playback::{
-    LoudnessNormalization, LoudnessNormalizationScope, SourceSessionEpoch, StreamQuality,
-    StreamRequest,
-};
+use library::{LoudnessMeasurement, ReadCancellation, SourceKey, TrackLoudnessWork};
+use playback::{LoudnessNormalization, LoudnessNormalizationScope, StreamQuality, StreamRequest};
 use playback_gstreamer::{LoudnessAnalysis, album_loudness, analyze_loudness_cancellable};
 use tracing::{info, warn};
 
@@ -18,7 +13,6 @@ use crate::source::{ActiveSource, SelectedSourceState, WeakActiveSource};
 
 struct ActiveAnalysis {
     source_key: SourceKey,
-    epoch: SourceSessionEpoch,
     selected: WeakActiveSource,
     cancelled: Arc<AtomicBool>,
     task: Option<tokio::task::AbortHandle>,
@@ -43,15 +37,15 @@ pub(crate) struct LoudnessAnalysisOwner {
 }
 
 #[derive(Default)]
-struct AnalysisFailureBlock(Option<(SourceKey, SourceSessionEpoch)>);
+struct AnalysisFailureBlock(Option<SourceKey>);
 
 impl AnalysisFailureBlock {
-    fn blocks(&self, source: SourceKey, epoch: SourceSessionEpoch) -> bool {
-        self.0 == Some((source, epoch))
+    fn blocks(&self, source: SourceKey) -> bool {
+        self.0 == Some(source)
     }
 
-    fn record(&mut self, source: SourceKey, epoch: SourceSessionEpoch) {
-        self.0 = Some((source, epoch));
+    fn record(&mut self, source: SourceKey) {
+        self.0 = Some(source);
     }
 
     fn clear(&mut self) {
@@ -88,12 +82,11 @@ impl LoudnessAnalysisOwner {
             return;
         };
         let source_key = state.source_key;
-        let epoch = state.source_session_epoch;
         if self
             .blocked
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
-            .blocks(source_key, epoch)
+            .blocks(source_key)
         {
             return;
         }
@@ -102,7 +95,6 @@ impl LoudnessAnalysisOwner {
             let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
             if active.as_ref().is_some_and(|current| {
                 current.source_key == source_key
-                    && current.epoch == epoch
                     && current.scope == scope
                     && current.write_tags == write_tags
             }) {
@@ -113,7 +105,6 @@ impl LoudnessAnalysisOwner {
             }
             *active = Some(ActiveAnalysis {
                 source_key,
-                epoch,
                 selected: selected.downgrade(),
                 cancelled: Arc::clone(&cancelled),
                 task: None,
@@ -165,9 +156,10 @@ impl LoudnessAnalysisOwner {
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .clear();
         let mut active = self.active.lock().unwrap_or_else(|p| p.into_inner());
-        if let Some(current) = active.as_mut().filter(|current| {
-            current.source_key == state.source_key && current.epoch == state.source_session_epoch
-        }) {
+        if let Some(current) = active
+            .as_mut()
+            .filter(|current| current.source_key == state.source_key)
+        {
             current.restart = true;
             return;
         }
@@ -206,7 +198,7 @@ impl LoudnessAnalysisOwner {
             self.blocked
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner())
-                .record(current.source_key, current.epoch);
+                .record(current.source_key);
         }
         drop(active);
         if !failed && let Some(selected) = restart {
@@ -397,63 +389,36 @@ async fn analyze_track(
     work: &TrackLoudnessWork,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<playback_gstreamer::AnalyzedLoudness, String> {
-    analyze_uri(
-        state,
-        &work.track_object_id,
-        work.media_uri.as_deref(),
-        work.cue_start_millis,
-        work.cue_end_millis,
-        cancelled,
-    )
-    .await
-    .map(|analysis| analysis.measurement())
+    analyze_uri(state, &work.media_uri, cancelled)
+        .await
+        .map(|analysis| analysis.measurement())
 }
 
 async fn analyze_album_track(
     state: &SelectedSourceState,
-    work: &AlbumLoudnessTrack,
+    work: &TrackLoudnessWork,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
-    analyze_uri(
-        state,
-        &work.track_object_id,
-        work.media_uri.as_deref(),
-        work.cue_start_millis,
-        work.cue_end_millis,
-        cancelled,
-    )
-    .await
+    analyze_uri(state, &work.media_uri, cancelled).await
 }
 
 async fn analyze_uri(
     state: &SelectedSourceState,
-    track_object_id: &str,
-    media_uri: Option<&str>,
-    start: Option<i64>,
-    end: Option<i64>,
+    media_uri: &str,
     cancelled: &Arc<AtomicBool>,
 ) -> Result<LoudnessAnalysis, String> {
-    let request = analysis_stream_request(track_object_id, media_uri, start, end);
-    let stream = prepare_stream(state.source.clone(), request).await?;
+    let request = StreamRequest::new(media_uri, StreamQuality::Original);
+    let source = state.source.clone();
+    let stream = prepare_stream(&state.database, request, move |_| {
+        source.ok_or_else(crate::source::source_access_unavailable)
+    })
+    .await?;
     let cancelled = Arc::clone(cancelled);
     tokio::task::spawn_blocking(move || {
         analyze_loudness_cancellable(&stream, || cancelled.load(Ordering::Acquire))
     })
     .await
     .map_err(|_| "loudness analysis worker stopped".to_string())?
-}
-
-fn analysis_stream_request(
-    track_object_id: &str,
-    media_uri: Option<&str>,
-    start: Option<i64>,
-    end: Option<i64>,
-) -> StreamRequest {
-    let mut request = StreamRequest::new(track_object_id, StreamQuality::Original);
-    request.media_uri = media_uri.map(str::to_owned);
-    request.cue_start_millis = start.and_then(|value| u64::try_from(value).ok());
-    request.cue_end_millis = end.and_then(|value| u64::try_from(value).ok());
-    request
 }
 
 fn current(
@@ -468,40 +433,19 @@ fn current(
 
 #[cfg(test)]
 mod tests {
-    use super::{AnalysisFailureBlock, analysis_stream_request};
+    use super::AnalysisFailureBlock;
     use library::SourceKey;
-    use playback::SourceSessionEpoch;
-
-    #[test]
-    fn provider_loudness_request_keeps_remote_identity_without_fabricating_a_uri() {
-        let request = analysis_stream_request("provider-track", None, Some(1_000), Some(2_000));
-
-        assert_eq!(request.track_object_id, "provider-track");
-        assert_eq!(request.media_uri, None);
-        assert_eq!(request.cue_start_millis, Some(1_000));
-        assert_eq!(request.cue_end_millis, Some(2_000));
-    }
-
-    #[test]
-    fn local_loudness_request_prefers_the_resolved_access_uri() {
-        let request =
-            analysis_stream_request("provider-track", Some("file:///download.flac"), None, None);
-
-        assert_eq!(request.track_object_id, "provider-track");
-        assert_eq!(request.media_uri.as_deref(), Some("file:///download.flac"));
-    }
 
     #[test]
     fn one_failed_analysis_blocks_immediate_restart_until_library_change() {
         let source = SourceKey::from_raw(1);
-        let epoch = SourceSessionEpoch::new(7);
         let mut blocked = AnalysisFailureBlock::default();
-        assert!(!blocked.blocks(source, epoch));
-        blocked.record(source, epoch);
+        assert!(!blocked.blocks(source));
+        blocked.record(source);
         for _ in 0..10_000 {
-            assert!(blocked.blocks(source, epoch));
+            assert!(blocked.blocks(source));
         }
         blocked.clear();
-        assert!(!blocked.blocks(source, epoch));
+        assert!(!blocked.blocks(source));
     }
 }

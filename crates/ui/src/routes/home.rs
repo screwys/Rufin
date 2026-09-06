@@ -36,7 +36,7 @@ use super::grid_cells::{
 };
 use super::home_layout::home_section_header;
 use super::library_fields::{COLLECTION_GRID_CARD_MARGIN, track_field};
-use super::playlist_picker::{PlaylistTrackSource, install_compact_playlist_drag_source};
+use super::playlist_picker::{MediaDragSource, install_compact_media_drag_source};
 use super::route::Route;
 use super::route_layout::{ROUTE_TOP_MARGIN, home_album_content_width, route_scroller_widget};
 
@@ -72,6 +72,8 @@ enum HomeItem {
     Album(HomeAlbumRow),
 }
 
+type HomeItemBinding = Rc<dyn Fn(HomeItem)>;
+
 #[derive(Clone)]
 struct MountedHomeSection {
     data: Rc<RefCell<Vec<HomeItem>>>,
@@ -81,6 +83,7 @@ struct MountedHomeSection {
     next: glib::WeakRef<gtk::Button>,
     page_start: Rc<Cell<usize>>,
     page_size: Rc<Cell<usize>>,
+    cells: Rc<RefCell<Vec<(u32, HomeItemBinding)>>>,
 }
 
 impl MountedHomeSection {
@@ -99,6 +102,7 @@ impl MountedHomeSection {
             .cloned()
             .map(glib::BoxedAnyObject::new)
             .collect::<Vec<_>>();
+        self.cells.borrow_mut().clear();
         self.model.splice(0, self.model.n_items(), &additions);
         self.page_start.set(page_start);
         if let Some(previous) = self.previous.upgrade() {
@@ -106,6 +110,25 @@ impl MountedHomeSection {
         }
         if let Some(next) = self.next.upgrade() {
             next.set_sensitive(page_end < data.len());
+        }
+    }
+
+    fn update(&self, update: impl Fn(&mut HomeItem) -> bool) {
+        let changed = {
+            let mut data = self.data.borrow_mut();
+            data.iter_mut()
+                .enumerate()
+                .filter_map(|(position, item)| update(item).then(|| (position, item.clone())))
+                .collect::<Vec<_>>()
+        };
+        let cells = self.cells.borrow().clone();
+        for (position, item) in changed {
+            if let Some((_, bind)) = cells
+                .iter()
+                .find(|(cell, _)| self.page_start.get().saturating_add(*cell as usize) == position)
+            {
+                bind(item);
+            }
         }
     }
 
@@ -168,7 +191,7 @@ impl HomeRouteProjection {
                 slot.remove(&child);
             }
             if let Some(showcase) = home.showcase.as_ref() {
-                slot.append(&shell.home_showcase(showcase));
+                slot.append(&shell.home_showcase(showcase, Rc::clone(&self.home)));
             }
         }
         for (block, kind, rows) in [
@@ -336,7 +359,7 @@ fn slot_has_content(slot: &gtk::Box) -> bool {
     visible_section_exists(std::iter::from_fn(move || {
         let current = child.take()?;
         child = current.next_sibling();
-        Some(current.is_visible())
+        Some(current.get_visible())
     }))
 }
 
@@ -409,8 +432,81 @@ impl Shell {
         let widget = route_scroller_widget(scroller);
         let apply = projection.clone();
         let resume = projection.clone();
+        let download = projection.clone();
+
+        let download_counts = projection.clone();
+
+        let counts = self.collection_download_change(move |identity, downloaded| {
+            let Some(uri) = identity.strip_prefix("album:") else {
+                return;
+            };
+            if let Some(showcase) = &mut download_counts.home.borrow_mut().showcase
+                && showcase.album.media_uri == uri
+            {
+                showcase.album.downloaded_count = if downloaded {
+                    showcase.album.track_count
+                } else {
+                    0
+                };
+            }
+            let views = download_counts
+                .sections
+                .borrow()
+                .values()
+                .chain(download_counts.provider_sections.borrow().values())
+                .cloned()
+                .collect::<Vec<_>>();
+            for view in views {
+                view.mounted.update(|item| {
+                    if let HomeItem::Album(item) = item
+                        && item.album.media_uri == uri
+                        && (item.album.downloaded_count == item.album.track_count) != downloaded
+                    {
+                        item.album.downloaded_count = if downloaded {
+                            item.album.track_count
+                        } else {
+                            0
+                        };
+                        true
+                    } else {
+                        false
+                    }
+                });
+            }
+        });
         MountedRoute::new(widget, Rc::new(move || resume.reconcile_block_settings()))
             .with_home_page_apply(Rc::new(move |home| apply.apply(home)))
+            .with_download_change(Rc::new(move |event| {
+                let downloads::DownloadEvent::Changed {
+                    media_uri: uri,
+                    downloaded,
+                } = event
+                else {
+                    return;
+                };
+                let (uri, downloaded) = (uri.as_str(), *downloaded);
+                let views = download
+                    .sections
+                    .borrow()
+                    .values()
+                    .chain(download.provider_sections.borrow().values())
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for view in views {
+                    view.mounted.update(|item| {
+                        if let HomeItem::Track(item) = item
+                            && item.track.media_uri == uri
+                            && item.track.is_downloaded != downloaded
+                        {
+                            item.track.is_downloaded = downloaded;
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                }
+            }))
+            .with_download_change(counts)
     }
 
     fn home_section_view(
@@ -430,10 +526,16 @@ impl Shell {
         let model = gio::ListStore::new::<glib::BoxedAnyObject>();
         let widget_shell = Rc::clone(self);
         let activate_shell = Rc::clone(self);
+        let cells = Rc::new(RefCell::new(Vec::new()));
+        let bind_cells = Rc::clone(&cells);
         let row = fixed_page_collection_row(
             model.clone(),
             page_size,
-            move |_, item: HomeItem| home_item_widget(&widget_shell, item),
+            move |position, item: HomeItem| {
+                let (widget, bind) = home_item_widget(&widget_shell, item);
+                bind_cells.borrow_mut().push((position, bind));
+                widget
+            },
             move |_, item: HomeItem| activate_home_item(&activate_shell, item),
         );
         let mounted = MountedHomeSection {
@@ -444,6 +546,7 @@ impl Shell {
             next: header.next().downgrade(),
             page_start: Rc::new(Cell::new(0)),
             page_size: Rc::new(Cell::new(page_size)),
+            cells,
         };
         mounted.render();
         let fit = mounted.clone();
@@ -484,13 +587,14 @@ impl Shell {
         }
     }
 
-    fn home_showcase(self: &Rc<Self>, item: &HomeAlbumRow) -> gtk::Widget {
+    fn home_showcase(
+        self: &Rc<Self>,
+        item: &HomeAlbumRow,
+        home: Rc<RefCell<HomePage>>,
+    ) -> gtk::Widget {
         let width = home_album_content_width(self);
         let mut album = item.album.clone();
         album.title.clone_from(&item.title);
-        if item.artwork_binding.is_some() {
-            album.artwork_binding.clone_from(&item.artwork_binding);
-        }
         let seed = stable_seed(&album.object_id);
         let cover = home_album_cover_projection(
             self,
@@ -507,24 +611,24 @@ impl Shell {
             radio_controller.play_radio(RadioPlayRequest::now(radio_seed.clone()));
         });
         showcase_view.append_kind_control(&radio);
-        let drag_album = album.album_key;
+        let drag_album = album.media_uri.clone();
         let drag_title = title_text.clone();
         let drag_target: gtk::Widget = cover.button().upcast();
         let drag_artwork = cover.drag_paintable_source();
         let drag_shell = Rc::downgrade(self);
-        install_compact_playlist_drag_source(&drag_target, &drag_artwork, move || {
+        install_compact_media_drag_source(&drag_target, &drag_artwork, move || {
             let shell = drag_shell.upgrade()?;
             let source =
-                PlaylistTrackSource::current_target(&shell, PlaybackTarget::Album(drag_album))?;
+                MediaDragSource::capture_target(&shell, PlaybackTarget::Album(drag_album.clone()));
             Some((source, drag_title.clone()))
         });
 
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let play_shell = Rc::clone(self);
-        let play_target = PlaybackTarget::Album(album.album_key);
-        let play: CollectionPlay = Rc::new(move |placement, shuffled| {
-            play_target.play(&play_shell, placement, shuffled);
+        let play_target = PlaybackTarget::Album(album.media_uri.clone());
+        let play: CollectionPlay = Rc::new(move |placement| {
+            play_target.play(&play_shell, placement);
         });
         let controls = detail_playback_controls(
             &actions,
@@ -542,17 +646,18 @@ impl Shell {
             .as_ref()
             .expect("Home album has a Favorite cover control")
             .clone();
-        let favorite_key = album.album_key;
+        let favorite_key = album.media_uri.clone();
         for button in [favorite, hover_favorite] {
+            let favorite_key = favorite_key.clone();
             self.register_dynamic_favorite_button(
                 Rc::new(move || Some(crate::favorites::album_favorite_key(&favorite_key))),
                 &button,
             );
             let favorite_shell = Rc::clone(self);
-            let favorite_album = album.album_key;
+            let favorite_media_uri = album.media_uri.clone();
             button.connect_clicked(move |button| {
                 favorite_shell.set_favorite_with_feedback(
-                    library::FavoriteTarget::Album(favorite_album),
+                    library::FavoriteTarget::Album(favorite_media_uri.clone()),
                     !favorite_button_is_active(button),
                     Some(button),
                 );
@@ -560,16 +665,16 @@ impl Shell {
         }
 
         let menu_shell = Rc::clone(self);
-        let menu_album = album.clone();
         let context_menu = Rc::new(move |target: &gtk::Widget, position| {
-            present_album_context_menu(
-                target,
-                &menu_shell,
-                menu_album.clone(),
-                None,
-                None,
-                position,
-            );
+            let album = home
+                .borrow()
+                .showcase
+                .as_ref()
+                .map(|item| item.album.clone());
+            let Some(album) = album else {
+                return;
+            };
+            present_album_context_menu(target, &menu_shell, album, None, None, position);
         });
 
         let artist = gtk::Label::new(Some(&album.display_artist));
@@ -682,74 +787,63 @@ fn title_case(part: &str) -> String {
         .unwrap_or_default()
 }
 
-fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> gtk::Widget {
+fn home_item_widget(shell: &Rc<Shell>, item: HomeItem) -> (gtk::Widget, HomeItemBinding) {
     match item {
         HomeItem::Track(item) => {
             let mut track = item.track;
             track.title = item.title;
-            if item.artwork_binding.is_some() {
-                track.artwork_binding = item.artwork_binding;
-            }
             let play_shell = Rc::clone(shell);
-            let play_key = track.track_key;
+            let play_media_uri = track.media_uri.clone();
             let play = Rc::new(move |_| {
-                super::collections::PlaybackTarget::Track(play_key).play(
-                    &play_shell,
-                    playback::QueuePlacement::Now,
-                    false,
-                );
+                super::collections::PlaybackTarget::Track(play_media_uri.clone())
+                    .play(&play_shell, playback::QueuePlacement::Now);
             });
             let field = Rc::new(move |_, track: &library::TrackRow, field| match field {
                 LibraryField::Artist => track_artist_links(track),
                 LibraryField::AlbumArtist => track_album_artist_links(track),
                 LibraryField::Album => DetailLinks::route(
-                    &track.display_album,
-                    track.album_key.map(Route::AlbumDetail),
+                    &track.album,
+                    track.album_media_uri.clone().map(Route::AlbumDetail),
                 ),
                 _ => DetailLinks::text(&track_field(track, field)),
             });
             let cell = TrackGridCell::new(shell, &HOME_TRACK_GRID_FIELDS, play, field, None);
-            let drag_title = track.title.clone();
-            let drag_artwork = cell.drag_paintable_source();
             cell.bind(0, track);
-            let widget = cell.widget();
-            let drag_shell = Rc::downgrade(shell);
-            install_compact_playlist_drag_source(&widget, &drag_artwork, move || {
-                let shell = drag_shell.upgrade()?;
-                let source = PlaylistTrackSource::current_track(&shell, play_key)?;
-                Some((source, drag_title.clone()))
-            });
-            widget
+            (
+                cell.widget(),
+                Rc::new(move |item| {
+                    if let HomeItem::Track(item) = item {
+                        let mut track = item.track;
+                        track.title = item.title;
+                        cell.bind(0, track);
+                    }
+                }),
+            )
         }
         HomeItem::Album(item) => {
             let mut album = item.album;
             album.title = item.title;
-            if item.artwork_binding.is_some() {
-                album.artwork_binding = item.artwork_binding;
-            }
-            let album_key = album.album_key;
             let cell = AlbumGridCell::new(shell, &HOME_ALBUM_GRID_FIELDS, None);
-            let drag_title = album.title.clone();
-            let drag_artwork = cell.drag_paintable_source();
             cell.bind(0, album);
-            let widget = cell.widget();
-            let drag_shell = Rc::downgrade(shell);
-            install_compact_playlist_drag_source(&widget, &drag_artwork, move || {
-                let shell = drag_shell.upgrade()?;
-                let source =
-                    PlaylistTrackSource::current_target(&shell, PlaybackTarget::Album(album_key))?;
-                Some((source, drag_title.clone()))
-            });
-            widget
+            (
+                cell.widget(),
+                Rc::new(move |item| {
+                    if let HomeItem::Album(item) = item {
+                        let mut album = item.album;
+                        album.title = item.title;
+                        cell.bind(0, album);
+                    }
+                }),
+            )
         }
     }
 }
 
 fn activate_home_item(shell: &Rc<Shell>, item: HomeItem) {
     match item {
-        HomeItem::Track(item) => super::collections::PlaybackTarget::Track(item.track.track_key)
-            .play(shell, playback::QueuePlacement::Now, false),
-        HomeItem::Album(item) => shell.navigate(Route::AlbumDetail(item.album.album_key)),
+        HomeItem::Track(item) => super::collections::PlaybackTarget::Track(item.track.media_uri)
+            .play(shell, playback::QueuePlacement::Now),
+        HomeItem::Album(item) => shell.navigate(Route::AlbumDetail(item.album.media_uri.clone())),
     }
 }
 

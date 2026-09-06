@@ -68,7 +68,7 @@ impl Shell {
         library_loading_status(&operation, self.startup.initial_launch.get())
     }
     pub(crate) fn schedule_startup_route_reveal(self: &Rc<Self>) {
-        if self.startup.route_revealed.get() || self.source.login_screen_active() {
+        if self.startup.route_revealed.get() {
             return;
         }
         if self.startup.reveal_deadline.borrow().is_some() {
@@ -85,7 +85,7 @@ impl Shell {
             Duration::from_millis(STARTUP_ROUTE_REVEAL_MAX_MS),
             move || {
                 shell.startup.reveal_deadline.borrow_mut().take();
-                if shell.startup.route_revealed.get() || shell.source.login_screen_active() {
+                if shell.startup.route_revealed.get() {
                     shell.finish_startup_cover_prime_gate();
                     return;
                 }
@@ -115,7 +115,6 @@ impl Shell {
     pub(in crate::shell) fn finish_startup_route_allocation(self: &Rc<Self>, width: i32) {
         if self.startup.reveal_deadline.borrow().is_none()
             || self.startup.route_revealed.get()
-            || self.source.login_screen_active()
             || !self.has_active_mounted_route()
             || width <= 1
         {
@@ -131,7 +130,6 @@ impl Shell {
     fn startup_route_ready_for_width(&self, width: i32) -> bool {
         self.startup.reveal_deadline.borrow().is_some()
             && !self.startup.route_revealed.get()
-            && !self.source.login_screen_active()
             && self.has_active_mounted_route()
             && self.startup.route_allocated.get()
             && width > 1
@@ -155,10 +153,7 @@ impl Shell {
         self.finish_startup_cover_prime_gate();
     }
     pub(crate) fn prepare_startup_route_content(self: &Rc<Self>) {
-        if self.has_active_mounted_route()
-            || self.startup.route_revealed.get()
-            || self.source.login_screen_active()
-        {
+        if self.has_active_mounted_route() || self.startup.route_revealed.get() {
             return;
         }
 
@@ -168,7 +163,7 @@ impl Shell {
         self.update_bottom_player();
     }
     pub(crate) fn reveal_startup_route(self: &Rc<Self>) {
-        if self.source.login_screen_active() || self.startup.route_revealed.get() {
+        if self.startup.route_revealed.get() {
             return;
         }
 

@@ -11,38 +11,14 @@ use crate::{
 const RADIO_LIMIT: usize = 500;
 const RADIO_EXTRA_EXCLUSION_LIMIT: usize = 500;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum RadioSeed {
-    Track(TrackKey),
+    Track(String),
     Album(AlbumKey),
     Artist(ArtistKey),
     AlbumArtist(ArtistKey),
     Genre(GenreKey),
     Playlist(PlaylistKey),
-}
-
-impl RadioSeed {
-    const fn kind(self) -> i64 {
-        match self {
-            Self::Track(_) => 0,
-            Self::Album(_) => 1,
-            Self::Artist(_) => 2,
-            Self::AlbumArtist(_) => 5,
-            Self::Genre(_) => 3,
-            Self::Playlist(_) => 4,
-        }
-    }
-
-    const fn raw(self) -> i64 {
-        match self {
-            Self::Track(key) => key.raw(),
-            Self::Album(key) => key.raw(),
-            Self::Artist(key) => key.raw(),
-            Self::AlbumArtist(key) => key.raw(),
-            Self::Genre(key) => key.raw(),
-            Self::Playlist(key) => key.raw(),
-        }
-    }
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
@@ -78,24 +54,44 @@ impl Database {
         &self,
         source: SourceKey,
         seed: RadioSeed,
-        extra_excluded: &[TrackKey],
+        extra_excluded: &[String],
         requested: usize,
         require_media: bool,
         variation: i64,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
+    ) -> LibraryResult<Vec<String>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let seed = if let RadioSeed::Playlist(playlist) = seed {
-            let first = sqlx::query_scalar::<_, TrackKey>("SELECT entry.track_key FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.source_key=?1 AND playlist.playlist_key=?2 AND entry.track_key IS NOT NULL ORDER BY entry.position LIMIT 1")
+        let (seed_kind, seed_raw) = if let RadioSeed::Playlist(playlist) = seed {
+            let first = sqlx::query_scalar::<_, TrackKey>("SELECT track.track_key FROM playlist_entries entry JOIN tracks track ON track.media_uri=entry.media_uri AND track.source_key=?1 WHERE entry.playlist_key=?2 ORDER BY entry.position LIMIT 1")
                 .bind(source).bind(playlist).fetch_optional(&mut *connection).await?;
             let Some(first) = first else {
                 Database::clear_progress(&mut connection).await?;
                 return Ok(Vec::new());
             };
-            RadioSeed::Track(first)
+            (0, first.raw())
         } else {
-            seed
+            match seed {
+                RadioSeed::Track(media_uri) => {
+                    let key = sqlx::query_scalar::<_, TrackKey>(
+                        "SELECT track_key FROM tracks WHERE source_key=?1 AND media_uri=?2",
+                    )
+                    .bind(source)
+                    .bind(media_uri)
+                    .fetch_optional(&mut *connection)
+                    .await?;
+                    let Some(key) = key else {
+                        Database::clear_progress(&mut connection).await?;
+                        return Ok(Vec::new());
+                    };
+                    (0, key.raw())
+                }
+                RadioSeed::Album(key) => (1, key.raw()),
+                RadioSeed::Artist(key) => (2, key.raw()),
+                RadioSeed::AlbumArtist(key) => (5, key.raw()),
+                RadioSeed::Genre(key) => (3, key.raw()),
+                RadioSeed::Playlist(_) => unreachable!(),
+            }
         };
         let max_key = sqlx::query_scalar::<_, i64>(
             "SELECT COALESCE(max(track_key),0) FROM tracks WHERE source_key=?1",
@@ -113,17 +109,17 @@ impl Database {
         let mut wrapped = false;
         loop {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT track.track_key FROM tracks AS track
+                "SELECT track.track_key,track.media_uri FROM tracks AS track
              WHERE track.source_key=",
             );
             query
             .push_bind(source)
             .push(" AND track.track_key>").push_bind(after)
-            .push(" AND (").push_bind(seed.kind()).push("<>0 OR track.track_key<>").push_bind(seed.raw()).push(")")
+            .push(" AND (").push_bind(seed_kind).push("<>0 OR track.track_key<>").push_bind(seed_raw).push(")")
             .push(" AND (").push_bind(!wrapped).push(" OR track.track_key<").push_bind(pivot).push(") AND (")
             .push_bind(!require_media)
             .push(" OR track.media_uri IS NOT NULL) AND (")
-            .push_bind(seed.kind())
+            .push_bind(seed_kind)
             .push(
                 "=0 AND (
                  EXISTS (
@@ -131,61 +127,53 @@ impl Database {
                    JOIN track_artists AS seeded ON seeded.artist_key=candidate.artist_key
                    WHERE candidate.track_key=track.track_key AND seeded.track_key=",
             )
-            .push_bind(seed.raw())
+            .push_bind(seed_raw)
             .push(
                 ") OR EXISTS (
                    SELECT 1 FROM track_genres AS candidate
                    JOIN track_genres AS seeded ON seeded.genre_key=candidate.genre_key
                    WHERE candidate.track_key=track.track_key AND seeded.track_key=",
             )
-            .push_bind(seed.raw())
+            .push_bind(seed_raw)
             .push(")) OR (")
-            .push_bind(seed.kind())
+            .push_bind(seed_kind)
             .push(
                 "=5 AND EXISTS (
                  SELECT 1 FROM album_artists
                  WHERE album_key=track.album_key AND artist_key=",
             )
-            .push_bind(seed.raw())
+            .push_bind(seed_raw)
             .push(")) OR (")
-            .push_bind(seed.kind())
-            .push("=1 AND track.album_key<>").push_bind(seed.raw()).push(" AND (EXISTS (SELECT 1 FROM tracks candidate JOIN album_genres candidate_genre USING(album_key) JOIN album_genres seeded_genre ON seeded_genre.genre_key=candidate_genre.genre_key WHERE candidate.track_key=track.track_key AND seeded_genre.album_key=").push_bind(seed.raw()).push(") OR EXISTS (SELECT 1 FROM tracks candidate JOIN album_artists candidate_artist USING(album_key) JOIN album_artists seeded_artist ON seeded_artist.artist_key=candidate_artist.artist_key WHERE candidate.track_key=track.track_key AND seeded_artist.album_key=").push_bind(seed.raw()).push("))) OR (")
-            .push_bind(seed.kind())
+            .push_bind(seed_kind)
+            .push("=1 AND track.album_key<>").push_bind(seed_raw).push(" AND (EXISTS (SELECT 1 FROM tracks candidate JOIN album_genres candidate_genre USING(album_key) JOIN album_genres seeded_genre ON seeded_genre.genre_key=candidate_genre.genre_key WHERE candidate.track_key=track.track_key AND seeded_genre.album_key=").push_bind(seed_raw).push(") OR EXISTS (SELECT 1 FROM tracks candidate JOIN album_artists candidate_artist USING(album_key) JOIN album_artists seeded_artist ON seeded_artist.artist_key=candidate_artist.artist_key WHERE candidate.track_key=track.track_key AND seeded_artist.album_key=").push_bind(seed_raw).push("))) OR (")
+            .push_bind(seed_kind)
             .push(
                 "=2 AND EXISTS (
                  SELECT 1 FROM track_artists
                  WHERE track_key=track.track_key AND artist_key=",
             )
-            .push_bind(seed.raw())
+            .push_bind(seed_raw)
             .push(")) OR (")
-            .push_bind(seed.kind())
+            .push_bind(seed_kind)
             .push(
                 "=3 AND EXISTS (
                  SELECT 1 FROM track_genres
                  WHERE track_key=track.track_key AND genre_key=",
             )
-            .push_bind(seed.raw())
-            .push(")) OR (")
-            .push_bind(seed.kind())
-            .push(
-                "=4 AND EXISTS (
-                 SELECT 1 FROM playlist_entries
-                 WHERE track_key=track.track_key AND playlist_key=",
-            )
-            .push_bind(seed.raw())
+            .push_bind(seed_raw)
             .push(")))");
-            query.push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.source_key=").push_bind(source).push(" AND queued.track_key=track.track_key)");
+            query.push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.media_uri=track.media_uri)");
             if !extra_excluded.is_empty() {
-                query.push(" AND track.track_key NOT IN (");
+                query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");
-                for key in extra_excluded {
-                    separated.push_bind(*key);
+                for media_uri in extra_excluded {
+                    separated.push_bind(media_uri);
                 }
                 separated.push_unseparated(")");
             }
             query.push(" ORDER BY track.track_key LIMIT 500");
             let page = query
-                .build_query_scalar::<TrackKey>()
+                .build_query_as::<(TrackKey, String)>()
                 .persistent(false)
                 .fetch_all(&mut *connection)
                 .await?;
@@ -197,9 +185,9 @@ impl Database {
                 after = -1;
                 continue;
             }
-            for key in page {
+            for (key, media_uri) in page {
                 after = key.raw();
-                result.push(key);
+                result.push(media_uri);
                 if result.len() == requested {
                     break;
                 }
@@ -217,10 +205,10 @@ impl Database {
         source: SourceKey,
         folder: Option<FolderKey>,
         criteria: &RandomCriteria,
-        extra_excluded: &[TrackKey],
+        extra_excluded: &[String],
         requested: usize,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackKey>> {
+    ) -> LibraryResult<Vec<String>> {
         require_radio_bounds(extra_excluded.len(), requested)?;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let max_key = sqlx::query_scalar::<_, i64>(
@@ -239,7 +227,7 @@ impl Database {
         let mut wrapped = false;
         loop {
             let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT track.track_key FROM tracks AS track
+                "SELECT track.track_key,track.media_uri FROM tracks AS track
              WHERE track.source_key=",
             );
             query
@@ -286,7 +274,7 @@ impl Database {
                    AND baseline.period='lifetime' AND baseline.item_kind='track'
                    AND baseline.play_count>0
              ) AND NOT EXISTS (
-                 SELECT 1 FROM listens WHERE track_key=track.track_key
+                 SELECT 1 FROM listens WHERE media_uri=track.media_uri
              )) OR (",
                 )
                 .push_bind(criteria.played.code())
@@ -298,21 +286,21 @@ impl Database {
                    AND baseline.period='lifetime' AND baseline.item_kind='track'
                    AND baseline.play_count>0
              ) OR EXISTS (
-                 SELECT 1 FROM listens WHERE track_key=track.track_key
+                 SELECT 1 FROM listens WHERE media_uri=track.media_uri
                     ))))",
                 );
-            query.push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.source_key=").push_bind(source).push(" AND queued.track_key=track.track_key)");
+            query.push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.media_uri=track.media_uri)");
             if !extra_excluded.is_empty() {
-                query.push(" AND track.track_key NOT IN (");
+                query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");
-                for key in extra_excluded {
-                    separated.push_bind(*key);
+                for media_uri in extra_excluded {
+                    separated.push_bind(media_uri);
                 }
                 separated.push_unseparated(")");
             }
             query.push(" ORDER BY track.track_key LIMIT 500");
             let page = query
-                .build_query_scalar::<TrackKey>()
+                .build_query_as::<(TrackKey, String)>()
                 .persistent(false)
                 .fetch_all(&mut *connection)
                 .await?;
@@ -324,9 +312,9 @@ impl Database {
                 after = -1;
                 continue;
             }
-            for key in page {
+            for (key, media_uri) in page {
                 after = key.raw();
-                result.push(key);
+                result.push(media_uri);
                 if result.len() == requested {
                     break;
                 }

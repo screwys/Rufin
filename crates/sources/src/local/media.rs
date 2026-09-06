@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use crate::LocalImageRef;
+use lofty::config::ParseOptions;
 use lofty::file::FileType;
 use lofty::file::TaggedFileExt;
 use lofty::prelude::*;
@@ -12,7 +13,7 @@ use lofty::tag::{ItemKey, Tag};
 use crate::policy::stable_hash;
 
 use super::discovery;
-use super::lofty_metadata::{read_lofty_file, source_format};
+use super::lofty_metadata::{read_lofty, read_lofty_file, source_format};
 
 #[derive(Clone, Debug)]
 pub(super) struct ScannedTrack {
@@ -129,12 +130,19 @@ pub(super) fn read_media(
         Ok(file) => file,
         Err(_) => return MediaRead::Unreadable,
     };
-    let tagged_file = read_lofty_file(file, false).ok().flatten();
+    // Recognize a frame sync at the start or immediately after ID3 metadata;
+    // searching binary interiors can mistake executable bytes for MPEG audio.
+    let tagged_file = read_lofty_file(
+        file,
+        ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
+    )
+    .ok()
+    .flatten();
     let topology_admitted = tagged_file
         .as_ref()
         .filter(|file| requires_topology_admission(file.file_type()))
         .map(|_| worker.discovery.read(&path));
-    let tagged_file = tagged_file.filter(|file| {
+    let mut tagged_file = tagged_file.filter(|file| {
         if requires_topology_admission(file.file_type()) {
             topology_admitted.as_ref().is_some_and(Option::is_some)
         } else {
@@ -152,6 +160,14 @@ pub(super) fn read_media(
     } else {
         None
     };
+    if tagged_file.is_none() {
+        // Discovery has confirmed audio, so retain Lofty's tag recovery for
+        // playable files whose frames or ID3 metadata follow leading junk.
+        tagged_file = read_lofty(&path, false)
+            .ok()
+            .flatten()
+            .filter(lofty_supplies_required_audio);
+    }
     let metadata = if let Some(tagged_file) = tagged_file.as_ref() {
         audio_metadata_from_lofty(&path, tagged_file, sidecar)
     } else {
@@ -768,9 +784,75 @@ fn clean_mbid(value: &str) -> Option<String> {
 
 #[cfg(test)]
 mod tests {
+    use lofty::config::WriteOptions;
     use lofty::tag::TagType;
 
     use super::*;
+
+    #[test]
+    fn executable_contents_are_not_local_audio() {
+        let path = std::env::current_exe().expect("test executable");
+        assert!(matches!(
+            read_media(&mut Worker::default(), path, None),
+            MediaRead::Rejected
+        ));
+    }
+
+    #[test]
+    fn mpeg_content_keeps_metadata_with_arbitrary_suffixes_and_leading_junk() {
+        let directory = tempfile::tempdir().expect("audio directory");
+        for (name, prefixed) in [
+            ("track.mp3", false),
+            ("track.bin", false),
+            ("prefixed.bin", true),
+        ] {
+            let path = directory.path().join(name);
+            let mut frame = vec![0; 417];
+            frame[..4].copy_from_slice(&[0xff, 0xfb, 0x90, 0x00]);
+            fs::write(&path, frame.repeat(40)).expect("MPEG silence");
+            let mut tag = Tag::new(TagType::Id3v2);
+            tag.set_title("Original".into());
+            tag.set_comment("Retained comment".into());
+            tag.save_to_path(&path, WriteOptions::new().preferred_padding(0))
+                .expect("audio tags");
+            if prefixed {
+                let mut bytes = vec![0; 32];
+                bytes.extend(fs::read(&path).expect("tagged audio"));
+                fs::write(&path, bytes).expect("leading junk");
+            }
+            let MediaRead::Accepted(track) = read_media(&mut Worker::default(), path.clone(), None)
+            else {
+                panic!("audio content was rejected: {name}");
+            };
+            assert_eq!(track.title, "Original", "{name}");
+            assert_eq!(track.comment.as_deref(), Some("Retained comment"), "{name}");
+            let mut metadata =
+                super::super::read_track_metadata(&path, Some("mp3")).expect("read audio metadata");
+            assert!(metadata.writable.title, "{name}");
+            metadata.values.title = "Updated".into();
+            super::super::metadata::write_track(
+                &path,
+                Some("mp3"),
+                metadata.revision.as_deref().expect("file revision"),
+                &crate::TrackMetadataEdit {
+                    values: metadata.values,
+                    changed: crate::TrackMetadataWritable {
+                        title: true,
+                        ..Default::default()
+                    },
+                },
+            )
+            .expect("write audio metadata");
+            let updated = super::super::read_track_metadata(&path, Some("mp3"))
+                .expect("read updated audio metadata");
+            assert_eq!(updated.values.title, "Updated", "{name}");
+            assert_eq!(
+                updated.values.comment.as_deref(),
+                Some("Retained comment"),
+                "{name}"
+            );
+        }
+    }
 
     #[test]
     fn local_loudness_parses_replay_gain_and_r128_independently() {

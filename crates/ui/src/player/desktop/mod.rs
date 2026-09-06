@@ -14,7 +14,6 @@ use adw::prelude::*;
 use ashpd::desktop::background::Background;
 use gtk::glib;
 use playback::{CurrentMedia, PlaybackView, PositionDiscontinuity, TransportHandle};
-use sources::SourceId;
 use tracing::{info, warn};
 
 use crate::Settings as UiSettings;
@@ -142,18 +141,10 @@ impl Shell {
         player: Option<&PlaybackView>,
         refresh_current: bool,
     ) {
-        let source_id = self
-            .selected_library()
-            .as_deref()
-            .map(|selected| selected.artwork.source_id.clone());
         let artwork = player.and_then(|player| {
             player.transport.current.as_deref().and_then(|media| {
-                self.current_playback_cached_artwork_path(
-                    source_id.as_ref()?,
-                    media,
-                    THUMB_COVER_SIZE,
-                )
-                .map(|artwork| artwork.path)
+                self.current_playback_cached_artwork_path(media, THUMB_COVER_SIZE)
+                    .map(|artwork| artwork.path)
             })
         });
         self.desktop.notifications.observe(
@@ -174,16 +165,12 @@ impl Shell {
 
     pub(crate) fn update_media_controls_after(&self, discontinuity: Option<PositionDiscontinuity>) {
         let playback = self.selected_playback();
-        let source_id = self
-            .selected_library()
-            .as_deref()
-            .map(|selected| selected.artwork.source_id.clone());
         let art_url = playback.as_ref().and_then(|playback| {
             playback
                 .transport
                 .current
                 .as_deref()
-                .and_then(|media| self.current_art_url(source_id.as_ref()?, media))
+                .and_then(|media| self.current_art_url(media))
         });
         self.desktop
             .media_controls
@@ -200,9 +187,8 @@ impl Shell {
             .observe_position(position_millis, discontinuity);
     }
 
-    fn current_art_url(&self, source_id: &SourceId, media: &CurrentMedia) -> Option<String> {
-        let artwork =
-            self.current_playback_cached_artwork_path(source_id, media, THUMB_COVER_SIZE)?;
+    fn current_art_url(&self, media: &CurrentMedia) -> Option<String> {
+        let artwork = self.current_playback_cached_artwork_path(media, THUMB_COVER_SIZE)?;
         glib::filename_to_uri(artwork.path, None)
             .ok()
             .map(|uri| uri.to_string())

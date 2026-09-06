@@ -17,24 +17,25 @@ use crate::{LibraryField, LibraryLayout, LibraryListKey, LibraryListSettings};
 use super::collection_context::present_playlist_entry_context_menu;
 use super::collections::{
     CollectionTableProjection, LibraryCollectionProjection, LibraryPresentationProjection,
-    dynamic_collection_table, library_route_inset, track_grid_field_links,
+    dynamic_collection_table, library_route_inset,
 };
 use super::columns::{
     TrackRowPlayingIndicator, set_track_row_index_text, track_column_fit_width,
     track_row_index_cell,
 };
-use super::detail_links::{DetailLinks, track_album_artist_links, track_artist_links};
+use super::detail_links::DetailLinks;
 use super::grid_cells::{
     CollectionGridCardCell, CollectionGridProjection, ReusableCollectionGridCell,
     collection_grid_with_selection_and_demand,
 };
 use super::library_fields::{
-    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, item_at_from_item, opaque_artwork,
-    track_field,
+    COLLECTION_GRID_MAX_CARD_WIDTH, add_field_skeleton_class, count, display_unix_date,
+    favorite_text, item_at_from_item, opaque_artwork, optional_track_number, optional_year,
+    stored_rating,
 };
 use super::playlist_entry_model::{PlaylistEntryModel, PlaylistEntryProjectionRequest};
 use super::playlist_picker::{
-    PlaylistDragPreviewBinding, PlaylistTrackSource, playlist_drag_content_provider,
+    MediaDragPreviewBinding, MediaDragSource, media_drag_content_provider,
 };
 use super::recycled_cells::{RecycledArtworkCell, RecycledMergedCell, RecycledTextCell, list_cell};
 use super::route_shell::LibraryToolbarProjection;
@@ -42,19 +43,10 @@ use super::sparse_model::connect_sparse_bind;
 use super::table_sizing::route_column_view_initial_width_with_inset;
 use super::track_selection::PlaylistEntrySelection;
 
-#[derive(Default)]
-struct PlaylistEntryOrderLane(std::cell::Cell<u64>);
-
-impl PlaylistEntryOrderLane {
-    fn begin(&self) -> u64 {
-        let generation = self.0.get().wrapping_add(1);
-        self.0.set(generation);
-        generation
-    }
-
-    fn accepts(&self, generation: u64) -> bool {
-        self.0.get() == generation
-    }
+fn begin_order_request(generation: &std::cell::Cell<u64>) -> u64 {
+    let next = generation.get().wrapping_add(1);
+    generation.set(next);
+    next
 }
 
 #[derive(Clone)]
@@ -66,10 +58,14 @@ pub(crate) struct PlaylistEntriesView {
     search: gtk::SearchEntry,
     stack: gtk::Stack,
     toolbar_widget: gtk::Widget,
-    order_generation: Rc<PlaylistEntryOrderLane>,
+    order_generation: Rc<std::cell::Cell<u64>>,
 }
 
 impl PlaylistEntriesView {
+    pub(crate) fn play(&self, queue: playback::QueueHandle, placement: playback::QueuePlacement) {
+        self.model.play(0, queue, placement, true);
+    }
+
     pub(crate) fn widget(&self) -> gtk::Widget {
         self.widget.clone()
     }
@@ -90,6 +86,10 @@ impl PlaylistEntriesView {
         self.model.resume_initial_demand();
     }
 
+    pub(crate) fn update_downloaded(&self, media_uri: &str, downloaded: bool) {
+        self.model.update_downloaded(media_uri, downloaded);
+    }
+
     pub(crate) fn connect_search_request(
         &self,
         callback: impl Fn(u64, PlaylistEntryProjectionRequest) + 'static,
@@ -98,14 +98,14 @@ impl PlaylistEntriesView {
         let generation = Rc::clone(&self.order_generation);
         self.search.connect_search_changed(move |search| {
             if model.set_query(&search.text()) {
-                callback(generation.begin(), model.projection_request());
+                callback(begin_order_request(&generation), model.projection_request());
             }
         });
     }
 
     pub(crate) fn begin_order_request(&self) -> (u64, PlaylistEntryProjectionRequest) {
         (
-            self.order_generation.begin(),
+            begin_order_request(&self.order_generation),
             self.model.projection_request(),
         )
     }
@@ -113,12 +113,12 @@ impl PlaylistEntriesView {
     pub(crate) fn replace_order(
         &self,
         generation: u64,
-        order: library::PlaylistEntryOrder,
+        order: Vec<library::PlaylistEntryKey>,
     ) -> bool {
-        if !self.order_generation.accepts(generation) {
+        if self.order_generation.get() != generation {
             return false;
         }
-        let empty = order.entries.is_empty();
+        let empty = order.is_empty();
         self.model.replace_order(order);
         self.toolbar_widget.set_visible(!empty);
         self.stack
@@ -143,10 +143,9 @@ impl PlaylistEntriesView {
 impl Shell {
     pub(crate) fn playlist_entries_view(
         self: &Rc<Self>,
-        selected: &crate::runtime::SelectedLibrary,
         playlist: PlaylistKey,
         playlist_name: String,
-        order: library::PlaylistEntryOrder,
+        order: Vec<library::PlaylistEntryKey>,
         first_row_position: usize,
         first_rows: Vec<PlaylistEntryRow>,
     ) -> PlaylistEntriesView {
@@ -156,7 +155,8 @@ impl Shell {
             .borrow()
             .library_list(LibraryListKey::PlaylistTracks);
         let model = PlaylistEntryModel::new(
-            selected,
+            self.products.library.clone(),
+            self.products.runtime.clone(),
             playlist,
             order,
             first_row_position,
@@ -201,7 +201,7 @@ impl Shell {
             search,
             stack,
             toolbar_widget,
-            order_generation: Rc::new(PlaylistEntryOrderLane::default()),
+            order_generation: Rc::new(std::cell::Cell::default()),
         }
     }
 }
@@ -220,19 +220,14 @@ fn playlist_entry_collection(
     let playing = TrackRowPlayingIndicator::new();
     let selection = PlaylistEntrySelection::new(model.clone(), playlist_name);
     shell.set_current_playlist_entry_selection(selection.clone());
-    let selected_source = shell
-        .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_key);
     let current_model = model.clone();
     let current_playing = playing.clone();
     shell.register_current_route_track_selection(Rc::new(move |current| {
         let position = current
-            .filter(|current| selected_source == Some(current.source_id))
             .and_then(|current| {
                 let context = current.context.as_ref()?;
                 current_model.position_for_current(
-                    current.track_id,
+                    &current.media_uri,
                     &context.context_id,
                     context.source_rank,
                 )
@@ -393,16 +388,12 @@ fn playlist_entry_image_column(
             return;
         };
         let cover = cell.artwork();
-        if let Some(track) = entry.track.as_ref() {
-            bind_shell.bind_artwork_tile(
-                &cover,
-                opaque_artwork(track.artwork_binding.as_deref()),
-                width,
-                crate::shell::cover::THUMB_COVER_SIZE,
-            );
-        } else {
-            bind_shell.clear_artwork_tile(&cover);
-        }
+        bind_shell.bind_artwork_tile(
+            &cover,
+            opaque_artwork(entry.artwork_binding.as_deref()),
+            width,
+            crate::shell::cover::THUMB_COVER_SIZE,
+        );
     });
     let clear_shell = Rc::clone(shell);
     factory.connect_unbind(move |_, item| {
@@ -437,22 +428,18 @@ fn playlist_entry_favorite_column(
             Rc::new(move || {
                 favorite_current()
                     .as_ref()
-                    .and_then(|entry| entry.track.as_ref())
-                    .map(|track| track_favorite_key(&track.track_key))
+                    .map(|entry| track_favorite_key(&entry.media_uri))
             }),
             &button,
         );
         let click_shell = Rc::clone(&setup_shell);
         let click_current = current;
         button.connect_clicked(move |button| {
-            let Some(track) = click_current()
-                .as_ref()
-                .and_then(|entry| entry.track.clone())
-            else {
+            let Some(entry) = click_current() else {
                 return;
             };
             click_shell.set_favorite_with_feedback(
-                library::FavoriteTarget::Track(track.track_key),
+                library::FavoriteTarget::Track(entry.media_uri.clone()),
                 !favorite_button_is_active(button),
                 Some(button),
             );
@@ -470,9 +457,8 @@ fn playlist_entry_favorite_column(
         let Some(button) = item.child().and_downcast::<gtk::Button>() else {
             return;
         };
-        let track = entry.track.as_ref();
-        set_favorite_button_active(&button, track.is_some_and(|track| track.favorite));
-        button.set_sensitive(track.is_some());
+        set_favorite_button_active(&button, entry.favorite);
+        button.set_sensitive(true);
     });
     factory.connect_unbind(move |_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -532,28 +518,20 @@ fn playlist_entry_title_column(
         };
         let cover = cell.cover();
         let title = cell.title();
-        if let Some(track) = entry.track.as_ref() {
-            bind_shell.bind_artwork_tile(
-                &cover,
-                opaque_artwork(track.artwork_binding.as_deref()),
-                36,
-                crate::shell::cover::THUMB_COVER_SIZE,
-            );
-            title.set_text(&track.title);
-            cell.bind_subtitle(track_artist_links(track));
-            cell.subtitle().set_visible(true);
-            bind_shell.bind_download_badge(
-                &cell.downloaded().expect("playlist title badge"),
-                track.is_downloaded,
-            );
-            bind_playing.bind(title.upcast_ref(), item.position());
-        } else {
-            bind_shell.clear_artwork_tile(&cover);
-            title.set_text("");
-            cell.clear_subtitle();
-            bind_shell.clear_download_badge(&cell.downloaded().expect("playlist title badge"));
-            bind_playing.unbind(title.upcast_ref());
-        }
+        bind_shell.bind_artwork_tile(
+            &cover,
+            opaque_artwork(entry.artwork_binding.as_deref()),
+            36,
+            crate::shell::cover::THUMB_COVER_SIZE,
+        );
+        title.set_text(&entry.title);
+        cell.bind_subtitle(playlist_entry_field_links(&entry, LibraryField::Artist));
+        cell.subtitle().set_visible(true);
+        bind_shell.bind_download_badge(
+            &cell.downloaded().expect("playlist title badge"),
+            entry.is_downloaded,
+        );
+        bind_playing.bind(title.upcast_ref(), item.position());
     });
     let clear_shell = Rc::clone(shell);
     factory.connect_unbind(move |_, item| {
@@ -621,23 +599,13 @@ fn playlist_entry_text_column(
             return;
         };
         let label = cell.label();
-        if let Some(track) = entry.track.as_ref() {
-            let links = match field {
-                LibraryField::Album => Some(DetailLinks::route(
-                    &track.display_album,
-                    track.album_key.map(super::route::Route::AlbumDetail),
-                )),
-                LibraryField::Artist => Some(track_artist_links(track)),
-                LibraryField::AlbumArtist => Some(track_album_artist_links(track)),
-                _ => None,
-            };
-            if let Some(links) = links {
-                cell.bind_links(links);
-            } else {
-                label.set_text(&track_field(track, field));
-            }
+        if matches!(
+            field,
+            LibraryField::Album | LibraryField::Artist | LibraryField::AlbumArtist
+        ) {
+            cell.bind_links(playlist_entry_field_links(&entry, field));
         } else {
-            cell.clear();
+            label.set_text(&playlist_entry_field(&entry, field));
         }
     });
     factory.connect_unbind(move |_, item| {
@@ -677,15 +645,12 @@ fn install_playlist_entry_context(
             let Some(entry) = current() else {
                 return;
             };
-            let Some(track) = entry.track else {
-                return;
-            };
             present_playlist_entry_context_menu(
                 target,
                 &shell,
                 playlist,
                 entry.playlist_entry_key,
-                track,
+                entry,
                 position,
             );
         }),
@@ -703,7 +668,7 @@ fn install_playlist_entry_drag(
         .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
     drag_source.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let preview = PlaylistDragPreviewBinding::default();
+    let preview = MediaDragPreviewBinding::default();
     preview.connect(&drag_source);
     let drag_preview = preview.clone();
     let drag_shell = Rc::downgrade(shell);
@@ -712,9 +677,8 @@ fn install_playlist_entry_drag(
         drag_preview.clear();
         let shell = drag_shell.upgrade()?;
         let entry = drag_current()?;
-        let track = entry.track.as_ref()?;
-        let title = track.title.clone();
-        let artwork = track
+        let title = entry.title.clone();
+        let artwork = entry
             .artwork_binding
             .as_deref()
             .map(artwork::ArtworkBinding::opaque)
@@ -724,9 +688,7 @@ fn install_playlist_entry_drag(
             .or_else(|| {
                 shell
                     .current_playlist_entry_selection_owner()
-                    .map(|selection| {
-                        selection.single_entry(entry.playlist_entry_key, entry.track_key)
-                    })
+                    .map(|selection| selection.single_entry(entry.playlist_entry_key))
             })?;
         let mut providers = Vec::new();
         if selection.entries.len() == 1 {
@@ -734,11 +696,9 @@ fn install_playlist_entry_drag(
                 &entry.playlist_entry_key.raw().to_value(),
             ));
         }
-        if !selection.tracks.tracks.is_empty() {
-            providers.push(playlist_drag_content_provider(
-                PlaylistTrackSource::selection(selection.tracks),
-            ));
-        }
+        providers.push(media_drag_content_provider(
+            MediaDragSource::playlist_entries(selection),
+        ));
         drag_preview.prepare_cache_only(&shell, title, artwork);
         match providers.as_slice() {
             [] => None,
@@ -748,7 +708,7 @@ fn install_playlist_entry_drag(
     });
     target.as_ref().add_controller(drag_source);
 
-    let operations = shell.selected_source_operations();
+    let move_shell = Rc::clone(shell);
     let drop_target = gtk::DropTarget::new(i64::static_type(), gtk::gdk::DragAction::MOVE);
     drop_target.connect_drop(move |_, value, _, _| {
         let Ok(entry) = value.get::<i64>() else {
@@ -757,14 +717,11 @@ fn install_playlist_entry_drag(
         let Some(target) = current() else {
             return false;
         };
-        let Some(operations) = operations.as_ref() else {
-            return false;
-        };
         let entry = PlaylistEntryKey::from_raw(entry);
         if entry == target.playlist_entry_key {
             return false;
         }
-        operations.move_playlist_entry(
+        move_shell.move_media_in_playlist(
             playlist,
             entry,
             playlist_entry_drop_position(target.position),
@@ -812,7 +769,7 @@ impl PlaylistEntryGridCell {
 
     fn bind_current_artwork(&self) {
         let current = self.current.borrow();
-        let Some(track) = current.as_ref().and_then(|entry| entry.track.as_ref()) else {
+        let Some(entry) = current.as_ref() else {
             return;
         };
         self.cover
@@ -820,7 +777,7 @@ impl PlaylistEntryGridCell {
             .remove_css_class("collection-grid-cover-skeleton");
         self.shell.bind_artwork_tile(
             &self.cover,
-            opaque_artwork(track.artwork_binding.as_deref()),
+            opaque_artwork(entry.artwork_binding.as_deref()),
             COLLECTION_GRID_MAX_CARD_WIDTH,
             crate::shell::cover::LARGE_COVER_SIZE,
         );
@@ -841,13 +798,11 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
     }
 
     fn bind(&self, _: u32, entry: PlaylistEntryRow) {
-        let Some(track) = entry.track.as_ref() else {
-            return;
-        };
+        self.body.bind(&entry.title, |field| {
+            playlist_entry_field_links(&entry, field)
+        });
         self.body
-            .bind(&track.title, |field| track_grid_field_links(track, field));
-        self.body
-            .set_download_target(&self.shell, track.is_downloaded);
+            .set_download_target(&self.shell, entry.is_downloaded);
         self.current.replace(Some(entry));
         self.bind_current_artwork();
     }
@@ -864,14 +819,10 @@ impl ReusableCollectionGridCell<PlaylistEntryRow> for PlaylistEntryGridCell {
 
     fn apply_fields(&self, fields: &[LibraryField]) {
         self.body.replace_fields(&self.shell, fields);
-        if let Some(track) = self
-            .current
-            .borrow()
-            .as_ref()
-            .and_then(|entry| entry.track.as_ref())
-        {
-            self.body
-                .bind(&track.title, |field| track_grid_field_links(track, field));
+        if let Some(entry) = self.current.borrow().as_ref() {
+            self.body.bind(&entry.title, |field| {
+                playlist_entry_field_links(entry, field)
+            });
         }
     }
 }
@@ -901,6 +852,46 @@ fn playlist_entry_grid(
     )
 }
 
+fn playlist_entry_field(entry: &PlaylistEntryRow, field: LibraryField) -> String {
+    match field {
+        LibraryField::Title | LibraryField::TitleMerged => entry.title.clone(),
+        LibraryField::Artist => entry.artist.clone(),
+        LibraryField::AlbumArtist => entry
+            .album_display_artist
+            .clone()
+            .unwrap_or_else(|| entry.artist.clone()),
+        LibraryField::Album => entry.album.clone(),
+        LibraryField::Year => optional_year(entry.year),
+        LibraryField::ReleaseDate => entry.release_date.clone().unwrap_or_default(),
+        LibraryField::DateAdded => entry.date_added.clone().unwrap_or_default(),
+        LibraryField::LastPlayed => display_unix_date(entry.last_played),
+        LibraryField::PlayCount => count(entry.play_count),
+        LibraryField::Genre => entry.genre.clone(),
+        LibraryField::Bpm => entry.bpm.map(|value| value.to_string()).unwrap_or_default(),
+        LibraryField::UserRating => stored_rating(entry.rating),
+        LibraryField::DiscNumber => entry
+            .disc_number
+            .map(|number| number.to_string())
+            .unwrap_or_default(),
+        LibraryField::TrackNumber => optional_track_number(entry.disc_number, entry.track_number),
+        LibraryField::Duration => {
+            crate::format_duration((entry.duration_millis.max(0) / 1_000) as u32)
+        }
+        LibraryField::Favorite => favorite_text(entry.favorite),
+        _ => String::new(),
+    }
+}
+
+fn playlist_entry_field_links(entry: &PlaylistEntryRow, field: LibraryField) -> DetailLinks {
+    super::detail_links::metadata_links(
+        field,
+        &playlist_entry_field(entry, field),
+        entry.album_media_uri.as_deref(),
+        &entry.artists,
+        &entry.album_artists,
+    )
+}
+
 fn playlist_entry_number(position: u32, ready: bool) -> String {
     ready
         .then(|| (position + 1).to_string())
@@ -926,11 +917,11 @@ mod tests {
 
     #[test]
     fn prepared_playlist_update_rejects_a_stale_request() {
-        let lane = PlaylistEntryOrderLane::default();
-        let stale = lane.begin();
-        let current = lane.begin();
-        assert!(!lane.accepts(stale));
-        assert!(lane.accepts(current));
+        let lane = std::cell::Cell::default();
+        let stale = begin_order_request(&lane);
+        let current = begin_order_request(&lane);
+        assert_ne!(lane.get(), stale);
+        assert_eq!(lane.get(), current);
     }
 
     #[test]
