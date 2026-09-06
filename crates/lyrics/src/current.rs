@@ -151,6 +151,8 @@ struct CachedBundle {
 }
 
 pub struct LyricsService {
+    dictionary_directory: PathBuf,
+    dictionary_status: Mutex<crate::JapaneseDictionaryStatus>,
     database: Database,
     runtime: tokio::runtime::Handle,
     events: Sender<LyricsEvent>,
@@ -172,8 +174,11 @@ impl LyricsService {
         settings: Settings,
         private_mode: bool,
         events: Sender<LyricsEvent>,
+        dictionary_directory: PathBuf,
     ) -> Arc<Self> {
         Arc::new(Self {
+            dictionary_directory,
+            dictionary_status: Mutex::new(crate::JapaneseDictionaryStatus::Idle),
             database,
             runtime,
             events,
@@ -1393,6 +1398,40 @@ impl LyricsService {
 }
 
 impl LyricsHandle {
+    pub fn japanese_dictionary(&self, retry: bool) -> crate::JapaneseDictionaryStatus {
+        use crate::JapaneseDictionaryStatus;
+
+        let mut status = self
+            .service
+            .dictionary_status
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
+        if matches!(*status, JapaneseDictionaryStatus::Idle)
+            || retry && matches!(*status, JapaneseDictionaryStatus::Failed)
+        {
+            *status = JapaneseDictionaryStatus::Loading;
+            self.service
+                .publish(LyricsEvent::JapaneseDictionaryChanged(status.clone()));
+            let service = Arc::clone(&self.service);
+            self.service.runtime.spawn_blocking(move || {
+                let result = crate::dictionary::prepare_dictionary(&service.dictionary_directory);
+                let status = match result {
+                    Ok(path) => JapaneseDictionaryStatus::Ready(path),
+                    Err(error) => {
+                        warn!(%error, "could not prepare Japanese dictionary");
+                        JapaneseDictionaryStatus::Failed
+                    }
+                };
+                *service
+                    .dictionary_status
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner()) = status.clone();
+                service.publish(LyricsEvent::JapaneseDictionaryChanged(status));
+            });
+        }
+        status.clone()
+    }
+
     pub fn load(&self, media_id: CurrentMediaId) {
         self.service.load(media_id);
     }
@@ -1724,6 +1763,7 @@ mod tests {
             },
             false,
             events,
+            directory.path().join("japanese-readings"),
         );
         for (index, (media_uri, title, expected)) in [
             (&file_uri, "Album", "Whole file lyrics"),

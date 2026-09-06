@@ -15,6 +15,7 @@ use crate::shell::Shell;
 
 pub(crate) struct LyricsState {
     pub(crate) panel_visible: Cell<bool>,
+    pub(crate) dictionary_toast: RefCell<Option<adw::Toast>>,
 }
 
 pub(crate) struct SelectedLyricsState {

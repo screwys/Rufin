@@ -38,8 +38,6 @@
                 ./cmake
                 ./crates
                 ./data/icons/hicolor
-                ./data/japanese-readings.dic
-                ./data/japanese-readings.LICENSE
                 ./data/io.github.screwys.Rufin.desktop
                 ./data/io.github.screwys.Rufin.metainfo.xml
                 ./locales

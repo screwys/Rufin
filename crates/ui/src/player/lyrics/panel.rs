@@ -60,6 +60,38 @@ fn highlight_lrc_timestamps(buffer: &gtk::TextBuffer) {
 }
 
 impl Shell {
+    pub(crate) fn apply_japanese_dictionary_status(
+        self: &Rc<Self>,
+        status: lyrics::JapaneseDictionaryStatus,
+    ) {
+        use lyrics::JapaneseDictionaryStatus;
+
+        let previous = self.lyrics.dictionary_toast.borrow_mut().take();
+        if let Some(toast) = previous {
+            toast.dismiss();
+        }
+        let id = match status {
+            JapaneseDictionaryStatus::Loading => "loading",
+            JapaneseDictionaryStatus::Failed => "failed",
+            JapaneseDictionaryStatus::Ready(_) => {
+                self.render_lyrics_panel();
+                return;
+            }
+            JapaneseDictionaryStatus::Idle => return,
+        };
+        let resource = crate::ui_resource::LYRICS_DICTIONARY_RESOURCE;
+        let builder = crate::ui_resource::builder(resource);
+        let toast: adw::Toast = crate::ui_resource::object(&builder, resource, id);
+        let shell = Rc::downgrade(self);
+        toast.connect_button_clicked(move |_| {
+            if let Some(shell) = shell.upgrade() {
+                shell.products.lyrics.japanese_dictionary(true);
+            }
+        });
+        self.chrome.toast_overlay.add_toast(toast.clone());
+        *self.lyrics.dictionary_toast.borrow_mut() = Some(toast);
+    }
+
     pub(crate) fn render_lyrics_panel(self: &Rc<Self>) {
         self.mark_lyrics_panes_dirty();
         self.render_lyrics_contents();
@@ -143,6 +175,18 @@ impl Shell {
         let show_romanization = settings.lyrics.show_romanization;
         let word_by_word_highlighting = settings.lyrics.karaoke_mode;
         drop(settings);
+        let dictionary_status = if (show_furigana || show_romanization && pronunciation.is_none())
+            && lyrics
+                .as_deref()
+                .is_some_and(|lyrics| lyrics.is_japanese_for_readings())
+        {
+            self.products.lyrics.japanese_dictionary(false)
+        } else {
+            lyrics::JapaneseDictionaryStatus::Idle
+        };
+        if let lyrics::JapaneseDictionaryStatus::Ready(path) = &dictionary_status {
+            lyrics::prepare_japanese_reader(path);
+        }
         pane.set_save_action(&tr("Save Lyrics"), lyrics_available);
         pane.set_edit_action(lyrics_editable);
         pane.set_search_action(&search_label, search_enabled);

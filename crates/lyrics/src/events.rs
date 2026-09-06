@@ -36,6 +36,7 @@ impl Default for CurrentLyrics {
 
 #[derive(Clone, Debug)]
 pub enum LyricsEvent {
+    JapaneseDictionaryChanged(crate::JapaneseDictionaryStatus),
     Current(CurrentLyrics),
     SearchFinished {
         media_id: CurrentMediaId,

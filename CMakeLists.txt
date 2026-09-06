@@ -181,12 +181,6 @@ install(DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/locale/"
 install(PROGRAMS "${RUFIN_CMAKE_EXECUTABLE}"
   DESTINATION "${RUFIN_INSTALL_BINDIR}"
   RENAME "rufin${CMAKE_EXECUTABLE_SUFFIX}")
-install(FILES
-  data/japanese-readings.dic
-  DESTINATION "${RUFIN_INSTALL_DATADIR}/rufin")
-install(FILES
-  data/japanese-readings.LICENSE
-  DESTINATION "${RUFIN_INSTALL_DATADIR}/licenses/rufin")
 if(UNIX AND NOT APPLE)
   install(FILES
     "${RUFIN_DESKTOP_FILE}"
