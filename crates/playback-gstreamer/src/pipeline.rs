@@ -67,6 +67,7 @@ struct PipelineSession {
     bus: gst::Bus,
     clock: SourceClock,
     trust_invalid_certificate: Arc<AtomicBool>,
+    module_decoder: Arc<AtomicBool>,
     about_to_finish_id: Option<glib::SignalHandlerId>,
     audio_graph: Option<AudioGraph>,
     visualizer_probe: Option<gst::PadProbeId>,
@@ -302,18 +303,18 @@ impl PlayerPipeline {
         self.session.is_some()
     }
 
+    pub(super) fn allows_preloading(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_none_or(|session| !session.module_decoder.load(Ordering::Relaxed))
+    }
+
     pub(super) fn position(&self) -> Option<gst::ClockTime> {
         self.session.as_ref().and_then(PipelineSession::position)
     }
 
     pub(super) fn duration(&self) -> Option<gst::ClockTime> {
         self.session.as_ref().and_then(PipelineSession::duration)
-    }
-
-    pub(super) fn running_time(&self) -> Option<gst::ClockTime> {
-        self.session
-            .as_ref()
-            .and_then(PipelineSession::running_time)
     }
 
     pub(super) fn seekable(&self) -> Option<bool> {
@@ -378,12 +379,33 @@ impl PipelineSession {
             certificate_policy.load(Ordering::SeqCst)
         });
 
+        let module_decoder = Arc::new(AtomicBool::new(false));
+        let module_for_setup = Arc::clone(&module_decoder);
+        pipeline.connect("element-setup", false, move |values| {
+            let element = values[1].get::<gst::Element>().expect("playbin element-setup element");
+            if let Some(factory) = element.factory()
+                && factory.klass().split('/').any(|class| class == "Decoder")
+                && factory.static_pad_templates().iter().any(|pad| {
+                    pad.direction() == gst::PadDirection::Sink
+                        && pad.caps().iter().any(|caps| caps.name() == "audio/x-mod")
+                })
+            {
+                info!(decoder = %factory.name(), "isolating tracker decoder from seeks and preloading");
+                module_for_setup.store(true, Ordering::Relaxed);
+            }
+            None
+        });
+
         let pipeline_for_signal = pipeline.clone();
         let shared_for_signal = Arc::clone(&shared);
         let queued_stream = Arc::new(Mutex::new(stream.clone()));
         let queued_stream_for_signal = Arc::clone(&queued_stream);
         let certificate_policy_for_signal = Arc::clone(&trust_invalid_certificate);
+        let module_for_signal = Arc::clone(&module_decoder);
         let about_to_finish_id = pipeline.connect("about-to-finish", false, move |_| {
+            if module_for_signal.load(Ordering::Relaxed) {
+                return None;
+            }
             handle_about_to_finish(
                 &pipeline_for_signal,
                 &shared_for_signal,
@@ -401,6 +423,7 @@ impl PipelineSession {
             bus,
             clock: SourceClock::from_stream(stream),
             trust_invalid_certificate,
+            module_decoder,
             about_to_finish_id: Some(about_to_finish_id),
             audio_graph: None,
             visualizer_probe: None,
@@ -513,6 +536,9 @@ impl PipelineSession {
     }
 
     pub(super) fn seek_physical_millis(&self, millis: u64) -> Result<(), String> {
+        if self.module_decoder.load(Ordering::Relaxed) {
+            return Err("Tracker decoder does not support safe seeking".to_string());
+        }
         let flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
         let (seek_flags, stop_type, stop) = self.clock.end_millis().map_or(
             (flags, gst::SeekType::None, gst::ClockTime::NONE),
@@ -562,18 +588,25 @@ impl PipelineSession {
     }
 
     pub(super) fn position(&self) -> Option<gst::ClockTime> {
+        if self.module_decoder.load(Ordering::Relaxed) {
+            return (self.pipeline.current_state() == gst::State::Playing)
+                .then(|| self.pipeline.current_running_time())
+                .flatten();
+        }
         self.pipeline.query_position::<gst::ClockTime>()
     }
 
     pub(super) fn duration(&self) -> Option<gst::ClockTime> {
+        if self.module_decoder.load(Ordering::Relaxed) {
+            return None;
+        }
         self.pipeline.query_duration::<gst::ClockTime>()
     }
 
-    pub(super) fn running_time(&self) -> Option<gst::ClockTime> {
-        self.pipeline.current_running_time()
-    }
-
     pub(super) fn seekable(&self) -> bool {
+        if self.module_decoder.load(Ordering::Relaxed) {
+            return false;
+        }
         let mut query = gst::query::Seeking::new(gst::Format::Time);
         self.pipeline.query(&mut query) && query.result().0
     }
@@ -616,6 +649,59 @@ pub(super) fn configure_playbin_for_audio(pipeline: &gst::Element) {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn tracker_decoder_rejects_seeking_without_format_metadata_or_extension() {
+        ensure_gstreamer_initialized().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("stream");
+        let mut module = vec![0_u8; 1_084 + 1_024 + 64];
+        module[42..44].copy_from_slice(&32_u16.to_be_bytes());
+        module[45] = 64;
+        module[48..50].copy_from_slice(&32_u16.to_be_bytes());
+        module[950] = 1;
+        module[1_080..1_084].copy_from_slice(b"M.K.");
+        module[1_084..1_088].copy_from_slice(&[1, 172, 16, 0]);
+        module[2_108..2_140].fill(96);
+        module[2_140..].fill(160);
+        std::fs::write(&path, module).unwrap();
+        let uri = glib::filename_to_uri(&path, None).unwrap();
+        let shared = Arc::new(Mutex::new(SharedBackendState::new()));
+        let mut player = PlayerPipeline::new("tracker-decoder-check", shared);
+        let item = PreparedRun {
+            run: RunId::new(1),
+            stream: ResolvedStream::new(uri.as_str()).into(),
+        };
+        let settings = BackendAudioSettings {
+            audio_output: Some("fakesink".to_string()),
+            ..BackendAudioSettings::default()
+        };
+        player
+            .play_item(
+                PipelineId(1),
+                Slot::Primary,
+                &item,
+                &settings,
+                1.0,
+                false,
+                1.0,
+                gst::State::Paused,
+            )
+            .unwrap();
+        player
+            .session
+            .as_ref()
+            .unwrap()
+            .pipeline
+            .state(gst::ClockTime::from_seconds(5))
+            .0
+            .unwrap();
+        assert!(!player.allows_preloading());
+        assert_eq!(player.seekable(), Some(false));
+        assert_eq!(player.duration(), None);
+        assert!(player.seek_millis(1_000).is_err());
+        player.stop();
+    }
 
     #[test]
     fn repeated_tracks_release_retired_pipelines() {
