@@ -33,6 +33,11 @@ msgid ""
 msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會被關閉"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -240,6 +245,9 @@ msgstr "所有曲目"
 msgid "All"
 msgstr ""
 
+msgid "Alternate addresses"
+msgstr ""
+
 msgid "Any genre"
 msgstr "任何曲風"
 
@@ -293,6 +301,9 @@ msgstr "投放時無法進行音訊處理"
 
 msgid "Audio"
 msgstr "音訊"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "自動 DJ 關閉"
@@ -357,6 +368,11 @@ msgstr "安全儲存空間"
 msgid "Backups"
 msgstr "返回"
 
+#, fuzzy
+#| msgid "Get token"
+msgid "Bearer token"
+msgstr "取得登入授權"
+
 msgid "Blue"
 msgstr "藍色"
 
@@ -382,6 +398,9 @@ msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
+msgstr ""
+
+msgid "Certificate authority (PEM)"
 msgstr ""
 
 msgid "Change Secret Storage"
@@ -497,6 +516,9 @@ msgstr ""
 msgid "Compact"
 msgstr "緊湊"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -517,6 +539,11 @@ msgstr "正在連接到 {device}..."
 
 msgid "Connection failed"
 msgstr "連接失敗"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "連接"
 
 msgid "Connection"
 msgstr "連接"
@@ -558,6 +585,9 @@ msgstr "無法載入此資料夾"
 msgid "Couldn't search for lyrics"
 msgstr "無法搜尋到歌詞"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "建立"
 
@@ -569,6 +599,9 @@ msgstr "交叉淡入淡出模式"
 
 msgid "Crossfade"
 msgstr "交叉淡入淡出"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr ""
@@ -681,6 +714,9 @@ msgstr "下載"
 msgid "Downloaded"
 msgstr "已下載"
 
+msgid "Downloading Japanese dictionary..."
+msgstr ""
+
 msgid "Downloading"
 msgstr "正在下載"
 
@@ -761,6 +797,9 @@ msgstr "輸入伺服器位置與 API 金鑰"
 msgid "Enter a server address, username, and password"
 msgstr "輸入伺服器位置、使用者名稱與密碼"
 
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
 msgid "Entire Library"
 msgstr "整個媒體庫"
 
@@ -840,6 +879,9 @@ msgstr ""
 
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "尋找您的 ListenBrainz 使用者憑證"
@@ -938,6 +980,9 @@ msgstr ""
 
 msgid "Grid"
 msgstr "網格"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "幫助"
@@ -1056,6 +1101,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "佈局"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 msgid "Legacy authorization"
 msgstr ""
@@ -1456,6 +1504,15 @@ msgstr "關閉"
 msgid "On this device"
 msgstr "此裝置"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "僅播放過的曲目"
 
@@ -1516,6 +1573,11 @@ msgstr "密碼"
 
 msgid "Paste"
 msgstr "貼上"
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Path in Source"
+msgstr "變更敏感存儲空間"
 
 msgid "Pause"
 msgstr "暫停"
@@ -1597,6 +1659,11 @@ msgstr "在此裝置上播放"
 
 msgid "Playing on {device}"
 msgstr "在 {device} 上播放"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "播放清單名稱"
 
 msgid "Playlist name"
 msgstr "播放清單名稱"
@@ -1750,6 +1817,11 @@ msgstr ""
 msgid "Remote lyrics"
 msgstr "遠端歌詞"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "移除"
+
 msgid "Remove All Downloads"
 msgstr "移除所有下載內容"
 
@@ -1826,7 +1898,13 @@ msgstr "重複播放單曲"
 msgid "Repeat"
 msgstr "重複播放"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
+msgstr ""
+
+msgid "Require SMB encryption"
 msgstr ""
 
 msgid "Reset to defaults"
@@ -1847,6 +1925,9 @@ msgstr "繼續"
 msgid "Resync Library"
 msgstr ""
 
+msgid "Retry"
+msgstr ""
+
 msgid "Rock"
 msgstr "搖滾"
 
@@ -1860,6 +1941,12 @@ msgid "Rufin data folder"
 msgstr "Rufin 資料資料夾"
 
 msgid "Rule actions"
+msgstr ""
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
 msgstr ""
 
 msgid "Saturday"
@@ -2006,6 +2093,11 @@ msgstr "選擇來源"
 msgid "Select all"
 msgstr "全選"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "選擇音樂資料夾"
+
 msgid "Selection"
 msgstr "選擇"
 
@@ -2055,6 +2147,9 @@ msgstr ""
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "元資料來源"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr ""
@@ -2126,6 +2221,9 @@ msgstr "側邊欄項目 {position}"
 
 msgid "Sidebar route by position"
 msgstr "按位置瀏覽側邊欄"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr ""
@@ -2351,6 +2449,9 @@ msgstr ""
 msgid "User"
 msgstr "使用者"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "使用者名稱"
 
@@ -2385,6 +2486,9 @@ msgid "Waiting for connection"
 msgstr "正在等候連線"
 
 msgid "Waveform seekbar"
+msgstr ""
+
+msgid "WebDAV"
 msgstr ""
 
 msgid "Wednesday"

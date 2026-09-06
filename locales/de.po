@@ -34,6 +34,11 @@ msgstr ""
 "ausgeschaltet"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -268,6 +273,11 @@ msgstr "Alle Titel"
 msgid "All"
 msgstr "Alle"
 
+#, fuzzy
+#| msgid "Server Address"
+msgid "Alternate addresses"
+msgstr "Server-Adresse"
+
 msgid "Any genre"
 msgstr "Beliebiges Genre"
 
@@ -321,6 +331,9 @@ msgstr "Audioverarbeitung ist beim Übertragen nicht verfügbar"
 
 msgid "Audio"
 msgstr "Audio"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "Auto-DJ aus"
@@ -387,6 +400,11 @@ msgstr "Sicherer Speicher"
 msgid "Backups"
 msgstr "Zurück"
 
+#, fuzzy
+#| msgid "User token"
+msgid "Bearer token"
+msgstr "Benutzer-Token"
+
 msgid "Blue"
 msgstr "Blau"
 
@@ -413,6 +431,9 @@ msgstr "Übertragungsnetzwerk"
 
 msgid "Casting"
 msgstr "Übertragen"
+
+msgid "Certificate authority (PEM)"
+msgstr ""
 
 msgid "Change Secret Storage"
 msgstr "Anmeldedaten-Speicher ändern"
@@ -524,6 +545,9 @@ msgstr "Kommentar"
 msgid "Compact"
 msgstr "Kompakt"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Bestätigen"
 
@@ -544,6 +568,11 @@ msgstr "Verbindung mit {device} wird hergestellt …"
 
 msgid "Connection failed"
 msgstr "Verbindung fehlgeschlagen"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "Verbindung"
 
 msgid "Connection"
 msgstr "Verbindung"
@@ -585,6 +614,9 @@ msgstr "Dieser Ordner konnte nicht geladen werden"
 msgid "Couldn't search for lyrics"
 msgstr "Es konnte nicht nach Liedtexten gesucht werdenSongtexte durchsuchen"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Erstellen"
 
@@ -596,6 +628,9 @@ msgstr "Überblendmodus"
 
 msgid "Crossfade"
 msgstr "Überblendung"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr "Benutzerdefiniert"
@@ -706,6 +741,9 @@ msgstr "Download"
 msgid "Downloaded"
 msgstr "Heruntergeladen"
 
+msgid "Downloading Japanese dictionary..."
+msgstr ""
+
 msgid "Downloading"
 msgstr "Wird heruntergeladen"
 
@@ -777,6 +815,9 @@ msgstr "Serveradresse und API-Schlüssel eingeben"
 
 msgid "Enter a server address, username, and password"
 msgstr "Serveradresse, Benutzername und Passwort eingeben"
+
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
 
 msgid "Entire Library"
 msgstr "Gesamte Bibliothek"
@@ -866,6 +907,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Die Dateien müssen mit Mood-/BPM-Tags versehen werden. Für Jellyfin nicht "
 "unterstützt"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Finden Sie Ihr ListenBrainz-Benutzer-Token"
@@ -964,6 +1008,9 @@ msgstr "Rasterbeschriftung"
 
 msgid "Grid"
 msgstr "Raster"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "Hilfe"
@@ -1083,6 +1130,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Layout"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -1480,6 +1530,15 @@ msgstr "Aus"
 msgid "On this device"
 msgstr "Dieses Gerät"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Nur gespielte Titel"
 
@@ -1538,6 +1597,11 @@ msgstr "Passwort"
 
 msgid "Paste"
 msgstr "Einfügen"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Path in Source"
+msgstr "Gespeicherte Quellen"
 
 msgid "Pause"
 msgstr "Pause"
@@ -1621,6 +1685,11 @@ msgstr "Wiedergabe auf diesem Gerät"
 
 msgid "Playing on {device}"
 msgstr "Wiedergabe auf {device}"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "Playlist-Name"
 
 msgid "Playlist name"
 msgstr "Playlist-Name"
@@ -1773,6 +1842,11 @@ msgstr "Veröffentlichung"
 msgid "Remote lyrics"
 msgstr "Externe Songtexte"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "Entfernen"
+
 msgid "Remove All Downloads"
 msgstr "Alle Downloads entfernen"
 
@@ -1845,8 +1919,14 @@ msgstr "Titel wiederholen"
 msgid "Repeat"
 msgstr "Wiederholen"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
 msgstr "ReplayGain"
+
+msgid "Require SMB encryption"
+msgstr ""
 
 msgid "Reset to defaults"
 msgstr "Auf Standardeinstellungen zurücksetzen"
@@ -1868,6 +1948,9 @@ msgstr "Fortsetzen"
 msgid "Resync Library"
 msgstr "Bibliothek neu synchronisieren"
 
+msgid "Retry"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rock"
 
@@ -1882,6 +1965,12 @@ msgstr "Rufin-Datenordner"
 
 msgid "Rule actions"
 msgstr "Regelaktionen"
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
+msgstr ""
 
 msgid "Saturday"
 msgstr ""
@@ -2023,6 +2112,11 @@ msgstr "Quelle auswählen"
 msgid "Select all"
 msgstr "Alle auswählen"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "Musikordner auswählen"
+
 msgid "Selection"
 msgstr "Auswahl"
 
@@ -2072,6 +2166,9 @@ msgstr "Discord-Aktivitätstyp auf „Hört gerade“ festlegen"
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Metadatenquelle"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr "Shared Secret"
@@ -2141,6 +2238,9 @@ msgstr "Seitenleistenelement {position}"
 
 msgid "Sidebar route by position"
 msgstr "Seitenleistenroute nach Position"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2368,6 +2468,9 @@ msgstr "Benutzer-Token"
 msgid "User"
 msgstr "Benutzer"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "Benutzername"
 
@@ -2404,6 +2507,9 @@ msgstr "Warten auf Verbindung"
 
 msgid "Waveform seekbar"
 msgstr "Wellenform-Fortschrittsbalken"
+
+msgid "WebDAV"
+msgstr ""
 
 msgid "Wednesday"
 msgstr ""

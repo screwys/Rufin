@@ -35,6 +35,11 @@ msgstr ""
 "отключены"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -269,6 +274,11 @@ msgstr "Все треки"
 msgid "All"
 msgstr "Все"
 
+#, fuzzy
+#| msgid "Server Address"
+msgid "Alternate addresses"
+msgstr "Адрес сервера"
+
 msgid "Any genre"
 msgstr "Любой жанр"
 
@@ -322,6 +332,9 @@ msgstr "Обработка звука недоступна во время тр�
 
 msgid "Audio"
 msgstr "Аудио"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "Авто-DJ выключен"
@@ -388,6 +401,11 @@ msgstr "Безопасное хранилище"
 msgid "Backups"
 msgstr "Назад"
 
+#, fuzzy
+#| msgid "User token"
+msgid "Bearer token"
+msgstr "Токен пользователя"
+
 msgid "Blue"
 msgstr "Синий"
 
@@ -414,6 +432,9 @@ msgstr "Сеть для трансляции"
 
 msgid "Casting"
 msgstr "Трансляция"
+
+msgid "Certificate authority (PEM)"
+msgstr ""
 
 msgid "Change Secret Storage"
 msgstr "Изменить секретное хранилище"
@@ -524,6 +545,9 @@ msgstr "Комментарий"
 msgid "Compact"
 msgstr "Компактный"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Подтвердить"
 
@@ -544,6 +568,11 @@ msgstr "Подключение к {device}..."
 
 msgid "Connection failed"
 msgstr "Соединение не удалось"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "Соединение"
 
 msgid "Connection"
 msgstr "Соединение"
@@ -585,6 +614,9 @@ msgstr "Не удалось загрузить эту папку"
 msgid "Couldn't search for lyrics"
 msgstr "Не удалось найти текст песни"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Создать"
 
@@ -596,6 +628,9 @@ msgstr "Режим кроссфейда"
 
 msgid "Crossfade"
 msgstr "Кроссфейд"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr "Настраиваемый"
@@ -706,6 +741,9 @@ msgstr "Загрузить"
 msgid "Downloaded"
 msgstr "Загружено"
 
+msgid "Downloading Japanese dictionary..."
+msgstr ""
+
 msgid "Downloading"
 msgstr "Загрузка"
 
@@ -777,6 +815,9 @@ msgstr "Введите адрес сервера и API ключ"
 
 msgid "Enter a server address, username, and password"
 msgstr "Введите адрес сервера, имя пользователя и пароль"
+
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
 
 msgid "Entire Library"
 msgstr "Вся библиотека"
@@ -865,6 +906,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Для файлов необходимо указать теги «Настроение» и «BPM». Не поддерживается "
 "для Jellyfin"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Найдите свой токен пользователя ListenBrainz"
@@ -963,6 +1007,9 @@ msgstr "Метки сетки"
 
 msgid "Grid"
 msgstr "Сетка"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "Помощь"
@@ -1083,6 +1130,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Макет"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -1483,6 +1533,15 @@ msgstr "Выкл."
 msgid "On this device"
 msgstr "Это устройство"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Только проигранные треки"
 
@@ -1541,6 +1600,11 @@ msgstr "Пароль"
 
 msgid "Paste"
 msgstr "Вставить"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Path in Source"
+msgstr "Сохраненные источники"
 
 msgid "Pause"
 msgstr "Приостановить"
@@ -1624,6 +1688,11 @@ msgstr "Играет на этом устройстве"
 
 msgid "Playing on {device}"
 msgstr "Играет на {device}"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "Название плейлиста"
 
 msgid "Playlist name"
 msgstr "Название плейлиста"
@@ -1777,6 +1846,11 @@ msgstr "Выпуск"
 msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "Удалить"
+
 msgid "Remove All Downloads"
 msgstr "Удалить Все загрузки"
 
@@ -1849,8 +1923,14 @@ msgstr "Повторять один"
 msgid "Repeat"
 msgstr "Повтор"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
 msgstr "Нормализация громкости"
+
+msgid "Require SMB encryption"
+msgstr ""
 
 msgid "Reset to defaults"
 msgstr "Восстановить настройки по умолчанию"
@@ -1872,6 +1952,9 @@ msgstr "Возобновить"
 msgid "Resync Library"
 msgstr "Синхронизировать библиотеку"
 
+msgid "Retry"
+msgstr ""
+
 msgid "Rock"
 msgstr "Рок"
 
@@ -1886,6 +1969,12 @@ msgstr "Папка с данными Rufin"
 
 msgid "Rule actions"
 msgstr "Действия с правилами"
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
+msgstr ""
 
 msgid "Saturday"
 msgstr ""
@@ -2031,6 +2120,11 @@ msgstr "Выбрать Источник"
 msgid "Select all"
 msgstr "Выбрать всё"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "Выбрать папку с музыкой"
+
 msgid "Selection"
 msgstr "Выбор"
 
@@ -2080,6 +2174,9 @@ msgstr "Установите тип активности в Discord на \"Пр�
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Источник метаданных"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr "Общий секретный ключ"
@@ -2150,6 +2247,9 @@ msgstr "Элемент боковой панели {position}"
 
 msgid "Sidebar route by position"
 msgstr "Маршрут в боковой панели по расположению"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2379,6 +2479,9 @@ msgstr "Токен пользователя"
 msgid "User"
 msgstr "Пользователь"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "Имя пользователя"
 
@@ -2414,6 +2517,9 @@ msgstr "Ожидание подключения"
 
 msgid "Waveform seekbar"
 msgstr "Индикатор прогресса воспроизведения в виде волновой формы"
+
+msgid "WebDAV"
+msgstr ""
 
 msgid "Wednesday"
 msgstr ""

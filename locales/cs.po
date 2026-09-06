@@ -34,6 +34,11 @@ msgstr ""
 "budou vypnuta"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -258,6 +263,11 @@ msgstr "Všechny skladby"
 msgid "All"
 msgstr ""
 
+#, fuzzy
+#| msgid "Server Address"
+msgid "Alternate addresses"
+msgstr "Adresa serveru"
+
 msgid "Any genre"
 msgstr "Všechny žánry"
 
@@ -313,6 +323,9 @@ msgstr "Zpracování zvuku není během odesílání k dispozici"
 
 msgid "Audio"
 msgstr "Zvuk"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "Auto DJ vypnuto"
@@ -381,6 +394,11 @@ msgstr "Bezpečné úložiště"
 msgid "Backups"
 msgstr "Zpět"
 
+#, fuzzy
+#| msgid "User token"
+msgid "Bearer token"
+msgstr "Uživatelský token"
+
 msgid "Blue"
 msgstr "Modrá"
 
@@ -409,6 +427,9 @@ msgstr "Přenos"
 
 msgid "Casting"
 msgstr "Přenos"
+
+msgid "Certificate authority (PEM)"
+msgstr ""
 
 msgid "Change Secret Storage"
 msgstr "Změnit tajné úložiště"
@@ -527,6 +548,9 @@ msgstr "Komentář"
 msgid "Compact"
 msgstr "Kompaktní"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -547,6 +571,11 @@ msgstr "Připojování k {device}..."
 
 msgid "Connection failed"
 msgstr "Spojení selhalo"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "Spojení"
 
 msgid "Connection"
 msgstr "Spojení"
@@ -588,6 +617,9 @@ msgstr "Nelze načíst tuto složku"
 msgid "Couldn't search for lyrics"
 msgstr "Nepodařilo se vyhledat text skladby"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Vytvořit"
 
@@ -599,6 +631,9 @@ msgstr "Režim prolínání"
 
 msgid "Crossfade"
 msgstr "Přechod"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr "Přizpůsobené"
@@ -713,6 +748,9 @@ msgstr "Stáhnout"
 msgid "Downloaded"
 msgstr "Staženo"
 
+msgid "Downloading Japanese dictionary..."
+msgstr ""
+
 msgid "Downloading"
 msgstr "Stahování"
 
@@ -792,6 +830,9 @@ msgstr "Zadejte adresu serveru a API klíč"
 
 msgid "Enter a server address, username, and password"
 msgstr "Zadejte adresu serveru, uživatelské jméno a heslo"
+
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
 
 msgid "Entire Library"
 msgstr "Celá knihovna"
@@ -876,6 +917,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Soubory musí obsahovat značky Mood/BPM. Tato funkce není v aplikaci Jellyfin "
 "podporována"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Najděte svůj uživatelský token ListenBrainz"
@@ -974,6 +1018,9 @@ msgstr "Popisky mřížky"
 
 msgid "Grid"
 msgstr "Mřížka"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "Nápověda"
@@ -1096,6 +1143,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Rozvržení"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -1505,6 +1555,15 @@ msgstr "Vypnuto"
 msgid "On this device"
 msgstr "Toto zařízení"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Pouze přehrané skladby"
 
@@ -1565,6 +1624,11 @@ msgstr "Heslo"
 
 msgid "Paste"
 msgstr "Vložit"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Path in Source"
+msgstr "Uložené zdroje"
 
 msgid "Pause"
 msgstr "Pauza"
@@ -1648,6 +1712,11 @@ msgstr "Přehrává se na tomto zařízení"
 
 msgid "Playing on {device}"
 msgstr "Přehrává se na {device}"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "Název playlistu"
 
 msgid "Playlist name"
 msgstr "Název playlistu"
@@ -1803,6 +1872,11 @@ msgstr "Vydání"
 msgid "Remote lyrics"
 msgstr "Vzdálené texty skladeb"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "Odebrat"
+
 msgid "Remove All Downloads"
 msgstr "Odstranit všechny stažené soubory"
 
@@ -1879,7 +1953,13 @@ msgstr "Opakovat jednou"
 msgid "Repeat"
 msgstr "Opakovat"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
+msgstr ""
+
+msgid "Require SMB encryption"
 msgstr ""
 
 msgid "Reset to defaults"
@@ -1900,6 +1980,9 @@ msgstr "Pokračovat"
 msgid "Resync Library"
 msgstr "Znovu synchronizovat knihovnu"
 
+msgid "Retry"
+msgstr ""
+
 msgid "Rock"
 msgstr "Rock"
 
@@ -1914,6 +1997,12 @@ msgstr "Složka s daty aplikace Rufin"
 
 msgid "Rule actions"
 msgstr "Akce založené na pravidlech"
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
+msgstr ""
 
 msgid "Saturday"
 msgstr ""
@@ -2065,6 +2154,11 @@ msgstr "Vyberte Zdroj"
 msgid "Select all"
 msgstr "Vybrat vše"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "Vybrat složku s hudbou"
+
 msgid "Selection"
 msgstr "Výběr"
 
@@ -2114,6 +2208,9 @@ msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Zdroj metadat"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr "Sdílený tajný klíč"
@@ -2185,6 +2282,9 @@ msgstr "Položka postranního panelu {position}"
 
 msgid "Sidebar route by position"
 msgstr "Rozložení postranního panelu podle pozice"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2416,6 +2516,9 @@ msgstr "Uživatelský token"
 msgid "User"
 msgstr "Uživatel"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "Uživatelské jméno"
 
@@ -2451,6 +2554,9 @@ msgstr "Čekání na připojení"
 
 msgid "Waveform seekbar"
 msgstr "Indikátor průběhu ve formě vlnové křivky"
+
+msgid "WebDAV"
+msgstr ""
 
 msgid "Wednesday"
 msgstr ""
