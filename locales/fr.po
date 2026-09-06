@@ -18,6 +18,15 @@ msgstr ""
 "X-Generator: Weblate 2026.9.dev0\n"
 
 msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+
+msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -39,13 +48,38 @@ msgid ""
 msgstr ""
 
 msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+
+msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
 
 msgid ""
+"Rufin started with fresh user state because the saved database could not be "
+"used. Your settings and saved logins are unchanged."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 
 msgid ""
@@ -129,6 +163,9 @@ msgstr ""
 msgid "Add Rule"
 msgstr ""
 
+msgid "Add Source"
+msgstr ""
+
 msgid "Add a matching server prefix"
 msgstr ""
 
@@ -145,9 +182,6 @@ msgid "Add current"
 msgstr ""
 
 msgid "Add folder"
-msgstr ""
-
-msgid "Add server"
 msgstr ""
 
 msgid "Add to Favorites"
@@ -273,6 +307,9 @@ msgstr ""
 msgid "Auto DJ"
 msgstr ""
 
+msgid "Automatic Backups"
+msgstr ""
+
 msgid "Automatic updates"
 msgstr ""
 
@@ -283,6 +320,30 @@ msgid "BPM"
 msgstr ""
 
 msgid "Back"
+msgstr ""
+
+msgid "Backup Folder"
+msgstr ""
+
+msgid "Backup Password"
+msgstr ""
+
+msgid "Backup Settings"
+msgstr ""
+
+msgid "Backup exported"
+msgstr ""
+
+msgid "Backup failed: {error}"
+msgstr ""
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr ""
+
+msgid "Backup restored"
+msgstr ""
+
+msgid "Backups"
 msgstr ""
 
 msgid "Blue"
@@ -315,6 +376,9 @@ msgstr ""
 msgid "Change Secret Storage"
 msgstr ""
 
+msgid "Change Source"
+msgstr ""
+
 msgid "Change"
 msgstr ""
 
@@ -324,6 +388,9 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
+msgid "Choose Folder"
 msgstr ""
 
 msgid "Choose a local music folder"
@@ -434,6 +501,9 @@ msgstr ""
 msgid "Connection"
 msgstr ""
 
+msgid "Contents"
+msgstr ""
+
 msgid "Context Menus"
 msgstr ""
 
@@ -444,6 +514,9 @@ msgid "Control notifications"
 msgstr ""
 
 msgid "Copy"
+msgstr ""
+
+msgid "Could not open folder: {error}"
 msgstr ""
 
 msgid "Could not save diagnostic log"
@@ -480,6 +553,9 @@ msgid "Customize display"
 msgstr ""
 
 msgid "Cut"
+msgstr ""
+
+msgid "Daily"
 msgstr ""
 
 msgid "Dance"
@@ -542,7 +618,13 @@ msgstr ""
 msgid "Discography"
 msgstr ""
 
+msgid "Discord Rich Presence"
+msgstr ""
+
 msgid "Discord"
+msgstr ""
+
+msgid "Do not encrypt"
 msgstr ""
 
 msgid "Don't duplicate"
@@ -614,6 +696,9 @@ msgstr ""
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
+msgid "Enable automatic backups"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr ""
 
@@ -624,6 +709,9 @@ msgid "Enable private mode"
 msgstr ""
 
 msgid "Enable"
+msgstr ""
+
+msgid "Encrypt backups"
 msgstr ""
 
 msgid "Enter API credentials first"
@@ -650,10 +738,31 @@ msgstr ""
 msgid "Explore"
 msgstr ""
 
+msgid "Export Activity"
+msgstr ""
+
+msgid "Export Backup"
+msgstr ""
+
+msgid "Export Playlist"
+msgstr ""
+
+msgid "Export format"
+msgstr ""
+
+msgid "Export playlist"
+msgstr ""
+
+msgid "Export your listening history in Rufin"
+msgstr ""
+
+msgid "Export"
+msgstr ""
+
 msgid "External lyric lookup is off"
 msgstr ""
 
-msgid "External lyric lookup"
+msgid "External lyrics lookup"
 msgstr ""
 
 msgid "External metadata lookup"
@@ -672,6 +781,9 @@ msgid "Favorite tracks, plus tracks from favorite albums and artists"
 msgstr ""
 
 msgid "Favorite"
+msgstr ""
+
+msgid "Favorites and ratings"
 msgstr ""
 
 msgid "Favorites"
@@ -704,13 +816,19 @@ msgstr ""
 msgid "Font size (px)"
 msgstr ""
 
-msgid "Forget Server"
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+
+msgid "Forget Source"
 msgstr ""
 
 msgid "Forward"
 msgstr ""
 
 msgid "Found Servers"
+msgstr ""
+
+msgid "Friday"
 msgstr ""
 
 msgid "Full Bass"
@@ -794,6 +912,9 @@ msgstr ""
 msgid "Home"
 msgstr ""
 
+msgid "Hour"
+msgstr ""
+
 msgid "Identify"
 msgstr ""
 
@@ -807,6 +928,12 @@ msgid "If you do not have API keys, create them"
 msgstr ""
 
 msgid "Image"
+msgstr ""
+
+msgid "Import Backup"
+msgstr ""
+
+msgid "Import Playlist"
 msgstr ""
 
 msgid "Include detailed Rufin diagnostics in this session"
@@ -831,9 +958,6 @@ msgid "Integrations"
 msgstr ""
 
 msgid "Jellyfin"
-msgstr ""
-
-msgid "Jellyfin, Navidrome, or OpenSubsonic"
 msgstr ""
 
 msgid "Karaoke Playback"
@@ -879,6 +1003,9 @@ msgid "Last.fm"
 msgstr ""
 
 msgid "Layout"
+msgstr ""
+
+msgid "Legacy authorization"
 msgstr ""
 
 msgid "Legacy"
@@ -930,6 +1057,9 @@ msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
+
+msgid "Local imports and access"
+msgstr ""
 
 msgid "Local library"
 msgstr ""
@@ -988,6 +1118,9 @@ msgstr ""
 msgid "Metadata editing is no longer available"
 msgstr ""
 
+msgid "Metadata editing requires Local access"
+msgstr ""
+
 msgid "Metadata source"
 msgstr ""
 
@@ -995,6 +1128,9 @@ msgid "Metadata"
 msgstr ""
 
 msgid "Minimum year"
+msgstr ""
+
+msgid "Monday"
 msgstr ""
 
 msgid "Mood tracks"
@@ -1180,9 +1316,6 @@ msgstr ""
 msgid "No network devices found"
 msgstr ""
 
-msgid "No remote sources configured"
-msgstr ""
-
 msgid "No servers found, add one manually or try again"
 msgstr ""
 
@@ -1210,6 +1343,9 @@ msgstr ""
 msgid "Not connected"
 msgstr ""
 
+msgid "Not needed for most servers"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr ""
 
@@ -1234,6 +1370,9 @@ msgstr ""
 msgid "Now playing updates"
 msgstr ""
 
+msgid "Number of backups"
+msgstr ""
+
 msgid "Number of songs"
 msgstr ""
 
@@ -1243,10 +1382,16 @@ msgstr ""
 msgid "Off"
 msgstr ""
 
+msgid "On this device"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr ""
 
 msgid "Only unplayed tracks"
+msgstr ""
+
+msgid "Open Folder"
 msgstr ""
 
 msgid "Open fullscreen player"
@@ -1286,6 +1431,9 @@ msgid "Other releases"
 msgstr ""
 
 msgid "Overview"
+msgstr ""
+
+msgid "Ownership of this item belongs to {source}"
 msgstr ""
 
 msgid "Password"
@@ -1400,6 +1548,9 @@ msgid "Pop"
 msgstr ""
 
 msgid "Position"
+msgstr ""
+
+msgid "Prefer distinct track covers"
 msgstr ""
 
 msgid "Prefer server lyrics"
@@ -1603,13 +1754,16 @@ msgstr ""
 msgid "Reset"
 msgstr ""
 
+msgid "Restore User State"
+msgstr ""
+
+msgid "Restore"
+msgstr ""
+
 msgid "Resume"
 msgstr ""
 
 msgid "Resync Library"
-msgstr ""
-
-msgid "Rich presence"
 msgstr ""
 
 msgid "Rock"
@@ -1625,6 +1779,9 @@ msgid "Rufin data folder"
 msgstr ""
 
 msgid "Rule actions"
+msgstr ""
+
+msgid "Saturday"
 msgstr ""
 
 msgid "Save Diagnostic Log"
@@ -1651,7 +1808,7 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
-msgid "Saved Sources"
+msgid "Saved logins"
 msgstr ""
 
 msgid "Saved mapping. {matched} of {total} server path matches"
@@ -1672,6 +1829,18 @@ msgid "Saves lyrics to your source"
 msgstr ""
 
 msgid "Saving..."
+msgstr ""
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Scheduled Backup Failed"
+msgstr ""
+
+msgid "Scheduled Backup Password"
+msgstr ""
+
+msgid "Scheduled backup password saved"
 msgstr ""
 
 msgid "Search Again"
@@ -1794,6 +1963,9 @@ msgstr ""
 msgid "Set the Discord activity type to Listening"
 msgstr ""
 
+msgid "Settings and sources"
+msgstr ""
+
 msgid "Shared secret"
 msgstr ""
 
@@ -1893,6 +2065,9 @@ msgstr ""
 msgid "Smart playlists"
 msgstr ""
 
+msgid "Some playlist entries could not be imported"
+msgstr ""
+
 msgid "Song title"
 msgstr ""
 
@@ -1908,6 +2083,9 @@ msgstr ""
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
+msgid "Source"
+msgstr ""
+
 msgid "Sources"
 msgstr ""
 
@@ -1921,6 +2099,9 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
+msgstr ""
+
+msgid "Sunday"
 msgstr ""
 
 msgid "Switch Search/Favorites tabs"
@@ -1968,6 +2149,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "Thursday"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr ""
 
@@ -2002,6 +2186,9 @@ msgid "Translation language"
 msgstr ""
 
 msgid "Troubleshooting"
+msgstr ""
+
+msgid "Tuesday"
 msgstr ""
 
 msgid "Turn off only for a server you control"
@@ -2055,6 +2242,9 @@ msgstr ""
 msgid "Use different layout below a threshold width"
 msgstr ""
 
+msgid "Use each track's own cover when available"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr ""
 
@@ -2101,6 +2291,15 @@ msgid "Waiting for connection"
 msgstr ""
 
 msgid "Waveform seekbar"
+msgstr ""
+
+msgid "Wednesday"
+msgstr ""
+
+msgid "Weekday"
+msgstr ""
+
+msgid "Weekly"
 msgstr ""
 
 msgid "Window"

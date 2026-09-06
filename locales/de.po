@@ -18,6 +18,15 @@ msgstr ""
 "X-Generator: Weblate 2026.9\n"
 
 msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+
+msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -42,11 +51,32 @@ msgstr ""
 "Freigegebene und manuelle Downloads bleiben erhalten."
 
 msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+
+msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
 "Servermedien über dieses Gerät leiten, anstatt Anbieter-URLs an den Renderer "
 "weiterzugeben"
+
+msgid ""
+"Rufin started with fresh user state because the saved database could not be "
+"used. Your settings and saved logins are unchanged."
+msgstr ""
 
 msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
@@ -55,6 +85,10 @@ msgstr ""
 "Rufin berechnet die fehlenden EBU-R128-Metadaten für die gesamte Bibliothek. "
 "Dies kann über längere Zeit erhebliche CPU-, Akku- und Netzwerkressourcen "
 "beanspruchen."
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
+msgstr ""
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -154,6 +188,11 @@ msgstr "Aktivität"
 msgid "Add Rule"
 msgstr "Regel hinzufügen"
 
+#, fuzzy
+#| msgid "Sources"
+msgid "Add Source"
+msgstr "Quellen"
+
 msgid "Add a matching server prefix"
 msgstr "Passendes Server-Präfix hinzufügen"
 
@@ -171,9 +210,6 @@ msgstr "Aktuellen Titel hinzufügen"
 
 msgid "Add folder"
 msgstr "Ordner hinzufügen"
-
-msgid "Add server"
-msgstr "Server hinzufügen"
 
 msgid "Add to Favorites"
 msgstr "Zu Favoriten hinzufügen"
@@ -298,6 +334,11 @@ msgstr "Auto-DJ-Schwellenwert"
 msgid "Auto DJ"
 msgstr "Auto DJ"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic Backups"
+msgstr "Automatische Updates"
+
 msgid "Automatic updates"
 msgstr "Automatische Updates"
 
@@ -308,6 +349,42 @@ msgid "BPM"
 msgstr "BPM"
 
 msgid "Back"
+msgstr "Zurück"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Backup Folder"
+msgstr "Musikordner"
+
+#, fuzzy
+#| msgid "Password"
+msgid "Backup Password"
+msgstr "Passwort"
+
+#, fuzzy
+#| msgid "Playback settings"
+msgid "Backup Settings"
+msgstr "Wiedergabeeinstellungen"
+
+msgid "Backup exported"
+msgstr ""
+
+#, fuzzy
+#| msgid "Server discovery failed: {error}"
+msgid "Backup failed: {error}"
+msgstr "Server-Erkennung fehlgeschlagen: {error}"
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Backup restored"
+msgstr "Sicherer Speicher"
+
+#, fuzzy
+#| msgid "Back"
+msgid "Backups"
 msgstr "Zurück"
 
 msgid "Blue"
@@ -340,6 +417,11 @@ msgstr "Übertragen"
 msgid "Change Secret Storage"
 msgstr "Anmeldedaten-Speicher ändern"
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Source"
+msgstr "Gespeicherte Quellen"
+
 msgid "Change"
 msgstr "Ändern"
 
@@ -350,6 +432,11 @@ msgstr[1] "Änderungen werden auf {count} Titel angewendet"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Änderungen werden nach einem Neustart von Rufin wirksam"
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose Folder"
+msgstr "Ordner auswählen"
 
 msgid "Choose a local music folder"
 msgstr "Lokalen Musikordner auswählen"
@@ -461,6 +548,11 @@ msgstr "Verbindung fehlgeschlagen"
 msgid "Connection"
 msgstr "Verbindung"
 
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Contents"
+msgstr "Kontextmenüs"
+
 msgid "Context Menus"
 msgstr "Kontextmenüs"
 
@@ -472,6 +564,11 @@ msgstr "Benachrichtigungen verwalten"
 
 msgid "Copy"
 msgstr "Kopie"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open folder: {error}"
+msgstr "Favoriten konnten nicht aktualisiert werden"
 
 msgid "Could not save diagnostic log"
 msgstr "Diagnoseprotokoll konnte nicht gespeichert werden"
@@ -508,6 +605,9 @@ msgstr "Ansicht anpassen"
 
 msgid "Cut"
 msgstr "Ausschneiden"
+
+msgid "Daily"
+msgstr ""
 
 msgid "Dance"
 msgstr "Dance"
@@ -569,8 +669,18 @@ msgstr "CD"
 msgid "Discography"
 msgstr "Diskografie"
 
+#, fuzzy
+#| msgid "Rich presence"
+msgid "Discord Rich Presence"
+msgstr "Rich Presence"
+
 msgid "Discord"
 msgstr "Discord"
+
+#, fuzzy
+#| msgid "is not empty"
+msgid "Do not encrypt"
+msgstr "ist nicht leer"
 
 msgid "Don't duplicate"
 msgstr "Duplikate vermeiden"
@@ -641,6 +751,9 @@ msgstr "In Titel einbetten"
 msgid "Enable EBU R128 Analysis?"
 msgstr "EBU-R128-Analyse aktivieren?"
 
+msgid "Enable automatic backups"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Equalizer einschalten"
 
@@ -652,6 +765,9 @@ msgstr "Privaten Modus aktivieren"
 
 msgid "Enable"
 msgstr "Aktivieren"
+
+msgid "Encrypt backups"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Geben Sie zuerst die API-Zugangsdaten ein"
@@ -677,10 +793,41 @@ msgstr "Seitenleiste ausklappen"
 msgid "Explore"
 msgstr "Entdecken"
 
+#, fuzzy
+#| msgid "Activity"
+msgid "Export Activity"
+msgstr "Aktivität"
+
+msgid "Export Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Export Playlist"
+msgstr "Smart-Playlist"
+
+msgid "Export format"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Export playlist"
+msgstr "Smart-Playlists"
+
+msgid "Export your listening history in Rufin"
+msgstr ""
+
+#, fuzzy
+#| msgid "Support"
+msgid "Export"
+msgstr "Support"
+
 msgid "External lyric lookup is off"
 msgstr "Externe Liedtextsuche ist deaktiviert"
 
-msgid "External lyric lookup"
+#, fuzzy
+#| msgid "External lyric lookup"
+msgid "External lyrics lookup"
 msgstr "Externe Songtext-Suche"
 
 msgid "External metadata lookup"
@@ -703,6 +850,11 @@ msgstr ""
 
 msgid "Favorite"
 msgstr "Favorit"
+
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorites and ratings"
+msgstr "Lieblingstitel"
 
 msgid "Favorites"
 msgstr "Favoriten"
@@ -736,7 +888,12 @@ msgstr "Schriftart"
 msgid "Font size (px)"
 msgstr "Schriftgröße (px)"
 
-msgid "Forget Server"
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+
+#, fuzzy
+#| msgid "Forget Server"
+msgid "Forget Source"
 msgstr "Server entfernen"
 
 msgid "Forward"
@@ -744,6 +901,9 @@ msgstr "Vorwärts"
 
 msgid "Found Servers"
 msgstr "Entdeckte Server"
+
+msgid "Friday"
+msgstr ""
 
 msgid "Full Bass"
 msgstr "Bass-Anhebung"
@@ -826,6 +986,9 @@ msgstr "Startseiten-Bereiche"
 msgid "Home"
 msgstr "Übersicht"
 
+msgid "Hour"
+msgstr ""
+
 msgid "Identify"
 msgstr "Erkennen"
 
@@ -841,6 +1004,14 @@ msgstr "Wenn Sie keine API-Schlüssel haben, erstellen Sie diese"
 
 msgid "Image"
 msgstr "Bild"
+
+msgid "Import Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Playlist"
+msgstr "Smart-Playlist"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Detaillierte Rufin-Diagnosedaten in dieser Sitzung einschließen"
@@ -865,9 +1036,6 @@ msgstr "Integrationen"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
-
-msgid "Jellyfin, Navidrome, or OpenSubsonic"
-msgstr "Jellyfin, Navidrome oder OpenSubsonic"
 
 msgid "Karaoke Playback"
 msgstr "Karaoke-Wiedergabe"
@@ -916,6 +1084,11 @@ msgstr "Last.fm"
 msgid "Layout"
 msgstr "Layout"
 
+#, fuzzy
+#| msgid "Opening Last.fm authorization..."
+msgid "Legacy authorization"
+msgstr "Last.fm-Autorisierung wird geöffnet..."
+
 msgid "Legacy"
 msgstr "Legacy"
 
@@ -963,9 +1136,15 @@ msgstr "Die Zuordnung lokaler Dateien ist nicht mehr verfügbar"
 
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
-msgstr[0] "Zuordnung lokaler Dateien: {matched} von {total} Serverpfad zugeordnet"
+msgstr[0] ""
+"Zuordnung lokaler Dateien: {matched} von {total} Serverpfad zugeordnet"
 msgstr[1] ""
 "Zuordnung lokaler Dateien: {matched} von {total} Serverpfaden zugeordnet"
+
+#, fuzzy
+#| msgid "Local File Access"
+msgid "Local imports and access"
+msgstr "Zugriff auf lokale Dateien"
 
 msgid "Local library"
 msgstr "Lokale Mediathek"
@@ -1024,6 +1203,11 @@ msgstr "Menü"
 msgid "Metadata editing is no longer available"
 msgstr "Die Bearbeitung von Metadaten ist nicht mehr verfügbar"
 
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Metadata editing requires Local access"
+msgstr "Die Bearbeitung von Metadaten ist nicht mehr verfügbar"
+
 msgid "Metadata source"
 msgstr "Metadatenquelle"
 
@@ -1032,6 +1216,9 @@ msgstr "Metadaten"
 
 msgid "Minimum year"
 msgstr "Mindestjahr"
+
+msgid "Monday"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Titel nach Stimmung"
@@ -1218,9 +1405,6 @@ msgstr "Noch keine Musik von diesem Künstler"
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
 
-msgid "No remote sources configured"
-msgstr "Keine externen Quellen konfiguriert"
-
 msgid "No servers found, add one manually or try again"
 msgstr ""
 "Keine Server gefunden. Füge einen Server manuell hinzu oder versuche es "
@@ -1250,6 +1434,9 @@ msgstr "Normalisierungsbereich"
 msgid "Not connected"
 msgstr "Nicht verbunden"
 
+msgid "Not needed for most servers"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr "Hier ist noch nichts"
 
@@ -1274,6 +1461,11 @@ msgstr "Wiedergabe-Benachrichtigungen"
 msgid "Now playing updates"
 msgstr "„Aktueller Titel“-Updates"
 
+#, fuzzy
+#| msgid "Number of songs"
+msgid "Number of backups"
+msgstr "Titelanzahl"
+
 msgid "Number of songs"
 msgstr "Titelanzahl"
 
@@ -1283,11 +1475,21 @@ msgstr "Nur bei einem selbst kontrollierten Server deaktivieren"
 msgid "Off"
 msgstr "Aus"
 
+#, fuzzy
+#| msgid "This device"
+msgid "On this device"
+msgstr "Dieses Gerät"
+
 msgid "Only played tracks"
 msgstr "Nur gespielte Titel"
 
 msgid "Only unplayed tracks"
 msgstr "Nur ungespielte Titel"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open Folder"
+msgstr "Ordner"
 
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
@@ -1327,6 +1529,9 @@ msgstr "Andere Veröffentlichungen"
 
 msgid "Overview"
 msgstr "Übersicht"
+
+msgid "Ownership of this item belongs to {source}"
+msgstr ""
 
 msgid "Password"
 msgstr "Passwort"
@@ -1443,6 +1648,9 @@ msgstr "Pop"
 
 msgid "Position"
 msgstr "Position"
+
+msgid "Prefer distinct track covers"
+msgstr ""
 
 msgid "Prefer server lyrics"
 msgstr "Server-Songtexte bevorzugen"
@@ -1646,14 +1854,19 @@ msgstr "Auf Standardeinstellungen zurücksetzen"
 msgid "Reset"
 msgstr "Zurücksetzen"
 
+#, fuzzy
+#| msgid "Restore Default"
+msgid "Restore User State"
+msgstr "Standardeinstellungen wiederherstellen"
+
+msgid "Restore"
+msgstr "Wiederherstellen"
+
 msgid "Resume"
 msgstr "Fortsetzen"
 
 msgid "Resync Library"
 msgstr "Bibliothek neu synchronisieren"
-
-msgid "Rich presence"
-msgstr "Rich Presence"
 
 msgid "Rock"
 msgstr "Rock"
@@ -1669,6 +1882,9 @@ msgstr "Rufin-Datenordner"
 
 msgid "Rule actions"
 msgstr "Regelaktionen"
+
+msgid "Saturday"
+msgstr ""
 
 msgid "Save Diagnostic Log"
 msgstr "Diagnoseprotokoll speichern"
@@ -1694,13 +1910,16 @@ msgstr "Zum erneuten Scannen speichern"
 msgid "Save"
 msgstr "Speichern"
 
-msgid "Saved Sources"
-msgstr "Gespeicherte Quellen"
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved logins"
+msgstr "Gespeichert unter"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] "Gespeicherte Zuordnung: {matched} von {total} Serverpfad zugeordnet"
-msgstr[1] "Gespeicherte Zuordnung: {matched} von {total} Serverpfaden zugeordnet"
+msgstr[1] ""
+"Gespeicherte Zuordnung: {matched} von {total} Serverpfaden zugeordnet"
 
 msgid "Saved to"
 msgstr "Gespeichert unter"
@@ -1716,6 +1935,18 @@ msgstr "Speichert Liedtexte in deiner Quelle"
 
 msgid "Saving..."
 msgstr "Wird gespeichert …"
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Scheduled Backup Failed"
+msgstr ""
+
+msgid "Scheduled Backup Password"
+msgstr ""
+
+msgid "Scheduled backup password saved"
+msgstr ""
 
 msgid "Search Again"
 msgstr "Erneut suchen"
@@ -1837,6 +2068,11 @@ msgstr "Server"
 msgid "Set the Discord activity type to Listening"
 msgstr "Discord-Aktivitätstyp auf „Hört gerade“ festlegen"
 
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Settings and sources"
+msgstr "Metadatenquelle"
+
 msgid "Shared secret"
 msgstr "Shared Secret"
 
@@ -1936,6 +2172,9 @@ msgstr "Smart-Playlist-Titel"
 msgid "Smart playlists"
 msgstr "Smart-Playlists"
 
+msgid "Some playlist entries could not be imported"
+msgstr ""
+
 msgid "Song title"
 msgstr "Songtitel"
 
@@ -1951,6 +2190,11 @@ msgstr "Sortieren"
 msgid "Source to use for cover images and song/artist links"
 msgstr "Quelle für Coverbilder und Titel-/Künstlerlinks"
 
+#, fuzzy
+#| msgid "Sources"
+msgid "Source"
+msgstr "Quellen"
+
 msgid "Sources"
 msgstr "Quellen"
 
@@ -1965,6 +2209,9 @@ msgstr "Berechnete Lautheit in unterstützten lokalen Musikdateien speichern"
 
 msgid "Stream quality"
 msgstr "Streaming-Qualität"
+
+msgid "Sunday"
+msgstr ""
 
 msgid "Switch Search/Favorites tabs"
 msgstr "Zwischen „Suche“ und „Favoriten“ wechseln"
@@ -2011,6 +2258,9 @@ msgstr "Dies ist nicht verfügbar"
 msgid "This source cannot edit this field"
 msgstr "Diese Quelle kann dieses Feld nicht bearbeiten"
 
+msgid "Thursday"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Titel (zusammengefasst)"
 
@@ -2046,6 +2296,9 @@ msgstr "Übersetzungssprache"
 
 msgid "Troubleshooting"
 msgstr "Fehlerbehebung"
+
+msgid "Tuesday"
+msgstr ""
 
 msgid "Turn off only for a server you control"
 msgstr "Nur bei einem selbst kontrollierten Server ausschalten"
@@ -2098,6 +2351,9 @@ msgstr "Verwende eine Zahl größer als null"
 msgid "Use different layout below a threshold width"
 msgstr "Anderes Layout unterhalb einer Mindestbreite verwenden"
 
+msgid "Use each track's own cover when available"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Höraktivität nutzen"
 
@@ -2148,6 +2404,15 @@ msgstr "Warten auf Verbindung"
 
 msgid "Waveform seekbar"
 msgstr "Wellenform-Fortschrittsbalken"
+
+msgid "Wednesday"
+msgstr ""
+
+msgid "Weekday"
+msgstr ""
+
+msgid "Weekly"
+msgstr ""
 
 msgid "Window"
 msgstr "Fenster"
@@ -2261,6 +2526,15 @@ msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
+#~ msgid "Add server"
+#~ msgstr "Server hinzufügen"
+
+#~ msgid "Jellyfin, Navidrome, or OpenSubsonic"
+#~ msgstr "Jellyfin, Navidrome oder OpenSubsonic"
+
+#~ msgid "No remote sources configured"
+#~ msgstr "Keine externen Quellen konfiguriert"
+
 #~ msgid ""
 #~ "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 #~ "{unmatched} unmatched of {total} track"
@@ -2316,9 +2590,6 @@ msgstr[1] "vor {count} Jahren"
 #~ msgid "Reset equalizer"
 #~ msgstr "Equalizer zurücksetzen"
 
-#~ msgid "Support"
-#~ msgstr "Support"
-
 #~ msgid "Use Template"
 #~ msgstr "Vorlage verwenden"
 
@@ -2337,12 +2608,6 @@ msgstr[1] "vor {count} Jahren"
 #~ msgid "Remove from playlist"
 #~ msgstr "Aus Playlist entfernen"
 
-#~ msgid "Restore Default"
-#~ msgstr "Standardeinstellungen wiederherstellen"
-
-#~ msgid "Restore"
-#~ msgstr "Wiederherstellen"
-
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2354,9 +2619,6 @@ msgstr[1] "vor {count} Jahren"
 
 #~ msgid "PipeWire"
 #~ msgstr "PipeWire"
-
-#~ msgid "Playback settings"
-#~ msgstr "Wiedergabeeinstellungen"
 
 #~ msgid "PulseAudio"
 #~ msgstr "PulseAudio"

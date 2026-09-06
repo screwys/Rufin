@@ -18,6 +18,15 @@ msgstr ""
 "X-Generator: Weblate 2026.9.dev0\n"
 
 msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+
+msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -42,6 +51,22 @@ msgstr ""
 "ručně stažené soubory zůstanou zachovány"
 
 msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+
+msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
@@ -49,8 +74,17 @@ msgstr ""
 "s rendererem"
 
 msgid ""
+"Rufin started with fresh user state because the saved database could not be "
+"used. Your settings and saved logins are unchanged."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 
 msgid ""
@@ -142,6 +176,11 @@ msgstr ""
 msgid "Add Rule"
 msgstr "Přidat pravidlo"
 
+#, fuzzy
+#| msgid "Sources"
+msgid "Add Source"
+msgstr "Zdroje"
+
 msgid "Add a matching server prefix"
 msgstr "Přidejte odpovídající prefix serveru"
 
@@ -161,9 +200,6 @@ msgstr "Přidat aktuální"
 
 msgid "Add folder"
 msgstr "Přidat složku"
-
-msgid "Add server"
-msgstr "Přidat server"
 
 msgid "Add to Favorites"
 msgstr "Přidat do oblíbených"
@@ -290,6 +326,11 @@ msgstr "Práh doplňování Auto DJ"
 msgid "Auto DJ"
 msgstr "Auto DJ"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic Backups"
+msgstr "Automatické aktualizace"
+
 msgid "Automatic updates"
 msgstr "Automatické aktualizace"
 
@@ -302,6 +343,42 @@ msgid "BPM"
 msgstr "BPM"
 
 msgid "Back"
+msgstr "Zpět"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Backup Folder"
+msgstr "Hudební složka"
+
+#, fuzzy
+#| msgid "Password"
+msgid "Backup Password"
+msgstr "Heslo"
+
+#, fuzzy
+#| msgid "Lyrics settings"
+msgid "Backup Settings"
+msgstr "Nastavení textu skladeb"
+
+msgid "Backup exported"
+msgstr ""
+
+#, fuzzy
+#| msgid "Server discovery failed: {error}"
+msgid "Backup failed: {error}"
+msgstr "Server se nepodařilo nalézt: {error}"
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Backup restored"
+msgstr "Bezpečné úložiště"
+
+#, fuzzy
+#| msgid "Back"
+msgid "Backups"
 msgstr "Zpět"
 
 msgid "Blue"
@@ -336,6 +413,11 @@ msgstr "Přenos"
 msgid "Change Secret Storage"
 msgstr "Změnit tajné úložiště"
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Source"
+msgstr "Uložené zdroje"
+
 msgid "Change"
 msgstr "Změnit"
 
@@ -347,6 +429,11 @@ msgstr[2] "Změny se vztahují na {count} skladeb"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose Folder"
+msgstr "Vyhledat složku"
 
 msgid "Choose a local music folder"
 msgstr "Vyberte místní hudební složku"
@@ -464,6 +551,11 @@ msgstr "Spojení selhalo"
 msgid "Connection"
 msgstr "Spojení"
 
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Contents"
+msgstr "Kontextové menu"
+
 msgid "Context Menus"
 msgstr "Kontextové menu"
 
@@ -475,6 +567,11 @@ msgstr "Správa oznámení"
 
 msgid "Copy"
 msgstr "Kopírovat"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open folder: {error}"
+msgstr "Nelze aktualizovat oblíbené"
 
 msgid "Could not save diagnostic log"
 msgstr "Nelze uložit diagnostický protokol"
@@ -511,6 +608,9 @@ msgstr "Přizpůsobit zobrazení"
 
 msgid "Cut"
 msgstr "Vyjmout"
+
+msgid "Daily"
+msgstr ""
 
 msgid "Dance"
 msgstr "Taneční hudba"
@@ -576,8 +676,18 @@ msgstr "Disk"
 msgid "Discography"
 msgstr "Diskografie"
 
+#, fuzzy
+#| msgid "Rich presence"
+msgid "Discord Rich Presence"
+msgstr "Rozšířené informace o přehrávání"
+
 msgid "Discord"
 msgstr "Discord"
+
+#, fuzzy
+#| msgid "is not empty"
+msgid "Do not encrypt"
+msgstr "není prázdné"
 
 msgid "Don't duplicate"
 msgstr "Neduplikujte"
@@ -656,6 +766,9 @@ msgstr "Skladby žánru"
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
+msgid "Enable automatic backups"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Zapnout equalizer"
 
@@ -666,6 +779,9 @@ msgid "Enable private mode"
 msgstr "Zapnout soukromý režim"
 
 msgid "Enable"
+msgstr ""
+
+msgid "Encrypt backups"
 msgstr ""
 
 msgid "Enter API credentials first"
@@ -692,10 +808,39 @@ msgstr "Rozbalit postranní panel"
 msgid "Explore"
 msgstr "Prozkoumat"
 
+msgid "Export Activity"
+msgstr ""
+
+msgid "Export Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Export Playlist"
+msgstr "Chytrý Playlist"
+
+msgid "Export format"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Export playlist"
+msgstr "Chytré playlisty"
+
+msgid "Export your listening history in Rufin"
+msgstr ""
+
+#, fuzzy
+#| msgid "Support"
+msgid "Export"
+msgstr "Uživatelská podpora"
+
 msgid "External lyric lookup is off"
 msgstr "Externí vyhledávání textů skladeb je vypnuté"
 
-msgid "External lyric lookup"
+#, fuzzy
+#| msgid "External lyric lookup"
+msgid "External lyrics lookup"
 msgstr "Externí vyhledávání textů skladeb"
 
 msgid "External metadata lookup"
@@ -715,6 +860,11 @@ msgstr "Oblíbené skladby, plus skladby z oblíbených alb a interpretů"
 
 msgid "Favorite"
 msgstr "Oblíbené"
+
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorites and ratings"
+msgstr "Oblíbené skladby"
 
 msgid "Favorites"
 msgstr "Oblíbené"
@@ -748,7 +898,12 @@ msgstr ""
 msgid "Font size (px)"
 msgstr ""
 
-msgid "Forget Server"
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+
+#, fuzzy
+#| msgid "Forget Server"
+msgid "Forget Source"
 msgstr "Zapomenout server"
 
 msgid "Forward"
@@ -756,6 +911,9 @@ msgstr "Vpřed"
 
 msgid "Found Servers"
 msgstr "Nalezené servery"
+
+msgid "Friday"
+msgstr ""
 
 msgid "Full Bass"
 msgstr "Posílení basů"
@@ -838,6 +996,9 @@ msgstr "Bloky domovské stránky"
 msgid "Home"
 msgstr "Domovská stránka"
 
+msgid "Hour"
+msgstr ""
+
 msgid "Identify"
 msgstr "Identifikovat"
 
@@ -854,6 +1015,14 @@ msgstr "Pokud nemáte klíče API, vytvořte si je"
 
 msgid "Image"
 msgstr "Obrázek"
+
+msgid "Import Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Playlist"
+msgstr "Chytrý Playlist"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Do této relace zahrňte podrobnou diagnostiku aplikace Rufin"
@@ -878,9 +1047,6 @@ msgstr "Integrace"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
-
-msgid "Jellyfin, Navidrome, or OpenSubsonic"
-msgstr "Jellyfin, Navidrome, nebo OpenSubsonic"
 
 #, fuzzy
 #| msgid "Playback"
@@ -930,6 +1096,11 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Rozvržení"
+
+#, fuzzy
+#| msgid "Opening Last.fm authorization..."
+msgid "Legacy authorization"
+msgstr "Zahájení autorizace na Last.fm..."
 
 msgid "Legacy"
 msgstr "Stará verze"
@@ -981,6 +1152,11 @@ msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
 msgstr[1] ""
 msgstr[2] ""
+
+#, fuzzy
+#| msgid "Local File Access"
+msgid "Local imports and access"
+msgstr "Přístup k místním souborům"
 
 msgid "Local library"
 msgstr "Místní knihovna"
@@ -1041,6 +1217,11 @@ msgstr "Menu"
 msgid "Metadata editing is no longer available"
 msgstr "Úprava metadat již není k dispozici"
 
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Metadata editing requires Local access"
+msgstr "Úprava metadat již není k dispozici"
+
 msgid "Metadata source"
 msgstr "Zdroj metadat"
 
@@ -1049,6 +1230,9 @@ msgstr "Metadata"
 
 msgid "Minimum year"
 msgstr "Minimální rok"
+
+msgid "Monday"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Skladby podle nálady"
@@ -1247,9 +1431,6 @@ msgstr "Tento interpret zatím nemá žádnou hudbu"
 msgid "No network devices found"
 msgstr "Nebyly nalezeny žádné sítové zařízení"
 
-msgid "No remote sources configured"
-msgstr "Nebyly nakonfigurovány žádné vzdálené zdroje"
-
 msgid "No servers found, add one manually or try again"
 msgstr ""
 "Nebyly nalezeny žádné servery. Přidejte jeden ručně nebo to zkuste znovu"
@@ -1278,6 +1459,9 @@ msgstr ""
 msgid "Not connected"
 msgstr "Není připojeno"
 
+msgid "Not needed for most servers"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr "Zatím tu nic není"
 
@@ -1302,6 +1486,11 @@ msgstr "Oznámení o tom, co se aktuálně přehrává"
 msgid "Now playing updates"
 msgstr "Aktualizace „Nyní se přehrává“"
 
+#, fuzzy
+#| msgid "Number of songs"
+msgid "Number of backups"
+msgstr "Počet skladeb"
+
 msgid "Number of songs"
 msgstr "Počet skladeb"
 
@@ -1311,11 +1500,21 @@ msgstr "Platí pouze pro server, který spravujete"
 msgid "Off"
 msgstr "Vypnuto"
 
+#, fuzzy
+#| msgid "This device"
+msgid "On this device"
+msgstr "Toto zařízení"
+
 msgid "Only played tracks"
 msgstr "Pouze přehrané skladby"
 
 msgid "Only unplayed tracks"
 msgstr "Pouze nepřehrané skladby"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open Folder"
+msgstr "Složka"
 
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
@@ -1357,6 +1556,9 @@ msgstr "Otevřít poznámky k verzi"
 
 msgid "Overview"
 msgstr "Přehled"
+
+msgid "Ownership of this item belongs to {source}"
+msgstr ""
 
 msgid "Password"
 msgstr "Heslo"
@@ -1473,6 +1675,9 @@ msgstr "Pop"
 
 msgid "Position"
 msgstr "Pozice"
+
+msgid "Prefer distinct track covers"
+msgstr ""
 
 msgid "Prefer server lyrics"
 msgstr "Upřednostnit texty skladeb ze serveru"
@@ -1683,14 +1888,17 @@ msgstr "Obnovit výchozí nastavení"
 msgid "Reset"
 msgstr "Obnovit"
 
+msgid "Restore User State"
+msgstr ""
+
+msgid "Restore"
+msgstr "Obnovit"
+
 msgid "Resume"
 msgstr "Pokračovat"
 
 msgid "Resync Library"
 msgstr "Znovu synchronizovat knihovnu"
-
-msgid "Rich presence"
-msgstr "Rozšířené informace o přehrávání"
 
 msgid "Rock"
 msgstr "Rock"
@@ -1706,6 +1914,9 @@ msgstr "Složka s daty aplikace Rufin"
 
 msgid "Rule actions"
 msgstr "Akce založené na pravidlech"
+
+msgid "Saturday"
+msgstr ""
 
 msgid "Save Diagnostic Log"
 msgstr "Uložit diagnostický protokol"
@@ -1733,8 +1944,10 @@ msgstr "Uložit pro opětovné naskenování"
 msgid "Save"
 msgstr "Uložit"
 
-msgid "Saved Sources"
-msgstr "Uložené zdroje"
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved logins"
+msgstr "Uložit do"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
@@ -1756,6 +1969,18 @@ msgstr ""
 
 msgid "Saving..."
 msgstr "Ukládání..."
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Scheduled Backup Failed"
+msgstr ""
+
+msgid "Scheduled Backup Password"
+msgstr ""
+
+msgid "Scheduled backup password saved"
+msgstr ""
 
 msgid "Search Again"
 msgstr "Hledat znovu"
@@ -1885,6 +2110,11 @@ msgstr "Servery"
 msgid "Set the Discord activity type to Listening"
 msgstr "Nastavte typ aktivity v Discordu na „Poslech“"
 
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Settings and sources"
+msgstr "Zdroj metadat"
+
 msgid "Shared secret"
 msgstr "Sdílený tajný klíč"
 
@@ -1986,6 +2216,9 @@ msgstr "Skladby v chytrém playlistu"
 msgid "Smart playlists"
 msgstr "Chytré playlisty"
 
+msgid "Some playlist entries could not be imported"
+msgstr ""
+
 msgid "Song title"
 msgstr "Název skladby"
 
@@ -2001,6 +2234,11 @@ msgstr "Seřadit"
 msgid "Source to use for cover images and song/artist links"
 msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"
 
+#, fuzzy
+#| msgid "Sources"
+msgid "Source"
+msgstr "Zdroje"
+
 msgid "Sources"
 msgstr "Zdroje"
 
@@ -2015,6 +2253,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Kvalita streamu"
+
+msgid "Sunday"
+msgstr ""
 
 msgid "Switch Search/Favorites tabs"
 msgstr ""
@@ -2063,6 +2304,9 @@ msgstr "Toto není dostupné"
 msgid "This source cannot edit this field"
 msgstr "Tento zdroj nemůže toto pole upravit"
 
+msgid "Thursday"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Název (sloučeno)"
 
@@ -2098,6 +2342,9 @@ msgstr "Jazyk překladu"
 
 msgid "Troubleshooting"
 msgstr "Řešení problémů"
+
+msgid "Tuesday"
+msgstr ""
 
 msgid "Turn off only for a server you control"
 msgstr "Vypněte pouze u serveru, který spravujete"
@@ -2152,6 +2399,9 @@ msgstr "Zadejte číslo větší než nula"
 msgid "Use different layout below a threshold width"
 msgstr "Při šířce menší než stanovená hodnota použít jiné rozložení"
 
+msgid "Use each track's own cover when available"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Využít funkci poslechu"
 
@@ -2201,6 +2451,15 @@ msgstr "Čekání na připojení"
 
 msgid "Waveform seekbar"
 msgstr "Indikátor průběhu ve formě vlnové křivky"
+
+msgid "Wednesday"
+msgstr ""
+
+msgid "Weekday"
+msgstr ""
+
+msgid "Weekly"
+msgstr ""
 
 msgid "Window"
 msgstr "Okno"
@@ -2322,6 +2581,15 @@ msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
 
+#~ msgid "Add server"
+#~ msgstr "Přidat server"
+
+#~ msgid "Jellyfin, Navidrome, or OpenSubsonic"
+#~ msgstr "Jellyfin, Navidrome, nebo OpenSubsonic"
+
+#~ msgid "No remote sources configured"
+#~ msgstr "Nebyly nakonfigurovány žádné vzdálené zdroje"
+
 #~ msgid ""
 #~ "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 #~ "{unmatched} unmatched of {total} track"
@@ -2383,9 +2651,6 @@ msgstr[2] "Před {count} roky"
 #~ msgid "Reset equalizer"
 #~ msgstr "Resetovat equalizer"
 
-#~ msgid "Support"
-#~ msgstr "Uživatelská podpora"
-
 #~ msgid "Go to Artist"
 #~ msgstr "Přejít na interpreta"
 
@@ -2401,9 +2666,6 @@ msgstr[2] "Před {count} roky"
 #~ msgid "Remove from playlist"
 #~ msgstr "Odebrat z playlistu"
 
-#~ msgid "Restore"
-#~ msgstr "Obnovit"
-
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2415,11 +2677,6 @@ msgstr[2] "Před {count} roky"
 
 #~ msgid "PipeWire"
 #~ msgstr "PipeWire"
-
-#, fuzzy
-#~| msgid "Lyrics settings"
-#~ msgid "Playback settings"
-#~ msgstr "Nastavení textu skladeb"
 
 #~ msgid "PulseAudio"
 #~ msgstr "PulseAudio"
