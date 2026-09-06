@@ -115,7 +115,10 @@ impl Database {
             .await;
         connection.close().await?;
         result?;
-        std::fs::File::open(&pending)?.sync_all()?;
+        std::fs::OpenOptions::new()
+            .write(true)
+            .open(&pending)?
+            .sync_all()?;
         std::fs::rename(&pending, destination)?;
         #[cfg(unix)]
         std::fs::File::open(parent)?.sync_all()?;

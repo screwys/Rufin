@@ -730,7 +730,7 @@ async fn real_schema_43_snapshot_relocates_and_preserves_owned_state() {
 }
 
 #[tokio::test]
-async fn schema_43_fixture_migrates_every_core_durable_family_and_selected_queue() {
+async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_selected_queue() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
     let mut schema_43 = connection(&path, true).await;
@@ -801,6 +801,13 @@ async fn schema_43_fixture_migrates_every_core_durable_family_and_selected_queue
     .await
     .expect("seed schema-43 durable families");
     schema_43.close().await.expect("close schema-43 fixture");
+
+    let relocated = directory.path().join("data/library.sqlite3");
+    Database::relocate(&path, &relocated)
+        .await
+        .expect("relocate schema-43 Store into data");
+    assert!(path.exists(), "relocation preserves the original Store");
+    let path = relocated;
 
     let configured = [SourceId::new("source-alpha"), SourceId::new("source-beta")];
     let selected = SourceId::new("source-beta");

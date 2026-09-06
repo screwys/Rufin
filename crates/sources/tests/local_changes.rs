@@ -372,12 +372,12 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
     let connected = Source::connect(SourceId::new("local-art"), SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root] })).await.unwrap();
     let (configuration, source, _) = connected.into_parts();
     let first = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap());
-    let uri = library::normalize_direct_media_uri(url::Url::from_file_path(&path).unwrap().as_str()).unwrap();
+    let uri = library::normalize_direct_media_uri(url::Url::from_file_path(path.canonicalize().unwrap()).unwrap().as_str()).unwrap();
     assert!(uri.contains("%25"));
     let row = database.track_row_by_uri(&uri, &ReadCancellation::new()).await.unwrap().unwrap();
     let binding: sources::LocalImageRef = serde_json::from_slice(row.artwork_binding.as_ref().unwrap()).unwrap();
     assert_eq!(binding.source_id(), source.source_id());
-    assert!(matches!(binding, sources::LocalImageRef::File { path, .. } if path == cover.to_string_lossy()));
+    assert!(matches!(binding, sources::LocalImageRef::File { path, .. } if path == cover.canonicalize().unwrap().to_string_lossy()));
     assert!(matches!(source.manual_refresh(&database, &configuration.name, &|_| {}, Arc::new(std::sync::atomic::AtomicBool::new(false))).await.unwrap(), ScanOutcome::Identical(_)));
     fs::write(&cover, b"changed image bytes").unwrap();
     assert!(matches!(source.apply_local_change(&database, first.source, LocalLiveChange::Paths { paths: vec![cover], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
@@ -400,7 +400,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
             tag.push_picture(lofty::picture::Picture::unchecked(vec![number as u8; 32]).pic_type(lofty::picture::PictureType::CoverFront).mime_type(lofty::picture::MimeType::Png).build());
         }
         tagged.save_to_path(&path, WriteOptions::default()).unwrap();
-        paths.push(path);
+        paths.push(path.canonicalize().unwrap());
     }
     let store = tempfile::tempdir().unwrap();
     let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
@@ -436,7 +436,7 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
         write_tagged_wav(&directory.join("track.wav"), "Track", "Artist", album, "Rock").unwrap();
         let cover = directory.join("cover.jpg");
         fs::write(&cover, album.as_bytes()).unwrap();
-        covers.push(cover);
+        covers.push(cover.canonicalize().unwrap());
     }
     let store = tempfile::tempdir().unwrap();
     let database = Database::open(store.path().join("library.sqlite")).await.unwrap();
@@ -468,7 +468,7 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
         fs::create_dir(&directory).unwrap();
         let path = directory.join("track.wav");
         write_tagged_wav(&path, "Track", "Artist", album, "Rock").unwrap();
-        paths.push(path);
+        paths.push(path.canonicalize().unwrap());
     }
     let cover = root.path().join("First/cover.jpg");
     fs::write(&cover, b"first image").unwrap();
@@ -497,7 +497,7 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
 #[tokio::test]
 async fn local_metadata_save_returns_publication_after_album_identity_changes() {
     let root = tempfile::tempdir().unwrap();
-    let path = root.path().join("café %.wav");
+    let path = root.path().canonicalize().unwrap().join("café %.wav");
     write_tagged_wav(&path, "Track", "Artist", "Before", "Rock").unwrap();
     let store = tempfile::tempdir().unwrap();
     let database = Database::open(store.path().join("library.sqlite")).await.unwrap();

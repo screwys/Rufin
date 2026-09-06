@@ -200,7 +200,10 @@ pub(crate) async fn import_released(
     source.close().await?;
     lookup.close().await?;
     database.close().await?;
-    std::fs::File::open(&pending)?.sync_all()?;
+    std::fs::OpenOptions::new()
+        .write(true)
+        .open(&pending)?
+        .sync_all()?;
     if input == destination {
         crate::db::preserve_store(input)?;
     }

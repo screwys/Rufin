@@ -786,7 +786,7 @@ mod tests {
     #[tokio::test]
     async fn removing_last_local_root_clears_catalog_without_deleting_files() {
         let directory = tempfile::tempdir().unwrap();
-        let audio = directory.path().join("track.wav");
+        let audio = directory.path().canonicalize().unwrap().join("track.wav");
         fs::write(&audio, silent_wav()).unwrap();
         let database = library::Database::open(directory.path().join("library.db"))
             .await
