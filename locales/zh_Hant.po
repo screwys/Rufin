@@ -19,6 +19,15 @@ msgstr ""
 "X-Generator: Weblate 2026.9.dev0\n"
 
 msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+
+msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr "從這個伺服器所下載的內容將被移除，且自動化規則會被關閉"
@@ -38,13 +47,38 @@ msgid ""
 msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
 
 msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+
+msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr "透過此裝置路由伺服器媒體，而非將來源網址提供給渲染器"
 
 msgid ""
+"Rufin started with fresh user state because the saved database could not be "
+"used. Your settings and saved logins are unchanged."
+msgstr ""
+
+msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
 "This can use significant CPU, battery, and network bandwidth for a long time."
+msgstr ""
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
 msgstr ""
 
 msgid ""
@@ -124,6 +158,11 @@ msgstr ""
 msgid "Add Rule"
 msgstr "新增規則"
 
+#, fuzzy
+#| msgid "Add a new source"
+msgid "Add Source"
+msgstr "新增來源"
+
 msgid "Add a matching server prefix"
 msgstr "新增匹配的伺服器前綴"
 
@@ -143,9 +182,6 @@ msgstr ""
 
 msgid "Add folder"
 msgstr "新增資料夾"
-
-msgid "Add server"
-msgstr "新增伺服器"
 
 msgid "Add to Favorites"
 msgstr "加入最愛"
@@ -270,6 +306,11 @@ msgstr "自動 DJ 補歌閾值"
 msgid "Auto DJ"
 msgstr "自動 DJ"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic Backups"
+msgstr "自動更新"
+
 msgid "Automatic updates"
 msgstr "自動更新"
 
@@ -280,6 +321,40 @@ msgid "BPM"
 msgstr "BPM"
 
 msgid "Back"
+msgstr "返回"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Backup Folder"
+msgstr "音樂資料夾"
+
+#, fuzzy
+#| msgid "Password"
+msgid "Backup Password"
+msgstr "密碼"
+
+#, fuzzy
+#| msgid "App settings"
+msgid "Backup Settings"
+msgstr "應用程式設定"
+
+msgid "Backup exported"
+msgstr ""
+
+msgid "Backup failed: {error}"
+msgstr ""
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Backup restored"
+msgstr "安全儲存空間"
+
+#, fuzzy
+#| msgid "Back"
+msgid "Backups"
 msgstr "返回"
 
 msgid "Blue"
@@ -312,6 +387,11 @@ msgstr ""
 msgid "Change Secret Storage"
 msgstr "變更敏感存儲空間"
 
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Change Source"
+msgstr "變更敏感存儲空間"
+
 msgid "Change"
 msgstr "變更"
 
@@ -321,6 +401,11 @@ msgstr[0] "套用變更到 {count} 個曲目"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose Folder"
+msgstr "定位資料夾"
 
 msgid "Choose a local music folder"
 msgstr "選擇本地音樂資料夾"
@@ -436,6 +521,11 @@ msgstr "連接失敗"
 msgid "Connection"
 msgstr "連接"
 
+#, fuzzy
+#| msgid "Continue"
+msgid "Contents"
+msgstr "繼續"
+
 msgid "Context Menus"
 msgstr ""
 
@@ -447,6 +537,11 @@ msgstr ""
 
 msgid "Copy"
 msgstr "複製"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open folder: {error}"
+msgstr "無法更新最愛"
 
 msgid "Could not save diagnostic log"
 msgstr "無法儲存診斷記錄"
@@ -483,6 +578,9 @@ msgstr ""
 
 msgid "Cut"
 msgstr "剪下"
+
+msgid "Daily"
+msgstr ""
 
 msgid "Dance"
 msgstr "舞曲"
@@ -548,8 +646,16 @@ msgstr "光碟"
 msgid "Discography"
 msgstr ""
 
+msgid "Discord Rich Presence"
+msgstr ""
+
 msgid "Discord"
 msgstr "Discord"
+
+#, fuzzy
+#| msgid "is not empty"
+msgid "Do not encrypt"
+msgstr "不為空"
 
 msgid "Don't duplicate"
 msgstr ""
@@ -628,6 +734,9 @@ msgstr "曲風曲目"
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
+msgid "Enable automatic backups"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "啟用等化器"
 
@@ -638,6 +747,9 @@ msgid "Enable private mode"
 msgstr "啟用無痕模式"
 
 msgid "Enable"
+msgstr ""
+
+msgid "Encrypt backups"
 msgstr ""
 
 msgid "Enter API credentials first"
@@ -664,10 +776,37 @@ msgstr "展開側邊欄"
 msgid "Explore"
 msgstr "探索"
 
+msgid "Export Activity"
+msgstr ""
+
+msgid "Export Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Export Playlist"
+msgstr "智慧播放清單"
+
+msgid "Export format"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Export playlist"
+msgstr "智慧播放清單"
+
+msgid "Export your listening history in Rufin"
+msgstr ""
+
+msgid "Export"
+msgstr ""
+
 msgid "External lyric lookup is off"
 msgstr "外部歌詞查找已關閉"
 
-msgid "External lyric lookup"
+#, fuzzy
+#| msgid "External lyric lookup"
+msgid "External lyrics lookup"
 msgstr "外部歌詞查找"
 
 msgid "External metadata lookup"
@@ -687,6 +826,11 @@ msgstr "最愛的曲目，包含最愛專輯與藝人的曲目"
 
 msgid "Favorite"
 msgstr "最愛"
+
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorites and ratings"
+msgstr "最愛的曲目"
 
 msgid "Favorites"
 msgstr "最愛"
@@ -718,13 +862,21 @@ msgstr ""
 msgid "Font size (px)"
 msgstr ""
 
-msgid "Forget Server"
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+
+#, fuzzy
+#| msgid "Forget Server"
+msgid "Forget Source"
 msgstr "遺忘伺服器"
 
 msgid "Forward"
 msgstr "前進"
 
 msgid "Found Servers"
+msgstr ""
+
+msgid "Friday"
 msgstr ""
 
 msgid "Full Bass"
@@ -808,6 +960,9 @@ msgstr ""
 msgid "Home"
 msgstr "首頁"
 
+msgid "Hour"
+msgstr ""
+
 msgid "Identify"
 msgstr "認證"
 
@@ -822,6 +977,14 @@ msgstr "如果你尚未擁有 API 金鑰，請建立它"
 
 msgid "Image"
 msgstr "圖像"
+
+msgid "Import Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Playlist"
+msgstr "智慧播放清單"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr ""
@@ -846,9 +1009,6 @@ msgstr ""
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
-
-msgid "Jellyfin, Navidrome, or OpenSubsonic"
-msgstr "Jellyfin、Navidrome 或 OpenSubsonic"
 
 #, fuzzy
 #| msgid "Playback"
@@ -896,6 +1056,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "佈局"
+
+msgid "Legacy authorization"
+msgstr ""
 
 msgid "Legacy"
 msgstr ""
@@ -945,6 +1108,9 @@ msgstr ""
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
+
+msgid "Local imports and access"
+msgstr ""
 
 msgid "Local library"
 msgstr "本地媒體庫"
@@ -1005,6 +1171,11 @@ msgstr "選單"
 msgid "Metadata editing is no longer available"
 msgstr "元資料已經不再能編輯"
 
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Metadata editing requires Local access"
+msgstr "元資料已經不再能編輯"
+
 msgid "Metadata source"
 msgstr "元資料來源"
 
@@ -1013,6 +1184,9 @@ msgstr "元資料"
 
 msgid "Minimum year"
 msgstr "最小年份"
+
+msgid "Monday"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "氛圍曲目"
@@ -1209,9 +1383,6 @@ msgstr "暫無此藝人的音樂"
 msgid "No network devices found"
 msgstr "找不到網路裝置"
 
-msgid "No remote sources configured"
-msgstr "未設置遠端來源"
-
 msgid "No servers found, add one manually or try again"
 msgstr ""
 
@@ -1239,6 +1410,9 @@ msgstr ""
 msgid "Not connected"
 msgstr "未連接"
 
+msgid "Not needed for most servers"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr "這裡目前還沒有任何東西"
 
@@ -1263,6 +1437,11 @@ msgstr "正在播放通知"
 msgid "Now playing updates"
 msgstr "正在播放更新"
 
+#, fuzzy
+#| msgid "Number of songs"
+msgid "Number of backups"
+msgstr "歌曲數量"
+
 msgid "Number of songs"
 msgstr "歌曲數量"
 
@@ -1272,11 +1451,21 @@ msgstr ""
 msgid "Off"
 msgstr "關閉"
 
+#, fuzzy
+#| msgid "This device"
+msgid "On this device"
+msgstr "此裝置"
+
 msgid "Only played tracks"
 msgstr "僅播放過的曲目"
 
 msgid "Only unplayed tracks"
 msgstr "僅未播放過的曲目"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open Folder"
+msgstr "資料夾"
 
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
@@ -1318,6 +1507,9 @@ msgstr "開啟更新記錄"
 
 msgid "Overview"
 msgstr "總覽"
+
+msgid "Ownership of this item belongs to {source}"
+msgstr ""
 
 msgid "Password"
 msgstr "密碼"
@@ -1432,6 +1624,9 @@ msgstr "流行"
 
 msgid "Position"
 msgstr "位置"
+
+msgid "Prefer distinct track covers"
+msgstr ""
 
 msgid "Prefer server lyrics"
 msgstr "偏好伺服器歌詞"
@@ -1640,13 +1835,16 @@ msgstr "重置回預設值"
 msgid "Reset"
 msgstr "重置"
 
+msgid "Restore User State"
+msgstr ""
+
+msgid "Restore"
+msgstr "復原"
+
 msgid "Resume"
 msgstr "繼續"
 
 msgid "Resync Library"
-msgstr ""
-
-msgid "Rich presence"
 msgstr ""
 
 msgid "Rock"
@@ -1662,6 +1860,9 @@ msgid "Rufin data folder"
 msgstr "Rufin 資料資料夾"
 
 msgid "Rule actions"
+msgstr ""
+
+msgid "Saturday"
 msgstr ""
 
 msgid "Save Diagnostic Log"
@@ -1688,8 +1889,10 @@ msgstr ""
 msgid "Save"
 msgstr "儲存"
 
-msgid "Saved Sources"
-msgstr ""
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved logins"
+msgstr "儲存至"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
@@ -1709,6 +1912,18 @@ msgstr ""
 
 msgid "Saving..."
 msgstr "正在儲存..."
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Scheduled Backup Failed"
+msgstr ""
+
+msgid "Scheduled Backup Password"
+msgstr ""
+
+msgid "Scheduled backup password saved"
+msgstr ""
 
 msgid "Search Again"
 msgstr "重新搜尋"
@@ -1836,6 +2051,11 @@ msgstr ""
 msgid "Set the Discord activity type to Listening"
 msgstr ""
 
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Settings and sources"
+msgstr "元資料來源"
+
 msgid "Shared secret"
 msgstr ""
 
@@ -1937,6 +2157,9 @@ msgstr "智慧播放清單曲目"
 msgid "Smart playlists"
 msgstr "智慧播放清單"
 
+msgid "Some playlist entries could not be imported"
+msgstr ""
+
 msgid "Song title"
 msgstr "曲名"
 
@@ -1952,6 +2175,11 @@ msgstr "排序"
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
+#, fuzzy
+#| msgid "No source"
+msgid "Source"
+msgstr "無來源"
+
 msgid "Sources"
 msgstr ""
 
@@ -1966,6 +2194,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "串流品質"
+
+msgid "Sunday"
+msgstr ""
 
 msgid "Switch Search/Favorites tabs"
 msgstr ""
@@ -2012,6 +2243,9 @@ msgstr ""
 msgid "This source cannot edit this field"
 msgstr ""
 
+msgid "Thursday"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "標題（已合併）"
 
@@ -2046,6 +2280,9 @@ msgid "Translation language"
 msgstr "翻譯語言"
 
 msgid "Troubleshooting"
+msgstr ""
+
+msgid "Tuesday"
 msgstr ""
 
 msgid "Turn off only for a server you control"
@@ -2099,6 +2336,9 @@ msgstr ""
 msgid "Use different layout below a threshold width"
 msgstr ""
 
+msgid "Use each track's own cover when available"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr ""
 
@@ -2145,6 +2385,15 @@ msgid "Waiting for connection"
 msgstr "正在等候連線"
 
 msgid "Waveform seekbar"
+msgstr ""
+
+msgid "Wednesday"
+msgstr ""
+
+msgid "Weekday"
+msgstr ""
+
+msgid "Weekly"
 msgstr ""
 
 msgid "Window"
@@ -2251,6 +2500,15 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
 
+#~ msgid "Add server"
+#~ msgstr "新增伺服器"
+
+#~ msgid "Jellyfin, Navidrome, or OpenSubsonic"
+#~ msgstr "Jellyfin、Navidrome 或 OpenSubsonic"
+
+#~ msgid "No remote sources configured"
+#~ msgstr "未設置遠端來源"
+
 #~ msgid "Checking..."
 #~ msgstr "檢查中..."
 
@@ -2274,6 +2532,3 @@ msgstr[0] "{count} 年之前"
 
 #~ msgid "Remove from playlist"
 #~ msgstr "從播放清單中移除"
-
-#~ msgid "Restore"
-#~ msgstr "復原"

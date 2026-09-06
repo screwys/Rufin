@@ -19,6 +19,15 @@ msgstr ""
 "X-Generator: Weblate 2026.9\n"
 
 msgid ""
+"Backup file may contain sensitive information. Do you want to set a password?"
+msgstr ""
+
+msgid ""
+"Backup restored with {entries} skipped playlist entries and {listens} "
+"skipped listens."
+msgstr ""
+
+msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
@@ -43,11 +52,32 @@ msgstr ""
 "загрузки останутся"
 
 msgid ""
+"Remove Local and its cached library from Rufin? Your music files will not be "
+"deleted."
+msgstr ""
+
+msgid ""
+"Replace the selected contents and remove these configured sources?\n"
+"{sources}\n"
+"Their retained user state and saved logins will remain unless selected."
+msgstr ""
+
+msgid ""
+"Replace the selected contents with this backup? Local folder permissions may "
+"need to be selected again."
+msgstr ""
+
+msgid ""
 "Route server media through this device instead of sharing provider URLs with "
 "the renderer"
 msgstr ""
 "Направлять медиапоток с сервера через это устройство, вместо того чтобы "
 "передавать URL-адреса провайдера устройству воспроизведения"
+
+msgid ""
+"Rufin started with fresh user state because the saved database could not be "
+"used. Your settings and saved logins are unchanged."
+msgstr ""
 
 msgid ""
 "Rufin will calculate the missing EBU R128 metadata for the whole library. "
@@ -56,6 +86,10 @@ msgstr ""
 "Rufin рассчитает недостающие метаданные EBU R128 для всей библиотеки. Это "
 "может потребовать значительных вычислительных ресурсов, заряда батареи и "
 "пропускной способности сети в течение длительного времени."
+
+msgid ""
+"Temporary library storage is in use. Changes may be lost when Rufin closes."
+msgstr ""
 
 msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
@@ -154,6 +188,11 @@ msgstr "Активность"
 msgid "Add Rule"
 msgstr "Добавить правило"
 
+#, fuzzy
+#| msgid "Source"
+msgid "Add Source"
+msgstr "Источник"
+
 msgid "Add a matching server prefix"
 msgstr "Введите соответствующий префикс сервера"
 
@@ -171,9 +210,6 @@ msgstr "Добавить текущий"
 
 msgid "Add folder"
 msgstr "Добавить папку"
-
-msgid "Add server"
-msgstr "Добавить сервер"
 
 msgid "Add to Favorites"
 msgstr "Добавить в избранное"
@@ -299,6 +335,11 @@ msgstr "Порог автоматического пополнения плей�
 msgid "Auto DJ"
 msgstr "Авто-DJ"
 
+#, fuzzy
+#| msgid "Automatic updates"
+msgid "Automatic Backups"
+msgstr "Автоматические обновления"
+
 msgid "Automatic updates"
 msgstr "Автоматические обновления"
 
@@ -309,6 +350,42 @@ msgid "BPM"
 msgstr "BPM"
 
 msgid "Back"
+msgstr "Назад"
+
+#, fuzzy
+#| msgid "Music Folder"
+msgid "Backup Folder"
+msgstr "Папка с музыкой"
+
+#, fuzzy
+#| msgid "Password"
+msgid "Backup Password"
+msgstr "Пароль"
+
+#, fuzzy
+#| msgid "Playback settings"
+msgid "Backup Settings"
+msgstr "Настройки воспроизведения"
+
+msgid "Backup exported"
+msgstr ""
+
+#, fuzzy
+#| msgid "Server discovery failed: {error}"
+msgid "Backup failed: {error}"
+msgstr "Не удалось выполнить поиск сервера: {error}"
+
+msgid "Backup restored with warnings: {warnings}"
+msgstr ""
+
+#, fuzzy
+#| msgid "Secure storage"
+msgid "Backup restored"
+msgstr "Безопасное хранилище"
+
+#, fuzzy
+#| msgid "Back"
+msgid "Backups"
 msgstr "Назад"
 
 msgid "Blue"
@@ -341,6 +418,11 @@ msgstr "Трансляция"
 msgid "Change Secret Storage"
 msgstr "Изменить секретное хранилище"
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Source"
+msgstr "Сохраненные источники"
+
 msgid "Change"
 msgstr "Изменить"
 
@@ -352,6 +434,9 @@ msgstr[2] "Изменения применяются к {count} трекам"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Изменения применяются после перезагрузки Rufin"
+
+msgid "Choose Folder"
+msgstr "Выбрать Папку"
 
 msgid "Choose a local music folder"
 msgstr "Выбрать локальную папку с музыкой"
@@ -463,6 +548,11 @@ msgstr "Соединение не удалось"
 msgid "Connection"
 msgstr "Соединение"
 
+#, fuzzy
+#| msgid "Context Menus"
+msgid "Contents"
+msgstr "Контекстные меню"
+
 msgid "Context Menus"
 msgstr "Контекстные меню"
 
@@ -474,6 +564,11 @@ msgstr "Управление уведомлениями"
 
 msgid "Copy"
 msgstr "Копировать"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not open folder: {error}"
+msgstr "Не удалось обновить список избранных"
 
 msgid "Could not save diagnostic log"
 msgstr "Не удалось сохранить диагностический журнал"
@@ -510,6 +605,9 @@ msgstr "Настроить отображение"
 
 msgid "Cut"
 msgstr "Вырезать"
+
+msgid "Daily"
+msgstr ""
 
 msgid "Dance"
 msgstr "Танцевальная"
@@ -571,8 +669,18 @@ msgstr "Диск"
 msgid "Discography"
 msgstr "Дискография"
 
+#, fuzzy
+#| msgid "Rich presence"
+msgid "Discord Rich Presence"
+msgstr "Расширенная информация о текущем воспроизведении"
+
 msgid "Discord"
 msgstr "Discord"
+
+#, fuzzy
+#| msgid "is not empty"
+msgid "Do not encrypt"
+msgstr "не пустой"
 
 msgid "Don't duplicate"
 msgstr "Не дублировать"
@@ -643,6 +751,9 @@ msgstr "Встроить в трек"
 msgid "Enable EBU R128 Analysis?"
 msgstr "Включить анализ EBU R128?"
 
+msgid "Enable automatic backups"
+msgstr ""
+
 msgid "Enable equalizer"
 msgstr "Включить эквалайзер"
 
@@ -654,6 +765,9 @@ msgstr "Включить приватный режим"
 
 msgid "Enable"
 msgstr "Активировать"
+
+msgid "Encrypt backups"
+msgstr ""
 
 msgid "Enter API credentials first"
 msgstr "Сначала введите данные для доступа к API"
@@ -679,10 +793,41 @@ msgstr "Развернуть боковую панель"
 msgid "Explore"
 msgstr "Изучить"
 
+#, fuzzy
+#| msgid "Activity"
+msgid "Export Activity"
+msgstr "Активность"
+
+msgid "Export Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Export Playlist"
+msgstr "Умный плейлист"
+
+msgid "Export format"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Export playlist"
+msgstr "Умные плейлисты"
+
+msgid "Export your listening history in Rufin"
+msgstr ""
+
+#, fuzzy
+#| msgid "Support"
+msgid "Export"
+msgstr "Поддержка"
+
 msgid "External lyric lookup is off"
 msgstr "Поиск текста песни в интернете отключен"
 
-msgid "External lyric lookup"
+#, fuzzy
+#| msgid "External lyric lookup"
+msgid "External lyrics lookup"
 msgstr "Поиск текста песни в интернете"
 
 msgid "External metadata lookup"
@@ -704,6 +849,11 @@ msgstr ""
 
 msgid "Favorite"
 msgstr "Избранное"
+
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorites and ratings"
+msgstr "Любимые треки"
 
 msgid "Favorites"
 msgstr "Избранные"
@@ -737,7 +887,12 @@ msgstr "Семейство шрифтов"
 msgid "Font size (px)"
 msgstr "Размер шрифта (в пикселях)"
 
-msgid "Forget Server"
+msgid "For this import or export only. Leave empty for an unencrypted archive."
+msgstr ""
+
+#, fuzzy
+#| msgid "Forget Server"
+msgid "Forget Source"
 msgstr "Забыть сервер"
 
 msgid "Forward"
@@ -745,6 +900,9 @@ msgstr "Вперед"
 
 msgid "Found Servers"
 msgstr "Найденные серверы"
+
+msgid "Friday"
+msgstr ""
 
 msgid "Full Bass"
 msgstr "Максимальные басы"
@@ -827,6 +985,9 @@ msgstr "Основные блоки"
 msgid "Home"
 msgstr "Главная"
 
+msgid "Hour"
+msgstr ""
+
 msgid "Identify"
 msgstr "Идентифицировать"
 
@@ -843,6 +1004,14 @@ msgstr "Если у вас нет ключей API, создайте их"
 
 msgid "Image"
 msgstr "Изображение"
+
+msgid "Import Backup"
+msgstr ""
+
+#, fuzzy
+#| msgid "Smart Playlist"
+msgid "Import Playlist"
+msgstr "Умный плейлист"
 
 msgid "Include detailed Rufin diagnostics in this session"
 msgstr "Включить подробную диагностику Rufin в текущей сессии"
@@ -867,9 +1036,6 @@ msgstr "Интеграции"
 
 msgid "Jellyfin"
 msgstr "Jellyfin"
-
-msgid "Jellyfin, Navidrome, or OpenSubsonic"
-msgstr "Jellyfin, Navidrome или OpenSubsonic"
 
 msgid "Karaoke Playback"
 msgstr "Воспроизведение караоке"
@@ -917,6 +1083,11 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Макет"
+
+#, fuzzy
+#| msgid "Opening Last.fm authorization..."
+msgid "Legacy authorization"
+msgstr "Запуск авторизации в Last.fm…"
 
 msgid "Legacy"
 msgstr "Устаревшая версия"
@@ -975,6 +1146,11 @@ msgstr[2] ""
 "Локальное сопоставление файлов: {matched} совпад из {total} с путями на "
 "сервере"
 
+#, fuzzy
+#| msgid "Local File Access"
+msgid "Local imports and access"
+msgstr "Доступ к локальным файлам"
+
 msgid "Local library"
 msgstr "Локальная библиотека"
 
@@ -1032,6 +1208,11 @@ msgstr "Меню"
 msgid "Metadata editing is no longer available"
 msgstr "Редактирование метаданных больше недоступно"
 
+#, fuzzy
+#| msgid "Metadata editing is no longer available"
+msgid "Metadata editing requires Local access"
+msgstr "Редактирование метаданных больше недоступно"
+
 msgid "Metadata source"
 msgstr "Источник метаданных"
 
@@ -1040,6 +1221,9 @@ msgstr "Метаданные"
 
 msgid "Minimum year"
 msgstr "Минимальный год"
+
+msgid "Monday"
+msgstr ""
 
 msgid "Mood tracks"
 msgstr "Треки по настроениям"
@@ -1226,9 +1410,6 @@ msgstr "Пока нет музыки от этого исполнителя"
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
 
-msgid "No remote sources configured"
-msgstr "Не настроено ни одного удаленного источника"
-
 msgid "No servers found, add one manually or try again"
 msgstr "Не найдено серверов, добавьте вручную или попробуйте еще раз"
 
@@ -1256,6 +1437,9 @@ msgstr "Область нормализации"
 msgid "Not connected"
 msgstr "Не подключено"
 
+msgid "Not needed for most servers"
+msgstr ""
+
 msgid "Nothing here yet"
 msgstr "Здесь пока ничего нет"
 
@@ -1280,6 +1464,11 @@ msgstr "Уведомления о текущем воспроизведении"
 msgid "Now playing updates"
 msgstr "Обновление информации о текущем воспроизводимом треке"
 
+#, fuzzy
+#| msgid "Number of songs"
+msgid "Number of backups"
+msgstr "Количество песен"
+
 msgid "Number of songs"
 msgstr "Количество песен"
 
@@ -1289,11 +1478,21 @@ msgstr "Отключайте только для сервера, которым 
 msgid "Off"
 msgstr "Выкл."
 
+#, fuzzy
+#| msgid "This device"
+msgid "On this device"
+msgstr "Это устройство"
+
 msgid "Only played tracks"
 msgstr "Только проигранные треки"
 
 msgid "Only unplayed tracks"
 msgstr "Только непрослушанные треки"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open Folder"
+msgstr "Папка"
 
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
@@ -1333,6 +1532,9 @@ msgstr "Другие выпуски"
 
 msgid "Overview"
 msgstr "Обзор"
+
+msgid "Ownership of this item belongs to {source}"
+msgstr ""
 
 msgid "Password"
 msgstr "Пароль"
@@ -1449,6 +1651,9 @@ msgstr "Поп"
 
 msgid "Position"
 msgstr "Позиция"
+
+msgid "Prefer distinct track covers"
+msgstr ""
 
 msgid "Prefer server lyrics"
 msgstr "Предпочитать тексты песен с сервера"
@@ -1653,14 +1858,19 @@ msgstr "Восстановить настройки по умолчанию"
 msgid "Reset"
 msgstr "Сбросить"
 
+#, fuzzy
+#| msgid "Restore Default"
+msgid "Restore User State"
+msgstr "Восстановить настройки по умолчанию"
+
+msgid "Restore"
+msgstr "Восстановить"
+
 msgid "Resume"
 msgstr "Возобновить"
 
 msgid "Resync Library"
 msgstr "Синхронизировать библиотеку"
-
-msgid "Rich presence"
-msgstr "Расширенная информация о текущем воспроизведении"
 
 msgid "Rock"
 msgstr "Рок"
@@ -1676,6 +1886,9 @@ msgstr "Папка с данными Rufin"
 
 msgid "Rule actions"
 msgstr "Действия с правилами"
+
+msgid "Saturday"
+msgstr ""
 
 msgid "Save Diagnostic Log"
 msgstr "Сохранить диагностический журнал"
@@ -1702,8 +1915,10 @@ msgstr "Сохранить для повторного сканирования"
 msgid "Save"
 msgstr "Сохранить"
 
-msgid "Saved Sources"
-msgstr "Сохраненные источники"
+#, fuzzy
+#| msgid "Saved to"
+msgid "Saved logins"
+msgstr "Сохранено в"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
@@ -1728,6 +1943,18 @@ msgstr "Сохраняет текст песни в источнике"
 
 msgid "Saving..."
 msgstr "Сохранение..."
+
+msgid "Schedule"
+msgstr ""
+
+msgid "Scheduled Backup Failed"
+msgstr ""
+
+msgid "Scheduled Backup Password"
+msgstr ""
+
+msgid "Scheduled backup password saved"
+msgstr ""
 
 msgid "Search Again"
 msgstr "Повторить поиск"
@@ -1849,6 +2076,11 @@ msgstr "Серверы"
 msgid "Set the Discord activity type to Listening"
 msgstr "Установите тип активности в Discord на \"Прослушивание\""
 
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Settings and sources"
+msgstr "Источник метаданных"
+
 msgid "Shared secret"
 msgstr "Общий секретный ключ"
 
@@ -1949,6 +2181,9 @@ msgstr "Треки умного плейлиста"
 msgid "Smart playlists"
 msgstr "Умные плейлисты"
 
+msgid "Some playlist entries could not be imported"
+msgstr ""
+
 msgid "Song title"
 msgstr "Название песни"
 
@@ -1963,6 +2198,9 @@ msgstr "Сортировать"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Источник для обложек и ссылок на песни/исполнителей"
+
+msgid "Source"
+msgstr "Источник"
 
 msgid "Sources"
 msgstr "Источники"
@@ -1980,6 +2218,9 @@ msgstr ""
 
 msgid "Stream quality"
 msgstr "Качество потока"
+
+msgid "Sunday"
+msgstr ""
 
 msgid "Switch Search/Favorites tabs"
 msgstr "Переключить вкладки «Поиск» и «Избранное»"
@@ -2026,6 +2267,9 @@ msgstr "Это недоступно"
 msgid "This source cannot edit this field"
 msgstr "Этот источник не может редактировать это поле"
 
+msgid "Thursday"
+msgstr ""
+
 msgid "Title (merged)"
 msgstr "Название (объединено)"
 
@@ -2061,6 +2305,9 @@ msgstr "Язык перевода"
 
 msgid "Troubleshooting"
 msgstr "Устранение неполадок"
+
+msgid "Tuesday"
+msgstr ""
 
 msgid "Turn off only for a server you control"
 msgstr "Отключайте только для сервера, которым вы управляете"
@@ -2115,6 +2362,9 @@ msgstr ""
 "Использовать другую схему расположения элементов, если ширина экрана меньше "
 "заданного значения"
 
+msgid "Use each track's own cover when available"
+msgstr ""
+
 msgid "Use listening activity"
 msgstr "Использовать данные о прослушиваниях"
 
@@ -2164,6 +2414,15 @@ msgstr "Ожидание подключения"
 
 msgid "Waveform seekbar"
 msgstr "Индикатор прогресса воспроизведения в виде волновой формы"
+
+msgid "Wednesday"
+msgstr ""
+
+msgid "Weekday"
+msgstr ""
+
+msgid "Weekly"
+msgstr ""
 
 msgid "Window"
 msgstr "Окно"
@@ -2285,6 +2544,15 @@ msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
 
+#~ msgid "Add server"
+#~ msgstr "Добавить сервер"
+
+#~ msgid "Jellyfin, Navidrome, or OpenSubsonic"
+#~ msgstr "Jellyfin, Navidrome или OpenSubsonic"
+
+#~ msgid "No remote sources configured"
+#~ msgstr "Не настроено ни одного удаленного источника"
+
 #~ msgid ""
 #~ "Saved mapping. {direct} direct, {prefix} prefix, {metadata} metadata, "
 #~ "{unmatched} unmatched of {total} track"
@@ -2349,9 +2617,6 @@ msgstr[2] "{count} лет назад"
 #~ msgid "Reset equalizer"
 #~ msgstr "Сбросить настройки эквалайзера"
 
-#~ msgid "Support"
-#~ msgstr "Поддержка"
-
 #~ msgid "Use Template"
 #~ msgstr "Использовать шаблон"
 
@@ -2370,12 +2635,6 @@ msgstr[2] "{count} лет назад"
 #~ msgid "Remove from playlist"
 #~ msgstr "Удалить из плейлиста"
 
-#~ msgid "Restore Default"
-#~ msgstr "Восстановить настройки по умолчанию"
-
-#~ msgid "Restore"
-#~ msgstr "Восстановить"
-
 #~ msgid "ALSA"
 #~ msgstr "ALSA"
 
@@ -2390,9 +2649,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "PipeWire"
 #~ msgstr "PipeWire"
-
-#~ msgid "Playback settings"
-#~ msgstr "Настройки воспроизведения"
 
 #~ msgid "PulseAudio"
 #~ msgstr "PulseAudio"
@@ -2481,9 +2737,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Checking {provider} server..."
 #~ msgstr "Проверка сервера {provider}…"
-
-#~ msgid "Choose Folder"
-#~ msgstr "Выбрать Папку"
 
 #~ msgid ""
 #~ "Choose a folder to scan and play locally from the computer (For flatpak "
@@ -2776,9 +3029,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Sort by"
 #~ msgstr "Сортировать по"
-
-#~ msgid "Source"
-#~ msgstr "Источник"
 
 #~ msgid "Spacious"
 #~ msgstr "Просторный"
