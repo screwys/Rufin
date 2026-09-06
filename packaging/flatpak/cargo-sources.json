@@ -145,6 +145,19 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
+        "url": "https://static.crates.io/crates/apple-cf/apple-cf-0.9.3.crate",
+        "sha256": "e7fd680cd0f3f02ee717b2014b26d18985c57b784384ba47213fcf8791e8c250",
+        "dest": "cargo/vendor/apple-cf-0.9.3"
+    },
+    {
+        "type": "inline",
+        "contents": "{\"package\": \"e7fd680cd0f3f02ee717b2014b26d18985c57b784384ba47213fcf8791e8c250\", \"files\": {}}",
+        "dest": "cargo/vendor/apple-cf-0.9.3",
+        "dest-filename": ".cargo-checksum.json"
+    },
+    {
+        "type": "archive",
+        "archive-type": "tar-gzip",
         "url": "https://static.crates.io/crates/apple-native-keyring-store/apple-native-keyring-store-1.0.2.crate",
         "sha256": "2b350bfd03649e07aa05c0a81b3e15934374e585c98204a57e20b9d49f49bb9a",
         "dest": "cargo/vendor/apple-native-keyring-store-1.0.2"
