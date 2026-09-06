@@ -50,13 +50,13 @@ async fn one_local_path_republishes_only_its_component() {
         .expect("before order");
     assert_eq!(before.len(), 2);
 
-    write_silent_wav(&first, 2).expect("edit one WAV");
+    write_silent_wav(&second, 2).expect("edit second WAV");
     let changed = source
         .apply_local_change(
             &database,
             first_publication.source,
             LocalLiveChange::Paths {
-                paths: vec![first.clone()],
+                paths: vec![second.clone()],
                 rename: None,
             },
         )

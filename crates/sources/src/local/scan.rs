@@ -1191,7 +1191,11 @@ async fn path_reuse(
                 }
             }
         } else if let Some(stored) = current.iter().find(|stored| {
-            stored.device_id == observation.device_id && stored.inode == observation.inode
+            stored.path == observation.path
+                || (observation.device_id.is_some()
+                    && observation.inode.is_some()
+                    && stored.device_id == observation.device_id
+                    && stored.inode == observation.inode)
         }) && let Some(object_id) = stored.track_object_id.as_ref()
         {
             reuse.renamed.insert(observation.path, object_id.clone());

@@ -411,16 +411,15 @@ fn prepare_file(
     })
 }
 
-fn commit_batch(prepared: Vec<PreparedFile>) -> Result<(), SourceMetadataError> {
-    let mut committed = 0;
-    for file in &prepared {
-        if let Err(error) = replace(file.temp.as_ref(), &file.target) {
-            for rollback in prepared[..committed].iter().rev() {
-                let _ = replace(rollback.temp.as_ref(), &rollback.target);
+fn commit_batch(mut prepared: Vec<PreparedFile>) -> Result<(), SourceMetadataError> {
+    for index in 0..prepared.len() {
+        let file = &mut prepared[index];
+        if let Err(error) = replace(&mut file.temp, &file.target) {
+            for rollback in prepared[..index].iter_mut().rev() {
+                let _ = replace(&mut rollback.temp, &rollback.target);
             }
             return Err(error);
         }
-        committed += 1;
     }
     for file in &prepared {
         if let Some(parent) = file.target.parent() {
@@ -472,10 +471,10 @@ fn replace_name(value: &str, previous: &str, replacement: &str) -> String {
 }
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
-fn replace(replacement: &Path, target: &Path) -> Result<(), SourceMetadataError> {
+fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), SourceMetadataError> {
     rustix::fs::renameat_with(
         rustix::fs::CWD,
-        replacement,
+        &**replacement,
         rustix::fs::CWD,
         target,
         rustix::fs::RenameFlags::EXCHANGE,
@@ -484,22 +483,31 @@ fn replace(replacement: &Path, target: &Path) -> Result<(), SourceMetadataError>
 }
 
 #[cfg(target_os = "windows")]
-fn replace(replacement: &Path, target: &Path) -> Result<(), SourceMetadataError> {
-    let replacement = replacement
-        .to_str()
-        .ok_or(SourceMetadataError::Unavailable)?;
+fn replace(replacement: &mut tempfile::TempPath, target: &Path) -> Result<(), SourceMetadataError> {
+    let backup = tempfile::Builder::new()
+        .prefix(".rufin-metadata-")
+        .tempfile_in(target.parent().ok_or(SourceMetadataError::Unavailable)?)
+        .map_err(write_error)?
+        .into_temp_path();
     let target = target.to_str().ok_or(SourceMetadataError::Unavailable)?;
     winsafe::ReplaceFile(
         target,
-        replacement,
-        None,
+        replacement
+            .to_str()
+            .ok_or(SourceMetadataError::Unavailable)?,
+        Some(backup.to_str().ok_or(SourceMetadataError::Unavailable)?),
         winsafe::co::REPLACEFILE::default(),
     )
-    .map_err(write_error)
+    .map_err(write_error)?;
+    *replacement = backup;
+    Ok(())
 }
 
 #[cfg(not(any(target_os = "linux", target_os = "macos", target_os = "windows")))]
-fn replace(_replacement: &Path, _target: &Path) -> Result<(), SourceMetadataError> {
+fn replace(
+    _replacement: &mut tempfile::TempPath,
+    _target: &Path,
+) -> Result<(), SourceMetadataError> {
     Err(SourceMetadataError::Unavailable)
 }
 
@@ -770,7 +778,11 @@ mod tests {
         let second_original = directory.path().join("second.original");
         let prepared = [&first, &second]
             .into_iter()
-            .map(|path| prepare_file(path, Some("wav"), None, |_, _| {}))
+            .map(|path| {
+                prepare_file(path, Some("wav"), None, |tag, _| {
+                    tag.set_title("After".into())
+                })
+            })
             .collect::<Result<Vec<_>, _>>()
             .expect("prepared metadata files");
         fs::rename(&second, &second_original).expect("make second replacement fail");

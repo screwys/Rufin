@@ -1221,7 +1221,7 @@ async fn older_source_scoped_playlist_ids_remain_distinct_global_playlists() {
 async fn schema_40_store_migrates_into_current_schema() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
-    create_legacy_store(&path).await;
+    let media = create_legacy_store(&path).await;
     let database = Database::open_configured(
         &path,
         &[SourceId::new("legacy-source")],
@@ -1287,8 +1287,8 @@ async fn schema_40_store_migrates_into_current_schema() {
         .unwrap(),
         (
             uri,
-            "/music/track.flac".into(),
-            "file:///music/track.flac".into()
+            media.to_str().unwrap().into(),
+            url::Url::from_file_path(&media).unwrap().to_string()
         )
     );
     assert_eq!(
@@ -1494,7 +1494,7 @@ async fn not_a_database_is_preserved_and_rebuilt_automatically() {
     );
 }
 
-async fn create_legacy_store(path: &Path) {
+async fn create_legacy_store(path: &Path) -> std::path::PathBuf {
     let mut connection = connection(path, true).await;
     sqlx::raw_sql(
         "PRAGMA application_id=1381320270;
@@ -1745,7 +1745,30 @@ async fn create_legacy_store(path: &Path) {
     .execute(&mut connection)
     .await
     .expect("create legacy Store fixture");
+    let root = path.parent().unwrap();
+    let media = root.join("track.flac");
+    let cue = root.join("album.cue");
+    for (query, secondary_path) in [
+        (
+            "UPDATE tracks SET source_path=?1,cue_path=?2",
+            cue.as_path(),
+        ),
+        ("UPDATE local_files SET path=?1,root=?2", root),
+        ("UPDATE local_access_files SET path=?1,root=?2", root),
+        (
+            "UPDATE playback_queues SET rows_json=json_set(rows_json,'$.fallback_tracks[0].source_path',?1,'$.fallback_tracks[0].cue.cue_path',?2)",
+            cue.as_path(),
+        ),
+    ] {
+        sqlx::query(query)
+            .bind(media.to_str().unwrap())
+            .bind(secondary_path.to_str().unwrap())
+            .execute(&mut connection)
+            .await
+            .expect("set native legacy file paths");
+    }
     connection.close().await.expect("close legacy fixture");
+    media
 }
 
 #[tokio::test]
@@ -2078,7 +2101,7 @@ async fn missing_required_index_column_opens_fresh_without_catalog_rescan() {
 async fn legacy_local_cue_queue_uses_the_same_identity_as_favorites() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite");
-    create_legacy_store(&path).await;
+    let media = create_legacy_store(&path).await;
     let mut raw = connection(&path, false).await;
     sqlx::raw_sql(
         "UPDATE source_libraries SET source_id='local:server:library';
@@ -2095,7 +2118,12 @@ async fn legacy_local_cue_queue_uses_the_same_identity_as_favorites() {
         .await
         .unwrap();
     let mut raw = connection(&path, false).await;
-    let uri = library::cue_media_uri("legacy-track", "file:///music/track.flac", 1000, 181000);
+    let uri = library::cue_media_uri(
+        "legacy-track",
+        url::Url::from_file_path(&media).unwrap().as_str(),
+        1000,
+        181000,
+    );
     assert_eq!(
         sqlx::query_scalar::<_, String>(
             "SELECT media_uri FROM queue_occurrences ORDER BY position"
