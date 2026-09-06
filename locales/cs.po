@@ -588,6 +588,9 @@ msgstr "Nelze načíst tuto složku"
 msgid "Couldn't search for lyrics"
 msgstr "Nepodařilo se vyhledat text skladby"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Vytvořit"
 
@@ -712,6 +715,9 @@ msgstr "Stáhnout"
 
 msgid "Downloaded"
 msgstr "Staženo"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "Stahování"
@@ -1899,6 +1905,9 @@ msgstr "Pokračovat"
 
 msgid "Resync Library"
 msgstr "Znovu synchronizovat knihovnu"
+
+msgid "Retry"
+msgstr ""
 
 msgid "Rock"
 msgstr "Rock"

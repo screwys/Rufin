@@ -534,6 +534,9 @@ msgstr ""
 msgid "Couldn't search for lyrics"
 msgstr ""
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr ""
 
@@ -649,6 +652,9 @@ msgid "Download"
 msgstr ""
 
 msgid "Downloaded"
+msgstr ""
+
+msgid "Downloading Japanese dictionary..."
 msgstr ""
 
 msgid "Downloading"
@@ -1764,6 +1770,9 @@ msgid "Resume"
 msgstr ""
 
 msgid "Resync Library"
+msgstr ""
+
+msgid "Retry"
 msgstr ""
 
 msgid "Rock"

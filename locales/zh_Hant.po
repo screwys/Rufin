@@ -558,6 +558,9 @@ msgstr "無法載入此資料夾"
 msgid "Couldn't search for lyrics"
 msgstr "無法搜尋到歌詞"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "建立"
 
@@ -680,6 +683,9 @@ msgstr "下載"
 
 msgid "Downloaded"
 msgstr "已下載"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "正在下載"
@@ -1845,6 +1851,9 @@ msgid "Resume"
 msgstr "繼續"
 
 msgid "Resync Library"
+msgstr ""
+
+msgid "Retry"
 msgstr ""
 
 msgid "Rock"

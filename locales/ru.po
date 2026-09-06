@@ -585,6 +585,9 @@ msgstr "Не удалось загрузить эту папку"
 msgid "Couldn't search for lyrics"
 msgstr "Не удалось найти текст песни"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Создать"
 
@@ -705,6 +708,9 @@ msgstr "Загрузить"
 
 msgid "Downloaded"
 msgstr "Загружено"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "Загрузка"
@@ -1871,6 +1877,9 @@ msgstr "Возобновить"
 
 msgid "Resync Library"
 msgstr "Синхронизировать библиотеку"
+
+msgid "Retry"
+msgstr ""
 
 msgid "Rock"
 msgstr "Рок"

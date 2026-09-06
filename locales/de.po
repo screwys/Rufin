@@ -585,6 +585,9 @@ msgstr "Dieser Ordner konnte nicht geladen werden"
 msgid "Couldn't search for lyrics"
 msgstr "Es konnte nicht nach Liedtexten gesucht werdenSongtexte durchsuchen"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Erstellen"
 
@@ -705,6 +708,9 @@ msgstr "Download"
 
 msgid "Downloaded"
 msgstr "Heruntergeladen"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "Wird heruntergeladen"
@@ -1867,6 +1873,9 @@ msgstr "Fortsetzen"
 
 msgid "Resync Library"
 msgstr "Bibliothek neu synchronisieren"
+
+msgid "Retry"
+msgstr ""
 
 msgid "Rock"
 msgstr "Rock"

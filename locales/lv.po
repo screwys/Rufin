@@ -586,6 +586,9 @@ msgstr "Nevarēja ielādēt šo mapi"
 msgid "Couldn't search for lyrics"
 msgstr "Nevarēja atrast tekstus"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Izveidot"
 
@@ -706,6 +709,9 @@ msgstr "Lejupielādēt"
 
 msgid "Downloaded"
 msgstr "Lejupielādēts"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "Lejupielādē"
@@ -1869,6 +1875,9 @@ msgstr "Turpināt"
 
 msgid "Resync Library"
 msgstr "Pārsinhronizēt bibliotēku"
+
+msgid "Retry"
+msgstr ""
 
 msgid "Rock"
 msgstr "Roks"

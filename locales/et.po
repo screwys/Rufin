@@ -578,6 +578,9 @@ msgstr "Selle kausta laadimine ei õnnestunud"
 msgid "Couldn't search for lyrics"
 msgstr "Laulusõnade otsimine ei õnenstunud"
 
+msgid "Couldn’t download Japanese dictionary"
+msgstr ""
+
 msgid "Create"
 msgstr "Loo"
 
@@ -698,6 +701,9 @@ msgstr "Laadi alla"
 
 msgid "Downloaded"
 msgstr "Allalaaditud"
+
+msgid "Downloading Japanese dictionary..."
+msgstr ""
 
 msgid "Downloading"
 msgstr "Allalaadimisel"
@@ -1854,6 +1860,9 @@ msgstr "Jätka"
 
 msgid "Resync Library"
 msgstr "Sünkrooni muusikakogu uuesti"
+
+msgid "Retry"
+msgstr ""
 
 msgid "Rock"
 msgstr "Rokkmuusika"
