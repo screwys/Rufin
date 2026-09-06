@@ -7,10 +7,7 @@ use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::time::Duration;
 
 use sqlx::pool::PoolConnection;
-use sqlx::sqlite::{
-    SqliteConnectOptions, SqliteConnection, SqliteJournalMode, SqlitePool, SqlitePoolOptions,
-    SqliteSynchronous,
-};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection, SqlitePool, SqlitePoolOptions};
 use sqlx::{Connection, Sqlite};
 use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 
@@ -202,9 +199,11 @@ impl Database {
         configured: &[crate::SourceId],
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<()> {
-        let mut reader = SqliteConnection::connect_with(&reader_options(input)).await?;
-        let version = schema::pragma(&mut reader, "user_version").await?;
+        let mut reader =
+            SqliteConnection::connect_with(&base_options(input).read_only(true)).await?;
+        let version = schema::pragma(&mut reader, "user_version").await;
         reader.close().await?;
+        let version = version?;
         if (1..=43).contains(&version) {
             crate::migration::import_released(input, destination, configured, selected).await?;
         } else if input != destination {
@@ -401,21 +400,31 @@ impl Database {
 }
 
 pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> {
-    Ok(SqliteConnection::connect_with(&writer_options(path)).await?)
-}
-
-fn writer_options(path: &Path) -> SqliteConnectOptions {
-    base_options(path)
+    let options = base_options(path)
         .create_if_missing(true)
-        .page_size(PAGE_SIZE_BYTES)
-        .journal_mode(SqliteJournalMode::Wal)
-        .synchronous(SqliteSynchronous::Normal)
         .statement_cache_capacity(WRITER_STATEMENTS)
-        .thread_name(|id| format!("rufin-library-writer-{id}"))
+        .thread_name(|id| format!("rufin-library-writer-{id}"));
+    let mut connection = SqliteConnection::connect_with(&options).await?;
+    // Own the handle before configuring it so failures can await its release before replacement.
+    let result = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
+        "PRAGMA page_size={PAGE_SIZE_BYTES}; PRAGMA journal_mode=WAL;
+         PRAGMA synchronous=NORMAL; PRAGMA cache_size=-{PAGE_CACHE_KIB};
+         PRAGMA temp_store=FILE; PRAGMA mmap_size=0;"
+    )))
+    .execute(&mut connection)
+    .await;
+    if let Err(error) = result {
+        connection.close().await?;
+        return Err(error.into());
+    }
+    Ok(connection)
 }
 
 fn reader_options(path: &Path) -> SqliteConnectOptions {
     base_options(path)
+        .pragma("cache_size", (-PAGE_CACHE_KIB).to_string())
+        .pragma("temp_store", "FILE")
+        .pragma("mmap_size", "0")
         .with_regexp()
         .read_only(true)
         .create_if_missing(false)
@@ -428,9 +437,6 @@ fn base_options(path: &Path) -> SqliteConnectOptions {
         .filename(path)
         .shared_cache(false)
         .busy_timeout(BUSY_TIMEOUT)
-        .pragma("cache_size", (-PAGE_CACHE_KIB).to_string())
-        .pragma("temp_store", "FILE")
-        .pragma("mmap_size", "0")
         .command_buffer_size(COMMAND_BUFFER)
         .row_buffer_size(ROW_BUFFER)
 }

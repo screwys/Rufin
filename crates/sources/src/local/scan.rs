@@ -17,7 +17,7 @@ use crate::{SourceError, SourceResult};
 
 const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-const LOCAL_PARSER_VERSION: u32 = 9;
+const LOCAL_PARSER_VERSION: u32 = 10;
 
 pub(super) async fn publish_metadata_paths(
     database: &library::Database,
