@@ -1,0 +1,375 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20" />
+  <requires lib="libadwaita" version="1.9" />
+  <object class="GtkStringList" id="authentication_options">
+    <items>
+      <item translatable="yes">Username and password</item>
+      <item translatable="yes">Guest / public access</item>
+      <item translatable="yes">Bearer token</item>
+    </items>
+  </object>
+  <object class="GtkBox" id="fields">
+    <property name="spacing">12</property>
+    <property name="homogeneous">true</property>
+    <property name="hexpand">true</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="hexpand">true</property>
+        <child>
+          <object class="AdwEntryRow" id="name">
+            <property name="title" translatable="yes">Name</property>
+            <style>
+              <class name="compact-field-row" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="hexpand">true</property>
+        <child>
+          <object class="AdwEntryRow" id="url">
+            <property name="title" translatable="yes">Server Address</property>
+            <style>
+              <class name="compact-field-row" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+  <object class="GtkBox" id="section">
+    <property name="orientation">vertical</property>
+    <property name="spacing">8</property>
+    <child>
+      <object class="AdwPreferencesGroup" id="fields_group" />
+    </child>
+    <child>
+      <object class="GtkBox">
+        <property name="spacing">8</property>
+        <child>
+          <object class="GtkButton" id="nextcloud">
+            <property name="tooltip-text" translatable="yes">Enter your Nextcloud server address to sign in through your browser</property>
+            <property name="child">
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Sign in with Nextcloud</property>
+                <property name="wrap">true</property>
+                <property name="wrap-mode">word-char</property>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="find_shares">
+            <property name="label" translatable="yes">Find shares</property>
+            <property name="tooltip-text" translatable="yes">List shared folders on this server using the entered credentials or guest access</property>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <child>
+          <object class="AdwComboRow" id="share">
+            <property name="title" translatable="yes">Share</property>
+            <property name="visible">false</property>
+            <property name="model">
+              <object class="GtkStringList" id="share_options" />
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwComboRow" id="authentication">
+            <property name="title" translatable="yes">Authentication</property>
+            <property name="model">authentication_options</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwEntryRow" id="username">
+            <property name="title" translatable="yes">Username</property>
+            <style>
+              <class name="compact-field-row" />
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPasswordEntryRow" id="password">
+            <property name="title" translatable="yes">Password</property>
+            <style>
+              <class name="compact-field-row" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="saved_credential_hint">
+        <property name="label" translatable="yes">Leave the password empty to keep the saved credential</property>
+        <property name="xalign">0</property>
+        <property name="wrap">true</property>
+        <style>
+          <class name="dim-label" />
+        </style>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="actions">
+        <property name="spacing">8</property>
+        <property name="halign">end</property>
+        <child>
+          <object class="GtkButton" id="connect">
+            <property name="label" translatable="yes">Connect</property>
+            <style>
+              <class name="suggested-action" />
+              <class name="pill" />
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="GtkButton" id="save">
+            <property name="child">
+              <object class="GtkLabel">
+                <property name="label" translatable="yes">Save Server Settings</property>
+                <property name="wrap">true</property>
+                <property name="wrap-mode">word-char</property>
+              </object>
+            </property>
+            <style>
+              <class name="suggested-action" />
+            </style>
+          </object>
+        </child>
+      </object>
+    </child>
+    <child>
+      <object class="GtkBox" id="status_host">
+        <property name="orientation">vertical</property>
+      </object>
+    </child>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Connection options</property>
+        <child>
+          <object class="AdwEntryRow" id="domain">
+            <property name="title" translatable="yes">SMB Domain</property>
+            <style>
+              <class name="compact-field-row" />
+            </style>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="encryption">
+            <property name="title" translatable="yes">Require SMB encryption</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="cert_verify">
+            <property name="title" translatable="yes">Verify server certificate</property>
+            <property name="active">true</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow" id="folders_group">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Selected folders</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">One folder path per line; leave empty to include the whole collection</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <style>
+                      <class name="dim-label" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="min-content-height">32</property>
+                    <property name="max-content-height">160</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="child">
+                      <object class="GtkTextView" id="folders">
+                        <property name="wrap-mode">word-char</property>
+                        <property name="accepts-tab">false</property>
+                        <property name="monospace">true</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Selected folders</property>
+                        </accessibility>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow" id="alternates_group">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Alternate addresses</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">One address per line, pointing to the same collection</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <style>
+                      <class name="dim-label" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="min-content-height">32</property>
+                    <property name="max-content-height">160</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="child">
+                      <object class="GtkTextView" id="alternates">
+                        <property name="wrap-mode">word-char</property>
+                        <property name="accepts-tab">false</property>
+                        <property name="monospace">true</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Alternate addresses</property>
+                        </accessibility>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow" id="headers_group">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Custom HTTP headers</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="AdwSwitchRow" id="replace_headers">
+                    <property name="title" translatable="yes">Replace saved custom headers</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">One Name: Value header per line</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                    <style>
+                      <class name="dim-label" />
+                    </style>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="min-content-height">32</property>
+                    <property name="max-content-height">160</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="child">
+                      <object class="GtkTextView" id="headers">
+                        <property name="wrap-mode">word-char</property>
+                        <property name="accepts-tab">false</property>
+                        <property name="monospace">true</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Custom HTTP headers</property>
+                        </accessibility>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwPreferencesRow" id="certificate_group">
+            <property name="activatable">false</property>
+            <property name="selectable">false</property>
+            <property name="child">
+              <object class="GtkBox">
+                <property name="orientation">vertical</property>
+                <property name="spacing">6</property>
+                <property name="margin-top">12</property>
+                <property name="margin-bottom">12</property>
+                <property name="margin-start">12</property>
+                <property name="margin-end">12</property>
+                <child>
+                  <object class="GtkLabel">
+                    <property name="label" translatable="yes">Certificate authority (PEM)</property>
+                    <property name="xalign">0</property>
+                    <property name="wrap">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkScrolledWindow">
+                    <property name="hscrollbar-policy">never</property>
+                    <property name="min-content-height">32</property>
+                    <property name="max-content-height">160</property>
+                    <property name="propagate-natural-height">true</property>
+                    <property name="child">
+                      <object class="GtkTextView" id="certificate">
+                        <property name="wrap-mode">word-char</property>
+                        <property name="accepts-tab">false</property>
+                        <property name="monospace">true</property>
+                        <accessibility>
+                          <property name="label" translatable="yes">Certificate authority (PEM)</property>
+                        </accessibility>
+                      </object>
+                    </property>
+                  </object>
+                </child>
+              </object>
+            </property>
+          </object>
+        </child>
+      </object>
+    </child>
+  </object>
+</interface>

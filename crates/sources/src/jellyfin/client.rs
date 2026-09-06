@@ -715,6 +715,7 @@ pub(super) fn stream_descriptor(
     }
     Ok(
         ResolvedStream::with_redacted(url.to_string(), redacted_url.to_string())
+            .with_content_type(max_bitrate.map(|_| "audio/mpeg".to_string()))
             .with_trust_invalid_certificate(trust_invalid_certificate),
     )
 }

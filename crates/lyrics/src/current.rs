@@ -704,17 +704,23 @@ impl LyricsService {
         let Some(source) = resolution.context.source().await else {
             return false;
         };
-        match source.lyrics(&key.media_uri).await {
-            Ok(Some(native)) => {
-                self.resolve_candidate(
-                    request,
-                    key,
-                    resolution,
-                    cancelled,
-                    fallback,
-                    lyrics_from_native(native),
-                )
-                .await
+        match source
+            .lyrics(&resolution.context.database, &key.media_uri)
+            .await
+        {
+            Ok(Some(lyrics)) => {
+                let candidate = match lyrics {
+                    sources::SourceLyrics::Structured(native) => lyrics_from_native(native),
+                    sources::SourceLyrics::Text(text) => {
+                        let Some(mut bundle) = lyrics_from_edited_text(&text) else {
+                            return false;
+                        };
+                        bundle.origin = LyricsOrigin::Native;
+                        bundle
+                    }
+                };
+                self.resolve_candidate(request, key, resolution, cancelled, fallback, candidate)
+                    .await
             }
             Ok(None) => false,
             Err(error) => {
@@ -1623,10 +1629,11 @@ async fn current_resolution(context: LyricsContext, plan: LyricsPlan) -> Current
     let cue_track = library::cue_media_parts(&context.media.media_uri).is_some();
     let access = context
         .database
-        .playback_access_uri(&context.media.media_uri)
+        .playback_access(&context.media.media_uri)
         .await
         .ok()
-        .flatten();
+        .flatten()
+        .map(|(uri, _)| uri);
     let local = access
         .as_deref()
         .and_then(local_audio_path)

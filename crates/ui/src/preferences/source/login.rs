@@ -1,3 +1,5 @@
+mod files;
+
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
 use std::rc::Rc;
@@ -68,7 +70,22 @@ static LOCAL: SourcePresentation = SourcePresentation {
     setup_flow: local_setup_flow,
     settings_group: None,
 };
-static SOURCE_PRESENTATIONS: [&SourcePresentation; 4] = [&JELLYFIN, &NAVIDROME, &SUBSONIC, &LOCAL];
+static WEBDAV: SourcePresentation = SourcePresentation {
+    kind: "webdav",
+    title: msgid("WebDAV"),
+    icon_name: "io.github.screwys.Rufin.source.webdav",
+    setup_flow: files::setup_flow,
+    settings_group: Some(files::settings_group),
+};
+static SMB: SourcePresentation = SourcePresentation {
+    kind: "smb",
+    title: msgid("SMB / Samba"),
+    icon_name: "io.github.screwys.Rufin.source.smb",
+    setup_flow: files::setup_flow,
+    settings_group: Some(files::settings_group),
+};
+static SOURCE_PRESENTATIONS: [&SourcePresentation; 6] =
+    [&JELLYFIN, &NAVIDROME, &SUBSONIC, &WEBDAV, &SMB, &LOCAL];
 
 fn source_presentations() -> &'static [&'static SourcePresentation] {
     &SOURCE_PRESENTATIONS
@@ -332,6 +349,13 @@ impl Shell {
 
     pub(crate) fn release_inactive_add_server_form(&self) {
         let mut handle = self.source.add_server.borrow_mut();
+        if !matches!(
+            *self.source.operation.borrow(),
+            SourceOperation::Adding { .. }
+        ) {
+            handle.take();
+            return;
+        }
         let Some(handle) = handle.as_mut() else {
             return;
         };
@@ -847,6 +871,7 @@ fn source_choice_selector(shell: &Rc<Shell>, context: &SetupViewContext) -> gtk:
     crate::ui_resource::objects!(builder, resource, {
         wrapper: gtk::ScrolledWindow, device_sources: adw::PreferencesGroup,
         server_sources: adw::PreferencesGroup, import_backup: gtk::Button,
+        remote_sources: adw::PreferencesGroup,
         privacy: adw::PreferencesGroup, external_metadata: adw::SwitchRow,
         external_lyrics: adw::SwitchRow, discord_presence: adw::SwitchRow,
     });
@@ -868,10 +893,10 @@ fn source_choice_selector(shell: &Rc<Shell>, context: &SetupViewContext) -> gtk:
             *context.flow.borrow_mut() = (presentation.setup_flow)(&shell, presentation);
             mount_setup_flow(&shell, &context);
         });
-        if presentation.kind == LOCAL_SOURCE_KIND {
-            device_sources.add(&row);
-        } else {
-            server_sources.add(&row);
+        match presentation.kind {
+            LOCAL_SOURCE_KIND => device_sources.add(&row),
+            "webdav" | "smb" => remote_sources.add(&row),
+            _ => server_sources.add(&row),
         }
     }
     privacy.set_visible(context.onboarding);

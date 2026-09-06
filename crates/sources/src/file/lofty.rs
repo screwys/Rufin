@@ -1,7 +1,7 @@
 //! Lofty content probing, metadata reading, and exact writer capability.
 
 use std::fs;
-use std::io::BufReader;
+use std::io::{BufReader, Read, Seek};
 use std::path::Path;
 
 use lofty::config::{GlobalOptions, ParseOptions, apply_global_options};
@@ -12,16 +12,16 @@ use lofty::tag::{ItemKey, TagType};
 const LOFTY_ALLOCATION_MAX_BYTES: usize = 32 * 1024 * 1024;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(super) struct MetadataWriter {
+pub(crate) struct MetadataWriter {
     file_type: FileType,
 }
 
 impl MetadataWriter {
-    pub(super) fn for_path(path: &Path) -> Option<Self> {
+    pub(crate) fn for_path(path: &Path) -> Option<Self> {
         Self::for_file_type(probe_file_type(path)?)
     }
 
-    pub(super) fn for_source_format(source_format: &str) -> Option<Self> {
+    pub(crate) fn for_source_format(source_format: &str) -> Option<Self> {
         Self::for_file_type(FileType::from_ext(source_format)?)
     }
 
@@ -32,15 +32,15 @@ impl MetadataWriter {
             .then_some(Self { file_type })
     }
 
-    pub(super) const fn file_type(self) -> FileType {
+    pub(crate) const fn file_type(self) -> FileType {
         self.file_type
     }
 
-    pub(super) fn metadata_key_is_writable(self, key: ItemKey) -> bool {
+    pub(crate) fn metadata_key_is_writable(self, key: ItemKey) -> bool {
         metadata_key_is_writable(self.file_type.primary_tag_type(), key)
     }
 
-    pub(super) fn lyrics_target(self) -> Option<(TagType, ItemKey)> {
+    pub(crate) fn lyrics_target(self) -> Option<(TagType, ItemKey)> {
         let primary = self.file_type.primary_tag_type();
         for key in [ItemKey::UnsyncLyrics, ItemKey::Lyrics] {
             if metadata_key_is_writable(primary, key) {
@@ -63,7 +63,7 @@ fn metadata_key_is_writable(tag_type: lofty::tag::TagType, key: ItemKey) -> bool
         || tag_type == lofty::tag::TagType::Id3v2 && key == ItemKey::MusicBrainzRecordingId
 }
 
-pub(super) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
+pub(crate) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
     // Lofty's generic MP4 conversion writes `tmpo` as text and can preserve an
     // existing integer atom beside it, so that path is not a safe BPM writer.
     if tag_type == lofty::tag::TagType::Mp4Ilst {
@@ -74,14 +74,14 @@ pub(super) fn bpm_key(tag_type: lofty::tag::TagType) -> Option<ItemKey> {
         .find(|key| metadata_key_is_writable(tag_type, *key))
 }
 
-pub(super) fn probe_file_type(path: &Path) -> Option<FileType> {
+pub(crate) fn probe_file_type(path: &Path) -> Option<FileType> {
     Probe::new(BufReader::new(fs::File::open(path).ok()?))
         .guess_file_type()
         .ok()?
         .file_type()
 }
 
-pub(super) fn source_format(path: &Path, file_type: FileType) -> Option<String> {
+pub(crate) fn source_format(path: &Path, file_type: FileType) -> Option<String> {
     let extension = path
         .extension()
         .and_then(|extension| extension.to_str())
@@ -112,7 +112,7 @@ fn canonical_extension(file_type: FileType) -> Option<&'static str> {
     }
 }
 
-pub(super) fn read_lofty(
+pub(crate) fn read_lofty(
     path: &Path,
     read_cover_art: bool,
 ) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
@@ -122,8 +122,8 @@ pub(super) fn read_lofty(
     )
 }
 
-pub(super) fn read_lofty_file(
-    file: fs::File,
+pub(crate) fn read_lofty_file(
+    file: impl Read + Seek,
     options: ParseOptions,
 ) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {
     apply_global_options(
@@ -140,7 +140,7 @@ pub(super) fn read_lofty_file(
     probe.read().map(Some)
 }
 
-pub(super) fn read_lofty_for_edit(
+pub(crate) fn read_lofty_for_edit(
     path: &Path,
     file_type: FileType,
 ) -> Result<Option<TaggedFile>, lofty::error::FileParseError> {

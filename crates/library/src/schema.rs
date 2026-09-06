@@ -219,7 +219,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 44;
+PRAGMA user_version = 45;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -325,6 +325,8 @@ CREATE INDEX IF NOT EXISTS tracks_order_idx ON tracks(source_key, sort_text, tra
 
 CREATE INDEX IF NOT EXISTS tracks_key_idx ON tracks(source_key, track_key);
 CREATE INDEX IF NOT EXISTS tracks_source_path_idx ON tracks(source_key, source_path, album_key);
+
+CREATE INDEX IF NOT EXISTS tracks_source_cue_idx ON tracks(source_key, cue_path, object_id) WHERE cue_path IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS tracks_artwork_idx ON tracks(source_key, artwork_binding)
     WHERE artwork_binding IS NOT NULL;
@@ -565,12 +567,17 @@ CREATE TABLE IF NOT EXISTS local_files (
     mtime_ns INTEGER NOT NULL,
     device_id INTEGER,
     inode INTEGER,
+    native_id TEXT,
+    picture_index INTEGER,
+    revision TEXT,
     parse_version INTEGER,
     state TEXT NOT NULL CHECK (state IN ('accepted', 'rejected', 'unreadable', 'observed')),
     UNIQUE (source_key, path)
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS local_files_identity_idx ON local_files(source_key, device_id, inode);
+
+CREATE INDEX IF NOT EXISTS local_files_native_id_idx ON local_files(source_key, native_id) WHERE native_id IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS local_files_kind_path_idx ON local_files(source_key, kind, path);
 
@@ -604,6 +611,29 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
 }
 pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
     let mut transaction = connection.begin().await?;
+    // Preserve the accepted Local inventory when adding remote-file observations.
+    let has_files: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='local_files' AND type='table')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?;
+    if has_files {
+        let has_revision: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_files') WHERE name='revision')",
+        )
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !has_revision {
+            sqlx::raw_sql("ALTER TABLE local_files ADD COLUMN native_id TEXT; ALTER TABLE local_files ADD COLUMN revision TEXT;")
+                .execute(&mut *transaction).await?;
+        }
+        let has_picture: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_files') WHERE name='picture_index')").fetch_one(&mut *transaction).await?;
+        if !has_picture {
+            sqlx::raw_sql("ALTER TABLE local_files ADD COLUMN picture_index INTEGER;")
+                .execute(&mut *transaction)
+                .await?;
+        }
+    }
     sqlx::raw_sql(CATALOG_SCHEMA)
         .execute(&mut *transaction)
         .await?;

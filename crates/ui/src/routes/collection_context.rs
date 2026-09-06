@@ -970,7 +970,7 @@ pub(crate) fn present_playlist_context_menu(
     let export_name = playlist.name.clone();
     surface.add_action("export", move || {
         export_shell.export_playlist_dialog(
-            super::interchange::PlaylistExport::Playlist(export_key),
+            crate::runtime::source::PlaylistExport::Playlist(export_key),
             &export_name,
         )
     });
@@ -1039,7 +1039,7 @@ pub(crate) fn present_smart_playlist_context_menu(
     let export_name = playlist.name.clone();
     surface.add_action("export", move || {
         export_shell.export_playlist_dialog(
-            super::interchange::PlaylistExport::Smart(export_key),
+            crate::runtime::source::PlaylistExport::Smart(export_key),
             &export_name,
         )
     });

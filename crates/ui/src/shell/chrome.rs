@@ -38,6 +38,7 @@ pub(crate) struct WindowChrome {
     pub(crate) app_root_overlay: gtk::Overlay,
     pub(crate) app_content_stack: gtk::Stack,
     pub(super) startup_loading_host: gtk::Box,
+    pub(super) startup_loading_status: gtk::Label,
 }
 
 pub(crate) struct WindowControlLayout {

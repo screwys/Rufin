@@ -388,7 +388,9 @@ async fn encoded_local_paths_publish_folder_art_and_watcher_replacements() {
 
 #[tokio::test]
 async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_group_fallback() {
-    let root = tempfile::tempdir().unwrap();
+    let parent = tempfile::tempdir().unwrap();
+    fs::write(parent.path().join("cover.png"), b"outside the music root").unwrap();
+    let root = tempfile::tempdir_in(parent.path()).unwrap();
     let mut paths = Vec::new();
     for number in 1..=3 {
         let path = root.path().join(format!("{number} café %.wav"));
@@ -417,7 +419,7 @@ async fn local_default_cover_reaches_later_track_and_distinct_rescan_preserves_g
             let binding: sources::LocalImageRef = serde_json::from_slice(&bytes).unwrap();
             assert_eq!(binding.source_id(), source.source_id());
             let expected = if distinct && index == 2 { &paths[2] } else { &paths[1] };
-            assert!(matches!(binding, sources::LocalImageRef::Embedded { path, .. } if path == expected.to_string_lossy()));
+            assert!(matches!(&binding, sources::LocalImageRef::Embedded { path, .. } if path == &expected.to_string_lossy()), "distinct={distinct}, track={index}, binding={binding:?}, expected={expected:?}");
             if index == 0 {
                 if let Some(group) = &expected_group { assert_eq!(&bytes, group); }
                 expected_group = Some(bytes);
@@ -446,7 +448,8 @@ async fn local_artist_cover_keeps_album_order_across_point_updates() {
     let artist = database.artist_route_page(initial.source, None, false, false, "", library::ArtistSort::Title, false, library::RouteSeedWindow::top(), &ReadCancellation::new()).await.unwrap().2.remove(0);
     for changed in [&covers[1], &covers[0]] {
         fs::write(changed, b"replacement artwork").unwrap();
-        assert!(matches!(source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![changed.clone()], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
+        let outcome = source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![changed.clone()], rename: None }).await.unwrap();
+        assert!(matches!(outcome, Some(ScanOutcome::ArtworkChanged(_))), "{outcome:?}");
         let current = database.artist_row_by_media_uri(&artist.media_uri, &ReadCancellation::new()).await.unwrap().unwrap();
         let binding: sources::LocalImageRef = serde_json::from_slice(current.artwork_binding.as_ref().unwrap()).unwrap();
         assert_eq!(binding.source_id(), source.source_id());
@@ -482,7 +485,8 @@ async fn local_borrowed_album_cover_follows_replacement_and_removal() {
     assert!(before.artwork_binding.is_some());
     for remove in [false, true] {
         if remove { fs::remove_file(&cover).unwrap(); } else { fs::write(&cover, b"replacement image").unwrap(); }
-        assert!(matches!(source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![cover.clone()], rename: None }).await.unwrap(), Some(ScanOutcome::ArtworkChanged(_))));
+        let outcome = source.apply_local_change(&database, initial.source, LocalLiveChange::Paths { paths: vec![cover.clone()], rename: None }).await.unwrap();
+        assert!(matches!(outcome, Some(ScanOutcome::ArtworkChanged(_))), "{outcome:?}");
         let borrower = database.track_row_by_uri(&borrower_uri, &ReadCancellation::new()).await.unwrap().unwrap();
         assert_eq!(borrower.track_key, before.track_key);
         assert_ne!(borrower.artwork_binding, before.artwork_binding);
@@ -591,6 +595,7 @@ async fn transient_cue_read_failure_retains_tracks_but_rejected_content_removes_
 #[tokio::test]
 async fn exact_track_change_rebuilds_relations_from_the_complete_album() {
     let root = tempfile::tempdir().expect("music root");
+    fs::write(root.path().join("cover.jpg"), b"album cover").unwrap();
     let first = root.path().join("first.wav");
     let second = root.path().join("second.wav");
     write_tagged_wav(&first, "First", "First Artist", "Shared Album", "Rock")
@@ -723,6 +728,9 @@ async fn explicit_rename_preserves_track_identity_without_native_file_identity()
             mtime_ns: media.mtime_ns,
             device_id: None,
             inode: None,
+            native_id: None,
+            picture_index: None,
+            revision: None,
             parse_version: media.parse_version,
             state: media.state,
         },

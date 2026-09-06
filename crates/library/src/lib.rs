@@ -54,6 +54,7 @@ pub use keys::{
 pub use local::{
     DownloadMetadata, LocalAccessOrigin, LocalAccessRow, LocalAccessWrite, LocalFileKind,
     LocalFileRow, LocalFileState, LocalFileWrite, LocalLocatorWrite, MappingTrackRow,
+    ObservedMediaFile,
 };
 pub use loudness::{AlbumLoudnessWork, LoudnessMeasurement, R128TagWrite, TrackLoudnessWork};
 pub use lyrics::LyricsCacheRow;

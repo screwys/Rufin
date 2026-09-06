@@ -212,41 +212,23 @@ struct IncomingPipeline {
     slot: Slot,
     item: PreparedNext,
     phase: IncomingPhase,
+    start_at: Option<gst::ClockTime>,
 }
 
 #[derive(Clone, Debug)]
-enum PendingHandoff {
-    Separate {
-        incoming: IncomingPipeline,
-        from: Slot,
-        old_run: RunId,
-    },
-    AdjacentWindow {
-        slot: Slot,
-        id: PipelineId,
-        old_run: RunId,
-        item: PreparedNext,
-        confirmation_after: gst::Seqnum,
-    },
+struct PendingHandoff {
+    incoming: IncomingPipeline,
+    from: Slot,
+    old_run: RunId,
 }
 
 impl PendingHandoff {
     fn matches(&self, slot: Slot, id: PipelineId) -> bool {
-        match self {
-            Self::Separate { incoming, .. } => incoming.slot == slot && incoming.id == id,
-            Self::AdjacentWindow {
-                slot: pending_slot,
-                id: pending_id,
-                ..
-            } => *pending_slot == slot && *pending_id == id,
-        }
+        self.incoming.slot == slot && self.incoming.id == id
     }
 
     fn item(&self) -> &PreparedNext {
-        match self {
-            Self::Separate { incoming, .. } => &incoming.item,
-            Self::AdjacentWindow { item, .. } => item,
-        }
+        &self.incoming.item
     }
 }
 
@@ -583,24 +565,23 @@ impl GstEngine {
 
     fn cancel_handoff_for_replan(&mut self) -> Option<RunId> {
         self.clear_incoming();
-        match self.pending_handoff.take()? {
-            PendingHandoff::Separate {
-                incoming,
-                from,
-                old_run,
-            } => {
-                self.stop_pipeline(incoming.slot);
-                if incoming.item.transition != NextTransition::Gapless {
-                    return None;
-                }
-                self.stop_pipeline(from);
-                Some(old_run)
-            }
-            PendingHandoff::AdjacentWindow { slot, old_run, .. } => {
-                self.stop_pipeline(slot);
-                Some(old_run)
-            }
+        let pending = self.pending_handoff.take()?;
+        let ended = self.handoff_outgoing_ended(&pending);
+        self.stop_pipeline(pending.incoming.slot);
+        if ended {
+            self.stop_pipeline(pending.from);
+            Some(pending.old_run)
+        } else {
+            None
         }
+    }
+
+    fn handoff_outgoing_ended(&self, pending: &PendingHandoff) -> bool {
+        pending.incoming.item.transition == NextTransition::Gapless
+            && pending.incoming.start_at.is_none_or(|time| {
+                self.pipeline_for_slot(pending.incoming.slot)
+                    .clock_reached(time)
+            })
     }
 
     fn prepare_incoming(&mut self, next: &PreparedNext) {
@@ -654,11 +635,17 @@ impl GstEngine {
         self.clear_incoming();
         self.stop_pipeline(slot);
         let item = PreparedRun::from_next(next);
+        // A paused sink cannot play its preroll; preserve gapless samples at
+        // playback gain instead of baking the preparation mute into that buffer.
+        let preroll_gain = match next.transition {
+            NextTransition::Gapless => settings.output_gain(),
+            NextTransition::Crossfade { .. } => 0.0,
+        };
         let id = match self.start_pipeline(
             slot,
             &item,
             &settings,
-            0.0,
+            preroll_gain,
             muted,
             playback_rate,
             gst::State::Paused,
@@ -674,6 +661,7 @@ impl GstEngine {
             slot,
             item: next.clone(),
             phase: IncomingPhase::Prerolling,
+            start_at: None,
         });
     }
 
@@ -687,25 +675,6 @@ impl GstEngine {
         self.pending_handoff
             .as_ref()
             .is_some_and(|pending| pending.matches(slot, id))
-    }
-
-    fn pending_handoff_accepts_async_done(
-        &self,
-        slot: Slot,
-        id: PipelineId,
-        seqnum: gst::Seqnum,
-    ) -> bool {
-        self.pending_handoff
-            .as_ref()
-            .is_some_and(|pending| match pending {
-                PendingHandoff::AdjacentWindow {
-                    slot: pending_slot,
-                    id: pending_id,
-                    confirmation_after,
-                    ..
-                } => *pending_slot == slot && *pending_id == id && seqnum > *confirmation_after,
-                PendingHandoff::Separate { .. } => false,
-            })
     }
 
     fn handle_incoming_async_done(&mut self, slot: Slot, id: PipelineId) {
@@ -758,7 +727,7 @@ impl GstEngine {
         let Some(incoming) = self.incoming.take() else {
             return false;
         };
-        self.pending_handoff = Some(PendingHandoff::Separate {
+        self.pending_handoff = Some(PendingHandoff {
             incoming,
             from,
             old_run,
@@ -781,135 +750,46 @@ impl GstEngine {
         else {
             return false;
         };
-        let (still_current, stop_target_if_stale) = {
+        if let Some(start_at) = pending.incoming.start_at
+            && !self.pipeline_for_slot(slot).clock_reached(start_at)
+        {
+            return false;
+        }
+        let (still_current, target_is_live) = {
             let shared = lock_recover(&self.shared);
-            match pending {
-                PendingHandoff::Separate {
-                    incoming,
-                    from,
-                    old_run,
-                } => {
-                    let target_is_live = shared.pipeline_is_live(slot, id);
-                    (
-                        shared.active == *from
-                            && shared.current.as_ref().map(|current| current.run) == Some(*old_run)
-                            && target_is_live
-                            && shared.next.as_ref() == Some(&incoming.item),
-                        target_is_live,
-                    )
-                }
-                PendingHandoff::AdjacentWindow { old_run, item, .. } => (
-                    shared.pipeline_is_current(slot, id)
-                        && shared.current.as_ref().map(|current| current.run) == Some(*old_run)
-                        && shared.next.as_ref() == Some(item)
-                        && self.pending_seek.is_none(),
-                    false,
-                ),
-            }
+            let target_is_live = shared.pipeline_is_live(slot, id);
+            (
+                shared.active == pending.from
+                    && shared.current.as_ref().map(|current| current.run) == Some(pending.old_run)
+                    && target_is_live
+                    && shared.next.as_ref() == Some(&pending.incoming.item),
+                target_is_live,
+            )
         };
         if !still_current {
             self.pending_handoff = None;
-            if stop_target_if_stale {
+            if target_is_live {
                 self.stop_pipeline(slot);
             }
             return false;
         }
-        let Some(pending) = self.pending_handoff.take() else {
+        let Some(PendingHandoff {
+            incoming,
+            from,
+            old_run,
+        }) = self.pending_handoff.take()
+        else {
             return false;
         };
-        match pending {
-            PendingHandoff::Separate {
-                incoming,
-                from,
-                old_run,
-            } => match incoming.item.transition {
-                NextTransition::Gapless => {
-                    self.commit_prepared_gapless_handoff(incoming, from, old_run)
-                }
-                NextTransition::Crossfade { duration_millis } => {
-                    self.commit_crossfade_handoff(incoming, from, old_run, duration_millis)
-                }
-            },
-            PendingHandoff::AdjacentWindow {
-                slot,
-                old_run,
-                item,
-                ..
-            } => {
-                self.commit_adjacent_window_handoff(slot, old_run, item);
+        match incoming.item.transition {
+            NextTransition::Gapless => {
+                self.commit_prepared_gapless_handoff(incoming, from, old_run)
+            }
+            NextTransition::Crossfade { duration_millis } => {
+                self.commit_crossfade_handoff(incoming, from, old_run, duration_millis);
             }
         }
         true
-    }
-
-    fn begin_adjacent_window_handoff(
-        &mut self,
-        slot: Slot,
-        id: PipelineId,
-        old_run: RunId,
-        item: PreparedNext,
-        confirmation_after: gst::Seqnum,
-    ) -> bool {
-        if self.pending_handoff.is_some() || self.pending_seek.is_some() || !self.desired_playing {
-            return false;
-        }
-        let matches = {
-            let shared = lock_recover(&self.shared);
-            shared.pipeline_is_current(slot, id)
-                && shared.current.as_ref().map(|current| current.run) == Some(old_run)
-                && shared.next.as_ref() == Some(&item)
-        };
-        if !matches {
-            return false;
-        }
-        self.clear_incoming();
-        self.pending_handoff = Some(PendingHandoff::AdjacentWindow {
-            slot,
-            id,
-            old_run,
-            item,
-            confirmation_after,
-        });
-        true
-    }
-
-    fn commit_adjacent_window_handoff(&mut self, slot: Slot, old_run: RunId, item: PreparedNext) {
-        let new_run = item.run;
-        self.pipeline_for_slot_mut(slot)
-            .activate_stream(&item.stream);
-        let visualizer_enabled = {
-            let mut shared = lock_recover(&self.shared);
-            shared.current = Some(PreparedRun::from_next(&item));
-            shared.next = None;
-            shared.gapless_pending = None;
-            shared.about_to_finish_pending = false;
-            shared.next_needed = None;
-            shared.visualizer_enabled
-        };
-        self.pending_seek = None;
-        self.ended_run = None;
-        self.last_position_tick = Instant::now();
-        self.sync_visualizer_taps(visualizer_enabled);
-        if visualizer_enabled {
-            push_event(
-                &self.events,
-                BackendEvent::Visualizer {
-                    run: new_run,
-                    levels: Vec::new(),
-                },
-            );
-        }
-        push_event(
-            &self.events,
-            BackendEvent::Transitioned { old_run, new_run },
-        );
-        push_event(
-            &self.events,
-            BackendEvent::Position {
-                run: new_run,
-                millis: 0,
-            },
-        );
     }
 
     fn fail_handoff(&mut self, slot: Slot, id: PipelineId, error: String) -> bool {
@@ -919,53 +799,21 @@ impl GstEngine {
         let Some(pending) = self.pending_handoff.take() else {
             return false;
         };
-        let (next_run, ended_run) = match pending {
-            PendingHandoff::Separate {
-                incoming, old_run, ..
-            } => {
-                self.stop_pipeline(incoming.slot);
-                (
-                    incoming.item.run,
-                    (incoming.item.transition == NextTransition::Gapless).then_some(old_run),
-                )
-            }
-            PendingHandoff::AdjacentWindow {
-                slot,
-                old_run,
-                item,
-                ..
-            } => {
-                self.stop_pipeline(slot);
-                (item.run, Some(old_run))
-            }
-        };
-        self.report_next_preparation_failure(next_run, error);
-        if let Some(ended_run) = ended_run {
-            self.emit_ended_once(ended_run);
+        let ended = self.handoff_outgoing_ended(&pending);
+        self.stop_pipeline(pending.incoming.slot);
+        self.report_next_preparation_failure(pending.incoming.item.run, error);
+        if ended {
+            self.emit_ended_once(pending.old_run);
         }
         true
     }
 
     fn cancel_unconfirmed_handoff_for_pause(&mut self) {
-        let Some(pending) = self.pending_handoff.take() else {
+        if self.pending_handoff.is_none() {
             return;
-        };
-        match pending {
-            PendingHandoff::Separate {
-                incoming,
-                from,
-                old_run,
-            } => {
-                self.stop_pipeline(incoming.slot);
-                if incoming.item.transition == NextTransition::Gapless {
-                    self.stop_pipeline(from);
-                    self.emit_ended_once(old_run);
-                }
-            }
-            PendingHandoff::AdjacentWindow { slot, old_run, .. } => {
-                self.stop_pipeline(slot);
-                self.emit_ended_once(old_run);
-            }
+        }
+        if let Some(old_run) = self.cancel_handoff_for_replan() {
+            self.emit_ended_once(old_run);
         }
     }
 
@@ -974,9 +822,7 @@ impl GstEngine {
             .pending_handoff
             .as_ref()
             .and_then(|pending| match pending {
-                PendingHandoff::Separate { incoming, from, .. } if *from == slot => {
-                    Some(incoming.slot)
-                }
+                PendingHandoff { incoming, from, .. } if *from == slot => Some(incoming.slot),
                 _ => None,
             });
         if let Some(target) = pending_target {
@@ -994,16 +840,9 @@ impl GstEngine {
     }
 
     fn gapless_handoff_waits_for_confirmation(&self, slot: Slot) -> bool {
-        self.pending_handoff
-            .as_ref()
-            .is_some_and(|pending| match pending {
-                PendingHandoff::Separate { incoming, from, .. } => {
-                    incoming.item.transition == NextTransition::Gapless && *from == slot
-                }
-                PendingHandoff::AdjacentWindow {
-                    slot: pending_slot, ..
-                } => *pending_slot == slot,
-            })
+        self.pending_handoff.as_ref().is_some_and(|pending| {
+            pending.incoming.item.transition == NextTransition::Gapless && pending.from == slot
+        })
     }
 
     fn commit_prepared_gapless_handoff(
@@ -1013,6 +852,7 @@ impl GstEngine {
         old_run: RunId,
     ) {
         let slot = incoming.slot;
+        self.pipeline_for_slot(slot).finish_scheduled_start();
         self.stop_pipeline(from);
         let (volume, muted) = self.output_gain_state();
         self.pipeline_for_slot(slot)
@@ -1642,20 +1482,13 @@ impl GstEngine {
     }
 
     fn cancel_handoff_for_seek(&mut self) -> Option<PreparedRun> {
-        let current = lock_recover(&self.shared).current.clone();
-        match self.pending_handoff.take()? {
-            PendingHandoff::Separate { incoming, .. } => {
-                self.stop_pipeline(incoming.slot);
-                if incoming.item.transition == NextTransition::Gapless {
-                    current
-                } else {
-                    None
-                }
-            }
-            PendingHandoff::AdjacentWindow { slot, .. } => {
-                self.stop_pipeline(slot);
-                current
-            }
+        let pending = self.pending_handoff.take()?;
+        let ended = self.handoff_outgoing_ended(&pending);
+        self.stop_pipeline(pending.incoming.slot);
+        if ended {
+            lock_recover(&self.shared).current.clone()
+        } else {
+            None
         }
     }
 
@@ -1746,18 +1579,9 @@ impl GstEngine {
                     self.fail_handoff(slot, id, details);
                 }
                 MessageView::StateChanged(state)
-                    if matches!(
-                        self.pending_handoff.as_ref(),
-                        Some(PendingHandoff::Separate { .. })
-                    ) && self.message_source_is_pipeline(slot, message)
+                    if self.message_source_is_pipeline(slot, message)
                         && state.current() == gst::State::Playing
                         && state.pending() == gst::State::VoidPending =>
-                {
-                    self.confirm_handoff(slot, id);
-                }
-                MessageView::AsyncDone(_)
-                    if self.message_source_is_pipeline(slot, message)
-                        && self.pending_handoff_accepts_async_done(slot, id, message.seqnum()) =>
                 {
                     self.confirm_handoff(slot, id);
                 }
@@ -1859,8 +1683,7 @@ impl GstEngine {
                 }
                 self.handle_buffering(percent);
             }
-            MessageView::SegmentDone(_) => self.handle_end(slot, true),
-            MessageView::Eos(_) => self.handle_end(slot, false),
+            MessageView::Eos(_) => self.handle_end(slot),
             MessageView::Error(error_message) => {
                 let output = self.pipeline_for_slot(slot).audio_output_factory();
                 let error = gstreamer_error_details(message, "playback", output.as_deref())
@@ -2213,25 +2036,11 @@ impl GstEngine {
         }
     }
 
-    fn handle_end(&mut self, slot: Slot, stream_window: bool) {
+    fn handle_end(&mut self, slot: Slot) {
         if self.finish_crossfade_if_needed(slot) {
             return;
         }
         if self.gapless_handoff_waits_for_confirmation(slot) {
-            return;
-        }
-        if stream_window && self.is_active_slot(slot) && self.pending_seek.is_some() {
-            debug!(
-                ?slot,
-                "ignoring stream-window completion while a seek is pending"
-            );
-            return;
-        }
-        if self.desired_playing
-            && stream_window
-            && self.is_active_slot(slot)
-            && self.promote_adjacent_stream_window()
-        {
             return;
         }
         if self.desired_playing && self.is_active_slot(slot) && self.promote_prepared_gapless() {
@@ -2242,7 +2051,7 @@ impl GstEngine {
             let run = self.timing_run_id();
             info!(
                 run = run.map(RunId::get).unwrap_or_default(),
-                stream_window, "playback reached end"
+                "playback reached end"
             );
             if let Some(run) = run {
                 self.emit_ended_once(run);
@@ -2394,6 +2203,32 @@ impl GstEngine {
     }
 
     fn tick(&mut self) {
+        if self.desired_playing {
+            if let Some(PendingHandoff { incoming, .. }) = self.pending_handoff.as_ref()
+                && incoming.start_at.is_some()
+                && self.pipeline_for_slot(incoming.slot).is_playing()
+            {
+                self.confirm_handoff(incoming.slot, incoming.id);
+            }
+            self.maybe_schedule_gapless();
+        }
+        let deferred_next = {
+            let shared = lock_recover(&self.shared);
+            (shared.about_to_finish_pending
+                && self.desired_playing
+                && self.state == BackendState::Playing
+                && self.pending_seek.is_none())
+            .then(|| shared.next.clone())
+            .flatten()
+        };
+        if let Some(next) = deferred_next
+            && self
+                .active_pipeline()
+                .position()
+                .is_some_and(|position| position > gst::ClockTime::ZERO)
+        {
+            self.prepare_next(Some(next));
+        }
         let next_needed = lock_recover(&self.shared).next_needed.take();
         if let Some(run) = next_needed {
             push_event(&self.events, BackendEvent::NextNeeded { run });
@@ -2407,10 +2242,7 @@ impl GstEngine {
 
         if self.last_position_tick.elapsed() >= Duration::from_millis(500) {
             self.last_position_tick = Instant::now();
-            if matches!(
-                self.pending_handoff.as_ref(),
-                Some(PendingHandoff::AdjacentWindow { .. })
-            ) || self
+            if self
                 .pending_seek
                 .as_ref()
                 .is_some_and(PendingSeek::blocks_timing_query)
@@ -2455,55 +2287,6 @@ impl GstEngine {
         }
     }
 
-    fn promote_adjacent_stream_window(&mut self) -> bool {
-        if !self.desired_playing || self.pending_seek.is_some() {
-            return false;
-        }
-        let candidate = (|| {
-            let shared = lock_recover(&self.shared);
-            let current = shared.current.as_ref()?;
-            if !adjacent_window_can_reuse_pipeline(&shared.settings) {
-                return None;
-            }
-            let boundary = current.stream.end_millis()?;
-            let next = shared.next.as_ref()?;
-            if next.transition != NextTransition::Gapless
-                || next.stream.uri() != current.stream.uri()
-                || next.stream.start_millis() != boundary
-            {
-                return None;
-            }
-            Some((
-                shared.active,
-                shared.pipeline_id(shared.active)?,
-                current.run,
-                next.clone(),
-            ))
-        })();
-        let Some((slot, id, old_run, next)) = candidate else {
-            return false;
-        };
-
-        let confirmation_after = match self
-            .pipeline_for_slot_mut(slot)
-            .rearm_stream_window(&next.stream)
-        {
-            Ok(confirmation_after) => confirmation_after,
-            Err(error) => {
-                push_event(
-                    &self.events,
-                    BackendEvent::NextPreparationFailed {
-                        current_run: old_run,
-                        next_run: next.run,
-                        error: BackendFailure::new(error),
-                    },
-                );
-                return false;
-            }
-        };
-        self.begin_adjacent_window_handoff(slot, id, old_run, next, confirmation_after)
-    }
-
     fn promote_prepared_gapless(&mut self) -> bool {
         if !self.desired_playing {
             return false;
@@ -2525,6 +2308,49 @@ impl GstEngine {
                 self.fail_incoming(slot, id, error);
                 false
             }
+        }
+    }
+
+    fn maybe_schedule_gapless(&mut self) {
+        if self.pending_seek.is_some()
+            || self.pending_handoff.is_some()
+            || self.state != BackendState::Playing
+        {
+            return;
+        }
+        let Some(incoming) = self.incoming.as_ref().filter(|incoming| {
+            incoming.phase == IncomingPhase::Ready
+                && incoming.item.transition == NextTransition::Gapless
+        }) else {
+            return;
+        };
+        let Some(position) = self.active_pipeline().position() else {
+            return;
+        };
+        let Some(duration) = self.active_pipeline().duration() else {
+            return;
+        };
+        let remaining = self
+            .active_pipeline()
+            .logical_remaining(clock_millis(position), clock_millis(duration));
+        if remaining == 0 || remaining > 500 {
+            return;
+        }
+        let (slot, id) = (incoming.slot, incoming.id);
+        let Some(start_at) = self
+            .pipeline_for_slot(slot)
+            .schedule_after(self.active_pipeline())
+        else {
+            return;
+        };
+        if let Some(incoming) = self.incoming.as_mut() {
+            incoming.start_at = Some(start_at);
+        }
+        match self.pipeline_for_slot(slot).set_state(gst::State::Playing) {
+            Ok(result) => {
+                self.begin_incoming_handoff(slot, id, result);
+            }
+            Err(error) => self.fail_incoming(slot, id, error),
         }
     }
 
@@ -2801,7 +2627,7 @@ impl GstEngine {
                 self.pending_handoff
                     .as_ref()
                     .and_then(|pending| match pending {
-                        PendingHandoff::Separate { incoming, .. }
+                        PendingHandoff { incoming, .. }
                             if matches!(
                                 incoming.item.transition,
                                 NextTransition::Crossfade { .. }
@@ -3052,7 +2878,11 @@ fn about_to_finish_action_for_pipeline(
     id: PipelineId,
     position_millis: u64,
 ) -> AboutToFinishAction {
-    if !shared.pipeline_is_current(slot, id) || position_millis == 0 {
+    if !shared.pipeline_is_current(slot, id) {
+        return AboutToFinishAction::Ignore;
+    }
+    if position_millis == 0 {
+        shared.about_to_finish_pending = true;
         return AboutToFinishAction::Ignore;
     }
     about_to_finish_action(shared)
@@ -3146,19 +2976,7 @@ fn gapless_uses_separate_pipeline(
     uses_direct_loudness(settings, &current.stream.loudness)
         != uses_direct_loudness(settings, &next.stream.loudness)
         || current.stream.stream == next.stream.stream
-        || (next.stream.window().is_some()
-            && (!adjacent_window_can_reuse_pipeline(settings)
-                || !streams_are_adjacent_windows(&current.stream, &next.stream)))
-}
-
-fn streams_are_adjacent_windows(current: &ResolvedStream, next: &ResolvedStream) -> bool {
-    current
-        .end_millis()
-        .is_some_and(|boundary| current.uri() == next.uri() && next.start_millis() == boundary)
-}
-
-fn adjacent_window_can_reuse_pipeline(settings: &BackendAudioSettings) -> bool {
-    settings.loudness_normalization == LoudnessNormalization::Off
+        || next.stream.window().is_some()
 }
 
 fn crossfade_start_remaining_millis(crossfade_millis: u64, playback_rate: f64) -> u64 {
@@ -3271,41 +3089,10 @@ mod tests {
                 slot: Slot::Secondary,
                 item: next.clone(),
                 phase: IncomingPhase::Ready,
+                start_at: None,
             });
             engine.desired_playing = true;
             engine.state = BackendState::Playing;
-            Self {
-                engine,
-                events,
-                old_run,
-                next_run,
-                next,
-            }
-        }
-
-        fn adjacent() -> Self {
-            let events = Arc::new(Mutex::new(EventMailbox::default()));
-            let mut engine = GstEngine::new(Arc::clone(&events));
-            let old_run = RunId::new(1);
-            let next_run = RunId::new(2);
-            let next = PreparedNext::new(
-                next_run,
-                ResolvedStream::new("file:///music/cue.flac").with_window(30_000, 60_000),
-                NextTransition::Gapless,
-            );
-            {
-                let mut shared = lock_recover(&engine.shared);
-                shared.current = Some(PreparedRun {
-                    run: old_run,
-                    stream: ResolvedStream::new("file:///music/cue.flac")
-                        .with_window(0, 30_000)
-                        .into(),
-                });
-                shared.next = Some(next.clone());
-                shared.active = Slot::Primary;
-                shared.set_pipeline_id(Slot::Primary, Some(ACTIVE_PIPELINE));
-            }
-            engine.desired_playing = true;
             Self {
                 engine,
                 events,
@@ -3323,20 +3110,6 @@ mod tests {
             ));
         }
 
-        fn begin_adjacent(&mut self) {
-            self.begin_adjacent_after(gst::Seqnum::next());
-        }
-
-        fn begin_adjacent_after(&mut self, confirmation_after: gst::Seqnum) {
-            assert!(self.engine.begin_adjacent_window_handoff(
-                Slot::Primary,
-                ACTIVE_PIPELINE,
-                self.old_run,
-                self.next.clone(),
-                confirmation_after,
-            ));
-        }
-
         fn current_run(&self) -> Option<RunId> {
             lock_recover(&self.engine.shared)
                 .current
@@ -3347,20 +3120,6 @@ mod tests {
         fn drain(&self) -> Vec<BackendEvent> {
             lock_recover(&self.events).drain()
         }
-    }
-
-    #[test]
-    fn normalized_cue_tracks_use_fresh_gain_state() {
-        let mut settings = BackendAudioSettings::default();
-        settings.loudness_normalization = LoudnessNormalization::Off;
-        assert!(adjacent_window_can_reuse_pipeline(&settings));
-
-        settings.loudness_normalization = LoudnessNormalization::ReplayGain;
-        settings.loudness_normalization_scope = LoudnessNormalizationScope::Track;
-        assert!(!adjacent_window_can_reuse_pipeline(&settings));
-
-        settings.loudness_normalization_scope = LoudnessNormalizationScope::Album;
-        assert!(!adjacent_window_can_reuse_pipeline(&settings));
     }
 
     #[test]
@@ -3775,7 +3534,7 @@ mod tests {
             assert!(fixture.engine.incoming.is_none());
             assert!(matches!(
                 fixture.engine.pending_handoff.as_ref(),
-                Some(PendingHandoff::Separate {
+                Some(PendingHandoff {
                     incoming,
                     from: Slot::Primary,
                     old_run,
@@ -3936,109 +3695,6 @@ mod tests {
     }
 
     #[test]
-    fn accepted_adjacent_window_seek_waits_for_async_done() {
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.begin_adjacent();
-
-        let shared = lock_recover(&fixture.engine.shared);
-        assert_eq!(
-            shared.current.as_ref().map(|item| item.run),
-            Some(fixture.old_run)
-        );
-        assert_eq!(shared.next, Some(fixture.next.clone()));
-        drop(shared);
-        assert!(matches!(
-            fixture.engine.pending_handoff.as_ref(),
-            Some(PendingHandoff::AdjacentWindow {
-                slot: Slot::Primary,
-                id: ACTIVE_PIPELINE,
-                old_run,
-                item,
-                ..
-            }) if *old_run == fixture.old_run && item.run == fixture.next_run
-        ));
-        assert!(fixture.drain().is_empty());
-    }
-
-    #[test]
-    fn adjacent_window_handoff_stays_behind_seek_and_pipeline_identity_boundaries() {
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.engine.pending_seek = Some(PendingSeek::interactive(
-            10_000,
-            BackendState::Playing,
-            Instant::now(),
-        ));
-
-        assert!(!fixture.engine.begin_adjacent_window_handoff(
-            Slot::Primary,
-            ACTIVE_PIPELINE,
-            fixture.old_run,
-            fixture.next.clone(),
-            gst::Seqnum::next(),
-        ));
-        assert!(fixture.engine.pending_handoff.is_none());
-
-        fixture.engine.pending_seek = None;
-        fixture.begin_adjacent();
-        assert!(
-            !fixture
-                .engine
-                .confirm_handoff(Slot::Primary, PipelineId(ACTIVE_PIPELINE.0 - 1))
-        );
-        assert!(fixture.engine.pending_handoff.is_some());
-        assert!(
-            fixture
-                .engine
-                .confirm_handoff(Slot::Primary, ACTIVE_PIPELINE)
-        );
-        assert_eq!(fixture.current_run(), Some(fixture.next_run));
-    }
-
-    #[test]
-    fn adjacent_window_handoff_rejects_async_done_from_before_its_seek() {
-        let stale = gst::Seqnum::next();
-        let confirmation_after = gst::Seqnum::next();
-        let current = gst::Seqnum::next();
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.begin_adjacent_after(confirmation_after);
-
-        assert!(!fixture.engine.pending_handoff_accepts_async_done(
-            Slot::Primary,
-            ACTIVE_PIPELINE,
-            stale,
-        ));
-        assert!(fixture.engine.pending_handoff_accepts_async_done(
-            Slot::Primary,
-            ACTIVE_PIPELINE,
-            current,
-        ));
-        assert!(fixture.engine.pending_handoff.is_some());
-        assert_eq!(fixture.current_run(), Some(fixture.old_run));
-    }
-
-    #[test]
-    fn audio_reconfiguration_cancels_an_unconfirmed_adjacent_window_handoff() {
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.begin_adjacent();
-
-        fixture
-            .engine
-            .handle_command(BackendCommand::ConfigureAudio(
-                BackendAudioSettings::default(),
-            ));
-
-        assert!(fixture.engine.pending_handoff.is_none());
-        assert_eq!(
-            lock_recover(&fixture.engine.shared).pipeline_id(Slot::Primary),
-            None
-        );
-        assert!(fixture.drain().iter().any(|event| matches!(
-            event,
-            BackendEvent::Ended { run } if *run == fixture.old_run
-        )));
-    }
-
-    #[test]
     fn volume_scale_change_preserves_an_unconfirmed_handoff() {
         let mut fixture = HandoffFixture::separate(NextTransition::Crossfade {
             duration_millis: 5_000,
@@ -4067,73 +3723,6 @@ mod tests {
                 .iter()
                 .any(|event| matches!(event, BackendEvent::Ended { .. }))
         );
-    }
-
-    #[test]
-    fn matching_async_done_commits_adjacent_window_handoff_once() {
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.begin_adjacent();
-
-        assert!(
-            fixture
-                .engine
-                .confirm_handoff(Slot::Primary, ACTIVE_PIPELINE)
-        );
-        assert!(
-            !fixture
-                .engine
-                .confirm_handoff(Slot::Primary, ACTIVE_PIPELINE)
-        );
-
-        let shared = lock_recover(&fixture.engine.shared);
-        assert_eq!(
-            shared.current.as_ref().map(|item| item.run),
-            Some(fixture.next_run)
-        );
-        assert!(shared.next.is_none());
-        drop(shared);
-        assert_eq!(
-            fixture
-                .drain()
-                .into_iter()
-                .filter(|event| matches!(event, BackendEvent::Transitioned { .. }))
-                .count(),
-            1
-        );
-    }
-
-    #[test]
-    fn failed_adjacent_window_seek_uses_the_cold_fallback() {
-        let mut fixture = HandoffFixture::adjacent();
-        fixture.begin_adjacent();
-
-        assert!(fixture.engine.fail_handoff(
-            Slot::Primary,
-            ACTIVE_PIPELINE,
-            "seek failed".to_string(),
-        ));
-
-        let shared = lock_recover(&fixture.engine.shared);
-        assert_eq!(
-            shared.current.as_ref().map(|item| item.run),
-            Some(fixture.old_run)
-        );
-        assert_eq!(shared.next, Some(fixture.next.clone()));
-        drop(shared);
-        assert!(fixture.engine.pending_handoff.is_none());
-        assert!(matches!(
-            fixture.drain().as_slice(),
-            [
-                BackendEvent::NextPreparationFailed {
-                    current_run,
-                    next_run: failed_next,
-                    ..
-                },
-                BackendEvent::Ended { run: ended_run }
-            ] if *current_run == fixture.old_run
-                && *failed_next == fixture.next_run
-                && *ended_run == fixture.old_run
-        ));
     }
 
     #[test]
@@ -4188,25 +3777,11 @@ mod tests {
                 run: gapless.old_run,
             });
             gapless.engine.handle_state_changed(late_state);
-            gapless.engine.handle_end(Slot::Primary, false);
+            gapless.engine.handle_end(Slot::Primary);
 
             assert_eq!(gapless.current_run(), Some(gapless.old_run));
             assert!(gapless.engine.pending_handoff.is_none());
             assert!(gapless.drain().iter().all(|event| !matches!(
-                event,
-                BackendEvent::Transitioned { .. } | BackendEvent::NextPreparationFailed { .. }
-            )));
-
-            let mut adjacent = HandoffFixture::adjacent();
-            adjacent.engine.handle_command(BackendCommand::Pause {
-                run: adjacent.old_run,
-            });
-            adjacent.engine.handle_state_changed(late_state);
-            adjacent.engine.handle_end(Slot::Primary, true);
-
-            assert_eq!(adjacent.current_run(), Some(adjacent.old_run));
-            assert!(adjacent.engine.pending_handoff.is_none());
-            assert!(adjacent.drain().iter().all(|event| !matches!(
                 event,
                 BackendEvent::Transitioned { .. } | BackendEvent::NextPreparationFailed { .. }
             )));
@@ -4382,24 +3957,6 @@ mod tests {
         );
         assert_eq!(separate.current_run(), Some(separate.old_run));
         assert!(separate.drain().is_empty());
-
-        let mut adjacent = HandoffFixture::adjacent();
-        adjacent.begin_adjacent();
-
-        let restored = adjacent
-            .engine
-            .cancel_handoff_for_seek()
-            .expect("adjacent window handoff restores the current run");
-
-        assert_eq!(restored.run, adjacent.old_run);
-        assert!(adjacent.engine.pending_handoff.is_none());
-        assert!(
-            !adjacent
-                .engine
-                .confirm_handoff(Slot::Primary, ACTIVE_PIPELINE)
-        );
-        assert_eq!(adjacent.current_run(), Some(adjacent.old_run));
-        assert!(adjacent.drain().is_empty());
     }
 
     #[test]
@@ -4429,6 +3986,7 @@ mod tests {
             slot: Slot::Secondary,
             item: next.clone(),
             phase: IncomingPhase::Prerolling,
+            start_at: None,
         });
 
         engine.fail_incoming(

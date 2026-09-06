@@ -171,6 +171,49 @@ impl PlayerPipeline {
         session.set_state(state)
     }
 
+    pub(super) fn schedule_after(&self, outgoing: &Self) -> Option<gst::ClockTime> {
+        let incoming = self.session.as_ref()?;
+        let outgoing = outgoing.session.as_ref()?;
+        let position = outgoing.position()?;
+        let end = outgoing
+            .clock
+            .end_millis()
+            .map(gst::ClockTime::from_mseconds)
+            .or_else(|| outgoing.duration())?;
+        let remaining = end.checked_sub(position)?;
+        let clock = outgoing.pipeline.clock()?;
+        let delay = gst::ClockTime::from_nseconds(
+            (remaining.nseconds() as f64 / outgoing.playback_rate).round() as u64,
+        );
+        let start_at = clock.time().checked_add(delay)?;
+        let pipeline = incoming.pipeline.downcast_ref::<gst::Pipeline>()?;
+        pipeline.use_clock(Some(&clock));
+        pipeline.set_start_time(gst::ClockTime::NONE);
+        pipeline.set_base_time(start_at);
+        Some(start_at)
+    }
+
+    pub(super) fn clock_reached(&self, time: gst::ClockTime) -> bool {
+        self.session
+            .as_ref()
+            .and_then(|session| session.pipeline.clock())
+            .is_some_and(|clock| clock.time() >= time)
+    }
+
+    pub(super) fn finish_scheduled_start(&self) {
+        if let Some(session) = self.session.as_ref() {
+            session
+                .pipeline
+                .set_start_time(session.pipeline.current_running_time());
+        }
+    }
+
+    pub(super) fn is_playing(&self) -> bool {
+        self.session
+            .as_ref()
+            .is_some_and(|session| session.pipeline.current_state() == gst::State::Playing)
+    }
+
     pub(super) fn stop(&mut self) {
         if let Some(mut session) = self.session.take() {
             session.stop();
@@ -255,16 +298,6 @@ impl PlayerPipeline {
         }
     }
 
-    pub(super) fn rearm_stream_window(
-        &mut self,
-        stream: &PreparedStream,
-    ) -> Result<gst::Seqnum, String> {
-        let Some(session) = self.session.as_mut() else {
-            return Err(format!("GStreamer session {} is not active", self.name));
-        };
-        session.rearm_stream_window(stream)
-    }
-
     pub(super) fn has_session(&self) -> bool {
         self.session.is_some()
     }
@@ -325,6 +358,10 @@ impl PipelineSession {
         playback_rate: f64,
     ) -> Result<Self, String> {
         let pipeline = make_playbin(name)?;
+        // Both playback slots share a clock that survives either audio sink stopping.
+        if let Some(pipeline) = pipeline.downcast_ref::<gst::Pipeline>() {
+            pipeline.use_clock(Some(&gst::SystemClock::obtain()));
+        }
         let bus = pipeline
             .bus()
             .ok_or_else(|| "GStreamer playbin did not expose a bus".to_string())?;
@@ -481,7 +518,7 @@ impl PipelineSession {
             (flags, gst::SeekType::None, gst::ClockTime::NONE),
             |end_millis| {
                 (
-                    flags | gst::SeekFlags::SEGMENT,
+                    flags,
                     gst::SeekType::Set,
                     Some(gst::ClockTime::from_mseconds(end_millis)),
                 )
@@ -522,32 +559,6 @@ impl PipelineSession {
 
     fn needs_initial_rate_seek(&self) -> bool {
         (self.playback_rate - DEFAULT_PLAYBACK_RATE).abs() > f64::EPSILON
-    }
-
-    fn rearm_stream_window(&mut self, stream: &PreparedStream) -> Result<gst::Seqnum, String> {
-        *self
-            .queued_stream
-            .lock()
-            .unwrap_or_else(|poisoned| poisoned.into_inner()) = stream.clone();
-        let clock = SourceClock::from_stream(stream);
-        let start_millis = clock.physical_seek(0);
-        let end_millis = clock
-            .end_millis()
-            .ok_or_else(|| "Adjacent stream window has no end boundary".to_string())?;
-        // GstBin gives the top-level AsyncDone its own sequence number, so retain the
-        // last number allocated before this seek instead of expecting exact equality.
-        let confirmation_after = gst::Seqnum::next();
-        self.pipeline
-            .seek(
-                self.playback_rate,
-                gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE | gst::SeekFlags::SEGMENT,
-                gst::SeekType::Set,
-                gst::ClockTime::from_mseconds(start_millis.min(end_millis)),
-                gst::SeekType::Set,
-                gst::ClockTime::from_mseconds(end_millis),
-            )
-            .map(|_| confirmation_after)
-            .map_err(|error| error.to_string())
     }
 
     pub(super) fn position(&self) -> Option<gst::ClockTime> {

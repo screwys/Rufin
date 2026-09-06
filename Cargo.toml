@@ -32,6 +32,11 @@ artwork = { path = "crates/artwork" }
 metadata-lookup = { path = "crates/metadata-lookup" }
 base64 = "0.23.0"
 blake3 = "1.8.2"
+bytes = "1"
+digest_auth = "0.3.1"
+http-body-util = "0.1"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
 csv = "1.4.0"
 directories = "6.0.0"
 desktop-integration = { path = "crates/desktop-integration" }
@@ -61,6 +66,7 @@ localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
 lofty = "0.25.1"
 md5 = "0.8.0"
+md5_digest = { package = "md-5", version = "0.10" }
 mediaplayer = "0.4.3"
 mpris-server = "0.10.0"
 notify = "8.2.0"
@@ -70,8 +76,13 @@ playback = { path = "crates/playback" }
 playback-gstreamer = { path = "crates/playback-gstreamer" }
 playback-cast = { path = "crates/playback-cast" }
 proc-macro2 = "1.0.107"
+quick-xml = { version = "0.42", features = ["async-tokio"] }
 pulldown-cmark = { version = "0.13.0", default-features = false }
 scrobbling = { path = "crates/scrobbling" }
+smb = { version = "=0.11.2", default-features = false, features = ["multi_threaded", "sign", "encrypt"] }
+smb-fscc = "=0.11.2"
+smb-msg = "=0.11.2"
+tokio-util = { version = "0.7", features = ["io"] }
 reqwest = { version = "0.13.3", default-features = false, features = ["http2", "rustls", "system-proxy"] }
 roxmltree = "0.21.0"
 rustls = { version = "0.23", default-features = false, features = ["aws_lc_rs", "logging", "tls12"] }
@@ -82,7 +93,7 @@ secrets = { path = "crates/secrets" }
 serde = { version = "1.0.228", features = ["derive", "rc"] }
 serde_json = "1.0.150"
 serde_path_to_error = "0.1.20"
-sha2 = "0.11.0"
+sha2 = "0.10"
 socket2 = { version = "0.6.5", features = ["all"] }
 sqlx = { version = "0.9.0", default-features = false, features = ["derive", "runtime-tokio", "sqlite", "regexp"] }
 regex = "1.13.1"

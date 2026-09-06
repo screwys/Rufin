@@ -330,6 +330,11 @@ impl SubsonicSource {
         let url = self.authenticated_url("stream", &extra)?;
         let redacted = redacted_subsonic_url(&url);
         Ok(ResolvedStream::with_redacted(url.to_string(), redacted)
+            .with_content_type(match format {
+                "mp3" => Some("audio/mpeg".to_string()),
+                "opus" => Some("audio/ogg".to_string()),
+                _ => None,
+            })
             .with_trust_invalid_certificate(self.trust_invalid_cert))
     }
 }

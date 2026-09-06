@@ -14,8 +14,8 @@ mod operations;
 mod policy;
 mod source;
 
+mod file;
 mod jellyfin;
-mod local;
 mod remote_http;
 mod subsonic;
 
@@ -32,6 +32,12 @@ pub use config::{
     JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, SourceConfiguration,
     SourceSettingsInput, SourceSetupInput,
 };
+pub use file::metadata::read_embedded_lyrics;
+pub use file::remote::smb::list_smb_shares;
+pub use file::remote::webdav::nextcloud::authorize_nextcloud;
+pub use file::remote::{
+    FileAuthentication, FileCredentials, FileCredentialsEdit, FileSourceSettings,
+};
 pub use library::SourceId;
 pub use operations::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
@@ -43,11 +49,10 @@ pub use operations::{
 };
 pub use source::*;
 
-pub use jellyfin::{DiscoveredJellyfinServer, discover_jellyfin_servers};
-pub use local::{
-    LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_embedded_lyrics, read_local_image,
-    verify_local_media_file,
+pub use file::local::{
+    LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_local_image, verify_local_media_file,
 };
+pub use jellyfin::{DiscoveredJellyfinServer, discover_jellyfin_servers};
 pub use subsonic::{SubsonicAuthentication, SubsonicFlavor};
 
 use thiserror::Error;

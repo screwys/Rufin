@@ -8,6 +8,8 @@
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png</file>
+    <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png</file>
+    <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png</file>
     <file>hicolor/scalable/actions/rufin-go-last-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-mail-forward-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-media-skip-backward-symbolic.svg</file>
@@ -135,6 +137,7 @@
     <file compressed="true">preferences/general.ui</file>
     <file compressed="true">preferences/dialogs/metadata.ui</file>
     <file compressed="true">preferences/dialogs/playlist_name.ui</file>
+    <file compressed="true">preferences/dialogs/playlist_file.ui</file>
     <file compressed="true">preferences/dialogs/release_note_row.ui</file>
     <file compressed="true">preferences/dialogs/release_notes.ui</file>
     <file compressed="true">preferences/dialogs/smart_playlist.ui</file>
@@ -149,6 +152,7 @@
     <file compressed="true">preferences/source/choice.ui</file>
     <file compressed="true">preferences/source/onboarding.ui</file>
     <file compressed="true">preferences/source/credential_host.ui</file>
+    <file compressed="true">preferences/source/file_host.ui</file>
     <file compressed="true">preferences/source/local_setup.ui</file>
     <file compressed="true">preferences/source/manage_server.ui</file>
     <file compressed="true">preferences/source/server_actions.ui</file>

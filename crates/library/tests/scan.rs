@@ -10,6 +10,141 @@ use sqlx::sqlite::SqliteConnection;
 const PRIVATE_TRACK_COUNT: usize = 100_000;
 
 #[tokio::test]
+async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.unwrap();
+    let source_id = library::SourceId::new("webdav:test");
+    let uri = library::source_entity_uri(&source_id, "track", "stable-track");
+    let mut observation = LocalFileWrite {
+        path: "https://music.example/dav/original.flac".into(),
+        root: "https://music.example/dav/".into(),
+        relative_path: "original.flac".into(),
+        kind: LocalFileKind::Media,
+        size_bytes: Some(1234),
+        mtime_ns: 0,
+        device_id: None,
+        inode: None,
+        native_id: Some("oc-fileid:123".into()),
+        picture_index: None,
+        revision: Some("etag-1".into()),
+        parse_version: Some(1),
+        state: LocalFileState::Accepted,
+    };
+    for renamed in [false, true] {
+        let mut scan = Scan::begin(&database, source_id.as_str(), "DAV", "dav", None)
+            .await
+            .unwrap();
+        scan.write_track(
+            "stable-track",
+            None,
+            "A track",
+            "a track",
+            "Album",
+            "Artist",
+            "a track",
+            2000,
+            1,
+            1,
+            None,
+            None,
+            None,
+            None,
+            Some("FLAC"),
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            None,
+            false,
+            None,
+            None,
+            None,
+            None,
+            None,
+            Some(&observation.path),
+            [1; 32],
+        )
+        .await
+        .unwrap();
+        scan.write_local_files(&[(observation.clone(), Vec::new())])
+            .await
+            .unwrap();
+        let publication = match scan.finish().await.unwrap() {
+            ScanOutcome::Changed(publication) => publication,
+            other => panic!("expected changed catalog, got {other:?}"),
+        };
+        let observed = database.observed_media_file(&uri).await.unwrap().unwrap();
+        assert_eq!(observed.path, observation.path);
+        assert_eq!(observed.revision, observation.revision);
+        if !renamed {
+            sqlx::query("INSERT INTO user_media_state(media_uri,favorite) VALUES(?1,1)")
+                .bind(&uri)
+                .execute(&mut connection(&path).await)
+                .await
+                .unwrap();
+            observation.path = "https://music.example/dav/renamed.flac".into();
+            observation.relative_path = "renamed.flac".into();
+            let candidates = database
+                .local_file_reuse_candidates(
+                    publication.source,
+                    &[observation.clone()],
+                    &ReadCancellation::default(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(
+                candidates[0].track_object_id.as_deref(),
+                Some("stable-track")
+            );
+            assert_eq!(candidates[0].path, observed.path);
+        }
+    }
+    let favorite: bool =
+        sqlx::query_scalar("SELECT favorite FROM user_media_state WHERE media_uri=?1")
+            .bind(&uri)
+            .fetch_one(&mut connection(&path).await)
+            .await
+            .unwrap();
+    assert!(favorite);
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn adding_remote_observation_columns_preserves_the_accepted_local_catalog() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.unwrap();
+    let publication = match write_small_catalog(&database, "same", "Track One", false, b"art").await
+    {
+        ScanOutcome::Changed(publication) => publication,
+        other => panic!("expected changed catalog, got {other:?}"),
+    };
+    database.close().await.unwrap();
+    let mut old = connection(&path).await;
+    sqlx::raw_sql("DROP INDEX catalog.local_files_native_id_idx; ALTER TABLE catalog.local_files DROP COLUMN native_id; ALTER TABLE catalog.local_files DROP COLUMN revision; PRAGMA catalog.user_version=44;")
+        .execute(&mut old).await.unwrap();
+    drop(old);
+    let reopened = Database::open(&path).await.unwrap();
+    assert_eq!(
+        reopened
+            .source_counts(publication.source, &ReadCancellation::default())
+            .await
+            .unwrap(),
+        (1, 2)
+    );
+    assert!(matches!(
+        write_small_catalog(&reopened, "same", "Track One", false, b"art").await,
+        ScanOutcome::Identical(_)
+    ));
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn local_component_paths_page_beyond_one_batch() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");
@@ -30,6 +165,9 @@ async fn local_component_paths_page_beyond_one_batch() {
             mtime_ns: 1,
             device_id: None,
             inode: None,
+            native_id: None,
+            picture_index: None,
+            revision: None,
             parse_version: None,
             state: LocalFileState::Observed,
         },
@@ -46,6 +184,9 @@ async fn local_component_paths_page_beyond_one_batch() {
                 mtime_ns: 1,
                 device_id: None,
                 inode: None,
+                native_id: None,
+                picture_index: None,
+                revision: None,
                 parse_version: Some(1),
                 state: LocalFileState::Accepted,
             },
@@ -734,6 +875,9 @@ async fn identical_and_artwork_only_incomplete_scans_retain_unseen_local_files()
                 mtime_ns: 1,
                 device_id: None,
                 inode: None,
+                native_id: None,
+                picture_index: None,
+                revision: None,
                 parse_version: Some(1),
                 state: LocalFileState::Accepted,
             },

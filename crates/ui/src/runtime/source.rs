@@ -82,6 +82,16 @@ pub struct CredentialInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSetup {
+    WebDav {
+        name: String,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    },
+    Smb {
+        name: String,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    },
     Jellyfin {
         credentials: CredentialInput,
         use_instant_mix: bool,
@@ -107,6 +117,7 @@ pub struct CredentialPreset {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditableSource {
+    pub file_settings: Option<sources::FileSourceSettings>,
     pub source: SourceSummary,
     pub credentials: CredentialPreset,
     pub jellyfin_use_instant_mix: Option<bool>,
@@ -114,6 +125,12 @@ pub struct EditableSource {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSettingsChange {
+    Files {
+        source_id: SourceId,
+        name: String,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentialsEdit,
+    },
     Jellyfin {
         source_id: SourceId,
         credentials: CredentialInput,
@@ -177,7 +194,7 @@ pub enum LibraryRefreshTrigger {
 
 impl SourceOperation {
     pub fn blocks_library(&self) -> bool {
-        matches!(self, Self::Switching { .. })
+        matches!(self, Self::Adding { .. } | Self::Switching { .. })
     }
 }
 
@@ -203,7 +220,37 @@ pub struct DiscoveryUpdate {
     pub status: DiscoveryStatus,
 }
 
+pub enum NextcloudLoginEvent {
+    OpenBrowser(String),
+    Authorized {
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    },
+}
+
 pub trait SourcePort: Send + Sync {
+    fn import_source_playlist(
+        &self,
+        source_id: SourceId,
+        path: String,
+    ) -> Receiver<Result<library::PlaylistImportReport, String>>;
+    fn export_source_playlist(
+        &self,
+        source_id: SourceId,
+        path: String,
+        target: PlaylistExport,
+        scope: Option<(library::SourceKey, Option<library::FolderKey>)>,
+    ) -> Receiver<Result<(), String>>;
+    fn smb_shares(
+        &self,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    ) -> Receiver<Result<Vec<(String, String)>, String>>;
+    fn nextcloud_login(
+        &self,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    ) -> Receiver<Result<NextcloudLoginEvent, String>>;
     fn import_playlist(
         &self,
         path: PathBuf,
@@ -296,6 +343,11 @@ pub trait SourcePort: Send + Sync {
     ) -> Receiver<Result<Option<(ArtistMetadataValues, Option<String>)>, String>>;
 }
 
+pub enum PlaylistExport {
+    Playlist(library::PlaylistKey),
+    Smart(library::SmartPlaylistKey),
+}
+
 /// Commands whose validity is owned by one selected source session.
 ///
 /// Rufin embeds this handle in the corresponding [`SelectedLibrary`](super::SelectedLibrary), so
@@ -334,9 +386,9 @@ mod tests {
     }
 
     #[test]
-    fn only_switching_gates_the_selected_library() {
+    fn adding_and_switching_gate_the_selected_library() {
         assert!(
-            !SourceOperation::Adding {
+            SourceOperation::Adding {
                 progress: progress()
             }
             .blocks_library()

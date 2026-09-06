@@ -477,6 +477,9 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         mtime_ns: 20,
         device_id: Some(1),
         inode: Some(2),
+        native_id: None,
+        picture_index: None,
+        revision: None,
         parse_version: Some(1),
         state: LocalFileState::Accepted,
     };

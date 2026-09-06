@@ -1,6 +1,6 @@
 //! One Local media candidate: Lofty metadata with container-specific GStreamer admission.
 
-use std::fs;
+use std::io::{Read, Seek};
 use std::path::{Path, PathBuf};
 
 use crate::LocalImageRef;
@@ -13,75 +13,77 @@ use lofty::tag::{ItemKey, Tag};
 use crate::policy::stable_hash;
 
 use super::discovery;
-use super::lofty_metadata::{read_lofty, read_lofty_file, source_format};
+use super::lofty::{read_lofty_file, source_format};
 
 #[derive(Clone, Debug)]
-pub(super) struct ScannedTrack {
-    pub(super) id: String,
-    pub(super) album_id: String,
-    pub(super) title: String,
-    pub(super) artist: String,
-    pub(super) album: String,
-    pub(super) year: u16,
-    pub(super) duration_seconds: u32,
-    pub(super) disc_number: u16,
-    pub(super) track_number: u16,
-    pub(super) local_artwork: Option<LocalImageRef>,
-    pub(super) musicbrainz_recording_id: Option<String>,
-    pub(super) musicbrainz_release_track_id: Option<String>,
-    pub(super) source_path: String,
-    pub(super) cue_path: Option<String>,
-    pub(super) cue_start_millis: Option<i64>,
-    pub(super) cue_end_millis: Option<i64>,
-    pub(super) source_format: Option<String>,
-    pub(super) comment: Option<String>,
-    pub(super) bpm: Option<u16>,
-    pub(super) user_rating: Option<u8>,
-    pub(super) artists: Vec<ArtistCredit>,
-    pub(super) album_artists: Vec<ArtistCredit>,
-    pub(super) genres: Vec<NamedCredit>,
-    pub(super) moods: Vec<NamedCredit>,
-    pub(super) album_artist: String,
-    pub(super) release_types: Vec<String>,
-    pub(super) is_compilation: Option<bool>,
-    pub(super) musicbrainz_album_id: Option<String>,
-    pub(super) musicbrainz_release_group_id: Option<String>,
-    pub(super) track_r128_lufs: Option<f64>,
-    pub(super) album_r128_lufs: Option<f64>,
-    pub(super) replay_gain_track_db: Option<f64>,
-    pub(super) replay_gain_track_peak: Option<f64>,
-    pub(super) replay_gain_album_db: Option<f64>,
-    pub(super) replay_gain_album_peak: Option<f64>,
+pub(crate) struct ScannedTrack {
+    pub(crate) id: String,
+    pub(crate) album_id: String,
+    pub(crate) title: String,
+    pub(crate) artist: String,
+    pub(crate) album: String,
+    pub(crate) year: u16,
+    pub(crate) duration_seconds: u32,
+    pub(crate) disc_number: u16,
+    pub(crate) track_number: u16,
+    pub(crate) local_artwork: Option<LocalImageRef>,
+    pub(crate) musicbrainz_recording_id: Option<String>,
+    pub(crate) musicbrainz_release_track_id: Option<String>,
+    pub(crate) source_path: String,
+    pub(crate) audio_revision: blake3::Hasher,
+    pub(crate) local_uri: Option<String>,
+    pub(crate) cue_path: Option<String>,
+    pub(crate) cue_start_millis: Option<i64>,
+    pub(crate) cue_end_millis: Option<i64>,
+    pub(crate) source_format: Option<String>,
+    pub(crate) comment: Option<String>,
+    pub(crate) bpm: Option<u16>,
+    pub(crate) user_rating: Option<u8>,
+    pub(crate) artists: Vec<ArtistCredit>,
+    pub(crate) album_artists: Vec<ArtistCredit>,
+    pub(crate) genres: Vec<NamedCredit>,
+    pub(crate) moods: Vec<NamedCredit>,
+    pub(crate) album_artist: String,
+    pub(crate) release_types: Vec<String>,
+    pub(crate) is_compilation: Option<bool>,
+    pub(crate) musicbrainz_album_id: Option<String>,
+    pub(crate) musicbrainz_release_group_id: Option<String>,
+    pub(crate) track_r128_lufs: Option<f64>,
+    pub(crate) album_r128_lufs: Option<f64>,
+    pub(crate) replay_gain_track_db: Option<f64>,
+    pub(crate) replay_gain_track_peak: Option<f64>,
+    pub(crate) replay_gain_album_db: Option<f64>,
+    pub(crate) replay_gain_album_peak: Option<f64>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct ArtistCredit {
-    pub(super) id: String,
-    pub(super) name: String,
-    pub(super) musicbrainz_artist_id: Option<String>,
+pub(crate) struct ArtistCredit {
+    pub(crate) id: String,
+    pub(crate) name: String,
+    pub(crate) musicbrainz_artist_id: Option<String>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct NamedCredit {
-    pub(super) id: String,
-    pub(super) name: String,
+pub(crate) struct NamedCredit {
+    pub(crate) id: String,
+    pub(crate) name: String,
 }
 
 #[derive(Clone, Debug)]
-pub(super) enum MediaRead {
+pub(crate) enum MediaRead {
     Accepted(Box<ScannedTrack>),
     Rejected,
     Unreadable,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct BasicAudioMetadata {
-    pub(super) title: String,
-    pub(super) album: String,
-    pub(super) artist: String,
-    pub(super) disc_number: u16,
-    pub(super) track_number: u16,
-    pub(super) duration_seconds: u32,
+pub(crate) struct BasicAudioMetadata {
+    pub(crate) title: String,
+    pub(crate) album: String,
+    pub(crate) artist: String,
+    pub(crate) disc_number: u16,
+    pub(crate) track_number: u16,
+    pub(crate) duration_seconds: u32,
 }
 
 struct MetadataArtist {
@@ -117,23 +119,29 @@ struct AudioMetadata {
 }
 
 #[derive(Default)]
-pub(super) struct Worker {
+pub(crate) struct Worker {
     discovery: discovery::Reader,
 }
 
-pub(super) fn read_media(
+impl Worker {
+    pub(crate) fn network() -> Self {
+        Self {
+            discovery: discovery::Reader::network(),
+        }
+    }
+}
+
+pub(crate) fn read_media_input(
     worker: &mut Worker,
     path: PathBuf,
+    file: &mut (impl Read + Seek),
+    uri: &str,
     sidecar: Option<LocalImageRef>,
 ) -> MediaRead {
-    let file = match fs::File::open(&path) {
-        Ok(file) => file,
-        Err(_) => return MediaRead::Unreadable,
-    };
     // Recognize a frame sync at the start or immediately after ID3 metadata;
     // searching binary interiors can mistake executable bytes for MPEG audio.
     let tagged_file = read_lofty_file(
-        file,
+        &mut *file,
         ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
     )
     .ok()
@@ -141,7 +149,7 @@ pub(super) fn read_media(
     let topology_admitted = tagged_file
         .as_ref()
         .filter(|file| requires_topology_admission(file.file_type()))
-        .map(|_| worker.discovery.read(&path));
+        .map(|_| worker.discovery.read_input(file, uri));
     let mut tagged_file = tagged_file.filter(|file| {
         if requires_topology_admission(file.file_type()) {
             topology_admitted.as_ref().is_some_and(Option::is_some)
@@ -153,7 +161,7 @@ pub(super) fn read_media(
         if topology_admitted.is_some_and(|admitted| admitted.is_none()) {
             return MediaRead::Rejected;
         }
-        let Some(discovered) = worker.discovery.read(&path) else {
+        let Some(discovered) = worker.discovery.read_input(file, uri) else {
             return MediaRead::Rejected;
         };
         Some(discovered)
@@ -163,7 +171,10 @@ pub(super) fn read_media(
     if tagged_file.is_none() {
         // Discovery has confirmed audio, so retain Lofty's tag recovery for
         // playable files whose frames or ID3 metadata follow leading junk.
-        tagged_file = read_lofty(&path, false)
+        if file.rewind().is_err() {
+            return MediaRead::Unreadable;
+        }
+        tagged_file = read_lofty_file(file, ParseOptions::new().read_cover_art(false))
             .ok()
             .flatten()
             .filter(lofty_supplies_required_audio);
@@ -487,6 +498,8 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         local_artwork,
         musicbrainz_recording_id,
         musicbrainz_release_track_id,
+        audio_revision: blake3::Hasher::new(),
+        local_uri: None,
         source_path: path_text,
         cue_path: None,
         cue_start_millis: None,
@@ -585,18 +598,18 @@ fn basic_audio_metadata_from_discoverer(
     }
 }
 
-pub(super) fn track_id(path: &Path) -> String {
+pub(crate) fn track_id(path: &Path) -> String {
     local_id("track", &path.to_string_lossy())
 }
 
-pub(super) fn cue_track_id(cue_path: &Path, track_number: u16) -> String {
+pub(crate) fn cue_track_id(cue_path: &Path, track_number: u16) -> String {
     local_id(
         "track",
         &format!("{}:{track_number}", cue_path.to_string_lossy()),
     )
 }
 
-pub(super) fn album_id(
+pub(crate) fn album_id(
     album_artists: &[ArtistCredit],
     album: &str,
     musicbrainz_album_id: Option<&str>,
@@ -622,7 +635,7 @@ pub(super) fn album_id(
     local_id("album", &identity)
 }
 
-pub(super) fn artist_credit(name: &str, musicbrainz_artist_id: Option<&str>) -> ArtistCredit {
+pub(crate) fn artist_credit(name: &str, musicbrainz_artist_id: Option<&str>) -> ArtistCredit {
     let musicbrainz_artist_id = musicbrainz_artist_id.and_then(clean_mbid);
     let id = musicbrainz_artist_id
         .as_deref()
@@ -635,7 +648,7 @@ pub(super) fn artist_credit(name: &str, musicbrainz_artist_id: Option<&str>) -> 
     }
 }
 
-pub(super) fn split_names(value: &str) -> Vec<String> {
+pub(crate) fn split_names(value: &str) -> Vec<String> {
     let mut values = Vec::new();
     for value in value
         .split([';', '/'])
@@ -647,7 +660,7 @@ pub(super) fn split_names(value: &str) -> Vec<String> {
     values
 }
 
-pub(super) fn local_id(kind: &str, value: &str) -> String {
+pub(crate) fn local_id(kind: &str, value: &str) -> String {
     format!("local:{kind}:{:016x}", stable_hash(value))
 }
 
@@ -788,6 +801,8 @@ mod tests {
     use lofty::tag::TagType;
 
     use super::*;
+    use crate::file::local::media::read_media;
+    use std::fs;
 
     #[test]
     fn executable_contents_are_not_local_audio() {
@@ -826,11 +841,11 @@ mod tests {
             };
             assert_eq!(track.title, "Original", "{name}");
             assert_eq!(track.comment.as_deref(), Some("Retained comment"), "{name}");
-            let mut metadata =
-                super::super::read_track_metadata(&path, Some("mp3")).expect("read audio metadata");
+            let mut metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
+                .expect("read audio metadata");
             assert!(metadata.writable.title, "{name}");
             metadata.values.title = "Updated".into();
-            super::super::metadata::write_track(
+            crate::file::metadata::write_track(
                 &path,
                 Some("mp3"),
                 metadata.revision.as_deref().expect("file revision"),
@@ -843,7 +858,7 @@ mod tests {
                 },
             )
             .expect("write audio metadata");
-            let updated = super::super::read_track_metadata(&path, Some("mp3"))
+            let updated = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read updated audio metadata");
             assert_eq!(updated.values.title, "Updated", "{name}");
             assert_eq!(

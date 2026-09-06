@@ -3,6 +3,7 @@ all-features = true
 
 [advisories]
 ignore = [
+    { id = "RUSTSEC-2023-0071", reason = "rsa is pulled by smb -> sspi -> picky; Rufin enables only NTLM, with Kerberos and PKU2U disabled, so the affected RSA private-key operations are unused. Reassess if SMB authentication features change." },
     { id = "RUSTSEC-2024-0436", reason = "lofty uses paste, can be removed if they change it to pastey" },
 ]
 

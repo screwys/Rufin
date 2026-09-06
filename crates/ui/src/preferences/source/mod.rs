@@ -118,7 +118,7 @@ pub(crate) fn source_progress_text(progress: &SourceProgress) -> String {
         SourceProgressStage::Playlists => "playlists",
         SourceProgressStage::Home => "Home",
         SourceProgressStage::Artwork => "artwork",
-        SourceProgressStage::Files => return tr("Caching local library..."),
+        SourceProgressStage::Files => "files",
         SourceProgressStage::Finalizing => return tr("Preparing library..."),
     };
     match progress.total {

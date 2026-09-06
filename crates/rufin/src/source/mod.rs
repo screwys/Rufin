@@ -26,8 +26,9 @@ use tracing::{info, warn};
 use ui::runtime::source::{
     ConfiguredSources, CredentialInput, CredentialPreset, DiscoveredServer, DiscoveryStatus,
     DiscoveryUpdate, EditableSource, LocalAccessStatus, LocalFolder, OpenSubsonicKind,
-    SelectedSourcePort, SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourcePort,
-    SourceProgress, SourceProgressStage, SourceSettingsChange, SourceSetup, SourceSummary,
+    PlaylistExport, SelectedSourcePort, SourceLocalAccess, SourceLocalAccessSummary,
+    SourceOperation, SourcePort, SourceProgress, SourceProgressStage, SourceSettingsChange,
+    SourceSetup, SourceSummary,
 };
 use ui::runtime::{
     CatalogChange, CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent,
@@ -855,6 +856,7 @@ impl SourceOwner {
                     continue;
                 }
                 Ok(None) => {}
+                Err(SourceError::Cancelled) => return,
                 Err(error) => {
                     warn!(%error, "bounded selected-source change failed; reacquiring after feed boundary loss");
                 }
@@ -1309,6 +1311,39 @@ impl SourceOwner {
 }
 
 impl SourcePort for SourceOwner {
+    fn smb_shares(
+        &self,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    ) -> Receiver<Result<Vec<(String, String)>, String>> {
+        self.reply(move |_, _| async move {
+            sources::list_smb_shares(settings, credentials)
+                .await
+                .map_err(string_error)
+        })
+    }
+
+    fn nextcloud_login(
+        &self,
+        settings: sources::FileSourceSettings,
+        credentials: sources::FileCredentials,
+    ) -> Receiver<Result<ui::runtime::source::NextcloudLoginEvent, String>> {
+        use ui::runtime::source::NextcloudLoginEvent;
+        let (send, receive) = async_channel::bounded(2);
+        self.shared.runtime.spawn(async move {
+            let authorization = sources::authorize_nextcloud(settings, credentials, |url| {
+                let _ = send.try_send(Ok(NextcloudLoginEvent::OpenBrowser(url.to_string())));
+            });
+            tokio::select! {
+                _ = send.closed() => {},
+                result = authorization => {
+                    let _ = send.send(result.map(|(settings, credentials)| NextcloudLoginEvent::Authorized { settings, credentials }).map_err(string_error)).await;
+                }
+            }
+        });
+        receive
+    }
+
     fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
             owner
@@ -1370,6 +1405,7 @@ impl SourcePort for SourceOwner {
 
     fn configure_source(&self, input: SourceSetup) {
         let cancelled = self.shared.begin_acquisition();
+        self.shared.cancel_observer();
         self.spawn_serialized(move |owner| async move {
             if cancelled.load(Ordering::Acquire) {
                 return;
@@ -1410,15 +1446,33 @@ impl SourcePort for SourceOwner {
                         owner.shared.selected().as_deref(),
                     )))
                     .await;
-                let publication = owner
-                    .shared
-                    .database
-                    .reconcile_source(&configuration.source_id)
+                let events = owner.shared.outputs.events.clone();
+                let progress = move |value| {
+                    let _ = events.try_send(SourceEvent::Operation(SourceOperation::Adding {
+                        progress: source_progress(value),
+                    }));
+                };
+                let outcome = source
+                    .manual_refresh(
+                        &owner.shared.database,
+                        &configuration.name,
+                        &progress,
+                        Arc::clone(&cancelled),
+                    )
                     .await
                     .map_err(string_error)?;
                 if !owner.shared.acquisition_is_current(&cancelled) {
                     return Ok(());
                 }
+                let publication = match outcome {
+                    ScanOutcome::Changed(publication)
+                    | ScanOutcome::PlaylistsChanged(publication)
+                    | ScanOutcome::ArtworkChanged(publication)
+                    | ScanOutcome::Identical(publication) => publication,
+                    ScanOutcome::Stale | ScanOutcome::Failed => {
+                        return Err("The initial library scan did not complete".to_string());
+                    }
+                };
                 owner
                     .install_selected(
                         configured,
@@ -1428,17 +1482,20 @@ impl SourcePort for SourceOwner {
                         Arc::clone(&cancelled),
                     )
                     .await?;
-                if let Some(selected) = owner.shared.selected() {
-                    owner
-                        .manual_refresh_selected(&selected, "source-add", Arc::clone(&cancelled))
-                        .await;
-                }
+                owner
+                    .accept_scan(&configuration.source_id, outcome, CatalogChange::Acquired)
+                    .await;
                 Ok(())
             }
             .await;
             if let Err(error) = result
                 && owner.shared.acquisition_is_current(&cancelled)
             {
+                if let Some(session) = owner.shared.selected_session()
+                    && let Some(selected) = session.resolve()
+                {
+                    owner.start_observer(session, selected, false);
+                }
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: persisted_source_id,
@@ -1491,6 +1548,7 @@ impl SourcePort for SourceOwner {
 
     fn select_source(&self, source_id: SourceId) {
         let cancelled = self.shared.begin_acquisition();
+        self.shared.cancel_observer();
         self.spawn_serialized(move |owner| async move {
             if cancelled.load(Ordering::Acquire) {
                 return;
@@ -1506,6 +1564,11 @@ impl SourcePort for SourceOwner {
                 .await
                 && !cancelled.load(Ordering::Acquire)
             {
+                if let Some(session) = owner.shared.selected_session()
+                    && let Some(selected) = session.resolve()
+                {
+                    owner.start_observer(session, selected, false);
+                }
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: Some(source_id),
@@ -1920,6 +1983,74 @@ impl SourcePort for SourceOwner {
             }
         });
         receiver
+    }
+
+    fn import_source_playlist(
+        &self,
+        source_id: SourceId,
+        path: String,
+    ) -> Receiver<Result<library::PlaylistImportReport, String>> {
+        self.reply(move |owner, _| async move {
+            let source = owner.client(&source_id)?;
+            let report = source
+                .import_playlist_file(&owner.shared.database, &path)
+                .await
+                .map_err(string_error)?;
+            owner
+                .accept_playlist_result(None, Some(report.playlist), Ok((true, None)))
+                .await;
+            Ok(report)
+        })
+    }
+
+    fn export_source_playlist(
+        &self,
+        source_id: SourceId,
+        path: String,
+        target: PlaylistExport,
+        scope: Option<(SourceKey, Option<FolderKey>)>,
+    ) -> Receiver<Result<(), String>> {
+        self.reply(move |owner, _| async move {
+            use std::io::Write;
+            let source = owner.client(&source_id)?;
+            let file = tempfile::NamedTempFile::new().map_err(string_error)?;
+            let mut output = std::io::BufWriter::new(file.reopen().map_err(string_error)?);
+            let destination = std::path::Path::new(&path);
+            match target {
+                PlaylistExport::Playlist(key) => {
+                    owner
+                        .shared
+                        .database
+                        .export_playlist_m3u(key, destination, &mut output)
+                        .await
+                }
+                PlaylistExport::Smart(key) => {
+                    let now = SystemTime::now()
+                        .duration_since(UNIX_EPOCH)
+                        .unwrap_or_default()
+                        .as_secs() as i64;
+                    owner
+                        .shared
+                        .database
+                        .export_smart_playlist_m3u(
+                            key,
+                            scope.map(|s| s.0),
+                            scope.and_then(|s| s.1),
+                            now,
+                            destination,
+                            &mut output,
+                        )
+                        .await
+                }
+            }
+            .map_err(string_error)?;
+            output.flush().map_err(string_error)?;
+            drop(output);
+            source
+                .save_playlist_file(&owner.shared.database, &path, file.into_temp_path())
+                .await
+                .map_err(string_error)
+        })
     }
 
     fn create_playlist(
@@ -2749,7 +2880,7 @@ impl SourceOwner {
             .ok()
             .flatten()?
             .source;
-        let local = self.configuration(&source_id)?.is_local();
+        let local = self.configuration(&source_id)?.is_file_library();
         Some((source_id, source_key, local))
     }
 
@@ -2803,10 +2934,10 @@ impl SourceOwner {
         match &target {
             FavoriteTarget::Track(media_uri) if local => {
                 if let Err(error) = source
-                    .write_local_track_rating(&self.shared.database, source_key, media_uri, rating)
+                    .write_file_track_rating(&self.shared.database, source_key, media_uri, rating)
                     .await
                 {
-                    warn!(%error, "could not write Local Track rating");
+                    warn!(%error, "could not write file Track rating");
                 }
             }
             _ if !local => {
@@ -3241,6 +3372,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             subsonic_authentication,
             ..
         } => Ok(EditableSource {
+            file_settings: None,
             source: SourceSummary {
                 id: configuration.source_id.clone(),
                 kind: configuration.kind.clone(),
@@ -3258,6 +3390,24 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             },
             jellyfin_use_instant_mix,
         }),
+        sources::EditableSource::Files { settings, .. } => Ok(EditableSource {
+            source: SourceSummary {
+                id: configuration.source_id.clone(),
+                kind: configuration.kind.clone(),
+                name: configuration.name.clone(),
+                transcoded_download_bitrate_limit_kbps: None,
+                half_stars_enabled: false,
+            },
+            credentials: CredentialPreset {
+                source_name: configuration.name.clone(),
+                server_url: settings.url.clone(),
+                username: settings.username.clone(),
+                trust_invalid_cert: settings.trust_invalid_certificate,
+                open_subsonic_authentication: None,
+            },
+            jellyfin_use_instant_mix: None,
+            file_settings: Some(settings),
+        }),
         sources::EditableSource::Local { .. } => {
             Err("Local folders are edited from the Local source panel".to_string())
         }
@@ -3266,6 +3416,24 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
 
 fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSetupInput {
     match input {
+        SourceSetup::WebDav {
+            name,
+            settings,
+            credentials,
+        } => SourceSetupInput::WebDav {
+            name,
+            settings,
+            credentials,
+        },
+        SourceSetup::Smb {
+            name,
+            settings,
+            credentials,
+        } => SourceSetupInput::Smb {
+            name,
+            settings,
+            credentials,
+        },
         SourceSetup::Jellyfin {
             credentials,
             use_instant_mix,
@@ -3289,6 +3457,16 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
 
 fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
     match input {
+        SourceSettingsChange::Files {
+            name,
+            settings,
+            credentials,
+            ..
+        } => SourceSettingsInput::Files {
+            name,
+            settings,
+            credentials,
+        },
         SourceSettingsChange::Jellyfin {
             source_id: _,
             credentials,
@@ -3311,7 +3489,8 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
 
 fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
     match input {
-        SourceSettingsChange::Jellyfin { source_id, .. }
+        SourceSettingsChange::Files { source_id, .. }
+        | SourceSettingsChange::Jellyfin { source_id, .. }
         | SourceSettingsChange::OpenSubsonic { source_id, .. } => source_id,
     }
 }
@@ -3431,6 +3610,75 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod artwork_preparation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn adding_a_source_keeps_setup_progress_until_the_catalog_is_ready() {
+        let directory = tempfile::tempdir().unwrap();
+        let music = directory.path().join("music");
+        std::fs::create_dir(&music).unwrap();
+        let database = Arc::new(
+            Database::open(directory.path().join("library.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let runtime = tokio::runtime::Handle::current();
+        let (events, receiver) = async_channel::unbounded();
+        let owner = SourceOwner::open_dormant(
+            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            Arc::clone(&database),
+            Downloads::new(
+                directory.path().join("downloads"),
+                database.as_ref().clone(),
+                runtime.clone(),
+                async_channel::unbounded().0,
+                Vec::new(),
+            ),
+            SettingsFile::memory(),
+            Arc::new(SwitchableSecretStore::new(Arc::new(
+                secrets::MemorySecretStore::new(),
+            ))),
+            runtime,
+            SourceOutputs {
+                events,
+                discovery: async_channel::unbounded().0,
+            },
+        )
+        .owner;
+        owner.configure_source(SourceSetup::Local { roots: vec![music] });
+        tokio::time::timeout(Duration::from_secs(10), async {
+            let mut scanned = false;
+            let mut selected = false;
+            loop {
+                match receiver.recv().await.unwrap() {
+                    SourceEvent::Operation(SourceOperation::Adding { progress }) => {
+                        scanned |= progress.stage == SourceProgressStage::Finalizing;
+                    }
+                    SourceEvent::Selected { .. } => {
+                        assert!(scanned, "selection must follow the initial scan");
+                        selected = true;
+                    }
+                    SourceEvent::Operation(SourceOperation::Idle) => {
+                        assert!(
+                            selected,
+                            "setup finishes after the ready catalog is selected"
+                        );
+                        break;
+                    }
+                    SourceEvent::Operation(SourceOperation::Refreshing { .. }) => {
+                        panic!("the initial scan belongs to setup, not background refresh");
+                    }
+                    SourceEvent::Operation(SourceOperation::Failed { message, .. }) => {
+                        panic!("{message}")
+                    }
+                    _ => {}
+                }
+            }
+        })
+        .await
+        .unwrap();
+        owner.shared.cancel_observer();
+        owner.shared.cancel_acquisition();
+    }
 
     #[tokio::test(flavor = "multi_thread", worker_threads = 2)]
     async fn cached_selection_is_published_while_credentials_are_held() {

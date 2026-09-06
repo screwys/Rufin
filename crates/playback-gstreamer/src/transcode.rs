@@ -15,6 +15,7 @@ pub struct TranscodedAudioReader {
     sink: gst_app::AppSink,
     current: Cursor<Vec<u8>>,
     finished: bool,
+    _stream: ResolvedStream,
 }
 
 impl TranscodedAudioReader {
@@ -78,6 +79,7 @@ impl TranscodedAudioReader {
             sink,
             current: Cursor::new(Vec::new()),
             finished: false,
+            _stream: stream.clone(),
         })
     }
 }

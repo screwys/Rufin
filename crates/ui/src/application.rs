@@ -381,6 +381,8 @@ pub(crate) fn verify_interface_resources() -> Result<(), String> {
     register_resources()?;
     for relative_path in [
         "scalable/apps/io.github.screwys.Rufin.svg",
+        "64x64/apps/io.github.screwys.Rufin.source.webdav.png",
+        "64x64/apps/io.github.screwys.Rufin.source.smb.png",
         "scalable/actions/rufin-go-last-symbolic.svg",
         "scalable/actions/rufin-audio-only-symbolic.svg",
         "scalable/actions/rufin-library-music-symbolic.svg",

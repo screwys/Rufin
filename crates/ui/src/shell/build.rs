@@ -156,6 +156,7 @@ pub fn build(
         operation_feedback_subtitle: gtk::Label,
         operation_feedback_action: gtk::Button,
         startup_loading_host: gtk::Box,
+        startup_loading_status: gtk::Label,
     });
     temporary_storage_banner.set_revealed(temporary_store);
     let fresh_start_banner: adw::Banner = crate::ui_resource::object(
@@ -284,6 +285,7 @@ pub fn build(
         app_root_overlay,
         app_content_stack,
         startup_loading_host,
+        startup_loading_status,
     };
     let navigation_view = NavigationWidgets {
         split_view,

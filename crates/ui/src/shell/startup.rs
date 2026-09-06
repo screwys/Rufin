@@ -35,32 +35,10 @@ impl Shell {
             .root_stack
             .set_visible_child(&self.chrome.app_root_overlay);
         self.chrome.startup_loading_host.set_visible(true);
-        while let Some(child) = self.chrome.startup_loading_host.first_child() {
-            self.chrome.startup_loading_host.remove(&child);
-        }
-        self.chrome
-            .startup_loading_host
-            .append(&self.startup_loading_view());
-    }
-    pub(crate) fn startup_loading_view(&self) -> gtk::Widget {
-        let wrapper = gtk::Box::new(gtk::Orientation::Vertical, 0);
-        wrapper.add_css_class("loading-page");
-        wrapper.set_hexpand(true);
-        wrapper.set_vexpand(true);
-        wrapper.set_halign(gtk::Align::Center);
-        wrapper.set_valign(gtk::Align::Center);
-
-        let spinner = adw::Spinner::new();
-        wrapper.append(&spinner);
         let status = self.library_loading_status();
-        if let Some(status) = status {
-            let label = gtk::Label::new(Some(&status));
-            label.add_css_class("dim-label");
-            label.add_css_class("startup-loading-status");
-            label.set_wrap(true);
-            wrapper.append(&label);
-        }
-        wrapper.upcast()
+        let label = &self.chrome.startup_loading_status;
+        label.set_visible(status.is_some());
+        label.set_text(status.as_deref().unwrap_or_default());
     }
 
     fn library_loading_status(&self) -> Option<String> {

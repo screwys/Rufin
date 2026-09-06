@@ -18,6 +18,9 @@
         <child><object class="AdwPreferencesGroup" id="server_sources">
           <property name="title" translatable="yes">Servers</property>
         </object></child>
+        <child><object class="AdwPreferencesGroup" id="remote_sources">
+          <property name="title" translatable="yes">Remote</property>
+        </object></child>
         <child><object class="AdwPreferencesGroup" id="privacy">
           <property name="title" translatable="yes">Privacy and Security</property>
           <child><object class="AdwSwitchRow" id="external_metadata"><property name="title" translatable="yes">External metadata lookup</property></object></child>

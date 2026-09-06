@@ -46,34 +46,35 @@ const ASF_AUDIO_MEDIA_GUID: [u8; 16] = [
 const WAVE_FORMAT_WMA_PRO: u16 = 0x0162;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
-pub(super) struct Metadata {
-    pub(super) title: Option<String>,
-    pub(super) album: Option<String>,
-    pub(super) artist: Option<String>,
-    pub(super) album_artist: Option<String>,
-    pub(super) artist_mbids: Vec<String>,
-    pub(super) album_artist_mbids: Vec<String>,
-    pub(super) genres: Vec<String>,
-    pub(super) moods: Vec<String>,
-    pub(super) year: Option<u16>,
-    pub(super) comment: Option<String>,
-    pub(super) bpm: Option<u16>,
-    pub(super) track_number: Option<u16>,
-    pub(super) disc_number: Option<u16>,
-    pub(super) musicbrainz_album_id: Option<String>,
-    pub(super) musicbrainz_release_group_id: Option<String>,
-    pub(super) musicbrainz_recording_id: Option<String>,
-    pub(super) musicbrainz_release_track_id: Option<String>,
-    pub(super) release_types: Vec<String>,
-    pub(super) is_compilation: Option<bool>,
-    pub(super) duration_seconds: u32,
-    pub(super) artwork_index: Option<u32>,
-    pub(super) source_format: Option<String>,
+pub(crate) struct Metadata {
+    pub(crate) title: Option<String>,
+    pub(crate) album: Option<String>,
+    pub(crate) artist: Option<String>,
+    pub(crate) album_artist: Option<String>,
+    pub(crate) artist_mbids: Vec<String>,
+    pub(crate) album_artist_mbids: Vec<String>,
+    pub(crate) genres: Vec<String>,
+    pub(crate) moods: Vec<String>,
+    pub(crate) year: Option<u16>,
+    pub(crate) comment: Option<String>,
+    pub(crate) bpm: Option<u16>,
+    pub(crate) track_number: Option<u16>,
+    pub(crate) disc_number: Option<u16>,
+    pub(crate) musicbrainz_album_id: Option<String>,
+    pub(crate) musicbrainz_release_group_id: Option<String>,
+    pub(crate) musicbrainz_recording_id: Option<String>,
+    pub(crate) musicbrainz_release_track_id: Option<String>,
+    pub(crate) release_types: Vec<String>,
+    pub(crate) is_compilation: Option<bool>,
+    pub(crate) duration_seconds: u32,
+    pub(crate) artwork_index: Option<u32>,
+    pub(crate) source_format: Option<String>,
 }
 
 #[derive(Default)]
-pub(super) struct Reader {
+pub(crate) struct Reader {
     discoverer: DiscovererState,
+    timeout_seconds: Option<u64>,
 }
 
 enum DiscovererState {
@@ -89,16 +90,39 @@ impl Default for DiscovererState {
 }
 
 impl Reader {
-    pub(super) fn read(&mut self, path: &Path) -> Option<Metadata> {
+    pub(crate) fn network() -> Self {
+        Self {
+            discoverer: DiscovererState::New,
+            timeout_seconds: Some(30),
+        }
+    }
+    pub(crate) fn read(&mut self, path: &Path) -> Option<Metadata> {
         let info = self.discover(path)?;
         metadata_from_info(&info)
     }
 
+    pub(crate) fn read_input(
+        &mut self,
+        file: &mut (impl Read + Seek),
+        uri: &str,
+    ) -> Option<Metadata> {
+        let info = self.discover_input(file, uri)?;
+        metadata_from_info(&info)
+    }
+
     fn discover(&mut self, path: &Path) -> Option<DiscovererInfo> {
-        preflight_known_container(path).ok()?;
-        let discoverer = self.discoverer()?;
+        let mut file = fs::File::open(path).ok()?;
         let uri = url::Url::from_file_path(path).ok()?;
-        let info = discoverer.discover_uri(uri.as_str()).ok()?;
+        self.discover_input(&mut file, uri.as_str())
+    }
+
+    fn discover_input(
+        &mut self,
+        file: &mut (impl Read + Seek),
+        uri: &str,
+    ) -> Option<DiscovererInfo> {
+        preflight_known_container(file).ok()?;
+        let info = self.discoverer()?.discover_uri(uri).ok()?;
         admitted_audio_stream(&info).map(|_| info)
     }
 
@@ -106,8 +130,10 @@ impl Reader {
         if matches!(self.discoverer, DiscovererState::New) {
             self.discoverer = ensure_gstreamer_initialized()
                 .and_then(|()| {
-                    Discoverer::new(gst::ClockTime::from_seconds(DISCOVERER_TIMEOUT_SECONDS))
-                        .map_err(|error| error.to_string())
+                    Discoverer::new(gst::ClockTime::from_seconds(
+                        self.timeout_seconds.unwrap_or(DISCOVERER_TIMEOUT_SECONDS),
+                    ))
+                    .map_err(|error| error.to_string())
                 })
                 .map_or(DiscovererState::Unavailable, DiscovererState::Ready);
         }
@@ -118,9 +144,15 @@ impl Reader {
     }
 }
 
-pub(super) fn read_image(path: &Path, picture_index: u32) -> SourceResult<ImageBytes> {
-    let mut reader = Reader::default();
-    let info = reader.discover(path).ok_or(SourceError::NotFound)?;
+pub(crate) fn read_image_input(
+    reader: &mut Reader,
+    file: &mut (impl Read + Seek),
+    uri: &str,
+    picture_index: u32,
+) -> SourceResult<ImageBytes> {
+    let info = reader
+        .discover_input(file, uri)
+        .ok_or(SourceError::NotFound)?;
     let audio = admitted_audio_stream(&info).ok_or(SourceError::NotFound)?;
     let tags = ScopedTags::new(container_tags(&info), audio.tags());
     let sample = tags
@@ -565,14 +597,16 @@ enum PreflightError {
     MissingSegment,
 }
 
-fn preflight_known_container(path: &Path) -> Result<(), PreflightError> {
-    let mut file = fs::File::open(path).map_err(|_| PreflightError::Io)?;
-    let mut prefix = [0_u8; 16];
-    let read = file.read(&mut prefix).map_err(|_| PreflightError::Io)?;
-    if read >= 4 && prefix[..4] == [0x1a, 0x45, 0xdf, 0xa3] {
-        preflight_mka(path)
-    } else if read == prefix.len() && prefix == ASF_HEADER_GUID {
-        preflight_asf(path)
+fn preflight_known_container(file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+    file.rewind().map_err(|_| PreflightError::Io)?;
+    let mut prefix = Vec::with_capacity(16);
+    file.take(16)
+        .read_to_end(&mut prefix)
+        .map_err(|_| PreflightError::Io)?;
+    if prefix.starts_with(&[0x1a, 0x45, 0xdf, 0xa3]) {
+        preflight_mka(file)
+    } else if prefix == ASF_HEADER_GUID {
+        preflight_asf(file)
     } else {
         Ok(())
     }
@@ -586,9 +620,11 @@ struct PreflightState {
     segment_found: bool,
 }
 
-fn preflight_mka(path: &Path) -> Result<(), PreflightError> {
-    let mut file = fs::File::open(path).map_err(|_| PreflightError::Io)?;
-    let file_len = file.metadata().map_err(|_| PreflightError::Io)?.len();
+fn preflight_mka(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+    let file_len = file
+        .seek(SeekFrom::End(0))
+        .map_err(|_| PreflightError::Io)?;
+    file.rewind().map_err(|_| PreflightError::Io)?;
     let mut state = PreflightState::default();
     scan_elements(&mut file, file_len, Scope::Root, 0, &mut state)?;
     if !state.segment_found {
@@ -597,9 +633,11 @@ fn preflight_mka(path: &Path) -> Result<(), PreflightError> {
     Ok(())
 }
 
-fn preflight_asf(path: &Path) -> Result<(), PreflightError> {
-    let mut file = fs::File::open(path).map_err(|_| PreflightError::Io)?;
-    let file_len = file.metadata().map_err(|_| PreflightError::Io)?.len();
+fn preflight_asf(mut file: &mut (impl Read + Seek)) -> Result<(), PreflightError> {
+    let file_len = file
+        .seek(SeekFrom::End(0))
+        .map_err(|_| PreflightError::Io)?;
+    file.rewind().map_err(|_| PreflightError::Io)?;
     let mut guid = [0_u8; 16];
     file.read_exact(&mut guid)
         .map_err(|_| PreflightError::InvalidAsf)?;
@@ -715,7 +753,7 @@ fn read_u64_le(reader: &mut impl Read) -> Result<u64, PreflightError> {
 }
 
 fn scan_elements(
-    file: &mut fs::File,
+    file: &mut (impl Read + Seek),
     end: u64,
     scope: Scope,
     depth: usize,
@@ -794,7 +832,7 @@ fn scan_elements(
 }
 
 fn scan_unknown_cluster(
-    file: &mut fs::File,
+    file: &mut (impl Read + Seek),
     segment_end: u64,
     state: &mut PreflightState,
 ) -> Result<(), PreflightError> {
@@ -1007,7 +1045,10 @@ mod tests {
         let path = directory.path().join("bounded.mka");
         fs::write(&path, mka_with_attachment(&[1, 2, 3], false)).expect("write MKA fixture");
 
-        assert_eq!(preflight_mka(&path), Ok(()));
+        assert_eq!(
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1015,7 +1056,10 @@ mod tests {
         let directory = tempfile::tempdir().expect("MKA fixture directory");
         let unknown = directory.path().join("unknown.mka");
         fs::write(&unknown, mka_with_attachment(&[], true)).expect("write unknown fixture");
-        assert_eq!(preflight_mka(&unknown), Err(PreflightError::UnknownSize));
+        assert_eq!(
+            preflight_mka(&mut fs::File::open(&unknown).expect("open fixture")),
+            Err(PreflightError::UnknownSize)
+        );
 
         let oversized = directory.path().join("oversized.mka");
         let mut bytes = Vec::new();
@@ -1025,7 +1069,7 @@ mod tests {
         bytes.extend(element(ID_ATTACHMENTS, &attached_file));
         fs::write(&oversized, bytes).expect("write oversized fixture");
         assert_eq!(
-            preflight_mka(&oversized),
+            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture")),
             Err(PreflightError::AttachmentTooLarge)
         );
     }
@@ -1041,14 +1085,14 @@ mod tests {
         bytes.extend(element(ID_ATTACHMENTS, &attachments));
         fs::write(&excessive_count, bytes).expect("write attachment-count fixture");
         assert_eq!(
-            preflight_mka(&excessive_count),
+            preflight_mka(&mut fs::File::open(&excessive_count).expect("open fixture")),
             Err(PreflightError::TooManyAttachments)
         );
 
         let excessive_bytes = directory.path().join("large-attachments.mka");
         write_sparse_attachments(&excessive_bytes, &[MAX_ATTACHMENT_BYTES / 2 + 1; 2]);
         assert_eq!(
-            preflight_mka(&excessive_bytes),
+            preflight_mka(&mut fs::File::open(&excessive_bytes).expect("open fixture")),
             Err(PreflightError::AttachmentsTooLarge)
         );
     }
@@ -1063,7 +1107,10 @@ mod tests {
         }
         fs::write(&path, bytes).expect("write element-count fixture");
 
-        assert_eq!(preflight_mka(&path), Err(PreflightError::TooManyHeaders));
+        assert_eq!(
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
+            Err(PreflightError::TooManyHeaders)
+        );
     }
 
     #[test]
@@ -1082,7 +1129,10 @@ mod tests {
         .expect("seek sparse payload");
         file.write_all(&[0]).expect("finish sparse payload");
 
-        assert_eq!(preflight_mka(&path), Ok(()));
+        assert_eq!(
+            preflight_mka(&mut fs::File::open(&path).expect("open fixture")),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1093,7 +1143,10 @@ mod tests {
         bytes.extend(element_header(ID_CLUSTER, None));
         bytes.extend(element(0xE7, &[0]));
         fs::write(&valid, &bytes).expect("write streaming MKA fixture");
-        assert_eq!(preflight_mka(&valid), Ok(()));
+        assert_eq!(
+            preflight_mka(&mut fs::File::open(&valid).expect("open fixture")),
+            Ok(())
+        );
 
         let oversized = directory.path().join("streaming-oversized-artwork.mka");
         bytes.extend(element(
@@ -1105,7 +1158,7 @@ mod tests {
         ));
         fs::write(&oversized, bytes).expect("write streaming MKA with oversized artwork");
         assert_eq!(
-            preflight_mka(&oversized),
+            preflight_mka(&mut fs::File::open(&oversized).expect("open fixture")),
             Err(PreflightError::AttachmentTooLarge)
         );
     }
@@ -1120,7 +1173,10 @@ mod tests {
         file.set_len(MAX_ASF_HEADER_BYTES * 2)
             .expect("extend sparse audio payload");
 
-        assert_eq!(preflight_asf(&path), Ok(()));
+        assert_eq!(
+            preflight_asf(&mut fs::File::open(&path).expect("open fixture")),
+            Ok(())
+        );
     }
 
     #[test]
@@ -1130,7 +1186,7 @@ mod tests {
         fs::write(&oversized, asf_header(MAX_ASF_HEADER_BYTES + 1, 0))
             .expect("write oversized ASF header");
         assert_eq!(
-            preflight_asf(&oversized),
+            preflight_asf(&mut fs::File::open(&oversized).expect("open fixture")),
             Err(PreflightError::AsfHeaderTooLarge)
         );
 
@@ -1138,7 +1194,7 @@ mod tests {
         fs::write(&excessive, asf_header(30, MAX_ASF_HEADER_OBJECTS + 1))
             .expect("write excessive ASF header");
         assert_eq!(
-            preflight_asf(&excessive),
+            preflight_asf(&mut fs::File::open(&excessive).expect("open fixture")),
             Err(PreflightError::TooManyAsfObjects)
         );
     }
@@ -1152,7 +1208,10 @@ mod tests {
             asf_with_declared_file_size(214, WAVE_FORMAT_WMA_PRO),
         )
         .expect("write complete ASF fixture");
-        assert_eq!(preflight_asf(&complete), Ok(()));
+        assert_eq!(
+            preflight_asf(&mut fs::File::open(&complete).expect("open fixture")),
+            Ok(())
+        );
 
         let truncated_pro = directory.path().join("truncated-pro.wma");
         fs::write(
@@ -1161,14 +1220,17 @@ mod tests {
         )
         .expect("write truncated WMA Pro fixture");
         assert_eq!(
-            preflight_asf(&truncated_pro),
+            preflight_asf(&mut fs::File::open(&truncated_pro).expect("open fixture")),
             Err(PreflightError::InvalidAsf)
         );
 
         let partial_wma2 = directory.path().join("partial-wma2.wma");
         fs::write(&partial_wma2, asf_with_declared_file_size(1_000, 0x0161))
             .expect("write partial WMA2 fixture");
-        assert_eq!(preflight_asf(&partial_wma2), Ok(()));
+        assert_eq!(
+            preflight_asf(&mut fs::File::open(&partial_wma2).expect("open fixture")),
+            Ok(())
+        );
     }
 
     fn mka_with_attachment(data: &[u8], unknown_data_size: bool) -> Vec<u8> {

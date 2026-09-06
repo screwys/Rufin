@@ -10,16 +10,18 @@ use std::time::UNIX_EPOCH;
 use library::Scan;
 use walkdir::WalkDir;
 
-use super::cue::{CueSheet, CueTrack, parse_cue_sheet};
-use super::media::{self, MediaRead, ScannedTrack};
+use super::media::read_media;
+use crate::file::cue::{CueSheet, cue_track, parse_cue_sheet};
+use crate::file::media::{self as media, MediaRead, ScannedTrack};
+use crate::file::scan::stage_audio_tracks_batch;
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
 
 const LOCAL_BATCH_SIZE: usize = 128;
 const LOCAL_CUE_MAX_BYTES: u64 = 1024 * 1024;
-const LOCAL_PARSER_VERSION: u32 = 10;
+pub(crate) const LOCAL_PARSER_VERSION: u32 = 10;
 
-pub(super) async fn publish_metadata_paths(
+pub(crate) async fn publish_metadata_paths(
     database: &library::Database,
     source_id: &str,
     paths: &[PathBuf],
@@ -46,7 +48,7 @@ pub(super) async fn publish_metadata_paths(
             let read_path = existing
                 .as_ref()
                 .map_or(path.as_path(), |(_, path)| Path::new(path));
-            match media::read_media(&mut worker, read_path.to_path_buf(), None) {
+            match read_media(&mut worker, read_path.to_path_buf(), None) {
                 MediaRead::Accepted(mut track) => {
                     if let Some((id, _)) = existing {
                         track.id = id;
@@ -69,7 +71,7 @@ pub(super) async fn publish_metadata_paths(
     Ok(scan.finish().await?)
 }
 
-pub(super) async fn catch_up(
+pub(crate) async fn catch_up(
     database: &library::Database,
     source: library::SourceKey,
     source_id: &str,
@@ -149,7 +151,7 @@ fn cached_observation_changed(file: &library::LocalFileRow) -> bool {
         ) && file.parse_version != Some(i64::from(LOCAL_PARSER_VERSION))
 }
 
-pub(super) async fn publish_paths(
+pub(crate) async fn publish_paths(
     database: &library::Database,
     source: library::SourceKey,
     source_id: &str,
@@ -175,7 +177,7 @@ pub(super) async fn publish_paths(
     }
     let artwork_only = paths
         .iter()
-        .all(|path| super::artwork::supported_image(path));
+        .all(|path| crate::file::artwork::supported_image(path));
     let mut scan = Scan::begin_items(database, source_id).await?;
     stage_component_paths(&mut scan, source, &paths, &seeds, &|| false).await?;
     stage_component(
@@ -259,7 +261,7 @@ async fn stage_component_path_page(
     for path in paths.iter().map(PathBuf::from) {
         let target = if path.is_dir() {
             &mut directories
-        } else if super::artwork::supported_image(&path) {
+        } else if crate::file::artwork::supported_image(&path) {
             &mut image_directories
         } else {
             continue;
@@ -334,7 +336,7 @@ async fn stage_component(
                     library::LocalFileState::Observed,
                     &[],
                 )?);
-            } else if super::artwork::supported_image(&path) {
+            } else if crate::file::artwork::supported_image(&path) {
                 observations.push(file_observation(
                     roots,
                     &path,
@@ -426,7 +428,11 @@ async fn stage_exact_cue(
             let dependencies = sheet
                 .files
                 .iter()
-                .map(|file| file.path.to_string_lossy().into_owned())
+                .map(|file| {
+                    resolve_cue_file_path(path, &file.path)
+                        .to_string_lossy()
+                        .into_owned()
+                })
                 .collect::<Vec<_>>();
             let tracks = read_cue_tracks(&mut media::Worker::default(), path, sheet);
             let dependencies_observed = tracks.is_some();
@@ -507,7 +513,7 @@ async fn stage_exact_cue(
     Ok(accepted)
 }
 
-pub(super) async fn stage_catalog(
+pub(crate) async fn stage_catalog(
     database: &library::Database,
     roots: &[PathBuf],
     scan: &mut Scan,
@@ -535,7 +541,7 @@ pub(super) async fn stage_catalog(
                     library::LocalFileState::Observed,
                     Vec::new(),
                 )
-            } else if super::artwork::supported_image(path) {
+            } else if crate::file::artwork::supported_image(path) {
                 (
                     library::LocalFileKind::Image,
                     library::LocalFileState::Observed,
@@ -657,7 +663,7 @@ pub(super) async fn stage_catalog(
     Ok(())
 }
 
-pub(super) async fn stage_artwork(
+pub(crate) async fn stage_artwork(
     database: &library::Database,
     scan: &mut Scan,
     cancelled: &(dyn Fn() -> bool + Send + Sync),
@@ -666,7 +672,7 @@ pub(super) async fn stage_artwork(
     let source_id = scan.source_id().to_string();
     let distinct = database.distinct_track_covers();
     let mut after_album = String::new();
-    let mut discoverer = super::discovery::Reader::default();
+    let mut discoverer = crate::file::discovery::Reader::default();
     loop {
         let albums = scan.local_artwork_album_page(&after_album).await?;
         if albums.is_empty() {
@@ -694,6 +700,12 @@ pub(super) async fn stage_artwork(
                             .parent()
                             .into_iter()
                             .chain(path.parent().and_then(Path::parent))
+                            .filter(|directory| {
+                                candidate
+                                    .root
+                                    .as_ref()
+                                    .is_some_and(|root| directory.starts_with(root))
+                            })
                             .enumerate()
                         {
                             let cached = &mut directory_images[priority];
@@ -944,99 +956,6 @@ async fn stage_audio_batch(
     Ok(accepted_count)
 }
 
-async fn stage_audio_tracks_batch(scan: &mut Scan, tracks: &[ScannedTrack]) -> SourceResult<()> {
-    let mut albums = BTreeSet::new();
-    let mut artists = BTreeSet::new();
-    let mut genres = BTreeSet::new();
-    let mut moods = BTreeSet::new();
-    for track in tracks {
-        if albums.insert(track.album_id.as_str()) {
-            stage_album(scan, track).await?;
-        }
-        for artist in &track.album_artists {
-            if artists.insert(artist.id.as_str()) {
-                stage_artist(scan, artist).await?;
-            }
-        }
-        stage_track_row(scan, track).await?;
-        for artist in &track.artists {
-            if artists.insert(artist.id.as_str()) {
-                stage_artist(scan, artist).await?;
-            }
-        }
-        for genre in &track.genres {
-            if genres.insert(genre.id.as_str()) {
-                stage_genre(scan, genre).await?;
-            }
-        }
-        for mood in &track.moods {
-            if moods.insert(mood.id.as_str()) {
-                stage_mood(scan, mood).await?;
-            }
-        }
-        stage_loudness(scan, track).await?;
-    }
-    let album_artists = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .album_artists
-                .iter()
-                .map(|artist| (track.album_id.as_str(), artist.id.as_str()))
-        })
-        .collect::<Vec<_>>();
-    let album_genres = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .genres
-                .iter()
-                .map(|genre| (track.album_id.as_str(), genre.id.as_str()))
-        })
-        .collect::<Vec<_>>();
-    let album_release_types = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .release_types
-                .iter()
-                .map(|kind| (track.album_id.as_str(), kind.as_str()))
-        })
-        .collect::<Vec<_>>();
-    let track_artists = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .artists
-                .iter()
-                .map(|artist| (track.id.as_str(), artist.id.as_str()))
-        })
-        .collect::<Vec<_>>();
-    let track_genres = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .genres
-                .iter()
-                .map(|genre| (track.id.as_str(), genre.id.as_str()))
-        })
-        .collect::<Vec<_>>();
-    let track_moods = tracks
-        .iter()
-        .flat_map(|track| {
-            track
-                .moods
-                .iter()
-                .map(|mood| (track.id.as_str(), mood.id.as_str()))
-        })
-        .collect::<Vec<_>>();
-    scan.write_album_relations(&album_artists, &album_genres, &album_release_types)
-        .await?;
-    scan.write_track_relations(&track_artists, &track_genres, &track_moods)
-        .await?;
-    Ok(())
-}
-
 fn local_worker_count(available_parallelism: usize) -> usize {
     available_parallelism.clamp(1, 4)
 }
@@ -1074,7 +993,7 @@ impl MediaPool {
                                 .expect("Local parser receiver is not poisoned")
                                 .recv();
                             let Ok(job) = job else { break };
-                            let result = (job.clone(), media::read_media(&mut worker, job, None));
+                            let result = (job.clone(), read_media(&mut worker, job, None));
                             if result_send.send(result).is_err() {
                                 break;
                             }
@@ -1224,6 +1143,18 @@ async fn path_reuse(
     Ok(reuse)
 }
 
+fn resolve_cue_file_path(cue_path: &Path, value: &str) -> PathBuf {
+    let path = PathBuf::from(value);
+    if path.is_absolute() {
+        path
+    } else {
+        cue_path
+            .parent()
+            .map(|parent| parent.join(&path))
+            .unwrap_or(path)
+    }
+}
+
 fn read_cue_tracks(
     worker: &mut media::Worker,
     cue_path: &Path,
@@ -1233,7 +1164,8 @@ fn read_cue_tracks(
     let album_title = sheet.album_title;
     let album_performer = sheet.album_performer;
     for file in sheet.files {
-        let MediaRead::Accepted(backing) = media::read_media(worker, file.path.clone(), None)
+        let MediaRead::Accepted(backing) =
+            read_media(worker, resolve_cue_file_path(cue_path, &file.path), None)
         else {
             return None;
         };
@@ -1259,230 +1191,6 @@ fn read_cue_tracks(
         }
     }
     Some(tracks)
-}
-
-fn cue_track(
-    cue_path: &Path,
-    album_title: Option<&str>,
-    album_performer: Option<&str>,
-    cue: &CueTrack,
-    end_millis: u64,
-    backing: &ScannedTrack,
-) -> ScannedTrack {
-    let mut track = backing.clone();
-    let album_artist = album_performer
-        .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album_artist.clone());
-    track.id = media::cue_track_id(cue_path, cue.number);
-    track.album = album_title
-        .map(ToString::to_string)
-        .unwrap_or_else(|| backing.album.clone());
-    track.artist = cue
-        .performer
-        .clone()
-        .unwrap_or_else(|| album_artist.clone());
-    track.album_artists = media::split_names(&album_artist)
-        .iter()
-        .map(|name| media::artist_credit(name, None))
-        .collect();
-    track.artists = media::split_names(&track.artist)
-        .iter()
-        .map(|name| media::artist_credit(name, None))
-        .collect();
-    track.album_id = media::album_id(
-        &track.album_artists,
-        &track.album,
-        track.musicbrainz_album_id.as_deref(),
-        Some(cue_path),
-    );
-    track.title = cue
-        .title
-        .clone()
-        .unwrap_or_else(|| format!("Track {}", cue.number));
-    track.duration_seconds = end_millis
-        .saturating_sub(cue.index_start_ms)
-        .div_euclid(1_000)
-        .max(1)
-        .min(u64::from(u32::MAX)) as u32;
-    track.disc_number = track.disc_number.max(1);
-    track.track_number = cue.number;
-    track.musicbrainz_recording_id = None;
-    track.musicbrainz_release_track_id = None;
-    track.comment = None;
-    track.cue_path = Some(cue_path.to_string_lossy().into_owned());
-    track.cue_start_millis = i64::try_from(cue.index_start_ms).ok();
-    track.cue_end_millis = i64::try_from(end_millis).ok();
-    track
-}
-
-async fn stage_album(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
-    let album_artwork = track
-        .local_artwork
-        .as_ref()
-        .map(serde_json::to_vec)
-        .transpose()?;
-    scan.write_album(
-        &track.album_id,
-        &track.album,
-        &track.album.to_lowercase(),
-        &track.album_artist,
-        &track.album.to_lowercase(),
-        Some(i64::from(track.year)).filter(|year| *year > 0),
-        None,
-        None,
-        track.musicbrainz_album_id.as_deref(),
-        track.musicbrainz_release_group_id.as_deref(),
-        track.is_compilation,
-        album_artwork.as_deref(),
-        false,
-        None,
-        Some(scan.accepted_at()),
-    )
-    .await?;
-    Ok(())
-}
-
-async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
-    let artwork = track
-        .local_artwork
-        .as_ref()
-        .map(serde_json::to_vec)
-        .transpose()?;
-    let normalized_search = format!(
-        "{} {} {} {}",
-        track.title,
-        track.album,
-        track.artist,
-        track.comment.as_deref().unwrap_or_default()
-    )
-    .to_lowercase();
-    scan.write_track(
-        &track.id,
-        Some(&track.album_id),
-        &track.title,
-        &normalized_search,
-        &track.album,
-        &track.artist,
-        &track.title.to_lowercase(),
-        i64::from(track.duration_seconds) * 1_000,
-        i64::from(track.disc_number),
-        i64::from(track.track_number),
-        Some(i64::from(track.year)).filter(|year| *year > 0),
-        None,
-        None,
-        url::Url::from_file_path(&track.source_path)
-            .ok()
-            .as_ref()
-            .map(url::Url::as_str),
-        track.source_format.as_deref(),
-        track.comment.as_deref(),
-        track.bpm.map(i64::from),
-        track.musicbrainz_recording_id.as_deref(),
-        track.musicbrainz_release_track_id.as_deref(),
-        track.cue_path.as_deref(),
-        track.cue_start_millis,
-        track.cue_end_millis,
-        artwork.as_deref(),
-        false,
-        track.user_rating.map(i64::from),
-        Some(scan.accepted_at()),
-        None,
-        None,
-        None,
-        Some(&track.source_path),
-        audio_key(track),
-    )
-    .await?;
-    Ok(())
-}
-
-async fn stage_loudness(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> {
-    if track.track_r128_lufs.is_some() || track.replay_gain_track_db.is_some() {
-        scan.write_track_source_loudness(
-            &track.id,
-            track.track_r128_lufs,
-            None,
-            track.replay_gain_track_db,
-            track.replay_gain_track_peak,
-        )
-        .await?;
-    }
-    if track.album_r128_lufs.is_some() || track.replay_gain_album_db.is_some() {
-        scan.write_album_source_loudness(
-            &track.album_id,
-            track.album_r128_lufs,
-            None,
-            track.replay_gain_album_db,
-            track.replay_gain_album_peak,
-        )
-        .await?;
-    }
-    Ok(())
-}
-
-async fn stage_genre(scan: &mut Scan, genre: &media::NamedCredit) -> SourceResult<()> {
-    Ok(scan
-        .write_genre(
-            &genre.id,
-            &genre.name,
-            &genre.name.to_lowercase(),
-            &genre.name.to_lowercase(),
-            None,
-        )
-        .await?)
-}
-
-async fn stage_mood(scan: &mut Scan, mood: &media::NamedCredit) -> SourceResult<()> {
-    Ok(scan
-        .write_mood(
-            &mood.id,
-            &mood.name,
-            &mood.name.to_lowercase(),
-            &mood.name.to_lowercase(),
-        )
-        .await?)
-}
-
-async fn stage_artist(scan: &mut Scan, artist: &media::ArtistCredit) -> SourceResult<()> {
-    Ok(scan
-        .write_artist(
-            &artist.id,
-            &artist.name,
-            &artist.name.to_lowercase(),
-            &artist.name.to_lowercase(),
-            artist.musicbrainz_artist_id.as_deref(),
-            None,
-            None,
-            None,
-        )
-        .await?)
-}
-
-fn audio_key(track: &ScannedTrack) -> [u8; 32] {
-    let mut hash = blake3::Hasher::new();
-    hash.update(b"rufin-local-audio-v1\0");
-    hash.update(track.source_path.as_bytes());
-    if let Ok(metadata) = fs::metadata(&track.source_path) {
-        hash.update(&metadata.len().to_le_bytes());
-        let modified = metadata
-            .modified()
-            .ok()
-            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
-            .map(|time| time.as_nanos())
-            .unwrap_or_default();
-        hash.update(&modified.to_le_bytes());
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::MetadataExt;
-            hash.update(&metadata.dev().to_le_bytes());
-            hash.update(&metadata.ino().to_le_bytes());
-        }
-    }
-    hash.update(&LOCAL_PARSER_VERSION.to_le_bytes());
-    hash.update(track.cue_path.as_deref().unwrap_or_default().as_bytes());
-    hash.update(&track.cue_start_millis.unwrap_or(-1).to_le_bytes());
-    hash.update(&track.cue_end_millis.unwrap_or(-1).to_le_bytes());
-    *hash.finalize().as_bytes()
 }
 
 fn file_observation(
@@ -1533,6 +1241,9 @@ fn file_observation(
         mtime_ns,
         device_id,
         inode,
+        native_id: None,
+        picture_index: None,
+        revision: None,
         parse_version: Some(i64::from(LOCAL_PARSER_VERSION)),
         state,
     };
@@ -1563,7 +1274,7 @@ fn read_cue(path: &Path) -> CueRead {
     let Ok(text) = fs::read_to_string(path) else {
         return CueRead::Unreadable;
     };
-    parse_cue_sheet(path, &text)
+    parse_cue_sheet(&text)
         .map(CueRead::Accepted)
         .unwrap_or(CueRead::Rejected)
 }
@@ -1582,7 +1293,7 @@ fn check_cancelled(cancelled: &(dyn Fn() -> bool + Send + Sync)) -> SourceResult
     }
 }
 
-pub(super) async fn stage_imported_paths(
+pub(crate) async fn stage_imported_paths(
     database: &library::Database,
     scan: &mut Scan,
 ) -> SourceResult<()> {
@@ -1599,7 +1310,7 @@ pub(super) async fn stage_imported_paths(
         let tracks = paths
             .into_iter()
             .filter_map(
-                |path| match media::read_media(&mut worker, PathBuf::from(path), None) {
+                |path| match read_media(&mut worker, PathBuf::from(path), None) {
                     MediaRead::Accepted(track) => Some(*track),
                     _ => None,
                 },
