@@ -32,6 +32,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -236,6 +241,9 @@ msgstr ""
 msgid "All"
 msgstr ""
 
+msgid "Alternate addresses"
+msgstr ""
+
 msgid "Any genre"
 msgstr ""
 
@@ -288,6 +296,9 @@ msgid "Audio processing is unavailable while casting"
 msgstr ""
 
 msgid "Audio"
+msgstr ""
+
+msgid "Authentication"
 msgstr ""
 
 msgid "Auto DJ off"
@@ -343,6 +354,9 @@ msgstr ""
 msgid "Backups"
 msgstr ""
 
+msgid "Bearer token"
+msgstr ""
+
 msgid "Blue"
 msgstr ""
 
@@ -368,6 +382,9 @@ msgid "Casting network"
 msgstr ""
 
 msgid "Casting"
+msgstr ""
+
+msgid "Certificate authority (PEM)"
 msgstr ""
 
 msgid "Change Secret Storage"
@@ -475,6 +492,9 @@ msgstr ""
 msgid "Compact"
 msgstr ""
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr ""
 
@@ -496,6 +516,9 @@ msgid "Connecting to {device}..."
 msgstr ""
 
 msgid "Connection failed"
+msgstr ""
+
+msgid "Connection options"
 msgstr ""
 
 msgid "Connection"
@@ -549,6 +572,9 @@ msgid "Crossfade mode"
 msgstr ""
 
 msgid "Crossfade"
+msgstr ""
+
+msgid "Custom HTTP headers"
 msgstr ""
 
 msgid "Custom"
@@ -731,6 +757,9 @@ msgstr ""
 msgid "Enter a server address, username, and password"
 msgstr ""
 
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
 msgid "Entire Library"
 msgstr ""
 
@@ -801,6 +830,9 @@ msgid "Featured genres"
 msgstr ""
 
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
+msgstr ""
+
+msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
@@ -897,6 +929,9 @@ msgid "Grid labels"
 msgstr ""
 
 msgid "Grid"
+msgstr ""
+
+msgid "Guest / public access"
 msgstr ""
 
 msgid "Help"
@@ -1011,6 +1046,9 @@ msgid "Last.fm"
 msgstr ""
 
 msgid "Layout"
+msgstr ""
+
+msgid "Leave the password empty to keep the saved credential"
 msgstr ""
 
 msgid "Legacy authorization"
@@ -1394,6 +1432,15 @@ msgstr ""
 msgid "On this device"
 msgstr ""
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr ""
 
@@ -1450,6 +1497,9 @@ msgid "Password"
 msgstr ""
 
 msgid "Paste"
+msgstr ""
+
+msgid "Path in Source"
 msgstr ""
 
 msgid "Pause"
@@ -1532,6 +1582,9 @@ msgstr ""
 
 #, rust-format
 msgid "Playing on {device}"
+msgstr ""
+
+msgid "Playlist File"
 msgstr ""
 
 msgid "Playlist name"
@@ -1684,6 +1737,9 @@ msgstr ""
 msgid "Remote lyrics"
 msgstr ""
 
+msgid "Remote"
+msgstr ""
+
 msgid "Remove All Downloads"
 msgstr ""
 
@@ -1756,7 +1812,13 @@ msgstr ""
 msgid "Repeat"
 msgstr ""
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
+msgstr ""
+
+msgid "Require SMB encryption"
 msgstr ""
 
 msgid "Reset to defaults"
@@ -1793,6 +1855,12 @@ msgid "Rufin data folder"
 msgstr ""
 
 msgid "Rule actions"
+msgstr ""
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
 msgstr ""
 
 msgid "Saturday"
@@ -1933,6 +2001,9 @@ msgstr ""
 msgid "Select all"
 msgstr ""
 
+msgid "Selected folders"
+msgstr ""
+
 msgid "Selection"
 msgstr ""
 
@@ -1980,6 +2051,9 @@ msgid "Set the Discord activity type to Listening"
 msgstr ""
 
 msgid "Settings and sources"
+msgstr ""
+
+msgid "Share"
 msgstr ""
 
 msgid "Shared secret"
@@ -2050,6 +2124,9 @@ msgid "Sidebar item {position}"
 msgstr ""
 
 msgid "Sidebar route by position"
+msgstr ""
+
+msgid "Sign in with Nextcloud"
 msgstr ""
 
 msgid "SimpMusic"
@@ -2274,6 +2351,9 @@ msgstr ""
 msgid "User"
 msgstr ""
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr ""
 
@@ -2308,6 +2388,9 @@ msgid "Waiting for connection"
 msgstr ""
 
 msgid "Waveform seekbar"
+msgstr ""
+
+msgid "WebDAV"
 msgstr ""
 
 msgid "Wednesday"

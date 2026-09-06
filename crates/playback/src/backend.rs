@@ -40,13 +40,27 @@ pub struct StreamWindow {
     pub end_millis: u64,
 }
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone)]
 pub struct ResolvedStream {
+    pub content_type: Option<String>,
     uri: String,
     redacted_uri: String,
     trust_invalid_certificate: bool,
     window: Option<StreamWindow>,
+    resource: Option<std::sync::Arc<dyn Send + Sync>>,
 }
+
+impl PartialEq for ResolvedStream {
+    fn eq(&self, other: &Self) -> bool {
+        self.uri == other.uri
+            && self.redacted_uri == other.redacted_uri
+            && self.trust_invalid_certificate == other.trust_invalid_certificate
+            && self.window == other.window
+            && self.content_type == other.content_type
+    }
+}
+
+impl Eq for ResolvedStream {}
 
 impl ResolvedStream {
     pub fn new(uri: impl Into<String>) -> Self {
@@ -56,6 +70,8 @@ impl ResolvedStream {
             uri,
             trust_invalid_certificate: false,
             window: None,
+            resource: None,
+            content_type: None,
         }
     }
 
@@ -65,11 +81,25 @@ impl ResolvedStream {
             redacted_uri: redacted_uri.into(),
             trust_invalid_certificate: false,
             window: None,
+            resource: None,
+            content_type: None,
         }
     }
 
     pub fn with_trust_invalid_certificate(mut self, trust: bool) -> Self {
         self.trust_invalid_certificate = trust;
+        self
+    }
+
+    pub fn with_content_type(mut self, content_type: Option<String>) -> Self {
+        self.content_type = content_type;
+        self
+    }
+
+    /// Retain temporary input or its serving endpoint while this stream is in use.
+    /// Resource ownership does not participate in stream identity or equality.
+    pub fn with_resource(mut self, resource: std::sync::Arc<dyn Send + Sync>) -> Self {
+        self.resource = Some(resource);
         self
     }
 
@@ -174,7 +204,6 @@ pub struct PreparedStream {
     pub stream: Box<ResolvedStream>,
     pub loudness: TrackLoudness,
     pub occurrence: Option<std::sync::Arc<crate::QueueOccurrence>>,
-    pub content_type: Option<String>,
     pub artwork_path: Option<Arc<PathBuf>>,
     pub allows_preloading: bool,
     pub allows_timing_queries: bool,
@@ -186,7 +215,6 @@ impl PreparedStream {
             stream: Box::new(stream),
             loudness,
             occurrence: None,
-            content_type: None,
             artwork_path: None,
             allows_preloading: true,
             allows_timing_queries: true,
@@ -204,7 +232,9 @@ impl PreparedStream {
         content_type: Option<String>,
     ) -> Self {
         self.occurrence = Some(occurrence);
-        self.content_type = content_type;
+        if self.stream.content_type.is_none() {
+            self.stream.content_type = content_type;
+        }
         self
     }
 }

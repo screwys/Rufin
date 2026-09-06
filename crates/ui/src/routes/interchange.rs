@@ -7,12 +7,8 @@ use gtk::glib;
 use localization::tr;
 
 use super::route::Route;
+use crate::runtime::source::PlaylistExport;
 use crate::shell::Shell;
-
-pub(crate) enum PlaylistExport {
-    Playlist(library::PlaylistKey),
-    Smart(library::SmartPlaylistKey),
-}
 
 fn playlist_export_filename(name: &str) -> String {
     let name: String = name
@@ -42,16 +38,24 @@ impl Shell {
     pub(crate) fn import_playlist_dialog(self: &Rc<Self>) {
         let shell = Rc::clone(self);
         glib::spawn_future_local(async move {
-            let dialog = gtk::FileDialog::builder()
-                .title(tr("Import Playlist"))
-                .build();
-            let Ok(file) = dialog.open_future(Some(&shell.chrome.window)).await else {
+            let Some(location) = playlist_file_location(&shell, "").await else {
                 return;
             };
-            let Some(path) = file.path() else {
-                return;
+            let receiver = if let FileLocation::Source(source, path) = location {
+                shell.products.source.import_source_playlist(source, path)
+            } else {
+                let dialog = gtk::FileDialog::builder()
+                    .title(tr("Import Playlist"))
+                    .build();
+                let Ok(file) = dialog.open_future(Some(&shell.chrome.window)).await else {
+                    return;
+                };
+                let Some(path) = file.path() else {
+                    return;
+                };
+                shell.products.source.import_playlist(path)
             };
-            match shell.products.source.import_playlist(path).recv().await {
+            match receiver.recv().await {
                 Ok(Ok(report)) => {
                     shell.navigate(Route::PlaylistDetail(report.playlist));
                     if report.skipped > 0 {
@@ -78,6 +82,29 @@ impl Shell {
             .as_ref()
             .and_then(|selected| selected.music_folder_key);
         glib::spawn_future_local(async move {
+            let Some(location) = playlist_file_location(&shell, &filename).await else {
+                return;
+            };
+            if let FileLocation::Source(destination, path) = location {
+                if let Ok(Err(error)) = shell
+                    .products
+                    .source
+                    .export_source_playlist(
+                        destination,
+                        path,
+                        target,
+                        source.map(|source| (source, folder)),
+                    )
+                    .recv()
+                    .await
+                {
+                    shell
+                        .chrome
+                        .toast_overlay
+                        .add_toast(adw::Toast::new(&error));
+                }
+                return;
+            }
             let dialog = gtk::FileDialog::builder()
                 .title(tr("Export Playlist"))
                 .initial_name(&filename)
@@ -166,5 +193,45 @@ impl Shell {
                     .add_toast(adw::Toast::new(&error.to_string()));
             }
         });
+    }
+}
+
+enum FileLocation {
+    Device,
+    Source(sources::SourceId, String),
+}
+
+async fn playlist_file_location(shell: &Rc<Shell>, filename: &str) -> Option<FileLocation> {
+    let selected = shell
+        .selected_library()
+        .map(|selected| selected.source_id.clone());
+    let source =
+        selected.and_then(|id| shell.products.source.configured_source(&id).ok().flatten());
+    let Some(source) = source.filter(|source| source.file_settings.is_some()) else {
+        return Some(FileLocation::Device);
+    };
+    let resource = crate::ui_resource::PLAYLIST_FILE_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::ui_resource::objects!(builder, resource, { dialog: adw::AlertDialog, path: adw::EntryRow });
+    dialog.set_body(&source.source.name);
+    path.set_text(filename);
+    dialog.set_response_enabled("source", !filename.is_empty());
+    let weak = dialog.downgrade();
+    path.connect_changed(move |path| {
+        if let Some(dialog) = weak.upgrade() {
+            dialog.set_response_enabled("source", !path.text().trim().is_empty());
+        }
+    });
+    match dialog
+        .choose_future(Some(&shell.chrome.window))
+        .await
+        .as_str()
+    {
+        "device" => Some(FileLocation::Device),
+        "source" => Some(FileLocation::Source(
+            source.source.id,
+            path.text().trim().into(),
+        )),
+        _ => None,
     }
 }

@@ -13,6 +13,14 @@ use crate::{
 const LOCAL_FILE_PAGE_LIMIT: usize = 128;
 
 #[derive(Debug, FromRow)]
+pub struct ObservedMediaFile {
+    pub path: String,
+    pub revision: Option<String>,
+    pub cue_start_millis: Option<i64>,
+    pub cue_end_millis: Option<i64>,
+}
+
+#[derive(Debug, FromRow)]
 pub struct DownloadMetadata {
     pub title: String,
     pub artist: String,
@@ -50,6 +58,9 @@ pub struct LocalFileWrite {
     pub mtime_ns: i64,
     pub device_id: Option<i64>,
     pub inode: Option<i64>,
+    pub native_id: Option<String>,
+    pub revision: Option<String>,
+    pub picture_index: Option<i64>,
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
 }
@@ -65,6 +76,9 @@ pub struct LocalFileRow {
     pub mtime_ns: i64,
     pub device_id: Option<i64>,
     pub inode: Option<i64>,
+    pub native_id: Option<String>,
+    pub revision: Option<String>,
+    pub picture_index: Option<i64>,
     pub parse_version: Option<i64>,
     pub state: LocalFileState,
     pub dependencies: Vec<String>,
@@ -82,6 +96,9 @@ struct LocalFileScalar {
     mtime_ns: i64,
     device_id: Option<i64>,
     inode: Option<i64>,
+    native_id: Option<String>,
+    revision: Option<String>,
+    picture_index: Option<i64>,
     parse_version: Option<i64>,
     state: String,
 }
@@ -184,7 +201,7 @@ impl LocalFileKind {
             Self::Directory => "directory",
         }
     }
-    fn parse(value: &str) -> LibraryResult<Self> {
+    pub(crate) fn parse(value: &str) -> LibraryResult<Self> {
         match value {
             "media" => Ok(Self::Media),
             "cue" => Ok(Self::Cue),
@@ -206,7 +223,7 @@ impl LocalFileState {
             Self::Observed => "observed",
         }
     }
-    fn parse(value: &str) -> LibraryResult<Self> {
+    pub(crate) fn parse(value: &str) -> LibraryResult<Self> {
         match value {
             "accepted" => Ok(Self::Accepted),
             "rejected" => Ok(Self::Rejected),
@@ -220,6 +237,33 @@ impl LocalFileState {
 }
 
 impl Database {
+    pub async fn file_metadata_track_page(
+        &self,
+        collection_uri: &str,
+        after: Option<crate::TrackKey>,
+    ) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
+        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let query = match crate::source_entity_parts(collection_uri).map(|(_, kind, _)| kind) {
+            Some(kind) if kind == "album" => {
+                "SELECT track.track_key,track.media_uri FROM albums album JOIN tracks track
+                 ON track.source_key=album.source_key AND track.album_key=album.album_key
+                 WHERE album.media_uri=?1 AND track.track_key>coalesce(?2,0)
+                 ORDER BY track.track_key LIMIT 128"
+            }
+            Some(kind) if kind == "artist" => {
+                "SELECT DISTINCT track.track_key,track.media_uri FROM artists artist
+                 JOIN track_artists relation USING(artist_key) JOIN tracks track USING(track_key)
+                 WHERE artist.media_uri=?1 AND track.track_key>coalesce(?2,0)
+                 ORDER BY track.track_key LIMIT 128"
+            }
+            _ => return Ok(Vec::new()),
+        };
+        Ok(sqlx::query_as(query)
+            .bind(collection_uri)
+            .bind(after)
+            .fetch_all(&mut *connection)
+            .await?)
+    }
     pub async fn downloaded_count(&self, source_id: Option<&str>) -> LibraryResult<usize> {
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         let count = if let Some(source_id) = source_id {
@@ -258,16 +302,42 @@ impl Database {
         .await?)
     }
 
-    pub async fn playback_access_uri(&self, media_uri: &str) -> LibraryResult<Option<String>> {
+    pub async fn playback_access(
+        &self,
+        media_uri: &str,
+    ) -> LibraryResult<Option<(String, LocalAccessOrigin)>> {
         let mut connection = self.acquire_reader().await?;
-        Ok(sqlx::query_scalar(
-            "SELECT access_uri FROM local_access_files WHERE media_uri=?1
+        Ok(sqlx::query_as(
+            "SELECT access_uri,origin FROM local_access_files WHERE media_uri=?1
              ORDER BY CASE origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
                       local_access_file_key LIMIT 1",
         )
         .bind(media_uri)
         .fetch_optional(&mut *connection)
         .await?)
+    }
+
+    pub async fn observed_media_file(
+        &self,
+        media_uri: &str,
+    ) -> LibraryResult<Option<ObservedMediaFile>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_as(
+            "SELECT track.source_path path,file.revision,track.cue_start_millis,track.cue_end_millis
+             FROM tracks track LEFT JOIN local_files file
+               ON file.source_key=track.source_key AND file.path=track.source_path
+             WHERE track.media_uri=?1 AND track.source_path IS NOT NULL",
+        ).bind(media_uri).fetch_optional(&mut *connection).await?)
+    }
+
+    pub async fn media_uri_for_file_path(
+        &self,
+        source: &str,
+        path: &str,
+    ) -> LibraryResult<Option<String>> {
+        let mut connection = self.acquire_reader().await?;
+        Ok(sqlx::query_scalar("SELECT track.media_uri FROM tracks track JOIN sources USING(source_key) WHERE sources.object_id=?1 AND track.source_path=?2 AND track.cue_path IS NULL LIMIT 1")
+            .bind(source).bind(path).fetch_optional(&mut *connection).await?)
     }
 
     pub async fn source_counts(
@@ -375,10 +445,10 @@ impl Database {
         let limit = limit.clamp(1, LOCAL_FILE_PAGE_LIMIT) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
+        let scalars = sqlx::query_as::<_, LocalFileScalar>("SELECT local_file_key,path,root,relative_path,kind,size_bytes,mtime_ns,device_id,inode,native_id,revision,picture_index,parse_version,state FROM local_files WHERE source_key=?1 AND local_file_key>?2 ORDER BY local_file_key LIMIT ?3")
             .bind(source).bind(after.map_or(0, LocalFileKey::raw)).bind(limit)
             .fetch_all(&mut *transaction).await?;
-        let rows = load_local_file_rows(&mut transaction, scalars).await?;
+        let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(rows)
@@ -400,26 +470,28 @@ impl Database {
         }
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(path,device_id,inode,position) AS (");
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "WITH requested(path,device_id,inode,native_id,position) AS (",
+        );
         query.push_values(
             observations.iter().enumerate(),
             |mut row, (position, observation)| {
                 row.push_bind(&observation.path)
                     .push_bind(observation.device_id)
                     .push_bind(observation.inode)
+                    .push_bind(&observation.native_id)
                     .push_bind(position as i64);
             },
         );
-        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
+        query.push(") SELECT file.local_file_key,file.path,file.root,file.relative_path,file.kind,file.size_bytes,file.mtime_ns,file.device_id,file.inode,file.native_id,file.revision,file.picture_index,file.parse_version,file.state FROM requested JOIN local_files file ON file.source_key=")
             .push_bind(source)
-            .push(" AND (file.path=requested.path OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
+            .push(" AND (file.path=requested.path OR (requested.native_id IS NOT NULL AND file.native_id=requested.native_id) OR (requested.device_id IS NOT NULL AND requested.inode IS NOT NULL AND file.device_id=requested.device_id AND file.inode=requested.inode)) ORDER BY requested.position,CASE WHEN file.path=requested.path THEN 0 ELSE 1 END,file.local_file_key");
         let scalars = query
             .build_query_as::<LocalFileScalar>()
             .persistent(false)
             .fetch_all(&mut *transaction)
             .await?;
-        let rows = load_local_file_rows(&mut transaction, scalars).await?;
+        let rows = load_local_file_rows(&mut transaction, source, scalars).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(rows)
@@ -613,6 +685,7 @@ impl Database {
 
 async fn load_local_file_rows(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
+    source: SourceKey,
     scalars: Vec<LocalFileScalar>,
 ) -> LibraryResult<Vec<LocalFileRow>> {
     let mut dependencies = BTreeMap::<LocalFileKey, Vec<String>>::new();
@@ -632,14 +705,28 @@ async fn load_local_file_rows(
         {
             dependencies.entry(file).or_default().push(dependency);
         }
-        let mut query =
-            QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,path,media_uri) AS (");
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(local_file_key,path) AS (");
         query.push_values(&scalars, |mut row, file| {
-            row.push_bind(file.local_file_key)
-                .push_bind(&file.path)
-                .push_bind(url::Url::from_file_path(&file.path).ok().map(String::from));
+            row.push_bind(file.local_file_key).push_bind(&file.path);
         });
-        query.push(") SELECT requested.local_file_key,min(track.object_id) FROM requested JOIN tracks track ON track.media_uri=requested.media_uri OR track.cue_path=requested.path GROUP BY requested.local_file_key");
+        query
+            .push(
+                ") SELECT local_file_key,min(object_id) FROM (
+            SELECT requested.local_file_key,track.object_id FROM requested JOIN tracks track
+              ON track.source_key=",
+            )
+            .push_bind(source)
+            .push(
+                " AND track.source_path=requested.path AND track.cue_path IS NULL
+            UNION ALL
+            SELECT requested.local_file_key,track.object_id FROM requested JOIN tracks track
+              ON track.source_key=",
+            )
+            .push_bind(source)
+            .push(
+                " AND track.cue_path=requested.path
+            ) GROUP BY local_file_key",
+            );
         for (file, object_id) in query
             .build_query_as::<(LocalFileKey, String)>()
             .persistent(false)
@@ -662,6 +749,9 @@ async fn load_local_file_rows(
                 mtime_ns: scalar.mtime_ns,
                 device_id: scalar.device_id,
                 inode: scalar.inode,
+                native_id: scalar.native_id,
+                revision: scalar.revision,
+                picture_index: scalar.picture_index,
                 parse_version: scalar.parse_version,
                 state: LocalFileState::parse(&scalar.state)?,
                 dependencies: dependencies

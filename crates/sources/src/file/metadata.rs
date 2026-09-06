@@ -1,17 +1,17 @@
-//! Atomic metadata reads and writes for exact Local or mapped-Local files.
+//! File tag semantics and atomic edits for originals and remote working copies.
 
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::time::UNIX_EPOCH;
 
-use lofty::config::WriteOptions;
-use lofty::file::TaggedFileExt;
-use lofty::prelude::{Accessor, TagExt};
-use lofty::tag::items::popularimeter::{Popularimeter, StarRating};
-use lofty::tag::{ItemKey, Tag};
+use ::lofty::config::WriteOptions;
+use ::lofty::file::TaggedFileExt;
+use ::lofty::prelude::{Accessor, TagExt};
+use ::lofty::tag::items::popularimeter::{Popularimeter, StarRating};
+use ::lofty::tag::{ItemKey, Tag};
 
-use super::lofty_metadata::{MetadataWriter, bpm_key, read_lofty, read_lofty_for_edit};
+use super::lofty::{MetadataWriter, bpm_key, read_lofty_for_edit};
 use crate::{AlbumMetadataEdit, ArtistMetadataEdit, SourceMetadataError, TrackMetadataEdit};
 
 pub(crate) fn revision(path: &Path) -> Result<String, SourceMetadataError> {
@@ -156,10 +156,19 @@ pub(crate) fn write_rating(
     commit_batch(vec![prepared])
 }
 
-pub(super) fn read_embedded_lyrics(path: &Path) -> Result<Option<String>, SourceMetadataError> {
-    let tagged = read_lofty(path, false)
-        .map_err(write_error)?
-        .ok_or(SourceMetadataError::Unavailable)?;
+pub fn read_embedded_lyrics(path: &Path) -> Result<Option<String>, SourceMetadataError> {
+    read_embedded_lyrics_input(fs::File::open(path).map_err(write_error)?)
+}
+
+pub(crate) fn read_embedded_lyrics_input(
+    file: impl std::io::Read + std::io::Seek,
+) -> Result<Option<String>, SourceMetadataError> {
+    let tagged = super::lofty::read_lofty_file(
+        file,
+        ::lofty::config::ParseOptions::new().read_cover_art(false),
+    )
+    .map_err(write_error)?
+    .ok_or(SourceMetadataError::Unavailable)?;
     Ok(tagged.tags().iter().find_map(|tag| {
         [ItemKey::UnsyncLyrics, ItemKey::Lyrics]
             .into_iter()
@@ -169,11 +178,11 @@ pub(super) fn read_embedded_lyrics(path: &Path) -> Result<Option<String>, Source
     }))
 }
 
-pub(super) fn write_embedded_lyrics(path: &Path, lyrics: &str) -> Result<(), SourceMetadataError> {
+pub(crate) fn write_embedded_lyrics(path: &Path, lyrics: &str) -> Result<(), SourceMetadataError> {
     let writer = MetadataWriter::for_path(path).ok_or(SourceMetadataError::Unavailable)?;
     if matches!(
         writer.file_type(),
-        lofty::file::FileType::Wav | lofty::file::FileType::Aiff
+        ::lofty::file::FileType::Wav | ::lofty::file::FileType::Aiff
     ) {
         return Err(SourceMetadataError::Unavailable);
     }
@@ -374,7 +383,7 @@ struct PreparedFile {
 fn prepare_file(
     path: &Path,
     source_format: Option<&str>,
-    tag_type: Option<lofty::tag::TagType>,
+    tag_type: Option<::lofty::tag::TagType>,
     mutate: impl FnOnce(&mut Tag, MetadataWriter),
 ) -> Result<PreparedFile, SourceMetadataError> {
     let writer = source_format
@@ -403,6 +412,20 @@ fn prepare_file(
         })
         .unwrap_or_else(|| writable_tag(&tagged));
     mutate(&mut tag, writer);
+    if tag.tag_type() == ::lofty::tag::TagType::Id3v2
+        && matches!(
+            writer.file_type(),
+            ::lofty::file::FileType::Wav | ::lofty::file::FileType::Aiff
+        )
+    {
+        // Lofty 0.25.1 subtracts growth when resizing an existing terminal ID3
+        // chunk. Remove that chunk before writing its complete edited tag so
+        // RIFF/FORM length stays valid and subsequent edits read the new values.
+        let mut file = temp.reopen().map_err(write_error)?;
+        tag.tag_type()
+            .remove_from(&mut file, WriteOptions::new())
+            .map_err(write_error)?;
+    }
     save_tag(&tag, temp.path())?;
     temp.as_file().sync_all().map_err(write_error)?;
     Ok(PreparedFile {
@@ -429,7 +452,7 @@ fn commit_batch(mut prepared: Vec<PreparedFile>) -> Result<(), SourceMetadataErr
     Ok(())
 }
 
-fn writable_tag(tagged: &lofty::file::TaggedFile) -> Tag {
+fn writable_tag(tagged: &::lofty::file::TaggedFile) -> Tag {
     tagged.primary_tag().cloned().unwrap_or_else(|| {
         let primary = tagged.file_type().primary_tag_type();
         let mut tag = tagged
@@ -535,6 +558,74 @@ mod tests {
         AlbumMetadataValues, AlbumMetadataWritable, TrackMetadataValues, TrackMetadataWritable,
     };
 
+    #[test]
+    fn repeated_album_edits_replace_the_previous_tag_in_a_working_copy() {
+        let file = tempfile::NamedTempFile::new().unwrap().into_temp_path();
+        fs::write(&file, silent_wav()).unwrap();
+        {
+            use lofty::prelude::{AudioFile, TaggedFileExt};
+            let mut tagged = lofty::probe::Probe::open(&file)
+                .unwrap()
+                .guess_file_type()
+                .unwrap()
+                .read()
+                .unwrap();
+            let mut tag = lofty::tag::Tag::new(lofty::tag::TagType::Id3v2);
+            tag.push_picture(
+                lofty::picture::Picture::unchecked(vec![7; 32])
+                    .pic_type(lofty::picture::PictureType::CoverFront)
+                    .mime_type(lofty::picture::MimeType::Png)
+                    .build(),
+            );
+            tagged.insert_tag(tag);
+            tagged
+                .save_to_path(&file, lofty::config::WriteOptions::default())
+                .unwrap();
+        }
+        for title in ["First album", "A longer second album title", "Short"] {
+            let edit = crate::AlbumMetadataEdit {
+                values: crate::AlbumMetadataValues {
+                    title: title.into(),
+                    ..Default::default()
+                },
+                changed: crate::AlbumMetadataWritable {
+                    title: true,
+                    ..Default::default()
+                },
+            };
+            let paths = [file.to_path_buf()];
+            let revision = combined_revision(&paths).unwrap();
+            write_album_batch(
+                &[(file.to_path_buf(), Some("wav".into()))],
+                &revision,
+                &edit,
+            )
+            .unwrap();
+            let observed = read_track_metadata(&file, Some("wav")).unwrap();
+            assert_eq!(observed.values.album.as_deref(), Some(title));
+            let saved = std::fs::read(&file).unwrap();
+            assert_eq!(
+                u32::from_le_bytes(saved[4..8].try_into().unwrap()) as usize + 8,
+                saved.len(),
+                "RIFF length remains valid after growing and shrinking tags"
+            );
+            let original = silent_wav();
+            assert_eq!(
+                &saved[12..original.len()],
+                &original[12..],
+                "Audio and format chunks remain byte-for-byte unchanged"
+            );
+            use lofty::prelude::TaggedFileExt;
+            let tagged = lofty::probe::Probe::open(&file)
+                .unwrap()
+                .guess_file_type()
+                .unwrap()
+                .read()
+                .unwrap();
+            assert_eq!(tagged.primary_tag().unwrap().pictures()[0].data(), &[7; 32]);
+        }
+    }
+
     fn track_edit(values: TrackMetadataValues) -> TrackMetadataEdit {
         TrackMetadataEdit {
             values,
@@ -572,7 +663,7 @@ mod tests {
         let directory = tempfile::tempdir().expect("metadata directory");
         let path = directory.path().join("track.wav");
         fs::write(&path, silent_wav()).expect("write WAV");
-        assert!(super::super::metadata_file_available(&path, Some("wav")));
+        assert!(super::metadata_file_available(&path, Some("wav")));
         let before = revision(&path).expect("file revision");
         let values = TrackMetadataValues {
             title: "Updated title".to_string(),
@@ -583,7 +674,7 @@ mod tests {
         };
 
         write_track(&path, Some("wav"), &before, &track_edit(values)).expect("write metadata");
-        let read = super::super::read_track_metadata(&path, Some("wav")).expect("read metadata");
+        let read = super::read_track_metadata(&path, Some("wav")).expect("read metadata");
         assert!(read.writable.title);
         assert_eq!(read.values.title, "Updated title");
         assert_eq!(read.values.artist.as_deref(), Some("Updated artist"));
@@ -645,16 +736,16 @@ mod tests {
             write_embedded_lyrics(&path, "[00:01.000]A line"),
             Err(SourceMetadataError::Unavailable)
         );
-        assert!(!super::super::embedded_lyrics_writable(&path));
+        assert!(!super::embedded_lyrics_writable(&path));
         assert_eq!(
-            super::super::read_track_metadata(&path, Some("wav"))
+            super::read_track_metadata(&path, Some("wav"))
                 .expect("read metadata")
                 .values
                 .title,
             "Track title"
         );
 
-        let mut id3 = Tag::new(lofty::tag::TagType::Id3v2);
+        let mut id3 = Tag::new(::lofty::tag::TagType::Id3v2);
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "first");
         set_embedded_lyrics(&mut id3, ItemKey::UnsyncLyrics, "updated");
         assert_eq!(id3.get_string(ItemKey::UnsyncLyrics), Some("updated"));
@@ -725,8 +816,8 @@ mod tests {
         .expect("write Album metadata");
 
         for (index, path) in paths.iter().enumerate() {
-            let values = super::super::read_album_metadata_values(path, Some("wav"))
-                .expect("read Album metadata");
+            let values =
+                super::read_album_metadata_values(path, Some("wav")).expect("read Album metadata");
             assert_eq!(values.title, "After");
             assert_eq!(values.album_artist.as_deref(), Some("Album Artist"));
             assert_eq!(
@@ -832,7 +923,7 @@ mod tests {
             root.join(".").join("café %.wav"),
             library::file_media_path(&uri).unwrap(),
         ] {
-            super::super::scan::publish_metadata_paths(
+            crate::file::local::scan::publish_metadata_paths(
                 &database,
                 source.source_id().as_str(),
                 &[path],
@@ -1022,4 +1113,358 @@ mod tests {
         bytes.resize(44 + data_len as usize, 0);
         bytes
     }
+}
+
+pub(crate) fn embedded_lyrics_writable(path: &Path) -> bool {
+    lyrics_writer_supported(super::lofty::MetadataWriter::for_path(path))
+}
+
+pub(crate) fn embedded_lyrics_format_writable(format: &str) -> bool {
+    lyrics_writer_supported(super::lofty::MetadataWriter::for_source_format(format))
+}
+
+fn lyrics_writer_supported(writer: Option<super::lofty::MetadataWriter>) -> bool {
+    writer.is_some_and(|writer| {
+        !matches!(
+            writer.file_type(),
+            ::lofty::file::FileType::Wav | ::lofty::file::FileType::Aiff
+        ) && writer.lyrics_target().is_some()
+    })
+}
+
+pub(crate) fn metadata_file_available(path: &Path, source_format: Option<&str>) -> bool {
+    source_format
+        .and_then(super::lofty::MetadataWriter::for_source_format)
+        .or_else(|| super::lofty::MetadataWriter::for_path(path))
+        .is_some()
+}
+
+pub(crate) fn read_track_metadata(
+    path: &Path,
+    source_format: Option<&str>,
+) -> Result<crate::TrackMetadata, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(super::lofty::MetadataWriter::for_source_format)
+        .or_else(|| super::lofty::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = super::lofty::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    let number = |key| text(key).and_then(|value| value.parse::<u16>().ok());
+    let values = crate::TrackMetadataValues {
+        title: tag
+            .and_then(|tag| tag.title())
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default(),
+        sort_title: text(ItemKey::TrackTitleSortOrder),
+        artist: tag
+            .and_then(|tag| tag.artist())
+            .map(|value| value.trim().to_string()),
+        album: tag
+            .and_then(|tag| tag.album())
+            .map(|value| value.trim().to_string()),
+        album_artist: text(ItemKey::AlbumArtist),
+        track_number: tag.and_then(|tag| tag.track()).map(|value| value as u16),
+        disc_number: tag.and_then(|tag| tag.disk()).map(|value| value as u16),
+        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        bpm: number(ItemKey::IntegerBpm).or_else(|| number(ItemKey::Bpm)),
+        locked: None,
+        musicbrainz_recording_id: text(ItemKey::MusicBrainzRecordingId),
+        musicbrainz_release_track_id: text(ItemKey::MusicBrainzTrackId),
+        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
+        musicbrainz_artist_id: text(ItemKey::MusicBrainzArtistId),
+    };
+    let can = |key| writer.metadata_key_is_writable(key);
+    let writable = crate::TrackMetadataWritable {
+        title: can(ItemKey::TrackTitle),
+        sort_title: can(ItemKey::TrackTitleSortOrder),
+        artist: can(ItemKey::TrackArtist),
+        album: can(ItemKey::AlbumTitle),
+        album_artist: can(ItemKey::AlbumArtist),
+        track_number: can(ItemKey::TrackNumber),
+        disc_number: can(ItemKey::DiscNumber),
+        year: can(ItemKey::RecordingDate),
+        genre: can(ItemKey::Genre),
+        comment: can(ItemKey::Comment),
+        bpm: super::lofty::bpm_key(writer.file_type().primary_tag_type()).is_some(),
+        locked: false,
+        musicbrainz_recording_id: can(ItemKey::MusicBrainzRecordingId),
+        musicbrainz_release_track_id: can(ItemKey::MusicBrainzTrackId),
+        musicbrainz_album_id: can(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: can(ItemKey::MusicBrainzReleaseGroupId),
+        musicbrainz_artist_id: can(ItemKey::MusicBrainzArtistId),
+    };
+    let metadata =
+        fs::metadata(path).map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?;
+    let modified = metadata
+        .modified()
+        .ok()
+        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
+        .map_or(0, |value| value.as_nanos());
+    Ok(crate::TrackMetadata {
+        writable,
+        source_search: false,
+        revision: Some(format!("{}:{modified}", metadata.len())),
+        source_values: values.clone(),
+        values,
+        rufin_filled: crate::TrackMetadataWritable::default(),
+    })
+}
+
+pub(crate) fn read_album_metadata_values(
+    path: &Path,
+    source_format: Option<&str>,
+) -> Result<crate::AlbumMetadataValues, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(super::lofty::MetadataWriter::for_source_format)
+        .or_else(|| super::lofty::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = super::lofty::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    Ok(crate::AlbumMetadataValues {
+        title: tag
+            .and_then(|tag| tag.album())
+            .map(|value| value.trim().to_string())
+            .unwrap_or_default(),
+        sort_title: text(ItemKey::AlbumTitleSortOrder),
+        artist: text(ItemKey::TrackArtist),
+        album_artist: text(ItemKey::AlbumArtist),
+        year: tag.and_then(|tag| tag.date()).map(|value| value.year),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        locked: None,
+        musicbrainz_album_id: text(ItemKey::MusicBrainzReleaseId),
+        musicbrainz_release_group_id: text(ItemKey::MusicBrainzReleaseGroupId),
+    })
+}
+
+pub(crate) fn read_artist_metadata_values(
+    path: &Path,
+    source_format: Option<&str>,
+    fallback_name: &str,
+) -> Result<crate::ArtistMetadataValues, crate::SourceMetadataError> {
+    let writer = source_format
+        .and_then(super::lofty::MetadataWriter::for_source_format)
+        .or_else(|| super::lofty::MetadataWriter::for_path(path))
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tagged = super::lofty::read_lofty_for_edit(path, writer.file_type())
+        .map_err(|error| crate::SourceMetadataError::Write(error.to_string()))?
+        .ok_or(crate::SourceMetadataError::Unavailable)?;
+    let tag = tagged.primary_tag().or_else(|| tagged.first_tag());
+    let text = |key| {
+        tag.and_then(|tag| tag.get_string(key))
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(ToString::to_string)
+    };
+    Ok(crate::ArtistMetadataValues {
+        name: fallback_name.to_string(),
+        sort_name: text(ItemKey::TrackArtistSortOrder),
+        genre: tag
+            .and_then(|tag| tag.genre())
+            .map(|value| value.trim().to_string()),
+        comment: tag
+            .and_then(|tag| tag.comment())
+            .map(|value| value.trim().to_string()),
+        locked: None,
+        musicbrainz_artist_id: text(ItemKey::MusicBrainzArtistId),
+    })
+}
+
+pub(crate) struct MetadataFileTarget {
+    pub path: PathBuf,
+    pub format: Option<String>,
+}
+
+pub(crate) fn read_album_file(
+    album: &library::AlbumRow,
+    current: Option<crate::AlbumMetadata>,
+    path: &std::path::Path,
+    format: Option<&str>,
+) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
+    let track = crate::file::metadata::read_track_metadata(path, format)?;
+    let mut values = crate::file::metadata::read_album_metadata_values(path, format)?;
+    if let Some(mut metadata) = current {
+        metadata.mixed.title |= values.title != metadata.source_values.title;
+        metadata.mixed.sort_title |= values.sort_title != metadata.source_values.sort_title;
+        metadata.mixed.artist |= values.artist != metadata.source_values.artist;
+        metadata.mixed.album_artist |= values.album_artist != metadata.source_values.album_artist;
+        metadata.mixed.year |= values.year != metadata.source_values.year;
+        metadata.mixed.genre |= values.genre != metadata.source_values.genre;
+        metadata.mixed.comment |= values.comment != metadata.source_values.comment;
+        metadata.mixed.musicbrainz_album_id |=
+            values.musicbrainz_album_id != metadata.source_values.musicbrainz_album_id;
+        metadata.mixed.musicbrainz_release_group_id |= values.musicbrainz_release_group_id
+            != metadata.source_values.musicbrainz_release_group_id;
+        metadata.writable.title &= track.writable.album;
+        metadata.writable.sort_title &= track.writable.sort_title;
+        metadata.writable.artist &= track.writable.artist;
+        metadata.writable.album_artist &= track.writable.album_artist;
+        metadata.writable.year &= track.writable.year;
+        metadata.writable.genre &= track.writable.genre;
+        metadata.writable.comment &= track.writable.comment;
+        metadata.writable.musicbrainz_album_id &= track.writable.musicbrainz_album_id;
+        metadata.writable.musicbrainz_release_group_id &=
+            track.writable.musicbrainz_release_group_id;
+        metadata.track_count += 1;
+        return Ok(metadata);
+    }
+    if values.title.is_empty() {
+        values.title = album.title.clone();
+    }
+    if values.album_artist.is_none() {
+        values.album_artist = Some(album.display_artist.clone());
+    }
+    if values.artist.is_none() {
+        values.artist = Some(album.display_artist.clone());
+    }
+    let source_values = values.clone();
+    let mut rufin_filled = crate::AlbumMetadataWritable::default();
+    if values.musicbrainz_album_id.is_none() && album.musicbrainz_release_id.is_some() {
+        values.musicbrainz_album_id = album.musicbrainz_release_id.clone();
+        rufin_filled.musicbrainz_album_id = true;
+    }
+    if values.musicbrainz_release_group_id.is_none() && album.musicbrainz_release_group_id.is_some()
+    {
+        values.musicbrainz_release_group_id = album.musicbrainz_release_group_id.clone();
+        rufin_filled.musicbrainz_release_group_id = true;
+    }
+    Ok(crate::AlbumMetadata {
+        writable: crate::AlbumMetadataWritable {
+            title: track.writable.album,
+            sort_title: track.writable.sort_title,
+            artist: track.writable.artist,
+            album_artist: track.writable.album_artist,
+            year: track.writable.year,
+            genre: track.writable.genre,
+            comment: track.writable.comment,
+            locked: false,
+            musicbrainz_album_id: track.writable.musicbrainz_album_id,
+            musicbrainz_release_group_id: track.writable.musicbrainz_release_group_id,
+        },
+        source_search: false,
+        revision: None,
+        source_values,
+        values,
+        rufin_filled,
+        track_count: 1,
+        mixed: crate::AlbumMetadataMixed::default(),
+    })
+}
+
+pub(crate) fn album_metadata_from_targets(
+    album: library::AlbumRow,
+    targets: &[MetadataFileTarget],
+) -> Result<crate::AlbumMetadata, crate::SourceMetadataError> {
+    let mut metadata = None;
+    for target in targets {
+        metadata = Some(read_album_file(
+            &album,
+            metadata,
+            &target.path,
+            target.format.as_deref(),
+        )?);
+    }
+    let mut metadata = metadata.ok_or(crate::SourceMetadataError::Unavailable)?;
+    let paths = targets
+        .iter()
+        .map(|target| target.path.clone())
+        .collect::<Vec<_>>();
+    metadata.revision = Some(combined_revision(&paths)?);
+    Ok(metadata)
+}
+pub(crate) fn read_artist_file(
+    artist: &library::ArtistRow,
+    current: Option<crate::ArtistMetadata>,
+    path: &std::path::Path,
+    format: Option<&str>,
+) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
+    let track = crate::file::metadata::read_track_metadata(path, format)?;
+    let mut values =
+        crate::file::metadata::read_artist_metadata_values(path, format, &artist.name)?;
+    if let Some(mut metadata) = current {
+        metadata.mixed.sort_name |= values.sort_name != metadata.source_values.sort_name;
+        metadata.mixed.genre |= values.genre != metadata.source_values.genre;
+        metadata.mixed.comment |= values.comment != metadata.source_values.comment;
+        metadata.mixed.musicbrainz_artist_id |=
+            values.musicbrainz_artist_id != metadata.source_values.musicbrainz_artist_id;
+        metadata.writable.name &= track.writable.artist;
+        metadata.writable.sort_name &= track.writable.sort_title;
+        metadata.writable.genre &= track.writable.genre;
+        metadata.writable.comment &= track.writable.comment;
+        metadata.writable.musicbrainz_artist_id &= track.writable.musicbrainz_artist_id;
+        metadata.track_count += 1;
+        return Ok(metadata);
+    }
+    let source_values = values.clone();
+    let mut rufin_filled = crate::ArtistMetadataWritable::default();
+    if values.musicbrainz_artist_id.is_none() && artist.musicbrainz_artist_id.is_some() {
+        values.musicbrainz_artist_id = artist.musicbrainz_artist_id.clone();
+        rufin_filled.musicbrainz_artist_id = true;
+    }
+    Ok(crate::ArtistMetadata {
+        writable: crate::ArtistMetadataWritable {
+            name: track.writable.artist,
+            sort_name: track.writable.sort_title,
+            genre: track.writable.genre,
+            comment: track.writable.comment,
+            locked: false,
+            musicbrainz_artist_id: track.writable.musicbrainz_artist_id,
+        },
+        source_search: false,
+        revision: None,
+        source_values,
+        values,
+        rufin_filled,
+        track_count: 1,
+        mixed: crate::ArtistMetadataMixed::default(),
+    })
+}
+
+pub(crate) fn artist_metadata_from_targets(
+    artist: library::ArtistRow,
+    targets: &[MetadataFileTarget],
+) -> Result<crate::ArtistMetadata, crate::SourceMetadataError> {
+    let mut metadata = None;
+    for target in targets {
+        metadata = Some(read_artist_file(
+            &artist,
+            metadata,
+            &target.path,
+            target.format.as_deref(),
+        )?);
+    }
+    let mut metadata = metadata.ok_or(crate::SourceMetadataError::Unavailable)?;
+    let paths = targets
+        .iter()
+        .map(|target| target.path.clone())
+        .collect::<Vec<_>>();
+    metadata.revision = Some(combined_revision(&paths)?);
+    Ok(metadata)
 }

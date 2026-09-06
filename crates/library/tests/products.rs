@@ -1116,9 +1116,10 @@ async fn completed_direct_download_is_an_all_media_owner_without_a_source() {
     assert_eq!(
         fixture
             .database
-            .playback_access_uri(&direct)
+            .playback_access(&direct)
             .await
             .expect("resolve direct download access")
+            .map(|(uri, _)| uri)
             .as_deref(),
         Some("file:///downloads/direct.flac")
     );

@@ -1385,6 +1385,87 @@ pub(super) fn hash_id_bytes(value: &[u8]) -> String {
 mod tests {
     use super::*;
 
+    #[tokio::test]
+    async fn file_source_download_resumes_after_its_private_endpoint_changes() {
+        use wiremock::{
+            Mock, MockServer, ResponseTemplate,
+            matchers::{header, method, path},
+        };
+        for kind in ["smb", "webdav"] {
+            for unchanged in [true, false] {
+                let server = MockServer::start().await;
+                let body = b"complete audio bytes";
+                let offset = 8;
+                let response = if unchanged {
+                    ResponseTemplate::new(206)
+                        .insert_header("ETag", "\"first\"")
+                        .insert_header(
+                            "Content-Range",
+                            format!("bytes {offset}-{}/{}", body.len() - 1, body.len()),
+                        )
+                        .set_body_bytes(body[offset..].to_vec())
+                } else {
+                    ResponseTemplate::new(200)
+                        .insert_header("ETag", "\"changed\"")
+                        .set_body_bytes(body.to_vec())
+                };
+                Mock::given(method("GET"))
+                    .and(path("/new-private-endpoint"))
+                    .and(header("Range", format!("bytes={offset}-").as_str()))
+                    .and(header("If-Range", "\"first\""))
+                    .respond_with(response)
+                    .expect(1)
+                    .mount(&server)
+                    .await;
+                let source = SourceId::new(format!("{kind}:download"));
+                let media_uri = library::source_entity_uri(&source, "track", "persistent-file-id");
+                let request = StreamRequest::original(&media_uri);
+                let previous = ResolvedStream::with_redacted(
+                    "http://127.0.0.1:1/previous-private-endpoint",
+                    &media_uri,
+                );
+                let current = ResolvedStream::with_redacted(
+                    format!("{}/new-private-endpoint", server.uri()),
+                    &media_uri,
+                );
+                let representation =
+                    representation_key(Some(&source), &request, previous.redacted_uri());
+                assert_eq!(
+                    representation,
+                    representation_key(Some(&source), &request, current.redacted_uri())
+                );
+                let directory = tempfile::tempdir().unwrap();
+                let paths = download_paths(directory.path(), Some(&source), &media_uri);
+                std::fs::create_dir_all(&paths.directory).unwrap();
+                std::fs::write(
+                    &paths.audio_part,
+                    if unchanged {
+                        &body[..offset]
+                    } else {
+                        b"old data"
+                    },
+                )
+                .unwrap();
+                std::fs::write(
+                    &paths.checkpoint,
+                    serde_json::to_vec(&TransferCheckpoint {
+                        representation: representation.clone(),
+                        validator: "\"first\"".into(),
+                        length: body.len() as u64,
+                    })
+                    .unwrap(),
+                )
+                .unwrap();
+                let (_cancel, mut cancellation) = oneshot::channel();
+                TransferClients::default()
+                    .download_cancellable(&current, &representation, &paths, &mut cancellation)
+                    .await
+                    .unwrap();
+                assert_eq!(std::fs::read(&paths.audio_part).unwrap(), body);
+            }
+        }
+    }
+
     fn record(relative_audio_path: PathBuf, custom_storage: bool, size: u64) -> DownloadRecord {
         DownloadRecord {
             version: RECORD_VERSION,

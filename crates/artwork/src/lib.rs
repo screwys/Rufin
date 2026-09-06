@@ -555,6 +555,61 @@ mod preparation_tests {
     }
 
     #[tokio::test]
+    async fn newly_fetched_background_artwork_reports_progress() {
+        let directory = tempfile::tempdir().unwrap();
+        let image_path = directory.path().join("cover.png");
+        image::RgbaImage::from_pixel(16, 16, image::Rgba([30, 80, 160, 255]))
+            .save(&image_path)
+            .unwrap();
+        let source = SourceId::new("source");
+        let binding = serde_json::to_vec(&sources::LocalImageRef::File {
+            source_id: source.clone(),
+            path: image_path.to_string_lossy().into_owned(),
+            revision: "1".into(),
+        })
+        .unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut scan = library::Scan::begin(&database, source.as_str(), "Source", "source", None)
+            .await
+            .unwrap();
+        scan.write_artist(
+            "artist",
+            "Artist",
+            "artist",
+            "artist",
+            None,
+            Some(&binding),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("artist artwork must be published");
+        };
+        let artwork = Artwork::new(directory.path().join("covers"), Handle::current()).unwrap();
+        for expected in [1, 0] {
+            let progress = AtomicUsize::new(0);
+            artwork
+                .prepare_database_source(
+                    &database,
+                    publication.source,
+                    &source,
+                    publication.artwork_digest,
+                    &|_, completed| {
+                        progress.store(completed, Ordering::Relaxed);
+                    },
+                    Arc::new(AtomicBool::new(false)),
+                )
+                .await
+                .unwrap();
+            assert_eq!(progress.load(Ordering::Relaxed), expected);
+        }
+    }
+
+    #[tokio::test]
     async fn completed_database_source_emits_no_preparation_progress() {
         let directory = tempfile::tempdir().unwrap();
         let database = library::Database::open(directory.path().join("library.sqlite"))

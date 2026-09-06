@@ -217,10 +217,10 @@ async fn analyze_selected(
         let Some(state) = current(&selected, &cancelled) else {
             return false;
         };
-        if state.configuration.kind == sources::LOCAL_SOURCE_ID
+        if state.configuration.is_file_library()
             && let Some(source) = state.source.as_ref()
             && let Err(error) = source
-                .backfill_local_r128_tags(&state.database, state.source_key)
+                .backfill_file_r128_tags(&state.database, state.source_key)
                 .await
         {
             warn!(%error, "could not write stored EBU R128 tags");
@@ -371,7 +371,7 @@ async fn write_local_tags(
     state: &SelectedSourceState,
     measurements: &[(library::TrackKey, Option<f64>, Option<f64>)],
 ) -> Result<(), String> {
-    if state.configuration.kind != sources::LOCAL_SOURCE_ID {
+    if !state.configuration.is_file_library() {
         return Ok(());
     }
     let source = state
@@ -379,7 +379,7 @@ async fn write_local_tags(
         .as_ref()
         .ok_or_else(|| "source is unavailable".to_string())?;
     source
-        .write_local_r128_tags(&state.database, state.source_key, measurements)
+        .write_file_r128_tags(&state.database, state.source_key, measurements)
         .await
         .map_err(|error| error.to_string())
 }

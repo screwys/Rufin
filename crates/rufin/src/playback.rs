@@ -601,7 +601,6 @@ impl PlaybackOwner {
         let database = Arc::clone(&self.database);
         let source_owner = self.source_owner();
         let playback = active.playback;
-        let quality = request.quality;
         let task = self.runtime.spawn(async move {
             let (track, album) = database
                 .playback_loudness(&occurrence.item.media_uri, &ReadCancellation::new())
@@ -617,7 +616,7 @@ impl PlaybackOwner {
                     .client(source_id)
             })
             .await
-            .map(|stream| prepare_media_stream(stream, loudness, occurrence, quality));
+            .map(|stream| prepare_media_stream(stream, loudness, occurrence));
             let _ = tokio::task::spawn_blocking(move || playback.resolve_stream(run, result)).await;
         });
         if let Some(previous) = self
@@ -1102,23 +1101,37 @@ pub(crate) async fn prepare_stream(
     request: StreamRequest,
     source: impl FnOnce(&sources::SourceId) -> Result<Arc<sources::Source>, String> + Send + 'static,
 ) -> Result<playback::ResolvedStream, String> {
-    let access_uri = database
-        .playback_access_uri(&request.media_uri)
+    let access = database
+        .playback_access(&request.media_uri)
         .await
         .ok()
         .flatten();
+    // Downloads names its owned file using the actual transcoded extension.
+    // Mapped and original files still use their parsed source format.
+    let content_type = access
+        .as_ref()
+        .filter(|(_, origin)| *origin == library::LocalAccessOrigin::Download)
+        .and_then(|(uri, _)| library::file_media_path(uri))
+        .and_then(|path| {
+            path.extension()
+                .and_then(|extension| extension.to_str())
+                .and_then(audio_mime)
+        });
+    let access_uri = access.map(|(uri, _)| uri);
     if let Some((_, file_uri, start, end)) = library::cue_media_parts(&request.media_uri) {
         return Ok(
-            playback::ResolvedStream::new(access_uri.unwrap_or(file_uri)).with_window(
-                u64::try_from(start).map_err(string_error)?,
-                u64::try_from(end).map_err(string_error)?,
-            ),
+            playback::ResolvedStream::new(access_uri.unwrap_or(file_uri))
+                .with_content_type(content_type)
+                .with_window(
+                    u64::try_from(start).map_err(string_error)?,
+                    u64::try_from(end).map_err(string_error)?,
+                ),
         );
     }
     if let Some(uri) =
         access_uri.or_else(|| library::normalize_direct_media_uri(&request.media_uri))
     {
-        return Ok(playback::ResolvedStream::new(uri));
+        return Ok(playback::ResolvedStream::new(uri).with_content_type(content_type));
     }
     let (source_id, kind, _) = library::source_entity_parts(&request.media_uri)
         .ok_or_else(crate::source::source_access_unavailable)?;
@@ -1128,20 +1141,15 @@ pub(crate) async fn prepare_stream(
     let source = tokio::task::spawn_blocking(move || source(&source_id))
         .await
         .map_err(string_error)??;
-    source.stream(request).await.map_err(string_error)
+    source.stream(database, request).await.map_err(string_error)
 }
 
 fn prepare_media_stream(
     stream: playback::ResolvedStream,
     loudness: playback::TrackLoudness,
     occurrence: Arc<playback::QueueOccurrence>,
-    quality: playback::StreamQuality,
 ) -> PreparedStream {
-    let content_type = if quality.max_bitrate_kbps().is_some() {
-        Some("audio/mpeg".to_string())
-    } else {
-        occurrence.source_format.as_deref().and_then(audio_mime)
-    };
+    let content_type = occurrence.source_format.as_deref().and_then(audio_mime);
     PreparedStream::new(stream, loudness).with_occurrence(occurrence, content_type)
 }
 
@@ -1293,7 +1301,6 @@ mod tests {
             playback::ResolvedStream::new("https://provider.example/stream?id=track"),
             playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
-            playback::StreamQuality::Original,
         );
 
         assert_eq!(prepared.content_type.as_deref(), Some("audio/flac"));
@@ -1302,12 +1309,68 @@ mod tests {
     #[test]
     fn provider_transcode_is_published_as_mpeg() {
         let prepared = prepare_media_stream(
-            playback::ResolvedStream::new("https://provider.example/stream?id=track"),
+            playback::ResolvedStream::new("https://provider.example/stream?id=track")
+                .with_content_type(Some("audio/mpeg".to_string())),
             playback::TrackLoudness::default(),
             test_occurrence("flac").into(),
-            playback::StreamQuality::MaxBitrateKbps(320),
         );
 
         assert_eq!(prepared.content_type.as_deref(), Some("audio/mpeg"));
+    }
+
+    #[tokio::test]
+    async fn downloaded_transcode_keeps_its_actual_format_and_canonical_occurrence() {
+        let folder = tempfile::tempdir().unwrap();
+        let database = library::Database::open(folder.path().join("library.sqlite3"))
+            .await
+            .unwrap();
+        let occurrence = test_occurrence("flac");
+        let path = folder.path().join("track.opus");
+        let uri = url::Url::from_file_path(&path).unwrap().to_string();
+        database
+            .upsert_local_access(
+                None,
+                &library::LocalAccessWrite {
+                    media_uri: occurrence.media_uri.clone(),
+                    origin: library::LocalAccessOrigin::Download,
+                    path: path.to_string_lossy().into_owned(),
+                    root: folder.path().to_string_lossy().into_owned(),
+                    relative_path: "track.opus".into(),
+                    size_bytes: 0,
+                    mtime_ns: 0,
+                    device_id: None,
+                    inode: None,
+                    parser_version: 1,
+                    title: "Track".into(),
+                    album: "Album".into(),
+                    artist: "Artist".into(),
+                    disc_number: 1,
+                    track_number: 1,
+                    duration_millis: 180_000,
+                    access_uri: uri.clone(),
+                    loudness_analysis_key: None,
+                },
+            )
+            .await
+            .unwrap();
+        let stream = super::prepare_stream(
+            &database,
+            playback::StreamRequest::new(
+                occurrence.media_uri.clone(),
+                playback::StreamQuality::Original,
+            ),
+            |_| panic!("a completed download must resolve without contacting its source"),
+        )
+        .await
+        .unwrap();
+        let canonical = occurrence.media_uri.clone();
+        let prepared = prepare_media_stream(
+            stream,
+            playback::TrackLoudness::default(),
+            occurrence.into(),
+        );
+        assert_eq!(prepared.uri(), uri);
+        assert_eq!(prepared.content_type.as_deref(), Some("audio/ogg"));
+        assert_eq!(prepared.occurrence.as_ref().unwrap().media_uri, canonical);
     }
 }

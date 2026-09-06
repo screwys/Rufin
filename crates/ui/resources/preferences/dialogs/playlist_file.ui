@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwAlertDialog" id="dialog">
+    <property name="heading" translatable="yes">Playlist File</property>
+    <property name="close-response">cancel</property>
+    <property name="default-response">source</property>
+    <property name="extra-child">
+      <object class="GtkListBox">
+        <property name="selection-mode">none</property>
+        <style><class name="boxed-list"/></style>
+        <child>
+          <object class="AdwEntryRow" id="path">
+            <property name="title" translatable="yes">Path in Source</property>
+            <property name="activates-default">true</property>
+          </object>
+        </child>
+      </object>
+    </property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="device" translatable="yes">This device</response>
+      <response id="source" translatable="yes" appearance="suggested">Use This Source</response>
+    </responses>
+  </object>
+</interface>

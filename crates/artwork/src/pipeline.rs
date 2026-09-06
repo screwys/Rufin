@@ -129,6 +129,7 @@ struct DecodedAccess {
 enum Resolution {
     Ready { image: Arc<DecodedImage> },
     Cached,
+    Fetched,
     Missing,
     Failed(Arc<str>),
 }
@@ -921,7 +922,7 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 Err(error) => return Resolution::Failed(error.to_string().into()),
             };
             match write_ready(shared, work, normalized.bytes()) {
-                Ok(Some(_path)) if !work.decode => Resolution::Cached,
+                Ok(Some(_path)) if !work.decode => Resolution::Fetched,
                 Ok(Some(path)) => match decode_normalized(
                     normalized,
                     path.clone(),
@@ -1028,7 +1029,7 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
     }
     let mut completions = Vec::new();
     for request_id in record.subscribers {
-        if matches!(&resolution, Resolution::Cached) {
+        if matches!(&resolution, Resolution::Cached | Resolution::Fetched) {
             restart_projection(&mut state, request_id);
             continue;
         }
@@ -1039,12 +1040,12 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
             Resolution::Ready { image, .. } => ArtworkOutcome::Ready(Arc::clone(image)),
             Resolution::Missing => ArtworkOutcome::Missing,
             Resolution::Failed(error) => ArtworkOutcome::Failed(Arc::clone(error)),
-            Resolution::Cached => unreachable!(),
+            Resolution::Cached | Resolution::Fetched => unreachable!(),
         };
         completions.push((projection.completion, outcome));
     }
     let background_result = match &resolution {
-        Resolution::Ready { .. } => BackgroundResult::Ready,
+        Resolution::Ready { .. } | Resolution::Fetched => BackgroundResult::Ready,
         Resolution::Cached => BackgroundResult::Cached,
         Resolution::Missing => BackgroundResult::Missing,
         Resolution::Failed(_) => BackgroundResult::Failed,

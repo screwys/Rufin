@@ -106,6 +106,8 @@ pub(crate) const METADATA_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/metadata.ui";
 pub(crate) const PLAYLIST_NAME_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_name.ui";
+pub(crate) const PLAYLIST_FILE_DIALOG_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_file.ui";
 pub(crate) const RELEASE_NOTE_ROW_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/release_note_row.ui";
 pub(crate) const RELEASE_NOTES_RESOURCE: &str =
@@ -124,6 +126,8 @@ pub(crate) const SOURCE_CHOICE_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/choice.ui";
 pub(crate) const SOURCE_CHOICE_SELECTOR_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/choice_selector.ui";
+pub(crate) const FILE_HOST_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/file_host.ui";
 pub(crate) const CREDENTIAL_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/credential_host.ui";
 pub(crate) const LOCAL_SETUP_RESOURCE: &str =
@@ -206,6 +210,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     BACKUP_DIALOG_RESOURCE,
     METADATA_DIALOG_RESOURCE,
     PLAYLIST_NAME_DIALOG_RESOURCE,
+    PLAYLIST_FILE_DIALOG_RESOURCE,
     RELEASE_NOTE_ROW_RESOURCE,
     RELEASE_NOTES_RESOURCE,
     SMART_PLAYLIST_DIALOG_RESOURCE,
@@ -216,6 +221,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     SOURCE_CHOICE_RESOURCE,
     ONBOARDING_RESOURCE,
     CREDENTIAL_HOST_RESOURCE,
+    FILE_HOST_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     MANAGE_SERVER_RESOURCE,
     SERVER_ACTIONS_RESOURCE,

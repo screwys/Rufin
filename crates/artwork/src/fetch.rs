@@ -22,6 +22,16 @@ impl FetchContext {
         Self { source_resolver }
     }
 
+    fn source(&self, source_id: &library::SourceId) -> Result<Arc<sources::Source>, String> {
+        let resolver = self
+            .source_resolver
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .clone()
+            .ok_or_else(|| "artwork source is unavailable".to_string())?;
+        resolver(source_id).ok_or_else(|| "artwork source is unavailable".to_string())
+    }
+
     pub(crate) fn fetch(
         &self,
         runtime: &Handle,
@@ -31,14 +41,7 @@ impl FetchContext {
     ) -> Result<FetchOutcome, String> {
         match candidate {
             Candidate::Native(image_ref) => {
-                let resolver = self
-                    .source_resolver
-                    .lock()
-                    .unwrap_or_else(|poisoned| poisoned.into_inner())
-                    .clone()
-                    .ok_or_else(|| "artwork source is unavailable".to_string())?;
-                let source = resolver(&image_ref.source_id)
-                    .ok_or_else(|| "artwork source is unavailable".to_string())?;
+                let source = self.source(&image_ref.source_id)?;
                 runtime
                     .block_on(source.image(SourceImageRequest::Native {
                         image_ref: image_ref.image.clone(),
@@ -53,15 +56,32 @@ impl FetchContext {
                     })
                     .or_else(source_result)
             }
-            Candidate::Local(reference) => sources::read_local_image(reference)
-                .map(|image| {
-                    if image.bytes.is_empty() {
-                        FetchOutcome::Missing
-                    } else {
-                        FetchOutcome::Ready(image.bytes)
-                    }
-                })
-                .or_else(source_result),
+            Candidate::Local(reference) => {
+                let path = match reference {
+                    sources::LocalImageRef::File { path, .. }
+                    | sources::LocalImageRef::Embedded { path, .. } => path,
+                };
+                let image = if !["http://", "https://", "smb://"]
+                    .iter()
+                    .any(|prefix| path.starts_with(prefix))
+                {
+                    sources::read_local_image(reference)
+                } else {
+                    runtime.block_on(
+                        self.source(reference.source_id())?
+                            .image(SourceImageRequest::Local(reference.clone())),
+                    )
+                };
+                image
+                    .map(|image| {
+                        if image.bytes.is_empty() {
+                            FetchOutcome::Missing
+                        } else {
+                            FetchOutcome::Ready(image.bytes)
+                        }
+                    })
+                    .or_else(source_result)
+            }
             Candidate::Album(album) => metadata_lookup::lookup_album_cover(
                 album,
                 size,

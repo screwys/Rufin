@@ -1015,7 +1015,7 @@ mod tests {
         let mut negotiated_source = PreparedStream::from(playback::ResolvedStream::new(
             Url::from_file_path(&path).expect("source URL").to_string(),
         ));
-        negotiated_source.content_type = Some("audio/alac".to_string());
+        negotiated_source.stream.content_type = Some("audio/alac".to_string());
         let source = relay
             .publish_as(&negotiated_source, RelayRepresentation::Source)
             .expect("publish negotiated source representation");

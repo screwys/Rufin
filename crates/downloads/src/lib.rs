@@ -1620,12 +1620,15 @@ impl Actor {
             }
             let request = StreamRequest::new(media_uri.clone(), quality);
             let resolved = if let Some(source) = source {
-                source.resolve_download(&request).map(|download| {
-                    (
-                        download.transcoded_extension().map(str::to_string),
-                        download.into_stream(),
-                    )
-                })
+                source
+                    .resolve_download(&self.database, &request)
+                    .await
+                    .map(|download| {
+                        (
+                            download.transcoded_extension().map(str::to_string),
+                            download.into_stream(),
+                        )
+                    })
             } else {
                 Some(media_uri.as_str())
                     .filter(|uri| uri.starts_with("http://") || uri.starts_with("https://"))
@@ -2805,9 +2808,10 @@ mod tests {
         );
         let access = actor
             .database
-            .playback_access_uri(&media_uri)
+            .playback_access(&media_uri)
             .await
-            .unwrap();
+            .unwrap()
+            .map(|(uri, _)| uri);
         assert_eq!(
             reqwest::Url::parse(access.as_deref().unwrap())
                 .unwrap()
@@ -2854,9 +2858,10 @@ mod tests {
         );
         let access = actor
             .database
-            .playback_access_uri(&media_uri)
+            .playback_access(&media_uri)
             .await
-            .unwrap();
+            .unwrap()
+            .map(|(uri, _)| uri);
         assert!(access.is_none());
         assert!(!paths.audio.exists());
         assert_eq!(

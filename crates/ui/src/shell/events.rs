@@ -396,10 +396,7 @@ fn apply_source_operation(shell: &Rc<Shell>, operation: SourceOperation) {
     apply_source_refresh_feedback(shell, &previous_operation, &operation);
 
     match &operation {
-        SourceOperation::Adding { .. } => {
-            shell.update_add_server_dialog();
-        }
-        SourceOperation::Switching { .. } => {
+        SourceOperation::Adding { .. } | SourceOperation::Switching { .. } => {
             if started_blocking {
                 shell.close_preferences_dialog();
             }
@@ -484,6 +481,10 @@ fn apply_source_refresh_feedback(
                 .chrome
                 .source_refresh_feedback_progress
                 .set_fraction(fraction);
+            shell
+                .chrome
+                .source_refresh_feedback_progress
+                .set_visible(progress.total.is_some());
             shell.chrome.source_refresh_feedback.set_visible(true);
         }
         SourceOperation::Idle if matches!(previous, SourceOperation::Refreshing { .. }) => {
@@ -548,6 +549,10 @@ fn apply_source_artwork_preparation(
                 .chrome
                 .source_refresh_feedback_progress
                 .set_fraction(source_progress_fraction(&progress));
+            shell
+                .chrome
+                .source_refresh_feedback_progress
+                .set_visible(progress.total.is_some());
             shell.chrome.source_refresh_feedback.set_visible(true);
         }
         None if shell.source.artwork_preparation_revision.get() == Some(revision) => {
@@ -587,8 +592,7 @@ fn source_progress_fraction(progress: &SourceProgress) -> f64 {
     match progress.total {
         Some(0) => 1.0,
         Some(total) => progress.completed.min(total) as f64 / total as f64,
-        None if progress.completed == 0 => 0.0,
-        None => (progress.completed as f64 / (progress.completed as f64 + 128.0)).min(0.9),
+        None => 0.0,
     }
 }
 
@@ -963,7 +967,7 @@ mod tests {
 
     #[test]
     fn source_progress_does_not_restart_the_blocking_transition() {
-        assert!(!source_operation_started_blocking(
+        assert!(source_operation_started_blocking(
             &SourceOperation::Idle,
             &adding()
         ));
@@ -991,6 +995,7 @@ mod tests {
             })
         };
         assert_eq!(fraction(SourceProgressStage::Connecting, 0, None), 0.0);
+        assert_eq!(fraction(SourceProgressStage::Tracks, 200, None), 0.0);
         assert_eq!(fraction(SourceProgressStage::Files, 10, Some(10)), 1.0);
         assert_eq!(fraction(SourceProgressStage::Tracks, 0, Some(10)), 0.0);
         assert_eq!(fraction(SourceProgressStage::Tracks, 5, Some(10)), 0.5);

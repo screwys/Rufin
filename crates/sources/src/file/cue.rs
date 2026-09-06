@@ -1,20 +1,23 @@
-use std::path::{Path, PathBuf};
+//! Shared CUE syntax and segment interpretation.
+
+use super::media::{self as media, ScannedTrack};
+use std::path::Path;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CueSheet {
+pub(crate) struct CueSheet {
     pub album_title: Option<String>,
     pub album_performer: Option<String>,
     pub files: Vec<CueFile>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CueFile {
-    pub path: PathBuf,
+pub(crate) struct CueFile {
+    pub path: String,
     pub tracks: Vec<CueTrack>,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct CueTrack {
+pub(crate) struct CueTrack {
     pub number: u16,
     pub title: Option<String>,
     pub performer: Option<String>,
@@ -29,7 +32,7 @@ struct OpenTrack {
     index_start_ms: Option<u64>,
 }
 
-pub(super) fn parse_cue_sheet(cue_path: &Path, text: &str) -> Option<CueSheet> {
+pub(crate) fn parse_cue_sheet(text: &str) -> Option<CueSheet> {
     let mut sheet = CueSheet {
         album_title: None,
         album_performer: None,
@@ -73,7 +76,7 @@ pub(super) fn parse_cue_sheet(cue_path: &Path, text: &str) -> Option<CueSheet> {
                     continue;
                 };
                 current_file = Some(CueFile {
-                    path: resolve_cue_file_path(cue_path, &path),
+                    path,
                     tracks: Vec::new(),
                 });
             }
@@ -152,18 +155,6 @@ fn push_track(file: &mut Option<CueFile>, track: Option<OpenTrack>) -> bool {
     true
 }
 
-fn resolve_cue_file_path(cue_path: &Path, value: &str) -> PathBuf {
-    let path = PathBuf::from(value);
-    if path.is_absolute() {
-        path
-    } else {
-        cue_path
-            .parent()
-            .map(|parent| parent.join(path.as_path()))
-            .unwrap_or(path)
-    }
-}
-
 fn cue_time_ms(value: &str) -> Option<u64> {
     let mut parts = value.split(':');
     let minutes = parts.next()?.parse::<u64>().ok()?;
@@ -210,6 +201,9 @@ impl<'a> CueFields<'a> {
             let mut value = String::new();
             for (index, ch) in rest.char_indices() {
                 if escaped {
+                    if !matches!(ch, '"' | '\\') {
+                        value.push('\\');
+                    }
                     value.push(ch);
                     escaped = false;
                     continue;
@@ -244,7 +238,6 @@ mod tests {
     #[test]
     fn parses_single_file_cue_tracks() {
         let sheet = parse_cue_sheet(
-            Path::new("/music/album.cue"),
             r#"
 PERFORMER "Album Artist"
 TITLE "Album Title"
@@ -263,9 +256,63 @@ FILE "album.flac" WAVE
         assert_eq!(sheet.album_title.as_deref(), Some("Album Title"));
         assert_eq!(sheet.album_performer.as_deref(), Some("Album Artist"));
         assert_eq!(sheet.files.len(), 1);
-        assert_eq!(sheet.files[0].path, PathBuf::from("/music/album.flac"));
+        assert_eq!(sheet.files[0].path, "album.flac");
         assert_eq!(sheet.files[0].tracks.len(), 2);
         assert_eq!(sheet.files[0].tracks[1].index_start_ms, 252_400);
         assert_eq!(sheet.files[0].tracks[1].performer.as_deref(), Some("Guest"));
     }
+}
+
+pub(crate) fn cue_track(
+    cue_path: &Path,
+    album_title: Option<&str>,
+    album_performer: Option<&str>,
+    cue: &CueTrack,
+    end_millis: u64,
+    backing: &ScannedTrack,
+) -> ScannedTrack {
+    let mut track = backing.clone();
+    let album_artist = album_performer
+        .map(ToString::to_string)
+        .unwrap_or_else(|| backing.album_artist.clone());
+    track.id = media::cue_track_id(cue_path, cue.number);
+    track.album = album_title
+        .map(ToString::to_string)
+        .unwrap_or_else(|| backing.album.clone());
+    track.artist = cue
+        .performer
+        .clone()
+        .unwrap_or_else(|| album_artist.clone());
+    track.album_artists = media::split_names(&album_artist)
+        .iter()
+        .map(|name| media::artist_credit(name, None))
+        .collect();
+    track.artists = media::split_names(&track.artist)
+        .iter()
+        .map(|name| media::artist_credit(name, None))
+        .collect();
+    track.album_id = media::album_id(
+        &track.album_artists,
+        &track.album,
+        track.musicbrainz_album_id.as_deref(),
+        Some(cue_path),
+    );
+    track.title = cue
+        .title
+        .clone()
+        .unwrap_or_else(|| format!("Track {}", cue.number));
+    track.duration_seconds = end_millis
+        .saturating_sub(cue.index_start_ms)
+        .div_euclid(1_000)
+        .max(1)
+        .min(u64::from(u32::MAX)) as u32;
+    track.disc_number = track.disc_number.max(1);
+    track.track_number = cue.number;
+    track.musicbrainz_recording_id = None;
+    track.musicbrainz_release_track_id = None;
+    track.comment = None;
+    track.cue_path = Some(cue_path.to_string_lossy().into_owned());
+    track.cue_start_millis = i64::try_from(cue.index_start_ms).ok();
+    track.cue_end_millis = i64::try_from(end_millis).ok();
+    track
 }

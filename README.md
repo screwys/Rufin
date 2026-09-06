@@ -8,11 +8,23 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player written in Rust, available on [multiple platforms](#installation). It can play music from your Jellyfin, Navidrome/OpenSubsonic flavor servers and local folders; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote libraries, available on [multiple platforms](#installation). It can play music from Jellyfin, Navidrome/OpenSubsonic servers, local folders, WebDAV, and SMB / Samba shares; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
 ![Rufin](data/screenshots/Rufin_full.png)
+
+# Supported Sources
+
+Local libraries: Rufin provides favorites, playlists, activity history, and Auto DJ recommendations.
+
+Jellyfin: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
+
+Navidrome / OpenSubsonic: Stream and download music, manage playlists and favorites, and use server-provided recommendations when available.
+
+WebDAV: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag editing, lyrics, and playlists. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+
+SMB / Samba: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, downloads, tag editing, lyrics, and playlists. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 # Features
 
@@ -33,9 +45,9 @@
 
 ## 📚 Library
 
-- First-class Jellyfin, Navidrome/OpenSubsonic and local music library support
 - Drag songs from your queue or lists to playlists, or select multiple of them with your keyboard batch operations
-- Combine multiple local folders in a single listening session
+- Combine all your music from different sources in a single listening session with global playlists
+- Import/export your playlists as .m3u8, as long as `media_uri` is accessible Rufin can play them
 - Download tracks manually or through automatic rules, then keep using the same remote library while offline
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
 - Metadata editing for supported servers and local formats; bulk editing and `Identify` available with auto-fill
@@ -45,6 +57,7 @@
 - Virtualized, smooth to scroll pages
 - EBU R128 tag writing option for local folders
 - Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
+- Export your activity as Last.fm/ListenBrainz compatible `.csv` files
 
 ## 🌍️ Discovery
 
@@ -57,7 +70,7 @@
 
 ## 🔌 Integrations
 
-- Last.fm, Libre.fm and ListenBrainz scrobbling, with offline storage and automatic retries 
+- Last.fm, Libre.fm and ListenBrainz scrobbling, with offline storage and automatic retries
 - Discord Rich Presence
 - Private mode for temporarily pausing external activity
 - Secure storage for server credentials and API secrets by default

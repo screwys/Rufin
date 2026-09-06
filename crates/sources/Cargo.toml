@@ -15,6 +15,11 @@ publish.workspace = true
 async-channel.workspace = true
 base64.workspace = true
 blake3.workspace = true
+bytes.workspace = true
+digest_auth.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 futures-util.workspace = true
 getrandom.workspace = true
 gstreamer-pbutils = { workspace = true, features = ["v1_26"] }
@@ -22,9 +27,16 @@ if-addrs.workspace = true
 library.workspace = true
 lofty.workspace = true
 md5.workspace = true
+md5_digest.workspace = true
 notify.workspace = true
 playback.workspace = true
-reqwest = { workspace = true, features = ["json"] }
+percent-encoding.workspace = true
+quick-xml.workspace = true
+reqwest = { workspace = true, features = ["json", "stream"] }
+sha2.workspace = true
+smb.workspace = true
+smb-fscc.workspace = true
+smb-msg.workspace = true
 rustix.workspace = true
 serde.workspace = true
 serde_json.workspace = true
@@ -33,6 +45,7 @@ tempfile.workspace = true
 thiserror.workspace = true
 tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
 tokio-tungstenite.workspace = true
+tokio-util.workspace = true
 tracing.workspace = true
 url.workspace = true
 walkdir.workspace = true

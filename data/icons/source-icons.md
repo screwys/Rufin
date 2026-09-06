@@ -1,5 +1,9 @@
 # Bundled Icons
 
+`hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png` is the blue WebDAV cloud logo from [Dashboard Icons](https://dashboardicons.com/icons/webdav), resized with its original proportions and transparency.
+
+`hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png` is the official compact Samba logo, copied unchanged from [samba.org](https://www.samba.org/samba/style/2010/samba_2010_logo_transparent_s_only_64x52.png). These logos identify supported sources and do not imply affiliation.
+
 Icons in `hicolor/64x64/apps` are taken from repositories of [Jellyfin (CC-BY-SA-4.0)](https://github.com/jellyfin/jellyfin), [Navidrome (GPL-3.0)](https://github.com/navidrome/navidrome) and [OpenSubsonic (Apache-2.0)](https://github.com/opensubsonic/open-subsonic-api); and are resized, they are not affiliated with this app.
 
 External service icons in `hicolor/64x64/apps` are resized from [Last.fm favicon](https://commons.wikimedia.org/wiki/File:Last.fm_favicon.png) and [MusicBrainz Logo Icon (2016)](https://commons.wikimedia.org/wiki/File:MusicBrainz_Logo_Icon_(2016).svg).

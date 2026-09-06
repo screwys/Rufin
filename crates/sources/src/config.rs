@@ -64,6 +64,16 @@ pub struct JellyfinSettingsInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSetupInput {
+    WebDav {
+        name: String,
+        settings: crate::FileSourceSettings,
+        credentials: crate::FileCredentials,
+    },
+    Smb {
+        name: String,
+        settings: crate::FileSourceSettings,
+        credentials: crate::FileCredentials,
+    },
     Jellyfin(JellyfinSetupInput),
     Subsonic {
         flavor: SubsonicFlavor,
@@ -75,6 +85,11 @@ pub enum SourceSetupInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSettingsInput {
+    Files {
+        name: String,
+        settings: crate::FileSourceSettings,
+        credentials: crate::FileCredentialsEdit,
+    },
     Jellyfin(JellyfinSettingsInput),
     Subsonic {
         authentication: crate::subsonic::SubsonicAuthentication,
@@ -87,6 +102,12 @@ pub enum SourceSettingsInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditableSource {
+    Files {
+        source_id: SourceId,
+        kind: String,
+        name: String,
+        settings: crate::FileSourceSettings,
+    },
     Credentials {
         source_id: SourceId,
         kind: String,
@@ -102,7 +123,11 @@ pub enum EditableSource {
 
 impl SourceConfiguration {
     pub fn is_local(&self) -> bool {
-        self.kind == crate::local::LOCAL_SOURCE_ID
+        self.kind == crate::file::local::LOCAL_SOURCE_ID
+    }
+
+    pub fn is_file_library(&self) -> bool {
+        matches!(self.kind.as_str(), "local" | "smb" | "webdav")
     }
 
     pub fn transcoded_download_bitrate_limit_kbps(&self) -> Option<u32> {
@@ -124,12 +149,12 @@ impl SourceConfiguration {
         name: impl Into<String>,
         roots: Vec<PathBuf>,
     ) -> SourceResult<Self> {
-        let roots = crate::local::configured_roots(roots)?;
+        let roots = crate::file::local::configured_roots(roots)?;
         Ok(encode_provider_payload(
             source_id,
-            crate::local::LOCAL_SOURCE_ID,
+            crate::file::local::LOCAL_SOURCE_ID,
             name,
-            crate::local::LocalSourceConfig { roots }.into_payload(),
+            crate::file::local::LocalSourceConfig { roots }.into_payload(),
         ))
     }
 
@@ -154,8 +179,13 @@ impl SourceConfiguration {
         digest_part(&mut digest, self.source_id.as_str().as_bytes());
         digest_part(&mut digest, self.kind.as_bytes());
         match self.kind.as_str() {
-            crate::local::LOCAL_SOURCE_ID => {
-                for root in crate::local::LocalSourceConfig::from_configuration(self)?.roots {
+            "smb" | "webdav" => {
+                let settings = crate::FileSourceSettings::from_configuration(self)?;
+                digest_part(&mut digest, settings.url.as_bytes());
+                digest_part(&mut digest, settings.username.as_bytes());
+            }
+            crate::file::local::LOCAL_SOURCE_ID => {
+                for root in crate::file::local::LocalSourceConfig::from_configuration(self)?.roots {
                     digest_part(&mut digest, root.to_string_lossy().as_bytes());
                 }
             }
@@ -197,6 +227,12 @@ impl SourceConfiguration {
     /// here and accepts the corresponding edit through `Source::edit`.
     pub fn editable(&self) -> SourceResult<EditableSource> {
         match self.kind.as_str() {
+            "smb" | "webdav" => Ok(EditableSource::Files {
+                source_id: self.source_id.clone(),
+                kind: self.kind.clone(),
+                name: self.name.clone(),
+                settings: crate::FileSourceSettings::from_configuration(self)?,
+            }),
             crate::jellyfin::JELLYFIN_SOURCE_ID => {
                 let config = crate::jellyfin::JellyfinSourceConfig::from_configuration(self)?;
                 Ok(EditableSource::Credentials {
@@ -227,8 +263,8 @@ impl SourceConfiguration {
                     subsonic_authentication: Some(config.authentication),
                 })
             }
-            crate::local::LOCAL_SOURCE_ID => {
-                let config = crate::local::LocalSourceConfig::from_configuration(self)?;
+            crate::file::local::LOCAL_SOURCE_ID => {
+                let config = crate::file::local::LocalSourceConfig::from_configuration(self)?;
                 Ok(EditableSource::Local {
                     source_id: self.source_id.clone(),
                     roots: config.roots,
@@ -281,8 +317,8 @@ mod tests {
     use crate::SourceId;
 
     use super::*;
+    use crate::file::local::LocalSourceConfig;
     use crate::jellyfin::JellyfinSourceConfig;
-    use crate::local::LocalSourceConfig;
     use crate::subsonic::SubsonicSourceConfig;
 
     fn migrated_source(kind: &str, payload: serde_json::Value) -> SourceConfiguration {
