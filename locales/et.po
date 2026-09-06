@@ -34,6 +34,11 @@ msgstr ""
 "lülitatakse välja"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -263,6 +268,11 @@ msgstr "Kõik lood"
 msgid "All"
 msgstr "Kõik"
 
+#, fuzzy
+#| msgid "Server Address"
+msgid "Alternate addresses"
+msgstr "Serveri aadress"
+
 msgid "Any genre"
 msgstr "Iga žanr"
 
@@ -316,6 +326,9 @@ msgstr "Heli töötlemine pole meediumilevi kasutamisel saadaval"
 
 msgid "Audio"
 msgstr "Heli"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "Automaatne diskor pole kasutusel"
@@ -382,6 +395,11 @@ msgstr "Turvaline andmeruum"
 msgid "Backups"
 msgstr "Tagasi"
 
+#, fuzzy
+#| msgid "User token"
+msgid "Bearer token"
+msgstr "Kasutaja tunnusluba"
+
 msgid "Blue"
 msgstr "Sinine"
 
@@ -408,6 +426,9 @@ msgstr "Meediumilevivõrk"
 
 msgid "Casting"
 msgstr "Meediumilevi"
+
+msgid "Certificate authority (PEM)"
+msgstr ""
 
 msgid "Change Secret Storage"
 msgstr "Muuda turvalist andmeruumi"
@@ -517,6 +538,9 @@ msgstr "Kommentaar"
 msgid "Compact"
 msgstr "Kompaktne"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Kinnita"
 
@@ -537,6 +561,11 @@ msgstr "Ühendan seadmega {device}..."
 
 msgid "Connection failed"
 msgstr "Ühendamine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "Ühendus"
 
 msgid "Connection"
 msgstr "Ühendus"
@@ -592,6 +621,9 @@ msgstr "Risthajumise viis"
 
 msgid "Crossfade"
 msgstr "Risthajutamine"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr "Kohandatud"
@@ -777,6 +809,9 @@ msgstr "Sisesta serveri aadress ja API-võti"
 msgid "Enter a server address, username, and password"
 msgstr "Sisesta serveri aadress, kasutajanimi ja salasõna"
 
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
 msgid "Entire Library"
 msgstr "Terve muusikakogu"
 
@@ -862,6 +897,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Selleks peavad failides olema meeleolu/BPM-i sildid. Jellyfinis vastav tugi "
 "puudub"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Vormista ListenBrainz-teenuse kasutaja tunnusluba"
@@ -960,6 +998,9 @@ msgstr "Ruudustikuvaate sildid"
 
 msgid "Grid"
 msgstr "Ruudustikuvaade"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "Abiteave"
@@ -1080,6 +1121,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Paigutus"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -1474,6 +1518,15 @@ msgstr "Väljas"
 msgid "On this device"
 msgstr "See seade"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Vaid esitatud lood"
 
@@ -1532,6 +1585,11 @@ msgstr "Salasõna"
 
 msgid "Paste"
 msgstr "Aseta"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Path in Source"
+msgstr "Salvestatud allikad"
 
 msgid "Pause"
 msgstr "Peata esitus"
@@ -1615,6 +1673,11 @@ msgstr "Esitamisel selles seadmes"
 
 msgid "Playing on {device}"
 msgstr "Esitamisel seadmes: {device}"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "Esitusloendi nimi"
 
 msgid "Playlist name"
 msgstr "Esitusloendi nimi"
@@ -1766,6 +1829,11 @@ msgstr "Väljalase"
 msgid "Remote lyrics"
 msgstr "Laulusõnad kaugserverist"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "Eemalda"
+
 msgid "Remove All Downloads"
 msgstr "Eemalda kõik allalaadimised"
 
@@ -1838,8 +1906,14 @@ msgstr "Korda üht lugu"
 msgid "Repeat"
 msgstr "Korda"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
 msgstr "Esitusvaljuse tundlikkus"
+
+msgid "Require SMB encryption"
+msgstr ""
 
 msgid "Reset to defaults"
 msgstr "Taasta vaikimisi väärtus"
@@ -1878,6 +1952,12 @@ msgstr "Rufini andmekaust"
 
 msgid "Rule actions"
 msgstr "Toiminguid reeglite alusel"
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
+msgstr ""
 
 msgid "Saturday"
 msgstr ""
@@ -2018,6 +2098,11 @@ msgstr "Vali allikas"
 msgid "Select all"
 msgstr "Vali kõik"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "Vali muusikakaust"
+
 msgid "Selection"
 msgstr "Valik"
 
@@ -2067,6 +2152,9 @@ msgstr "Märgi Discordis tegevuseks kuulamine (Listening)"
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Metateabe allikas"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr "Jagatud saladus"
@@ -2136,6 +2224,9 @@ msgstr "Külgriba objekt {position}"
 
 msgid "Sidebar route by position"
 msgstr "Külgriba teekond asukoha alusel"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2363,6 +2454,9 @@ msgstr "Kasutaja tunnusluba"
 msgid "User"
 msgstr "Kasutaja"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "Kasutajanimi"
 
@@ -2399,6 +2493,9 @@ msgstr "Oota ühenduse teket"
 
 msgid "Waveform seekbar"
 msgstr "Helilainega kerimisriba"
+
+msgid "WebDAV"
+msgstr ""
 
 msgid "Wednesday"
 msgstr ""

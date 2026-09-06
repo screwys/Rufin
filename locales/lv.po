@@ -35,6 +35,11 @@ msgstr ""
 "atslēgtas"
 
 msgid ""
+"List shared folders on this server using the entered credentials or guest "
+"access"
+msgstr ""
+
+msgid ""
 "Logs have secrets and absolute folder paths redacted, but you may still want "
 "to review the logs before sharing them"
 msgstr ""
@@ -266,6 +271,11 @@ msgstr "Visas dziesmas"
 msgid "All"
 msgstr "Visi"
 
+#, fuzzy
+#| msgid "Server Address"
+msgid "Alternate addresses"
+msgstr "Servera adrese"
+
 msgid "Any genre"
 msgstr "Jebkurš žanrs"
 
@@ -319,6 +329,9 @@ msgstr "Skaņas apstrāde nav pieejama straumējot"
 
 msgid "Audio"
 msgstr "Skaņa"
+
+msgid "Authentication"
+msgstr ""
 
 msgid "Auto DJ off"
 msgstr "Automātiskais DJ izslēgts"
@@ -385,6 +398,11 @@ msgstr "Droša krātuve"
 msgid "Backups"
 msgstr "Atpakaļ"
 
+#, fuzzy
+#| msgid "User token"
+msgid "Bearer token"
+msgstr "Lietotāja žetons"
+
 msgid "Blue"
 msgstr "Zils"
 
@@ -411,6 +429,9 @@ msgstr "Pārraides tīkls"
 
 msgid "Casting"
 msgstr "Pārraide"
+
+msgid "Certificate authority (PEM)"
+msgstr ""
 
 msgid "Change Secret Storage"
 msgstr "Mainīt slepeno krātuvi"
@@ -525,6 +546,9 @@ msgstr "Komentārs"
 msgid "Compact"
 msgstr "Kompakts"
 
+msgid "Complete sign-in in your browser"
+msgstr ""
+
 msgid "Confirm"
 msgstr "Apstiprināt"
 
@@ -545,6 +569,11 @@ msgstr "Izveido savienojumu ar {device}..."
 
 msgid "Connection failed"
 msgstr "Savienojums neizdevās"
+
+#, fuzzy
+#| msgid "Connection"
+msgid "Connection options"
+msgstr "Savienojums"
 
 msgid "Connection"
 msgstr "Savienojums"
@@ -600,6 +629,9 @@ msgstr "Sajaukšanas režīms"
 
 msgid "Crossfade"
 msgstr "Sajaukšana"
+
+msgid "Custom HTTP headers"
+msgstr ""
 
 msgid "Custom"
 msgstr "Pielāgots"
@@ -785,6 +817,9 @@ msgstr "Ievadiet servera adresi un API atslēgu"
 msgid "Enter a server address, username, and password"
 msgstr "Ievadiet servera adresi, lietotājvārdu un paroli"
 
+msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
 msgid "Entire Library"
 msgstr "Visa bibliotēka"
 
@@ -872,6 +907,9 @@ msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 "Failiem jābūt pievienotām noskaņas/BPM tagām. Neatbalstīts programmai "
 "Jellyfin"
+
+msgid "Find shares"
+msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "Atrodiet savu ListenBrainz lietotāja žetonu"
@@ -970,6 +1008,9 @@ msgstr "Režģa uzraksti"
 
 msgid "Grid"
 msgstr "Režģis"
+
+msgid "Guest / public access"
+msgstr ""
 
 msgid "Help"
 msgstr "Palīdzība"
@@ -1088,6 +1129,9 @@ msgstr "Last.fm"
 
 msgid "Layout"
 msgstr "Izkārtojums"
+
+msgid "Leave the password empty to keep the saved credential"
+msgstr ""
 
 #, fuzzy
 #| msgid "Opening Last.fm authorization..."
@@ -1487,6 +1531,15 @@ msgstr "Izslēgts"
 msgid "On this device"
 msgstr "Šī ierīce"
 
+msgid "One Name: Value header per line"
+msgstr ""
+
+msgid "One address per line, pointing to the same collection"
+msgstr ""
+
+msgid "One folder path per line; leave empty to include the whole collection"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Tikai atskaņotās dziesmas"
 
@@ -1545,6 +1598,11 @@ msgstr "Parole"
 
 msgid "Paste"
 msgstr "Ielīmēt"
+
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Path in Source"
+msgstr "Saglabātie avoti"
 
 msgid "Pause"
 msgstr "Pauzēt"
@@ -1628,6 +1686,11 @@ msgstr "Atskaņo šajā ierīcē"
 
 msgid "Playing on {device}"
 msgstr "Atskaņo ierīcē {device}"
+
+#, fuzzy
+#| msgid "Playlist name"
+msgid "Playlist File"
+msgstr "Atskaņošanas saraksta nosaukums"
 
 msgid "Playlist name"
 msgstr "Atskaņošanas saraksta nosaukums"
@@ -1779,6 +1842,11 @@ msgstr "Izdevums"
 msgid "Remote lyrics"
 msgstr "Attālināti teksti"
 
+#, fuzzy
+#| msgid "Remove"
+msgid "Remote"
+msgstr "Noņemt"
+
 msgid "Remove All Downloads"
 msgstr "Dzēst visas lejupielādes"
 
@@ -1853,8 +1921,14 @@ msgstr "Atkārtot vienu"
 msgid "Repeat"
 msgstr "Atkārtot"
 
+msgid "Replace saved custom headers"
+msgstr ""
+
 msgid "ReplayGain"
 msgstr "ReplayGain"
+
+msgid "Require SMB encryption"
+msgstr ""
 
 msgid "Reset to defaults"
 msgstr "Atiestatīt uz noklusējuma iestatījumiem"
@@ -1893,6 +1967,12 @@ msgstr "Rufin datu mape"
 
 msgid "Rule actions"
 msgstr "Noteikumu darbības"
+
+msgid "SMB / Samba"
+msgstr ""
+
+msgid "SMB Domain"
+msgstr ""
 
 msgid "Saturday"
 msgstr ""
@@ -2034,6 +2114,11 @@ msgstr "Izvēlēties avotu"
 msgid "Select all"
 msgstr "Atlasīt visu"
 
+#, fuzzy
+#| msgid "Select Music Folder"
+msgid "Selected folders"
+msgstr "Izvēlēties mūzikas mapi"
+
 msgid "Selection"
 msgstr "Atlasīšana"
 
@@ -2085,6 +2170,9 @@ msgstr "Iestatīt Discord aktivitātes veidu uz Klausīšanās"
 #| msgid "Metadata source"
 msgid "Settings and sources"
 msgstr "Metadatu avots"
+
+msgid "Share"
+msgstr ""
 
 msgid "Shared secret"
 msgstr "Slepenā atslēga"
@@ -2154,6 +2242,9 @@ msgstr "Sānjoslas elements {pozīcija}"
 
 msgid "Sidebar route by position"
 msgstr "Sānjoslas maršruts pēc pozīcijas"
+
+msgid "Sign in with Nextcloud"
+msgstr ""
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2379,6 +2470,9 @@ msgstr "Lietotāja žetons"
 msgid "User"
 msgstr "Lietotājs"
 
+msgid "Username and password"
+msgstr ""
+
 msgid "Username"
 msgstr "Lietotājvārds"
 
@@ -2414,6 +2508,9 @@ msgstr "Gaida savienojumu"
 
 msgid "Waveform seekbar"
 msgstr "Viļņa formas meklēšanas josla"
+
+msgid "WebDAV"
+msgstr ""
 
 msgid "Wednesday"
 msgstr ""
