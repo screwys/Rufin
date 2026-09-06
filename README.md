@@ -248,6 +248,12 @@ just debug
 
 On macOS, direct `cargo` commands outside these `just` recipes also need
 `GETTEXT_DIR="$(brew --prefix gettext)"` so Rust and GTK link the same gettext runtime.
+Before running tests on macOS or Windows, prepare and verify the packaged playback
+capabilities with `cmake --preset development` and
+`cmake --build --preset development --target rufin-runtime-check`.
+On macOS, also set
+`GST_PLUGIN_PATH="$PWD/.local/build/cmake/development/gst-plugins"` for direct Cargo
+commands so they load the same GME, OpenMPT, and WavPack plugins as the app bundle.
 
 Local builds are shown as `Rufin (Development)` and use the isolated `Rufin.Devel` application
 identity. The first macOS `just debug` or

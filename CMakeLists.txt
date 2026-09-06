@@ -48,6 +48,7 @@ set(RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS
   equalizer
   fdkaac
   flac
+  gme
   id3demux
   isomp4
   level
@@ -57,6 +58,7 @@ set(RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS
   musepack
   mulaw
   ogg
+  openmpt
   opus
   opusparse
   pbtypes
@@ -67,6 +69,7 @@ set(RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS
   typefindfunctions
   volume
   vorbis
+  wavpack
   wavparse
 )
 
@@ -118,6 +121,10 @@ pkg_check_modules(RUFIN_GSTREAMER REQUIRED IMPORTED_TARGET
   gstreamer-pbutils-1.0>=1.26
 )
 
+if(APPLE)
+  include(cmake/RufinMacOSAudio.cmake)
+endif()
+
 if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
   find_program(RUFIN_GST_INSPECT gst-inspect-1.0 REQUIRED)
   execute_process(
@@ -155,9 +162,36 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
         "GStreamer element ${RUFIN_GSTREAMER_ELEMENT} is required to run Rufin")
     endif()
   endforeach()
+
+  set(RUFIN_RUNTIME_CHECK_COMMANDS)
+  if(APPLE OR WIN32)
+    set(RUFIN_GST_ENVIRONMENT)
+    if(APPLE)
+      set(RUFIN_GST_ENVIRONMENT
+        "GST_PLUGIN_PATH=${RUFIN_AUDIO_PLUGIN_DIR}:$ENV{GST_PLUGIN_PATH}")
+    endif()
+    foreach(RUFIN_GSTREAMER_PLUGIN IN LISTS RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS)
+      list(APPEND RUFIN_RUNTIME_CHECK_COMMANDS
+        COMMAND "${CMAKE_COMMAND}" -E env ${RUFIN_GST_ENVIRONMENT}
+          "${RUFIN_GST_INSPECT}" --plugin "${RUFIN_GSTREAMER_PLUGIN}")
+    endforeach()
+  endif()
+  add_custom_target(rufin-runtime-check
+    ${RUFIN_RUNTIME_CHECK_COMMANDS}
+    VERBATIM
+  )
+  if(APPLE)
+    add_dependencies(rufin-runtime-check rufin-audio-runtime)
+  endif()
 endif()
 
 include(cmake/RufinCargo.cmake)
+if(APPLE)
+  add_dependencies(rufin rufin-audio-runtime)
+endif()
+if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
+  add_dependencies(rufin rufin-runtime-check)
+endif()
 
 if(APPLE)
   if(RUFIN_BUILD_IDENTITY STREQUAL "development")
