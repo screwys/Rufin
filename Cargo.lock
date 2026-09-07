@@ -171,6 +171,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "fa8973cd8c3dffc5266a7c4a60825f71e54d4b741ba103115727c9d67a98bb06"
 
 [[package]]
+name = "apple-cf"
+version = "0.9.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "e7fd680cd0f3f02ee717b2014b26d18985c57b784384ba47213fcf8791e8c250"
+dependencies = [
+ "doom-fish-utils",
+]
+
+[[package]]
 name = "apple-native-keyring-store"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1292,7 +1301,7 @@ name = "desktop-integration"
 version = "0.14.0"
 dependencies = [
  "app-identity",
- "apple-cf",
+ "apple-cf 0.9.3",
  "artwork",
  "async-channel",
  "gio",
@@ -3695,7 +3704,7 @@ version = "0.4.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "707f1ad053bddf7646f6a525a0b2c74cff23676a792e050b2d58e38c733467fb"
 dependencies = [
- "apple-cf",
+ "apple-cf 0.6.0",
  "doom-fish-utils",
  "libc",
 ]

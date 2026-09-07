@@ -20,7 +20,7 @@ tar = "0.4.46"
 chrono = "0.4.45"
 adw = { package = "libadwaita", version = "0.9.1" }
 apple-native-keyring-store = { version = "1.0.1", features = ["keychain"] }
-apple-cf = "=0.6.0"
+apple-cf = "=0.9.3"
 app-identity = { path = "crates/app-identity" }
 async-channel = "2.5.0"
 async-trait = "0.1.89"
