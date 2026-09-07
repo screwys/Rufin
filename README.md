@@ -8,7 +8,7 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. to It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
@@ -56,6 +56,7 @@
 - EBU R128 tag writing option for local folders
 - Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
 - Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
+- Granular import/export backup options including credentials, automatic backups with password protection available
 - Listening activity can be exported as Last.fm/ListenBrainz compatible `.csv` files
 
 ## 🌍️ Discovery
@@ -85,7 +86,7 @@
 - Automatic updates for Windows and macOS builds
 - Easy built-in log viewing and exporting (privacy-conscious)
 - Type to search for routes
-- Can run in the background or set to launch minimized
+- Can run in the background or set to launch minimized, which uses the GNOME portal when available
 - System tray integration
 
 # Screenshots
@@ -338,6 +339,7 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 - Russian and Latvian translation by [aguhadug](https://github.com/aguhadug)
 - German translation by [sevachka](https://github.com/sevachka)
 - Chezch translation by [Jakub Cabal](https://github.com/jakubcabal)
+- Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
 
 # License
 
