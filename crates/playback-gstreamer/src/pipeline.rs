@@ -688,14 +688,21 @@ mod tests {
                 gst::State::Paused,
             )
             .unwrap();
-        player
+        let state = player
             .session
             .as_ref()
             .unwrap()
             .pipeline
-            .state(gst::ClockTime::from_seconds(5))
-            .0
-            .unwrap();
+            .state(gst::ClockTime::from_seconds(30));
+        assert_eq!(
+            state,
+            (
+                Ok(gst::StateChangeSuccess::Success),
+                gst::State::Paused,
+                gst::State::VoidPending
+            ),
+            "tracker pipeline did not finish starting"
+        );
         assert!(!player.allows_preloading());
         assert_eq!(player.seekable(), Some(false));
         assert_eq!(player.duration(), None);
