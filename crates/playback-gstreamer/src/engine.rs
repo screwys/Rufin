@@ -4395,7 +4395,9 @@ mod tests {
                 }
                 assert!(
                     Instant::now() < deadline,
-                    "current track did not settle at {target}"
+                    "current track did not settle at {target}: position={:?}, pending={:?}",
+                    engine.active_pipeline().position(),
+                    engine.pending_seek
                 );
                 std::thread::sleep(Duration::from_millis(5));
             }

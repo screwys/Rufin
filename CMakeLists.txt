@@ -128,15 +128,11 @@ endif()
 if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
   find_program(RUFIN_GST_INSPECT gst-inspect-1.0 REQUIRED)
   execute_process(
-    COMMAND "${RUFIN_GST_INSPECT}" --exists playbin3
-    RESULT_VARIABLE RUFIN_PLAYBIN3_STATUS
-  )
-  execute_process(
     COMMAND "${RUFIN_GST_INSPECT}" --exists playbin
     RESULT_VARIABLE RUFIN_PLAYBIN_STATUS
   )
-  if(NOT RUFIN_PLAYBIN3_STATUS EQUAL 0 AND NOT RUFIN_PLAYBIN_STATUS EQUAL 0)
-    message(FATAL_ERROR "GStreamer playbin3 or playbin is required to run Rufin")
+  if(NOT RUFIN_PLAYBIN_STATUS EQUAL 0)
+    message(FATAL_ERROR "GStreamer playbin is required to run Rufin")
   endif()
 
   if(APPLE)
