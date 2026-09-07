@@ -337,27 +337,15 @@ mod tests {
         }
         source
             .save_queue(&crate::QueueRestore {
-                sources: vec![crate::QueueInstruction {
-                    input: crate::QueueInput::Choices(
-                        (0..250)
-                            .map(|_| {
-                                Some(crate::QueueChoice {
-                                    origin: None,
-                                    media_uri: "https://example.test/song".into(),
-                                    fallback: None,
-                                    provenance: crate::QueueProvenance::Manual,
-                                })
-                            })
-                            .collect(),
-                    ),
-                    repeat: true,
-                    seed: Some(7),
-                }],
-                pending: [crate::QueueCursor {
-                    seed: Some(7),
-                    ..Default::default()
-                }]
-                .into(),
+                entries: (0..250)
+                    .map(|index| crate::QueueEntry {
+                        occurrence: format!("backup:{index}").into(),
+                        media_uri: "https://example.test/song".into(),
+                        playlist_entry_id: None,
+                        provenance: crate::QueueProvenance::Manual,
+                    })
+                    .collect(),
+                order: (0..250).collect(),
                 repeat_mode: crate::QueueRepeatMode::All,
                 shuffled: true,
                 ..Default::default()

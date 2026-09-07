@@ -740,7 +740,6 @@ pub(crate) fn track_query(
         predicate: format!("track.source_key={}", source.raw()),
         order: sort.order_terms(descending),
         uri: "track.media_uri".into(),
-        key: "track.track_key".into(),
         entry_key: "NULL".into(),
     };
     if folder_subset {

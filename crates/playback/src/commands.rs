@@ -262,17 +262,15 @@ mod tests {
             false,
         );
         let page = database
-            .read_queue(library::QueueReadRequest {
-                input: request.batch.input.clone(),
-                cursor: Default::default(),
-                limit: 100,
-                history: false,
-                backwards: false,
+            .read_queue(library::QueueReadRequest::Capture {
+                input: Box::new(request.batch.input.clone()),
+                anchor_index: 0,
+                random_start: None,
             })
             .await
             .unwrap();
-        let first = &page.items[0].1;
-        let second = &page.items[1].1;
+        let first = &page.entries[0].provenance;
+        let second = &page.entries[1].provenance;
         assert!(matches!(
             second,
             Provenance::Context {

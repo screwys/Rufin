@@ -433,7 +433,7 @@ pub fn build(
                             crate::shell::player_menus::present_queue_track_context_menu(
                                 target,
                                 &shell,
-                                row.item,
+                                row.media_uri,
                                 row.occurrence,
                                 position,
                             );

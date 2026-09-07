@@ -1084,25 +1084,13 @@ mod tests {
             occurrence: OccurrenceId::new(id),
             position: 0,
             primary_artist_media_uri: None,
-            item: library::QueueItem {
-                media_uri: format!("https://example.test/{id}"),
-                title: title.to_string(),
-                artist: String::new(),
-                album: String::new(),
-                album_display_artist: None,
-                artwork_binding: None,
-                duration_millis: 0,
-                disc_number: None,
-                track_number: None,
-                year: None,
-                release_date: None,
-                source_format: None,
-                musicbrainz_recording_id: None,
-                musicbrainz_release_track_id: None,
-                musicbrainz_album_id: None,
-                musicbrainz_release_group_id: None,
-                primary_artist_musicbrainz_id: None,
-            },
+            media_uri: format!("https://example.test/{id}"),
+            title: title.to_string(),
+            artist: String::new(),
+            album: String::new(),
+            artwork_binding: None,
+            duration_millis: 0,
+            year: None,
             favorite: false,
         }
     }
@@ -1111,11 +1099,11 @@ mod tests {
     fn queue_search_filters_the_retained_window_and_keeps_duplicate_entries() {
         let state = QueueState::new();
         let mut first = row("one", "Été [live]");
-        first.item.artist = "Artist".to_string();
+        first.artist = "Artist".to_string();
         let mut second = first.clone();
         second.occurrence = OccurrenceId::new("two");
         let mut third = row("three", "Other");
-        third.item.album = "Summer".to_string();
+        third.album = "Summer".to_string();
         let generation = state.begin();
         assert!(state.accept(
             generation,
@@ -1175,9 +1163,9 @@ mod tests {
         let mut first = row("one", "One");
         let mut second = row("two", "Two");
         let mut third = row("three", "Three");
-        first.item.media_uri = "track:7".to_string();
-        second.item.media_uri = "track:7".to_string();
-        third.item.media_uri = "track:9".to_string();
+        first.media_uri = "track:7".to_string();
+        second.media_uri = "track:7".to_string();
+        third.media_uri = "track:9".to_string();
 
         let selected = queue_rows_for_indexes(
             &[Arc::new(first), Arc::new(second), Arc::new(third)],
@@ -1226,7 +1214,7 @@ mod tests {
         let first = state.model.item(0).expect("first Queue object");
         let second = state.model.item(1).expect("second Queue object");
         let mut next = vec![row("one", "One"), row("two", "Changed")];
-        next[1].item.artwork_binding = Some(vec![1, 2, 3]);
+        next[1].artwork_binding = Some(vec![1, 2, 3]);
         let generation = state.begin();
         assert!(state.accept(generation, next));
         assert_eq!(first.as_ptr(), state.model.item(0).unwrap().as_ptr());
@@ -1251,7 +1239,7 @@ mod tests {
                 row(&format!("replacement-{replacement}-one"), "Next one"),
                 row(&format!("replacement-{replacement}-two"), "Next two"),
             ];
-            next[0].item.media_uri = "track:replacement".to_string();
+            next[0].media_uri = "track:replacement".to_string();
             next[0].favorite = true;
             assert!(state.accept(state.begin(), next.clone()));
             assert_eq!(changes.get(), 0);
@@ -1282,7 +1270,7 @@ mod tests {
     fn queue_reorder_reserves_surviving_duplicate_occurrences_before_reusing_slots() {
         let state = QueueState::new();
         let mut first = row("one", "Repeated track");
-        first.item.media_uri = "track:7".to_string();
+        first.media_uri = "track:7".to_string();
         let mut second = first.clone();
         second.occurrence = OccurrenceId::new("two");
         assert!(state.accept(

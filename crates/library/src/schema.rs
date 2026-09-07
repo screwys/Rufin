@@ -143,6 +143,11 @@ CREATE TABLE IF NOT EXISTS queue_state (
     shuffled INTEGER NOT NULL DEFAULT 0 CHECK (shuffled IN (0, 1))
 ) STRICT;
 
+CREATE TABLE IF NOT EXISTS queue_order (
+    singleton INTEGER PRIMARY KEY CHECK (singleton = 1),
+    state TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS queue_occurrences (
     queue_occurrence_key INTEGER PRIMARY KEY,
     object_id TEXT NOT NULL CHECK (object_id <> ''),
@@ -195,11 +200,8 @@ CREATE TABLE IF NOT EXISTS queue_occurrences (
     UNIQUE (object_id)
 ) STRICT;
 
-CREATE UNIQUE INDEX IF NOT EXISTS queue_occurrences_page_idx
-    ON queue_occurrences(position);
-
-CREATE UNIQUE INDEX IF NOT EXISTS queue_occurrences_traversal_idx
-    ON queue_occurrences(traversal_position);
+DROP INDEX IF EXISTS queue_occurrences_page_idx;
+DROP INDEX IF EXISTS queue_occurrences_traversal_idx;
 
 CREATE INDEX IF NOT EXISTS queue_occurrences_media_idx ON queue_occurrences(media_uri,snapshot_at DESC,queue_occurrence_key DESC);
 

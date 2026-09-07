@@ -1368,7 +1368,6 @@ pub(crate) fn playlist_query(
         ),
         predicate: format!("entry.playlist_key={}", key.raw().abs()),
         uri: "entry.media_uri".into(),
-        key: "entry.playlist_entry_key".into(),
         entry_key: if native {
             "-entry.playlist_entry_key"
         } else {

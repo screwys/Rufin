@@ -1,4 +1,6 @@
 //! Rufin crossings for compact Playback, Database Queue persistence, streams, and Activity.
+#[cfg(test)]
+mod queue_tests;
 mod target;
 pub use target::PlaybackTarget;
 
@@ -54,6 +56,7 @@ pub(crate) struct PlaybackOwner {
     stream_tasks: Mutex<std::collections::HashMap<RunId, tokio::task::JoinHandle<()>>>,
     update_sender: async_channel::Sender<PlaybackWork>,
     pending_queue: Mutex<Option<playback::QueuePersistence>>,
+    latest_queue_request: Mutex<(u64, u64)>,
     store_sender: async_channel::Sender<PlaybackStoreWork>,
     monotonic_origin: Instant,
     play_id_prefix: String,
@@ -78,14 +81,47 @@ enum PlaybackStoreWork {
     Flush(std::sync::mpsc::SyncSender<()>),
     Read {
         playback: Playback,
+        instance: u64,
         id: u64,
         request: library::QueueReadRequest,
     },
-    Settings(playback::QueuePersistence),
-    Progress {
-        current: Option<OccurrenceId>,
-        progress: u64,
-    },
+    Settings,
+}
+
+fn enqueue_queue_save(
+    pending: &Mutex<Option<playback::QueuePersistence>>,
+    sender: &async_channel::Sender<PlaybackStoreWork>,
+    update: playback::QueuePersistence,
+) {
+    let mut pending = pending.lock().unwrap_or_else(|p| p.into_inner());
+    if let Some(current) = pending.as_mut() {
+        current.coalesce(update);
+    } else {
+        *pending = Some(update);
+        let _ = sender.try_send(PlaybackStoreWork::Settings);
+    }
+}
+
+async fn save_pending_queue(
+    database: &Database,
+    pending: &Mutex<Option<playback::QueuePersistence>>,
+) -> library::LibraryResult<()> {
+    let state = pending.lock().unwrap_or_else(|p| p.into_inner()).take();
+    let Some(state) = state else { return Ok(()) };
+    match state.kind() {
+        playback::QueuePersistenceKind::Membership => database.save_queue(state.state()).await,
+        playback::QueuePersistenceKind::Order => database.save_queue_order(state.state()).await,
+        playback::QueuePersistenceKind::State => {
+            database
+                .persist_queue_settings(
+                    state.current(),
+                    state.progress_millis() as i64,
+                    state.repeat_mode(),
+                    state.shuffled(),
+                )
+                .await
+        }
+    }
 }
 
 impl PlaybackOwner {
@@ -140,6 +176,7 @@ impl PlaybackOwner {
             stream_tasks: Mutex::new(std::collections::HashMap::new()),
             update_sender,
             pending_queue: Mutex::new(None),
+            latest_queue_request: Mutex::new((0, 0)),
             store_sender,
             monotonic_origin: Instant::now(),
             play_id_prefix: random_identity(),
@@ -187,7 +224,7 @@ impl PlaybackOwner {
         let stored = self.settings.load();
         let sequence = match self.database.restore_queue().await {
             Ok(mut restore) => {
-                if restore.occurrences.is_empty() {
+                if restore.entries.is_empty() {
                     restore.repeat_mode = stored.ui.repeat_mode;
                     restore.shuffled = stored.ui.shuffle_enabled;
                 }
@@ -280,13 +317,16 @@ impl PlaybackOwner {
     }
 
     fn queue_update(self: &Arc<Self>, instance: u64, mut update: PlaybackUpdate) {
-        if let Some(persistence) = update.queue_persistence.take() {
-            let mut pending = self.pending_queue.lock().unwrap_or_else(|p| p.into_inner());
-            if let Some(current) = pending.as_mut() {
-                current.coalesce(persistence);
-            } else {
-                *pending = Some(persistence);
+        for effect in &update.effects {
+            if let SessionEffect::Queue { id, .. } = effect {
+                *self
+                    .latest_queue_request
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner()) = (instance, *id);
             }
+        }
+        if let Some(persistence) = update.queue_persistence.take() {
+            enqueue_queue_save(&self.pending_queue, &self.store_sender, persistence);
         }
         if let Some((run, levels)) = update.visualizer.take() {
             let frame = VisualizerPublication { run, levels };
@@ -315,13 +355,6 @@ impl PlaybackOwner {
         let Some(active) = self.active_matching(instance) else {
             return;
         };
-        let queue_changed = update.queue_changed;
-        let queue_projection = update.projection.as_ref().and_then(|projection| {
-            queue_changed.then(|| PlaybackProjection {
-                view: projection.view.clone(),
-                notices: Vec::new(),
-            })
-        });
         if let Some(projection) = update.projection.take() {
             if update.current_media_changed {
                 self.publish_current_media(projection.view.transport.current.clone());
@@ -334,24 +367,8 @@ impl PlaybackOwner {
             );
             self.publish_projection(projection);
         }
-        let persistence = self
-            .pending_queue
-            .lock()
-            .unwrap_or_else(|p| p.into_inner())
-            .take();
-        if let Some(persistence) = persistence {
-            let _ = self
-                .store_sender
-                .try_send(PlaybackStoreWork::Settings(persistence));
-        }
         for effect in update.effects {
             self.consume_effect(&active, effect);
-        }
-        if let Some(projection) = queue_projection {
-            // Queue pages read the durable occurrence owner. Re-publish only
-            // after its matching snapshot commits so an early UI request can
-            // never leave a newly populated Queue showing stale empty rows.
-            self.publish_projection(projection);
         }
     }
 
@@ -382,31 +399,52 @@ impl PlaybackOwner {
             }
             PlaybackStoreWork::Read {
                 playback,
+                instance,
                 id,
                 request,
             } => {
+                if *self
+                    .latest_queue_request
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    != (instance, id)
+                {
+                    return;
+                }
+                let capturing = matches!(request, library::QueueReadRequest::Capture { .. });
                 let result = self
                     .database
                     .read_queue(request)
                     .await
                     .map_err(string_error);
-                let _ = playback.command(SessionCommand::QueueComplete {
-                    id,
-                    result: Box::new(result),
-                });
-            }
-            PlaybackStoreWork::Settings(state) => {
-                if let Err(error) = self.database.save_queue(state.state()).await {
-                    warn!(%error,"could not persist Queue settings");
+                let namespace = capturing
+                    .then(|| {
+                        result
+                            .as_ref()
+                            .ok()?
+                            .entries
+                            .first()?
+                            .occurrence
+                            .as_str()
+                            .rsplit_once(':')
+                            .map(|(prefix, _)| format!("{prefix}:"))
+                    })
+                    .flatten();
+                let current = *self
+                    .latest_queue_request
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    == (instance, id);
+                let accepted = current && playback.complete_queue(id, result).unwrap_or(false);
+                if !accepted && let Some(namespace) = namespace {
+                    if let Err(error) = self.database.discard_queue_capture(&namespace).await {
+                        warn!(%error, "could not release superseded Queue capture");
+                    }
                 }
             }
-            PlaybackStoreWork::Progress { current, progress } => {
-                if let Err(error) = self
-                    .database
-                    .persist_queue_progress(current.as_ref(), progress as i64)
-                    .await
-                {
-                    warn!(%error,"could not persist Queue progress");
+            PlaybackStoreWork::Settings => {
+                if let Err(error) = save_pending_queue(&self.database, &self.pending_queue).await {
+                    warn!(%error,"could not persist Queue");
                 }
             }
         }
@@ -433,6 +471,7 @@ impl PlaybackOwner {
             SessionEffect::Queue { id, request } => {
                 let _ = self.store_sender.try_send(PlaybackStoreWork::Read {
                     playback: active.playback.clone(),
+                    instance: active.instance,
                     id,
                     request,
                 });
@@ -443,21 +482,7 @@ impl PlaybackOwner {
                 request,
                 ..
             } => self.resolve_stream(active.clone(), run, occurrence, request),
-            SessionEffect::PersistProgress {
-                occurrence,
-                progress_millis,
-                ..
-            }
-            | SessionEffect::PersistState {
-                occurrence,
-                progress_millis,
-                ..
-            } => {
-                let _ = self.store_sender.try_send(PlaybackStoreWork::Progress {
-                    current: occurrence,
-                    progress: progress_millis,
-                });
-            }
+            SessionEffect::PersistProgress { .. } | SessionEffect::PersistState { .. } => {}
             SessionEffect::PersistOutputState {
                 volume,
                 muted,

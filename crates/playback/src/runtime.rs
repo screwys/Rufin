@@ -19,22 +19,29 @@ const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(33);
 pub struct QueuePersistence {
     revision: u64,
     state: library::QueueRestore,
+    kind: crate::QueuePersistenceKind,
 }
 
 impl QueuePersistence {
-    pub(crate) fn capture(sequence: &Sequence) -> Self {
+    pub(crate) fn capture(sequence: &Sequence, kind: crate::QueuePersistenceKind) -> Self {
         Self {
             revision: sequence.revision(),
             state: sequence.snapshot(),
+            kind,
         }
     }
     pub fn coalesce(&mut self, newer: Self) {
         if newer.revision >= self.revision {
+            let kind = self.kind.max(newer.kind);
             *self = newer;
+            self.kind = kind;
         }
     }
     pub fn state(&self) -> &library::QueueRestore {
         &self.state
+    }
+    pub fn kind(&self) -> crate::QueuePersistenceKind {
+        self.kind
     }
     pub const fn revision(&self) -> u64 {
         self.revision
@@ -139,6 +146,11 @@ enum RuntimeCommand {
     Session {
         command: SessionCommand,
         reply: Reply<()>,
+    },
+    CompleteQueue {
+        id: u64,
+        result: Box<Result<library::QueueReadPage, String>>,
+        reply: Reply<bool>,
     },
     AdmitPlay {
         activation: Option<(String, String, usize)>,
@@ -269,6 +281,18 @@ impl Playback {
 
     pub fn command(&self, command: SessionCommand) -> PlaybackResult<()> {
         self.request(|reply| RuntimeCommand::Session { command, reply })
+    }
+    /// Acknowledges the read after its accepted state reaches the output consumer.
+    pub fn complete_queue(
+        &self,
+        id: u64,
+        result: Result<library::QueueReadPage, String>,
+    ) -> PlaybackResult<bool> {
+        self.request(|reply| RuntimeCommand::CompleteQueue {
+            id,
+            result: Box::new(result),
+            reply,
+        })
     }
 
     pub fn admit_play(
@@ -478,6 +502,24 @@ fn apply_runtime_command(
         RuntimeCommand::Session { command, reply } => {
             reply_update(runtime.command(command, &sample), outputs, reply);
         }
+        RuntimeCommand::CompleteQueue { id, result, reply } => {
+            let accepted = runtime.session.accepts_queue(id);
+            let value = if accepted {
+                runtime
+                    .command(SessionCommand::QueueComplete { id, result }, &sample)
+                    .and_then(|update| {
+                        publish_update(outputs, update)?;
+                        Ok(true)
+                    })
+            } else {
+                Ok(false)
+            };
+            let value = value.and_then(|accepted| {
+                fence_outputs(outputs)?;
+                Ok(accepted)
+            });
+            let _ = reply.send(value);
+        }
         RuntimeCommand::AdmitPlay {
             activation,
             placement,
@@ -681,24 +723,17 @@ mod persistence_tests {
     ) -> QueuePersistence {
         loop {
             let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
-            if update.queue_changed || update.queue_persistence.is_some() {
-                return update
-                    .queue_persistence
-                    .expect("a queue edit must publish its persistence snapshot");
-            }
             for effect in update.effects {
                 if let SessionEffect::Queue { id, request } = effect {
                     let result = database
                         .read_queue(request)
                         .await
                         .map_err(|error| error.to_string());
-                    playback
-                        .command(SessionCommand::QueueComplete {
-                            id,
-                            result: Box::new(result),
-                        })
-                        .unwrap();
+                    assert!(playback.complete_queue(id, result).unwrap());
                 }
+            }
+            if let Some(snapshot) = update.queue_persistence {
+                return snapshot;
             }
         }
     }
@@ -762,25 +797,17 @@ mod persistence_tests {
 
         replace_queue(&playback, "first", 150);
         let mut pending = published_queue_snapshot(&playback, &updates, &database).await;
-        assert_eq!(
-            pending.state().occurrences.len(),
-            library::QUEUE_CONTEXT_LIMIT
-        );
-        assert_eq!(pending.state().sources.len(), 1);
-        assert_eq!(pending.state().pending.len(), 1);
+        assert_eq!(pending.state().entries.len(), 150);
+        assert!(pending.state().occurrences.len() <= library::QUEUE_CONTEXT_LIMIT);
         database.save_queue(pending.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
         assert_eq!(restored.occurrences.len(), library::QUEUE_CONTEXT_LIMIT);
-        assert_eq!(restored.sources, pending.state().sources);
-        assert_eq!(restored.pending, pending.state().pending);
 
         replace_queue(&playback, "replacement", 3);
         pending.coalesce(published_queue_snapshot(&playback, &updates, &database).await);
         database.save_queue(pending.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
         assert_eq!(restored.occurrences.len(), 3);
-        assert_eq!(restored.sources.len(), 1);
-        assert!(restored.pending.is_empty());
         assert!(
             restored
                 .occurrences
@@ -822,8 +849,6 @@ mod persistence_tests {
         database.save_queue(snapshot.state()).await.unwrap();
         let restored = database.restore_queue().await.unwrap();
         assert!(restored.occurrences.is_empty());
-        assert!(restored.sources.is_empty());
-        assert!(restored.pending.is_empty());
         playback.shutdown().unwrap();
     }
 
@@ -834,30 +859,29 @@ mod persistence_tests {
             .await
             .unwrap();
         let page = database
-            .read_queue(library::QueueReadRequest {
-                input: library::QueueInput::Uris {
+            .read_queue(library::QueueReadRequest::Capture {
+                input: Box::new(library::QueueInput::Uris {
                     order: (1..=4)
                         .map(|key| format!("https://example.test/{key}"))
                         .collect(),
                     context_id: "test".into(),
                     source_start: 0,
-                },
-                cursor: Default::default(),
-                limit: 100,
-                history: false,
-                backwards: false,
+                }),
+                anchor_index: 0,
+                random_start: None,
             })
             .await
             .unwrap();
         let mut sequence = Sequence::new();
         sequence.add_page(page, library::QueueReorderTarget::End, true, None);
-        let mut pending = QueuePersistence::capture(&sequence);
+        let mut pending =
+            QueuePersistence::capture(&sequence, crate::QueuePersistenceKind::Membership);
         sequence.set_repeat_mode(crate::RepeatMode::All);
         sequence.set_progress_millis(42000);
         sequence.shuffle(true, 7);
-        let newer = QueuePersistence::capture(&sequence);
+        let newer = QueuePersistence::capture(&sequence, crate::QueuePersistenceKind::Membership);
         pending.coalesce(newer);
-        assert_eq!(pending.revision(), 2);
+        assert_eq!(pending.revision(), 3);
         assert_eq!(pending.progress_millis(), 42000);
         assert_eq!(pending.repeat_mode(), crate::RepeatMode::All);
         assert!(pending.shuffled());
@@ -1080,7 +1104,7 @@ impl PlaybackRuntime {
         sample: &ClockSample,
     ) -> PlaybackResult<PlaybackUpdate> {
         let mut output = self.commit(update);
-        if let Some(effect) = self.session.refill_queue() {
+        if let Some(effect) = self.session.hydrate_queue() {
             output.effects.push(effect);
         }
         let mut backend_failures = Vec::new();
@@ -1113,14 +1137,16 @@ impl PlaybackRuntime {
     }
 
     fn commit(&mut self, update: SessionUpdate) -> PlaybackUpdate {
-        let queue_persistence = (update.queue_changed || update.queue_persistence_changed)
-            .then(|| QueuePersistence::capture(self.session.sequence()));
+        let mut persistence = self.session.take_queue_persistence();
         let mut notices = Vec::new();
         let mut effects = Vec::new();
         let mut current_media_changed = false;
         let mut visualizer = None;
         for effect in update.effects {
             match effect {
+                SessionEffect::PersistState { .. } | SessionEffect::PersistProgress { .. } => {
+                    persistence.get_or_insert(crate::QueuePersistenceKind::State);
+                }
                 effect @ SessionEffect::Listening(crate::ListeningFact::Started { run, .. }) => {
                     notices.push(PlaybackNotice::RunStarted(run));
                     effects.push(effect);
@@ -1160,7 +1186,8 @@ impl PlaybackRuntime {
             notices,
         });
         PlaybackUpdate {
-            queue_persistence,
+            queue_persistence: persistence
+                .map(|kind| QueuePersistence::capture(self.session.sequence(), kind)),
             projection,
             effects,
             current_media_changed,
