@@ -1431,7 +1431,7 @@ mod source_window_tests {
                         .unwrap()
                         .remove_progress_handler();
                     let steps = ticks.load(Ordering::Relaxed) * 100;
-                    eprintln!(
+                    tracing::info!(
                         "actual Smart reader tracks={size} empty={empty} shuffle={shuffle:?}: {elapsed:?}, ~{steps} VM instructions including continuation"
                     );
                     assert_eq!(rows.len(), if empty { 0 } else { 100 });

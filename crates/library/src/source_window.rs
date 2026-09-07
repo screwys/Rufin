@@ -477,7 +477,7 @@ mod tests {
                         .unwrap()
                         .remove_progress_handler();
                     let steps = count.load(Ordering::Relaxed) * 100;
-                    eprintln!(
+                    tracing::info!(
                         "tracks={size}, shuffle={seed:?}, two 100-member reads: {:?}, ~{steps} VM instructions",
                         started.elapsed()
                     );
@@ -545,7 +545,7 @@ mod tests {
                 };
                 let save = std::time::Instant::now();
                 database.save_queue(&state).await.unwrap();
-                eprintln!(
+                tracing::info!(
                     "tracks={size}, shuffle={seed:?}, clicked playback read+metadata: {read:?}, save: {:?}",
                     save.elapsed()
                 );
