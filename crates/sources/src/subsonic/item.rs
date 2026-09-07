@@ -1,5 +1,7 @@
 use super::*;
 use crate::policy::normalized_date;
+use crate::remote_json as json;
+use serde_json::Value;
 
 pub(super) async fn stage_album(
     scan: &mut library::Scan,
@@ -257,42 +259,24 @@ async fn stage_genre_credit(
     .await
 }
 
-pub(super) fn image_ref(
-    source: &SubsonicSource,
-    cover_art: Option<SubsonicId>,
-) -> Option<ImageRef> {
-    cover_art.map(|id| ImageRef::new(source.id("cover", &id.0), None))
+pub(super) fn image_ref(source: &SubsonicSource, cover_art: Option<String>) -> Option<ImageRef> {
+    cover_art.map(|id| ImageRef::new(source.id("cover", &id), None))
 }
-pub(super) fn folder_from_artist(source: &SubsonicSource, artist: SubsonicArtist) -> Folder {
-    Folder {
-        id: String::from(source.id("folder", artist.id.0.as_str())),
-        name: artist.name.unwrap_or_else(|| "Untitled Folder".to_string()),
+
+fn genre_credits_from_item(source: &SubsonicSource, item: &Value) -> Vec<GenreCredit> {
+    let mut names = Vec::new();
+    if let Some(genre) = json::field::<String>(item, "genre").filter(|name| !name.trim().is_empty())
+    {
+        names.push(genre);
     }
-}
-pub(super) fn folder_from_child(source: &SubsonicSource, child: SubsonicSong) -> Folder {
-    Folder {
-        id: String::from(source.id("folder", child.id.0.as_str())),
-        name: child.title.unwrap_or_else(|| "Untitled Folder".to_string()),
-    }
-}
-pub(super) fn genres_from_item(genre: Option<String>, genres: Vec<GenreName>) -> Vec<String> {
-    let mut values = Vec::new();
-    if let Some(genre) = genre.filter(|genre| !genre.trim().is_empty()) {
-        values.push(genre);
-    }
-    for genre in genres {
-        if !genre.name.trim().is_empty() && !values.iter().any(|value| value == &genre.name) {
-            values.push(genre.name);
+    for genre in json::items(&item["genres"]) {
+        if let Some(name) = json::field::<String>(genre, "name")
+            .filter(|name| !name.trim().is_empty() && !names.contains(name))
+        {
+            names.push(name);
         }
     }
-    values
-}
-fn genre_credits_from_item(
-    source: &SubsonicSource,
-    genre: Option<String>,
-    genres: Vec<GenreName>,
-) -> Vec<GenreCredit> {
-    genres_from_item(genre, genres)
+    names
         .into_iter()
         .map(|name| GenreCredit {
             id: String::from(source.id("genre", &name)),
@@ -300,6 +284,7 @@ fn genre_credits_from_item(
         })
         .collect()
 }
+
 pub(super) fn moods_from_item(source: &SubsonicSource, moods: Vec<String>) -> Vec<MoodCredit> {
     let mut values = Vec::new();
     for mood in moods {
@@ -317,31 +302,28 @@ pub(super) fn moods_from_item(source: &SubsonicSource, moods: Vec<String>) -> Ve
     }
     values
 }
-fn artist_credit(
-    source: &SubsonicSource,
-    id: Option<&SubsonicId>,
-    name: &str,
-) -> Option<ArtistCredit> {
-    let id = id?;
-    (!id.0.trim().is_empty()).then(|| ArtistCredit {
-        id: String::from(source.id("artist", &id.0)),
-        name: name.to_string(),
-        musicbrainz_artist_id: None,
-    })
+
+fn artist_credits_from_item(source: &SubsonicSource, artists: &Value) -> Vec<ArtistCredit> {
+    json::items(artists)
+        .iter()
+        .filter_map(|artist| {
+            Some(ArtistCredit {
+                id: String::from(source.id("artist", &json::id(&artist["id"])?)),
+                name: json::field(artist, "name").unwrap_or_default(),
+                musicbrainz_artist_id: None,
+            })
+        })
+        .collect()
 }
 
-fn artist_credits_from_refs(
-    source: &SubsonicSource,
-    artists: Vec<SubsonicArtistRef>,
-) -> Vec<ArtistCredit> {
-    artists
-        .into_iter()
-        .filter(|artist| !artist.id.0.trim().is_empty())
-        .map(|artist| ArtistCredit {
-            id: String::from(source.id("artist", &artist.id.0)),
-            name: artist.name,
+fn scalar_artist_credit(source: &SubsonicSource, item: &Value, name: &str) -> Vec<ArtistCredit> {
+    json::id(&item["artistId"])
+        .map(|id| ArtistCredit {
+            id: String::from(source.id("artist", &id)),
+            name: name.to_string(),
             musicbrainz_artist_id: None,
         })
+        .into_iter()
         .collect()
 }
 
@@ -354,50 +336,37 @@ pub(super) fn joined_artist_names(artists: &[ArtistCredit]) -> Option<String> {
     (!names.is_empty()).then(|| names.join(", "))
 }
 
-fn structured_release_date(date: Option<SubsonicItemDate>) -> Option<String> {
-    let date = date?;
-    let year = u16::try_from(date.year).ok().filter(|year| *year > 0)?;
+fn structured_release_date(date: &Value) -> Option<String> {
+    let year = json::field::<u16>(date, "year").filter(|year| *year > 0)?;
     match (
-        u8::try_from(date.month)
-            .ok()
-            .filter(|month| (1..=12).contains(month)),
-        u8::try_from(date.day)
-            .ok()
-            .filter(|day| (1..=31).contains(day)),
+        json::field::<u8>(date, "month").filter(|month| (1..=12).contains(month)),
+        json::field::<u8>(date, "day").filter(|day| (1..=31).contains(day)),
     ) {
         (Some(month), Some(day)) => Some(format!("{year:04}-{month:02}-{day:02}")),
         (Some(month), None) => Some(format!("{year:04}-{month:02}")),
         _ => Some(format!("{year:04}")),
     }
 }
-fn bpm_from_u32(value: u32) -> Option<u16> {
-    if value == 0 || value > u32::from(u16::MAX) {
-        None
-    } else {
-        Some(value as u16)
-    }
-}
+
 fn clean_optional(value: Option<String>) -> Option<String> {
     value.filter(|value| !value.trim().is_empty())
 }
-pub(super) fn album_from_dto(source: &SubsonicSource, album: SubsonicAlbum) -> Album {
-    let raw_id = raw_id_string(&album.id);
-    let structured_artists = artist_credits_from_refs(source, album.artists);
-    let artist = clean_optional(album.display_artist)
-        .or_else(|| clean_optional(album.artist.clone()))
+
+pub(super) fn album_from_json(source: &SubsonicSource, album: &Value) -> Option<Album> {
+    let raw_id = json::id(&album["id"])?;
+    let structured_artists = artist_credits_from_item(source, &album["artists"]);
+    let artist = clean_optional(json::field(album, "displayArtist"))
+        .or_else(|| clean_optional(json::field(album, "artist")))
         .or_else(|| joined_artist_names(&structured_artists))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     let album_artists = if structured_artists.is_empty() {
-        artist_credit(source, album.artist_id.as_ref(), &artist)
-            .into_iter()
-            .collect()
+        scalar_artist_credit(source, album, &artist)
     } else {
         structured_artists
     };
-    let genres = genre_credits_from_item(source, album.genre, album.genres);
-    let release_date = structured_release_date(album.release_date);
+    let release_date = structured_release_date(&album["releaseDate"]);
     let year = {
-        let scalar = u16_from_option(album.year);
+        let scalar = u16_from_option(json::field(album, "year"));
         if scalar > 0 {
             scalar
         } else {
@@ -408,117 +377,102 @@ pub(super) fn album_from_dto(source: &SubsonicSource, album: SubsonicAlbum) -> A
                 .unwrap_or_default()
         }
     };
-    Album {
+    Some(Album {
         id: String::from(source.id("album", &raw_id)),
-        title: album
-            .title
-            .or(album.name)
-            .or(album.album)
+        title: json::field(album, "title")
+            .or_else(|| json::field(album, "name"))
+            .or_else(|| json::field(album, "album"))
             .unwrap_or_else(|| "Untitled Album".to_string()),
         artist,
         year,
         release_date,
-        date_added: normalized_date(album.created),
-        last_played: normalized_timestamp(album.played),
-        play_count: album
-            .play_count
+        date_added: normalized_date(json::field(album, "created")),
+        last_played: normalized_timestamp(json::field(album, "played")),
+        play_count: json::field::<u64>(album, "playCount")
             .map(|value| value.min(u64::from(u32::MAX)) as u32),
-        user_rating: album
-            .user_rating
+        user_rating: json::field::<u32>(album, "userRating")
             .filter(|value| *value > 0)
             .map(|value| value.min(5).saturating_mul(2) as u8),
-        favorite: favorite(&album.starred),
+        favorite: favorite(&json::field(album, "starred")),
         color_seed: color_seed(&raw_id),
-        image_ref: image_ref(source, album.cover_art),
+        image_ref: image_ref(source, json::id(&album["coverArt"])),
         local_artwork: None,
-        release_types: normalize_release_types(album.release_types),
-        is_compilation: album.is_compilation,
-        musicbrainz_album_id: clean_optional(album.musicbrainz_album_id),
+        release_types: normalize_release_types(json::strings(&album["releaseTypes"])),
+        is_compilation: json::boolean(&album["isCompilation"]),
+        musicbrainz_album_id: clean_optional(json::field(album, "musicBrainzId")),
         musicbrainz_release_group_id: None,
         relations: AlbumRelations {
             album_artists,
             artists: Vec::new(),
-            genres,
+            genres: genre_credits_from_item(source, album),
         },
-    }
+    })
 }
-pub(super) fn track_from_dto(source: &SubsonicSource, song: SubsonicSong) -> Track {
-    let replay_gain = song.replay_gain.unwrap_or_default();
-    let raw_id = raw_id_string(&song.id);
-    let album_id = song
-        .album_id
-        .as_ref()
-        .map(raw_id_string)
-        .map(|id| String::from(source.id("album", &id)));
-    let structured_artists = artist_credits_from_refs(source, song.artists);
-    let album_artist_credits = artist_credits_from_refs(source, song.album_artists);
-    let artist = clean_optional(song.display_artist)
-        .or_else(|| clean_optional(song.artist.clone()))
+
+pub(super) fn track_from_json(source: &SubsonicSource, song: &Value) -> Option<Track> {
+    let raw_id = json::id(&song["id"])?;
+    let structured_artists = artist_credits_from_item(source, &song["artists"]);
+    let artist = clean_optional(json::field(song, "displayArtist"))
+        .or_else(|| clean_optional(json::field(song, "artist")))
         .or_else(|| joined_artist_names(&structured_artists))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     let artist_credits = if structured_artists.is_empty() {
-        artist_credit(source, song.artist_id.as_ref(), &artist)
-            .into_iter()
-            .collect()
+        scalar_artist_credit(source, song, &artist)
     } else {
         structured_artists
     };
-    let genres = genre_credits_from_item(source, song.genre, song.genres);
-    let moods = moods_from_item(source, song.moods);
-    let source_format = source_format_from_song(
-        song.suffix.as_deref(),
-        song.content_type.as_deref(),
-        song.path.as_deref(),
-    );
-    Track {
+    let suffix = json::field::<String>(song, "suffix");
+    let content_type = json::field::<String>(song, "contentType");
+    let path = json::field::<String>(song, "path");
+    let source_format =
+        source_format_from_song(suffix.as_deref(), content_type.as_deref(), path.as_deref());
+    let replay_gain = &song["replayGain"];
+    Some(Track {
         id: String::from(source.id("track", &raw_id)),
-        album_id,
-        title: song.title.unwrap_or_else(|| "Untitled Track".to_string()),
+        album_id: json::id(&song["albumId"]).map(|id| String::from(source.id("album", &id))),
+        title: json::field(song, "title").unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
-        album: song.album.unwrap_or_else(|| "Unknown Album".to_string()),
-        year: u16_from_option(song.year),
+        album: json::field(song, "album").unwrap_or_else(|| "Unknown Album".to_string()),
+        year: u16_from_option(json::field(song, "year")),
         release_date: None,
-        date_added: normalized_date(song.created),
-        last_played: crate::policy::unix_seconds(song.played),
-        play_count: song
-            .play_count
+        date_added: normalized_date(json::field(song, "created")),
+        last_played: crate::policy::unix_seconds(json::field(song, "played")),
+        play_count: json::field::<u64>(song, "playCount")
             .map(|value| value.min(u64::from(u32::MAX)) as u32),
-        user_rating: song
-            .user_rating
+        user_rating: json::field::<u32>(song, "userRating")
             .filter(|value| *value > 0)
             .map(|value| value.min(5).saturating_mul(2) as u8),
-        duration_seconds: song.duration.unwrap_or_default(),
-        favorite: favorite(&song.starred),
-        disc_number: u16_from_option(song.disc_number),
-        track_number: u16_from_option(song.track),
-        image_ref: image_ref(source, song.cover_art),
+        duration_seconds: json::field(song, "duration").unwrap_or_default(),
+        favorite: favorite(&json::field(song, "starred")),
+        disc_number: u16_from_option(json::field(song, "discNumber")),
+        track_number: u16_from_option(json::field(song, "track")),
+        image_ref: image_ref(source, json::id(&song["coverArt"])),
         local_artwork: None,
-        musicbrainz_recording_id: clean_optional(song.musicbrainz_recording_id),
+        musicbrainz_recording_id: clean_optional(json::field(song, "musicBrainzId")),
         musicbrainz_release_track_id: None,
-        source_path: song.path,
+        source_path: path,
         cue: None,
         source_format,
-        comment: song.comment.filter(|value| !value.trim().is_empty()),
+        comment: clean_optional(json::field(song, "comment")),
         skip_count: None,
-        bpm: song.bpm.and_then(bpm_from_u32),
-        replay_gain_track_db: finite(replay_gain.track_gain),
-        replay_gain_track_peak: positive_finite(replay_gain.track_peak),
-        replay_gain_album_db: finite(replay_gain.album_gain),
-        replay_gain_album_peak: positive_finite(replay_gain.album_peak),
+        bpm: json::field::<u16>(song, "bpm").filter(|value| *value > 0),
+        replay_gain_track_db: finite(json::field(replay_gain, "trackGain")),
+        replay_gain_track_peak: positive_finite(json::field(replay_gain, "trackPeak")),
+        replay_gain_album_db: finite(json::field(replay_gain, "albumGain")),
+        replay_gain_album_peak: positive_finite(json::field(replay_gain, "albumPeak")),
         relations: TrackRelations {
             artists: artist_credits,
-            album_artists: album_artist_credits,
-            genres,
-            moods,
+            album_artists: artist_credits_from_item(source, &song["albumArtists"]),
+            genres: genre_credits_from_item(source, song),
+            moods: moods_from_item(source, json::strings(&song["moods"])),
             music_folders: Vec::new(),
         },
-    }
+    })
 }
 
 fn finite(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite())
 }
-
 fn positive_finite(value: Option<f64>) -> Option<f64> {
     value.filter(|value| value.is_finite() && *value >= 0.0)
 }
@@ -550,49 +504,37 @@ pub(super) fn source_format_from_song(
                 .map(ToString::to_string)
         })
 }
-pub(super) fn artist_from_dto(source: &SubsonicSource, artist: SubsonicArtist) -> Artist {
-    let raw_id = raw_id_string(&artist.id);
-    Artist {
+pub(super) fn artist_from_json(source: &SubsonicSource, artist: &Value) -> Option<Artist> {
+    let raw_id = json::id(&artist["id"])?;
+    Some(Artist {
         id: String::from(source.id("artist", &raw_id)),
-        name: artist.name.unwrap_or_else(|| "Unknown Artist".to_string()),
-        favorite: favorite(&artist.starred),
-        last_played: normalized_timestamp(artist.played),
-        play_count: artist
-            .play_count
+        name: json::field(artist, "name").unwrap_or_else(|| "Unknown Artist".to_string()),
+        favorite: favorite(&json::field(artist, "starred")),
+        last_played: normalized_timestamp(json::field(artist, "played")),
+        play_count: json::field::<u64>(artist, "playCount")
             .map(|value| value.min(u64::from(u32::MAX)) as u32),
-        user_rating: artist
-            .user_rating
+        user_rating: json::field::<u32>(artist, "userRating")
             .filter(|value| *value > 0)
             .map(|value| value.min(5).saturating_mul(2) as u8),
-        musicbrainz_artist_id: clean_optional(artist.musicbrainz_artist_id),
-        image_ref: image_ref(source, artist.cover_art),
+        musicbrainz_artist_id: clean_optional(json::field(artist, "musicBrainzId")),
+        image_ref: image_ref(source, json::id(&artist["coverArt"])),
         local_artwork: None,
-    }
+    })
 }
-pub(super) fn genre_from_dto(source: &SubsonicSource, genre: SubsonicGenre) -> Genre {
-    Genre {
-        id: String::from(source.id("genre", &genre.value)),
-        name: genre.value,
-        image_ref: None,
-        local_artwork: None,
-    }
-}
+
 fn normalized_timestamp(value: Option<String>) -> Option<String> {
     value
         .map(|value| value.trim().to_string())
         .filter(|value| !value.is_empty())
 }
 
-pub(super) fn playlist_from_dto(source: &SubsonicSource, playlist: SubsonicPlaylist) -> Playlist {
-    let raw_id = raw_id_string(&playlist.id);
-    let track_count = playlist.entry.as_ref().map_or(0, Vec::len);
-    Playlist {
+pub(super) fn playlist_from_json(source: &SubsonicSource, playlist: &Value) -> Option<Playlist> {
+    let raw_id = json::id(&playlist["id"])?;
+    Some(Playlist {
         id: String::from(source.id("playlist", &raw_id)),
-        name: playlist
-            .name
-            .unwrap_or_else(|| "Untitled Playlist".to_string()),
-        image_ref: image_ref(source, playlist.cover_art),
+        name: json::field(playlist, "name").unwrap_or_else(|| "Untitled Playlist".to_string()),
+        image_ref: image_ref(source, json::id(&playlist["coverArt"])),
         duration_seconds: 0,
-        track_count,
-    }
+        track_count: json::items(&playlist["entry"]).len(),
+    })
 }

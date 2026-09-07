@@ -1,5 +1,6 @@
 use crate::config::{decode_provider_payload, require_payload_version};
 use crate::policy::{raw_item_id, stable_hash};
+use crate::remote_json::{field, id, items};
 use crate::{
     ConnectedSource, CredentialHostInput, ImageBytes, JellyfinSettingsInput, JellyfinSetupInput,
     NativeLyricLine, NativeLyrics, NativeLyricsDocument, NativeLyricsRole, SourceConfiguration,
@@ -7,14 +8,14 @@ use crate::{
 };
 pub use discovery::{DiscoveredJellyfinServer, discover_jellyfin_servers};
 use item::{
-    ALBUM_FIELDS, ImageRef, ItemQueryResult, JellyfinItem, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS,
-    TRACK_FIELDS, album_from_item, artist_from_item, genre_from_item, is_audio_item,
-    playlist_from_item, primary_image_ref, stage_album, stage_artist, stage_genre, stage_track,
-    track_from_item,
+    ALBUM_FIELDS, ImageRef, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS, album_from_item,
+    artist_from_item, genre_from_item, is_audio_item, playlist_from_item, primary_image_ref,
+    stage_album, stage_artist, stage_genre, stage_track, track_from_item,
 };
 use playback::{RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;
+use serde_json::Value;
 use std::sync::Arc;
 use tracing::instrument;
 
@@ -291,7 +292,7 @@ impl JellyfinSource {
 
         let body = AuthenticateByNameRequest { username, password };
         let auth_url = endpoint(&base_url, "Users/AuthenticateByName")?;
-        let response = send_json::<AuthenticationResult>(
+        let response = send_json::<Value>(
             client
                 .post(auth_url)
                 .header(header::AUTHORIZATION, auth_header(&config, None))
@@ -302,11 +303,14 @@ impl JellyfinSource {
         let provider_name = public_server_name(&client, &base_url, &config)
             .await
             .unwrap_or_else(|| "Jellyfin".to_string());
-        let server_id = response.server_id.filter(|value| !value.trim().is_empty());
+        let server_id = id(&response["ServerId"]);
         let canonical_base_url = base_url.as_str().trim_end_matches('/').to_string();
-        let user_id = response.user.id;
-        let username = response.user.name;
-        let credential = response.access_token;
+        let user_id = id(&response["User"]["Id"])
+            .ok_or_else(|| SourceError::Auth("Jellyfin returned no user identity".into()))?;
+        let username = field::<String>(&response["User"], "Name").unwrap_or(body.username);
+        let credential = field::<String>(&response, "AccessToken")
+            .filter(|token| !token.trim().is_empty())
+            .ok_or_else(|| SourceError::Auth("Jellyfin returned no access token".into()))?;
         let authorization = authenticated_header(&config, &credential)?;
         let configuration = crate::config::encode_provider_payload(
             source_id,
