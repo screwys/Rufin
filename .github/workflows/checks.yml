@@ -521,6 +521,25 @@ jobs:
           shared-key: macos-arm64
           workspaces: ". -> .local/target"
 
+      - name: Diagnose gapless cancellation
+        if: github.event_name != 'push'
+        run: |
+          cargo test --locked -p playback-gstreamer --lib --no-run --message-format=json > /tmp/playback-build.json
+          test_binary="$(python3 -c 'import json; print(next(record["executable"] for line in open("/tmp/playback-build.json") if (record := json.loads(line)).get("executable")))')"
+          "$test_binary" clearing_preloaded_next --nocapture &
+          test_pid=$!
+          (
+            sleep 15
+            if kill -0 "$test_pid" 2>/dev/null; then
+              sample "$test_pid" 1 -file /tmp/playback-threads.txt
+              cat /tmp/playback-threads.txt
+              kill -KILL "$test_pid"
+            fi
+          ) &
+          watchdog_pid=$!
+          trap 'kill "$watchdog_pid" 2>/dev/null || true' EXIT
+          wait "$test_pid"
+
       - name: Run platform tests
         if: github.event_name != 'push'
         run: >-
