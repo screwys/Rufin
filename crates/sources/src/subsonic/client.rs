@@ -1870,6 +1870,8 @@ mod tests {
         let album = database
             .album_detail(
                 &results.albums[0].media_uri,
+                library::TrackSort::TrackNumber,
+                false,
                 &library::ReadCancellation::new(),
             )
             .await
@@ -1899,6 +1901,8 @@ mod tests {
         let album = database
             .album_detail(
                 &results.albums[0].media_uri,
+                library::TrackSort::TrackNumber,
+                false,
                 &library::ReadCancellation::new(),
             )
             .await
