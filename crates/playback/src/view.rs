@@ -124,10 +124,10 @@ impl Sequence {
         QueueSummaryView {
             revision: self.revision(),
             total: self.total(),
-            current_occurrence: self.selected().map(|entry| entry.occurrence.clone()),
+            current_occurrence: self.selected_id().cloned(),
             current_index: self.selected_index(),
             next_occurrence: next_index
-                .and_then(|index| self.at(index))
+                .and_then(|index| self.entry_at(index))
                 .map(|entry| entry.occurrence.clone()),
             can_next: self.next_index(false).is_some(),
         }

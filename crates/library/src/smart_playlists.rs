@@ -75,6 +75,28 @@ pub(crate) async fn smart_source_reference(
     }))
 }
 
+pub(crate) async fn smart_members_ref(
+    connection: &mut SqliteConnection,
+    reference: &SmartSourceReference,
+    now: i64,
+) -> LibraryResult<Vec<String>> {
+    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
+        return Ok(Vec::new());
+    };
+    let sql = format!(
+        "{}\n{SMART_MEDIA_URI_SELECT}",
+        smart_policy_sql(connection, now, Some(key)).await?
+    );
+    Ok(sqlx::query_scalar(AssertSqlSafe(sql))
+        .persistent(false)
+        .bind(source)
+        .bind(now)
+        .bind(folder)
+        .bind(serde_json::to_string(&[key.raw()])?)
+        .fetch_all(connection)
+        .await?)
+}
+
 async fn resolve_smart_reference(
     connection: &mut SqliteConnection,
     reference: &SmartSourceReference,
@@ -101,61 +123,6 @@ async fn resolve_smart_reference(
         None
     };
     Ok(Some((key, source, folder)))
-}
-
-pub(crate) async fn smart_source_window_ref(
-    connection: &mut SqliteConnection,
-    reference: &SmartSourceReference,
-    now: i64,
-    after: Option<&str>,
-    limit: usize,
-    seed: Option<u64>,
-    anchor: Option<&str>,
-) -> LibraryResult<Vec<(String, String)>> {
-    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
-        return Ok(Vec::new());
-    };
-    smart_source_window(
-        connection, key, source, folder, now, after, limit, seed, anchor,
-    )
-    .await
-}
-
-pub(crate) async fn smart_source_last_ref(
-    connection: &mut SqliteConnection,
-    reference: &SmartSourceReference,
-    now: i64,
-    seed: Option<u64>,
-) -> LibraryResult<Option<(String, String)>> {
-    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
-        return Ok(None);
-    };
-    smart_source_last(connection, key, source, folder, now, seed).await
-}
-
-pub(crate) async fn smart_source_history_ref(
-    connection: &mut SqliteConnection,
-    reference: &SmartSourceReference,
-    now: i64,
-    anchor: &str,
-    limit: usize,
-) -> LibraryResult<Vec<(String, String)>> {
-    let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
-        return Ok(Vec::new());
-    };
-    read_smart_source_window(
-        connection,
-        key,
-        source,
-        folder,
-        now,
-        None,
-        limit,
-        None,
-        Some(anchor),
-        true,
-    )
-    .await
 }
 
 #[derive(Clone)]
@@ -611,7 +578,7 @@ async fn load_smart_playlist_page(
     }
     let sql = format!(
         "{}\n{SMART_LIST_PAGE_SELECT}",
-        smart_policy_sql(connection, now).await?
+        smart_policy_sql(connection, now, None).await?
     );
     let mut records = sqlx::query(AssertSqlSafe(sql.as_str()))
         .persistent(false)
@@ -690,7 +657,7 @@ async fn load_smart_playlist_rows(
     let requested = serde_json::to_string(&keys.iter().map(|key| key.raw()).collect::<Vec<_>>())?;
     let facts_sql = format!(
         "{}\n, smart_stats AS (SELECT definition_key,count(*) track_count,COALESCE(sum(duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=selected.media_uri AND access.origin='download') THEN 1 END) downloaded_count FROM selected GROUP BY definition_key), ranked_artwork AS (SELECT definition_key,track.artwork_binding,row_number() OVER (PARTITION BY definition_key ORDER BY result_position) artwork_position FROM selected JOIN tracks track USING(media_uri) WHERE track.artwork_binding IS NOT NULL) SELECT definition.definition_key,COALESCE(stats.track_count,0),COALESCE(stats.duration_millis,0),COALESCE(stats.downloaded_count,0),artwork.artwork_binding FROM definitions definition LEFT JOIN smart_stats stats USING(definition_key) LEFT JOIN ranked_artwork artwork ON artwork.definition_key=definition.definition_key AND artwork.artwork_position<=4 ORDER BY definition.position,definition.definition_key,artwork.artwork_position",
-        smart_policy_sql(connection, now).await?
+        smart_policy_sql(connection, now, None).await?
     );
     let facts = sqlx::query_as::<_, (SmartPlaylistKey, i64, i64, i64, Option<Vec<u8>>)>(
         AssertSqlSafe(facts_sql.as_str()),
@@ -1021,7 +988,7 @@ impl Database {
         normalize_definition(&mut summary.definition)?;
         let sql = format!(
             "{}\nSELECT selected.media_uri,selected.duration_millis,EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=selected.media_uri AND access.origin='download'),track.artwork_binding FROM selected LEFT JOIN tracks track USING(media_uri) ORDER BY result_position",
-            smart_policy_sql(&mut transaction, now).await?
+            smart_policy_sql(&mut transaction, now, Some(key)).await?
         );
         let mut selected =
             sqlx::query_as::<_, (String, i64, bool, Option<Vec<u8>>)>(AssertSqlSafe(sql.as_str()))
@@ -1068,7 +1035,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let sql = format!(
             "{}\n{SMART_MEDIA_URI_SELECT}",
-            smart_policy_sql(&mut connection, now).await?
+            smart_policy_sql(&mut connection, now, Some(key)).await?
         );
         let media_uris = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql.as_str()))
             .persistent(false)
@@ -1344,329 +1311,6 @@ mod source_window_tests {
             "a missing folder must not widen the source scope"
         );
     }
-
-    #[tokio::test]
-    #[ignore = "large isolated Store query verification"]
-    async fn sparse_million_track_source_windows_use_indexed_facts() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        };
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("store.sqlite"))
-            .await
-            .unwrap();
-        let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
-        let source=sqlx::query_scalar::<_,SourceKey>("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('source','Source','source',zeroblob(32),zeroblob(32)) RETURNING source_key").fetch_one(&mut *connection).await.unwrap();
-        let definition = SmartPlaylistDefinition {
-            current: true,
-            match_all: vec![SmartPlaylistRule {
-                field: SmartPlaylistRuleField::Played,
-                operator: SmartPlaylistRuleOperator::Is,
-                value: Some(SmartPlaylistRuleValue::Bool(false)),
-            }],
-            ..SmartPlaylistDefinition::default()
-        };
-        let key=sqlx::query_scalar::<_,SmartPlaylistKey>("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('never','Never','never',?1,0) RETURNING smart_playlist_key").bind(serde_json::to_string(&definition).unwrap()).fetch_one(&mut *connection).await.unwrap();
-        let mut previous = 0;
-        for size in [300_000, 1_000_000] {
-            sqlx::query("WITH RECURSIVE n(i) AS(VALUES(?2) UNION ALL SELECT i+1 FROM n WHERE i<?3) INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) SELECT i,?1,'track-'||i,'file:///track-'||printf('%07d',i),'Track','track','Album','Artist',printf('%07d',i),1000,1 FROM n").bind(source).bind(previous+1).bind(size).execute(&mut *connection).await.unwrap();
-            sqlx::query("UPDATE tracks SET local_play_count=0 WHERE track_key>?1")
-                .bind(size - 100)
-                .execute(&mut *connection)
-                .await
-                .unwrap();
-            sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) SELECT media_uri,title,display_artist,display_album,1700000000,'2023-11',1000,1000,0 FROM tracks WHERE track_key>?1 AND local_play_count>0").bind(previous).execute(&mut *connection).await.unwrap();
-            previous = size;
-            for empty in [false, true] {
-                if empty {
-                    sqlx::query("UPDATE tracks SET local_play_count=1 WHERE local_play_count=0")
-                        .execute(&mut *connection)
-                        .await
-                        .unwrap();
-                }
-                for shuffle in [None, Some(192837)] {
-                    let ticks = Arc::new(AtomicU64::new(0));
-                    let count = ticks.clone();
-                    connection
-                        .lock_handle()
-                        .await
-                        .unwrap()
-                        .set_progress_handler(100, move || {
-                            count.fetch_add(1, Ordering::Relaxed);
-                            true
-                        });
-                    let started = std::time::Instant::now();
-                    let rows = smart_source_window(
-                        connection,
-                        key,
-                        Some(source),
-                        None,
-                        2000000000,
-                        None,
-                        100,
-                        shuffle,
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                    let next = smart_source_window(
-                        connection,
-                        key,
-                        Some(source),
-                        None,
-                        2000000000,
-                        rows.last().map(|pair| pair.1.as_str()),
-                        100,
-                        shuffle,
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                    let elapsed = started.elapsed();
-                    connection
-                        .lock_handle()
-                        .await
-                        .unwrap()
-                        .remove_progress_handler();
-                    let steps = ticks.load(Ordering::Relaxed) * 100;
-                    tracing::info!(
-                        "actual Smart reader tracks={size} empty={empty} shuffle={shuffle:?}: {elapsed:?}, ~{steps} VM instructions including continuation"
-                    );
-                    assert_eq!(rows.len(), if empty { 0 } else { 100 });
-                    assert!(next.is_empty());
-                    assert!(
-                        steps < 50_000,
-                        "sparse source read traversed unrelated catalog rows"
-                    );
-                }
-            }
-        }
-    }
-
-    #[tokio::test]
-    async fn indexed_local_activity_continuation_preserves_rules_and_limits() {
-        let directory = tempfile::tempdir().unwrap();
-        let database = Database::open(directory.path().join("store.sqlite"))
-            .await
-            .unwrap();
-        let mut writer = database.writer().await.unwrap();
-        let connection = writer.as_mut().unwrap();
-        let source = sqlx::query_scalar::<_,SourceKey>("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('source','Source','source',zeroblob(32),zeroblob(32)) RETURNING source_key").fetch_one(&mut *connection).await.unwrap();
-        sqlx::query("WITH RECURSIVE n(i) AS(VALUES(0) UNION ALL SELECT i+1 FROM n WHERE i<299) INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) SELECT ?1,'track-'||i,'file:///track-'||printf('%03d',i),'Track '||i,'track','Album','Artist',printf('%03d',i),1000,CASE WHEN i%3=0 THEN 0 ELSE 1 END FROM n").bind(source).execute(&mut *connection).await.unwrap();
-        let definition = SmartPlaylistDefinition {
-            current: true,
-            match_all: vec![SmartPlaylistRule {
-                field: SmartPlaylistRuleField::Played,
-                operator: SmartPlaylistRuleOperator::Is,
-                value: Some(SmartPlaylistRuleValue::Bool(false)),
-            }],
-            limit: Some(73),
-            ..SmartPlaylistDefinition::default()
-        };
-        let key=sqlx::query_scalar::<_,SmartPlaylistKey>("INSERT INTO smart_playlists(object_id,name,normalized_name,definition_json,position) VALUES('test','Test','test',?1,0) RETURNING smart_playlist_key").bind(serde_json::to_string(&definition).unwrap()).fetch_one(&mut *connection).await.unwrap();
-        let mut entries = Vec::new();
-        loop {
-            let page = smart_source_window(
-                connection,
-                key,
-                Some(source),
-                None,
-                2000000000,
-                entries
-                    .last()
-                    .map(|pair: &(String, String)| pair.1.as_str()),
-                17,
-                None,
-                None,
-            )
-            .await
-            .unwrap();
-            if page.is_empty() {
-                break;
-            }
-            entries.extend(page);
-        }
-        assert_eq!(entries.len(), 73);
-        assert_eq!(
-            entries
-                .iter()
-                .map(|pair| pair.0.clone())
-                .collect::<Vec<_>>(),
-            (0..73)
-                .map(|i| format!("file:///track-{:03}", i * 3))
-                .collect::<Vec<_>>()
-        );
-        for seed in [0, 1, 2147483646] {
-            let mut shuffled = Vec::new();
-            loop {
-                let page = smart_source_window(
-                    connection,
-                    key,
-                    Some(source),
-                    None,
-                    2000000000,
-                    shuffled
-                        .last()
-                        .map(|pair: &(String, String)| pair.1.as_str()),
-                    17,
-                    Some(seed),
-                    None,
-                )
-                .await
-                .unwrap();
-                if page.is_empty() {
-                    break;
-                }
-                shuffled.extend(page);
-            }
-            assert_eq!(shuffled.len(), 73);
-            let mut actual = shuffled.into_iter().map(|pair| pair.0).collect::<Vec<_>>();
-            actual.sort();
-            assert_eq!(
-                actual,
-                entries
-                    .iter()
-                    .map(|pair| pair.0.clone())
-                    .collect::<Vec<_>>()
-            );
-        }
-        let anchored = smart_source_window(
-            connection,
-            key,
-            Some(source),
-            None,
-            2000000000,
-            None,
-            100,
-            None,
-            Some("file:///track-210"),
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            anchored
-                .iter()
-                .map(|pair| pair.0.as_str())
-                .collect::<Vec<_>>(),
-            [
-                "file:///track-210",
-                "file:///track-213",
-                "file:///track-216"
-            ]
-        );
-        let reference = smart_source_reference(connection, key, Some(source), None)
-            .await
-            .unwrap()
-            .unwrap();
-        let history =
-            smart_source_history_ref(connection, &reference, 2000000000, "file:///track-210", 11)
-                .await
-                .unwrap();
-        assert_eq!(
-            history.iter().map(|row| row.0.clone()).collect::<Vec<_>>(),
-            (60..=70)
-                .rev()
-                .map(|i| format!("file:///track-{:03}", i * 3))
-                .collect::<Vec<_>>()
-        );
-        let anchored_shuffle = smart_source_window(
-            connection,
-            key,
-            Some(source),
-            None,
-            2000000000,
-            None,
-            100,
-            Some(1),
-            Some("file:///track-210"),
-        )
-        .await
-        .unwrap();
-        assert_eq!(anchored_shuffle.first().unwrap().0, "file:///track-210");
-        assert_eq!(anchored_shuffle.len(), 73);
-        assert_eq!(
-            smart_source_last(connection, key, Some(source), None, 2000000000, None)
-                .await
-                .unwrap()
-                .unwrap()
-                .0,
-            "file:///track-216"
-        );
-        let shuffled = smart_source_window(
-            connection,
-            key,
-            Some(source),
-            None,
-            2000000000,
-            None,
-            100,
-            Some(1),
-            None,
-        )
-        .await
-        .unwrap();
-        assert_eq!(
-            smart_source_last(connection, key, Some(source), None, 2000000000, Some(1))
-                .await
-                .unwrap()
-                .unwrap()
-                .0,
-            shuffled.last().unwrap().0
-        );
-        for sort in SmartPlaylistSort::ALL {
-            for descending in [false, true] {
-                let mut definition = definition.clone();
-                definition.sort_field = sort;
-                definition.descending = descending;
-                sqlx::query(
-                    "UPDATE smart_playlists SET definition_json=?1 WHERE smart_playlist_key=?2",
-                )
-                .bind(serde_json::to_string(&definition).unwrap())
-                .bind(key)
-                .execute(&mut *connection)
-                .await
-                .unwrap();
-                let policy = smart_policy_sql(connection, 2000000000).await.unwrap();
-                let full = sqlx::query_scalar::<_, String>(AssertSqlSafe(format!(
-                    "{policy} SELECT media_uri FROM selected ORDER BY result_position"
-                )))
-                .bind(source)
-                .bind(2000000000_i64)
-                .bind(Option::<i64>::None)
-                .bind(serde_json::to_string(&[key.raw()]).unwrap())
-                .fetch_all(&mut *connection)
-                .await
-                .unwrap();
-                let mut pages = Vec::new();
-                loop {
-                    let page = smart_source_window(
-                        connection,
-                        key,
-                        Some(source),
-                        None,
-                        2000000000,
-                        pages.last().map(|pair: &(String, String)| pair.1.as_str()),
-                        17,
-                        None,
-                        None,
-                    )
-                    .await
-                    .unwrap();
-                    if page.is_empty() {
-                        break;
-                    }
-                    pages.extend(page);
-                }
-                assert_eq!(
-                    pages.into_iter().map(|pair| pair.0).collect::<Vec<_>>(),
-                    full,
-                    "{sort:?} descending={descending}"
-                );
-            }
-        }
-    }
 }
 
 fn source_fact(
@@ -1923,343 +1567,6 @@ fn source_sort(definition: &SmartPlaylistDefinition, catalog: bool, now: i64) ->
     }
 }
 
-/// Read a bounded continuation directly from the source's facts. The cursor holds
-/// only the last ordering values and consumed definition limit, never membership.
-pub(crate) async fn smart_source_window(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-    now: i64,
-    after: Option<&str>,
-    limit: usize,
-    shuffle_seed: Option<u64>,
-    anchor_uri: Option<&str>,
-) -> LibraryResult<Vec<(String, String)>> {
-    read_smart_source_window(
-        connection,
-        key,
-        source,
-        folder,
-        now,
-        after,
-        limit,
-        shuffle_seed,
-        anchor_uri,
-        false,
-    )
-    .await
-}
-
-pub(crate) async fn smart_source_last(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-    now: i64,
-    shuffle_seed: Option<u64>,
-) -> LibraryResult<Option<(String, String)>> {
-    Ok(read_smart_source_window(
-        connection,
-        key,
-        source,
-        folder,
-        now,
-        None,
-        1,
-        shuffle_seed,
-        None,
-        true,
-    )
-    .await?
-    .pop())
-}
-
-async fn read_smart_source_window(
-    connection: &mut SqliteConnection,
-    key: SmartPlaylistKey,
-    source: Option<SourceKey>,
-    folder: Option<FolderKey>,
-    now: i64,
-    after: Option<&str>,
-    limit: usize,
-    shuffle_seed: Option<u64>,
-    anchor_uri: Option<&str>,
-    last: bool,
-) -> LibraryResult<Vec<(String, String)>> {
-    let Some(json) = sqlx::query_scalar::<_, String>(
-        "SELECT definition_json FROM smart_playlists WHERE smart_playlist_key=?1",
-    )
-    .bind(key)
-    .fetch_optional(&mut *connection)
-    .await?
-    else {
-        return Ok(Vec::new());
-    };
-    let definition: SmartPlaylistDefinition = serde_json::from_str(&json)?;
-    let cursor = after
-        .map(serde_json::from_str::<serde_json::Value>)
-        .transpose()?;
-    let consumed = cursor
-        .as_ref()
-        .and_then(|cursor| cursor.get(3).and_then(serde_json::Value::as_u64))
-        .unwrap_or(0) as usize;
-    let limit = limit.min(100).min(
-        definition
-            .limit
-            .map(|max| max.saturating_sub(consumed))
-            .unwrap_or(100),
-    );
-    if limit == 0 || (definition.current && source.is_none()) {
-        return Ok(Vec::new());
-    }
-    let candidates = fallback_candidates(&definition);
-    let sources = sqlx::query_as::<_, (i64, String)>("SELECT source_key,object_id FROM sources")
-        .fetch_all(&mut *connection)
-        .await?;
-    let scope = if sources.is_empty() {
-        "SELECT NULL,NULL WHERE 0".into()
-    } else {
-        format!(
-            "VALUES {}",
-            sources
-                .into_iter()
-                .map(|(key, id)| format!(
-                    "({key},{})",
-                    sql_text(&crate::keys::source_entity_prefix(
-                        &crate::SourceId::new(id),
-                        "track"
-                    ))
-                ))
-                .collect::<Vec<_>>()
-                .join(",")
-        )
-    };
-    let scope_filter = if definition.current {
-        "owner.source_key=?1 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders WHERE track_key=owner.track_key AND folder_key=?3))"
-    } else {
-        "1"
-    };
-    let direction = if definition.descending { "DESC" } else { "ASC" };
-    let header = format!(
-        "WITH parameters AS (SELECT ?1,?2,?3,?4,?5,?6,?7,?8),definitions(current_scope) AS (VALUES({})),source_scope(source_key,prefix) AS ({scope}),{candidates}",
-        i32::from(definition.current)
-    );
-    let branch = |catalog: bool, extra: &str| {
-        let table = if catalog { "tracks" } else { "media_rows" };
-        format!(
-            "SELECT media_uri,sort_text,{} sort_value FROM {table} owner WHERE {scope_filter} AND {} AND ({extra})",
-            source_sort(&definition, catalog, now),
-            source_rules(&definition, catalog, now)
-        )
-    };
-    let mut boundary = cursor
-        .as_ref()
-        .and_then(|value| value.get(6))
-        .cloned()
-        .unwrap_or(serde_json::Value::Null);
-    if after.is_none() && (shuffle_seed.is_some() || anchor_uri.is_some() || last) {
-        if let Some(max) = definition.limit {
-            let sql = format!(
-                "{header} SELECT json_array(sort_value,sort_text,media_uri) FROM ({} UNION ALL {}) ORDER BY sort_value {direction} NULLS LAST,sort_text,media_uri LIMIT 1 OFFSET {}",
-                branch(true, "1"),
-                branch(false, "1"),
-                max - 1
-            );
-            if let Some(json) = sqlx::query_scalar::<_, String>(AssertSqlSafe(sql))
-                .persistent(false)
-                .bind(source)
-                .bind(now)
-                .bind(folder)
-                .fetch_optional(&mut *connection)
-                .await?
-            {
-                boundary = serde_json::from_str(&json)?;
-            }
-        }
-    }
-    let boundary_filter = if boundary.is_null() {
-        "1".into()
-    } else {
-        format!("NOT ({})", source_after(&definition, "?7", false))
-    };
-    let anchor = if after.is_none() {
-        if let Some(uri) = anchor_uri {
-            let sql = format!(
-                "{header} SELECT json_array(sort_value,sort_text,media_uri),catalog FROM (SELECT *,1 catalog FROM ({}) UNION ALL SELECT *,0 catalog FROM ({})) LIMIT 1",
-                branch(true, "owner.media_uri=?6"),
-                branch(false, "owner.media_uri=?6")
-            );
-            sqlx::query_as::<_, (String, bool)>(AssertSqlSafe(sql))
-                .persistent(false)
-                .bind(source)
-                .bind(now)
-                .bind(folder)
-                .bind(Option::<&str>::None)
-                .bind(limit as i64)
-                .bind(uri)
-                .fetch_optional(&mut *connection)
-                .await?
-        } else {
-            None
-        }
-    } else {
-        None
-    };
-    let mut output = Vec::new();
-    if let Some(seed) = shuffle_seed {
-        let catalog_first = cursor
-            .as_ref()
-            .and_then(|value| value.get(7))
-            .and_then(serde_json::Value::as_bool)
-            .unwrap_or(anchor.as_ref().is_none_or(|(_, catalog)| *catalog));
-        let mut pivot = cursor
-            .as_ref()
-            .and_then(|value| value.get(5))
-            .cloned()
-            .unwrap_or_else(|| serde_json::json!([seed % 2147483647, ""]));
-        if after.is_none() {
-            if let Some(uri) = anchor_uri.filter(|_| anchor.is_some()) {
-                pivot = if catalog_first {
-                    let key = sqlx::query_scalar::<_, i64>(
-                        "SELECT (track_key*1103515245)%2147483647 FROM tracks WHERE media_uri=?1",
-                    )
-                    .bind(uri)
-                    .fetch_one(&mut *connection)
-                    .await?;
-                    serde_json::json!([key, uri])
-                } else {
-                    serde_json::json!([uri, uri])
-                };
-            }
-        }
-        let first_phase = cursor
-            .as_ref()
-            .and_then(|value| value.get(4))
-            .and_then(serde_json::Value::as_u64)
-            .unwrap_or(0);
-        let phases: Vec<_> = if last {
-            (first_phase..4).rev().collect()
-        } else {
-            (first_phase..4).collect()
-        };
-        for phase in phases {
-            let catalog = (phase < 2) == catalog_first;
-            let table = if catalog { "tracks" } else { "media_rows" };
-            let order = if catalog {
-                "(owner.track_key*1103515245)%2147483647"
-            } else {
-                "owner.media_uri"
-            };
-            let phase_pivot = if phase < 2 {
-                pivot.clone()
-            } else if catalog {
-                serde_json::json!([seed % 2147483647, ""])
-            } else {
-                serde_json::json!(["", ""])
-            };
-            let phase_filter = format!(
-                "({order},owner.media_uri){}(json_extract(?8,'$[0]'),json_extract(?8,'$[1]'))",
-                if phase % 2 == 0 { ">=" } else { "<" }
-            );
-            let continuation = if phase == first_phase && after.is_some() {
-                format!(
-                    "AND ({order},owner.media_uri)>(json_extract(?4,'$[0]'),json_extract(?4,'$[2]'))"
-                )
-            } else {
-                String::new()
-            };
-            let direction = if last { "DESC" } else { "ASC" };
-            let sql = format!(
-                "{header} SELECT media_uri,json_array(shuffle_value,sort_text,media_uri) FROM (SELECT owner.media_uri,owner.sort_text,{} sort_value,{order} shuffle_value FROM {table} owner WHERE {scope_filter} AND {} AND ({boundary_filter}) AND {phase_filter} {continuation} ORDER BY shuffle_value {direction},owner.media_uri {direction} LIMIT ?5)",
-                source_sort(&definition, catalog, now),
-                source_rules(&definition, catalog, now)
-            );
-            let rows = sqlx::query_as::<_, (String, String)>(AssertSqlSafe(sql))
-                .persistent(false)
-                .bind(source)
-                .bind(now)
-                .bind(folder)
-                .bind(after)
-                .bind((limit - output.len()) as i64)
-                .bind(anchor_uri)
-                .bind(boundary.to_string())
-                .bind(phase_pivot.to_string())
-                .fetch_all(&mut *connection)
-                .await?;
-            for (uri, json) in rows {
-                let mut position: Vec<serde_json::Value> = serde_json::from_str(&json)?;
-                position.extend([
-                    serde_json::json!(consumed + output.len() + 1),
-                    serde_json::json!(phase),
-                    pivot.clone(),
-                    boundary.clone(),
-                    serde_json::json!(catalog_first),
-                ]);
-                output.push((uri, serde_json::to_string(&position)?));
-            }
-            if output.len() == limit {
-                break;
-            }
-        }
-    } else {
-        let direction = if last {
-            if definition.descending { "ASC" } else { "DESC" }
-        } else {
-            direction
-        };
-        let nulls = if last { "FIRST" } else { "LAST" };
-        let tie_direction = if last { "DESC" } else { "ASC" };
-        let position = after.or_else(|| anchor.as_ref().map(|(json, _)| json.as_str()));
-        let continuation = if position.is_none() {
-            "1".into()
-        } else if last {
-            format!("NOT ({})", source_after(&definition, "?4", false))
-        } else {
-            source_after(&definition, "?4", after.is_none())
-        };
-        let branches=[true,false].into_iter().map(|catalog|format!("SELECT * FROM ({} ORDER BY sort_value {direction} NULLS {nulls},sort_text {tie_direction},media_uri {tie_direction} LIMIT ?5)",branch(catalog,&format!("({boundary_filter}) AND ({continuation})")))).collect::<Vec<_>>().join(" UNION ALL ");
-        let sql = format!(
-            "{header} SELECT media_uri,json_array(sort_value,sort_text,media_uri) FROM ({branches}) ORDER BY sort_value {direction} NULLS {nulls},sort_text {tie_direction},media_uri {tie_direction} LIMIT ?5"
-        );
-        let rows = sqlx::query_as::<_, (String, String)>(AssertSqlSafe(sql))
-            .persistent(false)
-            .bind(source)
-            .bind(now)
-            .bind(folder)
-            .bind(position)
-            .bind(limit as i64)
-            .bind(anchor_uri)
-            .bind(boundary.to_string())
-            .fetch_all(&mut *connection)
-            .await?;
-        for (uri, json) in rows {
-            let mut position: Vec<serde_json::Value> = serde_json::from_str(&json)?;
-            position.extend([
-                serde_json::json!(consumed + output.len() + 1),
-                serde_json::Value::Null,
-                serde_json::Value::Null,
-                boundary.clone(),
-            ]);
-            output.push((uri, serde_json::to_string(&position)?));
-        }
-    }
-    Ok(output)
-}
-
-fn source_after(definition: &SmartPlaylistDefinition, parameter: &str, inclusive: bool) -> String {
-    let equal = if inclusive { "=" } else { "" };
-    if definition.sort_field == SmartPlaylistSort::Title && !definition.descending {
-        return format!(
-            "(sort_text,media_uri)>{equal}(json_extract({parameter},'$[1]'),json_extract({parameter},'$[2]'))"
-        );
-    }
-    let comparison = if definition.descending { "<" } else { ">" };
-    format!(
-        "((sort_value IS NULL AND json_extract({parameter},'$[0]') IS NOT NULL) OR (sort_value IS NOT NULL AND json_extract({parameter},'$[0]') IS NOT NULL AND sort_value{comparison}json_extract({parameter},'$[0]')) OR (sort_value IS json_extract({parameter},'$[0]') AND (sort_text,media_uri)>{equal}(json_extract({parameter},'$[1]'),json_extract({parameter},'$[2]'))))"
-    )
-}
-
 fn validate_definition(definition: &SmartPlaylistDefinition) -> LibraryResult<()> {
     let rules = definition.match_all.len() + definition.match_any.len();
     if rules > SMART_PLAYLIST_RULE_LIMIT {
@@ -2335,7 +1642,11 @@ media_rows AS (
 )
 "#;
 
-async fn smart_policy_sql(connection: &mut SqliteConnection, now: i64) -> LibraryResult<String> {
+async fn smart_policy_sql(
+    connection: &mut SqliteConnection,
+    now: i64,
+    selected: Option<SmartPlaylistKey>,
+) -> LibraryResult<String> {
     let sources = sqlx::query_as::<_, (i64, String)>("SELECT source_key,object_id FROM sources")
         .fetch_all(&mut *connection)
         .await?;
@@ -2357,7 +1668,7 @@ async fn smart_policy_sql(connection: &mut SqliteConnection, now: i64) -> Librar
                 .join(",")
         )
     };
-    let definitions=sqlx::query_as::<_,(i64,String)>("SELECT smart_playlist_key,definition_json FROM smart_playlists ORDER BY smart_playlist_key").fetch_all(connection).await?;
+    let definitions=sqlx::query_as::<_,(i64,String)>("SELECT smart_playlist_key,definition_json FROM smart_playlists WHERE ?1 IS NULL OR smart_playlist_key=?1 ORDER BY smart_playlist_key").bind(selected).fetch_all(connection).await?;
     let mut sql = format!(
         "WITH parameters AS (SELECT ?1,?2,?3,?4),source_scope(source_key,prefix) AS ({scope}),definitions AS (SELECT smart_playlist_key definition_key,position,normalized_name,COALESCE(json_extract(definition_json,'$.current'),0) current_scope FROM smart_playlists WHERE ?4 IS NULL OR smart_playlist_key IN(SELECT value FROM json_each(?4)))"
     );
@@ -2543,7 +1854,7 @@ impl Database {
         use futures_util::TryStreamExt;
         let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
         output.write_all(b"#EXTM3U\n")?;
-        let policy = smart_policy_sql(&mut connection, now).await?;
+        let policy = smart_policy_sql(&mut connection, now, Some(key)).await?;
         let sql = format!(
             "{policy} SELECT 'm3u:' || result_position object_id,media_uri,title,display_artist artist,display_album album,NULL album_display_artist,0 snapshot_at,duration_millis,NULL disc_number,NULL track_number,year,NULL release_date,NULL source_format,NULL musicbrainz_recording_id,NULL musicbrainz_release_track_id,result_position-1 position FROM selected ORDER BY result_position"
         );

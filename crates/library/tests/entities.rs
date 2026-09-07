@@ -144,7 +144,7 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             Default::default(),
         )
         .await;
-        assert!(!state.pending.is_empty());
+        assert_eq!(state.entries.len(), total);
         assert!(state.occurrences.len() <= 100);
     }
     assert_eq!(

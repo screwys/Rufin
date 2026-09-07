@@ -361,7 +361,7 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         Default::default(),
     )
     .await;
-    assert!(!state.pending.is_empty());
+    assert_eq!(state.entries.len(), 523);
     assert!(state.occurrences.len() <= 100);
     assert_eq!(state.occurrences[3].media_uri, fixture.track_uris[3]);
     assert_eq!(state.occurrences[95].media_uri, fixture.track_uris[3]);

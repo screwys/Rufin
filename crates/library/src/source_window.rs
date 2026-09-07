@@ -3,7 +3,7 @@ use crate::{
     FolderKey, LibraryResult, PlaylistEntryKey, PlaylistEntrySort, PlaylistKey, QueueCollection,
     QueueQuery, QueueScope, QueueSource, SourceId, SourceKey, TrackSort,
 };
-use sqlx::{AssertSqlSafe, SqliteConnection};
+use sqlx::SqliteConnection;
 pub(crate) fn quote(value: &str) -> String {
     format!("'{}'", value.replace('\'', "''"))
 }
@@ -13,7 +13,6 @@ pub(crate) struct SourceQuery {
     pub predicate: String,
     pub order: Vec<(String, bool)>,
     pub uri: String,
-    pub key: String,
     pub entry_key: String,
 }
 
@@ -36,172 +35,69 @@ impl SourceQuery {
             .collect::<Vec<_>>()
             .join(",")
     }
-
-    pub async fn window(
-        mut self,
-        connection: &mut SqliteConnection,
-        after: Option<&str>,
-        limit: usize,
-        seed: Option<u64>,
-        anchor: Option<String>,
-        backwards: bool,
-    ) -> LibraryResult<Vec<(String, Option<PlaylistEntryKey>, String, Option<String>)>> {
-        if seed.is_some() {
-            self.order = vec![
-                (format!("({}*1103515245)%2147483647", self.key), false),
-                (self.key.clone(), false),
-            ];
-        }
-        let columns = self
-            .order
-            .iter()
-            .map(|(field, _)| field.as_str())
-            .collect::<Vec<_>>()
-            .join(",");
-        let (mut phase, mut cursor, mut pivot): (u8, Option<String>, u64) =
-            after.map(serde_json::from_str).transpose()?.unwrap_or((
-                u8::from(backwards && seed.is_some()),
-                None,
-                seed.unwrap_or(0) % 2147483647,
-            ));
-        let mut inclusive = false;
-        if after.is_none()
-            && let Some(anchor) = anchor
-        {
-            cursor = sqlx::query_scalar::<_, String>(AssertSqlSafe(format!(
-                "SELECT json_array({columns}) FROM {} WHERE {} AND ({anchor}) LIMIT 1",
-                self.from, self.predicate
-            )))
-            .fetch_optional(&mut *connection)
-            .await?;
-            inclusive = cursor.is_some();
-            if seed.is_some()
-                && let Some(cursor) = &cursor
-            {
-                pivot = serde_json::from_str::<serde_json::Value>(cursor)?[0]
-                    .as_u64()
-                    .unwrap_or(pivot);
-                phase = 0;
-            }
-        }
-        let mut rows = Vec::new();
-        while rows.len() < limit.min(100) {
-            let mut predicate = self.predicate.clone();
-            if seed.is_some() {
-                predicate.push_str(&format!(
-                    " AND {} {} {pivot}",
-                    self.order[0].0,
-                    if phase == 0 { ">=" } else { "<" }
-                ));
-            }
-            if let Some(cursor) = &cursor {
-                let value = quote(cursor);
-                let seek = if self.order.iter().all(|(_, desc)| *desc == self.order[0].1) {
-                    let values = (0..self.order.len())
-                        .map(|i| format!("json_extract({value},'$[{i}]')"))
-                        .collect::<Vec<_>>()
-                        .join(",");
-                    format!(
-                        "({columns}){}{}({values})",
-                        if self.order[0].1 ^ backwards {
-                            "<"
-                        } else {
-                            ">"
-                        },
-                        if inclusive { "=" } else { "" }
-                    )
-                } else {
-                    let mut alternatives = Vec::new();
-                    for (i, (field, desc)) in self.order.iter().enumerate() {
-                        let mut terms = (0..i)
-                            .map(|j| {
-                                format!("({}) IS json_extract({value},'$[{j}]')", self.order[j].0)
-                            })
-                            .collect::<Vec<_>>();
-                        terms.push(format!(
-                            "({field}) {} json_extract({value},'$[{i}]')",
-                            if *desc ^ backwards { "<" } else { ">" }
-                        ));
-                        alternatives.push(format!("({})", terms.join(" AND ")));
-                    }
-                    if inclusive {
-                        alternatives.push(format!("json_array({columns})={value}"));
-                    }
-                    alternatives.join(" OR ")
-                };
-                predicate.push_str(&format!(" AND ({seek})"));
-            }
-            let available = limit.min(100) - rows.len();
-            let entry_id = if self.entry_key == "NULL" {
-                "NULL"
-            } else {
-                "entry.object_id"
-            };
-            let page=sqlx::query_as::<_,(String,Option<PlaylistEntryKey>,String,Option<String>)>(AssertSqlSafe(format!("SELECT {},{},json_array({columns}),{entry_id} FROM {} WHERE {predicate} ORDER BY {} LIMIT {available}",self.uri,self.entry_key,self.from,self.order_sql(backwards))))
-                .fetch_all(&mut *connection).await?;
-            let complete = page.len() < available;
-            for (uri, entry, position, entry_id) in page {
-                rows.push((
-                    uri,
-                    entry,
-                    serde_json::to_string(&(phase, Some(position), pivot))?,
-                    entry_id,
-                ));
-            }
-            if !complete
-                || seed.is_none()
-                || (backwards && phase == 0)
-                || (!backwards && phase == 1)
-            {
-                break;
-            }
-            phase = if backwards { 0 } else { 1 };
-            cursor = None;
-            inclusive = false;
-        }
-        Ok(rows)
-    }
 }
 
-pub(crate) async fn read_source(
+pub(crate) async fn source_members(
     connection: &mut SqliteConnection,
     source: &QueueSource,
-    after: Option<&str>,
-    limit: usize,
+) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
+    source_members_on(connection, source, None).await
+}
+
+pub(crate) async fn legacy_source_members(
+    connection: &mut SqliteConnection,
+    source: &QueueSource,
     seed: Option<u64>,
-    backwards: bool,
-) -> LibraryResult<Vec<(String, Option<PlaylistEntryKey>, String, Option<String>)>> {
-    let query = match &source.scope {
+) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
+    let mut rows = source_members_on(connection, source, seed).await?;
+    if seed.is_none()
+        && let Some(anchor) = rows.iter().position(|row| row.2)
+    {
+        rows.drain(..anchor);
+    }
+    Ok(rows)
+}
+
+async fn source_members_on(
+    connection: &mut SqliteConnection,
+    source: &QueueSource,
+    legacy_seed: Option<u64>,
+) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
+    let mut query = match &source.scope {
         QueueScope::Smart { reference, now } => {
-            let rows = if backwards {
-                if let Some(anchor) = &source.anchor_uri {
-                    crate::smart_playlists::smart_source_history_ref(
-                        connection, reference, *now, anchor, limit,
-                    )
-                    .await?
-                } else {
-                    crate::smart_playlists::smart_source_last_ref(connection, reference, *now, seed)
+            let mut uris =
+                crate::smart_playlists::smart_members_ref(connection, reference, *now).await?;
+            if let Some(seed) = legacy_seed {
+                let anchor = source.anchor_uri.as_deref();
+                let known = if let Some(uri) = anchor {
+                    sqlx::query_scalar::<_, i64>("SELECT track_key FROM tracks WHERE media_uri=?1")
+                        .bind(uri)
+                        .fetch_optional(&mut *connection)
                         .await?
-                        .into_iter()
-                        .collect()
-                }
-            } else {
-                crate::smart_playlists::smart_source_window_ref(
-                    connection,
-                    reference,
-                    *now,
-                    after,
-                    limit,
-                    seed,
-                    source.anchor_uri.as_deref(),
-                )
-                .await?
-            };
-            return Ok(rows
+                } else {
+                    None
+                };
+                let catalog_first = anchor.is_none() || known.is_some();
+                let pivot = known
+                    .map(|key| (key * 1103515245) % 2147483647)
+                    .unwrap_or((seed % 2147483647) as i64);
+                uris=sqlx::query_scalar(
+                    "SELECT requested.value FROM json_each(?1) requested LEFT JOIN tracks track ON track.media_uri=requested.value
+                     ORDER BY CASE WHEN track.track_key IS NOT NULL THEN ?2+(((track.track_key*1103515245)%2147483647)<?3)
+                                   ELSE (2-?2)+(requested.value<COALESCE(?4,'')) END,
+                              CASE WHEN track.track_key IS NOT NULL THEN (track.track_key*1103515245)%2147483647 END, requested.value")
+                    .bind(serde_json::to_string(&uris)?).bind(if catalog_first {0}else{2}).bind(pivot)
+                    .bind(if catalog_first {None}else{anchor}).fetch_all(&mut *connection).await?;
+            }
+            return Ok(uris
                 .into_iter()
-                .map(|(uri, cursor)| (uri, None, cursor, None))
+                .map(|uri| {
+                    let selected = source.anchor_uri.as_ref() == Some(&uri);
+                    (uri, None, selected)
+                })
                 .collect());
         }
+
         QueueScope::Tracks {
             source: id,
             folder,
@@ -285,9 +181,44 @@ pub(crate) async fn read_source(
             .as_ref()
             .map(|uri| format!("{}={}", query.uri, quote(uri)))
     };
-    query
-        .window(connection, after, limit, seed, anchor, backwards)
-        .await
+
+    if let Some(seed) = legacy_seed {
+        let key = if query.entry_key == "NULL" {
+            "track.track_key".to_string()
+        } else {
+            format!("abs({})", query.entry_key)
+        };
+        let hash = format!("({key}*1103515245)%2147483647");
+        let mut pivot = (seed % 2147483647) as i64;
+        if let Some(anchor) = &anchor
+            && let Some(value) = sqlx::query_scalar::<_, i64>(sqlx::AssertSqlSafe(format!(
+                "SELECT {hash} FROM {} WHERE {} AND ({anchor}) LIMIT 1",
+                query.from, query.predicate
+            )))
+            .fetch_optional(&mut *connection)
+            .await?
+        {
+            pivot = value;
+        }
+        query.order = vec![
+            (format!("(({hash})<{pivot})"), false),
+            (hash, false),
+            (key, false),
+        ];
+    }
+    let identity = if query.entry_key == "NULL" {
+        "NULL".to_string()
+    } else {
+        "json_array((SELECT object_id FROM source_ids WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)".to_string()
+    };
+    let columns = format!(
+        "{},{identity},COALESCE(({}),0)",
+        query.uri,
+        anchor.unwrap_or_else(|| "0".into())
+    );
+    Ok(sqlx::query_as(sqlx::AssertSqlSafe(query.select(&columns)))
+        .fetch_all(connection)
+        .await?)
 }
 pub(crate) async fn canonical_query(
     connection: &mut SqliteConnection,
@@ -403,163 +334,4 @@ pub(crate) async fn canonical_playlist_query(
         descending,
         anchor_uri,
     }))
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[tokio::test]
-    #[ignore = "large isolated source and persistence verification"]
-    async fn million_track_queue_reads_and_saves_stay_bounded() {
-        use std::sync::{
-            Arc,
-            atomic::{AtomicU64, Ordering},
-        };
-        let dir = tempfile::tempdir().unwrap();
-        let database = crate::Database::open(dir.path().join("queue.sqlite3"))
-            .await
-            .unwrap();
-        let mut previous = 0;
-        for size in [300_000, 1_000_000] {
-            let source;
-            {
-                let mut writer = database.writer().await.unwrap();
-                let connection = writer.as_mut().unwrap();
-                sqlx::query("INSERT OR IGNORE INTO sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(1,'source','Source','source',zeroblob(32),zeroblob(32))").execute(&mut *connection).await.unwrap();
-                source = SourceKey::from_raw(1);
-                sqlx::query("WITH RECURSIVE n(i) AS(VALUES(?1) UNION ALL SELECT i+1 FROM n WHERE i<?2) INSERT INTO tracks(track_key,source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis) SELECT i,1,'track-'||i,'https://example.test/'||i,'Track '||i,'track','Album','Artist',printf('%07d',i),1000 FROM n").bind(previous+1).bind(size).execute(&mut *connection).await.unwrap();
-                for seed in [None, Some(192837)] {
-                    let count = Arc::new(AtomicU64::new(0));
-                    let ticks = count.clone();
-                    connection
-                        .lock_handle()
-                        .await
-                        .unwrap()
-                        .set_progress_handler(100, move || {
-                            ticks.fetch_add(1, Ordering::Relaxed);
-                            true
-                        });
-                    let started = std::time::Instant::now();
-                    let first = crate::tracks::track_query(
-                        source,
-                        TrackSort::Title,
-                        false,
-                        false,
-                        None,
-                        "",
-                        false,
-                    )
-                    .window(connection, None, 100, seed, None, false)
-                    .await
-                    .unwrap();
-                    let next = crate::tracks::track_query(
-                        source,
-                        TrackSort::Title,
-                        false,
-                        false,
-                        None,
-                        "",
-                        false,
-                    )
-                    .window(
-                        connection,
-                        first.last().map(|row| row.2.as_str()),
-                        100,
-                        seed,
-                        None,
-                        false,
-                    )
-                    .await
-                    .unwrap();
-                    connection
-                        .lock_handle()
-                        .await
-                        .unwrap()
-                        .remove_progress_handler();
-                    let steps = count.load(Ordering::Relaxed) * 100;
-                    tracing::info!(
-                        "tracks={size}, shuffle={seed:?}, two 100-member reads: {:?}, ~{steps} VM instructions",
-                        started.elapsed()
-                    );
-                    assert_eq!(first.len(), 100);
-                    assert_eq!(next.len(), 100);
-                    assert!(steps < 50_000, "source read scanned unrelated tracks");
-                }
-            }
-            for seed in [None, Some(192837)] {
-                let started = std::time::Instant::now();
-                let page = database
-                    .read_queue(crate::QueueReadRequest {
-                        input: crate::QueueInput::Query {
-                            query: QueueQuery::Tracks {
-                                source,
-                                favorites_only: false,
-                                recursive: false,
-                            },
-                            folder: None,
-                            filter: String::new(),
-                            sort: TrackSort::Title,
-                            descending: false,
-                            context_id: "tracks".into(),
-                            anchor_uri: Some(format!("https://example.test/{}", size - 150)),
-                        },
-                        cursor: crate::QueueCursor {
-                            seed,
-                            anchor: Some((size - 151) as usize),
-                            ..Default::default()
-                        },
-                        limit: 100,
-                        history: true,
-                        backwards: false,
-                    })
-                    .await
-                    .unwrap();
-                let read = started.elapsed();
-                let state = crate::QueueRestore {
-                    current_index: Some(page.current_index),
-                    sources: vec![crate::QueueInstruction {
-                        input: page.input,
-                        repeat: true,
-                        seed: page.cursor.seed,
-                    }],
-                    pending: [page.cursor].into(),
-                    next_id: 100,
-                    occurrences: page
-                        .items
-                        .into_iter()
-                        .enumerate()
-                        .map(
-                            |(i, (item, provenance, canonical_position, playlist_entry_id))| {
-                                Arc::new(crate::QueueOccurrence {
-                                    occurrence: format!("queue:{i}").into(),
-                                    item,
-                                    provenance,
-                                    canonical_position,
-                                    playlist_entry_id,
-                                    source_index: Some(0),
-                                })
-                            },
-                        )
-                        .collect(),
-                    ..Default::default()
-                };
-                let save = std::time::Instant::now();
-                database.save_queue(&state).await.unwrap();
-                tracing::info!(
-                    "tracks={size}, shuffle={seed:?}, clicked playback read+metadata: {read:?}, save: {:?}",
-                    save.elapsed()
-                );
-                assert_eq!(database.restore_queue().await.unwrap(), state);
-                let mut writer = database.writer().await.unwrap();
-                assert_eq!(
-                    sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
-                        .fetch_one(writer.as_mut().unwrap())
-                        .await
-                        .unwrap(),
-                    100
-                );
-            }
-            previous = size;
-        }
-    }
 }

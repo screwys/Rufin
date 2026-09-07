@@ -214,8 +214,13 @@ pub fn present_playback_media_menu(
 ) {
     let database = Arc::clone(&menus.library);
     let runtime = menus.runtime.clone();
+    let occurrence = queue_occurrence.clone();
     let task = runtime.spawn(async move {
         let cancellation = library::ReadCancellation::new();
+        let media = match (media, occurrence) {
+            (None, Some(occurrence)) => database.queue_item_for_occurrence(&occurrence).await?,
+            (media, _) => media,
+        };
         if let Some(track) = database.track_row_by_uri(&media_uri, &cancellation).await? {
             Ok::<_, library::LibraryError>((Some(track), media, None, false))
         } else {

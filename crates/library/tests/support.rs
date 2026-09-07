@@ -271,52 +271,33 @@ pub async fn connection(path: &std::path::Path) -> SqliteConnection {
     connection
 }
 
-/// Resolve a source page into a fixture representing playback's bounded saved state.
+/// Capture complete membership with a bounded metadata projection.
 pub async fn resolve_queue(
     database: &Database,
     input: library::QueueInput,
-    cursor: library::QueueCursor,
+    anchor_index: usize,
 ) -> library::QueueRestore {
-    let page = database
-        .read_queue(library::QueueReadRequest {
-            input,
-            cursor,
-            limit: 100,
-            history: true,
-            backwards: false,
+    let mut page = database
+        .read_queue(library::QueueReadRequest::Capture {
+            input: Box::new(input),
+            anchor_index,
+            random_start: None,
         })
         .await
         .unwrap();
+    let start = page.current_index.saturating_sub(10);
+    page.occurrences = database
+        .read_queue(library::QueueReadRequest::Hydrate {
+            entries: page.entries[start..page.entries.len().min(start + 100)].to_vec(),
+        })
+        .await
+        .unwrap()
+        .occurrences;
     library::QueueRestore {
-        current_index: (!page.items.is_empty()).then_some(page.current_index),
-        next_id: page.items.len() as u64,
-        occurrences: page
-            .items
-            .into_iter()
-            .enumerate()
-            .map(
-                |(index, (item, provenance, canonical_position, playlist_entry_id))| {
-                    std::sync::Arc::new(QueueOccurrence {
-                        occurrence: format!("fixture:{index}").into(),
-                        item,
-                        provenance,
-                        canonical_position,
-                        source_index: Some(0),
-                        playlist_entry_id,
-                    })
-                },
-            )
-            .collect(),
-        sources: vec![library::QueueInstruction {
-            input: page.input,
-            repeat: true,
-            seed: page.cursor.seed,
-        }],
-        pending: if page.exhausted {
-            Default::default()
-        } else {
-            [page.cursor].into()
-        },
+        current_index: (!page.entries.is_empty()).then_some(page.current_index),
+        order: (0..page.entries.len() as u32).collect(),
+        entries: page.entries.into(),
+        occurrences: page.occurrences,
         ..Default::default()
     }
 }
