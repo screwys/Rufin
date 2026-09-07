@@ -77,6 +77,13 @@ impl Shell {
                 .borrow()
                 .library_list(LibraryListKey::AlbumDetailTracks),
         );
+        model.set_queue_source(
+            library::QueueQuery::Collection {
+                collection: library::QueueCollection::AlbumKey(album_id),
+                favorites_only: false,
+            },
+            None,
+        );
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,

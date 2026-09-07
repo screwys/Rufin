@@ -903,6 +903,8 @@ async fn source_removal_preserves_listens_and_pending_delivery_only() {
         &fixture.database,
         fixture.source,
         &[QueueOccurrence {
+            source_index: None,
+            playlist_entry_id: None,
             occurrence: OccurrenceId::new("remove-queue"),
             item: queue_media,
             canonical_position: 0,

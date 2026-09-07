@@ -14,7 +14,7 @@ use crate::{
 
 const TRACK_ROW_LIMIT: usize = 256;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum TrackSort {
     Title,
     TrackNumber,
@@ -38,83 +38,103 @@ impl TrackSort {
         matches!(self, Self::LastPlayed | Self::PlayCount)
     }
 
-    pub(crate) fn order_sql(self, descending: bool) -> &'static str {
-        match (self, descending) {
-            (TrackSort::Title, false) => "track.sort_text ASC, track.track_key ASC",
-            (TrackSort::Title, true) => "track.sort_text DESC, track.track_key ASC",
-            (TrackSort::TrackNumber, false) => {
-                "track.disc_number ASC, track.track_number ASC, track.sort_text, track.track_key"
+    pub(crate) fn order_terms(self, descending: bool) -> Vec<(String, bool)> {
+        let fields: &[(&str, bool)] = match self {
+            Self::Title => &[("track.sort_text", false), ("track.track_key", false)],
+            Self::TrackNumber => &[
+                ("track.disc_number", false),
+                ("track.track_number", false),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Artist => &[
+                ("track.display_artist", false),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::AlbumArtist => &[
+                (
+                    "(SELECT artist.sort_text FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) WHERE album.album_key=track.album_key ORDER BY relation.position LIMIT 1)",
+                    true,
+                ),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Album => &[
+                ("track.display_album", false),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Year => &[
+                ("track.year", true),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::ReleaseDate => &[
+                ("track.release_date", true),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::DateAdded => &[
+                ("track.date_added", true),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::UserRating => &[
+                (
+                    "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating)",
+                    true,
+                ),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Genre => &[
+                (
+                    "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1)",
+                    true,
+                ),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Bpm => &[
+                ("track.bpm", true),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Duration => &[
+                ("track.duration_millis", false),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::Favorite => &[
+                (
+                    "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)",
+                    false,
+                ),
+                ("track.sort_text", false),
+                ("track.track_key", false),
+            ],
+            Self::LastPlayed => &[("activity.last_played", true), ("track.track_key", false)],
+            Self::PlayCount => &[("activity.play_count", false), ("track.track_key", false)],
+        };
+        let mut terms = Vec::new();
+        for (i, (field, nulls_last)) in fields.iter().enumerate() {
+            let desc = descending && (i == 0 || (self == Self::TrackNumber && i == 1));
+            if *nulls_last {
+                terms.push((format!("({field}) IS NULL"), false));
             }
-            (TrackSort::TrackNumber, true) => {
-                "track.disc_number DESC, track.track_number DESC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Artist, false) => {
-                "track.display_artist ASC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Artist, true) => {
-                "track.display_artist DESC, track.sort_text, track.track_key"
-            }
-            (TrackSort::AlbumArtist, false) => {
-                "(SELECT artist.sort_text FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) WHERE album.album_key=track.album_key ORDER BY relation.position LIMIT 1) ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::AlbumArtist, true) => {
-                "(SELECT artist.sort_text FROM albums album JOIN album_artists relation USING(album_key) JOIN artists artist USING(artist_key) WHERE album.album_key=track.album_key ORDER BY relation.position LIMIT 1) DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::Album, false) => {
-                "track.display_album ASC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Album, true) => {
-                "track.display_album DESC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Year, false) => {
-                "track.year ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::Year, true) => {
-                "track.year DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::ReleaseDate, false) => {
-                "track.release_date ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::ReleaseDate, true) => {
-                "track.release_date DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::DateAdded, false) => {
-                "track.date_added ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::DateAdded, true) => {
-                "track.date_added DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::UserRating, false) => {
-                "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating) ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::UserRating, true) => {
-                "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_rating) DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::Genre, false) => {
-                "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1) ASC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::Genre, true) => {
-                "(SELECT genre.sort_text FROM track_genres relation JOIN genres genre USING(genre_key) WHERE relation.track_key=track.track_key ORDER BY relation.position LIMIT 1) DESC NULLS LAST, track.sort_text, track.track_key"
-            }
-            (TrackSort::Bpm, false) => "track.bpm ASC NULLS LAST, track.sort_text, track.track_key",
-            (TrackSort::Bpm, true) => "track.bpm DESC NULLS LAST, track.sort_text, track.track_key",
-            (TrackSort::Duration, false) => {
-                "track.duration_millis ASC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Duration, true) => {
-                "track.duration_millis DESC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Favorite, false) => {
-                "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite) ASC, track.sort_text, track.track_key"
-            }
-            (TrackSort::Favorite, true) => {
-                "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite) DESC, track.sort_text, track.track_key"
-            }
-            (TrackSort::LastPlayed, false) => "activity.last_played ASC NULLS LAST",
-            (TrackSort::LastPlayed, true) => "activity.last_played DESC NULLS LAST",
-            (TrackSort::PlayCount, false) => "activity.play_count ASC",
-            (TrackSort::PlayCount, true) => "activity.play_count DESC",
+            terms.push((
+                if *nulls_last {
+                    format!("COALESCE({field},'')")
+                } else if self == Self::TrackNumber && i < 2 {
+                    format!("coalesce({field},-1)")
+                } else {
+                    (*field).to_string()
+                },
+                desc,
+            ));
         }
+        terms
     }
 }
 
@@ -689,47 +709,72 @@ async fn load_track_order(
     filter: &str,
     folder_subset: bool,
 ) -> LibraryResult<Vec<(TrackKey, String)>> {
-    let simple = sort.order_sql(descending);
-    let mut query = if matches!(sort, TrackSort::LastPlayed | TrackSort::PlayCount) {
-        QueryBuilder::<Sqlite>::new(
-            "WITH listen_activity AS (SELECT listen.media_uri,count(*) play_count,max(listen.started_at) last_played FROM tracks member CROSS JOIN listens listen ON listen.media_uri=member.media_uri WHERE member.source_key=",
-        )
-    } else {
-        QueryBuilder::<Sqlite>::new(
-            "SELECT track.track_key,track.media_uri FROM tracks track WHERE track.source_key=",
-        )
+    let query = track_query(
+        source,
+        sort,
+        descending,
+        favorites_only,
+        folder,
+        filter,
+        folder_subset,
+    );
+    Ok(sqlx::query_as::<_, (TrackKey, String)>(sqlx::AssertSqlSafe(
+        query.select("track.track_key,track.media_uri"),
+    ))
+    .persistent(false)
+    .fetch_all(connection)
+    .await?)
+}
+
+pub(crate) fn track_query(
+    source: SourceKey,
+    sort: TrackSort,
+    descending: bool,
+    favorites_only: bool,
+    folder: Option<FolderKey>,
+    filter: &str,
+    folder_subset: bool,
+) -> crate::source_window::SourceQuery {
+    let mut query = crate::source_window::SourceQuery {
+        from: "tracks track".into(),
+        predicate: format!("track.source_key={}", source.raw()),
+        order: sort.order_terms(descending),
+        uri: "track.media_uri".into(),
+        key: "track.track_key".into(),
+        entry_key: "NULL".into(),
     };
-    if matches!(sort, TrackSort::LastPlayed | TrackSort::PlayCount) {
-        query.push_bind(source).push(" GROUP BY listen.media_uri), activity AS (SELECT track.track_key,COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0) play_count,CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played WHEN listen.last_played IS NULL THEN baseline.last_played_at ELSE max(baseline.last_played_at,listen.last_played) END last_played FROM tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' LEFT JOIN listen_activity listen ON listen.media_uri=track.media_uri WHERE track.source_key=").push_bind(source).push(") SELECT track.track_key,track.media_uri FROM tracks track JOIN activity USING(track_key) WHERE track.source_key=").push_bind(source);
-    } else {
-        query.push_bind(source);
-    }
     if folder_subset {
-        query.push(" AND EXISTS (SELECT 1 FROM temp.folder_route_tracks candidate WHERE candidate.media_uri=track.media_uri)");
+        query.predicate.push_str(" AND EXISTS(SELECT 1 FROM temp.folder_route_tracks candidate WHERE candidate.media_uri=track.media_uri)");
+    }
+    track_filter(&mut query, folder, filter, favorites_only);
+    if sort.uses_activity() {
+        for (field, _) in &mut query.order {
+            *field=field.replace("activity.play_count","(track.local_play_count+COALESCE((SELECT play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0))")
+                .replace("activity.last_played","(SELECT max(value) FROM (SELECT max(started_at) value FROM listens WHERE media_uri=track.media_uri UNION ALL SELECT last_played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'))");
+        }
+    }
+    query
+}
+
+pub(crate) fn track_filter(
+    query: &mut crate::source_window::SourceQuery,
+    folder: Option<FolderKey>,
+    filter: &str,
+    favorites_only: bool,
+) {
+    if let Some(folder) = folder {
+        query.predicate.push_str(&format!(" AND EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key={})",folder.raw()));
+    }
+    if favorites_only {
+        query.predicate.push_str(" AND COALESCE((SELECT favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1");
     }
     let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    query.push(" AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1) AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders relation WHERE relation.track_key=track.track_key AND relation.folder_key=").push_bind(folder).push(")) AND (").push_bind(filter.is_empty()).push(" OR instr(track.normalized_search,").push_bind(&filter).push(")>0 OR CAST(track.year AS TEXT)=").push_bind(&filter).push(") ORDER BY ");
-    if matches!(sort, TrackSort::LastPlayed) {
-        query.push(if descending {
-            "activity.last_played DESC NULLS LAST"
-        } else {
-            "activity.last_played ASC NULLS LAST"
-        });
-    } else if matches!(sort, TrackSort::PlayCount) {
-        query.push(if descending {
-            "activity.play_count DESC"
-        } else {
-            "activity.play_count ASC"
-        });
-    } else {
-        query.push(simple);
+    if !filter.is_empty() {
+        let filter = crate::source_window::quote(&filter);
+        query.predicate.push_str(&format!(
+            " AND (instr(track.normalized_search,{filter})>0 OR CAST(track.year AS TEXT)={filter})"
+        ));
     }
-    query.push(", track.track_key");
-    Ok(query
-        .build_query_as::<(TrackKey, String)>()
-        .persistent(false)
-        .fetch_all(connection)
-        .await?)
 }
 
 pub(crate) async fn load_track_rows(

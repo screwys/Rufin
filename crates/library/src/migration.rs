@@ -615,6 +615,7 @@ async fn import_queue(
                         LibraryError::InvalidStore("Queue occurrence ID unreadable".into())
                     })?;
                 Ok(crate::QueueOccurrence {
+                    source_index:None,playlist_entry_id:None,
                     occurrence: crate::OccurrenceId::new(id),
                     item,
                     canonical_position: integer(&row,"position").filter(|position|*position>=0).ok_or_else(||LibraryError::InvalidStore("Queue position unreadable".into()))? as usize,

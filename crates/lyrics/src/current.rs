@@ -1795,6 +1795,8 @@ mod tests {
                             media_uri, title, "Artist", "Album", 3_000,
                         ),
                         canonical_position: 0,
+                        source_index: None,
+                        playlist_entry_id: None,
                         provenance: playback::Provenance::Manual,
                     }),
                 }),

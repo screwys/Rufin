@@ -4,7 +4,6 @@
 //! owns the password login, rotating UI token, and richer album, track, and
 //! artist records used during a Navidrome library refresh.
 
-use std::collections::HashMap;
 use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
@@ -12,12 +11,14 @@ use std::pin::Pin;
 use library::Scan;
 use reqwest::Url;
 use reqwest::header::HeaderName;
+use serde::Serialize;
 use serde::de::DeserializeOwned;
-use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use tokio::sync::Mutex;
 
 use crate::policy::normalized_date;
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
+use crate::remote_json::{boolean, field, id, items, strings};
 use crate::source::{SourceReadProgress, SourceReadStage};
 use crate::{SourceError, SourceResult};
 
@@ -45,12 +46,6 @@ const NAVIDROME_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 struct NavidromeLoginRequest<'a> {
     username: &'a str,
     password: &'a str,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NavidromeLoginResponse {
-    token: String,
 }
 
 pub(super) struct NavidromeSession(Mutex<Option<String>>);
@@ -81,43 +76,53 @@ impl SubsonicSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        self.stage_navidrome_pages::<NavidromeAlbum>(
+        self.stage_navidrome_pages(
             "album",
             SourceReadStage::Albums,
             scan,
             progress,
             cancelled,
-            |scan, album| Box::pin(stage_album(scan, album_from_navidrome(self, album))),
+            |scan, raw_id, album| {
+                Box::pin(stage_album(
+                    scan,
+                    album_from_navidrome(self, &raw_id, &album),
+                ))
+            },
         )
         .await?;
-        self.stage_navidrome_pages::<NavidromeTrack>(
+        self.stage_navidrome_pages(
             "song",
             SourceReadStage::Tracks,
             scan,
             progress,
             cancelled,
-            |scan, track| {
+            |scan, raw_id, track| {
                 Box::pin(stage_navidrome_track(
                     scan,
-                    track_from_navidrome(self, track),
+                    track_from_navidrome(self, &raw_id, &track),
                 ))
             },
         )
         .await?;
-        self.stage_navidrome_pages::<NavidromeArtist>(
+        self.stage_navidrome_pages(
             "artist",
             SourceReadStage::Artists,
             scan,
             progress,
             cancelled,
-            |scan, artist| Box::pin(stage_artist(scan, artist_from_navidrome(self, artist))),
+            |scan, raw_id, artist| {
+                Box::pin(stage_artist(
+                    scan,
+                    artist_from_navidrome(self, &raw_id, &artist),
+                ))
+            },
         )
         .await?;
 
         Ok(())
     }
 
-    async fn stage_navidrome_pages<T: DeserializeOwned>(
+    async fn stage_navidrome_pages(
         &self,
         endpoint: &str,
         stage: SourceReadStage,
@@ -126,14 +131,12 @@ impl SubsonicSource {
         cancelled: &(dyn Fn() -> bool + Send + Sync),
         mut write: impl for<'scan> FnMut(
             &'scan mut Scan,
-            T,
+            String,
+            Value,
         ) -> Pin<
             Box<dyn Future<Output = library::LibraryResult<()>> + Send + 'scan>,
         >,
-    ) -> SourceResult<()>
-    where
-        T: Send,
-    {
+    ) -> SourceResult<()> {
         progress(SourceReadProgress {
             stage,
             completed: 0,
@@ -154,7 +157,9 @@ impl SubsonicSource {
             })?;
             scan.begin_batch().await?;
             for item in page {
-                write(scan, item).await?;
+                if let Some(raw_id) = id(&item["id"]) {
+                    write(scan, raw_id, item).await?;
+                }
             }
             scan.finish_batch().await?;
             progress(SourceReadProgress {
@@ -168,11 +173,7 @@ impl SubsonicSource {
         }
     }
 
-    async fn navidrome_page<T: DeserializeOwned>(
-        &self,
-        kind: &str,
-        offset: usize,
-    ) -> SourceResult<Vec<T>> {
+    async fn navidrome_page(&self, kind: &str, offset: usize) -> SourceResult<Vec<Value>> {
         let end = offset.checked_add(NAVIDROME_PAGE_SIZE).ok_or_else(|| {
             SourceError::Other("Navidrome library page offset overflowed".to_string())
         })?;
@@ -242,7 +243,10 @@ impl SubsonicSource {
             )
         })?;
         let login = navidrome_login(&self.client, &self.base_url, &self.username, password).await?;
-        let next = required(login.token, "Navidrome session token")?;
+        let next = required(
+            field(&login, "token").unwrap_or_default(),
+            "Navidrome session token",
+        )?;
         *token = Some(next.clone());
         Ok(next)
     }
@@ -266,7 +270,7 @@ async fn navidrome_login(
     base_url: &Url,
     username: &str,
     password: &str,
-) -> SourceResult<NavidromeLoginResponse> {
+) -> SourceResult<Value> {
     let url = navidrome_endpoint(base_url, "auth/login")?;
     remote_http::json(
         client
@@ -309,188 +313,30 @@ fn clean_optional(value: Option<String>) -> Option<String> {
     value.and_then(clean)
 }
 
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct NavidromeGenre {
-    #[serde(default)]
-    name: String,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct NavidromeParticipant {
-    id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    mbz_artist_id: Option<String>,
-}
-
-type NavidromeParticipants = HashMap<String, Vec<NavidromeParticipant>>;
-type NavidromeTags = HashMap<String, Vec<String>>;
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct NavidromeAlbum {
-    id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    artist: String,
-    #[serde(default)]
-    album_artist: String,
-    #[serde(default)]
-    album_artist_id: String,
-    #[serde(default)]
-    max_year: i32,
-    #[serde(default)]
-    release_date: Option<String>,
-    #[serde(default)]
-    created_at: Option<String>,
-    #[serde(default)]
-    updated_at: Option<String>,
-    #[serde(default)]
-    play_date: Option<String>,
-    #[serde(default)]
-    play_count: Option<u64>,
-    #[serde(default)]
-    rating: Option<f64>,
-    #[serde(default)]
-    starred: bool,
-    #[serde(default)]
-    compilation: bool,
-    #[serde(default)]
-    mbz_album_id: Option<String>,
-    #[serde(default)]
-    mbz_release_group_id: Option<String>,
-    #[serde(default)]
-    mbz_album_artist_id: Option<String>,
-    #[serde(default)]
-    genres: Option<Vec<NavidromeGenre>>,
-    #[serde(default)]
-    participants: NavidromeParticipants,
-    #[serde(default)]
-    tags: NavidromeTags,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct NavidromeTrack {
-    id: String,
-    #[serde(default)]
-    album_id: String,
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    artist: String,
-    #[serde(default)]
-    artist_id: String,
-    #[serde(default)]
-    album: String,
-    #[serde(default)]
-    album_artist: String,
-    #[serde(default)]
-    album_artist_id: String,
-    #[serde(default)]
-    year: i32,
-    #[serde(default)]
-    release_date: Option<String>,
-    #[serde(default)]
-    created_at: Option<String>,
-    #[serde(default)]
-    play_date: Option<String>,
-    #[serde(default)]
-    play_count: Option<u64>,
-    #[serde(default)]
-    rating: Option<f64>,
-    #[serde(default)]
-    starred: bool,
-    #[serde(default)]
-    duration: f64,
-    #[serde(default)]
-    disc_number: i32,
-    #[serde(default)]
-    track_number: i32,
-    #[serde(default)]
-    library_id: i64,
-    #[serde(default)]
-    library_path: Option<String>,
-    #[serde(default)]
-    path: String,
-    #[serde(default)]
-    suffix: String,
-    #[serde(default)]
-    comment: Option<String>,
-    #[serde(default)]
-    bpm: Option<i32>,
-    #[serde(default)]
-    #[serde(rename = "mbzRecordingID", alias = "mbzRecordingId")]
-    mbz_recording_id: Option<String>,
-    #[serde(default)]
-    mbz_release_track_id: Option<String>,
-    #[serde(default)]
-    mbz_artist_id: Option<String>,
-    #[serde(default)]
-    mbz_album_artist_id: Option<String>,
-    #[serde(default)]
-    genres: Option<Vec<NavidromeGenre>>,
-    #[serde(default)]
-    participants: NavidromeParticipants,
-    #[serde(default)]
-    tags: NavidromeTags,
-    #[serde(default)]
-    rg_track_gain: Option<f64>,
-    #[serde(default)]
-    rg_track_peak: Option<f64>,
-    #[serde(default)]
-    rg_album_gain: Option<f64>,
-    #[serde(default)]
-    rg_album_peak: Option<f64>,
-}
-
-#[derive(Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(super) struct NavidromeArtist {
-    id: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    starred: bool,
-    #[serde(default)]
-    play_date: Option<String>,
-    #[serde(default)]
-    play_count: Option<u64>,
-    #[serde(default)]
-    rating: Option<f64>,
-    #[serde(default)]
-    mbz_artist_id: Option<String>,
-}
-
-fn album_from_navidrome(source: &SubsonicSource, album: NavidromeAlbum) -> Album {
-    let raw_id = album.id.clone();
+fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) -> Album {
     let mut album_artists = participant_credits(
         source,
-        &album.participants,
+        &album["participants"],
         "albumartist",
-        &album.album_artist_id,
-        album.mbz_album_artist_id.as_deref(),
+        &id(&album["albumArtistId"]).unwrap_or_default(),
+        field::<String>(album, "mbzAlbumArtistId").as_deref(),
     );
-    let artist = clean(album.album_artist.clone())
-        .or_else(|| clean(album.artist.clone()))
+    let artist = clean_optional(field(album, "albumArtist"))
+        .or_else(|| clean_optional(field(album, "artist")))
         .or_else(|| super::joined_artist_names(&album_artists))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     if album_artists.is_empty() {
         album_artists = artist_credit(
             source,
-            album.album_artist_id,
+            id(&album["albumArtistId"]).unwrap_or_default(),
             artist.clone(),
-            album.mbz_album_artist_id,
+            field(album, "mbzAlbumArtistId"),
         )
         .into_iter()
         .collect();
     }
-    let release_date = normalized_date(album.release_date);
-    let year = positive_u16(Some(album.max_year))
+    let release_date = normalized_date(field(album, "releaseDate"));
+    let year = positive_u16(field(album, "maxYear"))
         .or_else(|| {
             release_date
                 .as_deref()
@@ -499,137 +345,140 @@ fn album_from_navidrome(source: &SubsonicSource, album: NavidromeAlbum) -> Album
         })
         .unwrap_or_default();
     Album {
-        id: String::from(source.id("album", &raw_id)),
-        title: clean(album.name).unwrap_or_else(|| "Untitled Album".to_string()),
-        artist: artist.clone(),
+        id: String::from(source.id("album", raw_id)),
+        title: clean_optional(field(album, "name")).unwrap_or_else(|| "Untitled Album".to_string()),
+        artist,
         year,
         release_date,
-        date_added: normalized_date(album.created_at),
-        last_played: clean_optional(album.play_date),
-        play_count: capped_u32(album.play_count),
-        user_rating: rating(album.rating),
-        favorite: album.starred,
-        color_seed: super::color_seed(&raw_id),
+        date_added: normalized_date(field(album, "createdAt")),
+        last_played: clean_optional(field(album, "playDate")),
+        play_count: capped_u32(field(album, "playCount")),
+        user_rating: rating(field(album, "rating")),
+        favorite: boolean(&album["starred"]).unwrap_or_default(),
+        color_seed: super::color_seed(raw_id),
         image_ref: Some(navidrome_image_ref(
             source,
             "al",
-            &raw_id,
-            clean_optional(album.updated_at),
+            raw_id,
+            clean_optional(field(album, "updatedAt")),
         )),
         local_artwork: None,
-        release_types: normalize_release_types(tag_values(&album.tags, "releasetype")),
-        is_compilation: Some(album.compilation),
-        musicbrainz_album_id: clean_optional(album.mbz_album_id),
-        musicbrainz_release_group_id: clean_optional(album.mbz_release_group_id),
+        release_types: normalize_release_types(tag_values(&album["tags"], "releasetype")),
+        is_compilation: Some(boolean(&album["compilation"]).unwrap_or_default()),
+        musicbrainz_album_id: clean_optional(field(album, "mbzAlbumId")),
+        musicbrainz_release_group_id: clean_optional(field(album, "mbzReleaseGroupId")),
         relations: AlbumRelations {
             album_artists,
             artists: Vec::new(),
-            genres: genre_credits(source, album.genres),
+            genres: genre_credits(source, &album["genres"]),
         },
     }
 }
 
-fn track_from_navidrome(source: &SubsonicSource, track: NavidromeTrack) -> Track {
-    let raw_id = track.id.clone();
+fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) -> Track {
     let mut artists = participant_credits(
         source,
-        &track.participants,
+        &track["participants"],
         "artist",
-        &track.artist_id,
-        track.mbz_artist_id.as_deref(),
+        &id(&track["artistId"]).unwrap_or_default(),
+        field::<String>(track, "mbzArtistId").as_deref(),
     );
-    let artist = clean(track.artist.clone())
+    let artist = clean_optional(field(track, "artist"))
         .or_else(|| super::joined_artist_names(&artists))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     if artists.is_empty() {
         artists = artist_credit(
             source,
-            track.artist_id,
+            id(&track["artistId"]).unwrap_or_default(),
             artist.clone(),
-            track.mbz_artist_id.clone(),
+            field(track, "mbzArtistId"),
         )
         .into_iter()
         .collect();
     }
     let mut album_artists = participant_credits(
         source,
-        &track.participants,
+        &track["participants"],
         "albumartist",
-        &track.album_artist_id,
-        track.mbz_album_artist_id.as_deref(),
+        &id(&track["albumArtistId"]).unwrap_or_default(),
+        field::<String>(track, "mbzAlbumArtistId").as_deref(),
     );
-    let album_artist = clean(track.album_artist.clone())
+    let album_artist = clean_optional(field(track, "albumArtist"))
         .or_else(|| super::joined_artist_names(&album_artists))
         .unwrap_or_else(|| artist.clone());
     if album_artists.is_empty() {
         album_artists = artist_credit(
             source,
-            track.album_artist_id,
+            id(&track["albumArtistId"]).unwrap_or_default(),
             album_artist,
-            track.mbz_album_artist_id.clone(),
+            field(track, "mbzAlbumArtistId"),
         )
         .into_iter()
         .collect();
     }
-    let album_id = clean(track.album_id).map(|id| String::from(source.id("album", &id)));
+    let album_id = id(&track["albumId"]).map(|id| String::from(source.id("album", &id)));
     Track {
-        id: String::from(source.id("track", &raw_id)),
+        id: String::from(source.id("track", raw_id)),
         album_id,
-        title: clean(track.title).unwrap_or_else(|| "Untitled Track".to_string()),
+        title: clean_optional(field(track, "title"))
+            .unwrap_or_else(|| "Untitled Track".to_string()),
         artist,
-        album: clean(track.album).unwrap_or_else(|| "Unknown Album".to_string()),
-        year: positive_u16(Some(track.year)).unwrap_or_default(),
-        release_date: normalized_date(track.release_date),
-        date_added: normalized_date(track.created_at),
-        last_played: crate::policy::unix_seconds(track.play_date),
-        play_count: capped_u32(track.play_count),
-        user_rating: rating(track.rating),
-        duration_seconds: duration_seconds(track.duration),
-        favorite: track.starred,
-        disc_number: positive_u16(Some(track.disc_number)).unwrap_or_default(),
-        track_number: positive_u16(Some(track.track_number)).unwrap_or_default(),
+        album: clean_optional(field(track, "album")).unwrap_or_else(|| "Unknown Album".to_string()),
+        year: positive_u16(field(track, "year")).unwrap_or_default(),
+        release_date: normalized_date(field(track, "releaseDate")),
+        date_added: normalized_date(field(track, "createdAt")),
+        last_played: crate::policy::unix_seconds(field(track, "playDate")),
+        play_count: capped_u32(field(track, "playCount")),
+        user_rating: rating(field(track, "rating")),
+        duration_seconds: duration_seconds(field(track, "duration").unwrap_or_default()),
+        favorite: boolean(&track["starred"]).unwrap_or_default(),
+        disc_number: positive_u16(field(track, "discNumber")).unwrap_or_default(),
+        track_number: positive_u16(field(track, "trackNumber")).unwrap_or_default(),
         image_ref: None,
         local_artwork: None,
-        musicbrainz_recording_id: clean_optional(track.mbz_recording_id),
-        musicbrainz_release_track_id: clean_optional(track.mbz_release_track_id),
-        source_path: server_path(track.library_path.as_deref(), &track.path),
+        musicbrainz_recording_id: clean_optional(
+            field(track, "mbzRecordingID").or_else(|| field(track, "mbzRecordingId")),
+        ),
+        musicbrainz_release_track_id: clean_optional(field(track, "mbzReleaseTrackId")),
+        source_path: server_path(
+            field::<String>(track, "libraryPath").as_deref(),
+            &field::<String>(track, "path").unwrap_or_default(),
+        ),
         cue: None,
-        source_format: clean(track.suffix),
-        comment: clean_optional(track.comment),
+        source_format: clean_optional(field(track, "suffix")),
+        comment: clean_optional(field(track, "comment")),
         skip_count: None,
-        bpm: positive_u16(track.bpm),
-        replay_gain_track_db: track.rg_track_gain.filter(|value| value.is_finite()),
-        replay_gain_track_peak: track
-            .rg_track_peak
+        bpm: positive_u16(field(track, "bpm")),
+        replay_gain_track_db: field::<f64>(track, "rgTrackGain").filter(|value| value.is_finite()),
+        replay_gain_track_peak: field::<f64>(track, "rgTrackPeak")
             .filter(|value| value.is_finite() && *value >= 0.0),
-        replay_gain_album_db: track.rg_album_gain.filter(|value| value.is_finite()),
-        replay_gain_album_peak: track
-            .rg_album_peak
+        replay_gain_album_db: field::<f64>(track, "rgAlbumGain").filter(|value| value.is_finite()),
+        replay_gain_album_peak: field::<f64>(track, "rgAlbumPeak")
             .filter(|value| value.is_finite() && *value >= 0.0),
         relations: TrackRelations {
             artists,
             album_artists,
-            genres: genre_credits(source, track.genres),
-            moods: super::moods_from_item(source, tag_values(&track.tags, "mood")),
-            music_folders: (track.library_id > 0)
-                .then(|| String::from(source.id("music-folder", &track.library_id.to_string())))
+            genres: genre_credits(source, &track["genres"]),
+            moods: super::moods_from_item(source, tag_values(&track["tags"], "mood")),
+            music_folders: field::<i64>(track, "libraryId")
+                .filter(|library_id| *library_id > 0)
+                .map(|library_id| String::from(source.id("music-folder", &library_id.to_string())))
                 .into_iter()
                 .collect(),
         },
     }
 }
 
-fn artist_from_navidrome(source: &SubsonicSource, artist: NavidromeArtist) -> Artist {
-    let raw_id = artist.id;
+fn artist_from_navidrome(source: &SubsonicSource, raw_id: &str, artist: &Value) -> Artist {
     Artist {
-        id: String::from(source.id("artist", &raw_id)),
-        name: clean(artist.name).unwrap_or_else(|| "Unknown Artist".to_string()),
-        favorite: artist.starred,
-        last_played: clean_optional(artist.play_date),
-        play_count: capped_u32(artist.play_count),
-        user_rating: rating(artist.rating),
-        musicbrainz_artist_id: clean_optional(artist.mbz_artist_id),
-        image_ref: Some(navidrome_image_ref(source, "ar", &raw_id, None)),
+        id: String::from(source.id("artist", raw_id)),
+        name: clean_optional(field(artist, "name")).unwrap_or_else(|| "Unknown Artist".to_string()),
+        favorite: boolean(&artist["starred"]).unwrap_or_default(),
+        last_played: clean_optional(field(artist, "playDate")),
+        play_count: capped_u32(field(artist, "playCount")),
+        user_rating: rating(field(artist, "rating")),
+        musicbrainz_artist_id: clean_optional(field(artist, "mbzArtistId")),
+        image_ref: Some(navidrome_image_ref(source, "ar", raw_id, None)),
         local_artwork: None,
     }
 }
@@ -649,22 +498,20 @@ fn artist_credit(
 
 fn participant_credits(
     source: &SubsonicSource,
-    participants: &NavidromeParticipants,
+    participants: &Value,
     role: &str,
     fallback_id: &str,
     fallback_musicbrainz_id: Option<&str>,
 ) -> Vec<ArtistCredit> {
-    let mut credits = participants
-        .get(role)
-        .into_iter()
-        .flatten()
+    let mut credits = items(&participants[role])
+        .iter()
         .filter_map(|participant| {
-            let raw_id = clean(participant.id.clone())?;
+            let raw_id = id(&participant["id"])?;
             Some(ArtistCredit {
                 id: String::from(source.id("artist", &raw_id)),
-                name: clean(participant.name.clone())
+                name: clean_optional(field(participant, "name"))
                     .unwrap_or_else(|| "Unknown Artist".to_string()),
-                musicbrainz_artist_id: clean_optional(participant.mbz_artist_id.clone()),
+                musicbrainz_artist_id: clean_optional(field(participant, "mbzArtistId")),
             })
         })
         .collect::<Vec<_>>();
@@ -681,11 +528,10 @@ fn participant_credits(
     credits
 }
 
-fn genre_credits(source: &SubsonicSource, genres: Option<Vec<NavidromeGenre>>) -> Vec<GenreCredit> {
-    genres
-        .unwrap_or_default()
-        .into_iter()
-        .filter_map(|genre| clean(genre.name))
+fn genre_credits(source: &SubsonicSource, genres: &Value) -> Vec<GenreCredit> {
+    items(genres)
+        .iter()
+        .filter_map(|genre| clean_optional(field(genre, "name")))
         .map(|name| GenreCredit {
             id: String::from(source.id("genre", &name)),
             name,
@@ -693,8 +539,8 @@ fn genre_credits(source: &SubsonicSource, genres: Option<Vec<NavidromeGenre>>) -
         .collect()
 }
 
-fn tag_values(tags: &NavidromeTags, name: &str) -> Vec<String> {
-    tags.get(name).cloned().unwrap_or_default()
+fn tag_values(tags: &Value, name: &str) -> Vec<String> {
+    strings(&tags[name])
 }
 
 fn navidrome_image_ref(
@@ -774,25 +620,26 @@ mod tests {
 
     #[test]
     fn navidrome_track_reads_replay_gain_columns() {
-        let track = serde_json::from_value::<NavidromeTrack>(serde_json::json!({
+        let track = serde_json::json!({
             "id": "track-one",
             "rgTrackGain": -4.25,
             "rgTrackPeak": 0.91,
             "rgAlbumGain": -3.5,
             "rgAlbumPeak": 0.95
-        }))
-        .expect("Navidrome track");
+        });
 
-        assert_eq!(track.rg_track_gain, Some(-4.25));
-        assert_eq!(track.rg_track_peak, Some(0.91));
-        assert_eq!(track.rg_album_gain, Some(-3.5));
-        assert_eq!(track.rg_album_peak, Some(0.95));
+        let source = navidrome_source("http://localhost/");
+        let track = track_from_navidrome(&source, "track-one", &track);
+        assert_eq!(track.replay_gain_track_db, Some(-4.25));
+        assert_eq!(track.replay_gain_track_peak, Some(0.91));
+        assert_eq!(track.replay_gain_album_db, Some(-3.5));
+        assert_eq!(track.replay_gain_album_peak, Some(0.95));
     }
 
     #[test]
     fn navidrome_album_and_artist_keep_the_identifiers_missing_from_opensubsonic() {
         let source = navidrome_source("http://localhost/");
-        let album = serde_json::from_value::<NavidromeAlbum>(serde_json::json!({
+        let album = serde_json::json!({
             "id": "album-one",
             "name": "Album",
             "albumArtist": "Album Artist",
@@ -817,9 +664,8 @@ mod tests {
             "tags": {
                 "releasetype": ["Album", "Live", "album"]
             }
-        }))
-        .expect("Navidrome Album");
-        let album = album_from_navidrome(&source, album);
+        });
+        let album = album_from_navidrome(&source, "album-one", &album);
         assert_eq!(
             album.musicbrainz_album_id.as_deref(),
             Some("11111111-1111-1111-1111-111111111111")
@@ -848,13 +694,12 @@ mod tests {
             ))
         );
 
-        let artist = serde_json::from_value::<NavidromeArtist>(serde_json::json!({
+        let artist = serde_json::json!({
             "id": "artist-one",
             "name": "Album Artist",
             "mbzArtistId": "33333333-3333-3333-3333-333333333333"
-        }))
-        .expect("Navidrome Artist");
-        let artist = artist_from_navidrome(&source, artist);
+        });
+        let artist = artist_from_navidrome(&source, "artist-one", &artist);
         assert_eq!(
             artist.musicbrainz_artist_id.as_deref(),
             Some("33333333-3333-3333-3333-333333333333")
@@ -926,13 +771,13 @@ mod tests {
         let source = navidrome_source(&server.uri());
 
         source
-            .navidrome_page::<NavidromeTrack>("song", 0)
+            .navidrome_page("song", 0)
             .await
             .expect("Navidrome song page");
     }
 
     #[tokio::test]
-    async fn typed_pages_preserve_the_exact_bounded_offsets() {
+    async fn pages_preserve_the_exact_bounded_offsets() {
         let server = MockServer::start().await;
         let first_page = (0..NAVIDROME_PAGE_SIZE)
             .map(|index| serde_json::json!({ "id": format!("artist-{index}") }))
@@ -953,11 +798,11 @@ mod tests {
             .await;
         let source = navidrome_source_with_token(&server, "token-a");
         let first = source
-            .navidrome_page::<NavidromeArtist>("artist", 0)
+            .navidrome_page("artist", 0)
             .await
             .expect("first Navidrome artist page");
         let second = source
-            .navidrome_page::<NavidromeArtist>("artist", NAVIDROME_PAGE_SIZE)
+            .navidrome_page("artist", NAVIDROME_PAGE_SIZE)
             .await
             .expect("second Navidrome artist page");
 
@@ -997,6 +842,7 @@ mod tests {
                 "name": format!("ZZZ Album {index}")
             })
         }));
+        first_albums[1] = serde_json::json!({"name": "Missing ID"});
         page_match("album", 0, "token-a")
             .respond_with(
                 ResponseTemplate::new(200)
@@ -1017,37 +863,56 @@ mod tests {
             .mount(&server)
             .await;
         page_match("song", 0, "token-b")
+            .respond_with(ResponseTemplate::new(200).set_body_json({
+                let mut songs = vec![serde_json::json!({
+                "id": "song-one",
+                "albumId": "album-one",
+                "title": "Track One",
+                "artist": "Track Artist",
+                "artistId": "track-artist-one",
+                "album": "AAA Rich Album",
+                "albumArtist": "Album Artist",
+                "albumArtistId": "album-artist-one",
+                "libraryId": 1,
+                "libraryPath": "/srv/navidrome/audio",
+                "path": "Artist/Album/Track.flac",
+                "suffix": "flac",
+                "duration": "181.4",
+                "bpm": 123,
+                "rating": {"unexpected": true},
+                "playCount": [],
+                "rgTrackGain": "-4.25",
+                "rgTrackPeak": "invalid",
+                "mbzRecordingID": "recording-one",
+                "mbzReleaseTrackId": "release-track-one",
+                "participants": {
+                    "artist": [null, {"name": "Missing ID"}, {
+                        "id": "track-artist-one",
+                        "name": "Track Artist",
+                        "mbzArtistId": "track-artist-mbid"
+                    }],
+                    "albumartist": [{
+                        "id": "album-artist-one",
+                        "name": "Album Artist",
+                        "mbzArtistId": "album-artist-mbid"
+                    }]
+                },
+                "genres": [null, {"name": 17}, {"name": "Rock"}],
+                "tags": {"mood": ["Focused", null, 17]}
+                })];
+                songs.resize(NAVIDROME_PAGE_SIZE, serde_json::json!({"id": null}));
+                songs
+            }))
+            .expect(1)
+            .mount(&server)
+            .await;
+        page_match("song", NAVIDROME_PAGE_SIZE, "token-b")
             .respond_with(
                 ResponseTemplate::new(200).set_body_json(serde_json::json!([{
-                    "id": "song-one",
-                    "albumId": "album-one",
-                    "title": "Track One",
-                    "artist": "Track Artist",
-                    "artistId": "track-artist-one",
-                    "album": "AAA Rich Album",
-                    "albumArtist": "Album Artist",
-                    "albumArtistId": "album-artist-one",
-                    "libraryId": 1,
-                    "libraryPath": "/srv/navidrome/audio",
-                    "path": "Artist/Album/Track.flac",
-                    "suffix": "flac",
-                    "duration": 181.4,
-                    "bpm": 123,
-                    "mbzRecordingID": "recording-one",
-                    "mbzReleaseTrackId": "release-track-one",
-                    "participants": {
-                        "artist": [{
-                            "id": "track-artist-one",
-                            "name": "Track Artist",
-                            "mbzArtistId": "track-artist-mbid"
-                        }],
-                        "albumartist": [{
-                            "id": "album-artist-one",
-                            "name": "Album Artist",
-                            "mbzArtistId": "album-artist-mbid"
-                        }]
-                    },
-                    "tags": {"mood": ["Focused"]}
+                    "id": 42,
+                    "title": "ZZZ Last Track",
+                    "duration": "invalid",
+                    "participants": {"artist": "invalid"}
                 }])),
             )
             .expect(1)
@@ -1133,6 +998,8 @@ mod tests {
             .await
             .expect("Track page");
         let track = tracks.first_rows.first().expect("rich Track");
+        assert_eq!(tracks.first_rows.len(), 2);
+        assert_eq!(tracks.first_rows[1].title, "ZZZ Last Track");
         assert_eq!(
             track.musicbrainz_recording_id.as_deref(),
             Some("recording-one")
@@ -1194,16 +1061,16 @@ mod tests {
         let source = navidrome_source_with_token(&server, "token-a");
 
         let mut first = source
-            .navidrome_page::<NavidromeTrack>("song", 0)
+            .navidrome_page("song", 0)
             .await
             .expect("first Navidrome page");
         source
-            .navidrome_page::<NavidromeTrack>("song", NAVIDROME_PAGE_SIZE)
+            .navidrome_page("song", NAVIDROME_PAGE_SIZE)
             .await
             .expect("second Navidrome page");
 
         assert_eq!(
-            track_from_navidrome(&source, first.remove(0))
+            track_from_navidrome(&source, "song-one", &first.remove(0))
                 .source_path
                 .as_deref(),
             Some("/music/Artist/Album/Track.flac")
@@ -1234,7 +1101,7 @@ mod tests {
         let source = navidrome_source_with_token(&server, "token-a");
 
         source
-            .navidrome_page::<NavidromeTrack>("song", 0)
+            .navidrome_page("song", 0)
             .await
             .expect("retried Navidrome page");
     }
@@ -1263,7 +1130,7 @@ mod tests {
         let source = navidrome_source_with_token(&server, "token-a");
 
         assert!(matches!(
-            source.navidrome_page::<NavidromeTrack>("song", 0).await,
+            source.navidrome_page("song", 0).await,
             Err(SourceError::Auth(_))
         ));
     }

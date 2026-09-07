@@ -3,7 +3,9 @@ use std::time::Duration;
 use library::{Freshness, Scan};
 
 use super::*;
+use crate::remote_json as json;
 use crate::source::{SourceReadProgress, SourceReadStage};
+use serde_json::Value;
 
 const ALBUM_REQUEST_SIZE: usize = 500;
 const TRACK_REQUEST_SIZE: usize = 500;
@@ -24,6 +26,27 @@ fn incomplete_collection(scan: &mut Scan, error: SourceError) -> SourceResult<()
 struct ScanWait {
     interval: Duration,
     max_polls: usize,
+}
+
+#[derive(Clone, Debug)]
+struct ScanStatus {
+    scanning: bool,
+    count: i64,
+    folder_count: Option<i64>,
+    last_scan: Option<String>,
+    error: Option<String>,
+}
+
+impl ScanStatus {
+    fn from_json(value: &Value) -> Option<Self> {
+        Some(Self {
+            scanning: json::boolean(&value["scanning"])?,
+            count: json::field(value, "count").unwrap_or_default(),
+            folder_count: json::field(value, "folderCount"),
+            last_scan: json::field(value, "lastScan"),
+            error: json::field(value, "error"),
+        })
+    }
 }
 
 impl SubsonicSource {
@@ -80,13 +103,12 @@ impl SubsonicSource {
         };
         let mut query = vec![("type", list_type.to_string()), ("size", "24".to_string())];
         query.extend(extra);
-        let body: AlbumListBody = self.get_json("getAlbumList2", &query).await?;
-        body.album_list
-            .album
-            .into_iter()
+        let body: Value = self.get_json("getAlbumList2", &query).await?;
+        json::items(&body["albumList2"]["album"])
+            .iter()
+            .filter_map(|value| album_from_json(self, value))
             .enumerate()
-            .map(|(position, dto)| {
-                let album = album_from_dto(self, dto);
+            .map(|(position, album)| {
                 Ok(library::HomeEntryInput {
                     section_id: section_id.to_string(),
                     position: position as i64,
@@ -99,8 +121,9 @@ impl SubsonicSource {
             .collect()
     }
     pub(crate) async fn freshness(&self) -> SourceResult<Option<Freshness>> {
-        let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
-        let Some(marker) = completed_freshness(body.scan_status) else {
+        let body = self.get_json("getScanStatus", &[]).await?;
+        let Some(marker) = ScanStatus::from_json(&body["scanStatus"]).and_then(completed_freshness)
+        else {
             return Ok(None);
         };
         Ok(Some(Freshness::new(marker)?))
@@ -193,7 +216,7 @@ impl SubsonicSource {
         let mut offset = 0_usize;
         loop {
             check_cancelled(cancelled)?;
-            let body: AlbumListBody = self
+            let body: Value = self
                 .get_json(
                     "getAlbumList2",
                     &[
@@ -203,7 +226,7 @@ impl SubsonicSource {
                     ],
                 )
                 .await?;
-            let page = body.album_list.album;
+            let page = json::items(&body["albumList2"]["album"]);
             if page.is_empty() {
                 return Ok(());
             }
@@ -212,8 +235,8 @@ impl SubsonicSource {
                 SourceError::Other("OpenSubsonic album offset overflowed".to_string())
             })?;
             scan.begin_batch().await?;
-            for album in page {
-                stage_album(scan, album_from_dto(self, album)).await?;
+            for album in page.iter().filter_map(|album| album_from_json(self, album)) {
+                stage_album(scan, album).await?;
             }
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Albums, offset));
@@ -252,11 +275,8 @@ impl SubsonicSource {
                 if let Some(folder) = folder {
                     extra.push(("musicFolderId", raw_item_id(folder.id.as_str()).to_string()));
                 }
-                let body: SearchBody = self.get_json("search3", &extra).await?;
-                let page = body
-                    .search_result
-                    .and_then(|result| result.song)
-                    .unwrap_or_default();
+                let body: Value = self.get_json("search3", &extra).await?;
+                let page = json::items(&body["searchResult3"]["song"]);
                 if page.is_empty() {
                     break;
                 }
@@ -265,8 +285,7 @@ impl SubsonicSource {
                 })?;
                 scan.begin_batch().await?;
                 let mut folder_links = Vec::new();
-                for song in page {
-                    let track = track_from_dto(self, song);
+                for track in page.iter().filter_map(|song| track_from_json(self, song)) {
                     if let Some(folder) = folder {
                         folder_links.push((track.id.clone(), folder.id.clone()));
                     }
@@ -289,26 +308,35 @@ impl SubsonicSource {
     }
 
     async fn read_music_folders(&self) -> SourceResult<Vec<MusicFolder>> {
-        let body: MusicFoldersBody = self.get_json("getMusicFolders", &[]).await?;
-        Ok(body
-            .music_folders
-            .music_folder
-            .into_iter()
-            .map(|folder| MusicFolder {
-                id: String::from(self.id("music-folder", &folder.id.0)),
-                name: folder.name,
-                image_ref: None,
+        let body: Value = self.get_json("getMusicFolders", &[]).await?;
+        Ok(json::items(&body["musicFolders"]["musicFolder"])
+            .iter()
+            .filter_map(|folder| {
+                Some(MusicFolder {
+                    id: self.id("music-folder", &json::id(&folder["id"])?),
+                    name: json::field(folder, "name")
+                        .unwrap_or_else(|| "Untitled Folder".to_string()),
+                    image_ref: None,
+                })
             })
             .collect())
     }
 
     async fn read_genres(&self) -> SourceResult<Vec<Genre>> {
-        let body: GenresBody = self.get_json("getGenres", &[]).await?;
-        Ok(body
-            .genres
-            .genre
-            .into_iter()
-            .map(|genre| genre_from_dto(self, genre))
+        let body: Value = self.get_json("getGenres", &[]).await?;
+        Ok(json::items(&body["genres"]["genre"])
+            .iter()
+            .filter_map(|genre| {
+                let name = json::field::<String>(genre, "value")
+                    .or_else(|| json::field(genre, "name"))
+                    .filter(|name| !name.trim().is_empty())?;
+                Some(Genre {
+                    id: self.id("genre", &name),
+                    name,
+                    image_ref: None,
+                    local_artwork: None,
+                })
+            })
             .collect())
     }
 
@@ -318,15 +346,15 @@ impl SubsonicSource {
         progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
         cancelled: &(dyn Fn() -> bool + Send + Sync),
     ) -> SourceResult<()> {
-        let body: PlaylistsBody = self.get_json("getPlaylists", &[]).await?;
-        let playlists = body
-            .playlists
-            .map(|playlists| playlists.playlist)
-            .unwrap_or_default();
+        let body: Value = self.get_json("getPlaylists", &[]).await?;
+        let playlists = json::items(&body["playlists"]["playlist"]);
         let total = playlists.len();
-        for (position, playlist) in playlists.into_iter().enumerate() {
+        for (position, playlist) in playlists.iter().enumerate() {
             check_cancelled(cancelled)?;
-            let id = String::from(self.id("playlist", &raw_id_string(&playlist.id)));
+            let Some(raw_id) = json::id(&playlist["id"]) else {
+                continue;
+            };
+            let id = self.id("playlist", &raw_id);
             self.stage_playlist_snapshot(scan, &id).await?;
             progress(SourceReadProgress {
                 stage: SourceReadStage::Playlists,
@@ -346,7 +374,7 @@ impl SubsonicSource {
         let mut offset = 0_usize;
         loop {
             check_cancelled(cancelled)?;
-            let body: SearchBody = self
+            let body: Value = self
                 .get_json(
                     "search3",
                     &[
@@ -360,18 +388,18 @@ impl SubsonicSource {
                     ],
                 )
                 .await?;
-            let page = body
-                .search_result
-                .and_then(|result| result.artist)
-                .unwrap_or_default();
+            let page = json::items(&body["searchResult3"]["artist"]);
             if page.is_empty() {
                 return Ok(());
             }
             offset += page.len();
             let finished = page.len() < ALBUM_REQUEST_SIZE;
             scan.begin_batch().await?;
-            for artist in page {
-                stage_artist(scan, artist_from_dto(self, artist)).await?;
+            for artist in page
+                .iter()
+                .filter_map(|artist| artist_from_json(self, artist))
+            {
+                stage_artist(scan, artist).await?;
             }
             scan.finish_batch().await?;
             progress(stage(SourceReadStage::Artists, offset));
@@ -406,8 +434,8 @@ impl SubsonicSource {
     }
 
     pub(crate) async fn require_metadata_scan_idle(&self) -> SourceResult<()> {
-        let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
-        if body.scan_status.scanning {
+        let body = self.get_json("getScanStatus", &[]).await?;
+        if json::boolean(&body["scanStatus"]["scanning"]) == Some(true) {
             return Err(SourceError::Other(
                 "The server is already scanning its library. Wait for it to finish before editing metadata."
                     .to_string(),
@@ -425,10 +453,10 @@ impl SubsonicSource {
     }
 
     async fn start_metadata_scan_with_wait(&self, wait: ScanWait) -> SourceResult<()> {
-        let body: ScanStatusBody = self.get_json("startScan", &[]).await?;
-        let mut status = body.scan_status;
+        let body = self.get_json("startScan", &[]).await?;
+        let mut status = ScanStatus::from_json(&body["scanStatus"]);
         for poll in 0..=wait.max_polls {
-            if !status.scanning {
+            if let Some(status) = status.take().filter(|status| !status.scanning) {
                 return scan_finished(status);
             }
             if poll == wait.max_polls {
@@ -437,8 +465,8 @@ impl SubsonicSource {
             if !wait.interval.is_zero() {
                 tokio::time::sleep(wait.interval).await;
             }
-            let body: ScanStatusBody = self.get_json("getScanStatus", &[]).await?;
-            status = body.scan_status;
+            let body = self.get_json("getScanStatus", &[]).await?;
+            status = ScanStatus::from_json(&body["scanStatus"]);
         }
         Err(SourceError::Other(
             "The server library scan did not finish within two minutes.".to_string(),
@@ -556,9 +584,21 @@ mod tests {
             Mock::given(method("GET")).and(path("/rest/search3.view"))
                 .respond_with(|request: &wiremock::Request| {
                     let query = request.url.query_pairs().collect::<std::collections::HashMap<_, _>>();
-                    let songs = if query.get("songCount").is_some_and(|count| count == "500")
-                        && query.get("songOffset").is_some_and(|offset| offset == "0") {
-                        serde_json::json!([{ "id": "track", "title": "Track", "album": "Album", "albumId": "album", "artist": "Artist", "duration": 42 }])
+                    let songs = if query.get("songCount").is_some_and(|count| count == "500") {
+                        match query.get("songOffset").map(|value| value.as_ref()) {
+                            Some("0") => {
+                                let mut page = vec![serde_json::json!({"title":"No identity"}); 499];
+                                page.push(serde_json::json!({
+                                    "id":"track", "title":"Track", "album":"Album", "albumId":"album",
+                                    "artist":"Artist", "duration":42, "isDir":"false", "bpm":{},
+                                    "artists":[{"id":"artist","name":"Artist"}, {"name":"No identity"}],
+                                    "genres":[{"name":"Rock"}, {"name":false}]
+                                }));
+                                serde_json::Value::Array(page)
+                            }
+                            Some("500") => serde_json::json!([{"id":2,"title":"Next page","albumId":"album"}]),
+                            _ => serde_json::json!([]),
+                        }
                     } else { serde_json::json!([]) };
                     ResponseTemplate::new(200).set_body_json(serde_json::json!({
                         "subsonic-response": { "status": "ok", "searchResult3": { "song": songs, "artist": [] } }
@@ -593,17 +633,24 @@ mod tests {
                 .unwrap();
                 super::stage_album(
                     &mut previous,
-                    super::album_from_dto(
+                    super::album_from_json(
                         &source,
-                        serde_json::from_value(
-                            serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
-                        )
-                        .unwrap(),
-                    ),
+                        &serde_json::json!({"id":"album","name":"Album","artist":"Artist"}),
+                    )
+                    .unwrap(),
                 )
                 .await
                 .unwrap();
-                super::stage_track(&mut previous, super::track_from_dto(&source, serde_json::from_value(serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"})).unwrap())).await.unwrap();
+                super::stage_track(
+                    &mut previous,
+                    super::track_from_json(
+                        &source,
+                        &serde_json::json!({"id":"removed","title":"Vanished","albumId":"album"}),
+                    )
+                    .unwrap(),
+                )
+                .await
+                .unwrap();
                 previous
                     .write_genre("cached-genre", "Cached", "cached", "cached", None)
                     .await
@@ -663,7 +710,7 @@ mod tests {
                 .await
                 .unwrap();
             assert_eq!(home.newly_added.albums.len(), 1);
-            assert_eq!(home.explore.len(), 1);
+            assert_eq!(home.explore.len(), 2);
             assert_eq!(
                 progress
                     .lock()
@@ -672,8 +719,21 @@ mod tests {
                     .filter(|progress| progress.stage == crate::SourceReadStage::Tracks)
                     .map(|progress| progress.completed)
                     .max(),
-                Some(1)
+                Some(2)
             );
+            for (id, title) in [("track", "Track"), ("2", "Next page")] {
+                let uri = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    "track",
+                    &format!("subsonic:track:{id}"),
+                );
+                let track = database
+                    .track_row_by_uri(&uri, &cancellation)
+                    .await
+                    .unwrap()
+                    .expect("usable track is published");
+                assert_eq!(track.title, title);
+            }
             assert_eq!(
                 library::Scan::accept_freshness(&database, "source", &marker, &cancellation)
                     .await
@@ -732,7 +792,7 @@ mod tests {
                             .unwrap()
                             .explore
                             .len(),
-                        1
+                        2
                     );
                 }
             }

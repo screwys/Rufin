@@ -17,6 +17,7 @@ mod source;
 mod file;
 mod jellyfin;
 mod remote_http;
+mod remote_json;
 mod subsonic;
 
 #[cfg(test)]

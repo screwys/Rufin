@@ -1959,6 +1959,8 @@ mod tests {
         playback::QueueOccurrence {
             occurrence: playback::OccurrenceId::new("test-occurrence"),
             canonical_position: 0,
+            source_index: None,
+            playlist_entry_id: None,
             provenance: playback::Provenance::Manual,
             item: playback::QueueItem {
                 media_uri: library::source_entity_uri(

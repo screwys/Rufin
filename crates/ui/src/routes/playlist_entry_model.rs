@@ -25,6 +25,8 @@ struct PlaylistEntryModelState {
     playlist_key: PlaylistKey,
     sparse: Rc<SparseRouteModel<PlaylistEntryKey, PlaylistEntryRow>>,
     request: RefCell<PlaylistEntryProjectionRequest>,
+    applied: RefCell<PlaylistEntryProjectionRequest>,
+    folder: std::cell::Cell<Option<library::FolderKey>>,
 }
 
 impl PlaylistEntryModel {
@@ -54,7 +56,12 @@ impl PlaylistEntryModel {
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 playlist_key,
+                folder: std::cell::Cell::new(None),
                 sparse,
+                applied: RefCell::new(PlaylistEntryProjectionRequest {
+                    query: String::new(),
+                    settings: settings.clone(),
+                }),
                 request: RefCell::new(PlaylistEntryProjectionRequest {
                     query: String::new(),
                     settings,
@@ -77,6 +84,10 @@ impl PlaylistEntryModel {
 
     pub(crate) fn playlist_key(&self) -> PlaylistKey {
         self.inner.playlist_key
+    }
+
+    pub(crate) fn set_queue_folder(&self, folder: Option<library::FolderKey>) {
+        self.inner.folder.set(folder);
     }
 
     pub(crate) fn source_is_empty(&self) -> bool {
@@ -107,6 +118,7 @@ impl PlaylistEntryModel {
     }
 
     pub(crate) fn replace_order(&self, order: Vec<PlaylistEntryKey>) {
+        self.inner.applied.replace(self.projection_request());
         self.inner.sparse.replace_order(order);
     }
 
@@ -122,7 +134,7 @@ impl PlaylistEntryModel {
     }
 
     pub(crate) fn visible_context_id(&self) -> String {
-        let request = self.inner.request.borrow();
+        let request = self.inner.applied.borrow();
         format!(
             "playlist:{}|query={}|sort={:?}|descending={}|result={}",
             self.inner.playlist_key,
@@ -174,18 +186,25 @@ impl PlaylistEntryModel {
         collection_start: bool,
     ) {
         let order = self.order();
-        if order.get(position).is_none() {
+        let Some(anchor_entry) = order.get(position).copied() else {
             return;
-        }
+        };
+        let applied = self.inner.applied.borrow();
         let request = if collection_start {
             playback::PlayRequest::ordered
         } else {
             playback::PlayRequest::captured
         };
         queue.play(request(
-            library::QueueInput::PlaylistEntries {
-                order,
+            library::QueueInput::PlaylistQuery {
+                key: self.inner.playlist_key,
+                folder: self.inner.folder.get(),
+                filter: applied.query.clone(),
+                sort: applied.settings.sort_key.playlist_entry_sort(),
+                descending: applied.settings.descending,
                 context_id: self.visible_context_id().into(),
+                anchor_entry: Some(anchor_entry),
+                anchor_uri: self.ready(position as u32).map(|row| row.media_uri.clone()),
             },
             position,
             placement,

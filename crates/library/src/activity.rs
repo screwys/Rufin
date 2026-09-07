@@ -747,6 +747,10 @@ pub(crate) async fn write_imported_listen(
     .fetch_optional(&mut *connection)
     .await?;
     let key = if let Some(key) = inserted {
+        sqlx::query("UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=?1")
+            .bind(&listen.media_uri)
+            .execute(&mut *connection)
+            .await?;
         key
     } else {
         sqlx::query_scalar("SELECT listen_key FROM listens WHERE external_id=?1 OR (external_id IS NULL AND listen_key=?2)")

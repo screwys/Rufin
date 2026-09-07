@@ -18,6 +18,7 @@ mod item;
 mod navidrome;
 mod refresh;
 
+use crate::remote_json as json;
 use client::*;
 use item::*;
 
@@ -25,7 +26,6 @@ use crate::{NativeImageRef as ImageRef, SourceId};
 
 type AlbumId = String;
 type ArtistId = String;
-type FolderId = String;
 type GenreId = String;
 type MusicFolderId = String;
 type PlaylistId = String;
@@ -133,11 +133,6 @@ struct Genre {
     name: String,
     image_ref: Option<ImageRef>,
     local_artwork: Option<()>,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-struct Folder {
-    id: FolderId,
-    name: String,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct MusicFolder {
@@ -481,25 +476,26 @@ impl SubsonicSource {
                 ping_url
                     .query_pairs_mut()
                     .extend_pairs(credential.common_query(&username, &[]));
-                let response = subsonic_json::<SubsonicEmpty>(client.get(ping_url)).await?;
+                let response = subsonic_json(client.get(ping_url)).await?;
                 let observed = async {
                     let mut user_url = endpoint(&base_url, "getUser")?;
                     user_url.query_pairs_mut().extend_pairs(
                         credential.common_query(&username, &[("username", username.as_str())]),
                     );
-                    subsonic_json::<AuthenticateBody>(client.get(user_url)).await
+                    subsonic_json(client.get(user_url)).await
                 }
                 .await
                 .ok();
                 let canonical = observed
                     .as_ref()
-                    .map(|value| value.body.user.username.trim())
+                    .and_then(|value| value.body["user"]["username"].as_str())
+                    .map(str::trim)
                     .filter(|value| !value.is_empty())
                     .unwrap_or(username.trim())
                     .to_string();
-                let editing = observed
-                    .as_ref()
-                    .is_some_and(|value| value.body.user.admin_role);
+                let editing = observed.as_ref().is_some_and(|value| {
+                    json::boolean(&value.body["user"]["adminRole"]).unwrap_or(false)
+                });
                 let name = observed
                     .and_then(|value| value.server_type)
                     .or(response.server_type)
@@ -512,8 +508,9 @@ impl SubsonicSource {
                 token_url
                     .query_pairs_mut()
                     .extend_pairs(credential.common_query("", &[]));
-                let response = subsonic_json::<TokenInfoBody>(client.get(token_url)).await?;
-                let canonical = response.body.token_info.username;
+                let response = subsonic_json(client.get(token_url)).await?;
+                let canonical = json::field::<String>(&response.body["tokenInfo"], "username")
+                    .unwrap_or_default();
                 let name = response
                     .server_type
                     .filter(|name| !name.trim().is_empty())
@@ -569,9 +566,9 @@ impl SubsonicSource {
 
     pub(crate) async fn refresh_metadata_editing(&self) {
         let available = self
-            .get_json::<AuthenticateBody>("getUser", &[("username", self.username.clone())])
+            .get_json("getUser", &[("username", self.username.clone())])
             .await
-            .is_ok_and(|body| body.user.admin_role);
+            .is_ok_and(|body| json::boolean(&body["user"]["adminRole"]).unwrap_or(false));
         self.metadata_editing.store(available, Ordering::Release);
     }
 }

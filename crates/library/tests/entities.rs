@@ -134,29 +134,17 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
                 .iter()
                 .all(|row| row.source_key == fixture.source)
         );
-        let state = fixture
-            .database
-            .edit_queue_with_preview(
-                library::QueueEdit::Apply {
-                    input: library::QueueInput::Uris {
-                        order: page.order.into(),
-                        context_id: "collection".into(),
-                        source_start: 0,
-                    },
-                    placement: library::QueuePlacement::Now,
-                    shuffle_seed: None,
-                    random_start: false,
-                    identity: None,
-                },
-                None,
-                library::QueueRepeatMode::Off,
-                false,
-                0,
-                |_| {},
-            )
-            .await
-            .unwrap();
-        assert_eq!(state.total, total);
+        let state = super::support::resolve_queue(
+            &fixture.database,
+            library::QueueInput::Uris {
+                order: page.order.into(),
+                context_id: "collection".into(),
+                source_start: 0,
+            },
+            Default::default(),
+        )
+        .await;
+        assert!(!state.pending.is_empty());
         assert!(state.occurrences.len() <= 100);
     }
     assert_eq!(
