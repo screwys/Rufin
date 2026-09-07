@@ -1,10 +1,9 @@
 use super::*;
 
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy, RemoteTimeouts};
-use serde::{
-    Deserialize, Deserializer, Serialize,
-    de::{self, DeserializeOwned, IntoDeserializer, Visitor},
-};
+use crate::remote_json as json;
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::fmt;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -42,7 +41,7 @@ impl SubsonicSource {
                     .await?
             }
             crate::SourceRadioSeed::Genre(name) => {
-                let body: RandomSongsBody = self
+                let body: Value = self
                     .get_json(
                         "getRandomSongs",
                         &[
@@ -51,11 +50,9 @@ impl SubsonicSource {
                         ],
                     )
                     .await?;
-                body.random_songs
-                    .map(|songs| songs.song)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .map(|song| track_from_dto(self, song))
+                json::items(&body["randomSongs"]["song"])
+                    .iter()
+                    .filter_map(|song| track_from_json(self, song))
                     .collect()
             }
         };
@@ -69,40 +66,42 @@ impl SubsonicSource {
     ) -> SourceResult<crate::LiveFolderPage> {
         let mut page = crate::LiveFolderPage::default();
         if let Some(folder) = folder_object_id {
-            let body: MusicDirectoryBody = self
+            let body: Value = self
                 .get_json(
                     "getMusicDirectory",
                     &[("id", raw_item_id(folder).to_string())],
                 )
                 .await?;
-            for child in body.directory.child {
-                if child.is_dir.unwrap_or(false) {
-                    let folder = folder_from_child(self, child);
+            for child in json::items(&body["directory"]["child"]) {
+                let Some(id) = json::id(&child["id"]) else {
+                    continue;
+                };
+                if json::boolean(&child["isDir"]).unwrap_or(false) {
                     page.folders.push(crate::LiveFolder {
-                        object_id: folder.id,
-                        name: folder.name,
+                        object_id: self.id("folder", &id),
+                        name: json::field(child, "title")
+                            .unwrap_or_else(|| "Untitled Folder".to_string()),
                     });
                 } else {
-                    page.tracks
-                        .push(String::from(self.id("track", &raw_id_string(&child.id))));
+                    page.tracks.push(self.id("track", &id));
                 }
             }
         } else {
             let parameters = music_folder_object_id
                 .map(|folder| vec![("musicFolderId", raw_item_id(folder).to_string())])
                 .unwrap_or_default();
-            let body: IndexesBody = self.get_json("getIndexes", &parameters).await?;
-            for artist in body
-                .indexes
-                .map(|indexes| indexes.index)
-                .unwrap_or_default()
-                .into_iter()
-                .flat_map(|index| index.artist)
+            let body: Value = self.get_json("getIndexes", &parameters).await?;
+            for artist in json::items(&body["indexes"]["index"])
+                .iter()
+                .flat_map(|index| json::items(&index["artist"]))
             {
-                let folder = folder_from_artist(self, artist);
+                let Some(id) = json::id(&artist["id"]) else {
+                    continue;
+                };
                 page.folders.push(crate::LiveFolder {
-                    object_id: folder.id,
-                    name: folder.name,
+                    object_id: self.id("folder", &id),
+                    name: json::field(artist, "name")
+                        .unwrap_or_else(|| "Untitled Folder".to_string()),
                 });
             }
         }
@@ -143,45 +142,27 @@ impl SubsonicSource {
         let mut artist_ids = Vec::new();
         let mut album_ids = Vec::new();
         let mut track_ids = Vec::new();
-        for artist in results["artist"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|value| serde_json::from_value::<SubsonicArtist>(value.clone()).ok())
+        for artist in json::items(&results["artist"])
+            .iter()
+            .filter_map(|value| artist_from_json(self, value))
             .take(limit.clamp(1, 100))
-            .map(|value| artist_from_dto(self, value))
         {
-            if raw_item_id(&artist.id).trim().is_empty() {
-                continue;
-            }
             artist_ids.push(artist.id.clone());
             stage_artist(&mut scan, artist).await?;
         }
-        for album in results["album"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|value| serde_json::from_value::<SubsonicAlbum>(value.clone()).ok())
+        for album in json::items(&results["album"])
+            .iter()
+            .filter_map(|value| album_from_json(self, value))
             .take(limit.clamp(1, 100))
-            .map(|value| album_from_dto(self, value))
         {
-            if raw_item_id(&album.id).trim().is_empty() {
-                continue;
-            }
             album_ids.push(album.id.clone());
             stage_album(&mut scan, album).await?;
         }
-        for track in results["song"]
-            .as_array()
-            .into_iter()
-            .flatten()
-            .filter_map(|value| serde_json::from_value::<SubsonicSong>(value.clone()).ok())
+        for track in json::items(&results["song"])
+            .iter()
+            .filter_map(|value| track_from_json(self, value))
             .take(limit.clamp(1, 100))
-            .map(|value| track_from_dto(self, value))
         {
-            if raw_item_id(&track.id).trim().is_empty() {
-                continue;
-            }
             track_ids.push(track.id.clone());
             stage_track(&mut scan, track).await?;
         }
@@ -211,15 +192,17 @@ impl SubsonicSource {
         let album_ids = match collection {
             crate::SourceCollection::Album(id) => vec![raw_item_id(id).to_string()],
             crate::SourceCollection::Artist(id) => {
-                let body: ArtistBody = self
+                let body: Value = self
                     .get_json("getArtist", &[("id", raw_item_id(id).to_string())])
                     .await?;
                 let mut ids = Vec::new();
-                for page in body.artist.album.chunks(100) {
+                for page in json::items(&body["artist"]["album"]).chunks(100) {
                     scan.begin_batch().await?;
                     for album in page {
-                        ids.push(raw_id_string(&album.id));
-                        stage_album(scan, album_from_dto(self, album.clone())).await?;
+                        if let Some(album) = album_from_json(self, album) {
+                            ids.push(raw_item_id(&album.id).to_string());
+                            stage_album(scan, album).await?;
+                        }
                     }
                     scan.finish_batch().await?;
                 }
@@ -228,22 +211,16 @@ impl SubsonicSource {
         };
         for album_id in album_ids {
             let body: serde_json::Value = self.get_json("getAlbum", &[("id", album_id)]).await?;
-            let album = body.get("album").cloned().unwrap_or_default();
-            let metadata = serde_json::from_value::<SubsonicAlbum>(album.clone())?;
-            scan.begin_batch().await?;
-            stage_album(scan, album_from_dto(self, metadata)).await?;
-            scan.finish_batch().await?;
-            let songs = album
-                .get("song")
-                .and_then(serde_json::Value::as_array)
-                .into_iter()
-                .flatten()
-                .filter_map(|song| serde_json::from_value::<SubsonicSong>(song.clone()).ok())
-                .collect::<Vec<_>>();
-            for page in songs.chunks(100) {
+            let album = &body["album"];
+            if let Some(metadata) = album_from_json(self, album) {
                 scan.begin_batch().await?;
-                for song in page {
-                    stage_track(scan, track_from_dto(self, song.clone())).await?;
+                stage_album(scan, metadata).await?;
+                scan.finish_batch().await?;
+            }
+            for page in json::items(&album["song"]).chunks(100) {
+                scan.begin_batch().await?;
+                for song in page.iter().filter_map(|song| track_from_json(self, song)) {
+                    stage_track(scan, song).await?;
                 }
                 scan.finish_batch().await?;
             }
@@ -252,34 +229,31 @@ impl SubsonicSource {
     }
 
     pub(super) async fn read_track(&self, track_id: &str) -> SourceResult<Track> {
-        let body: SongBody = self
+        let body: Value = self
             .get_json("getSong", &[("id", raw_item_id(track_id).to_string())])
             .await?;
-        Ok(track_from_dto(self, body.song))
+        track_from_json(self, &body["song"]).ok_or(SourceError::NotFound)
     }
 }
 
 impl SubsonicSource {
     pub(super) async fn read_playlist(&self, playlist_id: &str) -> SourceResult<PlaylistSnapshot> {
-        let body: PlaylistBody = self
+        let body: Value = self
             .get_json(
                 "getPlaylist",
                 &[("id", raw_item_id(playlist_id).to_string())],
             )
             .await?;
-        let playlist = playlist_from_dto(self, body.playlist.clone());
-        let entries = body
-            .playlist
-            .entry
-            .unwrap_or_default()
-            .into_iter()
+        let playlist = playlist_from_json(self, &body["playlist"]).ok_or(SourceError::NotFound)?;
+        let entries = json::items(&body["playlist"]["entry"])
+            .iter()
             .enumerate()
-            .map(|(index, song)| {
-                let raw_track_id = raw_id_string(&song.id);
-                PlaylistEntry {
+            .filter_map(|(index, song)| {
+                let raw_track_id = json::id(&song["id"])?;
+                Some(PlaylistEntry {
                     occurrence_id: playlist_entry_id(&playlist.id, index, &raw_track_id),
-                    track_id: String::from(self.id("track", &raw_track_id)),
-                }
+                    track_id: self.id("track", &raw_track_id),
+                })
             })
             .collect::<Vec<_>>();
         Ok(PlaylistSnapshot { playlist, entries })
@@ -393,10 +367,10 @@ impl SubsonicSource {
                 .iter()
                 .map(|track_id| ("songId", raw_item_id(track_id).to_string())),
         );
-        let body: PlaylistBody = self.get_json("createPlaylist", &extra).await?;
-        Ok(String::from(
-            self.id("playlist", &raw_id_string(&body.playlist.id)),
-        ))
+        let body: Value = self.get_json("createPlaylist", &extra).await?;
+        json::id(&body["playlist"]["id"])
+            .map(|id| self.id("playlist", &id))
+            .ok_or(SourceError::NotFound)
     }
     pub(crate) async fn rename_playlist(&self, playlist_id: &str, name: &str) -> SourceResult<()> {
         self.get_unit(
@@ -471,29 +445,33 @@ impl SubsonicSource {
 
 impl SubsonicSource {
     pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<NativeLyrics>> {
-        let extensions: OpenSubsonicExtensionsBody = self
+        let extensions: Value = self
             .get_json("getOpenSubsonicExtensions", &[])
             .await
             .unwrap_or_default();
-        let song_lyrics_version = extensions
-            .open_subsonic_extensions
+        let song_lyrics_version = json::items(&extensions["openSubsonicExtensions"])
             .iter()
-            .find(|extension| extension.name == "songLyrics")
-            .and_then(|extension| extension.versions.iter().max())
-            .copied()
+            .find(|extension| extension["name"].as_str() == Some("songLyrics"))
+            .and_then(|extension| {
+                json::items(&extension["versions"])
+                    .iter()
+                    .filter_map(Value::as_u64)
+                    .max()
+            })
             .unwrap_or_default();
         if song_lyrics_version >= 1 {
             let mut extra = vec![("id", raw_item_id(track_id).to_string())];
             if song_lyrics_version >= 2 {
                 extra.push(("enhanced", "true".to_string()));
             }
-            let body: StructuredLyricsBody = self.get_json("getLyricsBySongId", &extra).await?;
-            let lyrics = native_lyrics_from_structured(body.lyrics_list.structured_lyrics);
+            let body: Value = self.get_json("getLyricsBySongId", &extra).await?;
+            let lyrics =
+                native_lyrics_from_structured(json::items(&body["lyricsList"]["structuredLyrics"]));
             return Ok((!lyrics.documents.is_empty()).then_some(lyrics));
         }
 
         let track = self.read_track(track_id).await?;
-        let body: LyricsBody = self
+        let body: Value = self
             .get_json(
                 "getLyrics",
                 &[
@@ -502,10 +480,9 @@ impl SubsonicSource {
                 ],
             )
             .await?;
-        let Some(lyrics) = body.lyrics else {
-            return Ok(None);
-        };
-        let Some(value) = lyrics.value.filter(|value| !value.trim().is_empty()) else {
+        let Some(value) = json::field::<String>(&body["lyrics"], "value")
+            .filter(|value| !value.trim().is_empty())
+        else {
             return Ok(None);
         };
         Ok(Some(NativeLyrics {
@@ -529,21 +506,20 @@ impl SubsonicSource {
     }
 }
 
-pub(super) fn native_lyrics_from_structured(entries: Vec<StructuredLyricsDto>) -> NativeLyrics {
+pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
     let documents = entries
-        .into_iter()
+        .iter()
         .filter_map(|entry| {
-            let role = match entry.kind.as_deref().unwrap_or("main") {
+            let role = match entry["kind"].as_str().unwrap_or("main") {
                 "main" => NativeLyricsRole::Original,
                 "translation" => NativeLyricsRole::Translation,
                 "pronunciation" => NativeLyricsRole::Pronunciation,
                 _ => return None,
             };
-            let agents = entry
-                .agents
-                .into_iter()
+            let agents = json::items(&entry["agents"])
+                .iter()
                 .filter_map(|agent| {
-                    let role = match agent.role.as_str() {
+                    let role = match agent["role"].as_str()? {
                         "main" => NativeLyricAgentRole::Main,
                         "voice" => NativeLyricAgentRole::Voice,
                         "bg" => NativeLyricAgentRole::Background,
@@ -551,51 +527,63 @@ pub(super) fn native_lyrics_from_structured(entries: Vec<StructuredLyricsDto>) -
                         _ => return None,
                     };
                     Some(NativeLyricAgent {
-                        id: agent.id,
+                        id: json::id(&agent["id"])?,
                         role,
-                        name: agent.name,
+                        name: json::field(agent, "name"),
                     })
                 })
                 .collect::<Vec<_>>();
-            let mut cue_lines_by_index = vec![Vec::new(); entry.line.len()];
-            for cue_line in entry.cue_line {
-                let Some(lines) = cue_lines_by_index.get_mut(cue_line.index) else {
+            let raw_lines = json::items(&entry["line"]);
+            let mut cue_lines_by_index = vec![Vec::new(); raw_lines.len()];
+            for cue_line in json::items(&entry["cueLine"]) {
+                let Some(index) = json::field::<usize>(cue_line, "index") else {
                     continue;
                 };
-                let cues = cue_line
-                    .cue
-                    .into_iter()
+                let Some(lines) = cue_lines_by_index.get_mut(index) else {
+                    continue;
+                };
+                let Some(value) = cue_line["value"].as_str() else {
+                    continue;
+                };
+                let cues = json::items(&cue_line["cue"])
+                    .iter()
                     .filter_map(|cue| {
-                        let byte_end_exclusive = cue.byte_end.checked_add(1)?;
-                        (cue.byte_start <= cue.byte_end
-                            && byte_end_exclusive <= cue_line.value.len()
-                            && cue_line.value.is_char_boundary(cue.byte_start)
-                            && cue_line.value.is_char_boundary(byte_end_exclusive))
-                        .then_some(NativeLyricCue {
-                            text: cue.value,
-                            start_millis: cue.start,
-                            end_millis: cue.end,
-                            byte_start: cue.byte_start,
+                        let byte_start = json::field::<usize>(cue, "byteStart")?;
+                        let byte_end = json::field::<usize>(cue, "byteEnd")?;
+                        let byte_end_exclusive = byte_end.checked_add(1)?;
+                        if byte_start > byte_end
+                            || byte_end_exclusive > value.len()
+                            || !value.is_char_boundary(byte_start)
+                            || !value.is_char_boundary(byte_end_exclusive)
+                        {
+                            return None;
+                        }
+                        Some(NativeLyricCue {
+                            text: json::field(cue, "value")?,
+                            start_millis: json::field(cue, "start")?,
+                            end_millis: json::field(cue, "end"),
+                            byte_start,
                             byte_end_exclusive,
                         })
                     })
                     .collect();
                 lines.push(NativeLyricCueLine {
-                    text: cue_line.value,
-                    start_millis: cue_line.start,
-                    end_millis: cue_line.end,
-                    agent_id: cue_line.agent_id,
+                    text: value.to_string(),
+                    start_millis: json::field(cue_line, "start"),
+                    end_millis: json::field(cue_line, "end"),
+                    agent_id: json::id(&cue_line["agentId"]),
                     cues,
                 });
             }
-            let lines = entry
-                .line
-                .into_iter()
+            let lines = raw_lines
+                .iter()
                 .zip(cue_lines_by_index)
                 .filter_map(|(line, cue_lines)| {
-                    (!line.value.trim().is_empty()).then_some(NativeLyricLine {
-                        text: line.value,
-                        start_millis: line.start,
+                    let text = json::field::<String>(line, "value")
+                        .filter(|value| !value.trim().is_empty())?;
+                    Some(NativeLyricLine {
+                        text,
+                        start_millis: json::field(line, "start"),
                         end_millis: cue_lines.iter().filter_map(|line| line.end_millis).max(),
                         cue_lines,
                     })
@@ -603,8 +591,8 @@ pub(super) fn native_lyrics_from_structured(entries: Vec<StructuredLyricsDto>) -
                 .collect::<Vec<_>>();
             (!lines.is_empty()).then_some(NativeLyricsDocument {
                 role,
-                language: normalize_native_language(entry.lang),
-                offset_millis: entry.offset.unwrap_or_default(),
+                language: normalize_native_language(json::field(entry, "lang").unwrap_or_default()),
+                offset_millis: json::field(entry, "offset").unwrap_or_default(),
                 lines,
                 agents,
             })
@@ -896,19 +884,14 @@ fn saved_credential_error(error: serde_json::Error) -> SourceError {
     SourceError::Other(format!("saved Subsonic credential is invalid: {error}"))
 }
 #[derive(Debug)]
-pub(super) struct SubsonicApiResponse<T> {
-    pub(super) body: T,
+pub(super) struct SubsonicApiResponse {
+    pub(super) body: Value,
     pub(super) server_type: Option<String>,
 }
-pub(super) async fn subsonic_json<T: DeserializeOwned>(
+pub(super) async fn subsonic_json(
     request: reqwest::RequestBuilder,
-) -> SourceResult<SubsonicApiResponse<T>> {
-    let endpoint = request
-        .try_clone()
-        .and_then(|request| request.build().ok())
-        .map(|request| request.url().path().to_string())
-        .unwrap_or_else(|| "/rest".to_string());
-    let envelope = remote_http::json::<SubsonicEnvelope>(
+) -> SourceResult<SubsonicApiResponse> {
+    let mut envelope: Value = remote_http::json(
         request,
         SUBSONIC_HTTP,
         BodyLimit {
@@ -917,28 +900,27 @@ pub(super) async fn subsonic_json<T: DeserializeOwned>(
         },
     )
     .await?;
-    if envelope.response.status != "ok" {
-        let error = envelope.response.error;
-        let code = error.as_ref().and_then(|error| error.code);
-        let message = error
-            .map(|error| {
-                let message = error
-                    .message
-                    .filter(|message| !message.trim().is_empty())
-                    .unwrap_or_else(|| {
-                        error.code.map_or_else(
-                            || "Subsonic request failed".to_string(),
-                            |code| format!("Subsonic error {code}"),
-                        )
-                    });
-                match error.help_url {
-                    Some(help_url) if !help_url.trim().is_empty() => {
-                        format!("{message} ({help_url})")
-                    }
-                    _ => message,
-                }
-            })
-            .unwrap_or_else(|| format!("Subsonic returned {}", envelope.response.status));
+    let body = envelope
+        .get_mut("subsonic-response")
+        .map(Value::take)
+        .unwrap_or_default();
+    if body["status"].as_str() != Some("ok") {
+        let error = &body["error"];
+        let code = json::field::<u16>(error, "code");
+        let message = json::field::<String>(error, "message")
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| {
+                code.map_or_else(
+                    || "Subsonic request failed".to_string(),
+                    |code| format!("Subsonic error {code}"),
+                )
+            });
+        let message = match json::field::<String>(error, "helpUrl")
+            .filter(|value| !value.trim().is_empty())
+        {
+            Some(url) => format!("{message} ({url})"),
+            None => message,
+        };
         return Err(if matches!(code, Some(40..=44)) {
             SourceError::Auth(message)
         } else {
@@ -948,19 +930,9 @@ pub(super) async fn subsonic_json<T: DeserializeOwned>(
             }
         });
     }
-    let body = serde_path_to_error::deserialize::<_, T>(
-        serde_json::Value::Object(envelope.response.body).into_deserializer(),
-    )
-    .map_err(|error| {
-        SourceError::Other(format!(
-            "opensubsonic response at {endpoint} field {}: {}",
-            error.path(),
-            error.inner()
-        ))
-    })?;
     Ok(SubsonicApiResponse {
+        server_type: json::field(&body, "type"),
         body,
-        server_type: envelope.response.server_type,
     })
 }
 pub(super) async fn subsonic_bytes(request: reqwest::RequestBuilder) -> SourceResult<ImageBytes> {
@@ -1052,9 +1024,6 @@ pub(super) fn redacted_subsonic_url(url: &Url) -> String {
     redact_subsonic_query(&mut redacted);
     redacted.to_string()
 }
-pub(super) fn raw_id_string(id: &SubsonicId) -> String {
-    id.0.clone()
-}
 pub(super) fn playlist_entry_id(playlist_id: &str, index: usize, track_id: &str) -> String {
     format!("{}:{index}:{track_id}", playlist_id)
 }
@@ -1127,26 +1096,24 @@ impl SubsonicSource {
         Ok(url)
     }
 
-    pub(super) async fn get_json<T: DeserializeOwned>(
+    pub(super) async fn get_json(
         &self,
         method: &str,
         extra: &[(&str, String)],
-    ) -> SourceResult<T> {
+    ) -> SourceResult<Value> {
         let url = self.authenticated_url(method, extra)?;
         subsonic_json(self.client.get(url))
             .await
-            .map(|response: SubsonicApiResponse<T>| response.body)
+            .map(|response: SubsonicApiResponse| response.body)
     }
 
     async fn get_unit(&self, method: &str, extra: &[(&str, String)]) -> SourceResult<()> {
         let url = self.authenticated_url(method, extra)?;
-        subsonic_json::<SubsonicEmpty>(self.client.get(url))
-            .await
-            .map(|_| ())
+        subsonic_json(self.client.get(url)).await.map(|_| ())
     }
 
     async fn similar_songs(&self, raw_id: &str, count: usize) -> SourceResult<Vec<Track>> {
-        let body: SimilarSongsBody = self
+        let body: Value = self
             .get_json(
                 "getSimilarSongs",
                 &[
@@ -1155,12 +1122,9 @@ impl SubsonicSource {
                 ],
             )
             .await?;
-        Ok(body
-            .similar_songs
-            .map(|songs| songs.song)
-            .unwrap_or_default()
-            .into_iter()
-            .map(|song| track_from_dto(self, song))
+        Ok(json::items(&body["similarSongs"]["song"])
+            .iter()
+            .filter_map(|song| track_from_json(self, song))
             .collect())
     }
 
@@ -1179,489 +1143,9 @@ impl SubsonicSource {
     }
 }
 
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct SubsonicEmpty {}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicEnvelope {
-    #[serde(rename = "subsonic-response")]
-    pub(super) response: SubsonicResponse,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicResponse {
-    pub(super) status: String,
-    #[serde(default, rename = "type")]
-    pub(super) server_type: Option<String>,
-    #[serde(default)]
-    pub(super) error: Option<SubsonicError>,
-    #[serde(flatten)]
-    pub(super) body: serde_json::Map<String, serde_json::Value>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicError {
-    #[serde(default)]
-    pub(super) code: Option<u16>,
-    #[serde(default)]
-    pub(super) message: Option<String>,
-    #[serde(default, rename = "helpUrl")]
-    pub(super) help_url: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct AuthenticateBody {
-    pub(super) user: SubsonicUser,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct TokenInfoBody {
-    #[serde(rename = "tokenInfo")]
-    pub(super) token_info: TokenInfo,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct TokenInfo {
-    pub(super) username: String,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicUser {
-    pub(super) username: String,
-    #[serde(default, rename = "adminRole")]
-    pub(super) admin_role: bool,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct ScanStatusBody {
-    #[serde(rename = "scanStatus")]
-    pub(super) scan_status: ScanStatus,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct ScanStatus {
-    pub(super) scanning: bool,
-    #[serde(default)]
-    pub(super) count: i64,
-    #[serde(default, rename = "folderCount")]
-    pub(super) folder_count: Option<i64>,
-    #[serde(default, rename = "lastScan")]
-    pub(super) last_scan: Option<String>,
-    #[serde(default)]
-    pub(super) error: Option<String>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct AlbumListBody {
-    #[serde(default, rename = "albumList2")]
-    pub(super) album_list: AlbumList,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct ArtistBody {
-    #[serde(default)]
-    pub(super) artist: ArtistDetail,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct ArtistDetail {
-    #[serde(default)]
-    pub(super) album: Vec<SubsonicAlbum>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct AlbumList {
-    #[serde(default)]
-    pub(super) album: Vec<SubsonicAlbum>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct SearchBody {
-    #[serde(default, rename = "searchResult3")]
-    pub(super) search_result: Option<SearchResult>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct SearchResult {
-    #[serde(default)]
-    pub(super) artist: Option<Vec<SubsonicArtist>>,
-    #[serde(default)]
-    pub(super) song: Option<Vec<SubsonicSong>>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct MusicFoldersBody {
-    #[serde(default, rename = "musicFolders")]
-    pub(super) music_folders: MusicFolders,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct MusicFolders {
-    #[serde(default, rename = "musicFolder")]
-    pub(super) music_folder: Vec<SubsonicMusicFolder>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicMusicFolder {
-    pub(super) id: SubsonicId,
-    pub(super) name: String,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct IndexesBody {
-    #[serde(default)]
-    pub(super) indexes: Option<ArtistsIndex>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct MusicDirectoryBody {
-    pub(super) directory: SubsonicDirectory,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicDirectory {
-    #[serde(default)]
-    pub(super) child: Vec<SubsonicSong>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct ArtistsIndex {
-    #[serde(default)]
-    pub(super) index: Vec<ArtistIndex>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct ArtistIndex {
-    #[serde(default)]
-    pub(super) artist: Vec<SubsonicArtist>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct GenresBody {
-    pub(super) genres: GenresList,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct GenresList {
-    #[serde(default)]
-    pub(super) genre: Vec<SubsonicGenre>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct PlaylistsBody {
-    #[serde(default)]
-    pub(super) playlists: Option<PlaylistsList>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct PlaylistsList {
-    #[serde(default)]
-    pub(super) playlist: Vec<SubsonicPlaylist>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct PlaylistBody {
-    pub(super) playlist: SubsonicPlaylist,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SongBody {
-    pub(super) song: SubsonicSong,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct RandomSongsBody {
-    #[serde(default, rename = "randomSongs")]
-    pub(super) random_songs: Option<SongsList>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct SimilarSongsBody {
-    #[serde(default, rename = "similarSongs")]
-    pub(super) similar_songs: Option<SongsList>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SongsList {
-    #[serde(default)]
-    pub(super) song: Vec<SubsonicSong>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct LyricsBody {
-    #[serde(default)]
-    pub(super) lyrics: Option<SubsonicLyrics>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct OpenSubsonicExtensionsBody {
-    #[serde(default, rename = "openSubsonicExtensions")]
-    pub(super) open_subsonic_extensions: Vec<OpenSubsonicExtensionDto>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct OpenSubsonicExtensionDto {
-    pub(super) name: String,
-    #[serde(default)]
-    pub(super) versions: Vec<u32>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct StructuredLyricsBody {
-    #[serde(default, rename = "lyricsList")]
-    pub(super) lyrics_list: StructuredLyricsListDto,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct StructuredLyricsListDto {
-    #[serde(default, rename = "structuredLyrics")]
-    pub(super) structured_lyrics: Vec<StructuredLyricsDto>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StructuredLyricsDto {
-    pub(super) lang: String,
-    #[serde(default)]
-    pub(super) line: Vec<StructuredLyricLineDto>,
-    #[serde(default)]
-    pub(super) offset: Option<i64>,
-    #[serde(default)]
-    pub(super) kind: Option<String>,
-    #[serde(default)]
-    pub(super) agents: Vec<StructuredLyricAgentDto>,
-    #[serde(default, rename = "cueLine")]
-    pub(super) cue_line: Vec<StructuredLyricCueLineDto>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StructuredLyricLineDto {
-    pub(super) value: String,
-    #[serde(default)]
-    pub(super) start: Option<u64>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StructuredLyricAgentDto {
-    pub(super) id: String,
-    pub(super) role: String,
-    #[serde(default)]
-    pub(super) name: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StructuredLyricCueLineDto {
-    pub(super) index: usize,
-    pub(super) value: String,
-    #[serde(default)]
-    pub(super) start: Option<u64>,
-    #[serde(default)]
-    pub(super) end: Option<u64>,
-    #[serde(default, rename = "agentId")]
-    pub(super) agent_id: Option<String>,
-    #[serde(default)]
-    pub(super) cue: Vec<StructuredLyricCueDto>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct StructuredLyricCueDto {
-    pub(super) value: String,
-    pub(super) start: u64,
-    #[serde(default)]
-    pub(super) end: Option<u64>,
-    #[serde(rename = "byteStart")]
-    pub(super) byte_start: usize,
-    #[serde(rename = "byteEnd")]
-    pub(super) byte_end: usize,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicLyrics {
-    #[serde(default)]
-    pub(super) value: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicAlbum {
-    pub(super) id: SubsonicId,
-    #[serde(default)]
-    pub(super) album: Option<String>,
-    #[serde(default)]
-    pub(super) title: Option<String>,
-    #[serde(default)]
-    pub(super) name: Option<String>,
-    #[serde(default)]
-    pub(super) artist: Option<String>,
-    #[serde(default, rename = "displayArtist")]
-    pub(super) display_artist: Option<String>,
-    #[serde(default, rename = "artistId")]
-    pub(super) artist_id: Option<SubsonicId>,
-    #[serde(default, deserialize_with = "null_default")]
-    pub(super) artists: Vec<SubsonicArtistRef>,
-    #[serde(default, rename = "coverArt")]
-    pub(super) cover_art: Option<SubsonicId>,
-    #[serde(default)]
-    pub(super) year: Option<i32>,
-    #[serde(default, rename = "releaseDate")]
-    pub(super) release_date: Option<SubsonicItemDate>,
-    #[serde(default)]
-    pub(super) created: Option<String>,
-    #[serde(default)]
-    pub(super) played: Option<String>,
-    #[serde(default, rename = "playCount")]
-    pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
-    pub(super) user_rating: Option<u32>,
-    #[serde(default)]
-    pub(super) genre: Option<String>,
-    #[serde(default, deserialize_with = "null_default")]
-    pub(super) genres: Vec<GenreName>,
-    #[serde(default, rename = "releaseTypes", deserialize_with = "null_default")]
-    pub(super) release_types: Vec<String>,
-    #[serde(default, rename = "isCompilation")]
-    pub(super) is_compilation: Option<bool>,
-    #[serde(default, rename = "musicBrainzId")]
-    pub(super) musicbrainz_album_id: Option<String>,
-    #[serde(default)]
-    pub(super) starred: Option<serde_json::Value>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicSong {
-    pub(super) id: SubsonicId,
-    #[serde(default, rename = "isDir")]
-    pub(super) is_dir: Option<bool>,
-    #[serde(default)]
-    pub(super) title: Option<String>,
-    #[serde(default)]
-    pub(super) album: Option<String>,
-    #[serde(default, rename = "albumId")]
-    pub(super) album_id: Option<SubsonicId>,
-    #[serde(default)]
-    pub(super) artist: Option<String>,
-    #[serde(default, rename = "displayArtist")]
-    pub(super) display_artist: Option<String>,
-    #[serde(default, rename = "artistId")]
-    pub(super) artist_id: Option<SubsonicId>,
-    #[serde(default, deserialize_with = "null_default")]
-    pub(super) artists: Vec<SubsonicArtistRef>,
-    #[serde(default, rename = "albumArtists", deserialize_with = "null_default")]
-    pub(super) album_artists: Vec<SubsonicArtistRef>,
-    #[serde(default, rename = "coverArt")]
-    pub(super) cover_art: Option<SubsonicId>,
-    #[serde(default)]
-    pub(super) duration: Option<u32>,
-    #[serde(default)]
-    pub(super) track: Option<i32>,
-    #[serde(default)]
-    pub(super) year: Option<i32>,
-    #[serde(default)]
-    pub(super) created: Option<String>,
-    #[serde(default)]
-    pub(super) played: Option<String>,
-    #[serde(default, rename = "playCount")]
-    pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
-    pub(super) user_rating: Option<u32>,
-    #[serde(default)]
-    pub(super) genre: Option<String>,
-    #[serde(default)]
-    pub(super) comment: Option<String>,
-    #[serde(default, deserialize_with = "null_default")]
-    pub(super) genres: Vec<GenreName>,
-    #[serde(default, deserialize_with = "null_default")]
-    pub(super) moods: Vec<String>,
-    #[serde(default)]
-    pub(super) bpm: Option<u32>,
-    #[serde(default, rename = "discNumber")]
-    pub(super) disc_number: Option<i32>,
-    #[serde(default)]
-    pub(super) path: Option<String>,
-    #[serde(default)]
-    pub(super) suffix: Option<String>,
-    #[serde(default, rename = "contentType")]
-    pub(super) content_type: Option<String>,
-    #[serde(default)]
-    pub(super) starred: Option<serde_json::Value>,
-    #[serde(default, rename = "musicBrainzId")]
-    pub(super) musicbrainz_recording_id: Option<String>,
-    #[serde(default, rename = "replayGain")]
-    pub(super) replay_gain: Option<SubsonicReplayGain>,
-}
-#[derive(Clone, Debug, Default, Deserialize)]
-pub(super) struct SubsonicReplayGain {
-    #[serde(default, rename = "trackGain")]
-    pub(super) track_gain: Option<f64>,
-    #[serde(default, rename = "albumGain")]
-    pub(super) album_gain: Option<f64>,
-    #[serde(default, rename = "trackPeak")]
-    pub(super) track_peak: Option<f64>,
-    #[serde(default, rename = "albumPeak")]
-    pub(super) album_peak: Option<f64>,
-}
-
-fn null_default<'de, D, T>(deserializer: D) -> Result<T, D::Error>
-where
-    D: Deserializer<'de>,
-    T: DeserializeOwned + Default,
-{
-    Ok(serde_json::from_value(serde_json::Value::deserialize(deserializer)?).unwrap_or_default())
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicArtist {
-    pub(super) id: SubsonicId,
-    #[serde(default)]
-    pub(super) name: Option<String>,
-    #[serde(default, rename = "coverArt")]
-    pub(super) cover_art: Option<SubsonicId>,
-    #[serde(default)]
-    pub(super) played: Option<String>,
-    #[serde(default, rename = "playCount")]
-    pub(super) play_count: Option<u64>,
-    #[serde(default, rename = "userRating", deserialize_with = "null_default")]
-    pub(super) user_rating: Option<u32>,
-    #[serde(default)]
-    pub(super) starred: Option<serde_json::Value>,
-    #[serde(default, rename = "musicBrainzId")]
-    pub(super) musicbrainz_artist_id: Option<String>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicGenre {
-    #[serde(default, alias = "name")]
-    pub(super) value: String,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicPlaylist {
-    pub(super) id: SubsonicId,
-    #[serde(default)]
-    pub(super) name: Option<String>,
-    #[serde(default, rename = "coverArt")]
-    pub(super) cover_art: Option<SubsonicId>,
-    #[serde(default)]
-    pub(super) entry: Option<Vec<SubsonicSong>>,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct GenreName {
-    pub(super) name: String,
-}
-#[derive(Clone, Debug, Deserialize)]
-pub(super) struct SubsonicArtistRef {
-    pub(super) id: SubsonicId,
-    pub(super) name: String,
-}
-#[derive(Clone, Copy, Debug, Deserialize)]
-pub(super) struct SubsonicItemDate {
-    #[serde(default)]
-    pub(super) year: i32,
-    #[serde(default)]
-    pub(super) month: i32,
-    #[serde(default)]
-    pub(super) day: i32,
-}
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct SubsonicId(pub(super) String);
-impl<'de> Deserialize<'de> for SubsonicId {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        deserializer.deserialize_any(SubsonicIdVisitor)
-    }
-}
-pub(super) struct SubsonicIdVisitor;
-impl Visitor<'_> for SubsonicIdVisitor {
-    type Value = SubsonicId;
-
-    fn expecting(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        formatter.write_str("a string or numeric Subsonic id")
-    }
-
-    fn visit_str<E>(self, value: &str) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(SubsonicId(value.to_string()))
-    }
-
-    fn visit_string<E>(self, value: String) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(SubsonicId(value))
-    }
-
-    fn visit_u64<E>(self, value: u64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(SubsonicId(value.to_string()))
-    }
-
-    fn visit_i64<E>(self, value: i64) -> Result<Self::Value, E>
-    where
-        E: de::Error,
-    {
-        Ok(SubsonicId(value.to_string()))
-    }
-}
-
 #[cfg(test)]
 mod tests {
-    use super::{SubsonicCredential, SubsonicSong, redacted_subsonic_url};
+    use super::{SubsonicCredential, redacted_subsonic_url};
     use crate::subsonic::{
         SubsonicAuthentication, SubsonicFlavor, SubsonicSource, SubsonicSourceConfig,
     };
@@ -1685,24 +1169,198 @@ mod tests {
         assert!(!format!("{credential:?}").contains("secret-key"));
     }
 
+    fn source(url: &str) -> SubsonicSource {
+        SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: url.to_string(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::Password,
+            },
+            SubsonicCredential::from_password("password").serialize(),
+        )
+        .unwrap()
+    }
+
+    #[tokio::test]
+    async fn optional_metadata_does_not_block_login_tracks_or_playlist_positions() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/ping.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response": {"status":"ok", "type": {"unexpected": true}}
+            })))
+            .mount(&server)
+            .await;
+        for (admin, expected) in [
+            (serde_json::json!("false"), false),
+            (serde_json::json!(true), true),
+            (serde_json::json!("true"), true),
+            (serde_json::json!({"unexpected":true}), false),
+        ] {
+            let _user = Mock::given(method("GET")).and(path("/rest/getUser.view"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response": {"status":"ok", "user":{"username":"canonical", "adminRole":admin}}
+                }))).mount_as_scoped(&server).await;
+            let authenticated = SubsonicSource::authenticate(
+                crate::SourceId::new("source"),
+                SubsonicFlavor::Subsonic,
+                SubsonicAuthentication::Password,
+                crate::CredentialHostInput {
+                    server_name: None,
+                    server_url: server.uri(),
+                    username: "listener".into(),
+                    password: "password".into(),
+                    trust_invalid_cert: false,
+                },
+            )
+            .await
+            .unwrap();
+            assert_eq!(authenticated.source.username, "canonical");
+            assert_eq!(authenticated.source.metadata_editing_available(), expected);
+        }
+        let source = source(&server.uri());
+        let song = serde_json::json!({
+            "id": "one", "title": "Playable", "isDir":"false", "duration": "42", "year":"2024",
+            "artists":[{"id":"artist","name":"Artist"}, {"name":"unidentified"}],
+            "replayGain":{"trackGain":"-4.25","albumGain":{},"trackPeak":0.91}
+        });
+        Mock::given(method("GET"))
+            .and(path("/rest/getSong.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","song":song}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/rest/getPlaylist.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","playlist":{
+                    "id":"list", "name":[], "entry":[song, {"title":"no id"}, {"id":"one","isDir":{}}]
+                }}
+            }))).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/rest/getMusicDirectory.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","directory":{"child":[
+                    {"id":"folder","isDir":"true"}, {"title":"no id"}, song
+                ]}}
+            })))
+            .mount(&server)
+            .await;
+        let track = source.read_track("one").await.unwrap();
+        assert_eq!(track.title, "Playable");
+        assert_eq!(track.duration_seconds, 42);
+        assert_eq!(track.year, 2024);
+        assert_eq!(track.relations.artists.len(), 1);
+        assert_eq!(track.replay_gain_track_db, Some(-4.25));
+        assert_eq!(track.replay_gain_track_peak, Some(0.91));
+        assert_eq!(track.replay_gain_album_db, None);
+        let playlist = source.read_playlist("list").await.unwrap();
+        assert_eq!(playlist.entries.len(), 2);
+        assert_eq!(
+            playlist.entries[1].occurrence_id,
+            super::playlist_entry_id(&playlist.playlist.id, 2, "one")
+        );
+        let folder = source.browse_folder(Some("root"), None).await.unwrap();
+        assert_eq!(folder.folders[0].object_id, "subsonic:folder:folder");
+        assert_eq!(folder.tracks, ["subsonic:track:one"]);
+    }
+
     #[test]
     fn opensubsonic_song_reads_replay_gain() {
-        let song = serde_json::from_value::<SubsonicSong>(serde_json::json!({
-            "id": "track-one",
-            "replayGain": {
-                "trackGain": -4.25,
-                "albumGain": -3.5,
-                "trackPeak": 0.91,
-                "albumPeak": 0.95
-            }
-        }))
-        .expect("OpenSubsonic song");
+        let song = super::track_from_json(
+            &source("https://music.example"),
+            &serde_json::json!({
+                "id": "track-one",
+                "replayGain": {"trackGain":-4.25,"albumGain":-3.5,"trackPeak":0.91,"albumPeak":0.95}
+            }),
+        )
+        .unwrap();
+        assert_eq!(song.replay_gain_track_db, Some(-4.25));
+        assert_eq!(song.replay_gain_album_db, Some(-3.5));
+        assert_eq!(song.replay_gain_track_peak, Some(0.91));
+        assert_eq!(song.replay_gain_album_peak, Some(0.95));
+    }
 
-        let replay_gain = song.replay_gain.expect("ReplayGain");
-        assert_eq!(replay_gain.track_gain, Some(-4.25));
-        assert_eq!(replay_gain.album_gain, Some(-3.5));
-        assert_eq!(replay_gain.track_peak, Some(0.91));
-        assert_eq!(replay_gain.album_peak, Some(0.95));
+    #[tokio::test]
+    async fn login_keeps_server_errors_and_unreadable_envelopes_as_errors() {
+        for (body, auth_error) in [
+            (
+                serde_json::json!({"subsonic-response":{"status":"failed","error":{"code":40,"message":"Wrong password"}}}),
+                true,
+            ),
+            (
+                serde_json::json!({"subsonic-response":{"status":"failed","error":{"code":0,"message":"Unavailable"}}}),
+                false,
+            ),
+            (serde_json::json!([]), false),
+            (serde_json::json!(42), false),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/rest/ping.view"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+            let result = SubsonicSource::authenticate(
+                crate::SourceId::new("source"),
+                SubsonicFlavor::Subsonic,
+                SubsonicAuthentication::Password,
+                crate::CredentialHostInput {
+                    server_name: None,
+                    server_url: server.uri(),
+                    username: "listener".into(),
+                    password: "password".into(),
+                    trust_invalid_cert: false,
+                },
+            )
+            .await;
+            let error = result.err().expect("failed login");
+            assert_eq!(matches!(error, crate::SourceError::Auth(_)), auth_error);
+        }
+    }
+
+    #[tokio::test]
+    async fn structured_lyrics_keep_lines_and_cues_when_optional_facts_are_unreadable() {
+        let server = MockServer::start().await;
+        Mock::given(method("GET"))
+            .and(path("/rest/getOpenSubsonicExtensions.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","openSubsonicExtensions":[
+                    null, {"name":"songLyrics","versions":[{},2]}
+                ]}
+            })))
+            .mount(&server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/rest/getLyricsBySongId.view"))
+            .and(query_param("enhanced", "true"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","lyricsList":{"structuredLyrics":[{
+                    "lang":"en","offset":{},
+                    "agents":[null,{"id":"singer","role":"main","name":false}],
+                    "line":[{"value":"Hi","start":10},{"value":{}},{"value":"There","start":{}}],
+                    "cueLine":[{"index":2,"value":"There","agentId":"singer","cue":[
+                        {"value":"There","start":20,"byteStart":0,"byteEnd":4},
+                        {"value":"Unreadable","start":{}}
+                    ]}]
+                }]}}
+            })))
+            .mount(&server)
+            .await;
+        let lyrics = source(&server.uri()).lyrics("one").await.unwrap().unwrap();
+        let document = &lyrics.documents[0];
+        assert_eq!(document.language.as_deref(), Some("en"));
+        assert_eq!(document.offset_millis, 0);
+        assert_eq!(document.agents.len(), 1);
+        assert_eq!(document.lines.len(), 2);
+        assert_eq!(document.lines[0].start_millis, Some(10));
+        assert_eq!(document.lines[1].text, "There");
+        let cue = &document.lines[1].cue_lines[0].cues[0];
+        assert_eq!(cue.text, "There");
+        assert_eq!(cue.byte_end_exclusive, 5);
     }
 
     #[tokio::test]
@@ -1788,6 +1446,7 @@ mod tests {
             serde_json::json!({ "id": "track-one" }),
             serde_json::json!({
                 "id": "track-one",
+                "isDir": null,
                 "artists": null,
                 "albumArtists": null,
                 "genres": null,
@@ -1795,14 +1454,14 @@ mod tests {
                 "replayGain": null
             }),
         ] {
-            let song = serde_json::from_value::<SubsonicSong>(value)
+            let song = super::track_from_json(&source("https://music.example"), &value)
                 .expect("OpenSubsonic song without optional metadata");
 
-            assert!(song.artists.is_empty());
-            assert!(song.album_artists.is_empty());
-            assert!(song.genres.is_empty());
-            assert!(song.moods.is_empty());
-            assert!(song.replay_gain.is_none());
+            assert!(song.relations.artists.is_empty());
+            assert!(song.relations.album_artists.is_empty());
+            assert!(song.relations.genres.is_empty());
+            assert!(song.relations.moods.is_empty());
+            assert!(song.replay_gain_track_db.is_none());
         }
     }
 
@@ -1947,7 +1606,7 @@ mod tests {
                     .await
                     .unwrap();
             if cached {
-                super::stage_album(&mut scan, super::album_from_dto(&source, serde_json::from_value(serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap())).await.unwrap();
+                super::stage_album(&mut scan, super::album_from_json(&source, &serde_json::json!({"id":"album","name":"Nonmatching album","coverArt":"album-cover"})).unwrap()).await.unwrap();
             }
             scan.finish().await.unwrap();
             let (results, outcome) = source
