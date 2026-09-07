@@ -1037,7 +1037,7 @@ mod queue_tests {
         let current = sequence.selected().unwrap().clone();
         let moved = sequence.at(5).unwrap().occurrence.clone();
         sequence.reorder(
-            &[moved.clone()],
+            std::slice::from_ref(&moved),
             &QueueReorderTarget::After(current.occurrence.clone()),
         );
         assert_eq!(
