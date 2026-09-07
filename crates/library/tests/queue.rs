@@ -83,7 +83,7 @@ async fn queue_restores_uri_owned_duplicates_state_and_unavailable_media() {
 
     let page = fixture
         .database
-        .prepared_queue_page(&restored.occurrences, "")
+        .prepared_queue_page(&restored.occurrences)
         .await
         .unwrap();
     assert_eq!(page[1].media_uri, page[2].media_uri);
@@ -388,17 +388,12 @@ async fn saved_queue_contains_only_the_window_and_retains_compact_explicit_choic
     );
     let rows = fixture
         .database
-        .prepared_queue_page(&restored.occurrences, "499")
+        .prepared_queue_page(&restored.occurrences)
         .await
         .unwrap();
-    assert!(
-        rows.is_empty(),
-        "queue search cannot read outside its window"
-    );
-    let rows = fixture
-        .database
-        .prepared_queue_page(&restored.occurrences, "120")
-        .await
-        .unwrap();
-    assert_eq!(rows.len(), 1);
+    assert_eq!(rows.len(), restored.occurrences.len());
+    for (row, occurrence) in rows.iter().zip(&restored.occurrences) {
+        assert_eq!(row.occurrence, occurrence.occurrence);
+        assert_eq!(row.item, occurrence.item);
+    }
 }

@@ -5,8 +5,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use library::ListenWrite;
+use library::QueueItem;
 use library::{Database, ListenDeliveryTarget, PendingListenDelivery, ReadCancellation};
-use playback::{QueueItem, external_scrobble_threshold_millis};
 use reqwest::blocking::Client;
 use tracing::warn;
 
@@ -49,6 +49,25 @@ impl SubmissionTrack {
             album: pending.album_title.clone(),
             duration_millis: pending.duration_millis.max(0) as u64,
         }
+    }
+}
+
+fn external_scrobble_threshold_millis(duration_millis: u64) -> Option<u64> {
+    if duration_millis <= 30_000 {
+        return None;
+    }
+    Some((duration_millis / 2).min(240_000))
+}
+
+#[cfg(test)]
+mod duration_tests {
+    use super::*;
+    #[test]
+    fn external_scrobbles_retain_the_service_duration_law() {
+        assert_eq!(external_scrobble_threshold_millis(30_000), None);
+        assert_eq!(external_scrobble_threshold_millis(31_000), Some(15_500));
+        assert_eq!(external_scrobble_threshold_millis(180_000), Some(90_000));
+        assert_eq!(external_scrobble_threshold_millis(900_000), Some(240_000));
     }
 }
 

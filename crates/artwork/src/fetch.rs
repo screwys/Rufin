@@ -22,7 +22,7 @@ impl FetchContext {
         Self { source_resolver }
     }
 
-    fn source(&self, source_id: &library::SourceId) -> Result<Arc<sources::Source>, String> {
+    fn source(&self, source_id: &sources::SourceId) -> Result<Arc<sources::Source>, String> {
         let resolver = self
             .source_resolver
             .lock()

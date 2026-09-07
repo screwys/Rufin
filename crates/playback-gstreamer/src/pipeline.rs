@@ -623,10 +623,11 @@ impl Drop for PipelineSession {
     }
 }
 pub(super) fn make_playbin(name: &str) -> Result<gst::Element, String> {
-    gst::ElementFactory::make("playbin3")
+    // playbin3 can deadlock on teardown while its next URI is blocked waiting
+    // for the current stream to drain. Playback must remain cancellable.
+    gst::ElementFactory::make("playbin")
         .name(name)
         .build()
-        .or_else(|_| gst::ElementFactory::make("playbin").name(name).build())
         .map_err(|error| error.to_string())
 }
 pub(super) fn configure_playbin_for_audio(pipeline: &gst::Element) {

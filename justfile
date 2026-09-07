@@ -272,6 +272,7 @@ _check-all:
     fi
     @just _lint
     @just _test
+    @cargo test --locked -p library --lib million_track -- --ignored
     @cargo deny --locked check -D unmatched-skip
 
 _check-cmake:

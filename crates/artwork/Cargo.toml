@@ -13,7 +13,6 @@ publish.workspace = true
 [dependencies]
 metadata-lookup.workspace = true
 image.workspace = true
-library.workspace = true
 md5.workspace = true
 serde_json.workspace = true
 sources.workspace = true

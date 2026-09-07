@@ -50,20 +50,26 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | :--- | :--- |
 | `app-identity` | single-file crate to separate development builds |
 | `artwork` | artwork selection, loading, and caching |
+| `audio-processing` | waveform, loudness, transcoding and spectrum analysis |
+| `backup` | backup archives, encryption, staging and scheduling rules |
 | `desktop-integration` | MPRIS, notifications, the tray, and Discord RPC |
 | `downloads` | server track downloads and download management |
 | `library` | music items, listening activity, and the database |
 | `localization` | translation tooling and locales |
-| `lyrics` | lyrics fetching, selection, and state |
+| `lyrics` | lyrics documents, parsing, lookup and reading aids |
 | `metadata-lookup` | external metadata and artwork lookups |
 | `playback` | playback behavior and the queue |
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
-| `rufin` | app startup, settings persistence, and crate composition |
+| `rufin` | executable startup, desktop paths, backend construction and native observers |
+| `rufin-core` | application operations, saved settings, source ownership and current lyrics |
 | `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
-| `ui` | GTK views and navigation|
+| `ui-shell` | desktop window composition, navigation admission, preferences and native actions |
+| `ui-library` | browsing pages, bounded projections, models and page selection |
+| `ui-shared` | shared GTK controls, menus, editors, artwork presentation and resources |
+| `ui-player` | persistent playback, queue, lyrics, outputs and visualizer presentation |
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |
 

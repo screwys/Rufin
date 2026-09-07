@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 
+use serde::{Deserialize, Serialize};
 use sqlx::{Connection, FromRow, SqliteConnection};
 
 use crate::{
@@ -10,6 +11,51 @@ use crate::{
 };
 
 const HOME_LIMIT: i64 = 24;
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum HomeBlockKind {
+    Showcase,
+    Explore,
+    MostPlayed,
+    NewlyAdded,
+    RecentlyPlayed,
+    RecentlyReleased,
+    Genres,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
+pub enum HomeSectionKind {
+    Explore,
+    MostPlayed,
+    NewlyAdded,
+    RecentlyPlayed,
+    RecentlyReleased,
+}
+
+impl HomeBlockKind {
+    pub const fn all() -> [Self; 7] {
+        [
+            Self::Showcase,
+            Self::Explore,
+            Self::MostPlayed,
+            Self::NewlyAdded,
+            Self::RecentlyPlayed,
+            Self::RecentlyReleased,
+            Self::Genres,
+        ]
+    }
+
+    pub const fn section_kind(self) -> Option<HomeSectionKind> {
+        match self {
+            Self::Explore => Some(HomeSectionKind::Explore),
+            Self::MostPlayed => Some(HomeSectionKind::MostPlayed),
+            Self::NewlyAdded => Some(HomeSectionKind::NewlyAdded),
+            Self::RecentlyPlayed => Some(HomeSectionKind::RecentlyPlayed),
+            Self::RecentlyReleased => Some(HomeSectionKind::RecentlyReleased),
+            Self::Showcase | Self::Genres => None,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HomeEntryKind {
@@ -194,98 +240,110 @@ impl Database {
         folder: Option<FolderKey>,
         showcase_variation: i64,
         explore_variation: i64,
+        blocks: &[HomeBlockKind],
         cancellation: &ReadCancellation,
     ) -> LibraryResult<HomePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
 
-        let album_count = sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM albums album
+        let showcase = if blocks.contains(&HomeBlockKind::Showcase) {
+            let album_count = sqlx::query_scalar::<_, i64>(
+                "SELECT count(*) FROM albums album
              WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (
                SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
                WHERE track.album_key=album.album_key AND scope.folder_key=?2))",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_one(&mut *transaction)
-        .await?;
-        let showcase_offset = if album_count == 0 {
-            0
-        } else {
-            showcase_variation.rem_euclid(album_count)
-        };
-        let showcase = sqlx::query_as::<_, HomeAlbumFact>(
-            "SELECT album_key,title FROM albums
+            )
+            .bind(source)
+            .bind(folder)
+            .fetch_one(&mut *transaction)
+            .await?;
+            let showcase_offset = if album_count == 0 {
+                0
+            } else {
+                showcase_variation.rem_euclid(album_count)
+            };
+            sqlx::query_as::<_, HomeAlbumFact>(
+                "SELECT album_key,title FROM albums
              WHERE source_key=?1 AND (?3 IS NULL OR EXISTS (
                SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
                WHERE track.album_key=albums.album_key AND scope.folder_key=?3))
              ORDER BY album_key LIMIT 1 OFFSET ?2",
-        )
-        .bind(source)
-        .bind(showcase_offset)
-        .bind(folder)
-        .fetch_optional(&mut *transaction)
-        .await?;
+            )
+            .bind(source)
+            .bind(showcase_offset)
+            .bind(folder)
+            .fetch_optional(&mut *transaction)
+            .await?
+        } else {
+            None
+        };
 
-        let first_track_key = sqlx::query_scalar::<_, i64>(
-            "SELECT track.track_key FROM tracks track
+        let explore = if blocks.contains(&HomeBlockKind::Explore) {
+            let first_track_key = sqlx::query_scalar::<_, i64>(
+                "SELECT track.track_key FROM tracks track
              WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
                SELECT 1 FROM track_folders scope
                WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
              ORDER BY track.track_key LIMIT 1",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .unwrap_or(0);
-        let last_track_key = sqlx::query_scalar::<_, i64>(
-            "SELECT track.track_key FROM tracks track
+            )
+            .bind(source)
+            .bind(folder)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .unwrap_or(0);
+            let last_track_key = sqlx::query_scalar::<_, i64>(
+                "SELECT track.track_key FROM tracks track
              WHERE track.source_key=?1 AND (?2 IS NULL OR EXISTS (
                SELECT 1 FROM track_folders scope
                WHERE scope.track_key=track.track_key AND scope.folder_key=?2))
              ORDER BY track.track_key DESC LIMIT 1",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_optional(&mut *transaction)
-        .await?
-        .unwrap_or(0);
-        let track_pivot =
-            explore_track_pivot(source, explore_variation, first_track_key, last_track_key);
-        let mut explore = sqlx::query_as::<_, HomeTrackFact>(
-            "SELECT track_key,title FROM tracks
+            )
+            .bind(source)
+            .bind(folder)
+            .fetch_optional(&mut *transaction)
+            .await?
+            .unwrap_or(0);
+            let track_pivot =
+                explore_track_pivot(source, explore_variation, first_track_key, last_track_key);
+            let mut explore = sqlx::query_as::<_, HomeTrackFact>(
+                "SELECT track_key,title FROM tracks
              WHERE source_key=?1 AND track_key>=?2 AND (?3 IS NULL OR EXISTS (
                SELECT 1 FROM track_folders scope
                WHERE scope.track_key=tracks.track_key AND scope.folder_key=?3))
              ORDER BY track_key LIMIT 24",
-        )
-        .bind(source)
-        .bind(track_pivot)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
-        if explore.len() < HOME_LIMIT as usize {
-            let rest = sqlx::query_as::<_, HomeTrackFact>(
-                "SELECT track_key,title FROM tracks
+            )
+            .bind(source)
+            .bind(track_pivot)
+            .bind(folder)
+            .fetch_all(&mut *transaction)
+            .await?;
+            if explore.len() < HOME_LIMIT as usize {
+                let rest = sqlx::query_as::<_, HomeTrackFact>(
+                    "SELECT track_key,title FROM tracks
                  WHERE source_key=?1 AND track_key<?2 AND (?4 IS NULL OR EXISTS (
                    SELECT 1 FROM track_folders scope
                    WHERE scope.track_key=tracks.track_key AND scope.folder_key=?4))
                  ORDER BY track_key LIMIT ?3",
-            )
-            .bind(source)
-            .bind(track_pivot)
-            .bind(HOME_LIMIT - explore.len() as i64)
-            .bind(folder)
-            .fetch_all(&mut *transaction)
-            .await?;
-            explore.extend(rest);
-        }
+                )
+                .bind(source)
+                .bind(track_pivot)
+                .bind(HOME_LIMIT - explore.len() as i64)
+                .bind(folder)
+                .fetch_all(&mut *transaction)
+                .await?;
+                explore.extend(rest);
+            }
 
-        let mut most_played =
-            provider_section(&mut transaction, source, folder, "most-played").await?;
-        if most_played.tracks.is_empty() && most_played.albums.is_empty() {
-            most_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
+            explore
+        } else {
+            Vec::new()
+        };
+
+        let most_played = if blocks.contains(&HomeBlockKind::MostPlayed) {
+            let mut most_played =
+                provider_section(&mut transaction, source, folder, "most-played").await?;
+            if most_played.tracks.is_empty() && most_played.albums.is_empty() {
+                most_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
                 "WITH listen_count AS (
                    SELECT listen.media_uri,count(*) plays FROM tracks track
                    CROSS JOIN listens listen ON listen.media_uri=track.media_uri
@@ -305,12 +363,18 @@ impl Database {
             .bind(folder)
             .fetch_all(&mut *transaction)
             .await?;
-        }
+            }
 
-        let mut newly_added =
-            provider_section(&mut transaction, source, folder, "newly-added").await?;
-        if newly_added.tracks.is_empty() && newly_added.albums.is_empty() {
-            newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(
+            most_played
+        } else {
+            HomeSectionFacts::default()
+        };
+
+        let newly_added = if blocks.contains(&HomeBlockKind::NewlyAdded) {
+            let mut newly_added =
+                provider_section(&mut transaction, source, folder, "newly-added").await?;
+            if newly_added.tracks.is_empty() && newly_added.albums.is_empty() {
+                newly_added.albums = sqlx::query_as::<_, HomeAlbumFact>(
                 "SELECT album_key,title FROM albums
                  WHERE source_key=?1 AND (?2 IS NULL OR EXISTS (
                    SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key)
@@ -321,12 +385,18 @@ impl Database {
             .bind(folder)
             .fetch_all(&mut *transaction)
             .await?;
-        }
+            }
 
-        let mut recently_played =
-            provider_section(&mut transaction, source, folder, "recently-played").await?;
-        if recently_played.tracks.is_empty() && recently_played.albums.is_empty() {
-            recently_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
+            newly_added
+        } else {
+            HomeSectionFacts::default()
+        };
+
+        let recently_played = if blocks.contains(&HomeBlockKind::RecentlyPlayed) {
+            let mut recently_played =
+                provider_section(&mut transaction, source, folder, "recently-played").await?;
+            if recently_played.tracks.is_empty() && recently_played.albums.is_empty() {
+                recently_played.tracks = sqlx::query_as::<_, HomeTrackFact>(
                 "WITH latest AS (
                    SELECT listen.media_uri,max(listen.started_at) played_at FROM tracks track
                    CROSS JOIN listens listen ON listen.media_uri=track.media_uri
@@ -342,12 +412,18 @@ impl Database {
             .bind(folder)
             .fetch_all(&mut *transaction)
             .await?;
-        }
+            }
 
-        let mut recently_released =
-            provider_section(&mut transaction, source, folder, "recently-released").await?;
-        if recently_released.tracks.is_empty() && recently_released.albums.is_empty() {
-            recently_released.albums = sqlx::query_as::<_, HomeAlbumFact>(
+            recently_played
+        } else {
+            HomeSectionFacts::default()
+        };
+
+        let recently_released = if blocks.contains(&HomeBlockKind::RecentlyReleased) {
+            let mut recently_released =
+                provider_section(&mut transaction, source, folder, "recently-released").await?;
+            if recently_released.tracks.is_empty() && recently_released.albums.is_empty() {
+                recently_released.albums = sqlx::query_as::<_, HomeAlbumFact>(
                 "SELECT album_key,title FROM albums
                  WHERE source_key=?1 AND (release_date IS NOT NULL OR COALESCE(year,0)<>0)
                    AND (?2 IS NULL OR EXISTS (
@@ -359,10 +435,16 @@ impl Database {
             .bind(folder)
             .fetch_all(&mut *transaction)
             .await?;
-        }
+            }
 
-        let genres = sqlx::query_as::<_, HomeGenreRow>(
-            "SELECT genre.genre_key,genre.name,genre.artwork_binding,
+            recently_released
+        } else {
+            HomeSectionFacts::default()
+        };
+
+        let genres = if blocks.contains(&HomeBlockKind::Genres) {
+            sqlx::query_as::<_, HomeGenreRow>(
+                "SELECT genre.genre_key,genre.name,genre.artwork_binding,
                     count(DISTINCT track.album_key) album_count,
                     count(DISTINCT relation.track_key) track_count
              FROM genres genre
@@ -373,11 +455,14 @@ impl Database {
                WHERE credit.genre_key=genre.genre_key AND scope.folder_key=?2))
              GROUP BY genre.genre_key
              ORDER BY count(relation.track_key) DESC,genre.sort_text,genre.genre_key LIMIT 12",
-        )
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *transaction)
-        .await?;
+            )
+            .bind(source)
+            .bind(folder)
+            .fetch_all(&mut *transaction)
+            .await?
+        } else {
+            Vec::new()
+        };
 
         let provider_section_ids = sqlx::query_scalar::<_, String>(
             "SELECT DISTINCT section_id FROM home_entries

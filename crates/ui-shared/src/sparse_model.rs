@@ -1,0 +1,1657 @@
+//! Retains one complete key order and only the ready rows around the visible route window.
+//! Route policy, GTK factories, artwork requests, and skeleton geometry stay with the caller.
+
+use std::any::Any;
+use std::cell::{Cell, RefCell};
+use std::collections::{BTreeMap, VecDeque};
+use std::future::Future;
+use std::ops::Range;
+use std::pin::Pin;
+use std::rc::Rc;
+use std::sync::Arc;
+
+use gtk::prelude::*;
+use gtk::{gio, glib};
+use library::ReadCancellation;
+
+pub type SparseLoad<K, R> = Arc<
+    dyn Fn(Vec<K>, ReadCancellation) -> Pin<Box<dyn Future<Output = Result<Vec<R>, String>> + Send>>
+        + Send
+        + Sync,
+>;
+
+const SPARSE_WINDOW_SIZE: usize = 64;
+const SPARSE_PENDING_WINDOW_CAP: usize = 8;
+const SPARSE_READY_WINDOW_CAP: usize = 3;
+
+fn window_first(position: usize) -> usize {
+    position / SPARSE_WINDOW_SIZE * SPARSE_WINDOW_SIZE
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct HydrationPage<K> {
+    pub generation: u64,
+    pub range: Range<usize>,
+    pub keys: Vec<K>,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct ReadyChange {
+    pub range: Range<usize>,
+}
+
+#[derive(Clone, Debug, PartialEq)]
+pub enum SparseItem<K, R> {
+    Placeholder(K),
+    Ready(Arc<R>),
+}
+
+pub struct SparseModel<K, R> {
+    order_id: String,
+    order: Arc<[K]>,
+    ready: BTreeMap<usize, Arc<R>>,
+    ready_windows: VecDeque<usize>,
+    generation: u64,
+}
+
+pub struct SparseRouteModel<K, R> {
+    model: SparseObjectModel,
+    runtime: tokio::runtime::Handle,
+    load: SparseLoad<K, R>,
+    windows: RefCell<SparseWindowDemand>,
+    generation: Cell<u64>,
+    running: Cell<Option<u64>>,
+    demand_deferred: Cell<bool>,
+    initial_window: Cell<Option<usize>>,
+    cancellation: RefCell<Option<(u64, ReadCancellation)>>,
+    demand_source: RefCell<Option<glib::JoinHandle<()>>>,
+}
+
+#[derive(Default)]
+struct SparseWindowDemand {
+    active: Option<usize>,
+    pending: VecDeque<usize>,
+}
+
+impl SparseWindowDemand {
+    fn replace(&mut self, mut demanded: Vec<usize>) -> bool {
+        demanded.sort_unstable();
+        demanded.dedup();
+        let cancelled_active = self
+            .active
+            .is_some_and(|active| demanded.binary_search(&active).is_err());
+        if cancelled_active {
+            self.active = None;
+        }
+        self.pending.retain(|window| {
+            demanded.binary_search(window).is_ok() && self.active != Some(*window)
+        });
+        for window in demanded {
+            if self.active == Some(window) || self.pending.contains(&window) {
+                continue;
+            }
+            if self.pending.len() == SPARSE_PENDING_WINDOW_CAP {
+                break;
+            }
+            self.pending.push_back(window);
+        }
+        cancelled_active
+    }
+
+    fn start(&mut self) -> Option<usize> {
+        if self.active.is_some() {
+            return None;
+        }
+        let first = self.pending.pop_front()?;
+        self.active = Some(first);
+        Some(first)
+    }
+
+    fn accept(&mut self, first: usize) -> bool {
+        if self.active != Some(first) {
+            return false;
+        }
+        self.active = None;
+        true
+    }
+
+    fn reset(&mut self) {
+        self.active = None;
+        self.pending.clear();
+    }
+}
+
+mod item_imp {
+    use std::any::Any;
+    use std::cell::{Cell, RefCell};
+    use std::collections::BTreeMap;
+    use std::rc::Rc;
+
+    use gtk::glib;
+    use gtk::glib::subclass::prelude::*;
+
+    #[derive(Default)]
+    pub struct SparseObjectItem {
+        pub(super) value: RefCell<Option<Box<dyn Any>>>,
+        pub(super) ready: Cell<bool>,
+        pub(super) handlers: RefCell<BTreeMap<usize, Rc<dyn Fn()>>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for SparseObjectItem {
+        const NAME: &'static str = "RufinSparseObjectItem";
+        type Type = super::SparseObjectItem;
+    }
+
+    impl ObjectImpl for SparseObjectItem {}
+}
+
+glib::wrapper! {
+    pub struct SparseObjectItem(ObjectSubclass<item_imp::SparseObjectItem>);
+}
+
+impl SparseObjectItem {
+    fn from_sparse<K: 'static, R: 'static>(value: SparseItem<K, R>, ready: bool) -> Self {
+        match value {
+            SparseItem::Placeholder(key) => Self::new(key, ready),
+            SparseItem::Ready(row) => Self::new(row, ready),
+        }
+    }
+
+    fn replace_sparse<K: 'static, R: 'static>(&self, value: SparseItem<K, R>, ready: bool) {
+        match value {
+            SparseItem::Placeholder(key) => self.replace(key, ready),
+            SparseItem::Ready(row) => self.replace(row, ready),
+        }
+    }
+
+    pub fn new<T: 'static>(value: T, ready: bool) -> Self {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let item: Self = glib::Object::new();
+        item.imp().value.replace(Some(Box::new(value)));
+        item.imp().ready.set(ready);
+        item
+    }
+
+    pub fn replace<T: 'static>(&self, value: T, ready: bool) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let imp = self.imp();
+        imp.value.replace(Some(Box::new(value)));
+        imp.ready.set(ready);
+        let handlers = imp.handlers.borrow().values().cloned().collect::<Vec<_>>();
+        for handler in handlers {
+            handler();
+        }
+    }
+
+    pub fn value<T: Clone + 'static>(&self) -> Option<T> {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp()
+            .value
+            .borrow()
+            .as_ref()
+            .and_then(|value| value.downcast_ref::<T>())
+            .cloned()
+    }
+
+    fn typed_value<K: Clone + 'static, R: 'static>(&self) -> Option<SparseItem<K, R>> {
+        if self.is_ready() {
+            self.value::<Arc<R>>().map(SparseItem::Ready)
+        } else {
+            self.value::<K>().map(SparseItem::Placeholder)
+        }
+    }
+
+    pub fn is_ready(&self) -> bool {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().ready.get()
+    }
+
+    fn connect_ready(&self, owner: usize, handler: Rc<dyn Fn()>) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().handlers.borrow_mut().insert(owner, handler);
+    }
+
+    fn disconnect_ready(&self, owner: usize) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().handlers.borrow_mut().remove(&owner);
+    }
+
+    #[cfg(test)]
+    fn ready_handler_count(&self) -> usize {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().handlers.borrow().len()
+    }
+}
+
+pub fn bind_sparse_item(item: &gtk::ListItem, render: Rc<dyn Fn(&gtk::ListItem)>) {
+    if let Some(row) = item
+        .item()
+        .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+    {
+        let owner = item.as_ptr() as usize;
+        let weak_item = item.downgrade();
+        let weak_row = row.downgrade();
+        let ready_render = Rc::clone(&render);
+        row.connect_ready(
+            owner,
+            Rc::new(move || {
+                let Some(item) = weak_item.upgrade() else {
+                    return;
+                };
+                let Some(bound_row) = weak_row.upgrade() else {
+                    return;
+                };
+                if item
+                    .item()
+                    .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+                    .as_ref()
+                    == Some(&bound_row)
+                {
+                    ready_render(&item);
+                }
+            }),
+        );
+    }
+    render(item);
+}
+
+pub fn unbind_sparse_item(item: &gtk::ListItem) {
+    let owner = item.as_ptr() as usize;
+    if let Some(row) = item
+        .item()
+        .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+    {
+        row.disconnect_ready(owner);
+    }
+}
+
+pub fn connect_sparse_bind(
+    factory: &gtk::SignalListItemFactory,
+    render: impl Fn(&glib::Object) + 'static,
+) {
+    factory.connect_setup(|_, object| {
+        if let Some(item) = object.downcast_ref::<gtk::ListItem>() {
+            set_sparse_child_ready(item, false);
+        }
+    });
+    let render = Rc::new(render);
+    factory.connect_bind(move |_, object| {
+        let Some(item) = object.downcast_ref::<gtk::ListItem>() else {
+            return;
+        };
+        let render = Rc::clone(&render);
+        bind_sparse_item(
+            item,
+            Rc::new(move |item| {
+                let ready = item
+                    .item()
+                    .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+                    .is_none_or(|item| item.is_ready());
+                set_sparse_child_ready(item, ready);
+                render(item.upcast_ref());
+            }),
+        );
+    });
+    factory.connect_unbind(move |_, object| {
+        if let Some(item) = object.downcast_ref::<gtk::ListItem>() {
+            unbind_sparse_item(item);
+        }
+    });
+    factory.connect_teardown(move |_, object| {
+        if let Some(item) = object.downcast_ref::<gtk::ListItem>() {
+            teardown_sparse_item(item);
+        }
+    });
+}
+
+pub(crate) fn teardown_sparse_item(item: &gtk::ListItem) {
+    unbind_sparse_item(item);
+    item.set_child(None::<&gtk::Widget>);
+}
+
+fn set_sparse_child_ready(item: &gtk::ListItem, ready: bool) {
+    let Some(child) = item.child() else { return };
+    if ready {
+        child.remove_css_class("track-skeleton");
+    } else {
+        child.add_css_class("track-skeleton");
+    }
+    child.set_sensitive(ready);
+    child.set_can_target(ready);
+}
+
+trait SparseObjectState {
+    fn as_any_mut(&mut self) -> &mut dyn Any;
+    fn len(&self) -> usize;
+    fn item(&mut self, position: usize) -> Option<SparseObjectItem>;
+    fn cold_live_windows(&mut self) -> Vec<usize>;
+}
+
+struct TypedSparseObjectState<K, R> {
+    sparse: SparseModel<K, R>,
+    objects: BTreeMap<usize, glib::WeakRef<SparseObjectItem>>,
+}
+
+impl<K, R> SparseObjectState for TypedSparseObjectState<K, R>
+where
+    K: Clone + 'static,
+    R: 'static,
+{
+    fn as_any_mut(&mut self) -> &mut dyn Any {
+        self
+    }
+
+    fn len(&self) -> usize {
+        self.sparse.len()
+    }
+
+    fn item(&mut self, position: usize) -> Option<SparseObjectItem> {
+        if let Some(item) = self.objects.get(&position).and_then(glib::WeakRef::upgrade) {
+            return Some(item);
+        }
+        let value = self.sparse.item(position)?;
+        let ready = matches!(value, SparseItem::Ready(_));
+        let item = SparseObjectItem::from_sparse(value, ready);
+        self.objects.insert(position, item.downgrade());
+        Some(item)
+    }
+
+    fn cold_live_windows(&mut self) -> Vec<usize> {
+        let mut windows = Vec::new();
+        self.objects.retain(|position, item| {
+            let Some(item) = item.upgrade() else {
+                return false;
+            };
+            if !item.is_ready() && !self.sparse.ready.contains_key(position) {
+                windows.push(window_first(*position));
+            }
+            true
+        });
+        windows
+    }
+}
+
+mod imp {
+    use gio::subclass::prelude::*;
+
+    use super::*;
+
+    #[derive(Default)]
+    pub struct SparseObjectModel {
+        pub(super) state: RefCell<Option<Box<dyn SparseObjectState>>>,
+        pub(super) demand: RefCell<Option<Rc<dyn Fn(u32)>>>,
+        pub(super) ready_handler: RefCell<Option<Rc<dyn Fn(u32, u32)>>>,
+    }
+
+    #[glib::object_subclass]
+    impl ObjectSubclass for SparseObjectModel {
+        const NAME: &'static str = "RufinSparseObjectModel";
+        type Type = super::SparseObjectModel;
+        type Interfaces = (gio::ListModel,);
+    }
+
+    impl ObjectImpl for SparseObjectModel {}
+
+    impl ListModelImpl for SparseObjectModel {
+        fn item_type(&self) -> glib::Type {
+            SparseObjectItem::static_type()
+        }
+
+        fn n_items(&self) -> u32 {
+            self.state
+                .borrow()
+                .as_ref()
+                .map_or(0, |state| state.len().min(u32::MAX as usize) as u32)
+        }
+
+        fn item(&self, position: u32) -> Option<glib::Object> {
+            let item = {
+                let mut state = self.state.borrow_mut();
+                state
+                    .as_mut()?
+                    .item(position as usize)
+                    .map(|item| item.upcast())
+            };
+            if item.is_some()
+                && let Some(demand) = self.demand.borrow().clone()
+            {
+                demand(position);
+            }
+            item
+        }
+    }
+}
+
+glib::wrapper! {
+    pub struct SparseObjectModel(ObjectSubclass<imp::SparseObjectModel>)
+        @implements gio::ListModel;
+}
+
+impl SparseObjectModel {
+    pub fn new<K, R>(order: Vec<K>, overscan: usize) -> Self
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        let model: Self = glib::Object::new();
+        let mut sparse = SparseModel::new(overscan);
+        sparse.replace_order(order);
+        model
+            .imp()
+            .state
+            .replace(Some(Box::new(TypedSparseObjectState::<K, R> {
+                sparse,
+                objects: BTreeMap::new(),
+            })));
+        model
+    }
+
+    pub fn order_id<K: Clone + 'static, R: 'static>(&self) -> String {
+        self.with_typed_mut::<K, R, _>(|state| state.sparse.order_id.clone())
+    }
+
+    pub fn order<K, R>(&self) -> Arc<[K]>
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| state.sparse.order())
+    }
+
+    fn peek_ready<K, R>(&self, position: usize) -> Option<Arc<R>>
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| match state.sparse.item(position)? {
+            SparseItem::Ready(row) => Some(row),
+            SparseItem::Placeholder(_) => None,
+        })
+    }
+
+    pub fn seed<K, R>(&self, rows: Vec<R>)
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.seed_at::<K, R>(0, rows);
+    }
+
+    pub fn seed_at<K, R>(&self, first: usize, rows: Vec<R>)
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| state.sparse.seed_at(first, rows));
+    }
+
+    fn cold_live_windows(&self) -> Vec<usize> {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp()
+            .state
+            .borrow_mut()
+            .as_mut()
+            .map_or_else(Vec::new, |state| state.cold_live_windows())
+    }
+
+    fn set_demand(&self, demand: impl Fn(u32) + 'static) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().demand.replace(Some(Rc::new(demand)));
+    }
+
+    pub fn connect_ready_changed(&self, handler: impl Fn(u32, u32) + 'static) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        self.imp().ready_handler.replace(Some(Rc::new(handler)));
+    }
+
+    fn emit_ready_changed(&self, position: usize, count: usize) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        let position = position.min(u32::MAX as usize) as u32;
+        let count = count.min(u32::MAX as usize) as u32;
+        if let Some(handler) = self.imp().ready_handler.borrow().clone() {
+            handler(position, count);
+        }
+    }
+
+    pub fn hydrate<K, R>(&self, visible: Range<usize>) -> Option<HydrationPage<K>>
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| {
+            let page = state.sparse.hydrate(visible);
+            state.objects.retain(|_, item| item.upgrade().is_some());
+            page
+        })
+    }
+
+    pub fn accept<K, R>(&self, page: &HydrationPage<K>, rows: Vec<R>) -> bool
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        let accepted = self.with_typed_mut::<K, R, _>(|state| {
+            let change = state.sparse.accept(page, rows)?;
+            let updates = change
+                .range
+                .clone()
+                .filter_map(|position| {
+                    let item = state
+                        .objects
+                        .get(&position)
+                        .and_then(glib::WeakRef::upgrade)?;
+                    let value = state.sparse.item(position)?;
+                    Some((item, value))
+                })
+                .collect::<Vec<_>>();
+            Some((change, updates))
+        });
+        let Some((change, updates)) = accepted else {
+            return false;
+        };
+        for (item, value) in updates {
+            item.replace_sparse(value, true);
+        }
+        self.emit_ready_changed(change.range.start, change.range.len());
+        true
+    }
+
+    pub fn replace_order<K, R>(&self, order: Vec<K>)
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        let old_len = self.n_items();
+        self.with_typed_mut::<K, R, _>(|state| {
+            state.sparse.replace_order(order);
+            state.objects.clear();
+        });
+        self.items_changed(0, old_len, self.n_items());
+    }
+
+    fn replace_prepared<K, R>(&self, order: Vec<K>, first: usize, rows: Vec<R>)
+    where
+        K: Clone + Eq + 'static,
+        R: Clone + PartialEq + 'static,
+    {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        let old_len = self.n_items();
+        let (same_order, updates) = self.with_typed_mut::<K, R, _>(|state| {
+            let same_order = state.sparse.order.as_ref() == order.as_slice();
+            state.sparse.replace_order(order);
+            state.sparse.seed_at(first, rows);
+            if !same_order {
+                state.objects.clear();
+                return (false, Vec::new());
+            }
+            state.objects.retain(|_, item| item.upgrade().is_some());
+            let positions = state.objects.keys().copied().collect::<Vec<_>>();
+            let updates = positions
+                .into_iter()
+                .filter_map(|position| {
+                    let item = state.objects.get(&position)?.upgrade()?;
+                    let value = state.sparse.item(position)?;
+                    (item.typed_value::<K, R>().as_ref() != Some(&value)).then(|| {
+                        let ready = matches!(value, SparseItem::Ready(_));
+                        (position, item, value, ready)
+                    })
+                })
+                .collect::<Vec<_>>();
+            (true, updates)
+        });
+        if !same_order {
+            self.items_changed(0, old_len, self.n_items());
+            return;
+        }
+        for (position, item, value, ready) in updates {
+            item.replace_sparse(value, ready);
+            self.emit_ready_changed(position, 1);
+        }
+        if let Some(position) = self.cold_live_windows().first().copied()
+            && let Some(demand) = self.imp().demand.borrow().clone()
+        {
+            demand(position.min(u32::MAX as usize) as u32);
+        }
+    }
+
+    pub fn update_ready<K, R>(&self, key: &K, update: impl FnOnce(&mut R)) -> bool
+    where
+        K: Clone + Eq + 'static,
+        R: Clone + 'static,
+    {
+        let updated = self.with_typed_mut::<K, R, _>(|state| {
+            let position = state.sparse.update_ready(key, update)?;
+            let item = state
+                .objects
+                .get(&position)
+                .and_then(glib::WeakRef::upgrade);
+            let value = item.as_ref().and_then(|_| state.sparse.item(position));
+            Some((position, item.zip(value)))
+        });
+        let Some((position, item)) = updated else {
+            return false;
+        };
+        if let Some((item, value)) = item {
+            item.replace_sparse(value, true);
+        }
+        self.emit_ready_changed(position, 1);
+        true
+    }
+
+    fn ready_position<K, R>(&self, matches: impl Fn(&R) -> bool) -> Option<usize>
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| {
+            state
+                .sparse
+                .ready
+                .iter()
+                .find_map(|(position, row)| matches(row).then_some(*position))
+        })
+    }
+
+    fn update_matching<K, R>(&self, matches: impl Fn(&R) -> bool, update: impl Fn(&mut R))
+    where
+        K: Clone + 'static,
+        R: Clone + 'static,
+    {
+        let updates = self.with_typed_mut::<K, R, _>(|state| {
+            state
+                .sparse
+                .ready
+                .iter_mut()
+                .filter_map(|(position, row)| {
+                    if !matches(row) {
+                        return None;
+                    }
+                    update(Arc::make_mut(row));
+                    let item = state.objects.get(position).and_then(glib::WeakRef::upgrade);
+                    Some((*position, item, Arc::clone(row)))
+                })
+                .collect::<Vec<_>>()
+        });
+        for (position, item, row) in updates {
+            if let Some(item) = item {
+                item.replace_sparse(SparseItem::<K, R>::Ready(row), true);
+            }
+            self.emit_ready_changed(position, 1);
+        }
+    }
+
+    fn with_typed_mut<K, R, T>(
+        &self,
+        apply: impl FnOnce(&mut TypedSparseObjectState<K, R>) -> T,
+    ) -> T
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+
+        let mut state = self.imp().state.borrow_mut();
+        let state = state
+            .as_mut()
+            .and_then(|state| state.as_any_mut().downcast_mut())
+            .expect("SparseObjectModel concrete row type must match its constructor");
+        apply(state)
+    }
+
+    #[cfg(test)]
+    fn object_len<K, R>(&self) -> usize
+    where
+        K: Clone + 'static,
+        R: 'static,
+    {
+        self.with_typed_mut::<K, R, _>(|state| {
+            state.objects.retain(|_, item| item.upgrade().is_some());
+            state.objects.len()
+        })
+    }
+}
+
+impl<K, R> SparseRouteModel<K, R>
+where
+    K: Clone + Eq + Send + Sync + 'static,
+    R: Clone + Send + Sync + 'static,
+{
+    pub fn new(
+        order: Vec<K>,
+        _overscan: usize,
+        runtime: tokio::runtime::Handle,
+        load: SparseLoad<K, R>,
+    ) -> Rc<Self> {
+        let model = SparseObjectModel::new::<K, R>(order, SPARSE_WINDOW_SIZE);
+        let route = Rc::new(Self {
+            model: model.clone(),
+            runtime,
+            load,
+            windows: RefCell::new(SparseWindowDemand::default()),
+            generation: Cell::new(1),
+            running: Cell::new(None),
+            demand_deferred: Cell::new(false),
+            initial_window: Cell::new(None),
+            cancellation: RefCell::new(None),
+            demand_source: RefCell::new(None),
+        });
+        let weak = Rc::downgrade(&route);
+        model.set_demand(move |position| {
+            if let Some(route) = weak.upgrade() {
+                route.demand(position);
+            }
+        });
+        route
+    }
+
+    pub fn list_model(&self) -> SparseObjectModel {
+        self.model.clone()
+    }
+
+    pub fn len(&self) -> usize {
+        self.model.n_items() as usize
+    }
+
+    pub fn order_id(&self) -> String {
+        self.model.order_id::<K, R>()
+    }
+
+    pub fn order(&self) -> Arc<[K]> {
+        self.model.order::<K, R>()
+    }
+
+    pub fn seed(&self, rows: Vec<R>) {
+        self.model.seed::<K, R>(rows);
+    }
+
+    pub fn seed_matching(&self, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
+        self.seed_matching_at(0, rows, key)
+    }
+
+    pub fn seed_matching_at(&self, first: usize, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool {
+        let order = self.order();
+        if !rows
+            .iter()
+            .enumerate()
+            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
+        {
+            return false;
+        }
+        self.model.seed_at::<K, R>(first, rows);
+        self.demand_deferred.set(first > 0);
+        self.initial_window
+            .set((first > 0).then(|| window_first(first)));
+        true
+    }
+
+    pub fn resume_initial_demand(self: &Rc<Self>) {
+        self.demand_deferred.set(false);
+        let Some(initial) = self.initial_window.take() else {
+            return;
+        };
+        let demanded = self
+            .model
+            .cold_live_windows()
+            .into_iter()
+            .filter(|window| window.abs_diff(initial) <= SPARSE_WINDOW_SIZE)
+            .collect();
+        self.windows.borrow_mut().replace(demanded);
+        self.start();
+    }
+
+    pub fn replace_order(&self, order: Vec<K>) {
+        self.cancel();
+        self.model.replace_order::<K, R>(order);
+    }
+
+    pub fn replace_prepared(&self, order: Vec<K>, rows: Vec<R>, key: impl Fn(&R) -> K) -> bool
+    where
+        R: PartialEq,
+    {
+        self.replace_prepared_at(order, 0, rows, key)
+    }
+
+    pub fn replace_prepared_at(
+        &self,
+        order: Vec<K>,
+        first: usize,
+        rows: Vec<R>,
+        key: impl Fn(&R) -> K,
+    ) -> bool
+    where
+        R: PartialEq,
+    {
+        if !rows
+            .iter()
+            .enumerate()
+            .all(|(position, row)| order.get(first.saturating_add(position)) == Some(&key(row)))
+        {
+            return false;
+        }
+        self.cancel();
+        self.model.replace_prepared::<K, R>(order, first, rows);
+        true
+    }
+
+    pub fn ready(&self, position: u32) -> Option<Arc<R>> {
+        let item = self
+            .model
+            .item(position)?
+            .downcast::<SparseObjectItem>()
+            .ok()?;
+        item.is_ready().then(|| item.value::<Arc<R>>()).flatten()
+    }
+
+    pub fn demand_positions(self: &Rc<Self>, positions: impl IntoIterator<Item = usize>) {
+        let demanded = positions.into_iter().map(window_first).collect::<Vec<_>>();
+        let cancel_running = self.windows.borrow_mut().replace(demanded);
+        if cancel_running {
+            self.cancel_running();
+        }
+        self.start();
+    }
+
+    pub fn peek_ready(&self, position: usize) -> Option<Arc<R>> {
+        self.model.peek_ready::<K, R>(position)
+    }
+
+    pub fn ready_position(&self, matches: impl Fn(&R) -> bool) -> Option<u32> {
+        self.model
+            .ready_position::<K, R>(matches)
+            .and_then(|position| u32::try_from(position).ok())
+    }
+
+    pub fn update_ready(&self, key: &K, update: impl FnOnce(&mut R)) -> bool {
+        self.model.update_ready::<K, R>(key, update)
+    }
+
+    pub fn update_matching(&self, matches: impl Fn(&R) -> bool, update: impl Fn(&mut R)) {
+        self.model.update_matching::<K, R>(matches, update);
+    }
+
+    pub fn connect_ready_changed(&self, handler: impl Fn(u32, u32) + 'static) {
+        self.model.connect_ready_changed(handler)
+    }
+
+    fn demand(self: &Rc<Self>, _: u32) {
+        if self.demand_deferred.get() || self.demand_source.borrow().is_some() {
+            return;
+        }
+        // GTK requests and retires a batch of items while moving its viewport.
+        // Reconcile the final live set once, after that batch has finished.
+        let weak = Rc::downgrade(self);
+        self.demand_source.replace(Some(
+            glib::MainContext::ref_thread_default().spawn_local_with_priority(
+                glib::Priority::DEFAULT_IDLE,
+                async move {
+                    let Some(route) = weak.upgrade() else { return };
+                    route.demand_source.borrow_mut().take();
+                    route.reconcile_demand();
+                },
+            ),
+        ));
+    }
+
+    fn reconcile_demand(self: &Rc<Self>) {
+        let cancel_running = self
+            .windows
+            .borrow_mut()
+            .replace(self.model.cold_live_windows());
+        if cancel_running {
+            self.cancel_running();
+        }
+        self.start();
+    }
+
+    fn cancel_running(&self) {
+        self.generation
+            .set(self.generation.get().wrapping_add(1).max(1));
+        if let Some((_, cancellation)) = self.cancellation.borrow_mut().take() {
+            cancellation.cancel();
+        }
+        self.running.set(None);
+    }
+
+    fn start(self: &Rc<Self>) {
+        if self.running.get().is_some() {
+            return;
+        }
+        let (first, page) = loop {
+            let Some(first) = self.windows.borrow_mut().start() else {
+                return;
+            };
+            if let Some(page) = self
+                .model
+                .hydrate::<K, R>(first..first.saturating_add(SPARSE_WINDOW_SIZE))
+            {
+                break (first, page);
+            }
+            self.windows.borrow_mut().accept(first);
+        };
+        let token = self.generation.get();
+        self.running.set(Some(token));
+        let cancellation = ReadCancellation::new();
+        self.cancellation
+            .replace(Some((token, cancellation.clone())));
+        let task = self
+            .runtime
+            .spawn((self.load)(page.keys.clone(), cancellation));
+        let route = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            let rows = task.await.ok().and_then(Result::ok);
+            let Some(route) = route.upgrade() else {
+                return;
+            };
+            if route.running.get() != Some(token) || route.generation.get() != token {
+                return;
+            }
+            route.running.set(None);
+            if !route.windows.borrow_mut().accept(first) {
+                return;
+            }
+            if route
+                .cancellation
+                .borrow()
+                .as_ref()
+                .is_some_and(|(owner, _)| *owner == token)
+            {
+                route.cancellation.borrow_mut().take();
+            }
+            if let Some(rows) = rows {
+                route.model.accept::<K, R>(&page, rows);
+            }
+            let _ = route
+                .windows
+                .borrow_mut()
+                .replace(route.model.cold_live_windows());
+            route.start();
+        });
+    }
+
+    fn cancel(&self) {
+        if let Some(source) = self.demand_source.borrow_mut().take() {
+            source.abort();
+        }
+        self.cancel_running();
+        self.windows.borrow_mut().reset();
+    }
+}
+
+impl<K, R> Drop for SparseRouteModel<K, R> {
+    fn drop(&mut self) {
+        if let Some(source) = self.demand_source.get_mut().take() {
+            source.abort();
+        }
+        if let Some((_, cancellation)) = self.cancellation.get_mut().take() {
+            cancellation.cancel();
+        }
+    }
+}
+
+impl<K, R> SparseModel<K, R>
+where
+    K: Clone,
+{
+    pub fn new(_: usize) -> Self {
+        Self {
+            order_id: String::new(),
+            order: Arc::new([]),
+            ready: BTreeMap::new(),
+            ready_windows: VecDeque::new(),
+            generation: 1,
+        }
+    }
+
+    pub fn replace_order(&mut self, order: Vec<K>) {
+        static NEXT_ORDER: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        static SESSION: std::sync::LazyLock<u128> = std::sync::LazyLock::new(|| {
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_nanos()
+        });
+        self.order_id = format!(
+            "{}:{}",
+            *SESSION,
+            NEXT_ORDER.fetch_add(1, std::sync::atomic::Ordering::Relaxed)
+        );
+        self.order = order.into();
+        self.ready.clear();
+        self.ready_windows.clear();
+        self.generation = self.generation.wrapping_add(1).max(1);
+    }
+
+    pub fn len(&self) -> usize {
+        self.order.len()
+    }
+
+    pub fn order(&self) -> Arc<[K]> {
+        Arc::clone(&self.order)
+    }
+
+    fn seed_at(&mut self, first: usize, rows: Vec<R>) {
+        let capacity = SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - first % SPARSE_WINDOW_SIZE;
+        let rows = rows.into_iter().take(capacity);
+        for (offset, row) in rows.enumerate() {
+            let position = first.saturating_add(offset);
+            if position >= self.order.len() {
+                break;
+            }
+            if offset == 0 || position % SPARSE_WINDOW_SIZE == 0 {
+                self.touch_ready_window(window_first(position));
+            }
+            self.ready.insert(position, Arc::new(row));
+        }
+    }
+
+    #[cfg(test)]
+    pub fn key(&self, position: usize) -> Option<&K> {
+        self.order.get(position)
+    }
+
+    pub fn update_ready(&mut self, key: &K, update: impl FnOnce(&mut R)) -> Option<usize>
+    where
+        K: Eq,
+        R: Clone,
+    {
+        let position = self
+            .ready
+            .keys()
+            .copied()
+            .find(|position| self.order.get(*position) == Some(key))?;
+        let row = self.ready.get_mut(&position)?;
+        update(Arc::make_mut(row));
+        Some(position)
+    }
+
+    pub fn item(&mut self, position: usize) -> Option<SparseItem<K, R>> {
+        if let Some(row) = self.ready.get(&position) {
+            let row = Arc::clone(row);
+            self.touch_ready_window(window_first(position));
+            return Some(SparseItem::Ready(row));
+        }
+        self.order
+            .get(position)
+            .cloned()
+            .map(SparseItem::Placeholder)
+    }
+
+    pub fn hydrate(&mut self, visible: Range<usize>) -> Option<HydrationPage<K>> {
+        let start = window_first(visible.start).min(self.order.len());
+        let end = start
+            .saturating_add(SPARSE_WINDOW_SIZE)
+            .min(self.order.len());
+        if start == end {
+            return None;
+        }
+        if (start..end).all(|position| self.ready.contains_key(&position)) {
+            self.touch_ready_window(start);
+            return None;
+        }
+        Some(HydrationPage {
+            generation: self.generation,
+            range: start..end,
+            keys: self.order[start..end].to_vec(),
+        })
+    }
+
+    pub fn accept(&mut self, page: &HydrationPage<K>, rows: Vec<R>) -> Option<ReadyChange> {
+        if page.generation != self.generation
+            || rows.len() != page.range.len()
+            || page.range.end > self.order.len()
+        {
+            return None;
+        }
+        self.touch_ready_window(window_first(page.range.start));
+        for (position, row) in page.range.clone().zip(rows) {
+            self.ready.insert(position, Arc::new(row));
+        }
+        Some(ReadyChange {
+            range: page.range.clone(),
+        })
+    }
+
+    #[cfg(test)]
+    pub fn teardown(&mut self) {
+        self.ready.clear();
+        self.order = Arc::new([]);
+        self.ready_windows.clear();
+        self.generation = self.generation.wrapping_add(1).max(1);
+    }
+
+    #[cfg(test)]
+    fn ready_len(&self) -> usize {
+        self.ready.len()
+    }
+
+    fn touch_ready_window(&mut self, first: usize) {
+        if let Some(position) = self
+            .ready_windows
+            .iter()
+            .position(|window| *window == first)
+        {
+            self.ready_windows.remove(position);
+        } else if self.ready_windows.len() == SPARSE_READY_WINDOW_CAP
+            && let Some(evicted) = self.ready_windows.pop_front()
+        {
+            self.ready
+                .retain(|position, _| window_first(*position) != evicted);
+        }
+        self.ready_windows.push_back(first);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn viewport_hydration_keeps_final_live_items_and_discards_retired_items() {
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let runtime = tokio::runtime::Runtime::new().expect("runtime");
+                let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+                let loaded = Arc::clone(&requests);
+                let route = SparseRouteModel::new(
+                    (0..1_000_u64).collect(),
+                    64,
+                    runtime.handle().clone(),
+                    Arc::new(move |keys: Vec<u64>, _| {
+                        loaded.lock().unwrap().push(keys.clone());
+                        Box::pin(
+                            async move { Ok(keys.iter().map(u64::to_string).collect::<Vec<_>>()) },
+                        )
+                    }),
+                );
+                let model = route.list_model();
+                let transient = (0..64)
+                    .map(|position| model.item(position).unwrap())
+                    .collect::<Vec<_>>();
+                drop(transient);
+                let visible = (128..256)
+                    .map(|position| {
+                        model
+                            .item(position)
+                            .unwrap()
+                            .downcast::<SparseObjectItem>()
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>();
+                assert!(requests.lock().unwrap().is_empty());
+                context.block_on(async {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    while visible.iter().any(|item| !item.is_ready()) {
+                        assert!(std::time::Instant::now() < deadline, "visible rows hydrate");
+                        glib::timeout_future(std::time::Duration::from_millis(1)).await;
+                    }
+                });
+                assert_eq!(
+                    *requests.lock().unwrap(),
+                    vec![
+                        (128..192).collect::<Vec<_>>(),
+                        (192..256).collect::<Vec<_>>()
+                    ]
+                );
+                for (offset, item) in visible.iter().enumerate() {
+                    assert!(matches!(item.typed_value::<u64, String>(),
+                Some(SparseItem::Ready(row)) if *row == (128 + offset).to_string()));
+                }
+
+                // Retiring a route before its next viewport pass must release that work.
+                let pending = model.item(512).unwrap();
+                let weak = Rc::downgrade(&route);
+                drop(route);
+                assert!(weak.upgrade().is_none());
+                context.block_on(glib::timeout_future(std::time::Duration::from_millis(1)));
+                assert_eq!(requests.lock().unwrap().len(), 2);
+                drop(pending);
+            })
+            .expect("main context");
+    }
+
+    #[test]
+    fn replaced_routes_release_their_order_rows_and_loader() {
+        let runtime = tokio::runtime::Runtime::new().expect("runtime");
+        for _ in 0..16 {
+            let owner = Arc::new(());
+            let owner_weak = Arc::downgrade(&owner);
+            let load: SparseLoad<u64, String> = Arc::new(move |_, _| {
+                let owner = owner.clone();
+                Box::pin(async move {
+                    drop(owner);
+                    Ok(Vec::new())
+                })
+            });
+            let route =
+                SparseRouteModel::new((0..1_000_000).collect(), 64, runtime.handle().clone(), load);
+            route.seed(vec!["retained title".into()]);
+            let route_weak = Rc::downgrade(&route);
+            let order = Arc::downgrade(&route.order());
+            let row = Arc::downgrade(&route.ready(0).expect("seeded row"));
+            let list = route.list_model();
+            let list_weak = list.downgrade();
+            drop(route);
+            assert!(route_weak.upgrade().is_none());
+            assert!(
+                owner_weak.upgrade().is_none(),
+                "view does not retain the loader"
+            );
+            drop(list);
+            assert!(list_weak.upgrade().is_none());
+            assert!(
+                order.upgrade().is_none(),
+                "departed route order is released"
+            );
+            assert!(
+                row.upgrade().is_none(),
+                "departed hydrated rows are released"
+            );
+        }
+    }
+
+    #[test]
+    fn deep_windows_keep_route_extent_and_three_exact_ready_pages() {
+        let mut model = SparseModel::<u64, String>::new(8);
+        model.replace_order((0..10_000).collect());
+        assert_eq!(model.len(), 10_000);
+        let first = model.hydrate(5_000..5_020).expect("hydration page");
+        assert_eq!(first.range, 4_992..5_056);
+        assert!(matches!(
+            model.item(5_000),
+            Some(SparseItem::Placeholder(5_000))
+        ));
+        model
+            .accept(&first, first.keys.iter().map(u64::to_string).collect())
+            .expect("accept rows");
+        assert!(matches!(model.item(5_000), Some(SparseItem::Ready(_))));
+        assert_eq!(model.ready_len(), 64);
+
+        let deep = model.hydrate(9_900..9_920).expect("deep hydration");
+        model
+            .accept(&deep, deep.keys.iter().map(u64::to_string).collect())
+            .expect("accept deep rows");
+        assert_eq!(model.ready_len(), 128);
+        for position in [100, 2_000] {
+            let page = model
+                .hydrate(position..position + 1)
+                .expect("additional hydration page");
+            model
+                .accept(&page, page.keys.iter().map(u64::to_string).collect())
+                .expect("accept additional page");
+        }
+        assert_eq!(
+            model.ready_len(),
+            SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP
+        );
+        assert!(matches!(
+            model.item(5_000),
+            Some(SparseItem::Placeholder(5_000))
+        ));
+        assert_eq!(model.key(9_999), Some(&9_999));
+    }
+
+    #[test]
+    fn complete_history_result_keeps_selected_snapshots_across_both_windows() {
+        let order = (0..100_u64).collect::<Vec<_>>();
+        let model = SparseObjectModel::new::<u64, String>(order.clone(), SPARSE_WINDOW_SIZE);
+        model.seed::<u64, String>((0..100).map(|value| format!("matched {value}")).collect());
+        for position in [0, 63, 64, 99] {
+            assert!(
+                matches!(model.item(position).unwrap().downcast::<SparseObjectItem>().unwrap()
+                .typed_value::<u64, String>(), Some(SparseItem::Ready(row)) if *row==format!("matched {position}"))
+            );
+        }
+        assert!(model.hydrate::<u64, String>(64..100).is_none());
+        model.replace_prepared::<u64, String>(
+            order,
+            0,
+            (0..100).map(|value| format!("filtered {value}")).collect(),
+        );
+        assert!(model.hydrate::<u64, String>(64..100).is_none());
+        assert!(
+            matches!(model.item(99).unwrap().downcast::<SparseObjectItem>().unwrap()
+            .typed_value::<u64, String>(), Some(SparseItem::Ready(row)) if row.as_str()=="filtered 99")
+        );
+    }
+
+    #[test]
+    fn prepared_seed_respects_the_existing_ready_window_capacity() {
+        let mut model = SparseModel::<u64, u64>::new(SPARSE_WINDOW_SIZE);
+        model.replace_order((0..1000).collect());
+        model.seed_at(31, (31..1000).collect());
+        assert_eq!(
+            model.ready_len(),
+            SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP - 31
+        );
+        for position in [256, 384, 512] {
+            model.seed_at(position, (position as u64..position as u64 + 64).collect());
+        }
+        assert_eq!(
+            model.ready_len(),
+            SPARSE_WINDOW_SIZE * SPARSE_READY_WINDOW_CAP
+        );
+        assert!(matches!(model.item(31), Some(SparseItem::Placeholder(31))));
+    }
+
+    #[test]
+    fn restored_seed_populates_only_its_aligned_window() {
+        let mut model = SparseModel::new(SPARSE_WINDOW_SIZE);
+        model.replace_order((0..256_u64).collect());
+        model.seed_at(128, (128..192).map(|value| value.to_string()).collect());
+
+        assert!(matches!(model.item(0), Some(SparseItem::Placeholder(0))));
+        assert!(matches!(
+            model.item(128),
+            Some(SparseItem::Ready(value)) if value.as_str() == "128"
+        ));
+        assert_eq!(model.ready_windows, [128]);
+    }
+
+    #[test]
+    fn replaced_or_torn_down_routes_reject_delayed_rows() {
+        let mut model = SparseModel::<u64, u64>::new(2);
+        model.replace_order((0..20).collect());
+        let delayed = model.hydrate(5..10).expect("hydration page");
+        model.replace_order((100..120).collect());
+        assert!(model.accept(&delayed, delayed.keys.clone()).is_none());
+        model.teardown();
+        assert_eq!(model.len(), 0);
+    }
+
+    #[test]
+    fn live_window_demands_keep_one_active_and_eight_pending_pages() {
+        let mut demand = SparseWindowDemand::default();
+        assert!(!demand.replace((0..20).map(|index| index * SPARSE_WINDOW_SIZE).collect()));
+        assert_eq!(demand.pending.len(), SPARSE_PENDING_WINDOW_CAP);
+        assert_eq!(demand.start(), Some(0));
+        assert!(demand.replace(vec![9_984]));
+        assert_eq!(demand.active, None);
+        assert_eq!(demand.pending, [9_984]);
+        assert_eq!(demand.start(), Some(9_984));
+    }
+
+    #[test]
+    fn one_viewport_demand_finishes_each_intersecting_window_without_cancelling_its_peer() {
+        let mut demand = SparseWindowDemand::default();
+        assert!(!demand.replace(vec![0, SPARSE_WINDOW_SIZE]));
+        assert_eq!(demand.start(), Some(0));
+        assert!(!demand.replace(vec![0, SPARSE_WINDOW_SIZE]));
+        assert!(demand.accept(0));
+        assert_eq!(demand.start(), Some(SPARSE_WINDOW_SIZE));
+    }
+
+    #[test]
+    fn gtk_model_publishes_ready_rows_through_the_existing_item_identity() {
+        let model = SparseObjectModel::new::<u64, String>((0..100).collect(), 2);
+        assert_eq!(model.n_items(), 100);
+        let placeholder = model
+            .item(50)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("placeholder item");
+        assert!(matches!(
+            placeholder.typed_value::<u64, String>(),
+            Some(SparseItem::Placeholder(50))
+        ));
+        let notifications = Rc::new(Cell::new(0));
+        let notification_count = Rc::clone(&notifications);
+        let observed_ready = Rc::new(Cell::new(false));
+        let observed_ready_in_handler = Rc::clone(&observed_ready);
+        let notification_model = model.clone();
+        placeholder.connect_ready(
+            1,
+            Rc::new(move || {
+                notification_count.set(notification_count.get() + 1);
+                observed_ready_in_handler.set(
+                    notification_model
+                        .item(50)
+                        .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+                        .and_then(|item| item.typed_value::<u64, String>())
+                        .is_some_and(|item| matches!(item, SparseItem::Ready(_))),
+                );
+            }),
+        );
+
+        let page = model
+            .hydrate::<u64, String>(50..51)
+            .expect("hydration request");
+        let rows = page.keys.iter().map(u64::to_string).collect();
+        assert!(model.accept::<u64, String>(&page, rows));
+        let ready = model
+            .item(50)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("ready item");
+        assert_eq!(placeholder, ready);
+        assert_eq!(notifications.get(), 1);
+        assert!(observed_ready.get());
+        assert!(matches!(
+            ready.typed_value::<u64, String>(),
+            Some(SparseItem::Ready(value)) if value.as_str() == "50"
+        ));
+        assert_eq!(model.object_len::<u64, String>(), 1);
+
+        let _ = model.hydrate::<u64, String>(90..91);
+        assert_eq!(model.object_len::<u64, String>(), 1);
+        drop(ready);
+        drop(placeholder);
+        assert_eq!(model.object_len::<u64, String>(), 0);
+    }
+
+    #[test]
+    fn readiness_subscription_is_replaced_and_disconnected_by_bind_owner() {
+        let item = SparseObjectItem::from_sparse(SparseItem::<u64, String>::Placeholder(0), false);
+        let first_calls = Rc::new(Cell::new(0));
+        let second_calls = Rc::new(Cell::new(0));
+
+        for _ in 0..32 {
+            let first_calls = Rc::clone(&first_calls);
+            item.connect_ready(7, Rc::new(move || first_calls.set(first_calls.get() + 1)));
+        }
+        assert_eq!(item.ready_handler_count(), 1);
+        item.replace_sparse(
+            SparseItem::<u64, String>::Ready(Arc::new("one".into())),
+            true,
+        );
+        assert_eq!(first_calls.get(), 1);
+
+        let second_calls_in_handler = Rc::clone(&second_calls);
+        item.connect_ready(
+            7,
+            Rc::new(move || second_calls_in_handler.set(second_calls_in_handler.get() + 1)),
+        );
+        assert_eq!(item.ready_handler_count(), 1);
+        item.replace_sparse(
+            SparseItem::<u64, String>::Ready(Arc::new("two".into())),
+            true,
+        );
+        assert_eq!(first_calls.get(), 1);
+        assert_eq!(second_calls.get(), 1);
+
+        item.disconnect_ready(7);
+        assert_eq!(item.ready_handler_count(), 0);
+        item.replace_sparse(
+            SparseItem::<u64, String>::Ready(Arc::new("three".into())),
+            true,
+        );
+        assert_eq!(second_calls.get(), 1);
+    }
+
+    #[test]
+    fn folder_rows_use_the_same_sparse_ready_extraction_path() {
+        #[derive(Clone, Eq, PartialEq)]
+        struct FolderLink {
+            object_id: String,
+            name: String,
+        }
+
+        let model = SparseObjectModel::new::<FolderLink, String>(
+            vec![FolderLink {
+                object_id: "folder:music".to_string(),
+                name: "Music".to_string(),
+            }],
+            SPARSE_WINDOW_SIZE,
+        );
+        model.seed::<FolderLink, String>(vec!["Music".to_string()]);
+
+        assert_eq!(item_at::<String>(&model, 0).as_deref(), Some("Music"));
+    }
+
+    #[test]
+    fn prepared_replacement_publishes_the_first_window_atomically() {
+        let model = SparseObjectModel::new::<u64, String>(vec![1, 2], SPARSE_WINDOW_SIZE);
+        let _old_item = model.item(0).expect("old item");
+
+        model.replace_prepared::<u64, String>(
+            vec![10, 11],
+            0,
+            vec!["ten".to_string(), "eleven".to_string()],
+        );
+
+        let first = model
+            .item(0)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .and_then(|item| item.typed_value::<u64, String>());
+        assert!(matches!(first, Some(SparseItem::Ready(value)) if value.as_str() == "ten"));
+    }
+
+    #[test]
+    fn identical_prepared_replacement_preserves_live_items_without_a_splice() {
+        let model = SparseObjectModel::new::<u64, String>(vec![1, 2], SPARSE_WINDOW_SIZE);
+        model.seed::<u64, String>(vec!["one".to_string(), "two".to_string()]);
+        let item = model
+            .item(0)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("live prepared row");
+        let renders = Rc::new(Cell::new(0));
+        let render_count = Rc::clone(&renders);
+        item.connect_ready(1, Rc::new(move || render_count.set(render_count.get() + 1)));
+        let splices = Rc::new(Cell::new(0));
+        let splice_count = Rc::clone(&splices);
+        model.connect_items_changed(move |_, _, _, _| splice_count.set(splice_count.get() + 1));
+
+        model.replace_prepared::<u64, String>(
+            vec![1, 2],
+            0,
+            vec!["one".to_string(), "two".to_string()],
+        );
+
+        let current = model
+            .item(0)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("same live prepared row");
+        assert_eq!(current, item);
+        assert_eq!(renders.get(), 0);
+        assert_eq!(splices.get(), 0);
+    }
+
+    #[test]
+    fn prepared_replacement_updates_only_the_changed_live_row() {
+        let model = SparseObjectModel::new::<u64, String>(vec![1, 2], SPARSE_WINDOW_SIZE);
+        model.seed::<u64, String>(vec!["one".to_string(), "two".to_string()]);
+        let first = model
+            .item(0)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("first live row");
+        let second = model
+            .item(1)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("second live row");
+        let first_renders = Rc::new(Cell::new(0));
+        let first_count = Rc::clone(&first_renders);
+        first.connect_ready(1, Rc::new(move || first_count.set(first_count.get() + 1)));
+        let second_renders = Rc::new(Cell::new(0));
+        let second_count = Rc::clone(&second_renders);
+        second.connect_ready(2, Rc::new(move || second_count.set(second_count.get() + 1)));
+
+        model.replace_prepared::<u64, String>(
+            vec![1, 2],
+            0,
+            vec!["one".to_string(), "changed".to_string()],
+        );
+
+        assert_eq!(first_renders.get(), 0);
+        assert_eq!(second_renders.get(), 1);
+        assert!(matches!(
+            second.typed_value::<u64, String>(),
+            Some(SparseItem::Ready(value)) if value.as_str() == "changed"
+        ));
+    }
+
+    #[test]
+    fn prepared_replacement_reloads_a_live_row_outside_the_seed_window() {
+        let order = (0..128_u64).collect::<Vec<_>>();
+        let model = SparseObjectModel::new::<u64, String>(order.clone(), SPARSE_WINDOW_SIZE);
+        let page = model
+            .hydrate::<u64, String>(64..65)
+            .expect("second sparse page");
+        assert!(
+            model.accept::<u64, String>(&page, (64..128).map(|value| value.to_string()).collect())
+        );
+        let deep = model
+            .item(64)
+            .and_then(|item| item.downcast::<SparseObjectItem>().ok())
+            .expect("live deep row");
+        let demanded = Rc::new(Cell::new(None));
+        let demand_position = Rc::clone(&demanded);
+        model.set_demand(move |position| {
+            demand_position.set(Some(position));
+        });
+
+        model.replace_prepared::<u64, String>(
+            order,
+            0,
+            (0..64).map(|value| value.to_string()).collect(),
+        );
+
+        assert!(matches!(
+            deep.typed_value::<u64, String>(),
+            Some(SparseItem::Placeholder(64))
+        ));
+        assert_eq!(demanded.get(), Some(64));
+    }
+}
+
+fn sparse_item<T: Clone + 'static, R>(
+    item: &SparseObjectItem,
+    map: impl FnOnce(&T) -> R,
+) -> Option<R> {
+    if !item.is_ready() {
+        return None;
+    }
+    item.value::<Arc<T>>().map(|row| map(&row))
+}
+
+pub fn object_item<T: Clone + 'static, R>(
+    item: glib::Object,
+    map: impl FnOnce(&T) -> R,
+) -> Option<R> {
+    match item.downcast::<glib::BoxedAnyObject>() {
+        Ok(boxed) => boxed.try_borrow::<T>().ok().map(|item| map(&item)),
+        Err(item) => item
+            .downcast::<SparseObjectItem>()
+            .ok()
+            .and_then(|item| sparse_item(&item, map)),
+    }
+}
+
+pub fn item_at<T: Clone + 'static>(model: &impl IsA<gio::ListModel>, position: u32) -> Option<T> {
+    model
+        .item(position)
+        .and_then(|item| object_item(item, Clone::clone))
+}
+pub fn item_at_from_item<T: Clone + 'static>(item: &gtk::ListItem) -> Option<T> {
+    item.item().and_then(|item| object_item(item, Clone::clone))
+}

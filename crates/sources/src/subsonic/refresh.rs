@@ -706,7 +706,14 @@ mod tests {
             };
             let cancellation = library::ReadCancellation::new();
             let home = database
-                .home_page(publication.source, None, 0, 0, &cancellation)
+                .home_page(
+                    publication.source,
+                    None,
+                    0,
+                    0,
+                    &library::HomeBlockKind::all(),
+                    &cancellation,
+                )
                 .await
                 .unwrap();
             assert_eq!(home.newly_added.albums.len(), 1);
@@ -787,7 +794,14 @@ mod tests {
                         .unwrap();
                     assert_eq!(
                         database
-                            .home_page(publication.source, Some(folder), 0, 0, &cancellation)
+                            .home_page(
+                                publication.source,
+                                Some(folder),
+                                0,
+                                0,
+                                &library::HomeBlockKind::all(),
+                                &cancellation
+                            )
                             .await
                             .unwrap()
                             .explore

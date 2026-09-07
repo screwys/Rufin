@@ -12,9 +12,6 @@ publish.workspace = true
 autotests = false
 
 [dependencies]
-age.workspace = true
-flate2.workspace = true
-tar.workspace = true
 chrono.workspace = true
 tempfile.workspace = true
 futures-util.workspace = true

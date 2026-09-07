@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">routes/placeholder.ui</file>
+    <file compressed="true">routes/collection_grid_card.ui</file>
+    <file compressed="true">routes/collection_grid_cover.ui</file>
+    <file compressed="true">routes/detail_showcase.ui</file>
+    <file compressed="true">routes/folders.ui</file>
+    <file compressed="true">routes/home_section_header.ui</file>
+    <file compressed="true">routes/library_config.ui</file>
+    <file compressed="true">routes/library_page.ui</file>
+    <file compressed="true">routes/library_toolbar.ui</file>
+    <file compressed="true">routes/search.ui</file>
+  </gresource>
+</gresources>

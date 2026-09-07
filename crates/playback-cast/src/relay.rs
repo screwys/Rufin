@@ -564,7 +564,7 @@ fn transcoded_response(
         )
         .boxed());
     }
-    let reader = playback_gstreamer::TranscodedAudioReader::mp3(&resource.stream.stream)?;
+    let reader = audio_processing::TranscodedAudioReader::mp3(&resource.stream.stream)?;
     Ok(Response::new(StatusCode(200), headers, reader, None, None).boxed())
 }
 

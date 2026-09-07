@@ -563,7 +563,7 @@ impl JellyfinSource {
 }
 
 impl JellyfinSource {
-    pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<NativeLyrics>> {
+    pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<LyricsBundle>> {
         self.server_lyrics(track_id).await
     }
 }
@@ -884,7 +884,7 @@ impl JellyfinSource {
         .map(|_| ())
     }
 
-    async fn server_lyrics(&self, track_id: &str) -> SourceResult<Option<NativeLyrics>> {
+    async fn server_lyrics(&self, track_id: &str) -> SourceResult<Option<LyricsBundle>> {
         let raw_track_id = raw_item_id(track_id);
         let local_url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Lyrics"))?;
         match self.send_json::<LyricDto>(self.client.get(local_url)).await {
@@ -895,10 +895,11 @@ impl JellyfinSource {
     }
 }
 
-pub(super) fn lyrics_from_dto(dto: LyricDto) -> NativeLyrics {
-    NativeLyrics {
-        documents: vec![NativeLyricsDocument {
-            role: NativeLyricsRole::Original,
+pub(super) fn lyrics_from_dto(dto: LyricDto) -> LyricsBundle {
+    LyricsBundle::from_documents(
+        LyricsOrigin::Native,
+        vec![LyricsDocument {
+            role: LyricsRole::Original,
             language: None,
             offset_millis: 0,
             lines: dto
@@ -907,7 +908,7 @@ pub(super) fn lyrics_from_dto(dto: LyricDto) -> NativeLyrics {
                 .into_iter()
                 .filter_map(|line| {
                     let text = line.text.unwrap_or_default();
-                    (!text.trim().is_empty()).then_some(NativeLyricLine {
+                    (!text.trim().is_empty()).then_some(LyricsLine {
                         text,
                         start_millis: ticks_to_millis(line.start),
                         end_millis: None,
@@ -917,7 +918,7 @@ pub(super) fn lyrics_from_dto(dto: LyricDto) -> NativeLyrics {
                 .collect(),
             agents: Vec::new(),
         }],
-    }
+    )
 }
 
 #[derive(Clone, Debug, Serialize)]

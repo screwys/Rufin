@@ -444,7 +444,7 @@ impl SubsonicSource {
 }
 
 impl SubsonicSource {
-    pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<NativeLyrics>> {
+    pub(crate) async fn lyrics(&self, track_id: &str) -> SourceResult<Option<LyricsBundle>> {
         let extensions: Value = self
             .get_json("getOpenSubsonicExtensions", &[])
             .await
@@ -467,7 +467,7 @@ impl SubsonicSource {
             let body: Value = self.get_json("getLyricsBySongId", &extra).await?;
             let lyrics =
                 native_lyrics_from_structured(json::items(&body["lyricsList"]["structuredLyrics"]));
-            return Ok((!lyrics.documents.is_empty()).then_some(lyrics));
+            return Ok((!lyrics.documents().is_empty()).then_some(lyrics));
         }
 
         let track = self.read_track(track_id).await?;
@@ -485,15 +485,16 @@ impl SubsonicSource {
         else {
             return Ok(None);
         };
-        Ok(Some(NativeLyrics {
-            documents: vec![NativeLyricsDocument {
-                role: NativeLyricsRole::Original,
+        Ok(Some(LyricsBundle::from_documents(
+            LyricsOrigin::Native,
+            vec![LyricsDocument {
+                role: LyricsRole::Original,
                 language: None,
                 offset_millis: 0,
                 lines: value
                     .lines()
                     .filter(|line| !line.trim().is_empty())
-                    .map(|line| NativeLyricLine {
+                    .map(|line| LyricsLine {
                         text: line.trim().to_string(),
                         start_millis: None,
                         end_millis: None,
@@ -502,31 +503,31 @@ impl SubsonicSource {
                     .collect(),
                 agents: Vec::new(),
             }],
-        }))
+        )))
     }
 }
 
-pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
+pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> LyricsBundle {
     let documents = entries
         .iter()
         .filter_map(|entry| {
             let role = match entry["kind"].as_str().unwrap_or("main") {
-                "main" => NativeLyricsRole::Original,
-                "translation" => NativeLyricsRole::Translation,
-                "pronunciation" => NativeLyricsRole::Pronunciation,
+                "main" => LyricsRole::Original,
+                "translation" => LyricsRole::Translation,
+                "pronunciation" => LyricsRole::Pronunciation,
                 _ => return None,
             };
             let agents = json::items(&entry["agents"])
                 .iter()
                 .filter_map(|agent| {
                     let role = match agent["role"].as_str()? {
-                        "main" => NativeLyricAgentRole::Main,
-                        "voice" => NativeLyricAgentRole::Voice,
-                        "bg" => NativeLyricAgentRole::Background,
-                        "group" => NativeLyricAgentRole::Group,
+                        "main" => LyricsAgentRole::Main,
+                        "voice" => LyricsAgentRole::Voice,
+                        "bg" => LyricsAgentRole::Background,
+                        "group" => LyricsAgentRole::Group,
                         _ => return None,
                     };
-                    Some(NativeLyricAgent {
+                    Some(LyricsAgent {
                         id: json::id(&agent["id"])?,
                         role,
                         name: json::field(agent, "name"),
@@ -558,7 +559,7 @@ pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
                         {
                             return None;
                         }
-                        Some(NativeLyricCue {
+                        Some(LyricsCue {
                             text: json::field(cue, "value")?,
                             start_millis: json::field(cue, "start")?,
                             end_millis: json::field(cue, "end"),
@@ -567,7 +568,7 @@ pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
                         })
                     })
                     .collect();
-                lines.push(NativeLyricCueLine {
+                lines.push(LyricsCueLine {
                     text: value.to_string(),
                     start_millis: json::field(cue_line, "start"),
                     end_millis: json::field(cue_line, "end"),
@@ -581,7 +582,7 @@ pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
                 .filter_map(|(line, cue_lines)| {
                     let text = json::field::<String>(line, "value")
                         .filter(|value| !value.trim().is_empty())?;
-                    Some(NativeLyricLine {
+                    Some(LyricsLine {
                         text,
                         start_millis: json::field(line, "start"),
                         end_millis: cue_lines.iter().filter_map(|line| line.end_millis).max(),
@@ -589,24 +590,20 @@ pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> NativeLyrics {
                     })
                 })
                 .collect::<Vec<_>>();
-            (!lines.is_empty()).then_some(NativeLyricsDocument {
-                role,
-                language: normalize_native_language(json::field(entry, "lang").unwrap_or_default()),
-                offset_millis: json::field(entry, "offset").unwrap_or_default(),
-                lines,
-                agents,
+            (!lines.is_empty()).then(|| {
+                let mut document = LyricsDocument {
+                    role,
+                    language: json::field(entry, "lang"),
+                    offset_millis: json::field(entry, "offset").unwrap_or_default(),
+                    lines,
+                    agents,
+                };
+                document.normalize_timing_and_language();
+                document
             })
         })
         .collect();
-    NativeLyrics { documents }
-}
-
-fn normalize_native_language(language: String) -> Option<String> {
-    let language = language.trim();
-    (!language.is_empty()
-        && !language.eq_ignore_ascii_case("und")
-        && !language.eq_ignore_ascii_case("xxx"))
-    .then(|| language.to_string())
+    LyricsBundle::from_documents(LyricsOrigin::Native, documents)
 }
 
 impl SubsonicSource {
@@ -1145,10 +1142,12 @@ impl SubsonicSource {
 
 #[cfg(test)]
 mod tests {
+    use super::super::native_lyrics_from_structured;
     use super::{SubsonicCredential, redacted_subsonic_url};
     use crate::subsonic::{
         SubsonicAuthentication, SubsonicFlavor, SubsonicSource, SubsonicSourceConfig,
     };
+    use lyrics::{LyricsAgentRole, LyricsRole};
     use reqwest::Url;
     use wiremock::matchers::{method, path, query_param};
     use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -1351,7 +1350,7 @@ mod tests {
             .mount(&server)
             .await;
         let lyrics = source(&server.uri()).lyrics("one").await.unwrap().unwrap();
-        let document = &lyrics.documents[0];
+        let document = &lyrics.documents()[0];
         assert_eq!(document.language.as_deref(), Some("en"));
         assert_eq!(document.offset_millis, 0);
         assert_eq!(document.agents.len(), 1);
@@ -1361,6 +1360,46 @@ mod tests {
         let cue = &document.lines[1].cue_lines[0].cues[0];
         assert_eq!(cue.text, "There");
         assert_eq!(cue.byte_end_exclusive, 5);
+    }
+
+    #[test]
+    fn structured_lyrics_normalize_offsets_and_languages_without_losing_cues() {
+        for (offset, start, end) in [(20, 0, 80), (-20, 30, 120)] {
+            let lyrics = native_lyrics_from_structured(&[serde_json::json!({
+                "kind":"translation", "lang":"eng", "offset":offset,
+                "agents":[{"id":"singer","role":"bg","name":"Singer"}],
+                "line":[{"value":"Hi","start":10}],
+                "cueLine":[{"index":0,"value":"Hi","start":10,"end":100,"agentId":"singer",
+                    "cue":[{"value":"Hi","start":10,"end":100,"byteStart":0,"byteEnd":1}]}]
+            })]);
+            let document = &lyrics.documents()[0];
+            assert_eq!(document.role, LyricsRole::Translation);
+            assert_eq!(document.language.as_deref(), Some("en"));
+            assert_eq!(document.offset_millis, 0);
+            assert_eq!(document.agents[0].role, LyricsAgentRole::Background);
+            assert_eq!(document.agents[0].name.as_deref(), Some("Singer"));
+            let line = &document.lines[0];
+            assert_eq!(
+                (line.start_millis, line.end_millis),
+                (Some(start), Some(end))
+            );
+            let cue_line = &line.cue_lines[0];
+            assert_eq!(
+                (cue_line.start_millis, cue_line.end_millis),
+                (Some(start), Some(end))
+            );
+            assert_eq!(cue_line.agent_id.as_deref(), Some("singer"));
+            let cue = &cue_line.cues[0];
+            assert_eq!((cue.start_millis, cue.end_millis), (start, Some(end)));
+            assert_eq!((cue.byte_start, cue.byte_end_exclusive), (0, 2));
+            let mut normalized = document.clone();
+            normalized.normalize_timing_and_language();
+            assert_eq!(&normalized, document);
+        }
+        let lyrics = native_lyrics_from_structured(&[serde_json::json!({
+            "lang":"und", "line":[{"value":"Unknown language"}]
+        })]);
+        assert_eq!(lyrics.documents()[0].language, None);
     }
 
     #[tokio::test]

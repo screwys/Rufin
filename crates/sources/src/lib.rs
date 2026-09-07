@@ -43,10 +43,8 @@ pub use library::SourceId;
 pub use operations::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,
     AlbumMetadataWritable, ArtistMetadata, ArtistMetadataEdit, ArtistMetadataMixed,
-    ArtistMetadataValues, ArtistMetadataWritable, ImageBytes, NativeLyricAgent,
-    NativeLyricAgentRole, NativeLyricCue, NativeLyricCueLine, NativeLyricLine, NativeLyrics,
-    NativeLyricsDocument, NativeLyricsRole, SourceMetadataError, TrackMetadata, TrackMetadataEdit,
-    TrackMetadataValues, TrackMetadataWritable,
+    ArtistMetadataValues, ArtistMetadataWritable, ImageBytes, SourceMetadataError, TrackMetadata,
+    TrackMetadataEdit, TrackMetadataValues, TrackMetadataWritable,
 };
 pub use source::*;
 

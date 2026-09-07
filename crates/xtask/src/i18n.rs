@@ -211,9 +211,11 @@ fn literal_string(expression: &Expr) -> Option<String> {
 }
 
 fn extract_builder(root: &Path, catalog: &mut Catalog) -> Result<()> {
-    let resource_root = root.join("crates/ui/resources");
     let mut files = Vec::new();
-    collect_files_with_extension(root, &resource_root, "ui", &mut files)?;
+    for owner in ["ui-shell", "ui-shared", "ui-library", "ui-player"] {
+        let resource_root = root.join("crates").join(owner).join("resources");
+        collect_files_with_extension(root, &resource_root, "ui", &mut files)?;
+    }
     files.sort();
     for file in files {
         let source = read_to_string(&file)?;

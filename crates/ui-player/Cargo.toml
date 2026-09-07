@@ -1,0 +1,33 @@
+[package]
+name = "ui-player"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+app-identity.workspace = true
+tracing.workspace = true
+ui-shared.workspace = true
+rufin-core.workspace = true
+library.workspace = true
+lyrics.workspace = true
+playback.workspace = true
+artwork.workspace = true
+localization.workspace = true
+gtk = { workspace = true, features = ["v4_20"] }
+adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
+regex.workspace = true
+pangocairo.workspace = true
+tokio.workspace = true
+
+[build-dependencies]
+glib-build-tools.workspace = true
+
+[lints]
+workspace = true

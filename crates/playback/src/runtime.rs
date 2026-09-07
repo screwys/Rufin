@@ -661,6 +661,172 @@ fn run_playback_outputs(
 #[cfg(test)]
 mod persistence_tests {
     use super::*;
+
+    struct IdleBackend;
+
+    impl PlaybackBackend for IdleBackend {
+        fn send(&mut self, _: crate::BackendCommand) -> Result<(), crate::BackendError> {
+            Ok(())
+        }
+
+        fn drain_events(&mut self) -> Vec<BackendEvent> {
+            Vec::new()
+        }
+    }
+
+    async fn published_queue_snapshot(
+        playback: &Playback,
+        updates: &Receiver<PlaybackUpdate>,
+        database: &library::Database,
+    ) -> QueuePersistence {
+        loop {
+            let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+            if update.queue_changed || update.queue_persistence.is_some() {
+                return update
+                    .queue_persistence
+                    .expect("a queue edit must publish its persistence snapshot");
+            }
+            for effect in update.effects {
+                if let SessionEffect::Queue { id, request } = effect {
+                    let result = database
+                        .read_queue(request)
+                        .await
+                        .map_err(|error| error.to_string());
+                    playback
+                        .command(SessionCommand::QueueComplete {
+                            id,
+                            result: Box::new(result),
+                        })
+                        .unwrap();
+                }
+            }
+        }
+    }
+
+    fn replace_queue(playback: &Playback, prefix: &str, count: usize) {
+        let request = PlayRequest::ordered(
+            library::QueueInput::Items(
+                (0..count)
+                    .map(|index| {
+                        (
+                            QueueItem::direct(
+                                format!("https://example.test/{prefix}/{index}"),
+                                format!("{prefix} {index}"),
+                                "Artist",
+                                "Album",
+                                180_000,
+                            ),
+                            crate::Provenance::Manual,
+                        )
+                    })
+                    .collect(),
+            ),
+            0,
+            crate::QueuePlacement::Now,
+            false,
+        );
+        let reservation = playback.admit_play(&request).unwrap().unwrap();
+        let (batch, placement) = request.compact_batch(7);
+        assert!(
+            playback
+                .complete_materialization(reservation.id, batch, placement)
+                .unwrap()
+        );
+    }
+
+    #[tokio::test]
+    async fn runtime_queue_edits_publish_restorable_bounded_snapshots() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("queue.sqlite3"))
+            .await
+            .unwrap();
+        let (sender, updates) = std::sync::mpsc::channel();
+        let (playback, _) = Playback::start(
+            Sequence::new(),
+            "persistence-test",
+            PlaybackSettings::default(),
+            false,
+            1,
+            SelectedPlaybackOutput::Local,
+            Box::new(IdleBackend),
+            Arc::new(|| ClockSample {
+                monotonic_millis: 0,
+                unix_seconds: 0,
+                local_period: "1970-01".into(),
+            }),
+            move |update| {
+                let _ = sender.send(update);
+            },
+        )
+        .unwrap();
+
+        replace_queue(&playback, "first", 150);
+        let mut pending = published_queue_snapshot(&playback, &updates, &database).await;
+        assert_eq!(
+            pending.state().occurrences.len(),
+            library::QUEUE_CONTEXT_LIMIT
+        );
+        assert_eq!(pending.state().sources.len(), 1);
+        assert_eq!(pending.state().pending.len(), 1);
+        database.save_queue(pending.state()).await.unwrap();
+        let restored = database.restore_queue().await.unwrap();
+        assert_eq!(restored.occurrences.len(), library::QUEUE_CONTEXT_LIMIT);
+        assert_eq!(restored.sources, pending.state().sources);
+        assert_eq!(restored.pending, pending.state().pending);
+
+        replace_queue(&playback, "replacement", 3);
+        pending.coalesce(published_queue_snapshot(&playback, &updates, &database).await);
+        database.save_queue(pending.state()).await.unwrap();
+        let restored = database.restore_queue().await.unwrap();
+        assert_eq!(restored.occurrences.len(), 3);
+        assert_eq!(restored.sources.len(), 1);
+        assert!(restored.pending.is_empty());
+        assert!(
+            restored
+                .occurrences
+                .iter()
+                .all(|row| row.media_uri.contains("/replacement/"))
+        );
+        assert_eq!(restored.current_index, Some(0));
+
+        playback
+            .command(SessionCommand::Remove(
+                restored.occurrences[2].occurrence.clone(),
+            ))
+            .unwrap();
+        let snapshot = published_queue_snapshot(&playback, &updates, &database).await;
+        database.save_queue(snapshot.state()).await.unwrap();
+        assert_eq!(database.restore_queue().await.unwrap().occurrences.len(), 2);
+
+        playback
+            .command(SessionCommand::SetShuffle {
+                enabled: true,
+                seed: 19,
+            })
+            .unwrap();
+        let snapshot = published_queue_snapshot(&playback, &updates, &database).await;
+        database.save_queue(snapshot.state()).await.unwrap();
+        assert!(database.restore_queue().await.unwrap().shuffled);
+
+        playback.command(SessionCommand::SetVolume(0.137)).unwrap();
+        let update = updates.recv_timeout(Duration::from_secs(5)).unwrap();
+        assert_eq!(update.projection.unwrap().view.controls.volume, 0.137);
+        assert!(update.queue_persistence.is_none());
+
+        playback
+            .command(SessionCommand::Clear {
+                include_current: true,
+            })
+            .unwrap();
+        let snapshot = published_queue_snapshot(&playback, &updates, &database).await;
+        database.save_queue(snapshot.state()).await.unwrap();
+        let restored = database.restore_queue().await.unwrap();
+        assert!(restored.occurrences.is_empty());
+        assert!(restored.sources.is_empty());
+        assert!(restored.pending.is_empty());
+        playback.shutdown().unwrap();
+    }
+
     #[tokio::test]
     async fn persistence_coalesces_latest_queue_metadata() {
         let directory = tempfile::tempdir().unwrap();
@@ -947,8 +1113,7 @@ impl PlaybackRuntime {
     }
 
     fn commit(&mut self, update: SessionUpdate) -> PlaybackUpdate {
-        let queue_persistence = update
-            .queue_persistence_changed
+        let queue_persistence = (update.queue_changed || update.queue_persistence_changed)
             .then(|| QueuePersistence::capture(self.session.sequence()));
         let mut notices = Vec::new();
         let mut effects = Vec::new();

@@ -21,35 +21,16 @@ name = "rufin"
 path = "src/main.rs"
 
 [dependencies]
+rufin-core.workspace = true
 app-identity.workspace = true
-metadata-lookup.workspace = true
-async-channel.workspace = true
-artwork.workspace = true
 directories.workspace = true
 desktop-integration.workspace = true
-downloads.workspace = true
-getrandom.workspace = true
-glib.workspace = true
-gio.workspace = true
-md5.workspace = true
-playback.workspace = true
-playback-cast.workspace = true
-playback-gstreamer.workspace = true
-reqwest = { workspace = true, features = ["blocking", "json"] }
-scrobbling.workspace = true
-sources.workspace = true
-secrets.workspace = true
-library.workspace = true
 localization.workspace = true
-lyrics.workspace = true
-serde.workspace = true
-serde_json.workspace = true
-tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+playback.workspace = true
+playback-gstreamer.workspace = true
+sources.workspace = true
 tracing.workspace = true
-tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
-ui.workspace = true
-url.workspace = true
+ui-shell.workspace = true
 
 [target.'cfg(target_os = "windows")'.dependencies]
 windows-updater.workspace = true

@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Desktop interface definitions and base style. -->
+<gresources>
+
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">application/about.ui</file>
+    <file compressed="true">player/random_play.ui</file>
+    <file compressed="true">preferences/appearance.ui</file>
+    <file compressed="true">preferences/dialog.ui</file>
+    <file compressed="true">preferences/general.ui</file>
+    <file compressed="true">preferences/dialogs/playlist_file.ui</file>
+    <file compressed="true">preferences/dialogs/release_note_row.ui</file>
+    <file compressed="true">preferences/dialogs/release_notes.ui</file>
+    <file compressed="true">preferences/integrations.ui</file>
+    <file compressed="true">preferences/library.ui</file>
+    <file compressed="true">preferences/backup.ui</file>
+    <file compressed="true">preferences/dialogs/backup.ui</file>
+    <file compressed="true">preferences/playback.ui</file>
+    <file compressed="true">preferences/reorder_row.ui</file>
+    <file compressed="true">preferences/source/connection_progress.ui</file>
+    <file compressed="true">preferences/source/choice_selector.ui</file>
+    <file compressed="true">preferences/source/choice.ui</file>
+    <file compressed="true">preferences/source/onboarding.ui</file>
+    <file compressed="true">preferences/source/credential_host.ui</file>
+    <file compressed="true">preferences/source/file_host.ui</file>
+    <file compressed="true">preferences/source/local_setup.ui</file>
+    <file compressed="true">preferences/source/server_actions.ui</file>
+    <file compressed="true">preferences/source/setup_scaffold.ui</file>
+    <file compressed="true">shell/diagnostics.ui</file>
+    <file compressed="true">shell/content_chrome.ui</file>
+    <file compressed="true">shell/navigation.ui</file>
+    <file compressed="true">shell/root.ui</file>
+    <file compressed="true">shell/shortcuts.ui</file>
+    <file compressed="true">style.css</file>
+  </gresource>
+</gresources>

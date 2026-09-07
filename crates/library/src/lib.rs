@@ -30,10 +30,7 @@ pub use activity::{
     ListenDeliveryTarget, ListenWrite, PendingListenDelivery,
 };
 pub use artwork::RepresentativeArtworkScope;
-pub use backup::{
-    BackupContents, BackupFrequency, BackupManifest, BackupOptions, BackupRestoreReport,
-    BackupSchedule, StagedBackup, backup_filename, scheduled_backup_timestamp, stage_backup,
-};
+pub use backup::{BackupRestoreReport, StateGroups};
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
@@ -44,8 +41,8 @@ pub use collections::{
 pub use db::{Database, ReadCancellation};
 pub use favorites::{FavoriteTarget, UserMediaStateWrite};
 pub use home::{
-    HomeAlbumRow, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage, HomeProviderSection,
-    HomeSectionRows, HomeTrackRow,
+    HomeAlbumRow, HomeBlockKind, HomeEntryInput, HomeEntryKind, HomeGenreRow, HomePage,
+    HomeProviderSection, HomeSectionKind, HomeSectionRows, HomeTrackRow,
 };
 pub use keys::{
     AlbumKey, ArtistKey, FolderKey, GenreKey, ListenKey, ListenOutboxKey, LocalAccessFileKey,

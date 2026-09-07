@@ -1,10 +1,12 @@
 use crate::config::{decode_provider_payload, require_payload_version};
 use crate::policy::{raw_item_id, stable_hash, u16_from_option};
 use crate::{
-    ConnectedSource, CredentialHostInput, CredentialSettingsInput, ImageBytes, NativeLyricAgent,
-    NativeLyricAgentRole, NativeLyricCue, NativeLyricCueLine, NativeLyricLine, NativeLyrics,
-    NativeLyricsDocument, NativeLyricsRole, SourceConfiguration, SourceEditResult, SourceError,
-    SourceResult,
+    ConnectedSource, CredentialHostInput, CredentialSettingsInput, ImageBytes, SourceConfiguration,
+    SourceEditResult, SourceError, SourceResult,
+};
+use lyrics::{
+    LyricsAgent, LyricsAgentRole, LyricsBundle, LyricsCue, LyricsCueLine, LyricsDocument,
+    LyricsLine, LyricsOrigin, LyricsRole,
 };
 use playback::{ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url};

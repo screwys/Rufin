@@ -234,7 +234,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .unwrap();
         assert_eq!(smart_rows[0].artwork_binding, binding);
         let queue = database
-            .prepared_queue_page(&database.restore_queue().await.unwrap().occurrences, "")
+            .prepared_queue_page(&database.restore_queue().await.unwrap().occurrences)
             .await
             .unwrap();
         assert_eq!(queue[0].artwork_binding, binding);
@@ -1775,7 +1775,14 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
     }
     let home = fixture
         .database
-        .home_page(fixture.source, Some(fixture.folder), 0, 0, &cancel)
+        .home_page(
+            fixture.source,
+            Some(fixture.folder),
+            0,
+            0,
+            &library::HomeBlockKind::all(),
+            &cancel,
+        )
         .await
         .unwrap();
     assert_eq!(
@@ -1793,6 +1800,81 @@ async fn artist_and_home_activity_follow_membership_even_without_listen_source_i
             .map(|row| row.track.media_uri.as_str())
             .collect::<Vec<_>>(),
         [fixture.track_uris[0].as_str()]
+    );
+}
+
+#[tokio::test]
+async fn home_reads_only_enabled_blocks_and_preserves_provider_sections() {
+    use library::{HomeBlockKind, HomePage};
+
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(?1,'Track','Artist','Album',100,'2026-09',1000,1000)")
+        .bind(&fixture.track_uris[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let cancel = ReadCancellation::new();
+    let all = fixture
+        .database
+        .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
+        .await
+        .unwrap();
+    assert!(!all.provider_sections.is_empty());
+    assert!(all.showcase.is_some());
+    assert!(!all.explore.is_empty());
+    assert!(!all.most_played.tracks.is_empty());
+    assert!(!all.newly_added.albums.is_empty());
+    assert!(!all.recently_played.tracks.is_empty());
+    assert!(!all.recently_released.albums.is_empty());
+    assert!(!all.genres.is_empty());
+
+    for block in HomeBlockKind::all() {
+        let selected = fixture
+            .database
+            .home_page(fixture.source, None, 0, 0, &[block], &cancel)
+            .await
+            .unwrap();
+        let mut expected = HomePage {
+            provider_sections: all.provider_sections.clone(),
+            ..HomePage::default()
+        };
+        match block {
+            HomeBlockKind::Showcase => expected.showcase = all.showcase.clone(),
+            HomeBlockKind::Explore => expected.explore = all.explore.clone(),
+            HomeBlockKind::MostPlayed => expected.most_played = all.most_played.clone(),
+            HomeBlockKind::NewlyAdded => expected.newly_added = all.newly_added.clone(),
+            HomeBlockKind::RecentlyPlayed => expected.recently_played = all.recently_played.clone(),
+            HomeBlockKind::RecentlyReleased => {
+                expected.recently_released = all.recently_released.clone()
+            }
+            HomeBlockKind::Genres => expected.genres = all.genres.clone(),
+        }
+        assert_eq!(
+            selected, expected,
+            "only {block:?} and provider sections are read"
+        );
+    }
+    let disabled = fixture
+        .database
+        .home_page(fixture.source, None, 0, 0, &[], &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        disabled,
+        HomePage {
+            provider_sections: all.provider_sections.clone(),
+            ..HomePage::default()
+        }
+    );
+    let enabled_again = fixture
+        .database
+        .home_page(fixture.source, None, 0, 0, &HomeBlockKind::all(), &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        enabled_again, all,
+        "disabling presentation keeps stored Home facts"
     );
 }
 
@@ -1854,7 +1936,14 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     let initial_home = fixture
         .database
-        .home_page(fixture.source, None, 0, 0, &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &library::HomeBlockKind::all(),
+            &cancel,
+        )
         .await
         .expect("initial bounded Home page");
     assert!(initial_home.most_played.tracks.is_empty());
@@ -1871,7 +1960,14 @@ async fn home_search_and_radio_results_stay_bounded() {
     );
     let alternate_showcase_home = fixture
         .database
-        .home_page(fixture.source, None, 1, 0, &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            1,
+            0,
+            &library::HomeBlockKind::all(),
+            &cancel,
+        )
         .await
         .expect("alternate Showcase Home page");
     assert_eq!(initial_home.explore, alternate_showcase_home.explore);
@@ -1890,7 +1986,14 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(alternate_showcase.album.album_key, fixture.albums[1]);
     let alternate_explore_home = fixture
         .database
-        .home_page(fixture.source, None, 0, 2, &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            2,
+            &library::HomeBlockKind::all(),
+            &cancel,
+        )
         .await
         .expect("alternate Explore Home page");
     assert_eq!(initial_home.showcase, alternate_explore_home.showcase);
@@ -1900,7 +2003,14 @@ async fn home_search_and_radio_results_stay_bounded() {
         .bind(fixture.albums[0]).execute(&mut raw).await.expect("establish Local first-seen facts");
     let newly_added = fixture
         .database
-        .home_page(fixture.source, None, 0, 0, &cancel)
+        .home_page(
+            fixture.source,
+            None,
+            0,
+            0,
+            &library::HomeBlockKind::all(),
+            &cancel,
+        )
         .await
         .expect("bounded Home Albums")
         .newly_added
@@ -1915,7 +2025,14 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, 0, &cancel)
+            .home_page(
+                fixture.source,
+                None,
+                0,
+                0,
+                &library::HomeBlockKind::all(),
+                &cancel
+            )
             .await
             .expect("released Albums require a release fact")
             .recently_released
@@ -1928,7 +2045,14 @@ async fn home_search_and_radio_results_stay_bounded() {
     assert_eq!(
         fixture
             .database
-            .home_page(fixture.source, None, 0, 0, &cancel)
+            .home_page(
+                fixture.source,
+                None,
+                0,
+                0,
+                &library::HomeBlockKind::all(),
+                &cancel
+            )
             .await
             .expect("bounded Home Genres")
             .genres

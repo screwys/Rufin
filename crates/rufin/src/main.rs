@@ -1,24 +1,14 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod album_release;
-mod app;
-mod backup;
-mod diagnostics;
-mod loudness;
 mod paths;
-mod playback;
-mod radio;
-mod release_update;
-mod scrobbling;
-mod settings;
-mod source;
-mod waveform;
 
+use rufin_core::{app, diagnostics};
 use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::{Command, ExitCode};
+use std::sync::Arc;
 #[cfg(target_os = "macos")]
 use std::{fs, path::Path};
 use tracing::info;
@@ -43,7 +33,7 @@ fn main() -> ExitCode {
         }
         None => false,
     };
-    let settings = app::startup_settings();
+    let settings = app::startup_settings(&paths::roots());
     if let Some(result) = restart_with_language(&settings.load().ui.language) {
         return result;
     }
@@ -54,11 +44,37 @@ fn main() -> ExitCode {
     let diagnostics = diagnostics::Diagnostics::install(paths::state_dir());
     info!("starting Rufin native shell");
 
-    let bootstrap = move || app::runtime_inputs(diagnostics, !updated_restart, settings);
+    let bootstrap = move || {
+        let discord = Arc::new(desktop_integration::Discord::new());
+        let presence = Arc::clone(&discord);
+        app::runtime_inputs(
+            diagnostics,
+            !updated_restart,
+            settings,
+            paths::roots(),
+            || {
+                playback_gstreamer::GStreamerPlaybackBackend::new()
+                    .map(|backend| Box::new(backend) as Box<dyn playback::PlaybackBackend>)
+                    .map_err(|error| error.to_string())
+            },
+            playback_gstreamer::available_audio_outputs,
+            Arc::new(move |projection, discontinuity| {
+                presence.observe(projection.map(|p| &p.view), discontinuity)
+            }),
+            Arc::new(move |settings, projection| {
+                discord.update(
+                    settings.rich_presence.clone(),
+                    !settings.private_mode,
+                    &settings.lastfm_api_key,
+                    projection.map(|p| &p.view),
+                )
+            }),
+        )
+    };
     if updated_restart {
-        ui::run_application_after_update(bootstrap, || {})
+        ui_shell::run_application_after_update(bootstrap, || {})
     } else {
-        ui::run_application(bootstrap)
+        ui_shell::run_application(bootstrap)
     }
 }
 
@@ -287,7 +303,7 @@ fn verify_media_argument() -> Option<ExitCode> {
         if arguments.next().is_some() {
             return Err("Usage: rufin --verify-media PATH".to_string());
         }
-        ui::verify_interface_resources()?;
+        ui_shell::verify_interface_resources()?;
         sources::verify_local_media_file(&path).map_err(|error| error.to_string())?;
         playback_gstreamer::verify_audio_file(&path)?;
         Ok(())

@@ -14,6 +14,12 @@ readme = "README.md"
 publish = false
 
 [workspace.dependencies]
+ui-library = { path = "crates/ui-library" }
+ui-player = { path = "crates/ui-player" }
+ui-shared = { path = "crates/ui-shared" }
+rufin-core = { path = "crates/rufin-core" }
+backup = { path = "crates/backup" }
+audio-processing = { path = "crates/audio-processing" }
 age = "0.12.1"
 flate2 = "1.1.10"
 tar = "0.4.46"
@@ -108,7 +114,7 @@ tokio-tungstenite = { version = "0.30.0", default-features = false }
 tiny_http = "0.12.0"
 tracing = "0.1.41"
 tracing-subscriber = "0.3.23"
-ui = { path = "crates/ui" }
+ui-shell = { path = "crates/ui-shell" }
 url = "2.5.7"
 lindera = "=6.0.0"
 walkdir = "2.5.0"
