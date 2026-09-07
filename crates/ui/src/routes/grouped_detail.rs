@@ -117,7 +117,6 @@ impl Shell {
             first_rows,
             key,
             SearchableTrackOptions {
-                on_visible_count_changed: None,
                 context_id: playback_context.clone(),
                 content_inset: PRIMARY_ROUTE_HORIZONTAL_INSET,
                 fixed_layout: None,

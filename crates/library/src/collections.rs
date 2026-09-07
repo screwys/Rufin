@@ -1557,6 +1557,8 @@ impl Database {
     pub async fn album_detail(
         &self,
         media_uri: &str,
+        sort: TrackSort,
+        descending: bool,
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Option<AlbumDetail>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
@@ -1580,14 +1582,11 @@ impl Database {
             Database::clear_progress(&mut connection).await?;
             return Ok(None);
         };
-        let track_order = sqlx::query_scalar::<_, String>(
-            "SELECT media_uri FROM tracks WHERE source_key=?1 AND album_key=?2
-             ORDER BY disc_number, track_number, sort_text, track_key",
-        )
-        .bind(source)
-        .bind(key)
-        .fetch_all(&mut *transaction)
-        .await?;
+        let mut query = collection_track_query(source, sort);
+        query.push(" AND track.album_key=").push_bind(key);
+        let track_order =
+            finish_collection_track_order(query, None, "", sort, descending, &mut transaction)
+                .await?;
         let artists = album
             .album_artists
             .iter()
@@ -1599,7 +1598,7 @@ impl Database {
         Database::clear_progress(&mut connection).await?;
         Ok(Some(AlbumDetail {
             album,
-            track_order,
+            track_order: track_order.into_iter().map(|(_, uri)| uri).collect(),
             artists,
             genres,
             release_types,

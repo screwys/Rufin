@@ -207,6 +207,7 @@ impl Shell {
             tracks_widget,
             item_navigation,
             apply,
+            Rc::new(|| {}),
             search,
             layout_cycle,
             initial_demand,
@@ -281,11 +282,16 @@ impl Shell {
             search_request(search_entries.clone(), generation, request);
         });
         let apply_entries = Rc::clone(&entries);
-        let apply_request = Rc::clone(&request_order);
+        let refresh_entries = Rc::clone(&entries);
+        let refresh = Rc::new(move || {
+            let (generation, request) = refresh_entries.begin_order_request();
+            request_order(Rc::downgrade(&refresh_entries), generation, request);
+        }) as Rc<dyn Fn()>;
+        let apply_refresh = Rc::clone(&refresh);
         let apply = Rc::new(move |settings: &LibraryListSettings| {
-            apply_entries.apply_library_list_settings(LibraryListKey::PlaylistTracks, settings);
-            let (generation, request) = apply_entries.begin_order_request();
-            apply_request(Rc::downgrade(&apply_entries), generation, request);
+            if apply_entries.apply_library_list_settings(LibraryListKey::PlaylistTracks, settings) {
+                apply_refresh();
+            }
         }) as Rc<dyn Fn(&LibraryListSettings)>;
         let search = entries.search();
         let layout_cycle = entries.layout_cycle();
@@ -305,6 +311,7 @@ impl Shell {
             tracks_widget,
             item_navigation,
             apply,
+            refresh,
             search,
             layout_cycle,
             initial_demand,
@@ -331,6 +338,7 @@ impl Shell {
         tracks_widget: gtk::Widget,
         item_navigation: crate::shell::route::MountedRouteItemNavigation,
         apply_list_settings: Rc<dyn Fn(&LibraryListSettings)>,
+        refresh_tracks: Rc<dyn Fn()>,
         search: gtk::SearchEntry,
         layout_cycle: crate::shell::route::MountedRouteCommand,
         initial_demand: Rc<dyn Fn()>,
@@ -534,11 +542,9 @@ impl Shell {
             let owner = Rc::clone(&owner_state);
             let showcase = showcase_view.clone();
             let cover = cover.clone();
-            let apply_list_settings = Rc::clone(&apply_list_settings);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
-                let list_settings = shell.settings.current.borrow().library_list(key);
-                apply_list_settings(&list_settings);
+                refresh_tracks();
                 let database = Arc::clone(&shell.products.library);
                 let owner_key = owner.borrow().clone();
                 let task = shell.products.runtime.spawn(async move {

@@ -37,7 +37,6 @@ struct CollectionReadRequest {
 }
 
 pub(crate) struct SearchableTrackOptions {
-    pub(crate) on_visible_count_changed: Option<Rc<dyn Fn(usize)>>,
     pub(crate) context_id: String,
     pub(crate) content_inset: i32,
     pub(crate) fixed_layout: Option<LibraryLayout>,
@@ -50,7 +49,6 @@ pub(crate) struct TrackListProjection<T: TrackPresentation = library::TrackRow> 
     search: gtk::SearchEntry,
     collection: super::collections::LibraryCollectionProjection,
     model: TrackCollectionModel<T>,
-    on_visible_count_changed: Option<Rc<dyn Fn(usize)>>,
     fixed_layout: Option<LibraryLayout>,
 }
 
@@ -134,11 +132,7 @@ impl<T: TrackPresentation> TrackListProjection<T> {
     }
 
     pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection<T>) -> bool {
-        let changed = self.model.replace_prepared(prepared);
-        if changed {
-            self.notify_visible_count();
-        }
-        changed
+        self.model.replace_prepared(prepared)
     }
 
     pub(crate) fn resume_initial_demand(&self) {
@@ -157,18 +151,8 @@ impl<T: TrackPresentation> TrackListProjection<T> {
         if let Some(layout) = self.fixed_layout {
             settings.layout = layout;
         }
-        let previous = self.model.settings();
         self.model.apply_settings(settings.clone());
-        if previous.sort_key != settings.sort_key || previous.descending != settings.descending {
-            self.notify_visible_count();
-        }
         self.collection.apply_settings(&settings);
-    }
-
-    fn notify_visible_count(&self) {
-        if let Some(on_visible_count_changed) = self.on_visible_count_changed.as_ref() {
-            on_visible_count_changed(self.model.visible_count());
-        }
     }
 }
 
@@ -190,7 +174,6 @@ impl Shell {
             key,
             settings,
             SearchableTrackOptions {
-                on_visible_count_changed: None,
                 context_id,
                 content_inset: 0,
                 fixed_layout: None,
@@ -496,7 +479,6 @@ impl Shell {
             first_rows,
             options.key,
             SearchableTrackOptions {
-                on_visible_count_changed: None,
                 context_id,
                 content_inset: 0,
                 fixed_layout: None,
@@ -537,7 +519,6 @@ impl Shell {
             key,
             settings,
             SearchableTrackOptions {
-                on_visible_count_changed: None,
                 context_id: "history:all".to_string(),
                 content_inset: 0,
                 fixed_layout: None,
@@ -983,22 +964,14 @@ impl Shell {
         settings: LibraryListSettings,
         options: SearchableTrackOptions,
     ) -> TrackListProjection<T> {
-        if let Some(on_visible_count_changed) = options.on_visible_count_changed.as_ref() {
-            on_visible_count_changed(model.visible_count());
-        }
         let persistent_search = options.search.is_some();
         let search = options.search.unwrap_or_else(gtk::SearchEntry::new);
         bind_search_placeholder(&search, "Search");
         search.set_hexpand(true);
         if !persistent_search {
             let model = model.clone();
-            let on_visible_count_changed = options.on_visible_count_changed.clone();
             search.connect_search_changed(move |entry| {
-                if model.set_query(entry.text().as_str())
-                    && let Some(on_visible_count_changed) = on_visible_count_changed.as_ref()
-                {
-                    on_visible_count_changed(model.visible_count());
-                }
+                model.set_query(entry.text().as_str());
             });
         }
         let collection = track_collection_projection(
@@ -1014,7 +987,6 @@ impl Shell {
             search,
             collection,
             model,
-            on_visible_count_changed: options.on_visible_count_changed,
             fixed_layout: options.fixed_layout,
         }
     }
@@ -1152,14 +1124,25 @@ impl Shell {
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
                 let settings = shell.settings.current.borrow().library_list(key);
+                let previous = projection.projection_request();
                 projection.apply_library_list_settings(key, &settings);
                 page.apply_library_list_settings(key, &settings);
-                read.request_with(map_request(projection.projection_request()));
+                let request = projection.projection_request();
+                if !previous.same_query(&request) {
+                    read.request_with(map_request(request));
+                }
             })
+        };
+        let refresh = {
+            let projection = projection.clone();
+            let read = Rc::clone(&read);
+            let map_request = Rc::clone(&map_request);
+            Rc::new(move || read.request_with(map_request(projection.projection_request())))
         };
         let favorite_projection = projection.clone();
         let favorite_read = read;
         page.mounted_route(resume)
+            .with_catalog_refresh(refresh)
             .with_download_change(projection.download_change())
             .with_item_navigation(projection.item_navigation())
             .with_initial_demand({

@@ -20,8 +20,7 @@ use localization::{msgid, track_count_text};
 use playback::RadioPlayRequest;
 
 use super::collection_context::present_album_context_menu;
-use super::collections::CollectionPlay;
-use super::collections::{library_route_inset, set_library_table_content_height};
+use super::collections::{CollectionPlay, library_route_inset};
 use super::detail_links::{DetailLinkBinding, album_artist_links};
 use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, album_external_links, detail_genre_pill_button,
@@ -31,14 +30,10 @@ use super::detail_showcase::{
 use super::release_kind::album_release_kind_label;
 use super::route::Route;
 use super::route_layout::{
-    PRIMARY_ROUTE_MARGIN_END, PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN,
-    detail_route_inner_width, detail_route_scroller, detail_route_wrapper,
+    PRIMARY_ROUTE_MARGIN_START, ROUTE_TOP_MARGIN, detail_route_inner_width, detail_route_wrapper,
     detail_showcase_cover_size,
 };
-use super::routes::SearchableTrackOptions;
-use super::track_model::{PreparedTrackProjection, TrackProjectionRequest};
-
-const ALBUM_DETAIL_ROUTE_INSET: i32 = PRIMARY_ROUTE_MARGIN_START + PRIMARY_ROUTE_MARGIN_END;
+use super::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackProjectionRequest};
 
 #[derive(Clone)]
 struct AlbumDetailReadRequest {
@@ -60,46 +55,33 @@ impl Shell {
         let album = detail.album.clone();
         let album_id = album.album_key;
         let album_uri = album.media_uri.clone();
-        let tracks = detail.track_order.clone();
+        let tracks = detail.track_order;
         let current_album = Rc::new(RefCell::new(detail.album.clone()));
         let context_id = format!("album:{album_id}");
         let applied_external_link_settings = Rc::new(RefCell::new(
             self.settings.current.borrow().external_site_links.clone(),
         ));
 
-        let wrapper = detail_route_wrapper(0);
-        let content = gtk::Box::new(gtk::Orientation::Vertical, 22);
-        content.set_margin_top(ROUTE_TOP_MARGIN);
-        content.set_hexpand(true);
-        content.set_halign(gtk::Align::Fill);
-        content.set_width_request(1);
+        let wrapper = detail_route_wrapper(22);
+        wrapper.set_margin_top(ROUTE_TOP_MARGIN);
 
         let inner_content_width = detail_route_inner_width(self, PRIMARY_ROUTE_MARGIN_START);
-        let table_scroller = gtk::ScrolledWindow::new();
-        table_scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Never);
-        table_scroller.set_width_request(1);
-        table_scroller.set_min_content_width(0);
-        table_scroller.set_max_content_width(1);
-        table_scroller.set_propagate_natural_width(false);
-        table_scroller.set_propagate_natural_height(false);
-        table_scroller.set_hexpand(true);
-        table_scroller.set_halign(gtk::Align::Fill);
-        let resize_scroller = table_scroller.clone();
-        let resize_tracks: Rc<dyn Fn(usize)> = Rc::new(move |row_count| {
-            set_library_table_content_height(&resize_scroller, row_count, None);
-        });
-        let track_projection = self.searchable_track_collection(
+        let model = TrackCollectionModel::new(
+            Arc::clone(&self.products.library),
+            self.products.runtime.clone(),
             tracks,
             first_row_position,
             first_rows,
+            self.settings
+                .current
+                .borrow()
+                .library_list(LibraryListKey::AlbumDetailTracks),
+        );
+        let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
+            model,
             LibraryListKey::AlbumDetailTracks,
-            SearchableTrackOptions {
-                on_visible_count_changed: Some(resize_tracks),
-                context_id: context_id.clone(),
-                content_inset: ALBUM_DETAIL_ROUTE_INSET,
-                fixed_layout: None,
-                search: None,
-            },
+            "album-detail",
+            context_id.clone(),
         );
         let cover_size = detail_showcase_cover_size(inner_content_width);
         let cover = media_cover_projection(
@@ -221,25 +203,9 @@ impl Shell {
                 actions_min_cover_size: None,
             }),
         );
-        content.append(&showcase);
-
-        let table = gtk::Box::new(gtk::Orientation::Vertical, 10);
-        table.set_widget_name("album-detail");
-        table.set_hexpand(true);
-        table.set_halign(gtk::Align::Fill);
-        table.set_width_request(1);
-        let track_toolbar = self.library_toolbar_projection(
-            LibraryListKey::AlbumDetailTracks,
-            track_projection.search(),
-        );
-        table.append(&track_toolbar.widget());
+        wrapper.append(&library_route_inset(showcase));
+        wrapper.append(&tracks_widget);
         let item_navigation = track_projection.item_navigation();
-        let track_content = track_projection.mount_in_scroller(&table_scroller);
-        table.append(&track_content);
-        content.append(&table);
-        wrapper.append(&detail_route_scroller(library_route_inset(
-            content.upcast(),
-        )));
         let route_stack = gtk::Stack::new();
         route_stack.set_hexpand(true);
         route_stack.set_vexpand(true);
@@ -338,9 +304,19 @@ impl Shell {
                     .current
                     .borrow()
                     .library_list(LibraryListKey::AlbumDetailTracks);
+                let previous = track_projection.projection_request();
                 track_projection
                     .apply_library_list_settings(LibraryListKey::AlbumDetailTracks, &settings);
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
+                let tracks = track_projection.projection_request();
+                if !previous.same_query(&tracks) {
+                    read.request_with(AlbumDetailReadRequest { tracks });
+                }
+            })
+        };
+        let refresh = {
+            let track_projection = track_projection.clone();
+            Rc::new(move || {
                 read.request_with(AlbumDetailReadRequest {
                     tracks: track_projection.projection_request(),
                 });
@@ -355,6 +331,7 @@ impl Shell {
             }
         });
         MountedRoute::new(route_stack.upcast(), resume)
+            .with_catalog_refresh(refresh)
             .with_download_change(downloads)
             .with_download_change(track_projection.download_change())
             .with_search(track_projection.search())

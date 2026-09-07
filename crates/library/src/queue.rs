@@ -1359,9 +1359,23 @@ impl Database {
             QueueInput::PlaylistEntries { order, context_id } => {
                 for (offset, batch) in order.chunks(128).enumerate() {
                     // The explicit entry keys retain duplicate snapshots and occurrence order.
-                    for (index, key) in batch.iter().enumerate() {
-                        sqlx::query("INSERT INTO temp.queue_input(media_uri,source_rank,entry_key) SELECT media_uri,?2,playlist_entry_key FROM playlist_entries WHERE playlist_entry_key=?1").bind(*key).bind((offset*128+index) as i64).execute(&mut **transaction).await?;
-                    }
+                    sqlx::query(
+                        "INSERT INTO temp.queue_input(media_uri,source_rank,entry_key)
+                        SELECT entry.media_uri,requested.key+?2 AS source_rank,entry.playlist_entry_key
+                        FROM json_each(?1) requested
+                        JOIN main.playlist_entries entry ON entry.playlist_entry_key=requested.value
+                        WHERE requested.value>=0
+                        UNION ALL
+                        SELECT entry.media_uri,requested.key+?2 AS source_rank,-entry.playlist_entry_key
+                        FROM json_each(?1) requested
+                        JOIN catalog.native_playlist_entries entry ON entry.playlist_entry_key=-requested.value
+                        WHERE requested.value<0
+                        ORDER BY source_rank",
+                    )
+                    .bind(serde_json::to_string(batch)?)
+                    .bind((offset * 128) as i64)
+                    .execute(&mut **transaction)
+                    .await?;
                 }
                 QueueProvenance::Context {
                     context_id,

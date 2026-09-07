@@ -130,13 +130,16 @@ impl PlaylistEntriesView {
         &self,
         key: LibraryListKey,
         settings: &LibraryListSettings,
-    ) {
+    ) -> bool {
         if key != LibraryListKey::PlaylistTracks {
-            return;
+            return false;
         }
+        let previous = self.model.projection_request();
         self.model.apply_settings(settings.clone());
         self.collection.apply_settings(settings);
         self.toolbar.apply(key, settings);
+        previous.settings.sort_key != settings.sort_key
+            || previous.settings.descending != settings.descending
     }
 }
 

@@ -21,6 +21,14 @@ pub(crate) struct TrackProjectionRequest {
     pub(crate) settings: LibraryListSettings,
 }
 
+impl TrackProjectionRequest {
+    pub(crate) fn same_query(&self, other: &Self) -> bool {
+        self.query == other.query
+            && self.settings.sort_key == other.settings.sort_key
+            && self.settings.descending == other.settings.descending
+    }
+}
+
 #[derive(Clone)]
 pub(crate) struct PreparedTrackProjection<T = TrackRow> {
     pub(crate) order: Vec<String>,
@@ -139,7 +147,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
     }
 
     pub(crate) fn replace_prepared(&self, prepared: PreparedTrackProjection<T>) -> bool {
-        if *self.0.request.borrow() != prepared.request {
+        if !self.0.request.borrow().same_query(&prepared.request) {
             return false;
         }
         self.0.sparse.replace_prepared_at(
@@ -258,6 +266,84 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn pending_projection_survives_presentation_changes_and_refreshes_metadata() {
+        let runtime = tokio::runtime::Runtime::new().unwrap();
+        let row = library::HistoryRow {
+            media_uri: "test:track".into(),
+            title: "Before".into(),
+            artist: String::new(),
+            album: String::new(),
+            album_media_uri: None,
+            artists: Vec::new(),
+            album_artists: Vec::new(),
+            album_display_artist: None,
+            artwork_binding: None,
+            duration_millis: 1000,
+            disc_number: None,
+            track_number: None,
+            year: None,
+            release_date: None,
+            date_added: None,
+            bpm: None,
+            genre: String::new(),
+            play_count: 1,
+            source_format: None,
+            musicbrainz_recording_id: None,
+            musicbrainz_release_track_id: None,
+            last_played: None,
+            favorite: false,
+            rating: None,
+            is_downloaded: false,
+        };
+        let model = TrackCollectionModel::with_load(
+            runtime.handle().clone(),
+            vec![row.media_uri.clone()],
+            0,
+            vec![row.clone()],
+            LibraryListSettings::for_key(crate::LibraryListKey::History),
+            Arc::new(|_, _| panic!("seeded rows must not request hydration")),
+        );
+        let pending = model.projection_request();
+        let mut presentation = model.settings();
+        presentation.layout = crate::LibraryLayout::Grid;
+        presentation.row_fields.reverse();
+        model.apply_settings(presentation.clone());
+        let mut updated = row;
+        updated.title = "After".into();
+        let prepared = PreparedTrackProjection {
+            order: vec![updated.media_uri.clone()],
+            first_row_position: 0,
+            first_rows: vec![updated.clone()],
+            request: pending,
+        };
+        assert!(model.replace_prepared(prepared.clone()));
+        assert_eq!(model.settings(), presentation);
+        assert_eq!(model.sparse_model().ready(0).unwrap().title, "After");
+
+        // A later catalog publication has the same query but new row data.
+        updated.title = "Catalog update".into();
+        assert!(model.replace_prepared(PreparedTrackProjection {
+            first_rows: vec![updated],
+            ..prepared.clone()
+        }));
+        assert_eq!(
+            model.sparse_model().ready(0).unwrap().title,
+            "Catalog update"
+        );
+
+        presentation.descending = !presentation.descending;
+        model.apply_settings(presentation);
+        assert!(!model.replace_prepared(prepared.clone()));
+        model.apply_settings(prepared.request.settings.clone());
+        model.set_query("different search");
+        assert!(!model.replace_prepared(prepared));
+        assert_eq!(
+            model.sparse_model().ready(0).unwrap().title,
+            "Catalog update"
+        );
+    }
 
     #[test]
     fn queue_context_keeps_short_orders_whole() {

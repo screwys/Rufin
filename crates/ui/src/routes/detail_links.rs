@@ -183,10 +183,19 @@ impl DetailLinkBinding {
     }
 
     pub(crate) fn bind(&self, links: DetailLinks) {
-        let markup = links.markup();
+        let has_links = !links.links.is_empty();
+        let text = if has_links {
+            links.markup()
+        } else {
+            links.text.clone()
+        };
         self.links.replace(links);
         if let Some(label) = self.label.upgrade() {
-            label.set_markup(&markup);
+            if has_links {
+                label.set_markup(&text);
+            } else {
+                label.set_text(&text);
+            }
         }
     }
 

@@ -43,11 +43,6 @@ use super::track_model::TrackCollectionModel;
 use super::track_selection::TrackSelection;
 use downloads::DownloadSubject;
 
-pub(super) const LIBRARY_TABLE_HEADER_HEIGHT: i32 = 92;
-const LIBRARY_TABLE_ROW_HEIGHT: i32 = 58;
-
-// GtkColumnView allocates a 30px header and 64px for each current track row.
-
 pub(crate) type CollectionPlay = Rc<dyn Fn(QueuePlacement)>;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -207,7 +202,7 @@ impl PlaybackTarget {
                 .map_err(|error| error.to_string()),
             (Self::Track(media_uri), _) => Ok(vec![media_uri.clone()]),
             (Self::Album(uri), _) => database
-                .album_detail(uri, &cancellation)
+                .album_detail(uri, library::TrackSort::TrackNumber, false, &cancellation)
                 .await
                 .map(|detail| detail.map(|detail| detail.track_order).unwrap_or_default())
                 .map_err(|error| error.to_string()),
@@ -1342,30 +1337,6 @@ fn selected_position(selection: &gtk::SelectionModel) -> u32 {
         positions.minimum()
     }
 }
-pub(crate) fn set_library_table_content_height(
-    scroller: &gtk::ScrolledWindow,
-    row_count: usize,
-    max_visible_rows: Option<usize>,
-) {
-    let height = max_visible_rows.map_or_else(
-        || library_table_content_height(row_count),
-        |max_visible_rows| capped_library_table_content_height(row_count, Some(max_visible_rows)),
-    );
-    scroller.set_min_content_height(height);
-    scroller.set_max_content_height(height);
-}
-pub(crate) fn library_table_content_height(row_count: usize) -> i32 {
-    capped_library_table_content_height(row_count, None)
-}
-pub(crate) fn capped_library_table_content_height(
-    row_count: usize,
-    max_visible_rows: Option<usize>,
-) -> i32 {
-    let max_rows = ((i32::MAX - LIBRARY_TABLE_HEADER_HEIGHT) / LIBRARY_TABLE_ROW_HEIGHT) as usize;
-    let visible_rows = row_count.max(1).min(max_visible_rows.unwrap_or(max_rows));
-    LIBRARY_TABLE_HEADER_HEIGHT + visible_rows as i32 * LIBRARY_TABLE_ROW_HEIGHT
-}
-
 pub(crate) fn install_smart_playlist_reorder(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,

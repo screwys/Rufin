@@ -64,6 +64,7 @@ pub(crate) struct SparseRouteModel<K, R> {
     demand_deferred: Cell<bool>,
     initial_window: Cell<Option<usize>>,
     cancellation: RefCell<Option<(u64, ReadCancellation)>>,
+    demand_source: RefCell<Option<glib::JoinHandle<()>>>,
 }
 
 #[derive(Default)]
@@ -280,12 +281,6 @@ pub(crate) fn connect_sparse_bind(
     factory.connect_unbind(move |_, object| {
         if let Some(item) = object.downcast_ref::<gtk::ListItem>() {
             unbind_sparse_item(item);
-            if item
-                .item()
-                .is_some_and(|item| item.is::<SparseObjectItem>())
-            {
-                set_sparse_child_ready(item, false);
-            }
         }
     });
     factory.connect_teardown(move |_, object| {
@@ -340,7 +335,6 @@ where
         if let Some(item) = self.objects.get(&position).and_then(glib::WeakRef::upgrade) {
             return Some(item);
         }
-        self.objects.retain(|_, item| item.upgrade().is_some());
         let value = self.sparse.item(position)?;
         let ready = matches!(value, SparseItem::Ready(_));
         let item = SparseObjectItem::new(value, ready);
@@ -349,15 +343,17 @@ where
     }
 
     fn cold_live_windows(&mut self) -> Vec<usize> {
-        self.objects.retain(|_, item| item.upgrade().is_some());
-        self.objects
-            .iter()
-            .filter_map(|(position, item)| {
-                let item = item.upgrade()?;
-                (!item.is_ready() && !self.sparse.ready.contains_key(position))
-                    .then_some(window_first(*position))
-            })
-            .collect()
+        let mut windows = Vec::new();
+        self.objects.retain(|position, item| {
+            let Some(item) = item.upgrade() else {
+                return false;
+            };
+            if !item.is_ready() && !self.sparse.ready.contains_key(position) {
+                windows.push(window_first(*position));
+            }
+            true
+        });
+        windows
     }
 }
 
@@ -730,6 +726,7 @@ where
             demand_deferred: Cell::new(false),
             initial_window: Cell::new(None),
             cancellation: RefCell::new(None),
+            demand_source: RefCell::new(None),
         });
         let weak = Rc::downgrade(&route);
         model.set_demand(move |position| {
@@ -883,9 +880,25 @@ where
     }
 
     fn demand(self: &Rc<Self>, _: u32) {
-        if self.demand_deferred.get() {
+        if self.demand_deferred.get() || self.demand_source.borrow().is_some() {
             return;
         }
+        // GTK requests and retires a batch of items while moving its viewport.
+        // Reconcile the final live set once, after that batch has finished.
+        let weak = Rc::downgrade(self);
+        self.demand_source.replace(Some(
+            glib::MainContext::ref_thread_default().spawn_local_with_priority(
+                glib::Priority::DEFAULT_IDLE,
+                async move {
+                    let Some(route) = weak.upgrade() else { return };
+                    route.demand_source.borrow_mut().take();
+                    route.reconcile_demand();
+                },
+            ),
+        ));
+    }
+
+    fn reconcile_demand(self: &Rc<Self>) {
         let cancel_running = self
             .windows
             .borrow_mut()
@@ -962,6 +975,9 @@ where
     }
 
     fn cancel(&self) {
+        if let Some(source) = self.demand_source.borrow_mut().take() {
+            source.abort();
+        }
         self.cancel_running();
         self.windows.borrow_mut().reset();
     }
@@ -969,6 +985,9 @@ where
 
 impl<K, R> Drop for SparseRouteModel<K, R> {
     fn drop(&mut self) {
+        if let Some(source) = self.demand_source.get_mut().take() {
+            source.abort();
+        }
         if let Some((_, cancellation)) = self.cancellation.get_mut().take() {
             cancellation.cancel();
         }
@@ -1131,6 +1150,71 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn viewport_hydration_keeps_final_live_items_and_discards_retired_items() {
+        let context = glib::MainContext::new();
+        context
+            .with_thread_default(|| {
+                let runtime = tokio::runtime::Runtime::new().expect("runtime");
+                let requests = Arc::new(std::sync::Mutex::new(Vec::new()));
+                let loaded = Arc::clone(&requests);
+                let route = SparseRouteModel::new(
+                    (0..1_000_u64).collect(),
+                    64,
+                    runtime.handle().clone(),
+                    Arc::new(move |keys: Vec<u64>, _| {
+                        loaded.lock().unwrap().push(keys.clone());
+                        Box::pin(
+                            async move { Ok(keys.iter().map(u64::to_string).collect::<Vec<_>>()) },
+                        )
+                    }),
+                );
+                let model = route.list_model();
+                let transient = (0..64)
+                    .map(|position| model.item(position).unwrap())
+                    .collect::<Vec<_>>();
+                drop(transient);
+                let visible = (128..256)
+                    .map(|position| {
+                        model
+                            .item(position)
+                            .unwrap()
+                            .downcast::<SparseObjectItem>()
+                            .unwrap()
+                    })
+                    .collect::<Vec<_>>();
+                assert!(requests.lock().unwrap().is_empty());
+                context.block_on(async {
+                    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
+                    while visible.iter().any(|item| !item.is_ready()) {
+                        assert!(std::time::Instant::now() < deadline, "visible rows hydrate");
+                        glib::timeout_future(std::time::Duration::from_millis(1)).await;
+                    }
+                });
+                assert_eq!(
+                    *requests.lock().unwrap(),
+                    vec![
+                        (128..192).collect::<Vec<_>>(),
+                        (192..256).collect::<Vec<_>>()
+                    ]
+                );
+                for (offset, item) in visible.iter().enumerate() {
+                    assert!(matches!(item.value::<SparseItem<u64, String>>(),
+                Some(SparseItem::Ready(row)) if *row == (128 + offset).to_string()));
+                }
+
+                // Retiring a route before its next viewport pass must release that work.
+                let pending = model.item(512).unwrap();
+                let weak = Rc::downgrade(&route);
+                drop(route);
+                assert!(weak.upgrade().is_none());
+                context.block_on(glib::timeout_future(std::time::Duration::from_millis(1)));
+                assert_eq!(requests.lock().unwrap().len(), 2);
+                drop(pending);
+            })
+            .expect("main context");
+    }
 
     #[test]
     fn replaced_routes_release_their_order_rows_and_loader() {

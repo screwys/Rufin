@@ -45,7 +45,15 @@ pub(crate) fn install_current_track_context_menu(
         target,
         Rc::new(move |target, position| {
             if let Some(track) = current_playback_track(shell.selected_playback().as_deref()) {
-                present_playback_media_menu(target, &shell, track, position, None, None);
+                present_playback_media_menu(
+                    target,
+                    &shell,
+                    track.media_uri.clone(),
+                    Some(track),
+                    position,
+                    None,
+                    None,
+                );
             }
         }),
     );
@@ -59,7 +67,8 @@ pub(crate) fn present_current_track_context_menu(
         present_playback_media_menu(
             target.as_ref(),
             shell,
-            track,
+            track.media_uri.clone(),
+            Some(track),
             None,
             Some(gtk::PositionType::Top),
             None,
@@ -77,8 +86,7 @@ pub(crate) fn present_track_context_menu(
         present_track_selection_menu(target, shell, selection, position);
         return;
     }
-    let item = library::QueueItem::direct(&media_uri, &media_uri, "", "", 0);
-    present_playback_media_menu(target, shell, item, position, None, None);
+    present_playback_media_menu(target, shell, media_uri, None, position, None, None);
 }
 
 pub(crate) fn present_playlist_entry_context_menu(
@@ -103,7 +111,15 @@ pub(crate) fn present_queue_track_context_menu(
     occurrence: playback::OccurrenceId,
     position: Option<(f64, f64)>,
 ) {
-    present_playback_media_menu(target, shell, media, position, None, Some(occurrence));
+    present_playback_media_menu(
+        target,
+        shell,
+        media.media_uri.clone(),
+        Some(media),
+        position,
+        None,
+        Some(occurrence),
+    );
 }
 
 fn present_catalog_track_menu(
@@ -169,7 +185,7 @@ fn present_catalog_track_menu(
     if let Some(media) = playback_media {
         install_live_track_playback_actions(&surface, shell, media);
     } else {
-        install_loaded_actions(&surface, shell, playback, None);
+        install_media_uri_playback_actions(&surface, shell, track.media_uri.clone());
     }
     install_radio_actions(&surface, shell, RadioSeed::Track(track.media_uri.clone()));
     add_favorite_action(
@@ -248,31 +264,38 @@ fn present_catalog_track_menu(
 pub(crate) fn present_playback_media_menu(
     target: &gtk::Widget,
     shell: &Rc<Shell>,
-    media: library::QueueItem,
+    media_uri: String,
+    media: Option<library::QueueItem>,
     position: Option<(f64, f64)>,
     popover_position: Option<gtk::PositionType>,
     queue_occurrence: Option<playback::OccurrenceId>,
 ) {
     let database = Arc::clone(&shell.products.library);
     let runtime = shell.products.runtime.clone();
-    let media_uri = media.media_uri.clone();
     let task = runtime.spawn(async move {
         let cancellation = library::ReadCancellation::new();
         if let Some(track) = database.track_row_by_uri(&media_uri, &cancellation).await? {
-            Ok::<_, library::LibraryError>((Some(track), None, false))
+            Ok::<_, library::LibraryError>((Some(track), media, None, false))
         } else {
             let state = database.user_media_state(&media_uri, &cancellation).await?;
             let downloaded = !database
                 .retaining_download_rows(std::slice::from_ref(&media_uri), &cancellation)
                 .await?
                 .is_empty();
-            Ok((None, state, downloaded))
+            let media = match media {
+                Some(media) => Some(media),
+                None => database
+                    .queue_items_for_uris(&[media_uri], &cancellation)
+                    .await?
+                    .pop(),
+            };
+            Ok((None, media, state, downloaded))
         }
     });
     let target = target.clone();
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
-        let Ok(Ok((track, user_state, downloaded))) = task.await else {
+        let Ok(Ok((track, media, user_state, downloaded))) = task.await else {
             return;
         };
         let Some(shell) = shell.upgrade() else {
@@ -285,10 +308,10 @@ pub(crate) fn present_playback_media_menu(
                 track,
                 position,
                 popover_position,
-                Some(media),
+                media,
                 queue_occurrence,
             );
-        } else {
+        } else if let Some(media) = media {
             present_direct_playback_media_menu(
                 &target,
                 &shell,

@@ -507,11 +507,36 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
     assert_eq!(album_rows[0].genres[0].name, "Rock");
     let album_detail = fixture
         .database
-        .album_detail(&album_rows[0].media_uri, &cancel)
+        .album_detail(
+            &album_rows[0].media_uri,
+            library::TrackSort::TrackNumber,
+            false,
+            &cancel,
+        )
         .await
         .expect("Album detail")
         .expect("existing Album");
     assert_eq!(album_detail.track_order.len(), 2);
+    let reversed = fixture
+        .database
+        .album_detail(
+            &album_rows[0].media_uri,
+            library::TrackSort::TrackNumber,
+            true,
+            &cancel,
+        )
+        .await
+        .expect("descending Album detail")
+        .expect("existing Album");
+    assert_eq!(
+        reversed.track_order,
+        album_detail
+            .track_order
+            .iter()
+            .rev()
+            .cloned()
+            .collect::<Vec<_>>()
+    );
     assert_eq!(album_detail.artists, [fixture.artists[0]]);
     assert_eq!(album_rows[0].is_compilation, Some(true));
     assert_eq!(album_rows[0].release_types, ["Album".to_string()]);
