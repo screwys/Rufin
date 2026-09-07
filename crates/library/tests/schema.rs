@@ -984,6 +984,7 @@ async fn fresh_schema_has_exact_table_inventory() {
             "playlist_entries",
             "playlists",
             "queue_occurrences",
+            "queue_saved",
             "queue_state",
             "smart_playlists",
             "source_ids",

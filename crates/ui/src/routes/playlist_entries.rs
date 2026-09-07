@@ -62,6 +62,9 @@ pub(crate) struct PlaylistEntriesView {
 }
 
 impl PlaylistEntriesView {
+    pub(crate) fn set_queue_folder(&self, folder: Option<library::FolderKey>) {
+        self.model.set_queue_folder(folder);
+    }
     pub(crate) fn play(&self, queue: playback::QueueHandle, placement: playback::QueuePlacement) {
         self.model.play(0, queue, placement, true);
     }

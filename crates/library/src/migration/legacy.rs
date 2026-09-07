@@ -587,6 +587,8 @@ async fn queue(
                 })
                 .unwrap_or(QueueProvenance::Legacy);
             let occurrence = QueueOccurrence {
+                source_index: None,
+                playlist_entry_id: None,
                 occurrence: OccurrenceId::new(id),
                 item,
                 canonical_position: integer(&row, "canonical_position").unwrap_or(0) as usize,

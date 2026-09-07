@@ -30,7 +30,6 @@ use crate::shell::actions::{PLAY_ICON, REMOVE_ICON};
 use crate::shell::cover::THUMB_COVER_SIZE;
 use crate::shell::layout::WINDOW_CHROME_MARGIN_END;
 
-const QUEUE_PAGE_SIZE: usize = 100;
 const QUEUE_FULLSCREEN_COVER_COLUMN_WIDTH: i32 = 50;
 const QUEUE_FULLSCREEN_SHOW_ALBUM_WIDTH: i32 = 572;
 const QUEUE_FULLSCREEN_SHOW_YEAR_WIDTH: i32 = 652;
@@ -375,14 +374,12 @@ impl QueueFullscreenColumnWidgets {
 }
 
 pub(crate) struct QueueState {
+    window: RefCell<Vec<QueuePageRow>>,
     rows: RefCell<Vec<QueuePageRow>>,
-    page_start: Cell<usize>,
     model: gio::ListStore,
     selection: RefCell<Option<gtk::MultiSelection>>,
     filter: RefCell<String>,
     generation: Cell<u64>,
-    running: Cell<Option<u64>>,
-    cancellation: RefCell<Option<(u64, library::ReadCancellation)>>,
     current: RefCell<Option<OccurrenceId>>,
     render_queued: Cell<bool>,
 }
@@ -391,30 +388,21 @@ impl QueueState {
     pub(crate) fn new() -> Self {
         let model = gio::ListStore::new::<SparseObjectItem>();
         Self {
+            window: RefCell::new(Vec::new()),
             rows: RefCell::new(Vec::new()),
-            page_start: Cell::new(0),
             model,
             selection: RefCell::new(None),
             filter: RefCell::new(String::new()),
             generation: Cell::new(0),
-            running: Cell::new(None),
-            cancellation: RefCell::new(None),
             current: RefCell::new(None),
             render_queued: Cell::new(false),
         }
     }
 
-    fn begin(&self) -> (u64, library::ReadCancellation) {
-        if let Some((_, cancellation)) = self.cancellation.borrow_mut().take() {
-            cancellation.cancel();
-        }
+    fn begin(&self) -> u64 {
         let generation = self.generation.get().wrapping_add(1);
         self.generation.set(generation);
-        self.running.set(Some(generation));
-        let cancellation = library::ReadCancellation::new();
-        self.cancellation
-            .replace(Some((generation, cancellation.clone())));
-        (generation, cancellation)
+        generation
     }
 
     fn selection_model(&self) -> gtk::MultiSelection {
@@ -427,11 +415,23 @@ impl QueueState {
     }
 
     fn accept(&self, generation: u64, rows: Vec<QueuePageRow>) -> bool {
-        if self.running.get() != Some(generation) || self.generation.get() != generation {
+        if self.generation.get() != generation {
             return false;
         }
-        self.running.set(None);
-        self.cancellation.borrow_mut().take();
+        self.window.replace(rows);
+        self.apply_filter();
+        true
+    }
+
+    fn apply_filter(&self) {
+        let filter = self.filter.borrow().clone();
+        let rows = filter_queue_window(&self.window.borrow(), &filter);
+        let selected = self.selection.borrow().as_ref().map(|selection| {
+            queue_rows_at_positions(&self.rows.borrow(), &selection.selection())
+                .into_iter()
+                .map(|row| row.occurrence)
+                .collect::<Vec<_>>()
+        });
         let previous_ids = self
             .rows
             .borrow()
@@ -491,7 +491,16 @@ impl QueueState {
                 .splice(prefix as u32, old_middle as u32, &objects[prefix..next_end]);
         }
         self.rows.replace(rows);
-        true
+        if let Some(selected) = selected {
+            let selection = self.selection.borrow().as_ref().cloned().unwrap();
+            let positions = gtk::Bitset::new_empty();
+            for (position, row) in self.rows.borrow().iter().enumerate() {
+                if selected.contains(&row.occurrence) {
+                    positions.add(position as u32);
+                }
+            }
+            selection.set_selection(&positions, &gtk::Bitset::new_range(0, self.model.n_items()));
+        }
     }
 
     fn update_current(&self, current: Option<OccurrenceId>) -> bool {
@@ -517,17 +526,6 @@ impl QueueState {
             }
         }
         true
-    }
-
-    pub(crate) fn needs_page_for_current(&self, current: Option<&OccurrenceId>) -> bool {
-        self.filter.borrow().trim().is_empty()
-            && current.is_some_and(|current| {
-                !self
-                    .rows
-                    .borrow()
-                    .iter()
-                    .any(|row| &row.occurrence == current)
-            })
     }
 
     fn selected_rows_for(
@@ -617,12 +615,23 @@ fn queue_rows_for_indexes(
         .collect()
 }
 
-impl Drop for QueueState {
-    fn drop(&mut self) {
-        if let Some((_, cancellation)) = self.cancellation.get_mut().take() {
-            cancellation.cancel();
-        }
+fn filter_queue_window(rows: &[QueuePageRow], filter: &str) -> Vec<QueuePageRow> {
+    let filter: String = filter.trim().chars().take(256).collect();
+    if filter.is_empty() {
+        return rows.to_vec();
     }
+    let pattern = regex::RegexBuilder::new(&regex::escape(&filter))
+        .case_insensitive(true)
+        .build()
+        .expect("Literal queue search");
+    rows.iter()
+        .filter(|row| {
+            [&row.title, &row.artist, &row.album]
+                .iter()
+                .any(|text| pattern.is_match(text))
+        })
+        .cloned()
+        .collect()
 }
 
 impl Shell {
@@ -665,7 +674,7 @@ impl Shell {
         };
         if queue.generation.get() == 0 {
             drop(queue);
-            self.request_queue_page();
+            self.refresh_queue_window();
             return;
         }
         let current_changed = queue.update_current(current);
@@ -695,76 +704,22 @@ impl Shell {
         }
     }
 
-    pub(crate) fn request_queue_page(self: &Rc<Self>) {
-        self.request_queue_window(None, false);
-    }
-
-    pub(crate) fn refresh_queue_page(self: &Rc<Self>) {
-        let start = self.selected_queue().map(|queue| queue.page_start.get());
-        self.request_queue_window(start, false);
-    }
-
-    pub(crate) fn request_committed_queue_page(self: &Rc<Self>) {
-        let start = self.selected_queue().and_then(|queue| {
-            let rows = queue.rows.borrow();
-            let scroller = if self.fullscreen_player_visible() {
-                queue_panel_scroller(&self.player_view.fullscreen_player.queue_panel)
-            } else {
-                queue_panel_scroller(&self.right_panel.queue_panel)
-            };
-            let visible = scroller.map_or(0, |scroller| {
-                let adjustment = scroller.vadjustment();
-                (adjustment.value() * rows.len() as f64 / adjustment.upper().max(1.0)) as usize
-            });
-            rows.get(visible).map(|row| row.position.max(0) as usize)
-        });
-        self.request_queue_window(start, false);
-    }
-
-    fn request_queue_window(self: &Rc<Self>, requested_start: Option<usize>, backwards: bool) {
+    pub(crate) fn refresh_queue_window(self: &Rc<Self>) {
         let Some(queue) = self.selected_queue() else {
             return;
         };
-        let (generation, cancellation) = queue.begin();
-        let filter = queue.filter.borrow().clone();
-        let old_start = queue.page_start.get();
-        let previous_rows = queue.rows.borrow().clone();
-        let old_count = previous_rows.len();
-        let filtered = !filter.trim().is_empty();
+        let generation = queue.begin();
         drop(queue);
-        let current = self
+        let window = self
             .selected_playback()
             .as_deref()
-            .and_then(|player| player.queue.current_position)
+            .map(|player| player.queue_window.clone())
             .unwrap_or_default();
-        let total = self
-            .selected_playback()
-            .as_deref()
-            .map_or(0, |player| player.queue.total);
-        let page_start = requested_start.unwrap_or_else(|| {
-            if filtered {
-                0
-            } else {
-                current
-                    .saturating_sub(QUEUE_PAGE_SIZE / 2)
-                    .min(total.saturating_sub(QUEUE_PAGE_SIZE))
-            }
-        });
-        let after = Some(page_start as i64 - i64::from(!backwards));
-        let prepared = self
-            .selected_playback()
-            .as_deref()
-            .and_then(|player| player.prepared_queue.clone());
         let database = Arc::clone(&self.products.library);
-        let task = self.products.runtime.spawn(async move {
-            if let Some(window) = prepared {
-                database.prepared_queue_page(&window, &filter).await
-            } else {
-                database
-                    .queue_page_direction(after, &filter, QUEUE_PAGE_SIZE, backwards, &cancellation)
-                    .await
-            }
-        });
+        let task = self
+            .products
+            .runtime
+            .spawn(async move { database.prepared_queue_page(&window, "").await });
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let rows = task.await.ok().and_then(Result::ok);
@@ -774,65 +729,12 @@ impl Shell {
             let Some(rows) = rows else {
                 return;
             };
-            let preserve_scroll = requested_start.is_some();
-            let row_offset = if requested_start.is_some() && (page_start != old_start || backwards)
+            if shell
+                .selected_queue()
+                .as_deref()
+                .is_some_and(|queue| queue.accept(generation, rows))
             {
-                queue_page_overlap_offset(&previous_rows, &rows)
-            } else {
-                0
-            };
-            let page_start = rows
-                .first()
-                .map_or(page_start, |row| row.position.max(0) as usize);
-            let sidebar_scroll =
-                queue_panel_scroller(&shell.right_panel.queue_panel).map(|scroller| {
-                    let adjustment = scroller.vadjustment();
-                    let offset = if old_count > 0 {
-                        row_offset as f64 * adjustment.upper() / old_count as f64
-                    } else {
-                        0.0
-                    };
-                    (scroller.clone(), adjustment.value() + offset)
-                });
-            let fullscreen_scroll = queue_panel_scroller(
-                &shell.player_view.fullscreen_player.queue_panel,
-            )
-            .map(|scroller| {
-                let adjustment = scroller.vadjustment();
-                let offset = if old_count > 0 {
-                    row_offset as f64 * adjustment.upper() / old_count as f64
-                } else {
-                    0.0
-                };
-                (scroller.clone(), adjustment.value() + offset)
-            });
-            if shell.selected_queue().as_deref().is_some_and(|queue| {
-                if queue.accept(generation, rows) {
-                    queue.page_start.set(page_start);
-                    true
-                } else {
-                    false
-                }
-            }) {
                 shell.render_queue_panel();
-                if preserve_scroll {
-                    for (scroller, value) in
-                        [sidebar_scroll, fullscreen_scroll].into_iter().flatten()
-                    {
-                        restore_queue_scroll_later(&scroller, value);
-                    }
-                } else {
-                    let current_row = current_queue_row(&shell);
-                    for scroller in [
-                        queue_panel_scroller(&shell.right_panel.queue_panel),
-                        queue_panel_scroller(&shell.player_view.fullscreen_player.queue_panel),
-                    ]
-                    .into_iter()
-                    .flatten()
-                    {
-                        reveal_queue_current_row_later(&scroller, current_row);
-                    }
-                }
             }
         });
     }
@@ -842,7 +744,7 @@ impl Shell {
             return;
         }
         let Some(scroller) = queue_panel_scroller(&self.right_panel.queue_panel) else {
-            self.request_queue_page();
+            self.refresh_queue_window();
             return;
         };
         reveal_queue_current_row(&scroller, current_queue_row(self));
@@ -1046,15 +948,6 @@ fn current_queue_row(shell: &Shell) -> Option<usize> {
     })
 }
 
-fn restore_queue_scroll_later(scroller: &gtk::ScrolledWindow, value: f64) {
-    let scroller = scroller.clone();
-    glib::idle_add_local_once(move || {
-        let adjustment = scroller.vadjustment();
-        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-        adjustment.set_value(value.clamp(adjustment.lower(), maximum));
-    });
-}
-
 fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) -> bool {
     let Some(current_row) = current_row.and_then(|position| u32::try_from(position).ok()) else {
         return false;
@@ -1084,18 +977,6 @@ fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<
     }
     list.scroll_to(current_row, gtk::ListScrollFlags::NONE, None);
     true
-}
-
-fn queue_page_overlap_offset(previous: &[QueuePageRow], next: &[QueuePageRow]) -> isize {
-    previous
-        .iter()
-        .enumerate()
-        .find_map(|(old, row)| {
-            next.iter()
-                .position(|next| next.occurrence == row.occurrence)
-                .map(|new| new as isize - old as isize)
-        })
-        .unwrap_or(0)
 }
 
 fn present_queue_selection_context_menu(
@@ -1164,53 +1045,10 @@ pub(crate) fn connect_queue_panel_controls(shell: &Rc<Shell>) {
         &shell.right_panel.queue_panel,
         &shell.player_view.fullscreen_player.queue_panel,
     ] {
-        let scroller = queue_panel_scroller(panel).unwrap_or_else(|| {
+        queue_panel_scroller(panel).unwrap_or_else(|| {
             let scroller = new_queue_scroller();
             panel.append(&scroller);
             scroller
-        });
-        let weak = Rc::downgrade(shell);
-        scroller.connect_edge_reached(move |_, edge| {
-            let Some(shell) = weak.upgrade() else { return };
-            let Some(queue) = shell.selected_queue() else {
-                return;
-            };
-            if queue.running.get().is_some() {
-                return;
-            }
-            if shell
-                .selected_playback()
-                .as_deref()
-                .is_some_and(|player| player.prepared_queue.is_some())
-            {
-                return;
-            }
-            let rows = queue.rows.borrow();
-            let Some(first) = rows.first() else { return };
-            let Some(last) = rows.last() else { return };
-            let total = shell
-                .selected_playback()
-                .as_deref()
-                .map_or(0, |player| player.queue.total);
-            let next = match edge {
-                gtk::PositionType::Bottom
-                    if last.position + 1 < total as i64 && rows.len() == QUEUE_PAGE_SIZE =>
-                {
-                    Some((rows[QUEUE_PAGE_SIZE / 2].position.max(0) as usize, false))
-                }
-                gtk::PositionType::Top if first.position > 0 => Some((
-                    rows[(rows.len() / 2).min(QUEUE_PAGE_SIZE / 2)]
-                        .position
-                        .max(0) as usize,
-                    true,
-                )),
-                _ => None,
-            };
-            drop(rows);
-            drop(queue);
-            if let Some((next, backwards)) = next {
-                shell.request_queue_window(Some(next), backwards);
-            }
         });
     }
     let sidebar_shell = Rc::downgrade(shell);
@@ -1223,11 +1061,12 @@ pub(crate) fn connect_queue_panel_controls(shell: &Rc<Shell>) {
             };
             if let Some(queue) = sidebar_shell.selected_queue() {
                 queue.filter.replace(entry.text().trim().to_string());
+                queue.apply_filter();
             }
             if let Some(scroller) = queue_panel_scroller(&sidebar_shell.right_panel.queue_panel) {
                 scroller.vadjustment().set_value(0.0);
             }
-            sidebar_shell.request_queue_page();
+            sidebar_shell.render_queue_panel();
         });
     let clear_shell = Rc::downgrade(shell);
     shell
@@ -1273,11 +1112,38 @@ mod tests {
     }
 
     #[test]
-    fn queue_paging_preserves_the_overlapping_rows_pixel_offset() {
-        let previous = vec![row("one", "One"), row("two", "Two"), row("three", "Three")];
-        let next = vec![row("three", "Three"), row("four", "Four")];
-        assert_eq!(queue_page_overlap_offset(&previous, &next), -2);
-        assert_eq!(queue_page_overlap_offset(&next, &previous), 2);
+    fn queue_search_filters_the_retained_window_and_keeps_duplicate_entries() {
+        let state = QueueState::new();
+        let mut first = row("one", "Été [live]");
+        first.item.artist = "Artist".to_string();
+        let mut second = first.clone();
+        second.occurrence = OccurrenceId::new("two");
+        let mut third = row("three", "Other");
+        third.item.album = "Summer".to_string();
+        let generation = state.begin();
+        assert!(state.accept(
+            generation,
+            vec![first.clone(), second.clone(), third.clone()]
+        ));
+        state.filter.replace("  ÉTÉ [live]  ".to_string());
+        state.apply_filter();
+        assert_eq!(*state.rows.borrow(), vec![first, second]);
+        state.filter.replace("SUMMER".to_string());
+        state.apply_filter();
+        assert_eq!(*state.rows.borrow(), vec![third]);
+        state.filter.replace(String::new());
+        state.apply_filter();
+        assert_eq!(state.rows.borrow().len(), 3);
+    }
+
+    #[test]
+    fn stale_window_projection_cannot_replace_newer_rows() {
+        let state = QueueState::new();
+        let stale = state.begin();
+        let current = state.begin();
+        assert!(state.accept(current, vec![row("new", "New")]));
+        assert!(!state.accept(stale, vec![row("old", "Old")]));
+        assert_eq!(state.rows.borrow()[0].occurrence, OccurrenceId::new("new"));
     }
 
     #[test]
@@ -1315,7 +1181,7 @@ mod tests {
     #[test]
     fn queue_current_change_preserves_model_rows() {
         let state = QueueState::new();
-        let (generation, _) = state.begin();
+        let generation = state.begin();
         assert!(state.accept(
             generation,
             vec![row("one", "One"), row("two", "Two"), row("three", "Three")]
@@ -1341,57 +1207,16 @@ mod tests {
     #[test]
     fn queue_track_and_artwork_changes_keep_stable_row_objects() {
         let state = QueueState::new();
-        let (generation, _) = state.begin();
+        let generation = state.begin();
         assert!(state.accept(generation, vec![row("one", "One"), row("two", "Two")]));
         let first = state.model.item(0).expect("first Queue object");
         let second = state.model.item(1).expect("second Queue object");
         let mut next = vec![row("one", "One"), row("two", "Changed")];
         next[1].item.artwork_binding = Some(vec![1, 2, 3]);
-        let (generation, _) = state.begin();
+        let generation = state.begin();
         assert!(state.accept(generation, next));
         assert_eq!(first.as_ptr(), state.model.item(0).unwrap().as_ptr());
         assert_eq!(second.as_ptr(), state.model.item(1).unwrap().as_ptr());
-    }
-
-    #[test]
-    fn prepared_queue_replaces_stale_rows_then_keeps_visible_occurrences_on_commit() {
-        let state = QueueState::new();
-        let (generation, _) = state.begin();
-        assert!(state.accept(generation, vec![row("old", "Old Queue")]));
-        let (stale, cancellation) = state.begin();
-        let mut prepared = (0..96)
-            .map(|index| {
-                let mut row = row(&format!("new:{index}"), "New Queue");
-                row.position = index * 1_000;
-                row
-            })
-            .collect::<Vec<_>>();
-        let (generation, _) = state.begin();
-        assert!(state.accept(generation, prepared.clone()));
-        assert!(!state.accept(stale, vec![row("old", "Old Queue")]));
-        drop(cancellation);
-        let visible = state.model.item(48).unwrap();
-        let mut durable = prepared.split_off(48);
-        durable.truncate(1);
-        for index in 1..100 {
-            let mut row = row(&format!("new:visible-{index}"), "New Queue");
-            row.position = 48_000 + index;
-            durable.push(row);
-        }
-        assert_eq!(
-            queue_page_overlap_offset(&state.rows.borrow(), &durable),
-            -48
-        );
-        let (generation, _) = state.begin();
-        assert!(state.accept(generation, durable));
-        assert_eq!(visible.as_ptr(), state.model.item(0).unwrap().as_ptr());
-        assert!(
-            state
-                .rows
-                .borrow()
-                .iter()
-                .all(|row| row.occurrence.as_str().starts_with("new:"))
-        );
     }
 
     #[test]
@@ -1400,18 +1225,6 @@ mod tests {
         let weak = state.model.downgrade();
         drop(state);
         assert!(weak.upgrade().is_none());
-    }
-
-    #[test]
-    fn current_outside_the_unfiltered_page_needs_a_centered_read() {
-        let state = QueueState::new();
-        let (generation, _) = state.begin();
-        assert!(state.accept(generation, vec![row("one", "One"), row("two", "Two")]));
-        assert!(!state.needs_page_for_current(Some(&OccurrenceId::new("one"))));
-        assert!(state.needs_page_for_current(Some(&OccurrenceId::new("far"))));
-        state.filter.replace("filtered".to_string());
-        assert!(!state.needs_page_for_current(Some(&OccurrenceId::new("far"))));
-        assert!(!state.needs_page_for_current(None));
     }
 
     #[test]

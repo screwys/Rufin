@@ -283,7 +283,7 @@ fn apply_selected_library_replacement(
     *shell.source.configured.borrow_mut() = configured;
     shell.selected_ui.replace_library(selected);
     if scope_changed {
-        shell.refresh_queue_page();
+        shell.refresh_queue_window();
         refresh_context_playlist_picker(shell);
         shell.rebuild_sidebar_navigation();
         shell.replace_current_route_when_ready();
@@ -304,7 +304,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         publication.change,
         CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Album(_)
     ) {
-        shell.refresh_queue_page();
+        shell.refresh_queue_window();
     }
     let matches_selected = shell
         .selected_library()
@@ -617,13 +617,13 @@ fn apply_source_discovery(shell: &Rc<Shell>, update: DiscoveryUpdate) {
 fn apply_playback_projection(shell: &Rc<Shell>, projection: playback::PlaybackProjection) {
     let previous_player = shell.selected_playback().as_deref().cloned();
     let playback::PlaybackProjection { view, notices } = projection;
-    let queue_page_changed = previous_player.as_ref().is_none_or(|previous| {
+    let queue_window_changed = previous_player.as_ref().is_none_or(|previous| {
         previous.queue.revision != view.queue.revision
             || previous.queue.total != view.queue.total
-            || previous.prepared_queue != view.prepared_queue
+            || previous.queue_window != view.queue_window
     });
     shell.selected_ui.replace_player(view.clone());
-    finish_playback_projection(shell, previous_player, view, notices, queue_page_changed);
+    finish_playback_projection(shell, previous_player, view, notices, queue_window_changed);
 }
 
 fn finish_playback_projection(
@@ -631,7 +631,7 @@ fn finish_playback_projection(
     previous_player: Option<playback::PlaybackView>,
     next_player: playback::PlaybackView,
     notices: Vec<playback::PlaybackNotice>,
-    queue_page_changed: bool,
+    queue_window_changed: bool,
 ) {
     if let Some(folder) = unavailable_local_folder_for_failed_playback(
         previous_player.as_ref(),
@@ -682,30 +682,14 @@ fn finish_playback_projection(
         .as_ref()
         .and_then(|player| player.queue.current_occurrence.as_ref());
     let next_queue_current = next_player.queue.current_occurrence.as_ref();
-    let current_needs_page = previous_queue_current != next_queue_current
-        && shell
-            .selected_queue()
-            .as_deref()
-            .is_some_and(|queue| queue.needs_page_for_current(next_queue_current));
     let queue_panel_changed = queue_panel_refresh_needed(
-        queue_page_changed,
+        queue_window_changed,
         previous_queue_current,
         next_queue_current,
     );
 
-    if (queue_page_changed || current_needs_page) && shell.selected_queue().is_some() {
-        if previous_queue_current == next_queue_current
-            && previous_player
-                .as_ref()
-                .is_some_and(|previous| previous.prepared_queue.is_some())
-            && next_player.prepared_queue.is_none()
-        {
-            shell.request_committed_queue_page();
-        } else if previous_queue_current == next_queue_current {
-            shell.refresh_queue_page();
-        } else {
-            shell.request_queue_page();
-        }
+    if queue_window_changed && shell.selected_queue().is_some() {
+        shell.refresh_queue_window();
     }
 
     let previous_route_track = route_current_track(previous_player.as_ref());
@@ -783,7 +767,7 @@ fn finish_playback_projection(
             media_controls_discontinuity,
         );
     }
-    if queue_panel_changed && !current_needs_page {
+    if queue_panel_changed && !queue_window_changed {
         shell.schedule_queue_panel_render();
     }
 }
@@ -871,6 +855,7 @@ fn media_controls_static_state_changed(
             || previous.controls.auto_dj_enabled != next.controls.auto_dj_enabled
             || previous.controls.volume != next.controls.volume
             || previous.queue.next_occurrence != next.queue.next_occurrence
+            || previous.queue.can_next != next.queue.can_next
     })
 }
 
@@ -1096,14 +1081,14 @@ mod tests {
 
     fn idle_playback_view() -> PlaybackView {
         PlaybackView {
-            prepared_queue: None,
+            queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: 0,
                 total: 0,
                 current_occurrence: None,
                 current_index: None,
-                current_position: None,
                 next_occurrence: None,
+                can_next: false,
             },
             transport: TransportView {
                 current: None,

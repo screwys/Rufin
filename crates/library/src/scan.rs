@@ -3289,7 +3289,7 @@ async fn publish_entities(
              source_format, comment, bpm, musicbrainz_recording_id,
              musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis,
              artwork_binding, source_favorite, source_rating, first_seen_at,
-             source_loudness_analysis_key,loudness_analysis_key
+             source_loudness_analysis_key,loudness_analysis_key,local_play_count
          ) SELECT ?1, item.object_id, album.album_key, item.title,
                   item.normalized_search, item.display_album, item.display_artist,
                   item.sort_text, item.duration_millis, item.disc_number,
@@ -3304,7 +3304,8 @@ async fn publish_entities(
                             WHERE access.media_uri=item.media_uri
                             ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
                                      access.local_access_file_key LIMIT 1),
-                           item.source_loudness_analysis_key)
+                           item.source_loudness_analysis_key),
+                  (SELECT count(*) FROM listens WHERE media_uri=item.media_uri)
            FROM temp.scan_tracks AS item
            LEFT JOIN albums AS album
              ON album.source_key = ?1 AND album.object_id = item.album_object_id
@@ -3327,7 +3328,8 @@ async fn publish_entities(
              source_favorite=excluded.source_favorite, source_rating=excluded.source_rating,
              first_seen_at=COALESCE(tracks.first_seen_at, excluded.first_seen_at),
              source_loudness_analysis_key=excluded.source_loudness_analysis_key,
-             loudness_analysis_key=excluded.loudness_analysis_key",
+             loudness_analysis_key=excluded.loudness_analysis_key,
+             local_play_count=excluded.local_play_count",
     )
     .bind(source_key)
     .execute(&mut **transaction)

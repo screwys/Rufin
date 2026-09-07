@@ -219,6 +219,16 @@ impl Shell {
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
+        tracks.set_queue_source(
+            library::QueueQuery::Collection {
+                collection: match id {
+                    NamedDetailId::Genre(key) => library::QueueCollection::Genre(key),
+                    NamedDetailId::Mood(key) => library::QueueCollection::Mood(key),
+                },
+                favorites_only: false,
+            },
+            selected.music_folder_key,
+        );
         let lane = Rc::new(NamedOrderLane::new());
         {
             let shell = Rc::downgrade(self);

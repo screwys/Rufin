@@ -233,7 +233,10 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
             .await
             .unwrap();
         assert_eq!(smart_rows[0].artwork_binding, binding);
-        let queue = database.queue_page(None, "", 100, &cancel).await.unwrap();
+        let queue = database
+            .prepared_queue_page(&database.restore_queue().await.unwrap().occurrences, "")
+            .await
+            .unwrap();
         assert_eq!(queue[0].artwork_binding, binding);
         let restored = database.restore_queue().await.unwrap();
         assert_eq!(restored.occurrences[0].artwork_binding, binding);
@@ -1559,6 +1562,11 @@ async fn smart_playlist_periods_and_never_played_query_sqlite_directly() {
         .execute(&mut raw)
         .await
         .expect("insert period listen");
+        sqlx::query("UPDATE tracks SET local_play_count=local_play_count+1 WHERE media_uri=?1")
+            .bind(media_uri)
+            .execute(&mut raw)
+            .await
+            .unwrap();
     }
     let now = sqlx::query_scalar::<_, i64>("SELECT CAST(strftime('%s', '2025-06-18') AS INTEGER)")
         .fetch_one(&mut raw)

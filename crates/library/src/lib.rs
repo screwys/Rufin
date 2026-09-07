@@ -21,6 +21,7 @@ mod scan;
 mod schema;
 mod search;
 mod smart_playlists;
+mod source_window;
 mod tracks;
 
 pub use activity::{
@@ -36,8 +37,9 @@ pub use backup::{
 pub use collections::{
     AlbumArtistLink, AlbumDetail, AlbumGenreLink, AlbumMetadataWrite, AlbumReleaseCandidate,
     AlbumReleaseClass, AlbumReleaseClassification, AlbumReleaseResult, AlbumRow, AlbumSort,
-    ArtistDetail, ArtistMetadataWrite, ArtistRow, ArtistSort, FolderRow, GenreDetail, GenreRow,
-    GenreSort, MoodDetail, MoodRow, MoodSort,
+    ArtistDetail, ArtistMetadataWrite, ArtistRow, ArtistSort, CollectionIdentity,
+    CollectionSourceReference, FolderRow, GenreDetail, GenreRow, GenreSort, MoodDetail, MoodRow,
+    MoodSort,
 };
 pub use db::{Database, ReadCancellation};
 pub use favorites::{FavoriteTarget, UserMediaStateWrite};
@@ -64,9 +66,10 @@ pub use playlists::{
     PlaylistIdentity, PlaylistRow, PlaylistSort,
 };
 pub use queue::{
-    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueCollection, QueueEdit, QueueInput, QueueItem,
-    QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance, QueueReorderTarget,
-    QueueRepeatMode, QueueRestore,
+    OccurrenceId, QUEUE_CONTEXT_LIMIT, QueueChoice, QueueCollection, QueueCursor, QueueInput,
+    QueueInstruction, QueueItem, QueueOccurrence, QueuePageRow, QueuePlacement, QueueProvenance,
+    QueueQuery, QueueReadPage, QueueReadRequest, QueueReorderTarget, QueueRepeatMode, QueueRestore,
+    QueueScope, QueueSource,
 };
 pub use radio::{PlayedFilter, RadioSeed, RandomCriteria};
 pub use scan::{
@@ -78,6 +81,7 @@ pub use smart_playlists::{
     SmartPlaylistListSort, SmartPlaylistRow, SmartPlaylistRule, SmartPlaylistRuleField,
     SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistRuleValueKind,
     SmartPlaylistSort, SmartPlaylistTrackRow, SmartPlaylistValueSuggestions, SmartPlaylistWrite,
+    SmartSourceReference,
 };
 pub use tracks::{
     TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackRoutePage, TrackRow, TrackSort,

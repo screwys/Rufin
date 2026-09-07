@@ -352,8 +352,7 @@ mod freedesktop {
                 )
         });
         let can_go_next = playback.is_some_and(|playback| {
-            has_current
-                && (playback.queue.next_occurrence.is_some() || playback.controls.auto_dj_enabled)
+            has_current && (playback.queue.can_next || playback.controls.auto_dj_enabled)
         });
         MprisDesiredState {
             run: playback
@@ -492,8 +491,12 @@ mod freedesktop {
             assert!(exhausted.can_go_previous);
 
             playback.queue.next_occurrence = Some(OccurrenceId::new("occurrence:next"));
+            playback.queue.can_next = true;
             let with_next = mpris_desired_state(Some(&playback), None);
             assert!(with_next.can_go_next);
+
+            playback.queue.next_occurrence = None;
+            assert!(mpris_desired_state(Some(&playback), None).can_go_next);
         }
 
         #[test]
@@ -655,8 +658,7 @@ mod windows {
                 playback.transport.state,
                 TransportStatus::Stopped | TransportStatus::Failed
             );
-        let can_next =
-            playback.queue.next_occurrence.is_some() || playback.controls.auto_dj_enabled;
+        let can_next = playback.queue.can_next || playback.controls.auto_dj_enabled;
         Some(WindowsMediaState {
             title: media.title.clone(),
             artist: media.artist.clone(),
@@ -1171,8 +1173,8 @@ mod macos {
                 playback.transport.state,
                 playback::TransportStatus::Stopped | playback::TransportStatus::Failed
             );
-        let can_go_next = has_current
-            && (playback.queue.next_occurrence.is_some() || playback.controls.auto_dj_enabled);
+        let can_go_next =
+            has_current && (playback.queue.can_next || playback.controls.auto_dj_enabled);
 
         commands.play_command().set_enabled(has_current);
         commands.pause_command().set_enabled(has_active_run);

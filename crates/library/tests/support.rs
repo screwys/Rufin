@@ -270,3 +270,53 @@ pub async fn connection(path: &std::path::Path) -> SqliteConnection {
     }
     connection
 }
+
+/// Resolve a source page into a fixture representing playback's bounded saved state.
+pub async fn resolve_queue(
+    database: &Database,
+    input: library::QueueInput,
+    cursor: library::QueueCursor,
+) -> library::QueueRestore {
+    let page = database
+        .read_queue(library::QueueReadRequest {
+            input,
+            cursor,
+            limit: 100,
+            history: true,
+            backwards: false,
+        })
+        .await
+        .unwrap();
+    library::QueueRestore {
+        current_index: (!page.items.is_empty()).then_some(page.current_index),
+        next_id: page.items.len() as u64,
+        occurrences: page
+            .items
+            .into_iter()
+            .enumerate()
+            .map(
+                |(index, (item, provenance, canonical_position, playlist_entry_id))| {
+                    std::sync::Arc::new(QueueOccurrence {
+                        occurrence: format!("fixture:{index}").into(),
+                        item,
+                        provenance,
+                        canonical_position,
+                        source_index: Some(0),
+                        playlist_entry_id,
+                    })
+                },
+            )
+            .collect(),
+        sources: vec![library::QueueInstruction {
+            input: page.input,
+            repeat: true,
+            seed: page.cursor.seed,
+        }],
+        pending: if page.exhausted {
+            Default::default()
+        } else {
+            [page.cursor].into()
+        },
+        ..Default::default()
+    }
+}

@@ -53,6 +53,13 @@ pub(crate) struct TrackListProjection<T: TrackPresentation = library::TrackRow> 
 }
 
 impl<T: TrackPresentation> TrackListProjection<T> {
+    pub(crate) fn set_queue_source(
+        &self,
+        query: library::QueueQuery,
+        folder: Option<library::FolderKey>,
+    ) {
+        self.model.set_queue_source(query, folder);
+    }
     pub(crate) fn download_change(&self) -> crate::shell::route::MountedDownloadChange {
         let model = self.model.clone();
         Rc::new(move |event| {
@@ -484,6 +491,14 @@ impl Shell {
                 fixed_layout: None,
                 search: None,
             },
+        );
+        projection.set_queue_source(
+            library::QueueQuery::Tracks {
+                source: selected.source_key,
+                favorites_only,
+                recursive: true,
+            },
+            selected.music_folder_key,
         );
         self.track_page_route(options, projection, selected, favorites_only)
     }

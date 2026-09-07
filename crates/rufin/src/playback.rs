@@ -73,14 +73,10 @@ enum PlaybackStoreWork {
     },
     Activity(Box<playback::ActivityListen>),
     Flush(std::sync::mpsc::SyncSender<()>),
-    Edit {
+    Read {
         playback: Playback,
         id: u64,
-        edit: library::QueueEdit,
-        current: Option<OccurrenceId>,
-        progress: u64,
-        repeat: RepeatMode,
-        shuffled: bool,
+        request: library::QueueReadRequest,
     },
     Settings(playback::QueuePersistence),
     Progress {
@@ -187,7 +183,7 @@ impl PlaybackOwner {
         let stored = self.settings.load();
         let sequence = match self.database.restore_queue().await {
             Ok(mut restore) => {
-                if restore.total == 0 {
+                if restore.occurrences.is_empty() {
                     restore.repeat_mode = stored.ui.repeat_mode;
                     restore.shuffled = stored.ui.shuffle_enabled;
                 }
@@ -385,30 +381,14 @@ impl PlaybackOwner {
             PlaybackStoreWork::Flush(reply) => {
                 let _ = reply.send(());
             }
-            PlaybackStoreWork::Edit {
+            PlaybackStoreWork::Read {
                 playback,
                 id,
-                edit,
-                current,
-                progress,
-                repeat,
-                shuffled,
+                request,
             } => {
                 let result = self
                     .database
-                    .edit_queue_with_preview(
-                        edit,
-                        current.as_ref(),
-                        repeat,
-                        shuffled,
-                        progress as i64,
-                        |window| {
-                            let _ = playback.command(SessionCommand::QueuePrepared {
-                                id,
-                                window: Box::new(window),
-                            });
-                        },
-                    )
+                    .read_queue(request)
                     .await
                     .map_err(string_error);
                 let _ = playback.command(SessionCommand::QueueComplete {
@@ -417,16 +397,7 @@ impl PlaybackOwner {
                 });
             }
             PlaybackStoreWork::Settings(state) => {
-                if let Err(error) = self
-                    .database
-                    .persist_queue_settings(
-                        state.current(),
-                        state.progress_millis() as i64,
-                        state.repeat_mode(),
-                        state.shuffled(),
-                    )
-                    .await
-                {
+                if let Err(error) = self.database.save_queue(state.state()).await {
                     warn!(%error,"could not persist Queue settings");
                 }
             }
@@ -460,22 +431,11 @@ impl PlaybackOwner {
                     task.abort();
                 }
             }
-            SessionEffect::Queue {
-                id,
-                edit,
-                current,
-                progress_millis,
-                repeat,
-                shuffled,
-            } => {
-                let _ = self.store_sender.try_send(PlaybackStoreWork::Edit {
+            SessionEffect::Queue { id, request } => {
+                let _ = self.store_sender.try_send(PlaybackStoreWork::Read {
                     playback: active.playback.clone(),
                     id,
-                    edit,
-                    current,
-                    progress: progress_millis,
-                    repeat,
-                    shuffled,
+                    request,
                 });
             }
             SessionEffect::ResolveStream {
@@ -846,57 +806,17 @@ impl QueueCommandPort for PlaybackOwner {
             return;
         };
         let playback = active.playback;
-        let database = Arc::clone(&self.database);
         self.runtime.spawn(async move {
             let shuffled = playback
                 .projection()
                 .is_ok_and(|projection| projection.view.controls.shuffle_enabled);
             request.shuffled_start &=
                 shuffled && request.placement == playback::QueuePlacement::Now;
-            if let Some((context, uri, rank)) = request.activation_context()
-                && let Ok(Some(occurrence)) = database
-                    .queue_context_occurrence(
-                        &context,
-                        (!uri.is_empty()).then_some(uri.as_str()),
-                        rank,
-                    )
-                    .await
-            {
-                let _ = playback.command(SessionCommand::Activate(occurrence));
-                return;
-            }
             let Some(reservation) = playback.admit_play(&request).ok().flatten() else {
                 return;
             };
             let seed = random_u64();
-            let anchor = request.anchor_index;
-            let random_start = request.shuffled_start;
             let (batch, placement) = request.compact_batch(seed);
-            let batch = if matches!(placement, playback::Placement::Replace { .. }) {
-                let identity = random_identity();
-                match database
-                    .prepare_queue_window(
-                        batch.input(),
-                        anchor,
-                        shuffled.then_some(seed),
-                        random_start,
-                        &identity,
-                    )
-                    .await
-                {
-                    Ok(window) => batch.with_prepared_window(identity, window),
-                    Err(error) => {
-                        let _ = playback.fail_materialization(
-                            reservation.id,
-                            placement,
-                            error.to_string(),
-                        );
-                        return;
-                    }
-                }
-            } else {
-                batch
-            };
             let _ = playback.complete_materialization(reservation.id, batch, placement);
         });
     }
@@ -1265,6 +1185,8 @@ mod tests {
             occurrence: playback::OccurrenceId::new("test-occurrence"),
             item: test_media(source_format),
             canonical_position: 0,
+            source_index: None,
+            playlist_entry_id: None,
             provenance: playback::Provenance::Manual,
         }
     }

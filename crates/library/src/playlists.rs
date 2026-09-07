@@ -21,23 +21,12 @@ pub enum PlaylistSort {
     TrackCount,
     Duration,
 }
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub enum PlaylistEntrySort {
     Position,
     Title,
     Artist,
     Album,
-}
-
-impl PlaylistEntrySort {
-    const fn code(self) -> i64 {
-        match self {
-            Self::Position => 0,
-            Self::Title => 1,
-            Self::Artist => 2,
-            Self::Album => 3,
-        }
-    }
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -386,39 +375,14 @@ impl Database {
         descending: bool,
         filter: &str,
     ) -> LibraryResult<Vec<PlaylistEntryKey>> {
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        if sort == PlaylistEntrySort::Position {
-            let result=sqlx::query_scalar::<_,PlaylistEntryKey>(if descending {"SELECT entry.playlist_entry_key FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) LEFT JOIN tracks track USING(media_uri) WHERE playlist.playlist_key=?1 AND (playlist.source_key IS NULL OR ?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2)) AND (?3 OR instr(lower(entry.title||' '||entry.artist||' '||entry.album),?4)>0 OR CAST(entry.year AS TEXT)=?4) ORDER BY entry.position DESC"} else {"SELECT entry.playlist_entry_key FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) LEFT JOIN tracks track USING(media_uri) WHERE playlist.playlist_key=?1 AND (playlist.source_key IS NULL OR ?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?2)) AND (?3 OR instr(lower(entry.title||' '||entry.artist||' '||entry.album),?4)>0 OR CAST(entry.year AS TEXT)=?4) ORDER BY entry.position"}).bind(playlist).bind(folder).bind(filter.is_empty()).bind(&filter).fetch_all(&mut *connection).await;
-
-            return Ok(result?);
-        }
-        let result = sqlx::query_scalar::<_, PlaylistEntryKey>(
-            "SELECT entry.playlist_entry_key FROM playlist_entries entry
-             JOIN playlists playlist USING(playlist_key) LEFT JOIN tracks track USING(media_uri)
-             WHERE playlist.playlist_key=?1
-               AND (playlist.source_key IS NULL OR ?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4))
-               AND (?5 OR instr(lower(entry.title||' '||entry.artist||' '||entry.album),?6)>0 OR CAST(entry.year AS TEXT)=?6) ORDER BY
-              CASE WHEN ?2=0 AND ?3=0 THEN entry.position END ASC,
-              CASE WHEN ?2=0 AND ?3=1 THEN entry.position END DESC,
-              CASE WHEN ?2=1 AND ?3=0 THEN lower(entry.title) END ASC,
-              CASE WHEN ?2=1 AND ?3=1 THEN lower(entry.title) END DESC,
-              CASE WHEN ?2=2 AND ?3=0 THEN lower(entry.artist) END ASC,
-              CASE WHEN ?2=2 AND ?3=1 THEN lower(entry.artist) END DESC,
-              CASE WHEN ?2=3 AND ?3=0 THEN lower(entry.album) END ASC,
-              CASE WHEN ?2=3 AND ?3=1 THEN lower(entry.album) END DESC,
-              entry.position",
+        let query = playlist_query(playlist, folder, sort, descending, filter);
+        Ok(
+            sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(
+                query.select(&query.entry_key),
+            ))
+            .fetch_all(connection)
+            .await?,
         )
-
-        .bind(playlist)
-        .bind(sort.code())
-        .bind(descending)
-        .bind(folder)
-        .bind(filter.is_empty())
-        .bind(filter)
-        .fetch_all(&mut *connection)
-        .await;
-
-        Ok(result?)
     }
 
     pub async fn playlist_media_uri_order(
@@ -1135,7 +1099,7 @@ mod point_projection_tests {
     }
 }
 
-async fn load_playlist_entry_rows(
+pub(crate) async fn load_playlist_entry_rows(
     transaction: &mut sqlx::Transaction<'_, Sqlite>,
     keys: &[PlaylistEntryKey],
 ) -> LibraryResult<Vec<PlaylistEntryRow>> {
@@ -1378,4 +1342,60 @@ pub(crate) async fn import_playlists_jsonl_on(
         count += 1;
     }
     Ok(count)
+}
+
+pub(crate) fn playlist_query(
+    key: PlaylistKey,
+    folder: Option<FolderKey>,
+    sort: PlaylistEntrySort,
+    descending: bool,
+    filter: &str,
+) -> crate::source_window::SourceQuery {
+    let native = key.raw() < 0;
+    let mut query = crate::source_window::SourceQuery {
+        from: format!(
+            "{} entry JOIN {} playlist USING(playlist_key)",
+            if native {
+                "catalog.native_playlist_entries"
+            } else {
+                "main.playlist_entries"
+            },
+            if native {
+                "catalog.native_playlists"
+            } else {
+                "main.playlists"
+            }
+        ),
+        predicate: format!("entry.playlist_key={}", key.raw().abs()),
+        uri: "entry.media_uri".into(),
+        key: "entry.playlist_entry_key".into(),
+        entry_key: if native {
+            "-entry.playlist_entry_key"
+        } else {
+            "entry.playlist_entry_key"
+        }
+        .into(),
+        order: vec![(
+            match sort {
+                PlaylistEntrySort::Position => "entry.position",
+                PlaylistEntrySort::Title => "lower(entry.title)",
+                PlaylistEntrySort::Artist => "lower(entry.artist)",
+                PlaylistEntrySort::Album => "lower(entry.album)",
+            }
+            .into(),
+            descending,
+        )],
+    };
+    if sort != PlaylistEntrySort::Position {
+        query.order.push(("entry.position".into(), false));
+    }
+    if let Some(folder) = folder {
+        query.predicate.push_str(&format!(" AND (playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.media_uri=entry.media_uri AND scope.folder_key={}))",folder.raw()));
+    }
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    if !filter.is_empty() {
+        let filter = crate::source_window::quote(&filter);
+        query.predicate.push_str(&format!(" AND (instr(lower(entry.title||' '||entry.artist||' '||entry.album),{filter})>0 OR CAST(entry.year AS TEXT)={filter})"));
+    }
+    query
 }

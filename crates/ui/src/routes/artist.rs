@@ -143,6 +143,16 @@ impl Shell {
                 search: None,
             },
         );
+        favorite.set_queue_source(
+            library::QueueQuery::Collection {
+                collection: library::QueueCollection::ArtistKey {
+                    key: artist,
+                    album_artist,
+                },
+                favorites_only: true,
+            },
+            None,
+        );
         let favorite_present = !favorite.source_is_empty();
         let favorite_section = gtk::Box::new(gtk::Orientation::Vertical, 10);
         favorite_section.set_visible(favorite_present);
@@ -511,6 +521,16 @@ impl Shell {
             first_row_position,
             first_rows,
             settings,
+        );
+        model.set_queue_source(
+            library::QueueQuery::Collection {
+                collection: library::QueueCollection::ArtistKey {
+                    key: artist,
+                    album_artist,
+                },
+                favorites_only,
+            },
+            None,
         );
         let (tracks_widget, tracks, toolbar) = self.scrolling_track_projection(
             model,

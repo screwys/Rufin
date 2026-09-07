@@ -18,6 +18,11 @@ PRAGMA user_version = 44;
 
 CREATE TABLE IF NOT EXISTS source_ids (source_key INTEGER PRIMARY KEY, object_id TEXT NOT NULL UNIQUE CHECK(object_id<>'')) STRICT;
 
+CREATE TABLE IF NOT EXISTS queue_saved (
+    singleton INTEGER PRIMARY KEY CHECK(singleton=1),
+    state TEXT NOT NULL
+) STRICT;
+
 CREATE TABLE IF NOT EXISTS playlists (
     playlist_key INTEGER PRIMARY KEY,
     source_key INTEGER REFERENCES source_ids ON DELETE CASCADE,
@@ -55,6 +60,7 @@ CREATE TABLE IF NOT EXISTS playlist_entries (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS playlist_entries_order_idx ON playlist_entries(playlist_key, position);
+CREATE INDEX IF NOT EXISTS playlist_entries_shuffle_idx ON playlist_entries(playlist_key,((playlist_entry_key*1103515245)%2147483647),playlist_entry_key);
 
 CREATE INDEX IF NOT EXISTS playlist_entries_media_idx ON playlist_entries(media_uri,(title IS NULL),snapshot_at DESC,playlist_entry_key DESC);
 
@@ -144,6 +150,9 @@ CREATE TABLE IF NOT EXISTS queue_occurrences (
     snapshot_at INTEGER NOT NULL DEFAULT (unixepoch()),
     position INTEGER NOT NULL CHECK (position >= 0),
     traversal_position INTEGER NOT NULL CHECK (traversal_position >= 0),
+    origin_source INTEGER,
+    origin_position INTEGER,
+    playlist_entry_id TEXT,
     provenance_kind TEXT NOT NULL CHECK (
         provenance_kind IN ('context', 'manual', 'random', 'radio', 'auto-dj', 'legacy')
     ),
@@ -301,6 +310,7 @@ CREATE TABLE IF NOT EXISTS tracks (
     source_favorite INTEGER NOT NULL DEFAULT 0 CHECK (source_favorite IN (0, 1)),
     source_rating INTEGER CHECK (source_rating IS NULL OR source_rating BETWEEN 0 AND 100),
     first_seen_at INTEGER,
+    local_play_count INTEGER NOT NULL DEFAULT 0 CHECK (local_play_count >= 0),
     source_loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
         CHECK (length(source_loudness_analysis_key) = 32),
     loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'
@@ -332,6 +342,7 @@ CREATE INDEX IF NOT EXISTS tracks_artwork_idx ON tracks(source_key, artwork_bind
     WHERE artwork_binding IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS tracks_album_idx ON tracks(source_key, album_key, disc_number, track_number, track_key);
+CREATE INDEX IF NOT EXISTS tracks_album_source_order_idx ON tracks(source_key,album_key,coalesce(disc_number,-1),coalesce(track_number,-1),sort_text,track_key);
 
 CREATE TABLE IF NOT EXISTS artists (
     artist_key INTEGER PRIMARY KEY,
@@ -498,6 +509,7 @@ CREATE TABLE IF NOT EXISTS native_playlist_entries (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS native_playlist_entries_order_idx ON native_playlist_entries(playlist_key, position);
+CREATE INDEX IF NOT EXISTS native_playlist_entries_shuffle_idx ON native_playlist_entries(playlist_key,((playlist_entry_key*1103515245)%2147483647),playlist_entry_key);
 
 CREATE INDEX IF NOT EXISTS native_playlist_entries_media_idx ON native_playlist_entries(media_uri,(title IS NULL),snapshot_at DESC,playlist_entry_key ASC);
 
@@ -606,6 +618,25 @@ pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(STORE_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    for (column, kind) in [
+        ("origin_source", "INTEGER"),
+        ("origin_position", "INTEGER"),
+        ("playlist_entry_id", "TEXT"),
+    ] {
+        let exists: bool = sqlx::query_scalar(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('queue_occurrences') WHERE name=?1)",
+        )
+        .bind(column)
+        .fetch_one(&mut *transaction)
+        .await?;
+        if !exists {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "ALTER TABLE queue_occurrences ADD COLUMN {column} {kind}"
+            )))
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -651,6 +682,36 @@ pub(crate) async fn attach_catalog(
     sqlx::raw_sql(CONNECTION_VIEWS)
         .execute(&mut *connection)
         .await?;
+    Ok(())
+}
+
+/// Backfill once after attaching the durable listens to an existing catalog.
+pub(crate) async fn initialize_local_activity(
+    connection: &mut SqliteConnection,
+) -> LibraryResult<()> {
+    let indexed: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM catalog.sqlite_schema WHERE name='tracks_local_play_count_idx')",
+    ).fetch_one(&mut *connection).await?;
+    let mut transaction = connection.begin().await?;
+    if !indexed {
+        let has_count: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tracks','catalog') WHERE name='local_play_count')",
+    ).fetch_one(&mut *transaction).await?;
+        if !has_count {
+            sqlx::query("ALTER TABLE catalog.tracks ADD COLUMN local_play_count INTEGER NOT NULL DEFAULT 0 CHECK(local_play_count>=0)")
+            .execute(&mut *transaction).await?;
+        }
+        sqlx::raw_sql("UPDATE catalog.tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE listens.media_uri=tracks.media_uri);
+        CREATE INDEX catalog.tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
+        CREATE INDEX catalog.tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);")
+        .execute(&mut *transaction).await?;
+    }
+    sqlx::raw_sql("CREATE INDEX IF NOT EXISTS catalog.tracks_local_shuffle_idx ON tracks(source_key,local_play_count,((track_key*1103515245)%2147483647),media_uri);
+        CREATE INDEX IF NOT EXISTS catalog.tracks_global_local_shuffle_idx ON tracks(local_play_count,((track_key*1103515245)%2147483647),media_uri);
+        CREATE INDEX IF NOT EXISTS catalog.tracks_shuffle_idx ON tracks(source_key,((track_key*1103515245)%2147483647),media_uri);
+        CREATE INDEX IF NOT EXISTS catalog.tracks_global_shuffle_idx ON tracks(((track_key*1103515245)%2147483647),media_uri);")
+        .execute(&mut *transaction).await?;
+    transaction.commit().await?;
     Ok(())
 }
 

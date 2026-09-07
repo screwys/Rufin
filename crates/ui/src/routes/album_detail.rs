@@ -1467,45 +1467,29 @@ fn play_album_track(shell: &Rc<Shell>, anchor: TrackRow) {
     let Some(album) = anchor.album_key else {
         return;
     };
-    let database = Arc::clone(&selected.database);
     let queue = shell.products.playback.queue.clone();
     let settings = shell
         .settings
         .current
         .borrow()
         .library_list(LibraryListKey::AlbumDetailTracks);
-    selected.runtime.spawn(async move {
-        let cancellation = library::ReadCancellation::new();
-        let Ok(page) = database
-            .album_track_route_page(
-                selected.source_key,
-                album,
-                selected.music_folder_key,
-                "",
-                settings.sort_key.track_sort(),
-                settings.descending,
-                library::RouteSeedWindow::top(),
-                &cancellation,
-            )
-            .await
-        else {
-            return;
-        };
-        let order = page.order;
-        let Some(position) = order.iter().position(|uri| uri == &anchor.media_uri) else {
-            return;
-        };
-        queue.play(playback::PlayRequest::ordered(
-            library::QueueInput::Uris {
-                order: order.into(),
-                context_id: format!("album:{album}").into(),
-                source_start: 0,
+    queue.play(playback::PlayRequest::ordered(
+        library::QueueInput::Query {
+            query: library::QueueQuery::Collection {
+                collection: library::QueueCollection::AlbumKey(album),
+                favorites_only: false,
             },
-            position,
-            QueuePlacement::Now,
-            false,
-        ));
-    });
+            folder: selected.music_folder_key,
+            filter: String::new(),
+            sort: settings.sort_key.track_sort(),
+            descending: settings.descending,
+            context_id: format!("album:{album}").into(),
+            anchor_uri: Some(anchor.media_uri),
+        },
+        0,
+        QueuePlacement::Now,
+        false,
+    ));
 }
 
 pub(crate) fn album_detail_track_text(
