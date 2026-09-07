@@ -352,28 +352,16 @@ async fn playlist_edits_preserve_uri_occurrences_order_and_duplicates() {
         )
         .await
         .unwrap();
-    let state = fixture
-        .database
-        .edit_queue_with_preview(
-            library::QueueEdit::Apply {
-                input: library::QueueInput::PlaylistEntries {
-                    order: entries.into(),
-                    context_id: "playlist".into(),
-                },
-                placement: library::QueuePlacement::Now,
-                shuffle_seed: None,
-                random_start: false,
-                identity: None,
-            },
-            None,
-            library::QueueRepeatMode::Off,
-            false,
-            0,
-            |_| {},
-        )
-        .await
-        .unwrap();
-    assert_eq!(state.total, 523);
+    let state = super::support::resolve_queue(
+        &fixture.database,
+        library::QueueInput::PlaylistEntries {
+            order: entries.into(),
+            context_id: "playlist".into(),
+        },
+        Default::default(),
+    )
+    .await;
+    assert!(!state.pending.is_empty());
     assert!(state.occurrences.len() <= 100);
     assert_eq!(state.occurrences[3].media_uri, fixture.track_uris[3]);
     assert_eq!(state.occurrences[95].media_uri, fixture.track_uris[3]);
@@ -450,27 +438,15 @@ async fn global_playlist_adds_rufin_media_without_provider_admission() {
         .expect("unavailable Playlist rows");
     assert_eq!(rows[1].title, "Beta");
     assert_eq!(rows[1].media_uri, fixture.track_uris[1]);
-    let playback = fixture
-        .database
-        .edit_queue_with_preview(
-            library::QueueEdit::Apply {
-                input: library::QueueInput::PlaylistEntries {
-                    order: entries.into(),
-                    context_id: "unavailable".into(),
-                },
-                placement: library::QueuePlacement::Now,
-                shuffle_seed: None,
-                random_start: false,
-                identity: None,
-            },
-            None,
-            library::QueueRepeatMode::Off,
-            false,
-            0,
-            |_| {},
-        )
-        .await
-        .unwrap();
+    let playback = super::support::resolve_queue(
+        &fixture.database,
+        library::QueueInput::PlaylistEntries {
+            order: entries.into(),
+            context_id: "unavailable".into(),
+        },
+        Default::default(),
+    )
+    .await;
     assert_eq!(playback.occurrences[1].title, "Beta");
     assert_eq!(playback.occurrences[1].media_uri, fixture.track_uris[1]);
 

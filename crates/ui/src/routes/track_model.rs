@@ -12,9 +12,6 @@ use super::sparse_model::{SparseObjectModel, SparseRouteModel};
 
 const TRACK_OVERSCAN: usize = 64;
 
-#[cfg(test)]
-use playback::queue_context_window;
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct TrackProjectionRequest {
     pub(crate) query: String,
@@ -40,6 +37,8 @@ pub(crate) struct PreparedTrackProjection<T = TrackRow> {
 struct TrackModelState<T: TrackPresentation> {
     sparse: Rc<SparseRouteModel<String, T>>,
     request: RefCell<TrackProjectionRequest>,
+    applied: RefCell<TrackProjectionRequest>,
+    queue_source: RefCell<Option<(library::QueueQuery, Option<library::FolderKey>)>>,
 }
 
 #[derive(Clone)]
@@ -92,6 +91,11 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         });
         Self(Rc::new(TrackModelState {
             sparse,
+            queue_source: RefCell::new(None),
+            applied: RefCell::new(TrackProjectionRequest {
+                query: String::new(),
+                settings: settings.clone(),
+            }),
             request: RefCell::new(TrackProjectionRequest {
                 query: String::new(),
                 settings,
@@ -101,6 +105,14 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
 
     pub(crate) fn list_model(&self) -> SparseObjectModel {
         self.0.sparse.list_model()
+    }
+
+    pub(crate) fn set_queue_source(
+        &self,
+        query: library::QueueQuery,
+        folder: Option<library::FolderKey>,
+    ) {
+        self.0.queue_source.replace(Some((query, folder)));
     }
 
     pub(crate) fn sparse_model(&self) -> Rc<SparseRouteModel<String, T>> {
@@ -150,6 +162,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         if !self.0.request.borrow().same_query(&prepared.request) {
             return false;
         }
+        self.0.applied.replace(prepared.request.clone());
         self.0.sparse.replace_prepared_at(
             prepared.order,
             prepared.first_row_position,
@@ -194,24 +207,33 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         collection_start: bool,
     ) {
         let order = self.0.sparse.order();
-        if order.get(anchor_index).is_none() {
+        let Some(anchor_uri) = order.get(anchor_index).cloned() else {
             return;
-        }
+        };
+        let input = if let Some((query, folder)) = self.0.queue_source.borrow().as_ref() {
+            let applied = self.0.applied.borrow();
+            library::QueueInput::Query {
+                query: query.clone(),
+                folder: *folder,
+                filter: applied.query.clone(),
+                sort: applied.settings.sort_key.track_sort(),
+                descending: applied.settings.descending,
+                context_id: self.visible_context_id(context_base).into(),
+                anchor_uri: Some(anchor_uri),
+            }
+        } else {
+            library::QueueInput::Uris {
+                order,
+                context_id: self.visible_context_id(context_base).into(),
+                source_start: 0,
+            }
+        };
         let request = if collection_start {
             PlayRequest::ordered
         } else {
             PlayRequest::captured
         };
-        queue.play(request(
-            library::QueueInput::Uris {
-                order,
-                context_id: self.visible_context_id(context_base).into(),
-                source_start: 0,
-            },
-            anchor_index,
-            placement,
-            collection_start,
-        ));
+        queue.play(request(input, anchor_index, placement, collection_start));
     }
 
     pub(crate) fn play_source(
@@ -224,7 +246,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
     }
 
     pub(crate) fn visible_context_id(&self, context_base: &str) -> String {
-        let request = self.0.request.borrow();
+        let request = self.0.applied.borrow();
         format!(
             "{context_base}|query={}|sort={:?}|descending={}|result={}",
             request.query,
@@ -333,41 +355,18 @@ mod tests {
             "Catalog update"
         );
 
+        let visible_context = model.visible_context_id("history");
         presentation.descending = !presentation.descending;
         model.apply_settings(presentation);
+        assert_eq!(model.visible_context_id("history"), visible_context);
         assert!(!model.replace_prepared(prepared.clone()));
         model.apply_settings(prepared.request.settings.clone());
         model.set_query("different search");
+        assert_eq!(model.visible_context_id("history"), visible_context);
         assert!(!model.replace_prepared(prepared));
         assert_eq!(
             model.sparse_model().ready(0).unwrap().title,
             "Catalog update"
         );
-    }
-
-    #[test]
-    fn queue_context_keeps_short_orders_whole() {
-        assert_eq!(queue_context_window(37, 20), 0..37);
-    }
-
-    #[test]
-    fn queue_context_fills_from_the_beginning() {
-        let window = queue_context_window(250, 3);
-        assert_eq!(window, 0..100);
-        assert_eq!(3 - window.start, 3);
-    }
-
-    #[test]
-    fn queue_context_centers_a_middle_anchor() {
-        let window = queue_context_window(250, 125);
-        assert_eq!(window, 75..175);
-        assert_eq!(125 - window.start, 50);
-    }
-
-    #[test]
-    fn queue_context_fills_to_the_end() {
-        let window = queue_context_window(250, 248);
-        assert_eq!(window, 150..250);
-        assert_eq!(248 - window.start, 98);
     }
 }

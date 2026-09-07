@@ -175,6 +175,16 @@ impl Shell {
             settings,
             load,
         );
+        model.set_queue_source(
+            library::QueueQuery::Smart {
+                key,
+                source,
+                now: SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64),
+            },
+            folder,
+        );
         let play_model = model.clone();
         let play_queue = self.products.playback.queue.clone();
         let play_context = owner.context_id();
@@ -243,6 +253,7 @@ impl Shell {
             detail.first_row_position,
             detail.first_rows,
         ));
+        entries.set_queue_folder(folder);
         let item_navigation = entries.item_navigation();
         let tracks_widget = entries.widget();
         let database = Arc::clone(&self.products.library);

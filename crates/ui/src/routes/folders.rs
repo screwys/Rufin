@@ -324,6 +324,27 @@ fn folder_page(
     sections.append(&folder_sparse.list_model());
     sections.append(&track_sparse.list_model());
     let rows = gtk::FlattenListModel::new(Some(sections));
+    let settings = shell
+        .settings
+        .current
+        .borrow()
+        .library_list(LibraryListKey::Tracks);
+    let queue_input = Rc::new(RefCell::new(match &source {
+        FolderTrackSource::Live(_) => None,
+        FolderTrackSource::CachedFolder(folder) => Some(library::QueueInput::Query {
+            query: library::QueueQuery::Tracks {
+                source: selected.source_key,
+                favorites_only: false,
+                recursive: false,
+            },
+            folder: *folder,
+            filter: String::new(),
+            sort: settings.sort_key.track_sort(),
+            descending: settings.descending,
+            context_id: folder_context_id(&path).into(),
+            anchor_uri: None,
+        }),
+    }));
     let table_initial_width = folder_table_initial_width(route_width);
     let (table, table_width_fit) = folder_table(
         shell,
@@ -332,6 +353,7 @@ fn folder_page(
         Rc::clone(&track_sparse),
         path.clone(),
         table_initial_width,
+        Rc::clone(&queue_input),
     );
 
     let table_scroller = gtk::ScrolledWindow::new();
@@ -386,6 +408,8 @@ fn folder_page(
             let source_key = selected.source_key;
             let source = source.clone();
             let folders = Arc::clone(&request_folders);
+            let applied_query = query.clone();
+            let applied_settings = settings.clone();
             let task = selected.runtime.spawn(async move {
                 let tracks = match source {
                     FolderTrackSource::Live(candidates) => {
@@ -429,6 +453,7 @@ fn folder_page(
             let generation = Rc::clone(&generation);
             let cancellation = Rc::clone(&cancellation);
             let stack = request_stack.clone();
+            let queue_input = Rc::clone(&queue_input);
             gtk::glib::spawn_future_local(async move {
                 if let Some((folders, tracks)) = task.await.ok().and_then(Result::ok)
                     && generation.get() == task_generation
@@ -440,6 +465,17 @@ fn folder_page(
                     });
                     folder_sparse.replace_order(folders);
                     track_sparse.replace_order(tracks);
+                    if let Some(library::QueueInput::Query {
+                        filter,
+                        sort,
+                        descending,
+                        ..
+                    }) = &mut *queue_input.borrow_mut()
+                    {
+                        *filter = applied_query;
+                        *sort = applied_settings.sort_key.track_sort();
+                        *descending = applied_settings.descending;
+                    }
                 }
                 if cancellation
                     .borrow()
@@ -487,6 +523,7 @@ fn folder_table(
     tracks: Rc<super::sparse_model::SparseRouteModel<String, FolderTableRow>>,
     path: Vec<FolderPathItem>,
     initial_width: i32,
+    queue_input: Rc<RefCell<Option<library::QueueInput>>>,
 ) -> (gtk::ColumnView, super::table_sizing::ColumnViewWidthFit) {
     let selection = gtk::SingleSelection::new(Some(rows));
     selection.set_autoselect(false);
@@ -552,12 +589,11 @@ fn folder_table(
                 if order.get(anchor) != Some(&track.media_uri) {
                     return;
                 }
-                activate_shell
-                    .products
-                    .playback
-                    .queue
-                    .play(playback::PlayRequest::captured(
-                        library::QueueInput::Uris {
+                let mut input =
+                    queue_input
+                        .borrow()
+                        .clone()
+                        .unwrap_or_else(|| library::QueueInput::Uris {
                             order,
                             context_id: format!(
                                 "{}|result={}",
@@ -566,7 +602,27 @@ fn folder_table(
                             )
                             .into(),
                             source_start: 0,
-                        },
+                        });
+                if let library::QueueInput::Query {
+                    anchor_uri,
+                    context_id,
+                    ..
+                } = &mut input
+                {
+                    *anchor_uri = Some(track.media_uri.clone());
+                    *context_id = format!(
+                        "{}|result={}",
+                        folder_context_id(&path),
+                        activate_tracks.order_id()
+                    )
+                    .into();
+                }
+                activate_shell
+                    .products
+                    .playback
+                    .queue
+                    .play(playback::PlayRequest::captured(
+                        input,
                         anchor,
                         QueuePlacement::Now,
                         false,

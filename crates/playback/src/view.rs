@@ -9,8 +9,8 @@ pub struct QueueSummaryView {
     pub total: usize,
     pub current_occurrence: Option<OccurrenceId>,
     pub current_index: Option<usize>,
-    pub current_position: Option<usize>,
     pub next_occurrence: Option<OccurrenceId>,
+    pub can_next: bool,
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -100,8 +100,8 @@ impl PlaybackOutput {
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackView {
     pub queue: QueueSummaryView,
-    /// Shared bounded Sequence rows until their replacement is durable in Store.
-    pub prepared_queue: Option<Vec<Arc<QueueOccurrence>>>,
+    /// Retained history, current, and upcoming rows in the bounded playback window.
+    pub queue_window: Vec<Arc<QueueOccurrence>>,
     pub transport: TransportView,
     pub controls: ControlsView,
 }
@@ -126,10 +126,10 @@ impl Sequence {
             total: self.total(),
             current_occurrence: self.selected().map(|entry| entry.occurrence.clone()),
             current_index: self.selected_index(),
-            current_position: self.selected().map(|entry| entry.canonical_position),
             next_occurrence: next_index
                 .and_then(|index| self.at(index))
                 .map(|entry| entry.occurrence.clone()),
+            can_next: self.next_index(false).is_some(),
         }
     }
 }
@@ -140,7 +140,7 @@ impl PlaybackSession {
         let settings = self.settings();
         PlaybackView {
             queue: sequence.summary(),
-            prepared_queue: sequence.prepared_window(),
+            queue_window: sequence.entries().to_vec(),
             transport: TransportView {
                 current: sequence.selected().map(|entry| {
                     Arc::new(CurrentMedia {

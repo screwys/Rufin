@@ -232,6 +232,7 @@ impl Database {
         }
         let (catalog, temporary_catalog) = prepare_catalog(catalog).await?;
         schema::attach_catalog(&mut writer, &catalog).await?;
+        schema::initialize_local_activity(&mut writer).await?;
         let readers = open_readers(path, &catalog).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
