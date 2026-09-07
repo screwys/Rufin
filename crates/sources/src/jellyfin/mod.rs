@@ -3,8 +3,7 @@ use crate::policy::{raw_item_id, stable_hash};
 use crate::remote_json::{field, id, items};
 use crate::{
     ConnectedSource, CredentialHostInput, ImageBytes, JellyfinSettingsInput, JellyfinSetupInput,
-    NativeLyricLine, NativeLyrics, NativeLyricsDocument, NativeLyricsRole, SourceConfiguration,
-    SourceEditResult, SourceError, SourceId, SourceResult,
+    SourceConfiguration, SourceEditResult, SourceError, SourceId, SourceResult,
 };
 pub use discovery::{DiscoveredJellyfinServer, discover_jellyfin_servers};
 use item::{
@@ -12,6 +11,7 @@ use item::{
     artist_from_item, genre_from_item, is_audio_item, playlist_from_item, primary_image_ref,
     stage_album, stage_artist, stage_genre, stage_track, track_from_item,
 };
+use lyrics::{LyricsBundle, LyricsDocument, LyricsLine, LyricsOrigin, LyricsRole};
 use playback::{RepeatMode, ResolvedStream, SourceReportFact, SourceReportPhase, StreamQuality};
 use reqwest::{Client, Url, header};
 use serde::Deserialize;

@@ -10,9 +10,9 @@ use serde::Deserialize;
 use tracing::debug;
 
 use crate::{
-    ExternalLyricsProvider, LyricsAgent, LyricsAgentRole, LyricsBundle as Lyrics, LyricsCue,
-    LyricsCueLine, LyricsDocument, LyricsLine as LyricLine, LyricsOrigin, LyricsRole,
-    LyricsSearchContent, LyricsSearchResult, normalize_language_tag,
+    ExternalLyricsProvider, LyricsBundle as Lyrics, LyricsCue, LyricsCueLine, LyricsDocument,
+    LyricsLine as LyricLine, LyricsOrigin, LyricsRole, LyricsSearchContent, LyricsSearchResult,
+    normalize_language_tag,
 };
 
 const EXTERNAL_LYRICS_REQUEST_TIMEOUT: Duration = Duration::from_secs(5);
@@ -21,7 +21,7 @@ const LRCLIB_RESPONSE_MAX_BYTES: usize = 2 * 1024 * 1024;
 const LOCAL_LYRICS_MAX_BYTES: usize = 2 * 1024 * 1024;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LyricsPlan {
+pub struct LyricsPlan {
     external_providers: Vec<ExternalLyricsProvider>,
     allow_external_fallback: bool,
     prefer_server: bool,
@@ -31,37 +31,37 @@ pub(crate) struct LyricsPlan {
 }
 
 impl LyricsPlan {
-    pub(crate) fn external_providers(&self) -> &[ExternalLyricsProvider] {
+    pub fn external_providers(&self) -> &[ExternalLyricsProvider] {
         &self.external_providers
     }
 
-    pub(crate) const fn allows_external_fallback(&self) -> bool {
+    pub const fn allows_external_fallback(&self) -> bool {
         self.allow_external_fallback
     }
 
-    pub(crate) const fn prefers_server(&self) -> bool {
+    pub const fn prefers_server(&self) -> bool {
         self.prefer_server
     }
 
-    pub(crate) const fn prefers_translations(&self) -> bool {
+    pub const fn prefers_translations(&self) -> bool {
         self.prefer_translations
     }
 
-    pub(crate) const fn requires_word_timing(&self) -> bool {
+    pub const fn requires_word_timing(&self) -> bool {
         self.require_word_timing
     }
 
-    pub(crate) fn preferred_translation_language(&self) -> &str {
+    pub fn preferred_translation_language(&self) -> &str {
         &self.preferred_translation_language
     }
 }
 
 impl crate::Settings {
-    pub(crate) fn automatic_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
+    pub fn automatic_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         self.lyrics_plan(private_mode, track_id)
     }
 
-    pub(crate) fn configured_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
+    pub fn configured_lyrics_plan(&self, private_mode: bool, track_id: &str) -> LyricsPlan {
         self.lyrics_plan(private_mode, track_id)
     }
 
@@ -111,88 +111,25 @@ impl crate::Settings {
     }
 }
 
-pub(crate) fn lyrics_from_native(native: sources::NativeLyrics) -> Lyrics {
-    Lyrics::from_documents(
-        LyricsOrigin::Native,
-        native
-            .documents
-            .into_iter()
-            .map(|document| {
-                let offset_millis = document.offset_millis;
-                LyricsDocument {
-                    role: match document.role {
-                        sources::NativeLyricsRole::Original => LyricsRole::Original,
-                        sources::NativeLyricsRole::Translation => LyricsRole::Translation,
-                        sources::NativeLyricsRole::Pronunciation => LyricsRole::Pronunciation,
-                    },
-                    language: document
-                        .language
-                        .as_deref()
-                        .and_then(normalize_language_tag),
-                    offset_millis: 0,
-                    lines: document
-                        .lines
-                        .into_iter()
-                        .map(|line| LyricLine {
-                            text: line.text,
-                            start_millis: shifted_lyrics_time(line.start_millis, offset_millis),
-                            end_millis: shifted_lyrics_time(line.end_millis, offset_millis),
-                            cue_lines: line
-                                .cue_lines
-                                .into_iter()
-                                .map(|cue_line| LyricsCueLine {
-                                    text: cue_line.text,
-                                    start_millis: shifted_lyrics_time(
-                                        cue_line.start_millis,
-                                        offset_millis,
-                                    ),
-                                    end_millis: shifted_lyrics_time(
-                                        cue_line.end_millis,
-                                        offset_millis,
-                                    ),
-                                    agent_id: cue_line.agent_id,
-                                    cues: cue_line
-                                        .cues
-                                        .into_iter()
-                                        .map(|cue| LyricsCue {
-                                            text: cue.text,
-                                            start_millis: shifted_lyrics_time(
-                                                Some(cue.start_millis),
-                                                offset_millis,
-                                            )
-                                            .unwrap_or_default(),
-                                            end_millis: shifted_lyrics_time(
-                                                cue.end_millis,
-                                                offset_millis,
-                                            ),
-                                            byte_start: cue.byte_start,
-                                            byte_end_exclusive: cue.byte_end_exclusive,
-                                        })
-                                        .collect(),
-                                })
-                                .collect(),
-                        })
-                        .collect(),
-                    agents: document
-                        .agents
-                        .into_iter()
-                        .map(|agent| LyricsAgent {
-                            id: agent.id,
-                            role: match agent.role {
-                                sources::NativeLyricAgentRole::Main => LyricsAgentRole::Main,
-                                sources::NativeLyricAgentRole::Voice => LyricsAgentRole::Voice,
-                                sources::NativeLyricAgentRole::Background => {
-                                    LyricsAgentRole::Background
-                                }
-                                sources::NativeLyricAgentRole::Group => LyricsAgentRole::Group,
-                            },
-                            name: agent.name,
-                        })
-                        .collect(),
+impl LyricsDocument {
+    pub fn normalize_timing_and_language(&mut self) {
+        self.language = self.language.as_deref().and_then(normalize_language_tag);
+        let offset = self.offset_millis;
+        for line in &mut self.lines {
+            line.start_millis = shifted_lyrics_time(line.start_millis, offset);
+            line.end_millis = shifted_lyrics_time(line.end_millis, offset);
+            for cue_line in &mut line.cue_lines {
+                cue_line.start_millis = shifted_lyrics_time(cue_line.start_millis, offset);
+                cue_line.end_millis = shifted_lyrics_time(cue_line.end_millis, offset);
+                for cue in &mut cue_line.cues {
+                    cue.start_millis =
+                        shifted_lyrics_time(Some(cue.start_millis), offset).unwrap_or_default();
+                    cue.end_millis = shifted_lyrics_time(cue.end_millis, offset);
                 }
-            })
-            .collect(),
-    )
+            }
+        }
+        self.offset_millis = 0;
+    }
 }
 
 fn shifted_lyrics_time(time: Option<u64>, offset_millis: i64) -> Option<u64> {
@@ -205,7 +142,7 @@ fn shifted_lyrics_time(time: Option<u64>, offset_millis: i64) -> Option<u64> {
     })
 }
 
-pub(crate) fn cached_lyrics_allowed(lyrics: &Lyrics, plan: &LyricsPlan, cue_track: bool) -> bool {
+pub fn cached_lyrics_allowed(lyrics: &Lyrics, plan: &LyricsPlan, cue_track: bool) -> bool {
     let allowed = match lyrics.origin {
         LyricsOrigin::Local | LyricsOrigin::Native => true,
         LyricsOrigin::External(provider) => plan.external_providers.contains(&provider),
@@ -239,7 +176,7 @@ fn lyrics_from_text_content(origin: LyricsOrigin, content: &str) -> Lyrics {
     )
 }
 
-pub(crate) fn lyrics_with_displayable_content(mut lyrics: Lyrics) -> Option<Lyrics> {
+pub fn lyrics_with_displayable_content(mut lyrics: Lyrics) -> Option<Lyrics> {
     if lyrics.is_instrumental() {
         return Some(lyrics);
     }
@@ -661,13 +598,13 @@ pub(crate) fn lrclib_automatic_search(
     )
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct LyricsLookup {
+pub struct LyricsLookup {
     artist_names: Vec<String>,
     track_name: String,
     duration_seconds: u32,
 }
 impl LyricsLookup {
-    pub(crate) fn from_search(artist_name: &str, track_name: &str, duration_seconds: u32) -> Self {
+    pub fn from_search(artist_name: &str, track_name: &str, duration_seconds: u32) -> Self {
         let mut lookup = Self {
             artist_names: Vec::new(),
             track_name: track_name.trim().to_string(),
@@ -806,7 +743,7 @@ pub fn search_lyrics(
     }
     Ok(results)
 }
-pub(crate) fn external_best_lyrics(
+pub fn external_best_lyrics(
     lookup: &LyricsLookup,
     providers: &[ExternalLyricsProvider],
     require_word_timing: bool,
@@ -1999,7 +1936,7 @@ pub struct LocalLyricsInput {
     pub cue_track: bool,
 }
 
-pub(crate) fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
+pub fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
     for path in local_sidecar_candidates(input) {
         if let Some(lyrics) = lyrics_from_sidecar_file(&path) {
             return Some(lyrics);
@@ -2008,12 +1945,7 @@ pub(crate) fn local_sidecar_lyrics(input: &LocalLyricsInput) -> Option<Lyrics> {
     None
 }
 
-pub(crate) fn embedded_lyrics_from_audio(path: &Path) -> Option<Lyrics> {
-    let content = sources::read_embedded_lyrics(path).ok().flatten()?;
-    lyrics_from_local_text(&content)
-}
-
-pub(crate) fn lyrics_from_edited_text(content: &str) -> Option<Lyrics> {
+pub fn lyrics_from_edited_text(content: &str) -> Option<Lyrics> {
     lyrics_from_local_text(content)
 }
 

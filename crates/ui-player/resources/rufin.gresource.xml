@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<gresources>
+  <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file compressed="true">player/lyrics/pane.ui</file>
+    <file compressed="true">player/bottom.ui</file>
+    <file compressed="true">player/fullscreen.ui</file>
+    <file compressed="true">player/equalizer.ui</file>
+    <file compressed="true">player/lyrics/dictionary.ui</file>
+    <file compressed="true">player/lyrics/edit.ui</file>
+    <file compressed="true">player/lyrics/search.ui</file>
+    <file compressed="true">player/right_panel.ui</file>
+    <file compressed="true">player/queue_sidebar_row.ui</file>
+    <file compressed="true">player/queue_fullscreen_row.ui</file>
+    <file compressed="true">player/lyrics/settings.ui</file>
+    <file compressed="true">player/lyrics/color_chooser.ui</file>
+    <file compressed="true">player/playback_settings.ui</file>
+  </gresource>
+</gresources>

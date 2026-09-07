@@ -11,16 +11,15 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
-ebur128.workspace = true
+audio-processing.workspace = true
 gstreamer = { workspace = true, features = ["v1_26"] }
-gstreamer-app = { workspace = true, features = ["v1_26"] }
 gstreamer-audio = { workspace = true, features = ["v1_26"] }
-library.workspace = true
 playback.workspace = true
-rustfft.workspace = true
 tracing.workspace = true
 
 [dev-dependencies]
+library.workspace = true
+gstreamer-app = { workspace = true, features = ["v1_26"] }
 tempfile.workspace = true
 
 [lints]

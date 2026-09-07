@@ -13,7 +13,6 @@ publish.workspace = true
 [dependencies]
 library.workspace = true
 md5.workspace = true
-playback.workspace = true
 reqwest = { workspace = true, features = ["blocking", "form", "json"] }
 serde.workspace = true
 serde_json.workspace = true

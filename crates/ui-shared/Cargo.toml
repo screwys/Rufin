@@ -1,0 +1,37 @@
+[package]
+name = "ui-shared"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+app-identity.workspace = true
+async-channel.workspace = true
+downloads.workspace = true
+sources.workspace = true
+artwork.workspace = true
+playback.workspace = true
+adw = { workspace = true, features = ["v1_9", "gtk_v4_20"] }
+rufin-core.workspace = true
+gtk = { workspace = true, features = ["v4_20"] }
+library.workspace = true
+localization.workspace = true
+serde.workspace = true
+tokio.workspace = true
+tracing.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+proptest = "1.6.0"
+
+[build-dependencies]
+glib-build-tools.workspace = true
+
+[lints]
+workspace = true

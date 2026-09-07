@@ -16,7 +16,7 @@ fcast-sender-sdk.workspace = true
 if-addrs.workspace = true
 mdns-sd.workspace = true
 playback.workspace = true
-playback-gstreamer.workspace = true
+audio-processing.workspace = true
 reqwest = { workspace = true, features = ["blocking"] }
 roxmltree.workspace = true
 rustls.workspace = true

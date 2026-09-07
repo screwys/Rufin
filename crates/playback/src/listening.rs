@@ -55,13 +55,6 @@ pub fn qualified_play_threshold_millis(duration_millis: u64) -> u64 {
     threshold_seconds.saturating_mul(1_000)
 }
 
-pub fn external_scrobble_threshold_millis(duration_millis: u64) -> Option<u64> {
-    if duration_millis <= 30_000 {
-        return None;
-    }
-    Some((duration_millis / 2).min(240_000))
-}
-
 pub fn manual_end_is_skip(
     reason: RunEndReason,
     duration_millis: u64,
@@ -85,14 +78,6 @@ mod tests {
         assert_eq!(qualified_play_threshold_millis(20_000), 10_000);
         assert_eq!(qualified_play_threshold_millis(180_000), 90_000);
         assert_eq!(qualified_play_threshold_millis(900_000), 240_000);
-    }
-
-    #[test]
-    fn external_scrobbles_retain_the_service_duration_law() {
-        assert_eq!(external_scrobble_threshold_millis(30_000), None);
-        assert_eq!(external_scrobble_threshold_millis(31_000), Some(15_500));
-        assert_eq!(external_scrobble_threshold_millis(180_000), Some(90_000));
-        assert_eq!(external_scrobble_threshold_millis(900_000), Some(240_000));
     }
 
     #[test]

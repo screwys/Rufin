@@ -1,0 +1,25 @@
+[package]
+name = "audio-processing"
+version.workspace = true
+authors.workspace = true
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+description.workspace = true
+repository.workspace = true
+readme.workspace = true
+publish.workspace = true
+
+[dependencies]
+ebur128.workspace = true
+gstreamer = { workspace = true, features = ["v1_26"] }
+gstreamer-app = { workspace = true, features = ["v1_26"] }
+gstreamer-audio = { workspace = true, features = ["v1_26"] }
+playback.workspace = true
+rustfft.workspace = true
+
+[dev-dependencies]
+tempfile.workspace = true
+
+[lints]
+workspace = true

@@ -208,7 +208,6 @@ version = "0.14.0"
 dependencies = [
  "async-trait",
  "image",
- "library",
  "md5",
  "metadata-lookup",
  "serde_json",
@@ -421,6 +420,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "21e4227379beff4205943696e6c3e0cd809bacdf3f0edd6e3dd153e2269571a4"
 
 [[package]]
+name = "audio-processing"
+version = "0.14.0"
+dependencies = [
+ "ebur128",
+ "gstreamer",
+ "gstreamer-app",
+ "gstreamer-audio",
+ "playback",
+ "rustfft",
+ "tempfile",
+]
+
+[[package]]
 name = "autocfg"
 version = "1.5.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -447,6 +459,23 @@ dependencies = [
  "dunce",
  "fs_extra",
  "pkg-config",
+]
+
+[[package]]
+name = "backup"
+version = "0.14.0"
+dependencies = [
+ "age",
+ "blake3",
+ "chrono",
+ "flate2",
+ "library",
+ "serde",
+ "serde_json",
+ "tar",
+ "tempfile",
+ "thiserror 2.0.20",
+ "tokio",
 ]
 
 [[package]]
@@ -3363,10 +3392,8 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 name = "library"
 version = "0.14.0"
 dependencies = [
- "age",
  "blake3",
  "chrono",
- "flate2",
  "futures-util",
  "percent-encoding",
  "proptest",
@@ -3374,7 +3401,6 @@ dependencies = [
  "serde",
  "serde_json",
  "sqlx",
- "tar",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -3596,14 +3622,10 @@ checksum = "112b39cec0b298b6c1999fee3e31427f74f676e4cb9879ed1a121b43661a4154"
 name = "lyrics"
 version = "0.14.0"
 dependencies = [
- "async-channel",
- "library",
  "lindera",
- "playback",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
- "sources",
  "tempfile",
  "tokio",
  "tracing",
@@ -4645,13 +4667,13 @@ dependencies = [
 name = "playback-cast"
 version = "0.14.0"
 dependencies = [
+ "audio-processing",
  "fcast-sender-sdk",
  "getrandom 0.4.3",
  "if-addrs",
  "library",
  "mdns-sd",
  "playback",
- "playback-gstreamer",
  "reqwest 0.13.4",
  "roxmltree",
  "rustls",
@@ -4666,13 +4688,12 @@ dependencies = [
 name = "playback-gstreamer"
 version = "0.14.0"
 dependencies = [
- "ebur128",
+ "audio-processing",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-audio",
  "library",
  "playback",
- "rustfft",
  "tempfile",
  "tracing",
 ]
@@ -5450,14 +5471,33 @@ name = "rufin"
 version = "0.14.0"
 dependencies = [
  "app-identity",
- "artwork",
- "async-channel",
  "desktop-integration",
  "directories",
+ "localization",
+ "playback",
+ "playback-gstreamer",
+ "rufin-core",
+ "sources",
+ "tracing",
+ "ui-shell",
+ "windows-updater",
+]
+
+[[package]]
+name = "rufin-core"
+version = "0.14.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "async-channel",
+ "audio-processing",
+ "backup",
+ "desktop-integration",
  "downloads",
  "getrandom 0.4.3",
  "gio",
  "glib",
+ "image",
  "library",
  "localization",
  "lyrics",
@@ -5465,7 +5505,6 @@ dependencies = [
  "metadata-lookup",
  "playback",
  "playback-cast",
- "playback-gstreamer",
  "reqwest 0.13.4",
  "scrobbling",
  "secrets",
@@ -5473,10 +5512,10 @@ dependencies = [
  "serde_json",
  "sources",
  "tempfile",
+ "thiserror 2.0.20",
  "tokio",
  "tracing",
  "tracing-subscriber",
- "ui",
  "url",
  "windows-updater",
 ]
@@ -5697,7 +5736,6 @@ version = "0.14.0"
 dependencies = [
  "library",
  "md5",
- "playback",
  "reqwest 0.13.4",
  "serde",
  "serde_json",
@@ -6201,6 +6239,7 @@ dependencies = [
  "if-addrs",
  "library",
  "lofty",
+ "lyrics",
  "md-5 0.10.6",
  "md5",
  "notify",
@@ -7069,13 +7108,77 @@ dependencies = [
 ]
 
 [[package]]
-name = "ui"
+name = "ui-library"
+version = "0.14.0"
+dependencies = [
+ "artwork",
+ "downloads",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "rufin-core",
+ "sources",
+ "tokio",
+ "tracing",
+ "ui-shared",
+]
+
+[[package]]
+name = "ui-player"
+version = "0.14.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "lyrics",
+ "pangocairo",
+ "playback",
+ "regex",
+ "rufin-core",
+ "tokio",
+ "tracing",
+ "ui-shared",
+]
+
+[[package]]
+name = "ui-shared"
+version = "0.14.0"
+dependencies = [
+ "app-identity",
+ "artwork",
+ "async-channel",
+ "downloads",
+ "glib-build-tools",
+ "gtk4",
+ "libadwaita",
+ "library",
+ "localization",
+ "playback",
+ "proptest",
+ "rufin-core",
+ "serde",
+ "sources",
+ "tempfile",
+ "tokio",
+ "tracing",
+]
+
+[[package]]
+name = "ui-shell"
 version = "0.14.0"
 dependencies = [
  "app-identity",
  "artwork",
  "ashpd",
  "async-channel",
+ "backup",
  "desktop-integration",
  "directories",
  "downloads",
@@ -7085,11 +7188,10 @@ dependencies = [
  "library",
  "localization",
  "lyrics",
- "pangocairo",
  "playback",
  "proptest",
  "pulldown-cmark",
- "regex",
+ "rufin-core",
  "secrets",
  "serde",
  "serde_json",
@@ -7097,6 +7199,9 @@ dependencies = [
  "tempfile",
  "tokio",
  "tracing",
+ "ui-library",
+ "ui-player",
+ "ui-shared",
 ]
 
 [[package]]

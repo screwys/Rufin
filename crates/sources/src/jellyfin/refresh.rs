@@ -807,7 +807,14 @@ mod tests {
         );
         assert_eq!(
             database
-                .home_page(publication.source, None, 0, 0, &cancellation)
+                .home_page(
+                    publication.source,
+                    None,
+                    0,
+                    0,
+                    &library::HomeBlockKind::all(),
+                    &cancellation
+                )
                 .await
                 .unwrap()
                 .recently_played

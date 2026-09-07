@@ -26,8 +26,6 @@ pub(crate) const LIVE_CHANGE_LIMIT: usize = 128;
 
 pub struct SelectedFeed {
     source: Arc<Source>,
-    database: Arc<Database>,
-    source_key: library::SourceKey,
     pending: Mutex<Option<SelectedFeedChange>>,
     wake: Sender<()>,
     cancelled: Arc<AtomicBool>,
@@ -110,7 +108,11 @@ impl SelectedFeed {
         }
     }
 
-    pub async fn apply_pending(&self) -> SourceResult<Option<ScanOutcome>> {
+    pub async fn apply_pending(
+        &self,
+        database: &Database,
+        source_key: library::SourceKey,
+    ) -> SourceResult<Option<ScanOutcome>> {
         if self.cancelled.load(Ordering::Acquire) {
             return Err(SourceError::Cancelled);
         }
@@ -127,7 +129,7 @@ impl SelectedFeed {
                 Implementation::Files(files),
                 SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Inventory),
             ) => files
-                .refresh(&self.database, &|| self.cancelled.load(Ordering::Acquire))
+                .refresh(database, &|| self.cancelled.load(Ordering::Acquire))
                 .await
                 .map(Some),
             (
@@ -137,7 +139,7 @@ impl SelectedFeed {
                     rename,
                 }),
             ) => files
-                .publish_paths(&self.database, self.source_key, &paths, rename.as_ref())
+                .publish_paths(database, source_key, &paths, rename.as_ref())
                 .await
                 .map(Some),
             (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan))
@@ -150,8 +152,8 @@ impl SelectedFeed {
                 SelectedFeedChange::Local(LocalLiveChange::Paths { paths, rename }),
             ) => local
                 .publish_paths(
-                    &self.database,
-                    self.source_key,
+                    database,
+                    source_key,
                     self.source.source_id.as_str(),
                     &paths,
                     rename.as_ref(),
@@ -162,12 +164,7 @@ impl SelectedFeed {
                 Implementation::Jellyfin(source),
                 SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items { upserts, removals }),
             ) => source
-                .apply_live_items(
-                    &self.database,
-                    self.source.source_id.as_str(),
-                    upserts,
-                    removals,
-                )
+                .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
                 .await
                 .map(Some),
             _ => Err(SourceError::InvalidRequest(
@@ -538,7 +535,7 @@ enum Implementation {
 
 pub enum SourceLyrics {
     Text(String),
-    Structured(crate::NativeLyrics),
+    Structured(lyrics::LyricsBundle),
 }
 
 pub struct Source {
@@ -1825,16 +1822,6 @@ impl Source {
         name: &str,
         media_uris: &[String],
     ) -> SourceResult<(bool, Option<ScanOutcome>, Option<String>)> {
-        if matches!(
-            &self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            let object_id = database
-                .create_playlist(Some(source), name, media_uris)
-                .await?
-                .map(|(_, object_id)| object_id);
-            return Ok((object_id.is_some(), None, object_id));
-        }
         let mut pages = media_uris.chunks(PROVIDER_PLAYLIST_PAGE);
         let first_ids = match pages.next() {
             Some(page) => playlist_track_ids(database, source, None, page, false).await?,
@@ -1874,17 +1861,6 @@ impl Source {
         playlist: library::PlaylistKey,
         name: &str,
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            return Ok((
-                database
-                    .rename_playlist(Some(source), playlist, name)
-                    .await?,
-                None,
-            ));
-        }
         let id = source_playlist_id(database, source, playlist).await?;
         match &self.implementation {
             Implementation::Jellyfin(provider) => provider.rename_playlist(&id, name).await?,
@@ -1902,15 +1878,6 @@ impl Source {
         source: library::SourceKey,
         playlist: library::PlaylistKey,
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            return Ok((
-                database.delete_playlist(Some(source), playlist).await?,
-                None,
-            ));
-        }
         let id = source_playlist_id(database, source, playlist).await?;
         match &self.implementation {
             Implementation::Jellyfin(provider) => provider.delete_playlist(&id).await?,
@@ -1932,15 +1899,7 @@ impl Source {
     ) -> SourceResult<(usize, Option<ScanOutcome>)> {
         let skip_existing =
             skip_existing || matches!(self.implementation, Implementation::Jellyfin(_));
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            let changed = database
-                .add_playlist_media(Some(source), playlist, media_uris, skip_existing)
-                .await?;
-            return Ok((changed, None));
-        }
+
         let id = source_playlist_id(database, source, playlist).await?;
         let mut accepted = 0;
         for page in media_uris.chunks(PROVIDER_PLAYLIST_PAGE) {
@@ -1975,16 +1934,6 @@ impl Source {
         playlist: library::PlaylistKey,
         entries: &[library::PlaylistEntryKey],
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            let changed = database
-                .remove_playlist_entries(Some(source), playlist, entries)
-                .await?
-                != 0;
-            return Ok((changed, None));
-        }
         let id = source_playlist_id(database, source, playlist).await?;
         for page in entries.chunks(PROVIDER_PLAYLIST_PAGE) {
             let occurrences = database
@@ -2023,15 +1972,6 @@ impl Source {
         entry: library::PlaylistEntryKey,
         position: usize,
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
-        if matches!(
-            self.implementation,
-            Implementation::Local(_) | Implementation::Files(_)
-        ) {
-            let changed = database
-                .move_playlist_entry(Some(source), playlist, entry, position)
-                .await?;
-            return Ok((changed, None));
-        }
         let id = source_playlist_id(database, source, playlist).await?;
         let occurrence = database
             .source_playlist_entry_object_ids(
@@ -2297,8 +2237,6 @@ impl Source {
     pub fn start_selected_feed(
         self: &Arc<Self>,
         runtime: &tokio::runtime::Handle,
-        database: Arc<Database>,
-        source_key: library::SourceKey,
     ) -> Option<Arc<SelectedFeed>> {
         if matches!(self.implementation, Implementation::OpenSubsonic(_))
             || matches!(&self.implementation, Implementation::Files(files) if !files.has_notifications())
@@ -2309,8 +2247,6 @@ impl Source {
         let (wake, receiver) = async_channel::bounded(1);
         let feed = Arc::new(SelectedFeed {
             source: Arc::clone(self),
-            database,
-            source_key,
             pending: Mutex::new(None),
             wake,
             cancelled: Arc::new(AtomicBool::new(false)),
@@ -2869,24 +2805,13 @@ mod refresh_laws {
             let _ = started.send(());
             while stream.read(&mut bytes).await.unwrap() > 0 {}
         });
-        let root = tempfile::tempdir().unwrap();
-        let database = Arc::new(
-            Database::open(root.path().join("library.sqlite"))
-                .await
-                .unwrap(),
-        );
         let source = Arc::new(Source::open(SourceConfiguration {
             source_id: SourceId::new("retired-jellyfin"), kind:"jellyfin".into(), name:"Music".into(),
             provider_payload:serde_json::json!({"version":1,"base_url":format!("http://{address}"),"server_id":"server","user_id":"user","username":"listener","trust_invalid_cert":false,"use_jellyfin_instant_mix":false}).to_string(),
         }, Some("token".into()), Some("device".into())).unwrap());
         let weak = Arc::downgrade(&source);
-        let key = database
-            .reconcile_source(source.source_id())
-            .await
-            .unwrap()
-            .source;
         let feed = source
-            .start_selected_feed(&tokio::runtime::Handle::current(), database, key)
+            .start_selected_feed(&tokio::runtime::Handle::current())
             .unwrap();
         tokio::time::timeout(std::time::Duration::from_secs(2), pending)
             .await

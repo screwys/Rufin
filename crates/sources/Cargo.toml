@@ -12,6 +12,7 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+lyrics.workspace = true
 async-channel.workspace = true
 base64.workspace = true
 blake3.workspace = true

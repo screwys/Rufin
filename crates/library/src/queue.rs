@@ -617,7 +617,6 @@ impl Database {
     pub async fn prepared_queue_page(
         &self,
         window: &[Arc<QueueOccurrence>],
-        filter: &str,
     ) -> LibraryResult<Vec<QueuePageRow>> {
         if window.len() > QUEUE_CONTEXT_LIMIT {
             return Err(LibraryError::InvalidStore(
@@ -627,17 +626,12 @@ impl Database {
         if window.is_empty() {
             return Ok(Vec::new());
         }
-        let mut query = sqlx::QueryBuilder::<Sqlite>::new(
-            "WITH requested(ordinal,media_uri,title,artist,album) AS (",
-        );
+        let mut query = sqlx::QueryBuilder::<Sqlite>::new("WITH requested(ordinal,media_uri) AS (");
         query.push_values(
             window.iter().enumerate(),
             |mut row, (ordinal, occurrence)| {
                 row.push_bind(ordinal as i64)
-                    .push_bind(&occurrence.media_uri)
-                    .push_bind(&occurrence.title)
-                    .push_bind(&occurrence.artist)
-                    .push_bind(&occurrence.album);
+                    .push_bind(&occurrence.media_uri);
             },
         );
         query.push(
@@ -648,16 +642,6 @@ impl Database {
         query
             .push(QUEUE_PRIMARY_ARTIST_SQL)
             .push(" FROM requested LEFT JOIN tracks track ON track.media_uri=requested.media_uri");
-        let filter = queue_search_pattern(filter);
-        if !filter.is_empty() {
-            query
-                .push(" WHERE requested.title REGEXP ")
-                .push_bind(&filter)
-                .push(" OR requested.artist REGEXP ")
-                .push_bind(&filter)
-                .push(" OR requested.album REGEXP ")
-                .push_bind(&filter);
-        }
         let mut connection = self.acquire_reader().await?;
         let facts = query
             .build_query_as::<(i64, bool, Option<String>)>()
@@ -678,15 +662,6 @@ impl Database {
             .collect::<Vec<_>>();
         rows.sort_unstable_by_key(|row| row.position);
         Ok(rows)
-    }
-}
-
-fn queue_search_pattern(filter: &str) -> String {
-    let filter: String = filter.trim().chars().take(256).collect();
-    if filter.is_empty() {
-        filter
-    } else {
-        format!("(?i){}", regex::escape(&filter))
     }
 }
 

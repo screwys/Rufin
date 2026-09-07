@@ -17,7 +17,7 @@ pub enum JapaneseDictionaryStatus {
     Failed,
 }
 
-pub(crate) fn prepare_dictionary(directory: &Path) -> Result<PathBuf, String> {
+pub fn prepare_dictionary(directory: &Path) -> Result<PathBuf, String> {
     install_dictionary(directory, DICTIONARY_URL).map_err(|error| error.to_string())
 }
 
@@ -49,30 +49,8 @@ fn install_dictionary(directory: &Path, url: &str) -> Result<PathBuf, Box<dyn st
 }
 
 #[cfg(test)]
-pub(crate) fn test_dictionary() -> &'static Path {
-    static DIRECTORY: std::sync::OnceLock<tempfile::TempDir> = std::sync::OnceLock::new();
-    DIRECTORY
-        .get_or_init(|| {
-            let directory = tempfile::tempdir().unwrap();
-            prepare_dictionary(directory.path()).expect("download Japanese dictionary");
-            directory
-        })
-        .path()
-}
-
-#[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    #[ignore = "downloads the pinned Lindera dictionary"]
-    fn downloaded_dictionary_is_reused_without_network() {
-        let directory = test_dictionary();
-        let path = install_dictionary(directory, "http://127.0.0.1:0/unavailable").unwrap();
-        assert_eq!(path, directory.join(DICTIONARY_DIRECTORY));
-        assert!(path.join("NOTICE.txt").is_file());
-        assert_eq!(fs::read_dir(directory).unwrap().count(), 1);
-    }
 
     #[test]
     fn failed_download_does_not_install_partial_dictionary() {

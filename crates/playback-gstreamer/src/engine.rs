@@ -1381,11 +1381,42 @@ impl GstEngine {
                 run = %current.run,
                 "cleared pending gapless next stream"
             );
-            if let Err(error) = self.pipeline_for_slot_mut(slot).set_stream(&current.stream) {
+            // Changing playbin's URI cannot retract an already-prerolled stream.
+            // Replace the session so its queued audio and bus messages die together.
+            let position = self
+                .pipeline_for_slot(slot)
+                .position()
+                .map_or(0, |position| {
+                    self.pipeline_for_slot(slot)
+                        .logical_position(clock_millis(position))
+                });
+            let target_state = if self.desired_playing {
+                gst::State::Playing
+            } else {
+                gst::State::Paused
+            };
+            let result = self.start_item_session_at_millis(current.clone(), position, target_state);
+            if let Ok((start_millis, needs_preroll_seek)) = result {
+                self.pending_seek = pending_seek_for_session_restart(
+                    start_millis,
+                    position,
+                    self.state,
+                    target_state,
+                    needs_preroll_seek,
+                    Instant::now(),
+                );
+            } else if let Err(error) = result {
                 warn!(
                     %error,
                     run = %current.run,
                     "failed to restore current stream after clearing pending gapless next"
+                );
+                push_event(
+                    &self.events,
+                    BackendEvent::Error {
+                        run: current.run,
+                        error: BackendFailure::new(error),
+                    },
                 );
             }
         }
@@ -4306,6 +4337,104 @@ mod tests {
                 BackendEvent::Ended { run: first },
             ]
         );
+    }
+
+    #[test]
+    fn clearing_preloaded_next_replaces_the_pipeline_and_preserves_the_current_run() {
+        ensure_gstreamer_initialized().expect("initialize GStreamer");
+        let directory = tempfile::tempdir().expect("playback fixture directory");
+        let current_path = directory.path().join("current.wav");
+        let next_path = directory.path().join("shorter.wav");
+        write_long_silent_wave(&current_path);
+        write_silent_wave(&next_path);
+        let current_uri = gst::glib::filename_to_uri(&current_path, None).unwrap();
+        let next_uri = gst::glib::filename_to_uri(&next_path, None).unwrap();
+        let events = Arc::new(Mutex::new(EventMailbox::default()));
+        let mut engine = GstEngine::new(Arc::clone(&events));
+        let current = PreparedRun {
+            run: RunId::new(1),
+            stream: ResolvedStream::new(current_uri.as_str()).into(),
+        };
+        let next = PreparedNext::new(
+            RunId::new(2),
+            ResolvedStream::new(next_uri.as_str()),
+            NextTransition::Gapless,
+        );
+        let settings = BackendAudioSettings {
+            audio_output: Some("fakesink".to_string()),
+            ..BackendAudioSettings::default()
+        };
+        let old_pipeline = engine
+            .start_pipeline(
+                Slot::Primary,
+                &current,
+                &settings,
+                settings.volume,
+                settings.muted,
+                DEFAULT_PLAYBACK_RATE,
+                gst::State::Paused,
+            )
+            .expect("start current track");
+        {
+            let mut shared = lock_recover(&engine.shared);
+            shared.settings = settings;
+            shared.current = Some(current.clone());
+        }
+        let wait_for_position = |engine: &mut GstEngine, target: u64| {
+            let deadline = Instant::now() + Duration::from_secs(5);
+            loop {
+                engine.poll_bus();
+                engine.tick();
+                if engine.pending_seek.is_none()
+                    && engine
+                        .active_pipeline()
+                        .position()
+                        .is_some_and(|position| clock_millis(position).abs_diff(target) < 50)
+                {
+                    break;
+                }
+                assert!(
+                    Instant::now() < deadline,
+                    "current track did not settle at {target}"
+                );
+                std::thread::sleep(Duration::from_millis(5));
+            }
+        };
+        wait_for_position(&mut engine, 0);
+        engine.state = BackendState::Paused;
+        engine
+            .start_seek(8_000)
+            .expect("seek two seconds before the end");
+        wait_for_position(&mut engine, 8_000);
+        lock_recover(&engine.shared).gapless_pending = Some(next.clone());
+        engine
+            .active_pipeline_mut()
+            .set_stream(&next.stream)
+            .unwrap();
+        engine.state = BackendState::Paused;
+        engine.handle_command(BackendCommand::PrepareNext {
+            current_run: current.run,
+            next: None,
+        });
+
+        let shared = lock_recover(&engine.shared);
+        assert!(!shared.pipeline_is_live(Slot::Primary, old_pipeline));
+        assert!(shared.pipeline_id(Slot::Primary).is_some());
+        assert_eq!(shared.current.as_ref().unwrap().run, current.run);
+        assert!(shared.gapless_pending.is_none());
+        assert!(shared.next.is_none());
+        drop(shared);
+        wait_for_position(&mut engine, 8_000);
+        assert_eq!(
+            engine.active_pipeline().duration().map(clock_millis),
+            Some(10_000)
+        );
+        assert!(!engine.desired_playing);
+        assert!(lock_recover(&events).drain().iter().all(|event| !matches!(
+            event,
+            BackendEvent::Transitioned { .. } | BackendEvent::Error { .. }
+        )));
+        engine.shutdown();
     }
 
     #[test]

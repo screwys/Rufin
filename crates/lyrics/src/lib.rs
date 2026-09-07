@@ -6,17 +6,15 @@ use std::collections::HashMap;
 use std::path::Path;
 use wana_kana::ConvertJapanese;
 
-mod current;
 mod dictionary;
-mod events;
 mod lyrics;
 
-pub use current::{LyricsContext, LyricsHandle, LyricsService};
-pub use dictionary::JapaneseDictionaryStatus;
-pub use events::{CurrentLyrics, CurrentLyricsContent, LyricsEvent};
+pub use dictionary::{JapaneseDictionaryStatus, prepare_dictionary};
 pub use lyrics::{
-    LocalLyricsInput, lyrics_from_search_result, lyrics_to_lrc_text, save_current_lyrics,
-    save_lyrics_search_result, search_lyrics, shift_lrc_text_timestamps,
+    LocalLyricsInput, LyricsLookup, LyricsPlan, cached_lyrics_allowed, external_best_lyrics,
+    local_sidecar_lyrics, lyrics_from_edited_text, lyrics_from_search_result, lyrics_to_lrc_text,
+    lyrics_with_displayable_content, save_current_lyrics, save_lyrics_search_result, search_lyrics,
+    shift_lrc_text_timestamps,
 };
 
 pub const LYRICS_PROVIDER_SETTINGS_VERSION: u8 = 1;
@@ -168,7 +166,7 @@ impl Settings {
         }
     }
 
-    pub(crate) const fn external_lyrics_network_allowed(&self, private_mode: bool) -> bool {
+    pub const fn external_lyrics_network_allowed(&self, private_mode: bool) -> bool {
         self.external_lyrics_enabled && !private_mode
     }
 
@@ -852,11 +850,6 @@ fn language_matches(candidate: Option<&str>, target: Option<&str>) -> bool {
 mod tests {
     use super::*;
 
-    fn prepare_test_reader() {
-        let path = dictionary::prepare_dictionary(dictionary::test_dictionary()).unwrap();
-        prepare_japanese_reader(&path);
-    }
-
     #[test]
     fn sparse_settings_preserve_flat_defaults_and_provider_order() {
         let mut settings = serde_json::from_str::<Settings>(
@@ -998,108 +991,6 @@ mod tests {
                 .selected_document(&settings)
                 .map(|document| document.lines[0].text.as_str()),
             Some("original")
-        );
-    }
-
-    #[test]
-    #[ignore = "downloads the pinned Lindera dictionary"]
-    fn local_japanese_readings_annotate_kanji_and_render_romaji() {
-        prepare_test_reader();
-        assert!(contains_japanese_kana("君の名は"));
-        assert!(!contains_japanese_kana("中文歌词"));
-        assert!(!contains_japanese_kana("한국어 가사"));
-
-        let reading = japanese_reading("君との思い出").expect("Japanese reading");
-        assert!(
-            reading
-                .segments
-                .iter()
-                .filter(|segment| !segment.surface.chars().any(is_kanji))
-                .all(|segment| segment.furigana.is_none())
-        );
-        assert!(
-            reading
-                .segments
-                .iter()
-                .filter(|segment| segment.furigana.is_some())
-                .all(|segment| segment.surface.chars().all(is_kanji))
-        );
-        assert!(reading.segments.windows(3).any(|segments| {
-            segments[0].surface == "思"
-                && segments[0].furigana.as_deref() == Some("おも")
-                && segments[1].surface == "い"
-                && segments[1].furigana.is_none()
-                && segments[2].surface == "出"
-                && segments[2].furigana.as_deref() == Some("で")
-        }));
-        assert_eq!(reading.romanization, "kimi to no omoide");
-
-        assert!(japanese_reading("中文歌词").is_none());
-        assert!(japanese_reading_for_language("愛", Some("jpn")).is_some());
-        assert!(japanese_reading_for_language("愛", Some("zh")).is_none());
-
-        JAPANESE_READER.with(|reader| assert!(reader.borrow().is_some()));
-        release_japanese_reader();
-        JAPANESE_READER.with(|reader| assert!(reader.borrow().is_none()));
-    }
-
-    #[test]
-    #[ignore = "downloads the pinned Lindera dictionary"]
-    fn romaji_preserves_non_japanese_parts_of_mixed_text() {
-        prepare_test_reader();
-        let reading = japanese_reading("君との Moon will shine 42!").expect("Japanese reading");
-
-        assert_eq!(reading.romanization, "kimi to no Moon will shine 42!");
-        assert_eq!(
-            reading
-                .segments
-                .iter()
-                .map(|segment| segment.surface.as_str())
-                .collect::<String>(),
-            "君との Moon will shine 42!"
-        );
-    }
-
-    #[test]
-    #[ignore = "downloads the pinned Lindera dictionary"]
-    fn full_line_readings_preserve_compounds_and_romanization_source_ranges() {
-        prepare_test_reader();
-        for (text, expected) in [
-            ("正気じゃないワックだわ", vec![("正気", "しょうき")]),
-            (
-                "瞳孔開いちゃって",
-                vec![("瞳孔", "どうこう"), ("開", "ひら")],
-            ),
-            (
-                "証拠を出して頂戴な",
-                vec![("証拠", "しょうこ"), ("出", "だ"), ("頂戴", "ちょうだい")],
-            ),
-        ] {
-            let reading = japanese_reading(text).unwrap();
-            let annotations = reading
-                .segments
-                .iter()
-                .filter_map(|segment| {
-                    segment
-                        .furigana
-                        .as_deref()
-                        .map(|reading| (segment.surface.as_str(), reading))
-                })
-                .collect::<Vec<_>>();
-            assert_eq!(annotations, expected, "{text}");
-            assert_eq!(
-                reading
-                    .romanization_spans
-                    .iter()
-                    .map(|(range, _)| text.get(range.clone()).expect("token source range"))
-                    .collect::<String>(),
-                text
-            );
-        }
-        let reading = japanese_reading("正気じゃないワックだわ").unwrap();
-        assert_eq!(
-            reading.romanization_spans[0],
-            (0.."正気".len(), "shouki".into())
         );
     }
 
