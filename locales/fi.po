@@ -7,14 +7,15 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"Last-Translator: Automatically generated\n"
-"Language-Team: none\n"
+"PO-Revision-Date: 2026-09-07 19:33+0000\n"
+"Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
+"Language-Team: Finnish <https://hosted.weblate.org/projects/rufin/app/fi/>\n"
 "Language: fi\n"
 "MIME-Version: 1.0\n"
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
+"X-Generator: Weblate 2026.9.1.dev0\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
@@ -143,7 +144,7 @@ msgid "320 kbps"
 msgstr ""
 
 msgid "5 Latest Albums"
-msgstr ""
+msgstr "5 uusinta albumia"
 
 msgid "API key"
 msgstr ""
@@ -185,7 +186,7 @@ msgid "Add folder"
 msgstr ""
 
 msgid "Add to Favorites"
-msgstr ""
+msgstr "Lisää suosikkeihin"
 
 msgid "Add to Pins"
 msgstr ""
@@ -200,7 +201,7 @@ msgid "Add"
 msgstr ""
 
 msgid "Added to favorites"
-msgstr ""
+msgstr "Lisätty suosikkeihin"
 
 msgid "Added to"
 msgstr ""
@@ -227,7 +228,7 @@ msgid "Album"
 msgstr ""
 
 msgid "Albums"
-msgstr ""
+msgstr "Albumit"
 
 msgid "All Music"
 msgstr ""
@@ -236,7 +237,7 @@ msgid "All Playlists"
 msgstr ""
 
 msgid "All tracks"
-msgstr ""
+msgstr "Kaikki kappaleet"
 
 msgid "All"
 msgstr ""
@@ -260,7 +261,7 @@ msgid "Appears On"
 msgstr ""
 
 msgid "Application name"
-msgstr ""
+msgstr "Sovelluksen nimi"
 
 msgid "Apply Template"
 msgstr ""
@@ -272,7 +273,7 @@ msgid "Artist albums"
 msgstr ""
 
 msgid "Artist name"
-msgstr ""
+msgstr "Esittäjän nimi"
 
 msgid "Artist radio"
 msgstr ""
@@ -409,13 +410,13 @@ msgid "Choose Folder"
 msgstr ""
 
 msgid "Choose a local music folder"
-msgstr ""
+msgstr "Valitse paikallinen musiikkikansio"
 
 msgid "Choose an existing local folder"
-msgstr ""
+msgstr "Valitse olemassa oleva paikallinen kansio"
 
 msgid "Choose at least one local music folder"
-msgstr ""
+msgstr "Valitse vähintään yksi paikallinen musiikkikansio"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
@@ -503,7 +504,7 @@ msgstr ""
 
 #, rust-format
 msgid "Connected as {username}"
-msgstr ""
+msgstr "Yhdistetty käyttäjänä {username}"
 
 msgid "Connected"
 msgstr ""
@@ -755,7 +756,7 @@ msgid "Enter a server address and API key"
 msgstr ""
 
 msgid "Enter a server address, username, and password"
-msgstr ""
+msgstr "Syötä palvelimen osoite, käyttäjätunnus ja salasana"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr ""
@@ -812,7 +813,7 @@ msgid "Fade audio when playback is paused or resumed"
 msgstr ""
 
 msgid "Favorite tracks"
-msgstr ""
+msgstr "Suosikkikappaleet"
 
 msgid "Favorite tracks, plus tracks from favorite albums and artists"
 msgstr ""
@@ -824,7 +825,7 @@ msgid "Favorites and ratings"
 msgstr ""
 
 msgid "Favorites"
-msgstr ""
+msgstr "Suosikit"
 
 msgid "Featured genres"
 msgstr ""
@@ -953,7 +954,7 @@ msgid "Home Blocks"
 msgstr ""
 
 msgid "Home"
-msgstr ""
+msgstr "Koti"
 
 msgid "Hour"
 msgstr ""
@@ -1001,7 +1002,7 @@ msgid "Integrations"
 msgstr ""
 
 msgid "Jellyfin"
-msgstr ""
+msgstr "Jellyfin"
 
 msgid "Karaoke Playback"
 msgstr ""
@@ -1088,7 +1089,7 @@ msgid "Local File Mapping"
 msgstr ""
 
 msgid "Local Folders"
-msgstr ""
+msgstr "Paikalliset kansiot"
 
 msgid "Local Prefix"
 msgstr ""
@@ -1109,16 +1110,16 @@ msgid "Local imports and access"
 msgstr ""
 
 msgid "Local library"
-msgstr ""
+msgstr "Paikallinen kirjasto"
 
 msgid "Local music folder is unavailable"
 msgstr ""
 
 msgid "Local music folder"
-msgstr ""
+msgstr "Paikallinen musiikkikansio"
 
 msgid "Local"
-msgstr ""
+msgstr "Paikallinen"
 
 msgid "Locate Folder"
 msgstr ""
@@ -1259,7 +1260,7 @@ msgid "Muted"
 msgstr ""
 
 msgid "Name"
-msgstr ""
+msgstr "Nimi"
 
 msgid "Narrow layout threshold"
 msgstr ""
@@ -1271,7 +1272,7 @@ msgid "Narrow right sidebar"
 msgstr ""
 
 msgid "Navidrome"
-msgstr ""
+msgstr "Navidrome"
 
 msgid "Navigate page items"
 msgstr ""
@@ -1334,7 +1335,7 @@ msgid "No favorite artists yet"
 msgstr ""
 
 msgid "No favorites yet"
-msgstr ""
+msgstr "Ei vielä suosikkeja"
 
 msgid "No folder selected"
 msgstr ""
@@ -1442,7 +1443,7 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
 msgid "Only played tracks"
-msgstr ""
+msgstr "Vain toistetut kappaleet"
 
 msgid "Only unplayed tracks"
 msgstr ""
@@ -1454,7 +1455,7 @@ msgid "Open fullscreen player"
 msgstr ""
 
 msgid "Open on Jellyfin"
-msgstr ""
+msgstr "Avaa Jellyfinissä"
 
 msgid "Open on Last.fm"
 msgstr ""
@@ -1463,7 +1464,7 @@ msgid "Open on MusicBrainz"
 msgstr ""
 
 msgid "Open on Navidrome"
-msgstr ""
+msgstr "Avaa Navidromessa"
 
 msgid "Open release notes"
 msgstr ""
@@ -1494,7 +1495,7 @@ msgid "Ownership of this item belongs to {source}"
 msgstr ""
 
 msgid "Password"
-msgstr ""
+msgstr "Salasana"
 
 msgid "Paste"
 msgstr ""
@@ -1771,7 +1772,7 @@ msgid "Remove folder"
 msgstr ""
 
 msgid "Remove from Favorites"
-msgstr ""
+msgstr "Poista suosikeista"
 
 msgid "Remove from Pins"
 msgstr ""
@@ -1789,7 +1790,7 @@ msgid "Remove"
 msgstr ""
 
 msgid "Removed from favorites"
-msgstr ""
+msgstr "Poistettu suosikeista"
 
 msgid "Removed from"
 msgstr ""
@@ -1957,7 +1958,7 @@ msgid "Searching Local Network"
 msgstr ""
 
 msgid "Searching for Jellyfin servers on the local network..."
-msgstr ""
+msgstr "Haetaan Jellyfin-palvelimia paikallisverkosta..."
 
 msgid "Searching for devices..."
 msgstr ""
@@ -2352,10 +2353,10 @@ msgid "User"
 msgstr ""
 
 msgid "Username and password"
-msgstr ""
+msgstr "Käyttäjätunnus ja salana"
 
 msgid "Username"
-msgstr ""
+msgstr "Käyttäjätunnus"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
@@ -2477,8 +2478,8 @@ msgstr ""
 #, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} albumi"
+msgstr[1] "{count} albumia"
 
 #, rust-format
 msgid "{count} day ago"
