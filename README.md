@@ -8,23 +8,23 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote libraries, available on [multiple platforms](#installation). It can play music from Jellyfin, Navidrome/OpenSubsonic servers, local folders, WebDAV, and SMB / Samba shares; can download tracks from these servers and let you play from downloaded songs while still keeping you in the same remote session. It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. to It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
 ![Rufin](data/screenshots/Rufin_full.png)
 
-# Supported Sources
+# 📂 Sources
 
-Local libraries: Rufin provides favorites, playlists, activity history, and Auto DJ recommendations.
+**Local libraries**: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
 
-Jellyfin: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
+**Jellyfin**: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-Navidrome / OpenSubsonic: Stream and download music, manage playlists and favorites, and use server-provided recommendations when available.
+**Navidrome / OpenSubsonic**: Supports API key authorization , normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
 
-WebDAV: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag editing, lyrics, and playlists. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+**WebDAV**: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag editing, lyrics, and playlists. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
-SMB / Samba: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, downloads, tag editing, lyrics, and playlists. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
+**SMB / Samba**: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, downloads, tag editing, lyrics, and playlists. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 # Features
 
@@ -42,7 +42,6 @@ SMB / Samba: Direct read/write access to Windows, Samba, and NAS shares without 
 - Audio output device selection
 - Configurable playback speed
 
-
 ## 📚 Library
 
 - Drag songs from your queue or lists to playlists, or select multiple of them with your keyboard batch operations
@@ -52,12 +51,12 @@ SMB / Samba: Direct read/write access to Windows, Samba, and NAS shares without 
 - Path matching between music servers and local folders, allowing local playback while keeping server activity and history
 - Metadata editing for supported servers and local formats; bulk editing and `Identify` available with auto-fill
 - Automatic metadata, artwork and lyrics caching
-- Extensive lyrics settings
 - Easy rating support, with an option to enable visual-only partial stars for OpenSubsonic
 - Virtualized, smooth to scroll pages
 - EBU R128 tag writing option for local folders
+- Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
 - Extensive lyrics organization settings; you can automatically save fetched lyrics to your source as embeds or separate .lrc files
-- Export your activity as Last.fm/ListenBrainz compatible `.csv` files
+- Listening activity can be exported as Last.fm/ListenBrainz compatible `.csv` files
 
 ## 🌍️ Discovery
 
@@ -66,9 +65,9 @@ SMB / Samba: Direct read/write access to Windows, Samba, and NAS shares without 
 - Dedicated Search, Folders and History pages
 - Moods browsing and mood/BPM-based smart playlists for Navidrome, Subsonic and local libraries
 - Synchronized lyrics with built-in search and adjustable offset
-- Furigana and Romaji lyrics overlays, translation preference and karaoke mode support
 
-## 🔌 Integrations
+
+## 🧩 Integrations
 
 - Last.fm, Libre.fm and ListenBrainz scrobbling, with offline storage and automatic retries
 - Discord Rich Presence
