@@ -1000,6 +1000,8 @@ mod playback_refresh_tests {
                     primary_artist_musicbrainz_id: None,
                 },
                 canonical_position: 0,
+                source_index: None,
+                playlist_entry_id: None,
                 provenance: Provenance::Manual,
             }),
         }
@@ -1012,14 +1014,14 @@ mod playback_refresh_tests {
     ) -> PlaybackView {
         let current_occurrence = current.as_ref().map(|media| media.id.occurrence.clone());
         PlaybackView {
-            prepared_queue: None,
+            queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: 1,
                 total: usize::from(current.is_some()),
                 current_occurrence,
                 current_index: current.as_ref().map(|_| 0),
-                current_position: current.as_ref().map(|_| 0),
                 next_occurrence: None,
+                can_next: false,
             },
             transport: TransportView {
                 current: current.map(Arc::new),

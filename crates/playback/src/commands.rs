@@ -9,14 +9,6 @@ use crate::{
 
 pub type QueuePlacement = Placement;
 
-pub fn queue_context_window(count: usize, anchor: usize) -> std::ops::Range<usize> {
-    let end = anchor
-        .saturating_sub(library::QUEUE_CONTEXT_LIMIT / 2)
-        .saturating_add(library::QUEUE_CONTEXT_LIMIT)
-        .min(count);
-    end.saturating_sub(library::QUEUE_CONTEXT_LIMIT)..end
-}
-
 #[derive(Clone)]
 pub struct PlayRequest {
     pub batch: Batch,
@@ -269,13 +261,18 @@ mod tests {
             QueuePlacement::Now,
             false,
         );
-        let window = database
-            .prepare_queue_window(request.batch.input(), 0, None, false, "prepared")
+        let page = database
+            .read_queue(library::QueueReadRequest {
+                input: request.batch.input.clone(),
+                cursor: Default::default(),
+                limit: 100,
+                history: false,
+                backwards: false,
+            })
             .await
-            .unwrap()
-            .expect("non-empty context");
-        let first = &window.occurrences[0].provenance;
-        let second = &window.occurrences[1].provenance;
+            .unwrap();
+        let first = &page.items[0].1;
+        let second = &page.items[1].1;
         assert!(matches!(
             second,
             Provenance::Context {

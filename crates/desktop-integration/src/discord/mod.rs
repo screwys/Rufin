@@ -473,18 +473,20 @@ pub(crate) mod tests {
                     primary_artist_musicbrainz_id: Some("artist-id".to_string()),
                 },
                 canonical_position: 0,
+                source_index: None,
+                playlist_entry_id: None,
                 provenance: Provenance::Manual,
             }),
         });
         PlaybackView {
-            prepared_queue: None,
+            queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: run,
                 total: 1,
                 current_occurrence: Some(occurrence),
                 current_index: Some(0),
-                current_position: Some(0),
                 next_occurrence: None,
+                can_next: false,
             },
             transport: TransportView {
                 current: Some(current),

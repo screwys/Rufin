@@ -18,20 +18,14 @@ const BACKEND_POLL_INTERVAL: Duration = Duration::from_millis(33);
 #[derive(Clone, Debug)]
 pub struct QueuePersistence {
     revision: u64,
-    current: Option<crate::OccurrenceId>,
-    progress_millis: u64,
-    repeat_mode: crate::RepeatMode,
-    shuffled: bool,
+    state: library::QueueRestore,
 }
 
 impl QueuePersistence {
     pub(crate) fn capture(sequence: &Sequence) -> Self {
         Self {
             revision: sequence.revision(),
-            current: sequence.selected().map(|entry| entry.occurrence.clone()),
-            progress_millis: sequence.progress_millis(),
-            repeat_mode: sequence.repeat_mode(),
-            shuffled: sequence.shuffle_enabled(),
+            state: sequence.snapshot(),
         }
     }
     pub fn coalesce(&mut self, newer: Self) {
@@ -39,20 +33,23 @@ impl QueuePersistence {
             *self = newer;
         }
     }
+    pub fn state(&self) -> &library::QueueRestore {
+        &self.state
+    }
     pub const fn revision(&self) -> u64 {
         self.revision
     }
     pub fn current(&self) -> Option<&crate::OccurrenceId> {
-        self.current.as_ref()
+        self.state.current()
     }
-    pub const fn progress_millis(&self) -> u64 {
-        self.progress_millis
+    pub fn progress_millis(&self) -> u64 {
+        self.state.progress_millis.max(0) as u64
     }
     pub const fn repeat_mode(&self) -> crate::RepeatMode {
-        self.repeat_mode
+        self.state.repeat_mode
     }
     pub const fn shuffled(&self) -> bool {
-        self.shuffled
+        self.state.shuffled
     }
 }
 
@@ -670,47 +667,29 @@ mod persistence_tests {
         let database = library::Database::open(directory.path().join("queue.sqlite3"))
             .await
             .unwrap();
-        let window = database
-            .edit_queue_with_preview(
-                library::QueueEdit::Apply {
-                    input: library::QueueInput::Uris {
-                        order: (1..=4)
-                            .map(|key| format!("https://example.test/{key}"))
-                            .collect::<Vec<_>>()
-                            .into(),
-                        context_id: "test".into(),
-                        source_start: 0,
-                    },
-                    placement: Placement::Now,
-                    shuffle_seed: None,
-                    random_start: false,
-                    identity: None,
+        let page = database
+            .read_queue(library::QueueReadRequest {
+                input: library::QueueInput::Uris {
+                    order: (1..=4)
+                        .map(|key| format!("https://example.test/{key}"))
+                        .collect(),
+                    context_id: "test".into(),
+                    source_start: 0,
                 },
-                None,
-                crate::RepeatMode::Off,
-                false,
-                0,
-                |_| {},
-            )
+                cursor: Default::default(),
+                limit: 100,
+                history: false,
+                backwards: false,
+            })
             .await
             .unwrap();
-        let sequence = Sequence::from_window(window, 1).unwrap();
+        let mut sequence = Sequence::new();
+        sequence.add_page(page, library::QueueReorderTarget::End, true, None);
         let mut pending = QueuePersistence::capture(&sequence);
-        let window = database
-            .edit_queue_with_preview(
-                library::QueueEdit::Shuffle {
-                    enabled: true,
-                    seed: 7,
-                },
-                sequence.selected().map(|row| &row.occurrence),
-                crate::RepeatMode::All,
-                false,
-                42000,
-                |_| {},
-            )
-            .await
-            .unwrap();
-        let newer = QueuePersistence::capture(&Sequence::from_window(window, 2).unwrap());
+        sequence.set_repeat_mode(crate::RepeatMode::All);
+        sequence.set_progress_millis(42000);
+        sequence.shuffle(true, 7);
+        let newer = QueuePersistence::capture(&sequence);
         pending.coalesce(newer);
         assert_eq!(pending.revision(), 2);
         assert_eq!(pending.progress_millis(), 42000);

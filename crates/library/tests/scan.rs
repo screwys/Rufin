@@ -145,6 +145,61 @@ async fn adding_remote_observation_columns_preserves_the_accepted_local_catalog(
 }
 
 #[tokio::test]
+async fn local_play_counts_survive_import_and_catalog_reconstruction() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.unwrap();
+    write_small_catalog(&database, "before", "Track One", false, b"art").await;
+    let uri =
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM tracks WHERE object_id='track-one'")
+            .fetch_one(&mut connection(&path).await)
+            .await
+            .unwrap();
+    let listen = serde_json::json!({"version":1,"listen_key":500,"source_id":null,"media_uri":uri,"title":"Track One","artist":"Artist","album":"Album","duration_millis":1000,"started_at":1700000000,"local_period":"2023-11","listened_millis":1000,"skipped":false});
+    for _ in 0..2 {
+        let report = database
+            .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&listen).unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(report.accepted, 1);
+    }
+    let counts =
+        || sqlx::query_scalar::<_, i64>("SELECT local_play_count FROM tracks ORDER BY object_id");
+    assert_eq!(
+        counts()
+            .fetch_all(&mut connection(&path).await)
+            .await
+            .unwrap(),
+        [1, 0]
+    );
+    sqlx::query("DELETE FROM sources")
+        .execute(&mut connection(&path).await)
+        .await
+        .unwrap();
+    write_small_catalog(&database, "after", "Track One", false, b"art").await;
+    assert_eq!(
+        counts()
+            .fetch_all(&mut connection(&path).await)
+            .await
+            .unwrap(),
+        [1, 0]
+    );
+    database.close().await.unwrap();
+    let mut old = connection(&path).await;
+    sqlx::raw_sql("DROP INDEX catalog.tracks_local_play_count_idx; DROP INDEX catalog.tracks_global_local_play_count_idx; DROP INDEX catalog.tracks_local_shuffle_idx; DROP INDEX catalog.tracks_global_local_shuffle_idx; ALTER TABLE catalog.tracks DROP COLUMN local_play_count;").execute(&mut old).await.unwrap();
+    drop(old);
+    let reopened = Database::open(&path).await.unwrap();
+    assert_eq!(
+        counts()
+            .fetch_all(&mut connection(&path).await)
+            .await
+            .unwrap(),
+        [1, 0]
+    );
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
 async fn local_component_paths_page_beyond_one_batch() {
     let directory = tempfile::tempdir().expect("temporary Store directory");
     let path = directory.path().join("library.sqlite3");

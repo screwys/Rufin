@@ -322,7 +322,7 @@ impl Database {
                 .await?;
         }
         if contents.activity {
-            sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;")
+            sqlx::raw_sql("DELETE FROM listens;DELETE FROM legacy_activity;UPDATE tracks SET local_play_count=0 WHERE local_play_count<>0;")
                 .execute(&mut *transaction)
                 .await?;
             let activity = crate::activity::import_activity_jsonl_on(
@@ -735,23 +735,32 @@ mod tests {
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         source
-            .edit_queue_with_preview(
-                crate::QueueEdit::Apply {
-                    identity: None,
-                    input: crate::QueueInput::MediaUris {
-                        order: vec!["https://example.test/song".into(); 250].into(),
-                        provenance: crate::QueueProvenance::Manual,
-                    },
-                    placement: crate::QueuePlacement::Now,
-                    shuffle_seed: Some(7),
-                    random_start: false,
-                },
-                None,
-                crate::QueueRepeatMode::All,
-                false,
-                0,
-                |_| {},
-            )
+            .save_queue(&crate::QueueRestore {
+                sources: vec![crate::QueueInstruction {
+                    input: crate::QueueInput::Choices(
+                        (0..250)
+                            .map(|_| {
+                                Some(crate::QueueChoice {
+                                    origin: None,
+                                    media_uri: "https://example.test/song".into(),
+                                    fallback: None,
+                                    provenance: crate::QueueProvenance::Manual,
+                                })
+                            })
+                            .collect(),
+                    ),
+                    repeat: true,
+                    seed: Some(7),
+                }],
+                pending: [crate::QueueCursor {
+                    seed: Some(7),
+                    ..Default::default()
+                }]
+                .into(),
+                repeat_mode: crate::QueueRepeatMode::All,
+                shuffled: true,
+                ..Default::default()
+            })
             .await
             .unwrap();
         let mut original_queue = Vec::new();
@@ -762,6 +771,10 @@ mod tests {
         let bytes = archive(&source, None).await;
         let staged = stage_backup(Cursor::new(bytes), None).unwrap();
         assert_eq!(staged.manifest.playlist_count, 2);
+        {
+            let mut writer = target.writer().await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(1,'catalog','Catalog','catalog',zeroblob(32),zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) VALUES(1,'song','https://example.test/song','Song','song','','','song',100,7);").execute(writer.as_mut().unwrap()).await.unwrap();
+        }
         target
             .restore_backup(&staged, BackupContents::default())
             .await
@@ -774,6 +787,15 @@ mod tests {
         assert_eq!(original_queue, restored_queue);
         let mut writer = target.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT local_play_count FROM tracks WHERE media_uri='https://example.test/song'"
+            )
+            .fetch_one(&mut *connection)
+            .await
+            .unwrap(),
+            1
+        );
         let identities: Vec<(String, Option<String>, i64)> =
             sqlx::query_as("SELECT object_id,name,position FROM main.playlists ORDER BY position")
                 .fetch_all(&mut *connection)

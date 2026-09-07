@@ -72,6 +72,15 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     assert_eq!(window[0].title, "Stored Title");
     assert_eq!(window[1].media_uri, listen.media_uri);
     let mut raw = connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT local_play_count FROM tracks WHERE media_uri=?1")
+            .bind(&listen.media_uri)
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        1,
+        "duplicate accepted listens must not increment the indexed local count"
+    );
     assert!(
         sqlx::query_scalar::<_, bool>("SELECT skipped FROM listens WHERE listen_key=?1")
             .bind(key)
@@ -84,7 +93,41 @@ async fn activity_keeps_one_listen_and_independent_delivery_targets() {
         .execute(&mut raw)
         .await
         .expect("seed recovered Activity baseline");
+    sqlx::query("INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at) VALUES (?1,'lifetime','track','track-1',2,0,1600000000)")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
     drop(raw);
+    let never = fixture
+        .database
+        .create_smart_playlist(
+            "Local never played",
+            &library::SmartPlaylistDefinition {
+                match_all: vec![
+                    library::SmartPlaylistRule {
+                        field: library::SmartPlaylistRuleField::Played,
+                        operator: library::SmartPlaylistRuleOperator::Is,
+                        value: Some(library::SmartPlaylistRuleValue::Bool(false)),
+                    },
+                    library::SmartPlaylistRule {
+                        field: library::SmartPlaylistRuleField::PlayCount,
+                        operator: library::SmartPlaylistRuleOperator::Equals,
+                        value: Some(library::SmartPlaylistRuleValue::Number(0)),
+                    },
+                ],
+                ..library::SmartPlaylistDefinition::default()
+            },
+        )
+        .await
+        .unwrap();
+    let unplayed = fixture
+        .database
+        .smart_playlist_media_uri_order(Some(fixture.source), never, None, 1800000000, &cancel)
+        .await
+        .unwrap();
+    assert!(
+        unplayed.contains(&fixture.track_uris[1]),
+        "remote play totals do not count as Rufin listens"
+    );
+    assert!(!unplayed.contains(&listen.media_uri));
     let catalog = fixture
         .database
         .track_row_by_uri(&listen.media_uri, &cancel)

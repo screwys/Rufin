@@ -14,6 +14,177 @@ use crate::{
 
 const COLLECTION_ROW_LIMIT: usize = 128;
 
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub enum CollectionIdentity {
+    Album(String),
+    Artist {
+        media_uri: String,
+        album_artist: bool,
+    },
+    Genre {
+        source_id: crate::SourceId,
+        object_id: String,
+    },
+    Mood {
+        source_id: crate::SourceId,
+        object_id: String,
+    },
+    Playlist {
+        source_id: Option<crate::SourceId>,
+        object_id: String,
+        native: bool,
+    },
+}
+
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct CollectionSourceReference {
+    pub collection: CollectionIdentity,
+    pub folder: Option<(crate::SourceId, String)>,
+}
+
+pub(crate) async fn canonical_collection_on(
+    connection: &mut SqliteConnection,
+    collection: &crate::QueueCollection,
+    folder: Option<FolderKey>,
+) -> LibraryResult<Option<CollectionSourceReference>> {
+    use crate::QueueCollection as C;
+    let collection = match collection {
+        C::Album(uri) => CollectionIdentity::Album(uri.clone()),
+        C::Artist {
+            media_uri,
+            album_artist,
+        } => CollectionIdentity::Artist {
+            media_uri: media_uri.clone(),
+            album_artist: *album_artist,
+        },
+        C::AlbumKey(key) => {
+            let Some(uri) =
+                sqlx::query_scalar::<_, String>("SELECT media_uri FROM albums WHERE album_key=?1")
+                    .bind(key)
+                    .fetch_optional(&mut *connection)
+                    .await?
+            else {
+                return Ok(None);
+            };
+            CollectionIdentity::Album(uri)
+        }
+        C::ArtistKey { key, album_artist } => {
+            let Some(media_uri) = sqlx::query_scalar::<_, String>(
+                "SELECT media_uri FROM artists WHERE artist_key=?1",
+            )
+            .bind(key)
+            .fetch_optional(&mut *connection)
+            .await?
+            else {
+                return Ok(None);
+            };
+            CollectionIdentity::Artist {
+                media_uri,
+                album_artist: *album_artist,
+            }
+        }
+        C::Genre(key) => {
+            let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,genre.object_id FROM genres genre JOIN sources source USING(source_key) WHERE genre.genre_key=?1").bind(key).fetch_optional(&mut *connection).await? else{return Ok(None);};
+            CollectionIdentity::Genre {
+                source_id: crate::SourceId::new(source),
+                object_id: id,
+            }
+        }
+        C::Mood(key) => {
+            let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,mood.object_id FROM moods mood JOIN sources source USING(source_key) WHERE mood.mood_key=?1").bind(key).fetch_optional(&mut *connection).await? else{return Ok(None);};
+            CollectionIdentity::Mood {
+                source_id: crate::SourceId::new(source),
+                object_id: id,
+            }
+        }
+        C::Playlist(key) => {
+            let native = key.raw() < 0;
+            let query = if native {
+                "SELECT source.object_id,playlist.object_id FROM catalog.native_playlists playlist JOIN sources source USING(source_key) WHERE playlist.playlist_key=-?1"
+            } else {
+                "SELECT source.object_id,playlist.object_id FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE playlist.playlist_key=?1"
+            };
+            let Some((source, id)) = sqlx::query_as::<_, (Option<String>, String)>(query)
+                .bind(key)
+                .fetch_optional(&mut *connection)
+                .await?
+            else {
+                return Ok(None);
+            };
+            CollectionIdentity::Playlist {
+                source_id: source.map(crate::SourceId::new),
+                object_id: id,
+                native,
+            }
+        }
+    };
+    let folder = if let Some(folder) = folder {
+        let Some((source,id))=sqlx::query_as::<_,(String,String)>("SELECT source.object_id,folder.object_id FROM folders folder JOIN sources source USING(source_key) WHERE folder.folder_key=?1").bind(folder).fetch_optional(connection).await? else{return Ok(None);};
+        Some((crate::SourceId::new(source), id))
+    } else {
+        None
+    };
+    Ok(Some(CollectionSourceReference { collection, folder }))
+}
+
+pub(crate) async fn resolve_collection_reference(
+    connection: &mut SqliteConnection,
+    reference: &CollectionSourceReference,
+) -> LibraryResult<Option<(crate::QueueCollection, Option<FolderKey>)>> {
+    use crate::QueueCollection as C;
+    let collection = match &reference.collection {
+        CollectionIdentity::Album(uri) => C::Album(uri.clone()),
+        CollectionIdentity::Artist {
+            media_uri,
+            album_artist,
+        } => C::Artist {
+            media_uri: media_uri.clone(),
+            album_artist: *album_artist,
+        },
+        CollectionIdentity::Genre {
+            source_id,
+            object_id,
+        } => {
+            let Some(key)=sqlx::query_scalar::<_,GenreKey>("SELECT genre_key FROM genres JOIN sources USING(source_key) WHERE sources.object_id=?1 AND genres.object_id=?2").bind(source_id.as_str()).bind(object_id).fetch_optional(&mut *connection).await? else{return Ok(None);};
+            C::Genre(key)
+        }
+        CollectionIdentity::Mood {
+            source_id,
+            object_id,
+        } => {
+            let Some(key)=sqlx::query_scalar::<_,MoodKey>("SELECT mood_key FROM moods JOIN sources USING(source_key) WHERE sources.object_id=?1 AND moods.object_id=?2").bind(source_id.as_str()).bind(object_id).fetch_optional(&mut *connection).await? else{return Ok(None);};
+            C::Mood(key)
+        }
+        CollectionIdentity::Playlist {
+            source_id,
+            object_id,
+            native,
+        } => {
+            let query = if *native {
+                "SELECT -playlist.playlist_key FROM catalog.native_playlists playlist JOIN sources source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2"
+            } else {
+                "SELECT playlist.playlist_key FROM main.playlists playlist LEFT JOIN main.source_ids source USING(source_key) WHERE source.object_id IS ?1 AND playlist.object_id=?2 AND playlist.name IS NOT NULL"
+            };
+            let Some(key) = sqlx::query_scalar::<_, crate::PlaylistKey>(query)
+                .bind(source_id.as_ref().map(crate::SourceId::as_str))
+                .bind(object_id)
+                .fetch_optional(&mut *connection)
+                .await?
+            else {
+                return Ok(None);
+            };
+            C::Playlist(key)
+        }
+    };
+    let folder = if let Some((source, id)) = &reference.folder {
+        let Some(key)=sqlx::query_scalar::<_,FolderKey>("SELECT folder_key FROM folders JOIN sources USING(source_key) WHERE sources.object_id=?1 AND folders.object_id=?2").bind(source.as_str()).bind(id).fetch_optional(connection).await? else{return Ok(None);};
+        Some(key)
+    } else {
+        None
+    };
+    Ok(Some((collection, folder)))
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum AlbumSort {
     Title,
@@ -1172,8 +1343,12 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query = collection_track_query(source, sort);
-        query.push(" AND track.album_key=").push_bind(album);
+        let query = collection_track_query(
+            source,
+            sort,
+            descending,
+            &crate::QueueCollection::AlbumKey(album),
+        );
         let order = finish_collection_track_order(
             query,
             folder,
@@ -1205,8 +1380,16 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query = collection_track_query(source, sort);
-        query.push(" AND ((").push_bind(!album_artist).push(" AND EXISTS (SELECT 1 FROM track_artists relation WHERE relation.track_key=track.track_key AND relation.artist_key=").push_bind(artist).push(")) OR (").push_bind(album_artist).push(" AND EXISTS (SELECT 1 FROM album_artists relation WHERE relation.album_key=track.album_key AND relation.artist_key=").push_bind(artist).push("))) AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=track.media_uri),track.source_favorite)=1)");
+        let mut query = collection_track_query(
+            source,
+            sort,
+            descending,
+            &crate::QueueCollection::ArtistKey {
+                key: artist,
+                album_artist,
+            },
+        );
+        crate::tracks::track_filter(&mut query, None, "", favorites_only);
         let order = finish_collection_track_order(
             query,
             folder,
@@ -1236,8 +1419,12 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query = collection_track_query(source, sort);
-        query.push(" AND EXISTS (SELECT 1 FROM track_genres relation WHERE relation.track_key=track.track_key AND relation.genre_key=").push_bind(genre).push(")");
+        let query = collection_track_query(
+            source,
+            sort,
+            descending,
+            &crate::QueueCollection::Genre(genre),
+        );
         let order = finish_collection_track_order(
             query,
             folder,
@@ -1267,8 +1454,12 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let mut query = collection_track_query(source, sort);
-        query.push(" AND EXISTS (SELECT 1 FROM track_moods relation WHERE relation.track_key=track.track_key AND relation.mood_key=").push_bind(mood).push(")");
+        let query = collection_track_query(
+            source,
+            sort,
+            descending,
+            &crate::QueueCollection::Mood(mood),
+        );
         let order = finish_collection_track_order(
             query,
             folder,
@@ -1582,8 +1773,12 @@ impl Database {
             Database::clear_progress(&mut connection).await?;
             return Ok(None);
         };
-        let mut query = collection_track_query(source, sort);
-        query.push(" AND track.album_key=").push_bind(key);
+        let query = collection_track_query(
+            source,
+            sort,
+            descending,
+            &crate::QueueCollection::AlbumKey(key),
+        );
         let track_order =
             finish_collection_track_order(query, None, "", sort, descending, &mut transaction)
                 .await?;
@@ -1949,181 +2144,154 @@ fn row_limit(kind: &str) -> LibraryError {
     ))
 }
 
-fn collection_queue_order(collection: &crate::QueueCollection) -> &'static str {
-    match collection {
-        crate::QueueCollection::Playlist(key) if key.raw() < 0 => {
-            "item.position,-item.playlist_entry_key"
-        }
-        crate::QueueCollection::Playlist(_) => "item.position,item.playlist_entry_key",
-        crate::QueueCollection::Album(_) | crate::QueueCollection::AlbumKey(_) => {
-            "item.disc_number,item.track_number,item.sort_text,item.track_key"
-        }
-        _ => "item.sort_text,item.track_key",
-    }
-}
-
-fn collection_query(
+fn collection_track_query(
+    source: SourceKey,
+    sort: TrackSort,
+    descending: bool,
     collection: &crate::QueueCollection,
-    folder: Option<FolderKey>,
-    select: String,
-) -> QueryBuilder<Sqlite> {
-    let mut query = QueryBuilder::<Sqlite>::new(select);
-    query.push(" FROM ");
-    match collection {
-        crate::QueueCollection::Playlist(key) => {
-            query.push(if key.raw() < 0 { "catalog.native_playlist_entries item JOIN catalog.native_playlists playlist USING(playlist_key) WHERE item.playlist_key=" } else { "main.playlist_entries item JOIN main.playlists playlist USING(playlist_key) WHERE item.playlist_key=" }).push_bind(key.raw().abs());
-            query.push(" AND (").push_bind(folder).push(" IS NULL OR playlist.source_key IS NULL OR EXISTS(SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.media_uri=item.media_uri AND scope.folder_key=").push_bind(folder).push("))");
-            return query;
-        }
-        crate::QueueCollection::Album(uri) => {
-            query.push("albums collection JOIN tracks item ON item.album_key=collection.album_key AND item.source_key=collection.source_key WHERE collection.media_uri=").push_bind(uri.clone());
-        }
-        crate::QueueCollection::AlbumKey(key) => {
-            query.push("albums collection JOIN tracks item ON item.album_key=collection.album_key AND item.source_key=collection.source_key WHERE collection.album_key=").push_bind(*key);
-        }
-        crate::QueueCollection::Artist {
+) -> crate::source_window::SourceQuery {
+    let mut query = crate::tracks::track_query(source, sort, descending, false, None, "", false);
+    use crate::QueueCollection as C;
+    let predicate = match collection {
+        C::AlbumKey(key) => format!("track.album_key={}", key.raw()),
+        C::Album(uri) => format!(
+            "track.album_key=(SELECT album_key FROM albums WHERE media_uri={})",
+            crate::source_window::quote(uri)
+        ),
+        C::ArtistKey { key, album_artist } => format!(
+            "EXISTS(SELECT 1 FROM {} credit WHERE credit.artist_key={} AND credit.{}=track.{})",
+            if *album_artist {
+                "album_artists"
+            } else {
+                "track_artists"
+            },
+            key.raw(),
+            if *album_artist {
+                "album_key"
+            } else {
+                "track_key"
+            },
+            if *album_artist {
+                "album_key"
+            } else {
+                "track_key"
+            }
+        ),
+        C::Artist {
             media_uri,
             album_artist,
-        } => {
-            query
-                .push("artists collection JOIN ")
-                .push(if *album_artist {
-                    "album_artists"
-                } else {
-                    "track_artists"
-                })
-                .push(" relation USING(artist_key) JOIN tracks item USING(")
-                .push(if *album_artist {
-                    "album_key"
-                } else {
-                    "track_key"
-                })
-                .push(") WHERE collection.media_uri=")
-                .push_bind(media_uri.clone());
-        }
-        crate::QueueCollection::ArtistKey { key, album_artist } => {
-            query
-                .push(if *album_artist {
-                    "album_artists"
-                } else {
-                    "track_artists"
-                })
-                .push(" relation JOIN tracks item USING(")
-                .push(if *album_artist {
-                    "album_key"
-                } else {
-                    "track_key"
-                })
-                .push(") WHERE relation.artist_key=")
-                .push_bind(*key);
-        }
-        crate::QueueCollection::Genre(key) => {
-            query.push("track_genres relation JOIN tracks item USING(track_key) WHERE relation.genre_key=").push_bind(*key);
-        }
-        crate::QueueCollection::Mood(key) => {
-            query.push("track_moods relation JOIN tracks item USING(track_key) WHERE relation.mood_key=").push_bind(*key);
-        }
-    }
-    query.push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=item.track_key AND scope.folder_key=")
-        .push_bind(folder).push("))");
+        } => format!(
+            "EXISTS(SELECT 1 FROM {} credit JOIN artists USING(artist_key) WHERE artists.media_uri={} AND credit.{}=track.{})",
+            if *album_artist {
+                "album_artists"
+            } else {
+                "track_artists"
+            },
+            crate::source_window::quote(media_uri),
+            if *album_artist {
+                "album_key"
+            } else {
+                "track_key"
+            },
+            if *album_artist {
+                "album_key"
+            } else {
+                "track_key"
+            }
+        ),
+        C::Genre(key) => format!(
+            "EXISTS(SELECT 1 FROM track_genres credit WHERE credit.genre_key={} AND credit.track_key=track.track_key)",
+            key.raw()
+        ),
+        C::Mood(key) => format!(
+            "EXISTS(SELECT 1 FROM track_moods credit WHERE credit.mood_key={} AND credit.track_key=track.track_key)",
+            key.raw()
+        ),
+        C::Playlist(_) => unreachable!("playlist queries belong to the playlist owner"),
+    };
+    query.predicate.push_str(&format!(" AND ({predicate})"));
     query
 }
 
-pub(crate) async fn collection_queue_first_window(
+pub(crate) async fn playback_query(
     connection: &mut SqliteConnection,
     collection: &crate::QueueCollection,
     folder: Option<FolderKey>,
-) -> LibraryResult<(usize, Vec<(String, Option<crate::PlaylistEntryKey>)>)> {
-    let total = collection_query(collection, folder, "SELECT count(*)".into())
-        .build_query_scalar::<i64>()
-        .persistent(false)
-        .fetch_one(&mut *connection)
-        .await? as usize;
-    let key = match collection {
-        crate::QueueCollection::Playlist(key) if key.raw() < 0 => "-item.playlist_entry_key",
-        crate::QueueCollection::Playlist(_) => "item.playlist_entry_key",
-        _ => "NULL",
+    filter: &str,
+    sort: TrackSort,
+    descending: bool,
+    favorites_only: bool,
+) -> LibraryResult<crate::source_window::SourceQuery> {
+    use crate::QueueCollection as C;
+    let source = match collection {
+        C::Album(uri) => {
+            sqlx::query_scalar("SELECT source_key FROM albums WHERE media_uri=?1")
+                .bind(uri)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::Artist { media_uri, .. } => {
+            sqlx::query_scalar("SELECT source_key FROM artists WHERE media_uri=?1")
+                .bind(media_uri)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::AlbumKey(key) => {
+            sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1")
+                .bind(key)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::ArtistKey { key, .. } => {
+            sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1")
+                .bind(key)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::Genre(key) => {
+            sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1")
+                .bind(key)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::Mood(key) => {
+            sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1")
+                .bind(key)
+                .fetch_one(&mut *connection)
+                .await?
+        }
+        C::Playlist(key) => {
+            return Ok(crate::playlists::playlist_query(
+                *key,
+                folder,
+                crate::PlaylistEntrySort::Position,
+                descending,
+                filter,
+            ));
+        }
     };
-    let select = format!("SELECT item.media_uri,{key}");
-    let order = collection_queue_order(collection);
-    let mut query = collection_query(collection, folder, select.clone());
-    query.push(" ORDER BY ").push(order).push(" LIMIT 96");
-    let mut rows = query
-        .build_query_as()
-        .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?;
-    if total > 96 {
-        let mut query = collection_query(collection, folder, select);
-        query
-            .push(" ORDER BY ")
-            .push(order.replace(',', " DESC,"))
-            .push(" DESC LIMIT 1");
-        rows.extend(
-            query
-                .build_query_as()
-                .persistent(false)
-                .fetch_all(&mut *connection)
-                .await?,
-        );
-    }
-    Ok((total, rows))
-}
-
-pub(crate) async fn seed_collection_queue(
-    connection: &mut SqliteConnection,
-    collection: crate::QueueCollection,
-    folder: Option<FolderKey>,
-) -> LibraryResult<()> {
-    let order = collection_queue_order(&collection);
-    let key = match collection {
-        crate::QueueCollection::Playlist(key) if key.raw() < 0 => "-item.playlist_entry_key",
-        crate::QueueCollection::Playlist(_) => "item.playlist_entry_key",
-        _ => "NULL",
-    };
-    let mut query = collection_query(
-        &collection,
-        folder,
-        format!(
-            "INSERT INTO temp.queue_input(media_uri,source_rank,entry_key) SELECT item.media_uri,row_number() OVER(ORDER BY {order})-1,{key}"
-        ),
-    );
-    query.push(" ORDER BY ").push(order);
-    query.build().persistent(false).execute(connection).await?;
-    Ok(())
-}
-
-fn collection_track_query(source: SourceKey, sort: TrackSort) -> QueryBuilder<Sqlite> {
-    if sort.uses_activity() {
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "WITH listen_activity AS (SELECT listen.media_uri,count(*) play_count,max(listen.started_at) last_played FROM tracks member CROSS JOIN listens listen ON listen.media_uri=member.media_uri WHERE member.source_key=",
-        );
-        query.push_bind(source).push(" GROUP BY listen.media_uri),activity AS (SELECT track.track_key,COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0) play_count,CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played WHEN listen.last_played IS NULL THEN baseline.last_played_at ELSE max(baseline.last_played_at,listen.last_played) END last_played FROM tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' LEFT JOIN listen_activity listen ON listen.media_uri=track.media_uri WHERE track.source_key=").push_bind(source).push(") SELECT track.track_key,track.media_uri FROM tracks track JOIN activity USING(track_key) WHERE track.source_key=").push_bind(source);
-        query
-    } else {
-        let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT track.track_key,track.media_uri FROM tracks track WHERE track.source_key=",
-        );
-        query.push_bind(source);
-        query
-    }
+    let mut query = collection_track_query(source, sort, descending, collection);
+    crate::tracks::track_filter(&mut query, folder, filter, favorites_only);
+    Ok(query)
 }
 
 async fn finish_collection_track_order(
-    mut query: QueryBuilder<Sqlite>,
+    mut query: crate::source_window::SourceQuery,
     folder: Option<FolderKey>,
     filter: &str,
     sort: TrackSort,
     descending: bool,
     connection: &mut SqliteConnection,
-) -> LibraryResult<Vec<(TrackKey, String)>> {
-    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-    query.push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) AND (").push_bind(filter.is_empty()).push(" OR instr(track.normalized_search,").push_bind(&filter).push(")>0 OR CAST(track.year AS TEXT)=").push_bind(&filter).push(") ORDER BY ").push(sort.order_sql(descending)).push(",track.track_key");
-    Ok(query
-        .build_query_as::<(TrackKey, String)>()
-        .persistent(false)
-        .fetch_all(&mut *connection)
-        .await?)
+) -> LibraryResult<Vec<(crate::TrackKey, String)>> {
+    crate::tracks::track_filter(&mut query, folder, filter, false);
+    let _ = (sort, descending);
+    Ok(
+        sqlx::query_as::<_, (crate::TrackKey, String)>(sqlx::AssertSqlSafe(
+            query.select("track.track_key,track.media_uri"),
+        ))
+        .fetch_all(connection)
+        .await?,
+    )
 }
 
 async fn finish_track_route_page(
