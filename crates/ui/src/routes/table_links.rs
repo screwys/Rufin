@@ -8,7 +8,7 @@ use crate::routes::collection_context::present_track_context_menu;
 use crate::shell::Shell;
 
 use super::detail_links::DetailLinks;
-use super::library_fields::item_at_from_item;
+use super::library_fields::object_item;
 use super::recycled_cells::{RecycledTextCell, list_cell};
 use super::sparse_model::connect_sparse_bind;
 
@@ -49,8 +49,10 @@ where
                 let (Some(item), Some(shell)) = (weak_item.upgrade(), weak_shell.upgrade()) else {
                     return;
                 };
-                if let Some(track) =
-                    item_at_from_item::<T>(&item).and_then(|value| item_track_value(&value))
+                if let Some(track) = item
+                    .item()
+                    .and_then(|object| object_item::<T, _>(object, |value| item_track_value(value)))
+                    .flatten()
                 {
                     present_track_context_menu(target, &shell, track, position);
                 }
@@ -66,11 +68,14 @@ where
         let Some(cell) = list_cell::<RecycledTextCell>(list_item) else {
             return;
         };
-        let Some(data) = item_at_from_item::<T>(list_item) else {
+        let Some(links) = list_item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| value(row)))
+        else {
             cell.clear();
             return;
         };
-        cell.bind_links(value(&data));
+        cell.bind_links(links);
     });
 
     factory.connect_unbind(move |_, list_item| {

@@ -236,7 +236,7 @@ impl Shell {
                 );
             });
         }
-        let resume = {
+        let refresh = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
             let selected = selected.clone();
@@ -245,8 +245,6 @@ impl Shell {
                 let Some(shell) = shell.upgrade() else {
                     return;
                 };
-                let settings = shell.settings.current.borrow().library_list(id.key());
-                projection.apply_library_list_settings(id.key(), &settings);
                 request_named_order(
                     Rc::downgrade(&shell),
                     Rc::downgrade(&projection),
@@ -255,6 +253,20 @@ impl Shell {
                     projection.projection_request(),
                     Rc::clone(&lane),
                 );
+            })
+        };
+        let resume = {
+            let shell = Rc::downgrade(self);
+            let projection = Rc::clone(&tracks);
+            let refresh = Rc::clone(&refresh);
+            Rc::new(move || {
+                let Some(shell) = shell.upgrade() else { return };
+                let settings = shell.settings.current.borrow().library_list(id.key());
+                let previous = projection.projection_request();
+                projection.apply_library_list_settings(id.key(), &settings);
+                if !previous.same_query(&projection.projection_request()) {
+                    refresh();
+                }
             })
         };
         let download_summary = Rc::clone(&current);
@@ -275,6 +287,7 @@ impl Shell {
                 },
             );
         MountedRoute::new(grouped.widget(), resume)
+            .with_catalog_refresh(refresh)
             .with_download_change(downloads)
             .with_download_change(tracks.download_change())
             .with_search(grouped.search())

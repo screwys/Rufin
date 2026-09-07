@@ -334,7 +334,9 @@ fn selected_collection_target(
     // Sparse placeholders already carry collection keys. A large selection needs no row hydration.
     macro_rules! selected {
         ($row:ty, $key:ty, $field:ident, $target:expr, $matches:expr) => {{
-            if let Some(row) = super::library_fields::object_item::<$row>(object.clone()) {
+            if let Some(row) =
+                super::library_fields::object_item::<$row, _>(object.clone(), Clone::clone)
+            {
                 Some(($target(row.$field), $matches(&row)))
             } else if let Some(SparseItem::Placeholder(key)) = object
                 .downcast_ref::<SparseObjectItem>()?

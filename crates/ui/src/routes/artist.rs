@@ -130,7 +130,6 @@ impl Shell {
             detail.favorite_first_rows,
             LibraryListKey::ArtistTracks,
             SearchableTrackOptions {
-                on_visible_count_changed: None,
                 context_id: format!(
                     "{}:{artist}|favorites",
                     if album_artist {
@@ -559,15 +558,12 @@ impl Shell {
             });
         }
         let layout_cycle = toolbar.layout_cycle();
-        let resume = {
+        let refresh = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
             let lane = Rc::clone(&lane);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else { return };
-                let settings = shell.settings.current.borrow().library_list(key);
-                projection.apply_library_list_settings(key, &settings);
-                toolbar.apply(key, &settings);
                 request_artist_order(
                     Rc::downgrade(&shell),
                     Rc::downgrade(&projection),
@@ -581,7 +577,23 @@ impl Shell {
                 );
             })
         };
+        let resume = {
+            let shell = Rc::downgrade(self);
+            let projection = Rc::clone(&tracks);
+            let refresh = Rc::clone(&refresh);
+            Rc::new(move || {
+                let Some(shell) = shell.upgrade() else { return };
+                let settings = shell.settings.current.borrow().library_list(key);
+                let previous = projection.projection_request();
+                projection.apply_library_list_settings(key, &settings);
+                toolbar.apply(key, &settings);
+                if !previous.same_query(&projection.projection_request()) {
+                    refresh();
+                }
+            })
+        };
         MountedRoute::new(root.upcast(), resume)
+            .with_catalog_refresh(refresh)
             .with_download_change(tracks.download_change())
             .with_search(tracks.search())
             .with_layout_cycle(layout_cycle)

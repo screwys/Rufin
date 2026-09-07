@@ -333,6 +333,93 @@ async fn collection_preview_preserves_playlist_occurrences_and_explicit_shuffle(
 }
 
 #[tokio::test]
+async fn selected_playlist_entries_preserve_order_snapshots_and_source_ranks() {
+    use library::{PlaylistEntryKey, QueueEdit, QueueInput, QueuePlacement};
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO main.playlists(playlist_key,object_id,name,position) VALUES(100,'selected','Selected',0)")
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text) VALUES(100,?1,'selected-native','Native','native','native')")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    for index in 0..260_i64 {
+        sqlx::query("INSERT INTO main.playlist_entries(playlist_entry_key,playlist_key,object_id,media_uri,title,duration_millis,position) VALUES(?1,100,?2,?3,?4,?5,?6)")
+            .bind(10_000 + index)
+            .bind(index.to_string())
+            .bind(format!("https://example.test/repeated/{}", index % 2))
+            .bind(format!("Occurrence {index}"))
+            .bind(index * 1_000)
+            .bind(index)
+            .execute(&mut raw).await.unwrap();
+    }
+    sqlx::query("INSERT INTO catalog.native_playlist_entries SELECT * FROM main.playlist_entries WHERE playlist_key=100")
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("UPDATE catalog.native_playlist_entries SET title='Native '||title,duration_millis=duration_millis+500 WHERE playlist_key=100")
+        .execute(&mut raw).await.unwrap();
+    let mut order = (0..260_i64)
+        .rev()
+        .map(|index| {
+            if index % 2 == 0 {
+                10_000 + index
+            } else {
+                -(10_000 + index)
+            }
+        })
+        .collect::<Vec<_>>();
+    order[127] = 10_017;
+    order[128] = 99_999;
+    order[129] = 10_017;
+    let expected = order
+        .iter()
+        .enumerate()
+        .filter(|(_, key)| **key != 99_999)
+        .map(|(rank, key)| {
+            (
+                rank as i64,
+                format!(
+                    "{}Occurrence {}",
+                    if *key < 0 { "Native " } else { "" },
+                    key.abs() - 10_000
+                ),
+                (key.abs() - 10_000) * 1_000 + if *key < 0 { 500 } else { 0 },
+            )
+        })
+        .collect::<Vec<_>>();
+    for seed in [None, Some(71)] {
+        let state = fixture
+            .database
+            .edit_queue_with_preview(
+                QueueEdit::Apply {
+                    input: QueueInput::PlaylistEntries {
+                        order: order
+                            .iter()
+                            .copied()
+                            .map(PlaylistEntryKey::from_raw)
+                            .collect(),
+                        context_id: "selected-order".into(),
+                    },
+                    placement: QueuePlacement::Replace { anchor_index: 0 },
+                    shuffle_seed: seed,
+                    random_start: false,
+                    identity: None,
+                },
+                None,
+                QueueRepeatMode::Off,
+                false,
+                0,
+                |_| {},
+            )
+            .await
+            .unwrap();
+        assert_eq!(state.total, expected.len());
+        assert_eq!(state.shuffled, seed.is_some());
+        let actual = sqlx::query_as::<_, (i64, String, i64)>(
+            "SELECT provenance_source_rank,title,duration_millis FROM queue_occurrences ORDER BY position",
+        ).fetch_all(&mut raw).await.unwrap();
+        assert_eq!(actual, expected);
+    }
+}
+
+#[tokio::test]
 async fn captured_windows_match_persisted_original_shuffle_at_every_boundary() {
     use library::{QueueEdit, QueueInput, QueuePlacement};
     let directory = tempfile::tempdir().unwrap();

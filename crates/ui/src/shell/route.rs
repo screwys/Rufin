@@ -1349,7 +1349,7 @@ impl Shell {
         self: &Rc<Self>,
         route: Route,
         album_uri: String,
-        _: LibraryListSettings,
+        settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
         let database = Arc::clone(&self.products.library);
@@ -1358,7 +1358,14 @@ impl Shell {
             render_started,
             "Album detail route",
             move |window, cancellation| async move {
-                let detail = database.album_detail(&album_uri, &cancellation).await?;
+                let detail = database
+                    .album_detail(
+                        &album_uri,
+                        settings.sort_key.track_sort(),
+                        settings.descending,
+                        &cancellation,
+                    )
+                    .await?;
                 let Some(detail) = detail else {
                     return Ok::<_, library::LibraryError>((None, 0, Vec::new()));
                 };

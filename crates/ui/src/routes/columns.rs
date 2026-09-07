@@ -24,7 +24,7 @@ use super::collections::{install_playlist_reorder, install_smart_playlist_reorde
 use super::detail_links::{DetailLinks, album_artist_links};
 use super::library_fields::{
     add_field_skeleton_class, album_field, artist_field, column_width, item_at_from_item,
-    opaque_artwork, play_count_column_width, playlist_artwork, playlist_field,
+    object_item, opaque_artwork, play_count_column_width, playlist_artwork, playlist_field,
     smart_playlist_display_name, smart_playlist_field,
 };
 use super::playlist_picker::{MediaDragSource, install_media_drag_source};
@@ -558,11 +558,14 @@ where
         else {
             return;
         };
-        let Some(data) = item_at_from_item::<T>(item) else {
+        let Some(text) = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |row| value(row)))
+        else {
             label.set_text("");
             return;
         };
-        label.set_text(&(value)(&data));
+        label.set_text(&text);
     });
     factory.connect_unbind(|_, item| {
         let Some(item) = item.downcast_ref::<gtk::ListItem>() else {
@@ -632,7 +635,10 @@ pub(crate) fn mapped_row_index_column<T: Clone + 'static>(width: i32) -> gtk::Co
         else {
             return;
         };
-        let ready = item_at_from_item::<T>(item).is_some();
+        let ready = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, |_| ()))
+            .is_some();
         let text = ready
             .then(|| (item.position() + 1).to_string())
             .unwrap_or_default();
@@ -680,7 +686,10 @@ where
         else {
             return;
         };
-        let ready = item_at_from_item::<T>(item).as_ref().is_some_and(&is_ready);
+        let ready = item
+            .item()
+            .and_then(|object| object_item::<T, _>(object, &is_ready))
+            .unwrap_or(false);
         if ready {
             set_track_row_index_text(&cell, &(item.position() + 1).to_string());
             bind_playing.bind(cell.upcast_ref(), item.position());

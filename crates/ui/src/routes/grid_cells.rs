@@ -477,13 +477,6 @@ where
         item.set_selectable(false);
         with_grid_cell::<Cell, _>(item, |cell| {
             cell.clear();
-            cell.set_ready(false);
-            if let Some(child) = item.child() {
-                child.set_sensitive(false);
-                child.set_can_target(false);
-            }
-            cell.widget().set_sensitive(false);
-            cell.widget().set_can_target(false);
         });
     });
     factory.connect_teardown(move |_, item| {
@@ -1036,6 +1029,7 @@ impl CollectionGridCardCell {
         let card = CollectionGridCardView::new();
         card.prepend(&cover);
         let title = card.imp().title.get();
+        connect_label_tooltip(&title);
         let title_row = card.imp().title_row.get();
         let field_cells = fields
             .iter()
@@ -1079,8 +1073,6 @@ impl CollectionGridCardCell {
         mut field_value: impl FnMut(LibraryField) -> DetailLinks,
     ) {
         self.title.set_text(title);
-        self.title
-            .set_tooltip_text((!title.is_empty()).then_some(title));
         for field in self.fields.borrow().iter() {
             field.bind(field_value(field.field));
         }
@@ -1088,7 +1080,6 @@ impl CollectionGridCardCell {
 
     pub(super) fn clear(&self, shell: &Rc<Shell>) {
         self.title.set_text("");
-        self.title.set_tooltip_text(None);
         if let Some(downloaded) = self.downloaded.borrow().as_ref() {
             shell.clear_download_badge(downloaded);
         }
@@ -1146,32 +1137,39 @@ impl CollectionGridCardCell {
 struct CollectionGridFieldCell {
     field: LibraryField,
     widget: gtk::Widget,
-    label: gtk::Label,
     links: DetailLinkBinding,
+}
+
+fn connect_label_tooltip(label: &gtk::Label) {
+    label.set_has_tooltip(true);
+    label.connect_query_tooltip(|label, _, _, _, tooltip| {
+        let text = label.text();
+        if text.is_empty() {
+            return false;
+        }
+        tooltip.set_text(Some(&text));
+        true
+    });
 }
 
 impl CollectionGridFieldCell {
     fn new(shell: &Rc<Shell>, field: LibraryField) -> Self {
         let (widget, label) = collection_grid_field_label("", field);
+        connect_label_tooltip(&label);
         let links = DetailLinkBinding::new(&label, shell);
         Self {
             field,
             widget,
-            label,
             links,
         }
     }
 
     fn bind(&self, links: DetailLinks) {
         self.links.bind(links);
-        let value = self.label.text();
-        self.label
-            .set_tooltip_text((!value.is_empty()).then_some(value.as_str()));
     }
 
     fn clear(&self) {
         self.links.clear();
-        self.label.set_tooltip_text(None);
         self.widget.set_cursor_from_name(None);
     }
 }

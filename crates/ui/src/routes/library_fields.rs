@@ -308,16 +308,15 @@ pub(super) fn optional_track_number(disc: Option<i64>, track: Option<i64>) -> St
     }
 }
 
-fn boxed_item<T: Clone + 'static>(boxed: &glib::BoxedAnyObject) -> Option<T> {
-    boxed.try_borrow::<T>().ok().map(|item| item.clone())
-}
-
-pub(super) fn sparse_item<T: Clone + 'static>(item: &SparseObjectItem) -> Option<T> {
+fn sparse_item<T: Clone + 'static, R>(
+    item: &SparseObjectItem,
+    map: impl FnOnce(&T) -> R,
+) -> Option<R> {
     macro_rules! ready {
         ($key:ty) => {
             if let Some(item) = item.value::<SparseItem<$key, T>>() {
                 return match item {
-                    SparseItem::Ready(row) => Some((*row).clone()),
+                    SparseItem::Ready(row) => Some(map(&row)),
                     SparseItem::Placeholder(_) => None,
                 };
             }
@@ -335,13 +334,16 @@ pub(super) fn sparse_item<T: Clone + 'static>(item: &SparseObjectItem) -> Option
     None
 }
 
-pub(super) fn object_item<T: Clone + 'static>(item: glib::Object) -> Option<T> {
+pub(super) fn object_item<T: Clone + 'static, R>(
+    item: glib::Object,
+    map: impl FnOnce(&T) -> R,
+) -> Option<R> {
     match item.downcast::<glib::BoxedAnyObject>() {
-        Ok(boxed) => boxed_item(&boxed),
+        Ok(boxed) => boxed.try_borrow::<T>().ok().map(|item| map(&item)),
         Err(item) => item
             .downcast::<SparseObjectItem>()
             .ok()
-            .and_then(|item| sparse_item(&item)),
+            .and_then(|item| sparse_item(&item, map)),
     }
 }
 
@@ -349,10 +351,12 @@ pub(crate) fn item_at<T: Clone + 'static>(
     model: &impl IsA<gio::ListModel>,
     position: u32,
 ) -> Option<T> {
-    model.item(position).and_then(object_item)
+    model
+        .item(position)
+        .and_then(|item| object_item(item, Clone::clone))
 }
 pub(crate) fn item_at_from_item<T: Clone + 'static>(item: &gtk::ListItem) -> Option<T> {
-    item.item().and_then(object_item)
+    item.item().and_then(|item| object_item(item, Clone::clone))
 }
 pub(crate) fn opaque_artwork(binding: Option<&[u8]>) -> ArtworkBinding {
     binding.map(ArtworkBinding::opaque).unwrap_or_default()
