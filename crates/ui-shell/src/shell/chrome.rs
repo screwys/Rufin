@@ -13,6 +13,7 @@ use ui_shared::layout::configure_fill_width_clip;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use super::layout::COMPACT_RAIL_WIDTH;
+#[cfg(not(any(target_os = "windows", target_os = "macos")))]
 use ui_shared::layout::WINDOW_CHROME_MARGIN_END;
 
 #[cfg(not(any(target_os = "windows", target_os = "macos")))]
