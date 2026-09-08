@@ -1,6 +1,5 @@
-//! Bounded PCM mixing and spectrum analysis.
+//! Bounded spectrum analysis.
 
-use gstreamer_audio as gst_audio;
 use rustfft::{Fft, FftPlanner, num_complex::Complex};
 use std::collections::VecDeque;
 use std::sync::Arc;
@@ -19,97 +18,6 @@ const VISUALIZER_MIN_EMIT_INTERVAL: Duration = Duration::from_millis(33);
 const VISUALIZER_NOISE_FLOOR_DB: f32 = -72.0;
 const VISUALIZER_CEILING_DB: f32 = -6.0;
 
-pub fn copy_audio_samples(
-    bytes: &[u8],
-    info: &gst_audio::AudioInfo,
-    max_frames: usize,
-) -> Option<Vec<f32>> {
-    if info.layout() != gst_audio::AudioLayout::Interleaved {
-        return None;
-    }
-    let channels = usize::try_from(info.channels()).ok()?.max(1);
-    let frame_size = usize::try_from(info.bpf()).ok()?;
-    let sample_size = visualizer_sample_size(info.format())?;
-    if frame_size == 0 || sample_size == 0 || sample_size.saturating_mul(channels) > frame_size {
-        return None;
-    }
-    let frames = (bytes.len() / frame_size).min(max_frames);
-    let mut samples = Vec::with_capacity(frames);
-    for frame_index in 0..frames {
-        let frame_start = frame_index * frame_size;
-        let mut total = 0.0;
-        for channel in 0..channels {
-            let sample_start = frame_start + channel * sample_size;
-            let sample_end = sample_start + sample_size;
-            let sample = bytes
-                .get(sample_start..sample_end)
-                .and_then(|slice| decode_visualizer_sample(info.format(), slice))
-                .unwrap_or(0.0);
-            total += sample.clamp(-1.0, 1.0);
-        }
-        let mono = total / channels as f32;
-        samples.push(mono);
-    }
-    (!samples.is_empty()).then_some(samples)
-}
-fn visualizer_sample_size(format: gst_audio::AudioFormat) -> Option<usize> {
-    Some(match format {
-        gst_audio::AudioFormat::S8 | gst_audio::AudioFormat::U8 => 1,
-        gst_audio::AudioFormat::S16le | gst_audio::AudioFormat::U16le => 2,
-        gst_audio::AudioFormat::S24le | gst_audio::AudioFormat::U24le => 3,
-        gst_audio::AudioFormat::S2432le
-        | gst_audio::AudioFormat::U2432le
-        | gst_audio::AudioFormat::S32le
-        | gst_audio::AudioFormat::U32le
-        | gst_audio::AudioFormat::F32le => 4,
-        gst_audio::AudioFormat::F64le => 8,
-        _ => return None,
-    })
-}
-fn decode_visualizer_sample(format: gst_audio::AudioFormat, bytes: &[u8]) -> Option<f32> {
-    let sample = match format {
-        gst_audio::AudioFormat::S8 => i8::from_ne_bytes([bytes[0]]) as f32 / i8::MAX as f32,
-        gst_audio::AudioFormat::U8 => (bytes[0] as f32 - 128.0) / 128.0,
-        gst_audio::AudioFormat::S16le => {
-            i16::from_le_bytes([bytes[0], bytes[1]]) as f32 / i16::MAX as f32
-        }
-        gst_audio::AudioFormat::U16le => {
-            (u16::from_le_bytes([bytes[0], bytes[1]]) as f32 - 32_768.0) / 32_768.0
-        }
-        gst_audio::AudioFormat::S24le => decode_s24le(bytes) as f32 / 8_388_607.0,
-        gst_audio::AudioFormat::U24le => (decode_u24le(bytes) as f32 - 8_388_608.0) / 8_388_608.0,
-        gst_audio::AudioFormat::S2432le => {
-            (i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) >> 8) as f32 / 8_388_607.0
-        }
-        gst_audio::AudioFormat::U2432le => {
-            ((u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) >> 8) as f32
-                - 8_388_608.0)
-                / 8_388_608.0
-        }
-        gst_audio::AudioFormat::S32le => {
-            i32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32 / i32::MAX as f32
-        }
-        gst_audio::AudioFormat::U32le => {
-            (u32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]]) as f32 - 2_147_483_648.0)
-                / 2_147_483_648.0
-        }
-        gst_audio::AudioFormat::F32le => {
-            f32::from_le_bytes([bytes[0], bytes[1], bytes[2], bytes[3]])
-        }
-        gst_audio::AudioFormat::F64le => f64::from_le_bytes([
-            bytes[0], bytes[1], bytes[2], bytes[3], bytes[4], bytes[5], bytes[6], bytes[7],
-        ]) as f32,
-        _ => return None,
-    };
-    Some(if sample.is_finite() { sample } else { 0.0 })
-}
-fn decode_s24le(bytes: &[u8]) -> i32 {
-    let sign = if bytes[2] & 0x80 == 0 { 0x00 } else { 0xff };
-    i32::from_le_bytes([bytes[0], bytes[1], bytes[2], sign])
-}
-fn decode_u24le(bytes: &[u8]) -> u32 {
-    u32::from_le_bytes([bytes[0], bytes[1], bytes[2], 0])
-}
 pub struct VisualizerFft {
     samples: VecDeque<f32>,
     input: Vec<Complex<f32>>,
@@ -269,52 +177,6 @@ fn erb_to_frequency(erb: f32) -> f32 {
 #[cfg(test)]
 mod visualizer_tests {
     use super::*;
-    use crate::ensure_gstreamer_initialized;
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    static GST_TEST_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-
-    fn gst_test_guard() -> MutexGuard<'static, ()> {
-        let guard = GST_TEST_LOCK
-            .get_or_init(|| Mutex::new(()))
-            .lock()
-            .unwrap_or_else(std::sync::PoisonError::into_inner);
-        ensure_gstreamer_initialized().expect("initialize GStreamer");
-        guard
-    }
-
-    #[test]
-    fn visualizer_pcm_copy_mixes_supported_stereo_formats() {
-        let _gst = gst_test_guard();
-        let float_info = gst_audio::AudioInfo::builder(gst_audio::AudioFormat::F32le, 48_000, 2)
-            .layout(gst_audio::AudioLayout::Interleaved)
-            .build()
-            .expect("float audio info");
-        let mut float_bytes = Vec::new();
-        for sample in [(0.5_f32, -0.25_f32), (2.0_f32, 0.0_f32)] {
-            float_bytes.extend_from_slice(&sample.0.to_le_bytes());
-            float_bytes.extend_from_slice(&sample.1.to_le_bytes());
-        }
-        let float_samples =
-            copy_audio_samples(&float_bytes, &float_info, 8).expect("copy float samples");
-        assert!((float_samples[0] - 0.125).abs() < 0.001);
-        assert!((float_samples[1] - 0.5).abs() < 0.001);
-
-        let integer_info = gst_audio::AudioInfo::builder(gst_audio::AudioFormat::S16le, 48_000, 2)
-            .layout(gst_audio::AudioLayout::Interleaved)
-            .build()
-            .expect("integer audio info");
-        let mut integer_bytes = Vec::new();
-        for sample in [(16_384_i16, -8_192_i16), (i16::MAX, 0_i16)] {
-            integer_bytes.extend_from_slice(&sample.0.to_le_bytes());
-            integer_bytes.extend_from_slice(&sample.1.to_le_bytes());
-        }
-        let integer_samples =
-            copy_audio_samples(&integer_bytes, &integer_info, 8).expect("copy integer samples");
-        assert!((integer_samples[0] - 0.125).abs() < 0.001);
-        assert!((integer_samples[1] - 0.5).abs() < 0.001);
-    }
-
     #[test]
     fn visualizer_fft_distinguishes_silence_from_bounded_energy() {
         let mut fft = VisualizerFft::new();

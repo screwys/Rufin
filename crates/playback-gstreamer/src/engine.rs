@@ -1,4 +1,4 @@
-use super::audio::{SharedQueuedStream, audio_output_is_available, uses_direct_loudness};
+use super::audio::{SharedQueuedStream, audio_output_is_available};
 use super::pipeline::{AboutToFinishAction, PlayerPipeline, SourceClock};
 #[cfg(test)]
 use super::visualizer::visualizer_pipeline_is_live;
@@ -212,7 +212,6 @@ struct IncomingPipeline {
     slot: Slot,
     item: PreparedNext,
     phase: IncomingPhase,
-    start_at: Option<gst::ClockTime>,
 }
 
 #[derive(Clone, Debug)]
@@ -578,10 +577,6 @@ impl GstEngine {
 
     fn handoff_outgoing_ended(&self, pending: &PendingHandoff) -> bool {
         pending.incoming.item.transition == NextTransition::Gapless
-            && pending.incoming.start_at.is_none_or(|time| {
-                self.pipeline_for_slot(pending.incoming.slot)
-                    .clock_reached(time)
-            })
     }
 
     fn prepare_incoming(&mut self, next: &PreparedNext) {
@@ -614,9 +609,7 @@ impl GstEngine {
             }
             let should_prepare = match next.transition {
                 NextTransition::Crossfade { .. } => true,
-                NextTransition::Gapless => {
-                    gapless_uses_separate_pipeline(&shared.settings, current, next)
-                }
+                NextTransition::Gapless => gapless_uses_separate_pipeline(current, next),
             };
             should_prepare.then(|| {
                 (
@@ -661,7 +654,6 @@ impl GstEngine {
             slot,
             item: next.clone(),
             phase: IncomingPhase::Prerolling,
-            start_at: None,
         });
     }
 
@@ -757,11 +749,6 @@ impl GstEngine {
         else {
             return false;
         };
-        if let Some(start_at) = pending.incoming.start_at
-            && !self.pipeline_for_slot(slot).clock_reached(start_at)
-        {
-            return false;
-        }
         let (still_current, target_is_live) = {
             let shared = lock_recover(&self.shared);
             let target_is_live = shared.pipeline_is_live(slot, id);
@@ -859,7 +846,6 @@ impl GstEngine {
         old_run: RunId,
     ) {
         let slot = incoming.slot;
-        self.pipeline_for_slot(slot).finish_scheduled_start();
         self.stop_pipeline(from);
         let (volume, muted) = self.output_gain_state();
         self.pipeline_for_slot(slot)
@@ -1604,6 +1590,19 @@ impl GstEngine {
         }
         use gst::MessageView;
 
+        match message.view() {
+            MessageView::SegmentDone(_) => {
+                self.pipeline_for_slot(slot).segment_done(message.seqnum())
+            }
+            MessageView::NewClock(clock) => {
+                debug!(?slot, clock = ?clock.clock().map(|clock| clock.name()), "GStreamer playback clock selected");
+            }
+            MessageView::Warning(warning) => {
+                warn!(?slot, message = %warning.error(), details = ?warning.debug(), "GStreamer playback warning");
+            }
+            _ => {}
+        }
+
         if self.pending_handoff_matches(slot, id) {
             match message.view() {
                 MessageView::Error(error) => {
@@ -2241,14 +2240,13 @@ impl GstEngine {
     }
 
     fn tick(&mut self) {
-        if self.desired_playing {
-            if let Some(PendingHandoff { incoming, .. }) = self.pending_handoff.as_ref()
-                && incoming.start_at.is_some()
-                && self.pipeline_for_slot(incoming.slot).is_playing()
-            {
-                self.confirm_handoff(incoming.slot, incoming.id);
-            }
-            self.maybe_schedule_gapless();
+        if self.desired_playing
+            && self.state == BackendState::Playing
+            && self.pending_seek.is_none()
+            && lock_recover(&self.shared).gapless_pending.is_none()
+            && self.active_pipeline().take_segment_done()
+        {
+            self.continue_segment();
         }
         let deferred_next = {
             let shared = lock_recover(&self.shared);
@@ -2343,46 +2341,36 @@ impl GstEngine {
         }
     }
 
-    fn maybe_schedule_gapless(&mut self) {
-        if self.pending_seek.is_some()
-            || self.pending_handoff.is_some()
-            || self.state != BackendState::Playing
-        {
-            return;
-        }
-        let Some(incoming) = self.incoming.as_ref().filter(|incoming| {
-            incoming.phase == IncomingPhase::Ready
-                && incoming.item.transition == NextTransition::Gapless
-        }) else {
-            return;
-        };
-        let Some(position) = self.active_pipeline().position() else {
-            return;
-        };
-        let Some(duration) = self.active_pipeline().duration() else {
-            return;
-        };
-        let remaining = self
-            .active_pipeline()
-            .logical_remaining(clock_millis(position), clock_millis(duration));
-        if remaining == 0 || remaining > 500 {
-            return;
-        }
-        let (slot, id) = (incoming.slot, incoming.id);
-        let Some(start_at) = self
-            .pipeline_for_slot(slot)
-            .schedule_after(self.active_pipeline())
-        else {
-            return;
-        };
-        if let Some(incoming) = self.incoming.as_mut() {
-            incoming.start_at = Some(start_at);
-        }
-        match self.pipeline_for_slot(slot).set_state(gst::State::Playing) {
-            Ok(result) => {
-                self.begin_incoming_handoff(slot, id, result);
+    fn continue_segment(&mut self) {
+        let next = {
+            let mut shared = lock_recover(&self.shared);
+            let next = shared
+                .next
+                .as_ref()
+                .filter(|next| {
+                    next.transition == NextTransition::Gapless
+                        && next.stream.allows_preloading
+                        && shared.current.as_ref().is_some_and(|current| {
+                            current.stream.allows_preloading
+                                && current.stream.uri() == next.stream.uri()
+                        })
+                })
+                .cloned();
+            if let Some(next) = next.as_ref() {
+                shared.next = None;
+                shared.gapless_pending = Some(next.clone());
             }
-            Err(error) => self.fail_incoming(slot, id, error),
+            next
+        };
+        if let Err(error) = self
+            .active_pipeline()
+            .continue_segment(next.as_ref().map(|next| &next.stream))
+        {
+            if let Some(next) = next {
+                cancel_gapless_pending(&mut lock_recover(&self.shared));
+                self.report_next_preparation_failure(next.run, error);
+            }
+            self.handle_end(self.active_slot());
         }
     }
 
@@ -2823,8 +2811,28 @@ fn run_gstreamer_thread(
         return;
     }
 
+    // These clock corrections and device underruns are debug-log warnings, not
+    // bus messages. Queue them so diagnostic file/terminal I/O cannot block audio.
+    let (audio_warning_sender, audio_warnings) = sync_channel(32);
+    let audio_log = gst::log::add_log_function(move |category, level, _, _, _, object, message| {
+        if level <= gst::DebugLevel::Warning
+            && matches!(category.name(), "audiobasesink" | "pulse")
+            && let Some(message) = message.get()
+        {
+            let _ = audio_warning_sender.try_send((
+                category.name().to_string(),
+                object.map(|object| object.to_string()),
+                message.to_string(),
+            ));
+        }
+    });
+    for category in ["audiobasesink", "pulse"] {
+        gst::log::set_threshold_for_name(category, gst::DebugLevel::Warning);
+    }
+
     let mut engine = GstEngine::new(Arc::clone(&events));
     if ready.send(Ok(())).is_err() {
+        gst::log::remove_log_function(audio_log);
         return;
     }
     info!(
@@ -2833,6 +2841,9 @@ fn run_gstreamer_thread(
     );
 
     loop {
+        for (category, element, message) in audio_warnings.try_iter() {
+            warn!(%category, ?element, %message, "GStreamer audio output warning");
+        }
         engine.poll_bus();
         match receiver.recv_timeout(Duration::from_millis(50)) {
             Ok(command) => engine.handle_command(command),
@@ -2842,6 +2853,7 @@ fn run_gstreamer_thread(
         engine.tick();
     }
     engine.shutdown();
+    gst::log::remove_log_function(audio_log);
 }
 pub(super) fn handle_about_to_finish(
     pipeline: &gst::Element,
@@ -2970,7 +2982,8 @@ fn gapless_preload_should_run(shared: &SharedBackendState, next: &PreparedNext) 
     next.transition == NextTransition::Gapless
         && next.stream.allows_preloading
         && current.stream.allows_preloading
-        && !gapless_uses_separate_pipeline(&shared.settings, current, next)
+        && current.stream.window().is_none()
+        && !gapless_uses_separate_pipeline(current, next)
 }
 
 pub(super) fn gapless_preload_source_is_supported(uri: &str) -> bool {
@@ -2983,15 +2996,9 @@ fn inactive_slot(slot: Slot) -> Slot {
     }
 }
 
-fn gapless_uses_separate_pipeline(
-    settings: &BackendAudioSettings,
-    current: &PreparedRun,
-    next: &PreparedNext,
-) -> bool {
-    uses_direct_loudness(settings, &current.stream.loudness)
-        != uses_direct_loudness(settings, &next.stream.loudness)
-        || current.stream.stream == next.stream.stream
-        || next.stream.window().is_some()
+fn gapless_uses_separate_pipeline(current: &PreparedRun, next: &PreparedNext) -> bool {
+    (current.stream.window().is_some() || next.stream.window().is_some())
+        && (current.stream.window().is_none() || current.stream.uri() != next.stream.uri())
 }
 
 fn crossfade_start_remaining_millis(crossfade_millis: u64, playback_rate: f64) -> u64 {
@@ -3104,7 +3111,6 @@ mod tests {
                 slot: Slot::Secondary,
                 item: next.clone(),
                 phase: IncomingPhase::Ready,
-                start_at: None,
             });
             engine.desired_playing = true;
             engine.state = BackendState::Playing;
@@ -3138,12 +3144,7 @@ mod tests {
     }
 
     #[test]
-    fn gapless_changes_normalizer_strategy_only_between_pipelines() {
-        let settings = BackendAudioSettings {
-            loudness_normalization: LoudnessNormalization::ReplayGain,
-            loudness_normalization_scope: LoudnessNormalizationScope::Track,
-            ..BackendAudioSettings::default()
-        };
+    fn gapless_normalization_can_share_the_audio_graph() {
         let direct_loudness = TrackLoudness {
             track: Some(Box::new(LoudnessMeasurement {
                 analysis_key: [1; 32],
@@ -3175,20 +3176,12 @@ mod tests {
             NextTransition::Gapless,
         );
 
-        assert!(!gapless_uses_separate_pipeline(
-            &settings,
-            &current,
-            &direct_next
-        ));
-        assert!(gapless_uses_separate_pipeline(
-            &settings,
-            &current,
-            &native_next
-        ));
+        assert!(!gapless_uses_separate_pipeline(&current, &direct_next));
+        assert!(!gapless_uses_separate_pipeline(&current, &native_next));
     }
 
     #[test]
-    fn repeated_stream_uses_the_separate_gapless_pipeline() {
+    fn repeated_stream_is_preloaded_on_the_current_pipeline() {
         let pipeline = PipelineId(5);
         let current_run = RunId::new(10);
         let repeated = PreparedStream::from(ResolvedStream::new("file:///music/repeated.flac"));
@@ -3202,8 +3195,7 @@ mod tests {
         shared.next = Some(next.clone());
         shared.set_pipeline_id(Slot::Primary, Some(pipeline));
 
-        assert!(gapless_uses_separate_pipeline(
-            &shared.settings,
+        assert!(!gapless_uses_separate_pipeline(
             shared.current.as_ref().expect("current stream"),
             &next,
         ));
@@ -3213,16 +3205,15 @@ mod tests {
             NextTransition::Gapless,
         );
         assert!(!gapless_uses_separate_pipeline(
-            &shared.settings,
             shared.current.as_ref().expect("current stream"),
             &distinct,
         ));
         assert_eq!(
             about_to_finish_action_for_pipeline(&mut shared, Slot::Primary, pipeline, 1),
-            AboutToFinishAction::Ignore
+            AboutToFinishAction::Preload(Box::new(next.clone()))
         );
-        assert_eq!(shared.next, Some(next));
-        assert!(shared.gapless_pending.is_none());
+        assert!(shared.next.is_none());
+        assert_eq!(shared.gapless_pending, Some(next));
     }
 
     #[test]
@@ -3916,6 +3907,121 @@ mod tests {
         write_silent_mono_wave(path, 800);
     }
 
+    #[test]
+    fn repeats_and_cue_windows_preserve_samples_on_one_pipeline() {
+        ensure_gstreamer_initialized().unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let path = directory.path().join("segments.wav");
+        write_silent_mono_wave(&path, 16_000);
+        let source = (0..16_000)
+            .map(|i| ((i % 1000) as i16 - 500) * 16)
+            .collect::<Vec<_>>();
+        let mut wav = std::fs::read(&path).unwrap();
+        for (sample, bytes) in source.iter().zip(wav[44..].chunks_exact_mut(2)) {
+            bytes.copy_from_slice(&sample.to_le_bytes());
+        }
+        std::fs::write(&path, wav).unwrap();
+        let uri = gst::glib::filename_to_uri(&path, None).unwrap();
+        for (first, second) in [
+            (None, None),
+            (Some((250, 750)), Some((250, 750))),
+            (Some((250, 750)), Some((750, 1250))),
+        ] {
+            let stream = |window: Option<(u64, u64)>| {
+                let stream = ResolvedStream::new(uri.as_str());
+                window.map_or(stream.clone(), |(start, end)| {
+                    stream.with_window(start, end)
+                })
+            };
+            let events = Arc::new(Mutex::new(EventMailbox::default()));
+            let mut engine = GstEngine::new(Arc::clone(&events));
+            engine.handle_command(BackendCommand::ConfigureAudio(BackendAudioSettings {
+                audio_output: Some("appsink".into()),
+                fade_on_status_change: false,
+                ..BackendAudioSettings::default()
+            }));
+            engine.handle_command(BackendCommand::Start {
+                run: RunId::new(1),
+                current: stream(first).into(),
+                next: Some(PreparedNext::new(
+                    RunId::new(2),
+                    stream(second),
+                    NextTransition::Gapless,
+                )),
+                start_position_millis: 0,
+                playback_rate: 1.0,
+            });
+            let root = engine
+                .active_pipeline()
+                .audio_graph_root()
+                .unwrap()
+                .downcast::<gst::Bin>()
+                .unwrap();
+            let sink = root
+                .by_name("rufin-audio-output")
+                .unwrap()
+                .downcast::<gstreamer_app::AppSink>()
+                .unwrap();
+            sink.set_sync(true);
+            let mut samples = Vec::new();
+            let mut transitions = 0;
+            let mut ended = false;
+            let deadline = Instant::now() + Duration::from_secs(8);
+            while Instant::now() < deadline && !ended {
+                engine.poll_bus();
+                engine.tick();
+                while let Some(sample) = sink.try_pull_sample(gst::ClockTime::ZERO) {
+                    let map = sample.buffer().unwrap().map_readable().unwrap();
+                    samples.extend(
+                        map.as_slice()
+                            .chunks_exact(4)
+                            .map(|bytes| f32::from_le_bytes(bytes.try_into().unwrap())),
+                    );
+                }
+                for event in lock_recover(&events).drain() {
+                    match event {
+                        BackendEvent::Transitioned { old_run, new_run } => {
+                            assert_eq!((old_run, new_run), (RunId::new(1), RunId::new(2)));
+                            transitions += 1;
+                            assert!(!engine.secondary.has_session());
+                        }
+                        BackendEvent::Ended { run } => {
+                            assert_eq!(run, RunId::new(2));
+                            ended = true;
+                        }
+                        BackendEvent::Error { error, .. } => panic!("{error:?}"),
+                        _ => {}
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(1));
+            }
+            engine.shutdown();
+            assert!(ended, "no EOS for {first:?} -> {second:?}");
+            assert_eq!(transitions, 1);
+            let expected = [first, second]
+                .into_iter()
+                .flat_map(|window| {
+                    let (start, end) = window.unwrap_or((0, 2000));
+                    source[start as usize * 8..end as usize * 8]
+                        .iter()
+                        .map(|sample| f32::from(*sample) / 32768.0)
+                })
+                .collect::<Vec<_>>();
+            assert_eq!(
+                samples.len(),
+                expected.len(),
+                "sample count for {first:?} -> {second:?}"
+            );
+            assert!(
+                samples
+                    .iter()
+                    .zip(&expected)
+                    .all(|(actual, expected)| (actual - expected).abs() < 0.00001),
+                "samples changed at {first:?} -> {second:?}"
+            );
+        }
+    }
+
     fn write_long_silent_wave(path: &std::path::Path) {
         write_silent_mono_wave(path, 80_000);
     }
@@ -4001,7 +4107,6 @@ mod tests {
             slot: Slot::Secondary,
             item: next.clone(),
             phase: IncomingPhase::Prerolling,
-            start_at: None,
         });
 
         engine.fail_incoming(

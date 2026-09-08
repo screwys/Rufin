@@ -15,7 +15,7 @@ pub use loudness::{
 pub use transcode::TranscodedAudioReader;
 pub use waveform::generate_waveform_peaks_cancellable;
 
-pub use visualizer::{VisualizerFft, copy_audio_samples};
+pub use visualizer::VisualizerFft;
 
 /// Initialize GStreamer once before playback or waveform work starts.
 pub fn ensure_gstreamer_initialized() -> Result<(), String> {

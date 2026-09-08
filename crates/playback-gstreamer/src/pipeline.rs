@@ -74,6 +74,14 @@ struct PipelineSession {
     current_stream: PreparedStream,
     queued_stream: SharedQueuedStream,
     playback_rate: f64,
+    segment: Arc<Mutex<SegmentPlayback>>,
+}
+
+#[derive(Default)]
+struct SegmentPlayback {
+    seek: Option<gst::Seqnum>,
+    done: bool,
+    starts_stream: bool,
 }
 impl PlayerPipeline {
     pub(super) fn new(name: &str, shared: Arc<Mutex<SharedBackendState>>) -> Self {
@@ -148,6 +156,15 @@ impl PlayerPipeline {
     }
 
     #[cfg(test)]
+    pub(super) fn audio_graph_root(&self) -> Option<gst::Element> {
+        self.session
+            .as_ref()?
+            .audio_graph
+            .as_ref()
+            .map(|graph| graph.root().clone())
+    }
+
+    #[cfg(test)]
     pub(super) fn output_volume_state(&self) -> Option<(f64, bool)> {
         self.session.as_ref().map(|session| {
             (
@@ -172,47 +189,49 @@ impl PlayerPipeline {
         session.set_state(state)
     }
 
-    pub(super) fn schedule_after(&self, outgoing: &Self) -> Option<gst::ClockTime> {
-        let incoming = self.session.as_ref()?;
-        let outgoing = outgoing.session.as_ref()?;
-        let position = outgoing.position()?;
-        let end = outgoing
-            .clock
-            .end_millis()
-            .map(gst::ClockTime::from_mseconds)
-            .or_else(|| outgoing.duration())?;
-        let remaining = end.checked_sub(position)?;
-        let clock = outgoing.pipeline.clock()?;
-        let delay = gst::ClockTime::from_nseconds(
-            (remaining.nseconds() as f64 / outgoing.playback_rate).round() as u64,
-        );
-        let start_at = clock.time().checked_add(delay)?;
-        let pipeline = incoming.pipeline.downcast_ref::<gst::Pipeline>()?;
-        pipeline.use_clock(Some(&clock));
-        pipeline.set_start_time(gst::ClockTime::NONE);
-        pipeline.set_base_time(start_at);
-        Some(start_at)
-    }
-
-    pub(super) fn clock_reached(&self, time: gst::ClockTime) -> bool {
-        self.session
-            .as_ref()
-            .and_then(|session| session.pipeline.clock())
-            .is_some_and(|clock| clock.time() >= time)
-    }
-
-    pub(super) fn finish_scheduled_start(&self) {
+    pub(super) fn segment_done(&self, seqnum: gst::Seqnum) {
         if let Some(session) = self.session.as_ref() {
-            session
-                .pipeline
-                .set_start_time(session.pipeline.current_running_time());
+            let mut segment = session.segment.lock().unwrap_or_else(|p| p.into_inner());
+            // Some parsers post SEGMENT_DONE with a fresh sequence number. Only
+            // discard completion messages older than the latest seek.
+            if segment.seek.is_some_and(|seek| seqnum >= seek) {
+                segment.done = true;
+            }
         }
     }
 
-    pub(super) fn is_playing(&self) -> bool {
-        self.session
+    pub(super) fn take_segment_done(&self) -> bool {
+        self.session.as_ref().is_some_and(|session| {
+            let mut segment = session.segment.lock().unwrap_or_else(|p| p.into_inner());
+            std::mem::take(&mut segment.done)
+        })
+    }
+
+    pub(super) fn continue_segment(&self, next: Option<&PreparedStream>) -> Result<(), String> {
+        let session = self
+            .session
             .as_ref()
-            .is_some_and(|session| session.pipeline.current_state() == gst::State::Playing)
+            .ok_or("GStreamer session is not active")?;
+        let (start, end, flags) = if let Some(next) = next {
+            *session
+                .queued_stream
+                .lock()
+                .unwrap_or_else(|p| p.into_inner()) = next.clone();
+            let flags = if next.end_millis().is_some() {
+                gst::SeekFlags::ACCURATE | gst::SeekFlags::SEGMENT
+            } else {
+                gst::SeekFlags::ACCURATE
+            };
+            (next.start_millis(), next.end_millis(), flags)
+        } else {
+            // An empty non-segment seek drains the queued tail and delivers EOS.
+            let end = session
+                .clock
+                .end_millis()
+                .ok_or("No bounded segment to finish")?;
+            (end, Some(end), gst::SeekFlags::ACCURATE)
+        };
+        session.seek_segment(start, end, flags, next.is_some())
     }
 
     pub(super) fn stop(&mut self) {
@@ -359,10 +378,6 @@ impl PipelineSession {
         playback_rate: f64,
     ) -> Result<Self, String> {
         let pipeline = make_playbin(name)?;
-        // Both playback slots share a clock that survives either audio sink stopping.
-        if let Some(pipeline) = pipeline.downcast_ref::<gst::Pipeline>() {
-            pipeline.use_clock(Some(&gst::SystemClock::obtain()));
-        }
         let bus = pipeline
             .bus()
             .ok_or_else(|| "GStreamer playbin did not expose a bus".to_string())?;
@@ -430,6 +445,7 @@ impl PipelineSession {
             current_stream: stream.clone(),
             queued_stream,
             playback_rate: sanitize_playback_rate(playback_rate),
+            segment: Arc::new(Mutex::new(SegmentPlayback::default())),
         })
     }
 
@@ -438,7 +454,7 @@ impl PipelineSession {
         settings: &BackendAudioSettings,
     ) -> Result<(), String> {
         if let Some(graph) = self.audio_graph.as_mut()
-            && graph.reconfigure(settings, self.playback_rate, &self.current_stream.loudness)?
+            && graph.reconfigure(settings, self.playback_rate)?
         {
             return Ok(());
         }
@@ -449,6 +465,44 @@ impl PipelineSession {
             self.current_stream.loudness.clone(),
             Arc::clone(&self.queued_stream),
         )?;
+        let segment = Arc::clone(&self.segment);
+        graph
+            .root()
+            .static_pad("sink")
+            .expect("audio graph input")
+            .add_probe(gst::PadProbeType::EVENT_DOWNSTREAM, move |pad, info| {
+                let Some(event) = info.event() else {
+                    return gst::PadProbeReturn::Ok;
+                };
+                if matches!(event.view(), gst::EventView::Segment(_)) {
+                    let starts_stream = {
+                        let mut segment = segment.lock().unwrap_or_else(|p| p.into_inner());
+                        segment.seek == Some(event.seqnum())
+                            && std::mem::take(&mut segment.starts_stream)
+                    };
+                    if starts_stream {
+                        // A non-flushing segment seek keeps the decoder and sink. Mark
+                        // the logical track boundary for gain, tags, and playback events.
+                        let mut tags = Vec::new();
+                        while let Some(tag) = pad.sticky_event::<gst::event::Tag>(tags.len() as u32)
+                        {
+                            tags.push(tag);
+                        }
+                        pad.send_event(
+                            gst::event::StreamStart::builder(&format!(
+                                "rufin-segment-{:?}",
+                                event.seqnum()
+                            ))
+                            .group_id(gst::GroupId::next())
+                            .build(),
+                        );
+                        for tag in tags {
+                            pad.send_event(tag);
+                        }
+                    }
+                }
+                gst::PadProbeReturn::Ok
+            });
         self.pipeline.set_property("audio-sink", graph.root());
         self.audio_graph = Some(graph);
         Ok(())
@@ -456,7 +510,7 @@ impl PipelineSession {
 
     fn try_reconfigure_audio(&mut self, settings: &BackendAudioSettings) -> Result<bool, String> {
         self.audio_graph.as_mut().map_or(Ok(false), |graph| {
-            graph.reconfigure(settings, self.playback_rate, &self.current_stream.loudness)
+            graph.reconfigure(settings, self.playback_rate)
         })
     }
 
@@ -539,30 +593,41 @@ impl PipelineSession {
         if self.module_decoder.load(Ordering::Relaxed) {
             return Err("Tracker decoder does not support safe seeking".to_string());
         }
-        let flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
-        let (seek_flags, stop_type, stop) = self.clock.end_millis().map_or(
-            (flags, gst::SeekType::None, gst::ClockTime::NONE),
-            |end_millis| {
-                (
-                    flags,
-                    gst::SeekType::Set,
-                    Some(gst::ClockTime::from_mseconds(end_millis)),
-                )
-            },
-        );
-        let result = self.pipeline.seek(
+        let mut flags = gst::SeekFlags::FLUSH | gst::SeekFlags::ACCURATE;
+        if self.clock.end_millis().is_some() {
+            flags |= gst::SeekFlags::SEGMENT;
+        }
+        self.seek_segment(millis, self.clock.end_millis(), flags, false)
+    }
+
+    fn seek_segment(
+        &self,
+        millis: u64,
+        end: Option<u64>,
+        flags: gst::SeekFlags,
+        starts_stream: bool,
+    ) -> Result<(), String> {
+        let event = gst::event::Seek::new(
             self.playback_rate,
-            seek_flags,
+            flags,
             gst::SeekType::Set,
-            gst::ClockTime::from_mseconds(
-                self.clock
-                    .end_millis()
-                    .map_or(millis, |end_millis| millis.min(end_millis)),
-            ),
-            stop_type,
-            stop,
+            gst::ClockTime::from_mseconds(end.map_or(millis, |end| millis.min(end))),
+            if end.is_some() {
+                gst::SeekType::Set
+            } else {
+                gst::SeekType::None
+            },
+            end.map(gst::ClockTime::from_mseconds),
         );
-        result.map_err(|error| error.to_string())
+        *self.segment.lock().unwrap_or_else(|p| p.into_inner()) = SegmentPlayback {
+            seek: Some(event.seqnum()),
+            done: false,
+            starts_stream,
+        };
+        self.pipeline
+            .send_event(event)
+            .then_some(())
+            .ok_or_else(|| "GStreamer segment seek failed".to_string())
     }
 
     fn set_playback_rate(
