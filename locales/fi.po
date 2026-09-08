@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-08 14:52+0000\n"
+"PO-Revision-Date: 2026-09-08 15:12+0000\n"
 "Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
 "Language-Team: Finnish <https://hosted.weblate.org/projects/rufin/app/fi/>\n"
 "Language: fi\n"
@@ -389,16 +389,16 @@ msgid "Certificate authority (PEM)"
 msgstr ""
 
 msgid "Change Profile"
-msgstr ""
+msgstr "Vaihda profiilia"
 
 msgid "Change Secret Storage"
-msgstr ""
+msgstr "Vaihda salaisuuden tallennustilaa"
 
 msgid "Change Source"
-msgstr ""
+msgstr "Vaihda lähdettä"
 
 msgid "Change"
-msgstr ""
+msgstr "Vaihda"
 
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
@@ -406,7 +406,7 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
-msgstr ""
+msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
 
 msgid "Choose Folder"
 msgstr "Valitse kansio"
@@ -429,7 +429,7 @@ msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
 
 msgid "Choose playback output"
-msgstr ""
+msgstr "Valitse toiston ulostulo"
 
 msgid "Choose"
 msgstr "Valitse"
@@ -1989,7 +1989,7 @@ msgid "Searching..."
 msgstr "Haetaan..."
 
 msgid "Secret storage"
-msgstr ""
+msgstr "Salaisuuden tallennustila"
 
 msgid "Secure storage"
 msgstr ""
@@ -2058,7 +2058,7 @@ msgid "Server is unreachable"
 msgstr ""
 
 msgid "Server lyrics are off in private mode"
-msgstr ""
+msgstr "Palvelimen sanoitukset eivät ole käytössä yksityistilassa"
 
 msgid "Server prefix doesn't match"
 msgstr ""
@@ -2079,7 +2079,7 @@ msgid "Share"
 msgstr ""
 
 msgid "Shared secret"
-msgstr ""
+msgstr "Jaettu salaisuus"
 
 msgid "Show Rufin"
 msgstr "Näytä Rufin"
@@ -2304,7 +2304,7 @@ msgid "Tracks"
 msgstr "Kappaleet"
 
 msgid "Transition mode"
-msgstr ""
+msgstr "Siirtymätila"
 
 msgid "Translation language"
 msgstr "Käännöskieli"
@@ -2586,12 +2586,12 @@ msgstr "Valitse olemassa oleva paikallinen kansio"
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
-msgstr ""
+msgstr "Sulje {app_name} ja yritä asennusta uudelleen."
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
-msgstr ""
+msgstr "Sulje {app_name} ja yritä asennuksen poistoa uudelleen."
 
 #. Windows installer: FinishTitle.
 msgctxt "Windows installer"
@@ -2606,7 +2606,7 @@ msgstr ""
 #. Windows installer: RemoveCache. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
-msgstr ""
+msgstr "Poista sovelluksen {app_name} välimuisti"
 
 #. Windows installer: InstallWriteFailed.
 msgctxt "Windows installer"
