@@ -657,6 +657,12 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
     );
     append_menu_action(
         &preferences,
+        &tr("Keyboard Shortcuts"),
+        "app.show-shortcuts",
+        "rufin-preferences-desktop-keyboard-shortcuts-symbolic",
+    );
+    append_menu_action(
+        &preferences,
         &primary_menu_private_mode_label(shell.as_ref()),
         "win.toggle-private-mode",
         "rufin-system-lock-screen-symbolic",
@@ -664,12 +670,6 @@ fn replace_primary_menu_model(menu: &gio::Menu, shell: &Rc<Shell>) {
     menu.append_section(None, &preferences);
 
     let window = gio::Menu::new();
-    append_menu_action(
-        &window,
-        &tr("Keyboard Shortcuts"),
-        "app.show-shortcuts",
-        "rufin-preferences-desktop-keyboard-shortcuts-symbolic",
-    );
     append_menu_action(
         &window,
         &tr("Toggle Fullscreen"),

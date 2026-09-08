@@ -73,12 +73,15 @@
     <property name="title" translatable="yes">Pins</property>
     <property name="subtitle" translatable="yes">Fixed position</property>
   </object>
-  <object class="AdwActionRow" id="context_menu_rating_row">
-    <property name="title" translatable="yes">Rating</property>
-    <child type="suffix">
-      <object class="GtkSwitch" id="context_menu_rating_visible">
-        <property name="valign">center</property>
-      </object>
-    </child>
-  </object>
+  <object class="AdwSwitchRow" id="context_menu_play"><property name="title" translatable="yes">Play</property></object>
+  <object class="AdwSwitchRow" id="context_menu_play_next"><property name="title" translatable="yes">Play Next</property></object>
+  <object class="AdwSwitchRow" id="context_menu_play_later"><property name="title" translatable="yes">Play Later</property></object>
+  <object class="AdwSwitchRow" id="context_menu_play_radio"><property name="title" translatable="yes">Play radio</property></object>
+  <object class="AdwSwitchRow" id="context_menu_playlist"><property name="title" translatable="yes">Add to Playlist</property></object>
+  <object class="AdwSwitchRow" id="context_menu_favorites"><property name="title" translatable="yes">Favorites</property></object>
+  <object class="AdwSwitchRow" id="context_menu_metadata"><property name="title" translatable="yes">Edit metadata</property></object>
+  <object class="AdwSwitchRow" id="context_menu_pins"><property name="title" translatable="yes">Pins</property></object>
+  <object class="AdwSwitchRow" id="context_menu_go_to"><property name="title" translatable="yes">Go to</property></object>
+  <object class="AdwSwitchRow" id="context_menu_download"><property name="title" translatable="yes">Download</property></object>
+  <object class="AdwSwitchRow" id="context_menu_rating_row"><property name="title" translatable="yes">Rating</property></object>
 </interface>

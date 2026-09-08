@@ -51,12 +51,6 @@
           </object>
         </child>
         <child>
-          <object class="AdwShortcutsItem" id="shortcut_resync_library">
-            <property name="title" translatable="yes">Resync Library</property>
-            <property name="action-name">win.refresh-library</property>
-          </object>
-        </child>
-        <child>
           <object class="AdwShortcutsItem" id="shortcut_close_window">
             <property name="title" translatable="yes">Close app window</property>
             <property name="action-name">window.close</property>
@@ -66,6 +60,29 @@
           <object class="AdwShortcutsItem" id="shortcut_quit">
             <property name="title" translatable="yes">Quit Rufin</property>
             <property name="action-name">app.quit</property>
+          </object>
+        </child>
+      </object>
+    </child>
+
+    <child>
+      <object class="AdwShortcutsSection" id="section_library">
+        <property name="title" translatable="yes">Library</property>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_resync_library">
+            <property name="title" translatable="yes">Resync Library</property>
+            <property name="action-name">win.refresh-library</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_next_source">
+            <property name="title" translatable="yes">Next source</property>
+            <property name="action-name">win.next-source</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwShortcutsItem" id="shortcut_source_position">
+            <property name="title" translatable="yes">Source by position</property>
           </object>
         </child>
       </object>

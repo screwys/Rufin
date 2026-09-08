@@ -50,6 +50,31 @@ enum ContextMenuEntry<T> {
     Fixed(T),
 }
 
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum ContextMenuSection {
+    Playback,
+    Collection,
+    Details,
+    Downloads,
+    Fixed,
+}
+
+impl ContextMenuSection {
+    fn for_item(item: ContextMenuItem) -> Self {
+        match item {
+            ContextMenuItem::Play
+            | ContextMenuItem::PlayNext
+            | ContextMenuItem::PlayLater
+            | ContextMenuItem::PlayRadio => Self::Playback,
+            ContextMenuItem::AddToPlaylist | ContextMenuItem::Favorites => Self::Collection,
+            ContextMenuItem::EditMetadata | ContextMenuItem::Pins | ContextMenuItem::GoTo => {
+                Self::Details
+            }
+            ContextMenuItem::Download => Self::Downloads,
+        }
+    }
+}
+
 impl ContextMenuSurface {
     pub fn new(
         target: &gtk::Widget,
@@ -174,8 +199,32 @@ impl ContextMenuSurface {
     }
 
     pub fn popup(self, settings: &ContextMenuSettings) {
-        for item in resolve_context_menu_entries(self.entries.into_inner(), settings) {
-            self.menu.append_item(&item);
+        let entries = self
+            .entries
+            .into_inner()
+            .into_iter()
+            .map(|entry| match entry {
+                ContextMenuEntry::Configurable(setting, item) => ContextMenuEntry::Configurable(
+                    setting,
+                    (ContextMenuSection::for_item(setting), item),
+                ),
+                ContextMenuEntry::Fixed(item) => {
+                    ContextMenuEntry::Fixed((ContextMenuSection::Fixed, item))
+                }
+            })
+            .collect();
+        let mut previous = None;
+        let mut section = gio::Menu::new();
+        for (group, item) in resolve_context_menu_entries(entries, settings) {
+            if previous.is_some_and(|previous| previous != group) {
+                self.menu.append_section(None, &section);
+                section = gio::Menu::new();
+            }
+            section.append_item(&item);
+            previous = Some(group);
+        }
+        if section.n_items() > 0 {
+            self.menu.append_section(None, &section);
         }
         if context_menu_needs_sliding_submenus(&self.popover, &self.target, self.position) {
             self.popover.set_flags(gtk::PopoverMenuFlags::empty());
@@ -272,29 +321,15 @@ fn resolve_context_menu_entries<T>(
     entries: Vec<ContextMenuEntry<T>>,
     settings: &ContextMenuSettings,
 ) -> Vec<T> {
-    fn append_segment<T>(
-        resolved: &mut Vec<T>,
-        segment: &mut Vec<(ContextMenuItem, T)>,
-        settings: &ContextMenuSettings,
-    ) {
-        segment.retain(|(item, _)| settings.is_visible(*item));
-        segment.sort_by_key(|(item, _)| settings.position(*item));
-        resolved.extend(segment.drain(..).map(|(_, value)| value));
-    }
-
-    let mut resolved = Vec::with_capacity(entries.len());
-    let mut segment = Vec::new();
-    for entry in entries {
-        match entry {
-            ContextMenuEntry::Configurable(item, value) => segment.push((item, value)),
-            ContextMenuEntry::Fixed(value) => {
-                append_segment(&mut resolved, &mut segment, settings);
-                resolved.push(value);
+    entries
+        .into_iter()
+        .filter_map(|entry| match entry {
+            ContextMenuEntry::Configurable(item, value) => {
+                settings.is_visible(item).then_some(value)
             }
-        }
-    }
-    append_segment(&mut resolved, &mut segment, settings);
-    resolved
+            ContextMenuEntry::Fixed(value) => Some(value),
+        })
+        .collect()
 }
 
 #[cfg(test)]
@@ -324,7 +359,7 @@ mod context_menu_tests {
     }
 
     #[test]
-    fn configurable_items_follow_saved_order_and_visibility() {
+    fn configurable_items_ignore_saved_order_and_preserve_visibility() {
         let settings = settings(&[
             (ContextMenuItem::Download, true),
             (ContextMenuItem::Play, false),
@@ -339,12 +374,12 @@ mod context_menu_tests {
 
         assert_eq!(
             resolve_context_menu_entries(entries, &settings),
-            ["download", "remove-downloads", "favorite"]
+            ["favorite", "download", "remove-downloads"]
         );
     }
 
     #[test]
-    fn fixed_items_anchor_configurable_segments() {
+    fn fixed_items_keep_their_defined_positions() {
         let settings = settings(&[
             (ContextMenuItem::Download, true),
             (ContextMenuItem::Play, true),

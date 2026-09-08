@@ -24,6 +24,8 @@ impl ControlFeedbackState {
         self.show_feedback_toast(title);
     }
 
+    /// Default presenter for informational toasts: one message, no animation or close button.
+    /// Use `show_control_feedback_toast` for optional playback-control notifications.
     pub fn show_feedback_toast(&self, title: String) {
         let Some(label) = self.label.upgrade() else {
             return;
