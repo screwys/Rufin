@@ -9,7 +9,7 @@ description.workspace = true
 repository.workspace = true
 readme.workspace = true
 publish.workspace = true
-keywords = ["music", "audio", "gtk4", "jellyfin", "subsonic"]
+keywords = ["jellyfin", "emby", "plex", "navidrome", "subsonic"]
 categories = ["multimedia::audio", "gui"]
 build = "build.rs"
 

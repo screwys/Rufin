@@ -22,7 +22,7 @@ Rufin, by design, comes with external lyric, metadata and cover lookups enabled,
 
 ### Music servers
 
-Your configured Jellyfin, Navidrome, or OpenSubsonic server. Again, Rufin can not control your server settings that do external requests on their own. Private mode keeps this path working.
+Your configured Jellyfin, Emby, Plex, Navidrome, or OpenSubsonic server, plus configured WebDAV and Samba shares. Again, Rufin can not control your server settings that do external requests on their own. Private mode keeps this path working.
 
 ### Metadata
 
@@ -60,9 +60,9 @@ Discord Rich Presence is disabled by default. It may also use Last.fm, MusicBrai
 
 ### Release notification
 
-Flathub
+GitHub
 
-Release notifications use Flathub release data. This can be disabled by private mode or a separate setting.
+Release notifications use GitHub release data. This can be disabled by private mode or a separate setting.
 
 ## Telemetry
 
