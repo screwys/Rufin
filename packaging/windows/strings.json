@@ -1,0 +1,14 @@
+{
+  "WelcomeTitle": "Welcome to Rufin Setup",
+  "WelcomeText": "Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.\n\nThis setup will install Rufin in your computer.\n\nClick Next to continue.",
+  "FinishTitle": "Completing Rufin Setup",
+  "FinishText": "Rufin has been installed on your computer.\n\nClick Finish to finalize Setup.",
+  "DesktopShortcut": "Create desktop shortcut",
+  "InvalidUpdate": "The {app_name} automatic update option is invalid.",
+  "DirectoryConflict": "Choose a separate installation folder.",
+  "CloseToInstall": "Close {app_name} and try the installation again.",
+  "CloseToUninstall": "Close {app_name} and try the uninstall again.",
+  "RemoveCache": "Remove {app_name}'s cache",
+  "InstallWriteFailed": "Setup could not complete the installation. Please try again.",
+  "CleanupFailed": "Setup could not remove the existing Rufin files. Close Rufin and try again."
+}

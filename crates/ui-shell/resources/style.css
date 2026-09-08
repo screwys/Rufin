@@ -2224,7 +2224,7 @@ entry.lyrics-offset-value.flat:focus-within {
 }
 
 .fullscreen-player {
-  background: color-mix(in srgb, var(--window-bg-color) 94%, var(--card-bg-color));
+  background: var(--window-bg-color);
   color: var(--window-fg-color);
 }
 

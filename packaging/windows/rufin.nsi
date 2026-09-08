@@ -45,6 +45,7 @@ Unicode true
 Name "${RUFIN_DISPLAY_NAME}"
 OutFile "${RUFIN_OUTPUT_DIR}/${RUFIN_PROJECT_NAME}-${RUFIN_VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
+InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
 Icon "${RUFIN_ASSET_DIR}/rufin.ico"
@@ -61,9 +62,19 @@ VIAddVersionKey /LANG=1033 "LegalCopyright" "GPL-3.0-or-later"
 !define MUI_ABORTWARNING
 !define MUI_ICON "${RUFIN_ASSET_DIR}/rufin.ico"
 !define MUI_UNICON "${RUFIN_ASSET_DIR}/rufin.ico"
-!define MUI_WELCOMEPAGE_TITLE "Welcome to ${RUFIN_DISPLAY_NAME}"
-!define MUI_WELCOMEPAGE_TEXT " This will install ${RUFIN_DISPLAY_NAME} on your computer."
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${RUFIN_ASSET_DIR}/wizard.bmp"
+!define MUI_WELCOMEPAGE_TITLE "$(WelcomeTitle)"
+!define MUI_WELCOMEPAGE_TEXT "$(WelcomeText)"
+!define MUI_FINISHPAGE_TITLE "$(FinishTitle)"
+!define MUI_FINISHPAGE_TEXT "$(FinishText)"
 !define MUI_FINISHPAGE_RUN "$INSTDIR\bin\rufin.exe"
+!define MUI_FINISHPAGE_SHOWREADME
+!define MUI_FINISHPAGE_SHOWREADME_TEXT "$(DesktopShortcut)"
+!define MUI_FINISHPAGE_SHOWREADME_FUNCTION CreateDesktopShortcut
+!define MUI_FINISHPAGE_SHOWREADME_NOTCHECKED
+!define MUI_LANGDLL_REGISTRY_ROOT HKCU
+!define MUI_LANGDLL_REGISTRY_KEY "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}"
+!define MUI_LANGDLL_REGISTRY_VALUENAME "InstallerLanguage"
 
 Var LegacyInstallDir
 Var LegacyInstallOwned
@@ -71,6 +82,20 @@ Var UpdateMode
 Var UpdateWaitAttempts
 Var PurgeCache
 Var PurgeCacheCheckbox
+
+!insertmacro MUI_PAGE_WELCOME
+!insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}/LICENSE"
+!define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateDestination
+!insertmacro MUI_PAGE_DIRECTORY
+!insertmacro MUI_PAGE_INSTFILES
+!insertmacro MUI_PAGE_FINISH
+
+!insertmacro MUI_UNPAGE_CONFIRM
+UninstPage custom un.CachePageCreate un.CachePageLeave
+!insertmacro MUI_UNPAGE_INSTFILES
+
+!include "${RUFIN_LANGUAGES_FILE}"
+!insertmacro MUI_RESERVEFILE_LANGDLL
 
 !macro CreateRufinShortcut SHORTCUT_PATH TARGET_PATH ICON_PATH
     !insertmacro ComHlpr_CreateInProcInstance ${CLSID_ShellLink} ${IID_IShellLink} r0 ""
@@ -105,12 +130,11 @@ Var PurgeCacheCheckbox
 
 !macro RequireRufinClosed EXECUTABLE LABEL RUNNING_LABEL
     IfFileExists "${EXECUTABLE}" 0 ${LABEL}_not_running
-    Delete "${EXECUTABLE}.rufin-install"
-    ClearErrors
-    Rename "${EXECUTABLE}" "${EXECUTABLE}.rufin-install"
-    IfErrors ${RUNNING_LABEL}
-    Rename "${EXECUTABLE}.rufin-install" "${EXECUTABLE}"
-    IfErrors ${RUNNING_LABEL}
+    ; Windows permits renaming a running executable. Request exclusive write
+    ; access instead, without changing the installed executable's name.
+    System::Call 'kernel32::CreateFileW(w "${EXECUTABLE}", i 0x40000000, i 0, p 0, i 3, i 0, p 0) p .r0'
+    StrCmp $0 -1 ${RUNNING_LABEL}
+    System::Call 'kernel32::CloseHandle(p r0)'
 
 ${LABEL}_not_running:
 !macroend
@@ -120,6 +144,8 @@ ${LABEL}_not_running:
         "DisplayName" "${RUFIN_DISPLAY_NAME}"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "DisplayVersion" "${RUFIN_VERSION}"
+    WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
+        "InstallLocation" "$INSTDIR"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
         "DisplayIcon" "$INSTDIR\rufin.ico"
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
@@ -137,7 +163,6 @@ ${LABEL}_not_running:
 !macroend
 
 Function .onInit
-    StrCpy $INSTDIR "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
     StrCpy $LegacyInstallOwned 0
     StrCpy $UpdateMode 0
     StrCpy $UpdateWaitAttempts 0
@@ -155,7 +180,7 @@ invalid_update_mode:
 
 invalid_update_mode_message:
     MessageBox MB_OK|MB_ICONSTOP \
-        "The ${RUFIN_DISPLAY_NAME} automatic update option is invalid."
+        "$(InvalidUpdate)"
 
 invalid_update_mode_silent:
     SetErrorLevel 3
@@ -165,8 +190,18 @@ update_mode_enabled:
     StrCpy $UpdateMode 1
 
 update_mode_done:
+    !insertmacro MUI_LANGDLL_DISPLAY
+FunctionEnd
+
+Function DetectPreviousInstall
+    StrCpy $LegacyInstallOwned 0
     ClearErrors
+    ReadRegStr $LegacyInstallDir HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "InstallLocation"
+    StrCmp $LegacyInstallDir "" 0 previous_install_found
     ReadRegStr $LegacyInstallDir HKCU "Software\${RUFIN_PROJECT_NAME}" "InstallDir"
+    StrCmp $LegacyInstallDir "" 0 previous_install_found
+    StrCpy $LegacyInstallDir "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
+previous_install_found:
     StrCmp $LegacyInstallDir "" legacy_install_done
     GetFullPathName $LegacyInstallDir "$LegacyInstallDir"
     GetFullPathName $INSTDIR "$INSTDIR"
@@ -180,6 +215,31 @@ legacy_install_owned:
     StrCpy $LegacyInstallOwned 1
 
 legacy_install_done:
+FunctionEnd
+
+Function ValidateDestination
+    Call DetectPreviousInstall
+    ; Moving into or above the old installation would make its cleanup remove
+    ; the new payload. Both folders must be separate when changing location.
+    StrCmp $LegacyInstallOwned 1 0 destination_valid
+    GetFullPathName $0 "$INSTDIR\"
+    GetFullPathName $1 "$LegacyInstallDir\"
+    StrLen $2 $0
+    StrCpy $3 $1 $2
+    StrCmp $3 $0 invalid_destination
+    StrLen $2 $1
+    StrCpy $3 $0 $2
+    StrCmp $3 $1 invalid_destination
+
+destination_valid:
+    ClearErrors
+    Return
+invalid_destination:
+    IfSilent +2
+    MessageBox MB_OK|MB_ICONEXCLAMATION \
+        "$(DirectoryConflict)"
+    SetErrorLevel 7
+    Abort
 FunctionEnd
 
 Function .onInstSuccess
@@ -203,20 +263,10 @@ Function .onInstFailed
 update_failure_done:
 FunctionEnd
 
-!insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}/LICENSE"
-!insertmacro MUI_PAGE_COMPONENTS
-!insertmacro MUI_PAGE_INSTFILES
-!insertmacro MUI_PAGE_FINISH
-
-!insertmacro MUI_UNPAGE_CONFIRM
-UninstPage custom un.CachePageCreate un.CachePageLeave
-!insertmacro MUI_UNPAGE_INSTFILES
-
-!insertmacro MUI_LANGUAGE "English"
-
 Section "${RUFIN_DISPLAY_NAME}" RufinSection
     SectionIn RO
+    Call ValidateDestination
+    SetErrorLevel 0
 
 runtime_check:
     !insertmacro RequireRufinClosed "$INSTDIR\bin\rufin.exe" current_bin runtime_is_running
@@ -245,13 +295,14 @@ runtime_wait_exhausted:
 
 runtime_show_running:
     MessageBox MB_OK|MB_ICONEXCLAMATION \
-        "Close ${RUFIN_DISPLAY_NAME} and try the installation again."
+        "$(CloseToInstall)"
 
 runtime_silent_abort:
     SetErrorLevel 2
     Abort
 
 runtime_not_running:
+    SetOutPath "$TEMP"
     ClearErrors
     RMDir /r "$INSTDIR\bin"
     RMDir /r "$INSTDIR\etc"
@@ -272,11 +323,11 @@ runtime_not_running:
 
 install_write_failed:
     SetErrorLevel 4
-    Abort
+    Abort "$(InstallWriteFailed)"
 
 runtime_cleanup_failed:
     SetErrorLevel 5
-    Abort
+    Abort "$(CleanupFailed)"
 
 install_written:
 
@@ -327,14 +378,15 @@ create_existing_desktop:
 no_existing_desktop:
 SectionEnd
 
-Section /o "Desktop shortcut" DesktopSection
+Function CreateDesktopShortcut
     !insertmacro CreateRufinShortcut \
         "$DESKTOP\${RUFIN_DISPLAY_NAME}.lnk" \
         "$INSTDIR\bin\rufin.exe" \
         "$INSTDIR\rufin.ico"
-SectionEnd
+FunctionEnd
 
 Function un.onInit
+    !insertmacro MUI_UNGETLANGUAGE
     StrCpy $PurgeCache 0
     ${GetParameters} $0
     ClearErrors
@@ -352,7 +404,7 @@ Function un.CachePageCreate
     ${If} $0 == error
         Abort
     ${EndIf}
-    ${NSD_CreateCheckbox} 0 0 100% 14u "Remove ${RUFIN_DISPLAY_NAME}'s cache"
+    ${NSD_CreateCheckbox} 0 0 100% 14u "$(RemoveCache)"
     Pop $PurgeCacheCheckbox
     ${If} $PurgeCache == 1
         ${NSD_Check} $PurgeCacheCheckbox
@@ -381,13 +433,14 @@ uninstall_runtime_is_running:
 
 uninstall_show_running:
     MessageBox MB_OK|MB_ICONEXCLAMATION \
-        "Close ${RUFIN_DISPLAY_NAME} and try the uninstall again."
+        "$(CloseToUninstall)"
 
 uninstall_silent_abort:
     SetErrorLevel 2
     Abort
 
 uninstall_runtime_not_running:
+    SetOutPath "$TEMP"
     ClearErrors
     Delete "$DESKTOP\${RUFIN_DISPLAY_NAME}.lnk"
     RMDir /r "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}"
@@ -432,7 +485,7 @@ uninstall_restore_registration:
 
 uninstall_cleanup_failed:
     SetErrorLevel 5
-    Abort
+    Abort "$(CleanupFailed)"
 
 uninstall_done:
 SectionEnd

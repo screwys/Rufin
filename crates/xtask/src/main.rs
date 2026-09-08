@@ -11,6 +11,7 @@ mod process;
 mod release;
 mod rpm;
 mod verify;
+mod windows_i18n;
 
 type Result<T> = std::result::Result<T, Box<dyn Error>>;
 
@@ -45,6 +46,7 @@ fn print_usage() {
         "Usage:
   cargo run --locked -p xtask -- generate flatpak-sources [--check]
   cargo run --locked -p xtask -- generate i18n-template [--check] [--output PATH]
+  cargo run --locked -p xtask -- generate windows-installer-languages LOCALE_DIR MAKENSIS OUTPUT
   cargo run --locked -p xtask -- generate linux-packaging [--check]
   cargo run --locked -p xtask -- generate media-verification-files OUTPUT
   cargo run --locked -p xtask -- generate rpm-srpm TAG --output PATH
