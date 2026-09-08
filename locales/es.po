@@ -2599,6 +2599,77 @@ msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
 
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr ""
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
+
 #~ msgid "Add server"
 #~ msgstr "Agregar servidor"
 
