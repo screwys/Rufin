@@ -48,8 +48,8 @@ InstallDir "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
 InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "InstallLocation"
 RequestExecutionLevel user
 SetCompressor /SOLID lzma
-Icon "${RUFIN_ASSET_DIR}/rufin.ico"
-UninstallIcon "${RUFIN_ASSET_DIR}/rufin.ico"
+Icon "${RUFIN_ASSET_DIR}\rufin.ico"
+UninstallIcon "${RUFIN_ASSET_DIR}\rufin.ico"
 
 VIProductVersion "${RUFIN_VERSION_QUAD}"
 VIAddVersionKey /LANG=1033 "ProductName" "${RUFIN_DISPLAY_NAME}"
@@ -60,9 +60,9 @@ VIAddVersionKey /LANG=1033 "ProductVersion" "${RUFIN_VERSION}"
 VIAddVersionKey /LANG=1033 "LegalCopyright" "GPL-3.0-or-later"
 
 !define MUI_ABORTWARNING
-!define MUI_ICON "${RUFIN_ASSET_DIR}/rufin.ico"
-!define MUI_UNICON "${RUFIN_ASSET_DIR}/rufin.ico"
-!define MUI_WELCOMEFINISHPAGE_BITMAP "${RUFIN_ASSET_DIR}/wizard.bmp"
+!define MUI_ICON "${RUFIN_ASSET_DIR}\rufin.ico"
+!define MUI_UNICON "${RUFIN_ASSET_DIR}\rufin.ico"
+!define MUI_WELCOMEFINISHPAGE_BITMAP "${RUFIN_ASSET_DIR}\wizard.bmp"
 !define MUI_WELCOMEPAGE_TITLE "$(WelcomeTitle)"
 !define MUI_WELCOMEPAGE_TEXT "$(WelcomeText)"
 !define MUI_FINISHPAGE_TITLE "$(FinishTitle)"
@@ -84,7 +84,7 @@ Var PurgeCache
 Var PurgeCacheCheckbox
 
 !insertmacro MUI_PAGE_WELCOME
-!insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}/LICENSE"
+!insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}\LICENSE"
 !define MUI_PAGE_CUSTOMFUNCTION_LEAVE ValidateDestination
 !insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
