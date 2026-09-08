@@ -16,19 +16,19 @@
 
 # 📂 Sources
 
-**Local libraries**: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
+<img src="data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
 
-**Jellyfin**: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
+<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-**Navidrome / OpenSubsonic**: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
+<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
 
-**Emby**: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
+<img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.emby.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
 
-**Plex**: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
+<img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.plex.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
-**WebDAV**: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
-**SMB / Samba**: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
+<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 # Features
 
