@@ -141,7 +141,6 @@ jobs:
 
           expected_version="${RELEASE_TAG#v}-1"
           api_errors=0
-          validated=false
           while true; do
             if response="$(curl \
               --fail \
@@ -162,20 +161,21 @@ jobs:
               continue
             fi
 
-            if [[ "$validated" == false ]]; then
-              jq -e \
-                --arg version "$expected_version" \
-                '.ownername == "screwyy"
-                  and .projectname == "rufin"
-                  and .source_package.name == "rufin"
-                  and .source_package.version == $version' \
-                <<<"$response" >/dev/null
-              validated=true
-            fi
-
             echo "COPR build $build_id: $state"
             case "$state" in
               succeeded)
+                if ! jq -e \
+                  --arg version "$expected_version" \
+                  '.ownername == "screwyy"
+                    and .projectname == "rufin"
+                    and .source_package.name == "rufin"
+                    and .source_package.version == $version' \
+                  <<<"$response" >/dev/null; then
+                  echo "COPR build $build_id does not match screwyy/rufin package rufin $expected_version:" >&2
+                  jq '{ownername, projectname, source_package: (.source_package | {name, version})}' \
+                    <<<"$response" >&2
+                  exit 1
+                fi
                 break
                 ;;
               failed|canceled|skipped)
