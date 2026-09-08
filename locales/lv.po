@@ -117,6 +117,11 @@ msgstr ""
 "noapaļot tās šim avotam"
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -796,6 +801,9 @@ msgstr "Rediģēt"
 
 msgid "Embed in track"
 msgstr "Iekļaut dziesmā"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Ieslēgt EBU R128 analīzi?"
@@ -1608,9 +1616,6 @@ msgstr "Citi izdevumi"
 msgid "Overview"
 msgstr "Pārskats"
 
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
-
 msgid "Password"
 msgstr "Parole"
 
@@ -2398,6 +2403,9 @@ msgstr "Tēma"
 
 msgid "This device"
 msgstr "Šī ierīce"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "Šis nav pieejams"

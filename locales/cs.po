@@ -112,6 +112,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -810,6 +815,9 @@ msgstr "Upravit"
 #| msgid "Genre tracks"
 msgid "Embed in track"
 msgstr "Skladby žánru"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
@@ -1634,9 +1642,6 @@ msgstr "Otevřít poznámky k verzi"
 msgid "Overview"
 msgstr "Přehled"
 
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
-
 msgid "Password"
 msgstr "Heslo"
 
@@ -2442,6 +2447,9 @@ msgstr "Téma"
 
 msgid "This device"
 msgstr "Toto zařízení"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "Toto není dostupné"

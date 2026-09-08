@@ -137,6 +137,11 @@ msgstr ""
 "aufrunden"
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -776,6 +781,9 @@ msgstr "Bearbeiten"
 
 msgid "Embed in track"
 msgstr "In Titel einbetten"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "EBU-R128-Analyse aktivieren?"
@@ -1563,9 +1571,6 @@ msgstr "Andere Veröffentlichungen"
 msgid "Overview"
 msgstr "Übersicht"
 
-msgid "Ownership of this item belongs to {source}"
-msgstr "Dieses Element gehört {source}"
-
 msgid "Password"
 msgstr "Passwort"
 
@@ -2331,6 +2336,9 @@ msgstr "Darstellung"
 msgid "This device"
 msgstr "Dieses Gerät"
 
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
+
 msgid "This isn't available"
 msgstr "Dies ist nicht verfügbar"
 
@@ -2616,6 +2624,9 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
+
+#~ msgid "Ownership of this item belongs to {source}"
+#~ msgstr "Dieses Element gehört {source}"
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Gespeichert, mit den Übereinstimmungen der Vorschau synchronisieren"
