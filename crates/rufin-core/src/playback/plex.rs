@@ -790,7 +790,6 @@ async fn create_queue(
     Ok(queue)
 }
 
-#[cfg(test)]
 fn stopped_timeline() -> Timeline {
     Timeline {
         state: "stopped".into(),
