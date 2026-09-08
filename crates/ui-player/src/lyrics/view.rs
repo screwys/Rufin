@@ -197,7 +197,9 @@ impl LyricsPane {
             CurrentLyrics::Loading { media_id } => (Some(media_id), None, None, true),
             CurrentLyrics::Cleared => (None, None, None, false),
         };
-        let matches_current = current_media == media_id;
+        // A new playback run of the same queue item keeps the same lyrics and scroll extent.
+        let matches_current =
+            current_media.map(|media| &media.occurrence) == media_id.map(|media| &media.occurrence);
         let (document, pronunciation) = match content {
             Some(CurrentLyricsContent::Document {
                 document,
@@ -284,6 +286,7 @@ pub struct LyricsPane {
     rows: Rc<RefCell<Vec<LyricsRow>>>,
     content: Rc<RefCell<Option<LyricsPaneContent>>>,
     active_index: Rc<Cell<Option<usize>>>,
+    scroll_index: Rc<Cell<Option<usize>>>,
     active_row: Rc<RefCell<Option<gtk::Widget>>>,
     resize_anchor_y: Rc<Cell<Option<f32>>>,
     scroll_generation: Rc<Cell<u64>>,
@@ -411,6 +414,7 @@ impl LyricsPane {
             rows: Rc::new(RefCell::new(Vec::new())),
             content: Rc::new(RefCell::new(None)),
             active_index: Rc::new(Cell::new(None)),
+            scroll_index: Rc::new(Cell::new(None)),
             active_row: Rc::new(RefCell::new(None)),
             resize_anchor_y: Rc::new(Cell::new(None)),
             scroll_generation: Rc::new(Cell::new(0)),
@@ -550,6 +554,7 @@ impl LyricsPane {
         // for placeholders: GTK 4.22 refs NULL when resetting a map to None.
         self.body.set_font_map(Some(&pangocairo::FontMap::new()));
         self.active_index.set(None);
+        self.scroll_index.set(None);
         self.active_row.borrow_mut().take();
         self.cancel_scroll_animation();
         if !matches!(&content, LyricsPaneContent::Document { .. }) {
@@ -871,6 +876,10 @@ impl LyricsPane {
         let highlight_all_lines =
             lyrics.is_some_and(|lyrics| should_highlight_all_lyrics_lines(lyrics.lines.as_slice()));
         let previous_index = self.active_index.replace(active_index);
+        let scroll_index = active_index.or_else(|| {
+            lyrics.and_then(|lyrics| intro_lyrics_line_index(&lyrics.lines, position_millis))
+        });
+        let previous_scroll_index = self.scroll_index.replace(scroll_index);
         if previous_index != active_index {
             self.active_row.borrow_mut().take();
         }
@@ -905,7 +914,7 @@ impl LyricsPane {
                 }
             }
 
-            lyrics_follow_scroll_target(active_index, previous_index, follow_pause).and_then(
+            lyrics_follow_scroll_target(scroll_index, previous_scroll_index, follow_pause).and_then(
                 |index| {
                     let row = rows
                         .iter()
@@ -931,12 +940,25 @@ impl LyricsPane {
         };
 
         if let Some((row, duration)) = scroll_target {
-            self.scroll_row_into_view(row, duration);
+            if active_index.is_none() {
+                self.cancel_scroll_animation();
+                let adjustment = self.scroller.vadjustment();
+                animate_lyrics_scroll(
+                    adjustment.clone(),
+                    adjustment.lower(),
+                    duration,
+                    Rc::clone(&self.scroll_generation),
+                    self.scroll_generation.get(),
+                );
+            } else {
+                self.scroll_row_into_view(row, duration);
+            }
         }
     }
 
     pub fn refocus_highlight(&self, lyrics: Option<&LyricsDocument>, position_millis: i128) {
         self.active_index.set(None);
+        self.scroll_index.set(None);
         self.follow_pause_until.set(None);
         self.cancel_scroll_animation();
         self.update_highlight_with_scroll_duration(lyrics, position_millis, Some(0));
@@ -979,6 +1001,7 @@ impl LyricsPane {
 
     pub fn restart_follow_tracking(&self) {
         self.active_index.set(None);
+        self.scroll_index.set(None);
         self.follow_pause_until.set(None);
         self.cancel_scroll_animation();
     }
@@ -1212,27 +1235,46 @@ fn scroll_row_into_view_when_ready(
             viewport_height,
         )
         .clamp(adjustment.lower(), upper.max(adjustment.lower()));
-        let start = adjustment.value();
-        let delta = target - start;
-        if duration_millis == 0 || delta.abs() < 1.0 {
-            adjustment.set_value(target);
-            return;
+        animate_lyrics_scroll(
+            adjustment,
+            target,
+            duration_millis,
+            scroll_generation,
+            generation,
+        );
+    });
+}
+
+fn animate_lyrics_scroll(
+    adjustment: gtk::Adjustment,
+    target: f64,
+    duration_millis: u64,
+    scroll_generation: Rc<Cell<u64>>,
+    generation: u64,
+) {
+    let start = adjustment.value();
+    let delta = target - start;
+    if duration_millis == 0 || delta.abs() < 1.0 {
+        adjustment.set_value(target);
+        return;
+    }
+    let mut started_at = None;
+    glib::timeout_add_local(Duration::from_millis(16), move || {
+        if scroll_generation.get() != generation {
+            return glib::ControlFlow::Break;
         }
-        let started_at = Instant::now();
-        glib::timeout_add_local(Duration::from_millis(16), move || {
-            if scroll_generation.get() != generation {
-                return glib::ControlFlow::Break;
-            }
-            let elapsed = started_at.elapsed().as_millis() as f64;
-            let progress = (elapsed / duration_millis as f64).clamp(0.0, 1.0);
-            let eased = 1.0 - (1.0 - progress).powi(3);
-            adjustment.set_value(start + delta * eased);
-            if progress >= 1.0 {
-                glib::ControlFlow::Break
-            } else {
-                glib::ControlFlow::Continue
-            }
-        });
+        let elapsed = started_at
+            .get_or_insert_with(Instant::now)
+            .elapsed()
+            .as_millis() as f64;
+        let progress = (elapsed / duration_millis as f64).clamp(0.0, 1.0);
+        let eased = 1.0 - (1.0 - progress).powi(3);
+        adjustment.set_value(start + delta * eased);
+        if progress >= 1.0 {
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
     });
 }
 
@@ -1260,6 +1302,16 @@ pub fn active_lyrics_line_index(lines: &[LyricsLine], position_millis: i128) -> 
         })
         .max_by_key(|(_, start, index)| (*start, *index))
         .and_then(|(index, _, _)| index)
+}
+
+fn intro_lyrics_line_index(lines: &[LyricsLine], position_millis: i128) -> Option<usize> {
+    let (index, start) = lines
+        .iter()
+        .enumerate()
+        .filter(|(_, line)| lyric_line_has_text(line))
+        .filter_map(|(index, line)| line.start_millis.map(|start| (index, start)))
+        .min_by_key(|&(_, start)| start)?;
+    (position_millis < i128::from(start)).then_some(index)
 }
 
 pub fn should_highlight_all_lyrics_lines(lines: &[LyricsLine]) -> bool {
@@ -1322,6 +1374,101 @@ fn lyric_line_has_text(line: &LyricsLine) -> bool {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn repeat_intro_returns_the_scroller_to_the_top() {
+        use super::*;
+        adw::init().expect("GTK display");
+        crate::register_resources().expect("player resources");
+        let state = crate::lyrics::state::SelectedLyricsState::new();
+        let pane = &state.right_pane;
+        let document = Arc::new(LyricsDocument {
+            role: lyrics::LyricsRole::Original,
+            language: None,
+            offset_millis: 0,
+            agents: Vec::new(),
+            lines: (0..50)
+                .map(|index| line(&format!("Line {index}"), Some(15_000 + index * 5_000)))
+                .collect(),
+        });
+        let previous = playback::CurrentMediaId {
+            run: Some(playback::RunId::new(1)),
+            occurrence: playback::OccurrenceId::new("repeated"),
+        };
+        let next = playback::CurrentMediaId {
+            run: Some(playback::RunId::new(2)),
+            occurrence: previous.occurrence.clone(),
+        };
+        let ready = |media_id| rufin_core::lyrics::CurrentLyrics::Ready {
+            media_id,
+            content: Some(rufin_core::lyrics::CurrentLyricsContent::Document {
+                document: Arc::clone(&document),
+                pronunciation: None,
+            }),
+            origin: None,
+        };
+        let render = |media| {
+            pane.render_projection(
+                &state.projection.borrow(),
+                Some(media),
+                Some("repeated"),
+                &rufin_core::settings::Settings::default(),
+                false,
+                None,
+                0,
+                Rc::new(|_| {}),
+            )
+        };
+        state.apply_projection(ready(previous.clone()));
+        render(&previous);
+        let window = gtk::Window::builder()
+            .default_width(400)
+            .default_height(400)
+            .child(pane.widget())
+            .build();
+        window.present();
+        let settle = |millis| {
+            let until = Instant::now() + Duration::from_millis(millis);
+            while Instant::now() < until {
+                while glib::MainContext::default().pending() {
+                    glib::MainContext::default().iteration(false);
+                }
+                std::thread::sleep(Duration::from_millis(2));
+            }
+        };
+        settle(200);
+        pane.update_highlight(Some(&document), 260_000);
+        settle(400);
+        let adjustment = pane.scroller.vadjustment();
+        let end = adjustment.value();
+        assert!(end > 400.0, "end={end}");
+        // Repeat changes the playback identity before the matching lyrics publication arrives.
+        render(&next);
+        settle(80);
+        assert!(pane.body.is_visible());
+        assert_eq!(adjustment.value(), end);
+        assert!(!state.apply_projection(ready(next.clone())));
+        render(&next);
+        pane.update_highlight(Some(&document), 0);
+        settle(80);
+        let during = adjustment.value();
+        assert!(
+            during > adjustment.lower() && during < end,
+            "during={during}, end={end}"
+        );
+        settle(350);
+        assert!(
+            (adjustment.value() - adjustment.lower()).abs() < 1.0,
+            "intro={}",
+            adjustment.value()
+        );
+        pane.update_highlight(Some(&document), 10_000);
+        settle(350);
+        assert!((adjustment.value() - adjustment.lower()).abs() < 1.0);
+        assert_eq!(pane.active_index.get(), None);
+        window.close();
+    }
+
     #[test]
     #[ignore = "requires a GTK display"]
     fn publications_reuse_and_release_lyrics_rows_with_live_controls() {
@@ -1469,8 +1616,9 @@ mod tests {
     use super::karaoke_text::KaraokeText;
     use super::{
         LyricsFollowScrollPause, active_lyrics_line_index, centered_scroll_target,
-        karaoke_rows_need_full_sync, lyrics_follow_scroll_pause_state, lyrics_follow_scroll_target,
-        lyrics_scroll_animation_millis, should_highlight_all_lyrics_lines,
+        intro_lyrics_line_index, karaoke_rows_need_full_sync, lyrics_follow_scroll_pause_state,
+        lyrics_follow_scroll_target, lyrics_scroll_animation_millis,
+        should_highlight_all_lyrics_lines,
     };
     use gtk::prelude::WidgetExt;
     use lyrics::LyricsLine as LyricLine;
@@ -1610,6 +1758,39 @@ mod tests {
             lyrics_follow_scroll_target(Some(4), Some(3), LyricsFollowScrollPause::Active),
             None
         );
+    }
+
+    #[test]
+    fn lyrics_loop_scrolls_to_the_intro_without_highlighting_it_or_resetting_instrumental_gaps() {
+        let lines = [
+            line("", Some(0)),
+            line("First", Some(5_000)),
+            line("", Some(10_000)),
+            line("Last", Some(15_000)),
+            line("", Some(20_000)),
+        ];
+        let mut previous = None;
+        for (position, highlight, target) in [
+            (15_000, Some(3), Some(3)),
+            (20_000, None, None),
+            (0, None, Some(1)),
+            (1_000, None, None),
+            (5_000, Some(1), None),
+            (10_000, None, None),
+            (15_000, Some(3), Some(3)),
+            (0, None, Some(1)),
+        ] {
+            let active = active_lyrics_line_index(&lines, position);
+            assert_eq!(active, highlight);
+            let scroll = active.or_else(|| intro_lyrics_line_index(&lines, position));
+            assert_eq!(
+                lyrics_follow_scroll_target(scroll, previous, LyricsFollowScrollPause::Inactive),
+                target,
+            );
+            previous = scroll;
+        }
+        assert_eq!(intro_lyrics_line_index(&[], 0), None);
+        assert_eq!(intro_lyrics_line_index(&[line("Untimed", None)], 0), None);
     }
 
     #[test]
