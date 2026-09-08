@@ -875,7 +875,9 @@ button.suggested-action:disabled {
 }
 
 .compact-field-row:focus,
-.compact-field-row:focus-within {
+.compact-field-row:focus-within,
+row.entry.focused,
+row.entry:focus-within {
   outline: none;
   box-shadow: none;
 }
@@ -896,12 +898,6 @@ entry.metadata-identified-change:dir(rtl) {
   entry.metadata-identified-change {
     background: color-mix(in srgb, var(--accent-bg-color) 18%, var(--card-bg-color));
   }
-}
-
-row.entry.password.focused,
-row.entry.password:focus-within {
-  outline: none;
-  box-shadow: none;
 }
 
 .manage-server-action-row image {

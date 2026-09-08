@@ -1,5 +1,5 @@
 use lyrics::{LyricsCue, LyricsCueLine, LyricsLine};
-use playback::{PlaybackOutput, TransportStatus};
+use playback::TransportStatus;
 use std::cmp::Reverse;
 use std::collections::BinaryHeap;
 
@@ -155,16 +155,11 @@ pub fn effective_cue_end(
         .or_else(|| lines.get(line_index + 1).and_then(|line| line.start_millis))
 }
 
-pub fn lyrics_follow_local_clock(state: TransportStatus, output: &PlaybackOutput) -> bool {
-    state == TransportStatus::Playing && output.is_local()
-}
-
 #[cfg(test)]
 mod tests {
     use lyrics::{LyricsCue, LyricsCueLine, LyricsLine};
-    use playback::{PlaybackOutput, RemoteOutput, RemoteOutputProtocol, TransportStatus};
 
-    use super::{KaraokeTiming, LyricsTiming, effective_cue_end, lyrics_follow_local_clock};
+    use super::{KaraokeTiming, LyricsTiming, effective_cue_end};
 
     #[test]
     fn compound_reading_keeps_each_characters_original_timing_after_seeks() {
@@ -384,29 +379,14 @@ mod tests {
             assert_eq!(LyricsTiming::default().next_after(-1, karaoke), None);
         }
     }
-
-    #[test]
-    fn remote_lyrics_wait_for_receiver_positions() {
-        let remote = PlaybackOutput::Remote(RemoteOutput {
-            id: "renderer".to_string(),
-            name: "Renderer".to_string(),
-            protocol: RemoteOutputProtocol::Upnp,
-        });
-
-        assert!(lyrics_follow_local_clock(
-            TransportStatus::Playing,
-            &PlaybackOutput::Local,
-        ));
-        assert!(!lyrics_follow_local_clock(
-            TransportStatus::Playing,
-            &remote,
-        ));
-    }
 }
 
 use crate::PlayerUi;
 use gtk::glib;
-use std::{rc::Rc, time::Duration};
+use std::{
+    rc::Rc,
+    time::{Duration, Instant},
+};
 impl PlayerUi {
     pub fn cancel_scheduled_lyrics_highlight(&self) {
         let Some(lyrics) = self.selected_lyrics() else {
@@ -416,21 +396,30 @@ impl PlayerUi {
             source.remove();
         }
     }
-    pub fn schedule_next_lyrics_highlight(self: &Rc<Self>, position_millis: u64) {
+    pub fn schedule_next_lyrics_highlight(
+        self: &Rc<Self>,
+        position_millis: u64,
+        observed_at: Instant,
+    ) {
         if !self.lyrics_surface_visible() {
             return;
         }
-        let follows_local_clock = self.selected_playback().as_deref().is_some_and(|player| {
-            lyrics_follow_local_clock(player.transport.state, &player.controls.playback_output)
-        });
-        if !follows_local_clock {
+        // Receiver positions anchor the same animation clock as local playback;
+        // waiting for every remote poll makes karaoke advance in visible steps.
+        if !self
+            .selected_playback()
+            .as_deref()
+            .is_some_and(|player| player.transport.state == TransportStatus::Playing)
+        {
             return;
         }
 
         if self.visible_lyrics().is_none() {
             return;
         }
-        let lyrics_position_millis = self.lyrics_position_millis(position_millis);
+        let current_position =
+            position_millis.saturating_add(observed_at.elapsed().as_millis() as u64);
+        let lyrics_position_millis = self.lyrics_position_millis(current_position);
         let Some(lyrics) = self.selected_lyrics() else {
             return;
         };
@@ -447,7 +436,6 @@ impl PlayerUi {
         else {
             return;
         };
-        let next_playback_position_millis = position_millis.saturating_add(delay_millis);
         drop(lyrics);
 
         let shell = Rc::clone(self);
@@ -457,7 +445,9 @@ impl PlayerUi {
             };
             let _source = lyrics.timing_source.borrow_mut().take();
             drop(lyrics);
-            shell.update_lyrics_highlight_at(next_playback_position_millis);
+            // Keep the original position/time anchor across ticks. Adding the
+            // requested delay loses time whenever the GTK main loop runs late.
+            shell.update_lyrics_highlight_at(position_millis, observed_at);
         });
         let Some(lyrics) = self.selected_lyrics() else {
             source.remove();

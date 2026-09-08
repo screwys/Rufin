@@ -212,6 +212,7 @@ impl TrackSelectionSnapshot {
 }
 #[derive(Clone)]
 pub struct PlaylistEntrySelectionSnapshot {
+    pub writable: bool,
     pub playlist: PlaylistKey,
     pub playlist_name: Arc<str>,
     pub entries: Arc<[PlaylistEntryKey]>,

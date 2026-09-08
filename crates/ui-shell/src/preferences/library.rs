@@ -179,9 +179,18 @@ fn library_sources_page(
     }
 
     if local_source.is_some() || !configured.local_folders.is_empty() {
-        local_source_row.set_subtitle(&super::source::folder_selected_text(
-            configured.local_folders.len() as u64,
-        ));
+        let mut subtitle =
+            super::source::folder_selected_text(configured.local_folders.len() as u64);
+        if let Some(summary) = local_source.as_ref().and_then(|source| {
+            configured
+                .local_access
+                .iter()
+                .find(|summary| summary.source_id == source.id)
+        }) {
+            subtitle.push('\n');
+            subtitle.push_str(&source_cache_line(summary));
+        }
+        local_source_row.set_subtitle(&subtitle);
         let local_shell = Rc::downgrade(shell);
         let local_dialog = dialog.downgrade();
         let local_navigation = navigation.downgrade();
@@ -1119,7 +1128,7 @@ fn local_mapping_status(summary: Option<&SourceLocalAccessSummary>) -> String {
     }
     let status = &summary.status;
     if status.total_track_count == 0 {
-        return tr("Saved, sync to preview matches");
+        return tr("Local playback saved");
     }
     let matched = status.matched_track_count.to_string();
     let total = status.total_track_count.to_string();

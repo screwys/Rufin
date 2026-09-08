@@ -20,6 +20,9 @@ pub fn home_section_header(title: &str) -> HomeSectionHeaderView {
 }
 
 impl HomeSectionHeaderView {
+    pub fn set_title(&self, title: &str) {
+        self.imp().heading.set_label(title);
+    }
     pub fn previous(&self) -> gtk::Button {
         self.imp().previous.get()
     }

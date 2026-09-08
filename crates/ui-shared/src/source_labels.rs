@@ -2,6 +2,7 @@ use localization::msgid;
 pub fn source_kind_title(kind: &str) -> Option<&'static str> {
     Some(match kind {
         "jellyfin" => msgid("Jellyfin"),
+        "plex" => msgid("Plex"),
         "navidrome" => msgid("Navidrome"),
         "subsonic" => msgid("OpenSubsonic"),
         "local" => msgid("Local"),
@@ -61,6 +62,7 @@ pub fn configure_ownership_toggle(
 pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
     Some(match kind {
         "jellyfin" => "io.github.screwys.Rufin.source.jellyfin",
+        "plex" => "io.github.screwys.Rufin.source.plex",
         "navidrome" => "io.github.screwys.Rufin.source.navidrome",
         "subsonic" => "io.github.screwys.Rufin.source.opensubsonic",
         "local" => "rufin-folders-symbolic",

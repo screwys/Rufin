@@ -48,16 +48,36 @@ pub enum SourceReportPhase {
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceReportFact {
     pub run: RunId,
+    pub session_identifier: String,
+    pub queue_id: Option<u64>,
+    pub queue_item_id: Option<u64>,
     pub media_uri: String,
     pub phase: SourceReportPhase,
     pub started_at_unix_seconds: i64,
     pub position_millis: u64,
+    pub duration_millis: Option<u64>,
     pub paused: bool,
     pub muted: bool,
     pub volume: f64,
     pub shuffle: bool,
     pub repeat_mode: RepeatMode,
     pub failed: bool,
+}
+
+/// A receiver observation, applied without issuing transport commands or reporting
+/// another player's listen as Rufin activity. Queue metadata remains windowed.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ExternalPlayback {
+    pub queue: Option<library::QueueRestore>,
+    pub queue_total: usize,
+    pub queue_offset: usize,
+    pub status: TransportStatus,
+    pub position_millis: Option<u64>,
+    pub duration_millis: u64,
+    pub volume: f64,
+    pub muted: bool,
+    pub repeat: RepeatMode,
+    pub shuffle: bool,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -119,6 +139,11 @@ pub enum SessionEffect {
 
 #[derive(Clone, Debug, PartialEq)]
 pub enum SessionCommand {
+    OperationFailed(String),
+    ObserveExternal {
+        output: PlaybackOutput,
+        observation: ExternalPlayback,
+    },
     ApplyBatch {
         batch: Batch,
         placement: Placement,
@@ -272,6 +297,8 @@ enum QueueCompletion {
 
 #[derive(Clone, Debug)]
 pub(crate) struct PlaybackSession {
+    external: Option<ExternalPlayback>,
+    external_clock_millis: u64,
     sequence: Sequence,
     pending_queue: Option<(u64, QueueCompletion)>,
     next_queue_request: u64,
@@ -311,6 +338,8 @@ impl PlaybackSession {
         let output_muted = settings.muted;
         let restored_paused = sequence.selected().is_some();
         Self {
+            external: None,
+            external_clock_millis: 0,
             sequence,
             pending_queue: None,
             next_queue_request: 1,
@@ -347,8 +376,173 @@ impl PlaybackSession {
     pub fn sequence(&self) -> &Sequence {
         &self.sequence
     }
+    pub(crate) fn external_queue_extent(&self) -> Option<(usize, usize)> {
+        self.external
+            .as_ref()
+            .map(|external| (external.queue_total, external.queue_offset))
+    }
+
+    pub(crate) fn handoff_snapshot(&self) -> (library::QueueRestore, Option<SourceReportFact>) {
+        if self.external.is_some() {
+            return (self.sequence.snapshot(), None);
+        }
+        let restored = self.sequence.selected().map(|entry| {
+            let run = RunId::new(self.next_run_number);
+            let mut current = RunContext::resolving(run, self.play_id(run), entry);
+            current.status = TransportStatus::Paused;
+            current.desired_playing = false;
+            current
+        });
+        (
+            self.sequence.snapshot(),
+            self.current_run
+                .as_ref()
+                .or(restored.as_ref())
+                .map(|run| self.source_report(run, SourceReportPhase::Progress, false)),
+        )
+    }
+    pub(crate) fn next_session_identifier(&self) -> String {
+        self.play_id(RunId::new(self.next_run_number))
+    }
+
+    fn observe_external(
+        &mut self,
+        output: PlaybackOutput,
+        mut observation: ExternalPlayback,
+        sample: &ClockSample,
+    ) -> Result<SessionUpdate, SequenceError> {
+        let clock_changed = self.advance_external_clock(sample).view_changed;
+        let already_external = self.external.is_some();
+        self.external_clock_millis = sample.monotonic_millis;
+        // Hold the same occurrence's playhead for ignored previews and buffering
+        // reports, including when queue metadata is refreshed at the same time.
+        if already_external
+            && (observation.position_millis.is_none()
+                || observation.status == TransportStatus::Buffering)
+            && observation
+                .queue
+                .as_ref()
+                .is_none_or(|queue| queue.current() == self.sequence.selected_id())
+        {
+            observation.position_millis = Some(self.sequence.progress_millis());
+        }
+        // Validate the captured queue before retiring the local occurrence.
+        let sequence = observation
+            .queue
+            .take()
+            .map(|queue| Sequence::from_window(queue, self.sequence.revision() + 1))
+            .transpose()?;
+        let mut update = SessionUpdate::default();
+        if self.external.is_none() {
+            if let Some(run) = self.current_run() {
+                update
+                    .effects
+                    .push(SessionEffect::Backend(BackendCommand::Stop { run }));
+            }
+            self.finish_current(RunEndReason::Stopped, sample, &mut update.effects);
+            self.pending_queue = None;
+            self.deferred_queue.clear();
+            self.pending_replacement = None;
+            self.pending_additive.clear();
+            self.auto_dj_in_flight = None;
+        }
+        if let Some(sequence) = sequence {
+            self.sequence = sequence;
+            update.queue_changed = true;
+            update.effects.push(SessionEffect::CurrentMediaChanged);
+        }
+        update.view_changed = clock_changed
+            || update.queue_changed
+            || self.external.as_ref() != Some(&observation)
+            || self.playback_output != output;
+        if let Some(position) = observation.position_millis {
+            self.sequence.set_progress_millis(position);
+        }
+        self.sequence.set_repeat_mode(observation.repeat);
+        self.sequence.observe_shuffle(observation.shuffle);
+        self.output_volume = observation.volume;
+        self.output_muted = observation.muted;
+        self.playback_output = output;
+        self.external = Some(observation);
+        self.last_error = None;
+        update.effects.retain(|effect| {
+            !matches!(
+                effect,
+                SessionEffect::PersistProgress { .. } | SessionEffect::PersistState { .. }
+            )
+        });
+        if already_external && update.queue_changed {
+            self.maybe_request_auto_dj(&mut update.effects);
+        }
+        Ok(update)
+    }
+
+    pub(crate) fn advance_external_clock(&mut self, sample: &ClockSample) -> SessionUpdate {
+        let Some(external) = self.external.as_ref() else {
+            return SessionUpdate::default();
+        };
+        let elapsed = sample
+            .monotonic_millis
+            .saturating_sub(self.external_clock_millis);
+        self.external_clock_millis = sample.monotonic_millis;
+        if external.status != TransportStatus::Playing || self.sequence.selected_id().is_none() {
+            return SessionUpdate::default();
+        }
+        let previous = self.sequence.progress_millis();
+        let mut position = previous.saturating_add(elapsed);
+        let duration = self.duration_millis();
+        if duration > 0 {
+            position = position.min(duration);
+        }
+        self.sequence.set_progress_millis(position);
+        SessionUpdate {
+            view_changed: position != previous,
+            ..SessionUpdate::default()
+        }
+    }
+
+    pub(crate) fn adopt_local(
+        &mut self,
+        queue: library::QueueRestore,
+        stream: PreparedStream,
+        playing: bool,
+    ) -> Result<SessionUpdate, SequenceError> {
+        let sequence = Sequence::from_window(queue, self.sequence.revision() + 1)?;
+        if sequence.selected().is_none() {
+            return Err(SequenceError::MissingSelectedOccurrence);
+        }
+        self.external = None;
+        self.sequence = sequence;
+        self.sequence.persist_membership();
+        self.playback_output = PlaybackOutput::Local;
+        self.output_volume = self.settings.volume;
+        self.output_muted = self.settings.muted;
+        self.current_run = None;
+        self.next_plan = None;
+        self.auto_dj_in_flight = None;
+        self.auto_dj_waiting_for_continuation = false;
+        let mut update = SessionUpdate {
+            view_changed: true,
+            queue_changed: true,
+            ..SessionUpdate::default()
+        };
+        if let Some(entry) = self.sequence.selected().cloned() {
+            let run = self.next_run_id();
+            let mut current = RunContext::resolving(run, self.play_id(run), &entry);
+            current.desired_playing = playing;
+            self.current_run = Some(current);
+            self.plan_next(&mut update.effects);
+            update
+                .effects
+                .extend(self.current_stream_resolved(run, stream).effects);
+            update.effects.push(SessionEffect::CurrentMediaChanged);
+            update.effects.push(self.state_effect());
+        }
+        Ok(update)
+    }
     pub(crate) fn take_queue_persistence(&mut self) -> Option<crate::QueuePersistenceKind> {
-        self.sequence.take_persistence()
+        let dirty = self.sequence.take_persistence();
+        if self.external.is_some() { None } else { dirty }
     }
     pub(crate) fn accepts_queue(&self, id: u64) -> bool {
         self.pending_queue
@@ -369,6 +563,9 @@ impl PlaybackSession {
     }
 
     pub fn status(&self) -> TransportStatus {
+        if let Some(external) = &self.external {
+            return external.status;
+        }
         self.current_run
             .as_ref()
             .map(|run| {
@@ -390,6 +587,12 @@ impl PlaybackSession {
     }
 
     pub fn desired_playing(&self) -> bool {
+        if let Some(external) = &self.external {
+            return matches!(
+                external.status,
+                TransportStatus::Playing | TransportStatus::Buffering
+            );
+        }
         self.current_run
             .as_ref()
             .is_some_and(|run| run.desired_playing)
@@ -411,6 +614,11 @@ impl PlaybackSession {
     }
 
     pub fn duration_millis(&self) -> u64 {
+        if let Some(external) = &self.external {
+            if external.duration_millis > 0 {
+                return external.duration_millis;
+            }
+        }
         self.current_run
             .as_ref()
             .map(|run| run.duration_millis)
@@ -435,6 +643,7 @@ impl PlaybackSession {
     }
 
     pub(crate) fn replace_output(&mut self, output: PlaybackOutput) -> SessionUpdate {
+        self.external = None;
         self.playback_output = output;
         self.last_error = None;
         if self.playback_output.is_local() {
@@ -572,6 +781,18 @@ impl PlaybackSession {
             return Ok(SessionUpdate::default());
         }
         match command {
+            SessionCommand::OperationFailed(message) => {
+                self.last_error = Some(message.clone());
+                Ok(SessionUpdate {
+                    effects: vec![SessionEffect::NonfatalError(message)],
+                    view_changed: true,
+                    ..SessionUpdate::default()
+                })
+            }
+            SessionCommand::ObserveExternal {
+                output,
+                observation,
+            } => self.observe_external(output, observation, sample),
             SessionCommand::ApplyBatch { batch, placement } => {
                 self.apply_batch(batch, placement, sample)
             }
@@ -822,6 +1043,9 @@ impl PlaybackSession {
         batch: Batch,
         sample: &ClockSample,
     ) -> Result<Option<SessionUpdate>, SequenceError> {
+        if self.external.is_some() {
+            return Ok(None);
+        }
         let key = AutoDjKey {
             seed_occurrence: seed_occurrence.clone(),
         };
@@ -951,7 +1175,9 @@ impl PlaybackSession {
     }
 
     pub(crate) fn hydrate_queue(&mut self) -> Option<SessionEffect> {
-        if self.pending_queue.is_some() {
+        // Receiver observations already contain a hydrated, centered window. Local
+        // hydration would trim its leading rows and move the visible selection.
+        if self.external.is_some() || self.pending_queue.is_some() {
             return None;
         }
         let request = self.sequence.read_request()?;
@@ -2012,6 +2238,8 @@ impl PlaybackSession {
             transition,
             resolution: NextResolution::Resolving,
         });
+        let mut request = request;
+        request.session_identifier = Some(self.play_id(next_run));
         effects.push(SessionEffect::ResolveStream {
             run: next_run,
             occurrence: next,
@@ -2020,10 +2248,12 @@ impl PlaybackSession {
     }
 
     fn resolve_effect(&self, run: RunId, entry: &std::sync::Arc<QueueOccurrence>) -> SessionEffect {
+        let mut request = StreamRequest::for_item(&entry.item, self.settings.stream_quality);
+        request.session_identifier = Some(self.play_id(run));
         SessionEffect::ResolveStream {
             run,
             occurrence: entry.clone(),
-            request: StreamRequest::for_item(&entry.item, self.settings.stream_quality),
+            request,
         }
     }
 
@@ -2218,6 +2448,9 @@ impl PlaybackSession {
     ) -> SourceReportFact {
         SourceReportFact {
             run: current.id,
+            session_identifier: current.play_id.clone(),
+            queue_id: None,
+            queue_item_id: None,
             media_uri: self
                 .sequence
                 .occurrence(&current.occurrence)
@@ -2225,11 +2458,10 @@ impl PlaybackSession {
                 .media_uri
                 .clone(),
             phase,
-            started_at_unix_seconds: current
-                .started_at_unix_seconds
-                .expect("source reports require a started Playback run"),
+            started_at_unix_seconds: current.started_at_unix_seconds.unwrap_or_default(),
             position_millis: self.sequence.progress_millis(),
-            paused: current.status == TransportStatus::Paused,
+            duration_millis: (current.duration_millis > 0).then_some(current.duration_millis),
+            paused: !current.desired_playing,
             muted: self.settings.muted,
             volume: self.settings.volume,
             shuffle: self.sequence.shuffle_enabled(),
@@ -2265,8 +2497,17 @@ impl PlaybackSession {
     }
 
     fn maybe_request_auto_dj(&mut self, effects: &mut Vec<SessionEffect>) {
+        let remaining = self.external.as_ref().map_or_else(
+            || self.sequence.remaining_after_selected(),
+            |external| {
+                external.queue_total.saturating_sub(
+                    external.queue_offset
+                        + self.sequence.selected_index().map_or(0, |index| index + 1),
+                )
+            },
+        );
         if !self.auto_dj_enabled
-            || self.sequence.remaining_after_selected() >= self.auto_dj_refill_threshold
+            || remaining >= self.auto_dj_refill_threshold
             || self.auto_dj_in_flight.is_some()
         {
             return;
@@ -3088,6 +3329,301 @@ mod orchestration_tests {
                 ..
             }) if *run == next_run
         )));
+        let identifiers = current_update
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                SessionEffect::ResolveStream { run, request, .. } => Some((
+                    *run,
+                    request
+                        .session_identifier
+                        .clone()
+                        .expect("Plex session identity"),
+                )),
+                _ => None,
+            })
+            .collect::<HashMap<_, _>>();
+        assert_ne!(identifiers[&current_run], identifiers[&next_run]);
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1,
+            local_period: "1970-01".into(),
+        };
+        let started = session.handle_backend(BackendEvent::Started { run: current_run }, &sample);
+        assert!(started.effects.iter().any(|effect| matches!(effect,SessionEffect::SourceReport(report) if report.phase==SourceReportPhase::Started && report.session_identifier==identifiers[&current_run])));
+        session.handle_backend(
+            BackendEvent::Position {
+                run: current_run,
+                millis: 179_500,
+            },
+            &sample,
+        );
+        let transitioned = session.handle_backend(
+            BackendEvent::Transitioned {
+                old_run: current_run,
+                new_run: next_run,
+            },
+            &sample,
+        );
+        let reports = transitioned
+            .effects
+            .iter()
+            .filter_map(|effect| match effect {
+                SessionEffect::SourceReport(report) => Some(report),
+                _ => None,
+            })
+            .collect::<Vec<_>>();
+        assert!(
+            reports
+                .iter()
+                .any(|report| report.phase == SourceReportPhase::Ended
+                    && report.session_identifier == identifiers[&current_run]
+                    && report.position_millis == 179_500)
+        );
+        assert!(
+            reports
+                .iter()
+                .any(|report| report.phase == SourceReportPhase::Started
+                    && report.session_identifier == identifiers[&next_run]
+                    && report.position_millis == 0)
+        );
+    }
+
+    #[tokio::test]
+    async fn receiver_window_survives_local_hydration_ticks() {
+        let (_directory, _database, sequence) = seeded(
+            (0..30)
+                .map(|id| batch_item(id, Provenance::Manual))
+                .collect(),
+        )
+        .await;
+        let mut queue = sequence.snapshot();
+        queue.current_index = Some(20);
+        let mut session = PlaybackSession::new(
+            sequence,
+            "receiver",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1,
+            local_period: "1970-01".into(),
+        };
+        session
+            .observe_external(
+                PlaybackOutput::Remote(crate::RemoteOutput {
+                    id: "plexamp:test".into(),
+                    name: "Plexamp".into(),
+                    protocol: crate::RemoteOutputProtocol::PlexCompanion,
+                }),
+                ExternalPlayback {
+                    queue: Some(queue),
+                    queue_total: 1000,
+                    queue_offset: 600,
+                    status: TransportStatus::Playing,
+                    position_millis: Some(42000),
+                    duration_millis: 180000,
+                    volume: 1.0,
+                    muted: false,
+                    repeat: RepeatMode::Off,
+                    shuffle: false,
+                },
+                &sample,
+            )
+            .unwrap();
+        let before = session.view();
+        assert_eq!(before.queue_window.len(), 30);
+        assert!(session.hydrate_queue().is_none());
+        let after = session.view();
+        assert_eq!(after.queue_window, before.queue_window);
+        assert_eq!(after.queue.current_index, Some(620));
+    }
+
+    #[tokio::test]
+    async fn receiver_observation_keeps_global_queue_facts_without_commands_or_duplicate_reports() {
+        let (_directory, _database, sequence) = seeded(vec![
+            batch_item(1, Provenance::Manual),
+            batch_item(1, Provenance::Manual),
+        ])
+        .await;
+        let queue = sequence.snapshot();
+        let mut session = PlaybackSession::new(
+            sequence,
+            "receiver",
+            PlaybackSettings::default(),
+            PlaybackOutput::Local,
+            false,
+            3,
+        );
+        let (_, report) = session.handoff_snapshot();
+        let report = report.expect("restored paused occurrence can select a PMS queue item");
+        assert_eq!(report.phase, SourceReportPhase::Progress);
+        assert!(report.paused);
+        let mut sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 1,
+            local_period: "1970-01".into(),
+        };
+        let mut queue = queue;
+        queue.current_index = Some(1);
+        let selected = queue.current().unwrap().clone();
+        let output = PlaybackOutput::Remote(crate::RemoteOutput {
+            id: "plexamp:test".into(),
+            name: "Plexamp".into(),
+            protocol: crate::RemoteOutputProtocol::PlexCompanion,
+        });
+        let observation = ExternalPlayback {
+            queue: Some(queue.clone()),
+            queue_total: 1000,
+            queue_offset: 600,
+            status: TransportStatus::Paused,
+            position_millis: Some(42000),
+            duration_millis: 180000,
+            volume: 0.4,
+            muted: false,
+            repeat: RepeatMode::All,
+            shuffle: true,
+        };
+        let update = session
+            .observe_external(output.clone(), observation.clone(), &sample)
+            .unwrap();
+        assert!(!update.effects.iter().any(|effect| matches!(
+            effect,
+            SessionEffect::Backend(_)
+                | SessionEffect::SourceReport(_)
+                | SessionEffect::Listening(_)
+        )));
+        let view = session.view();
+        assert_eq!(view.queue.total, 1000);
+        assert_eq!(view.queue.current_index, Some(601));
+        assert_eq!(
+            view.transport.current.unwrap().occurrence.occurrence,
+            selected
+        );
+        assert_eq!(view.transport.position_millis, 42000);
+        assert_eq!(view.transport.state, TransportStatus::Paused);
+        assert!(view.controls.shuffle_enabled);
+        let update = session
+            .observe_external(
+                output,
+                ExternalPlayback {
+                    queue: None,
+                    ..observation
+                },
+                &sample,
+            )
+            .unwrap();
+        assert!(!update.view_changed);
+        assert!(update.effects.is_empty());
+        assert!(session.handoff_snapshot().1.is_none());
+        let mut preview = session.external.clone().unwrap();
+        preview.status = TransportStatus::Playing;
+        preview.position_millis = None;
+        preview.queue = Some(session.sequence.snapshot());
+        session
+            .observe_external(session.playback_output.clone(), preview, &sample)
+            .unwrap();
+        assert_eq!(session.view().transport.position_millis, 42000);
+        sample.monotonic_millis = 1000;
+        let tick = session.advance_external_clock(&sample);
+        assert!(tick.view_changed);
+        assert!(tick.effects.is_empty());
+        assert_eq!(session.view().transport.position_millis, 43000);
+        let mut preview = session.external.clone().unwrap();
+        preview.position_millis = None;
+        sample.monotonic_millis = 1500;
+        session
+            .observe_external(session.playback_output.clone(), preview, &sample)
+            .unwrap();
+        assert_eq!(session.view().transport.position_millis, 43500);
+        let mut committed = session.external.clone().unwrap();
+        committed.position_millis = Some(90000);
+        session
+            .observe_external(session.playback_output.clone(), committed, &sample)
+            .unwrap();
+        assert_eq!(session.view().transport.position_millis, 90000);
+        let mut buffering = session.external.clone().unwrap();
+        buffering.status = TransportStatus::Buffering;
+        buffering.duration_millis = 0;
+        for old_position in [0, 7000] {
+            buffering.position_millis = Some(old_position);
+            session
+                .observe_external(session.playback_output.clone(), buffering.clone(), &sample)
+                .unwrap();
+            assert_eq!(session.view().transport.position_millis, 90000);
+        }
+        sample.monotonic_millis = 5000;
+        assert!(!session.advance_external_clock(&sample).view_changed);
+        let view = session.view();
+        assert_eq!(view.transport.state, TransportStatus::Buffering);
+        assert!(view.transport.desired_playing);
+        assert_eq!(view.transport.position_millis, 90000);
+        assert_eq!(
+            view.transport.duration_millis,
+            session.sequence.selected().unwrap().duration_millis as u64
+        );
+        assert!(view.transport.can_seek);
+        assert_eq!(
+            view.transport.current.unwrap().occurrence.occurrence,
+            selected
+        );
+        let enabled = session.set_auto_dj(true, 3);
+        assert!(
+            !enabled
+                .effects
+                .iter()
+                .any(|effect| matches!(effect, SessionEffect::RequestAutoDj(_))),
+            "end of a receiver window is not end of its queue"
+        );
+        let mut near_end = session.external.clone().unwrap();
+        near_end.queue_total = 602;
+        near_end.queue = Some(session.sequence.snapshot());
+        let refill = session
+            .observe_external(session.playback_output.clone(), near_end, &sample)
+            .unwrap();
+        assert!(refill.effects.iter().any(|effect| matches!(effect,SessionEffect::RequestAutoDj(request) if request.seed_occurrence==selected)));
+        assert!(
+            session
+                .complete_auto_dj(
+                    &selected,
+                    Batch::new(vec![batch_item(9, Provenance::AutoDj)]),
+                    &sample
+                )
+                .unwrap()
+                .is_none(),
+            "native candidates are inserted through PMS, not into the observed window"
+        );
+        let update = session
+            .adopt_local(
+                queue,
+                crate::ResolvedStream::new("file:///return.flac").into(),
+                false,
+            )
+            .unwrap();
+        assert!(
+            !update.effects.iter().any(|effect| matches!(
+                effect,
+                SessionEffect::Backend(BackendCommand::Start { .. })
+            ))
+        );
+        assert_eq!(session.view().transport.state, TransportStatus::Paused);
+        assert_eq!(
+            session.take_queue_persistence(),
+            Some(crate::QueuePersistenceKind::Membership)
+        );
+        assert_eq!(
+            session
+                .view()
+                .transport
+                .current
+                .unwrap()
+                .occurrence
+                .occurrence,
+            selected
+        );
     }
 
     #[tokio::test]

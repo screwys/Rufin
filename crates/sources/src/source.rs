@@ -34,9 +34,10 @@ pub struct SelectedFeed {
 }
 
 enum SelectedFeedChange {
+    Plex(RemoteItemChange),
     Files(crate::file::remote::changes::FileChange),
     Local(LocalLiveChange),
-    Jellyfin(JellyfinLiveChange),
+    Jellyfin(RemoteItemChange),
 }
 
 impl SelectedFeed {
@@ -61,6 +62,7 @@ impl SelectedFeed {
 impl SelectedFeedChange {
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
+            (Self::Plex(current), Self::Plex(incoming)) => Self::Plex(current.merge(incoming)),
             (Self::Files(current), Self::Files(incoming)) => Self::Files(current.merge(incoming)),
             (Self::Local(current), Self::Local(incoming)) => Self::Local(current.merge(incoming)),
             (Self::Jellyfin(current), Self::Jellyfin(incoming)) => {
@@ -125,6 +127,16 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match (&self.source.implementation, change) {
+            (Implementation::Plex(_), SelectedFeedChange::Plex(RemoteItemChange::BoundaryLost)) => {
+                Ok(None)
+            }
+            (
+                Implementation::Plex(source),
+                SelectedFeedChange::Plex(RemoteItemChange::Items { upserts, removals }),
+            ) => source
+                .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
+                .await
+                .map(Some),
             (
                 Implementation::Files(files),
                 SelectedFeedChange::Files(crate::file::remote::changes::FileChange::Inventory),
@@ -145,7 +157,7 @@ impl SelectedFeed {
             (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan))
             | (
                 Implementation::Jellyfin(_),
-                SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost),
+                SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost),
             ) => Ok(None),
             (
                 Implementation::Local(local),
@@ -162,7 +174,7 @@ impl SelectedFeed {
                 .map(Some),
             (
                 Implementation::Jellyfin(source),
-                SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items { upserts, removals }),
+                SelectedFeedChange::Jellyfin(RemoteItemChange::Items { upserts, removals }),
             ) => source
                 .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
                 .await
@@ -337,7 +349,7 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) enum JellyfinLiveChange {
+pub(crate) enum RemoteItemChange {
     Items {
         upserts: Vec<String>,
         removals: Vec<String>,
@@ -345,7 +357,7 @@ pub(crate) enum JellyfinLiveChange {
     BoundaryLost,
 }
 
-impl JellyfinLiveChange {
+impl RemoteItemChange {
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (Self::BoundaryLost, _) | (_, Self::BoundaryLost) => Self::BoundaryLost,
@@ -457,6 +469,20 @@ pub struct ConnectedSource {
 }
 
 impl ConnectedSource {
+    pub(crate) fn plex(
+        configuration: SourceConfiguration,
+        source: crate::plex::PlexSource,
+        credential: Option<String>,
+    ) -> Self {
+        Self {
+            source: Source::new(
+                configuration.source_id.clone(),
+                Implementation::Plex(source),
+            ),
+            configuration,
+            credential,
+        }
+    }
     pub(crate) fn files(
         configuration: SourceConfiguration,
         source: crate::file::remote::RemoteSource,
@@ -527,6 +553,7 @@ pub enum SourceEditResult {
 }
 
 enum Implementation {
+    Plex(crate::plex::PlexSource),
     Local(crate::file::local::LocalSource),
     Files(crate::file::remote::RemoteSource),
     Jellyfin(crate::jellyfin::JellyfinSource),
@@ -544,6 +571,92 @@ pub struct Source {
 }
 
 impl Source {
+    pub async fn plex_companion_context(&self) -> SourceResult<crate::PlexCompanionContext> {
+        Ok(self
+            .plex_companion_source()?
+            .companion_context(&self.source_id)
+            .await)
+    }
+    fn plex_companion_source(&self) -> SourceResult<&crate::plex::PlexSource> {
+        match &self.implementation {
+            Implementation::Plex(source) => Ok(source),
+            _ => Err(SourceError::InvalidRequest(
+                "Native Plexamp playback requires one configured Plex server and profile",
+            )),
+        }
+    }
+    pub async fn plex_companion_players(&self) -> SourceResult<Vec<crate::PlexCompanionPlayer>> {
+        self.plex_companion_source()?.companion_players().await
+    }
+    pub async fn plex_delegation_token(&self) -> SourceResult<String> {
+        self.plex_companion_source()?.delegation_token().await
+    }
+    pub async fn plex_import_items(
+        &self,
+        database: &Database,
+        rating_keys: &[String],
+    ) -> SourceResult<()> {
+        self.plex_companion_source()?
+            .apply_live_items(
+                database,
+                self.source_id.as_str(),
+                rating_keys.to_vec(),
+                Vec::new(),
+            )
+            .await?;
+        Ok(())
+    }
+    pub async fn plex_queue_window(
+        &self,
+        queue_id: u64,
+        center: Option<u64>,
+    ) -> SourceResult<crate::PlexQueueWindow> {
+        self.plex_companion_source()?
+            .queue_window(&self.source_id, queue_id, center)
+            .await
+    }
+    pub async fn plex_queue_membership(
+        &self,
+        queue_id: u64,
+        total: usize,
+    ) -> SourceResult<crate::PlexQueueWindow> {
+        self.plex_companion_source()?
+            .queue_membership(&self.source_id, queue_id, total)
+            .await
+    }
+    pub async fn plex_queue_adjacent(
+        &self,
+        queue_id: u64,
+        center: u64,
+        before: bool,
+        center_offset: Option<usize>,
+    ) -> SourceResult<crate::PlexQueueWindow> {
+        self.plex_companion_source()?
+            .queue_adjacent(&self.source_id, queue_id, center, before, center_offset)
+            .await
+    }
+    pub async fn plex_queue_mutation(
+        &self,
+        mutation: crate::PlexQueueMutation,
+    ) -> SourceResult<crate::PlexQueueWindow> {
+        self.plex_companion_source()?
+            .queue_mutation(&self.source_id, mutation)
+            .await
+    }
+}
+
+impl Source {
+    pub fn plex_login(&self) -> Option<Arc<tokio::sync::Mutex<crate::PlexLogin>>> {
+        match &self.implementation {
+            Implementation::Plex(source) => Some(Arc::clone(&source.login)),
+            _ => None,
+        }
+    }
+    pub fn bind_plex_login(&mut self, login: Arc<tokio::sync::Mutex<crate::PlexLogin>>) {
+        if let Implementation::Plex(source) = &mut self.implementation {
+            source.login = login;
+        }
+    }
     fn track_object_id(&self, media_uri: &str) -> SourceResult<String> {
         library::source_entity_parts(media_uri)
             .filter(|(source_id, kind, _)| source_id == &self.source_id && kind == "track")
@@ -565,6 +678,7 @@ impl Source {
         input: SourceSetupInput,
     ) -> SourceResult<ConnectedSource> {
         match input {
+            SourceSetupInput::Plex(input) => crate::plex::connect(source_id, input).await,
             SourceSetupInput::WebDav {
                 name,
                 settings,
@@ -594,6 +708,9 @@ impl Source {
         jellyfin_device_id: Option<String>,
     ) -> SourceResult<SourceEditResult> {
         match input {
+            SourceSettingsInput::Plex(input) => {
+                crate::plex::edit(current, current_credential, input).await
+            }
             SourceSettingsInput::Files {
                 name,
                 settings,
@@ -623,6 +740,7 @@ impl Source {
     ) -> SourceResult<Self> {
         let implementation =
             match configuration.kind.as_str() {
+                "plex" => Implementation::Plex(crate::plex::open(&configuration, credential)?),
                 "smb" | "webdav" => Implementation::Files(crate::file::remote::RemoteSource::open(
                     &configuration,
                     credential,
@@ -737,6 +855,11 @@ impl Source {
         .await?;
         let cancelled_fn = || cancelled.load(Ordering::Relaxed);
         let staged = match &self.implementation {
+            Implementation::Plex(source) => {
+                source
+                    .stage_catalog(&mut scan, progress, &cancelled_fn)
+                    .await
+            }
             Implementation::Files(source) => {
                 source
                     .stage_catalog(database, &mut scan, progress, &cancelled_fn)
@@ -790,6 +913,7 @@ impl Source {
 
     async fn freshness(&self) -> SourceResult<Option<Freshness>> {
         match &self.implementation {
+            Implementation::Plex(_) => Ok(None),
             Implementation::Local(_) | Implementation::Jellyfin(_) => Ok(None),
             Implementation::Files(source) => source.freshness().await,
             Implementation::OpenSubsonic(source) => source.freshness().await,
@@ -806,6 +930,15 @@ impl Source {
         }
         let object_id = self.track_object_id(&request.media_uri)?;
         match &self.implementation {
+            Implementation::Plex(source) => {
+                source
+                    .resolve_stream(
+                        &object_id,
+                        request.quality,
+                        request.session_identifier.as_deref(),
+                    )
+                    .await
+            }
             Implementation::Files(source) => source.stream(database, &request.media_uri).await,
             Implementation::Local(_) => Err(SourceError::NotFound),
             Implementation::Jellyfin(source) => {
@@ -827,6 +960,9 @@ impl Source {
         }
         let object_id = self.track_object_id(&request.media_uri)?;
         match &self.implementation {
+            Implementation::Plex(source) => {
+                source.resolve_download(&object_id, request.quality).await
+            }
             Implementation::Files(source) => source
                 .stream(database, &request.media_uri)
                 .await
@@ -843,6 +979,12 @@ impl Source {
 
     pub async fn image(&self, request: SourceImageRequest) -> SourceResult<ImageBytes> {
         match &self.implementation {
+            Implementation::Plex(source) => match request {
+                SourceImageRequest::Native { image_ref, size } => {
+                    source.image_bytes(&image_ref, size).await
+                }
+                SourceImageRequest::Local(_) => Err(SourceError::NotFound),
+            },
             Implementation::Files(source) => source.image(request).await,
             Implementation::Local(source) => source.image(request),
             Implementation::Jellyfin(source) => match request {
@@ -867,6 +1009,11 @@ impl Source {
         limit: usize,
     ) -> SourceResult<(library::SearchResults, Option<library::ScanOutcome>)> {
         match &self.implementation {
+            Implementation::Plex(source) => {
+                source
+                    .live_search(&self.source_id, database, query, limit)
+                    .await
+            }
             Implementation::Local(_) | Implementation::Files(_) => {
                 Err(SourceError::InvalidRequest("File Search is Database-owned"))
             }
@@ -890,6 +1037,7 @@ impl Source {
         favorite: bool,
     ) -> SourceResult<()> {
         match &self.implementation {
+            Implementation::Plex(_) => Ok(()),
             Implementation::Local(_) | Implementation::Files(_) => Ok(()),
             Implementation::Jellyfin(source) => source.set_favorite(object_id, favorite).await,
             Implementation::OpenSubsonic(source) => {
@@ -903,6 +1051,7 @@ impl Source {
             return Err(SourceError::InvalidRequest("rating outside 0..=10"));
         }
         match &self.implementation {
+            Implementation::Plex(source) => source.set_rating(object_id, rating).await,
             Implementation::Local(_) | Implementation::Files(_) => Ok(()),
             Implementation::Jellyfin(source) => source.set_rating(object_id, rating).await,
             Implementation::OpenSubsonic(source) => source.set_rating(object_id, rating).await,
@@ -958,6 +1107,7 @@ impl Source {
 
     async fn refresh_remote_metadata_index(&self) -> SourceResult<()> {
         match &self.implementation {
+            Implementation::Plex(_) => Ok(()),
             Implementation::Local(_) | Implementation::Files(_) | Implementation::Jellyfin(_) => {
                 Ok(())
             }
@@ -985,6 +1135,10 @@ impl Source {
         }
         let source = track.source_key;
         match &self.implementation {
+            Implementation::Plex(_) => self
+                .metadata_file_target(database, source, &track)
+                .await
+                .is_ok(),
             Implementation::Files(_) => {
                 sidecar
                     || track
@@ -1026,6 +1180,10 @@ impl Source {
             return Err(crate::SourceMetadataError::Unavailable);
         }
         match &self.implementation {
+            Implementation::Plex(_) => {
+                self.write_file_lyrics(database, source, &track, lyrics, sidecar)
+                    .await
+            }
             Implementation::Files(files) => {
                 files.write_lyrics(database, &track, lyrics, sidecar).await
             }
@@ -1108,6 +1266,9 @@ impl Source {
         if let Implementation::Jellyfin(jellyfin) = &self.implementation {
             return jellyfin.read_track_metadata(track).await;
         }
+        if let Implementation::Plex(plex) = &self.implementation {
+            return plex.read_track_metadata(track).await;
+        }
         let (path, format) = self.metadata_file_target(database, source, &track).await?;
         if matches!(self.implementation, Implementation::OpenSubsonic(_))
             && !self.mapped_metadata_ready().await
@@ -1145,6 +1306,7 @@ impl Source {
         match &self.implementation {
             Implementation::Files(files) => files.read_album_metadata(database, album).await,
             Implementation::Jellyfin(jellyfin) => jellyfin.read_album_metadata(album).await,
+            Implementation::Plex(plex) => plex.read_album_metadata(album).await,
             Implementation::Local(_) => {
                 self.read_local_album_metadata(database, source, album)
                     .await
@@ -1176,6 +1338,7 @@ impl Source {
         match &self.implementation {
             Implementation::Files(files) => files.read_artist_metadata(database, artist).await,
             Implementation::Jellyfin(jellyfin) => jellyfin.read_artist_metadata(artist).await,
+            Implementation::Plex(plex) => plex.read_artist_metadata(artist).await,
             Implementation::Local(_) => {
                 self.read_local_artist_metadata(database, source, artist)
                     .await
@@ -1248,6 +1411,18 @@ impl Source {
             .ok_or(crate::SourceMetadataError::Unavailable)?;
         let source = track.source_key;
         match &self.implementation {
+            Implementation::Plex(plex) => {
+                plex.write_track_metadata(&track.object_id, expected_revision, &edit)
+                    .await?;
+                plex.apply_live_items(
+                    database,
+                    self.source_id.as_str(),
+                    vec![raw_item_id(&track.object_id).into()],
+                    vec![],
+                )
+                .await
+                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+            }
             Implementation::Files(files) => {
                 files
                     .write_track_metadata(database, &track, expected_revision, &edit)
@@ -1288,6 +1463,18 @@ impl Source {
             .ok_or(crate::SourceMetadataError::Unavailable)?;
         let source = album.source_key;
         match &self.implementation {
+            Implementation::Plex(plex) => {
+                plex.write_album_metadata(&album.object_id, expected_revision, &edit)
+                    .await?;
+                plex.apply_live_items(
+                    database,
+                    self.source_id.as_str(),
+                    vec![raw_item_id(&album.object_id).into()],
+                    vec![],
+                )
+                .await
+                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+            }
             Implementation::Files(files) => {
                 files
                     .write_album_metadata(database, &album, expected_revision, &edit)
@@ -1328,6 +1515,18 @@ impl Source {
             .ok_or(crate::SourceMetadataError::Unavailable)?;
         let source = artist.source_key;
         match &self.implementation {
+            Implementation::Plex(plex) => {
+                plex.write_artist_metadata(&artist.object_id, expected_revision, &edit)
+                    .await?;
+                plex.apply_live_items(
+                    database,
+                    self.source_id.as_str(),
+                    vec![raw_item_id(&artist.object_id).into()],
+                    vec![],
+                )
+                .await
+                .map_err(|error| crate::SourceMetadataError::SavedRefreshFailed(error.to_string()))
+            }
             Implementation::Files(files) => {
                 files
                     .write_artist_metadata(database, &artist, expected_revision, &edit)
@@ -1546,7 +1745,9 @@ impl Source {
                     .await
                     .map_err(metadata_database_error)
             }
-            Implementation::Jellyfin(_) | Implementation::Files(_) => unreachable!(),
+            Implementation::Plex(_) | Implementation::Jellyfin(_) | Implementation::Files(_) => {
+                unreachable!()
+            }
         }
     }
 
@@ -1618,7 +1819,9 @@ impl Source {
                     .await
                     .map_err(metadata_database_error)
             }
-            Implementation::Jellyfin(_) | Implementation::Files(_) => unreachable!(),
+            Implementation::Plex(_) | Implementation::Jellyfin(_) | Implementation::Files(_) => {
+                unreachable!()
+            }
         }
     }
 
@@ -1682,7 +1885,9 @@ impl Source {
                     .await
                     .map_err(metadata_database_error)
             }
-            Implementation::Jellyfin(_) | Implementation::Files(_) => unreachable!(),
+            Implementation::Plex(_) | Implementation::Jellyfin(_) | Implementation::Files(_) => {
+                unreachable!()
+            }
         }
     }
 
@@ -1828,6 +2033,7 @@ impl Source {
             None => Vec::new(),
         };
         let playlist = match &self.implementation {
+            Implementation::Plex(provider) => provider.create_playlist(name, &first_ids).await?,
             Implementation::Jellyfin(provider) => {
                 provider.create_playlist(name, &first_ids).await?
             }
@@ -1839,6 +2045,9 @@ impl Source {
         for page in pages {
             let ids = playlist_track_ids(database, source, None, page, false).await?;
             match &self.implementation {
+                Implementation::Plex(provider) => {
+                    provider.add_playlist_tracks(&playlist, &ids).await?
+                }
                 Implementation::Jellyfin(provider) => {
                     provider.add_playlist_tracks(&playlist, &ids).await?
                 }
@@ -1863,6 +2072,7 @@ impl Source {
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
         let id = source_playlist_id(database, source, playlist).await?;
         match &self.implementation {
+            Implementation::Plex(provider) => provider.rename_playlist(&id, name).await?,
             Implementation::Jellyfin(provider) => provider.rename_playlist(&id, name).await?,
             Implementation::OpenSubsonic(provider) => provider.rename_playlist(&id, name).await?,
             Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
@@ -1880,6 +2090,7 @@ impl Source {
     ) -> SourceResult<(bool, Option<ScanOutcome>)> {
         let id = source_playlist_id(database, source, playlist).await?;
         match &self.implementation {
+            Implementation::Plex(provider) => provider.delete_playlist(&id).await?,
             Implementation::Jellyfin(provider) => provider.delete_playlist(&id).await?,
             Implementation::OpenSubsonic(provider) => provider.delete_playlist(&id).await?,
             Implementation::Local(_) | Implementation::Files(_) => unreachable!(),
@@ -1897,8 +2108,11 @@ impl Source {
         media_uris: &[String],
         skip_existing: bool,
     ) -> SourceResult<(usize, Option<ScanOutcome>)> {
-        let skip_existing =
-            skip_existing || matches!(self.implementation, Implementation::Jellyfin(_));
+        let skip_existing = skip_existing
+            || matches!(
+                self.implementation,
+                Implementation::Jellyfin(_) | Implementation::Plex(_)
+            );
 
         let id = source_playlist_id(database, source, playlist).await?;
         let mut accepted = 0;
@@ -1910,6 +2124,7 @@ impl Source {
             }
             accepted += ids.len();
             match &self.implementation {
+                Implementation::Plex(provider) => provider.add_playlist_tracks(&id, &ids).await?,
                 Implementation::Jellyfin(provider) => {
                     provider.add_playlist_tracks(&id, &ids).await?
                 }
@@ -1950,6 +2165,9 @@ impl Source {
                 ));
             }
             match &self.implementation {
+                Implementation::Plex(provider) => {
+                    provider.remove_playlist_entries(&id, &occurrences).await?
+                }
                 Implementation::Jellyfin(provider) => {
                     provider.remove_playlist_entries(&id, &occurrences).await?
                 }
@@ -1986,6 +2204,17 @@ impl Source {
                 "Playlist entry is no longer current",
             ))?;
         match &self.implementation {
+            Implementation::Plex(provider) => {
+                let previous = database
+                    .playlist_entry_rows(&[entry], &library::ReadCancellation::new())
+                    .await?
+                    .first()
+                    .map(|row| row.position.max(0) as usize)
+                    .ok_or(SourceError::NotFound)?;
+                provider
+                    .move_playlist_entry(&id, &occurrence, previous, position)
+                    .await?
+            }
             Implementation::Jellyfin(provider) => {
                 provider
                     .move_playlist_entry(&id, &occurrence, position)
@@ -2010,6 +2239,16 @@ impl Source {
         deleted: Option<String>,
     ) -> SourceResult<ScanOutcome> {
         match &self.implementation {
+            Implementation::Plex(source) => {
+                source
+                    .apply_live_items(
+                        database,
+                        self.source_id.as_str(),
+                        affected.into_iter().collect(),
+                        deleted.into_iter().collect(),
+                    )
+                    .await
+            }
             Implementation::Jellyfin(source) => {
                 source
                     .apply_live_items(
@@ -2050,6 +2289,10 @@ impl Source {
     ) -> SourceResult<Option<SourceLyrics>> {
         let track_object_id = self.track_object_id(media_uri)?;
         match &self.implementation {
+            Implementation::Plex(source) => source
+                .lyrics(&track_object_id)
+                .await
+                .map(|lyrics| lyrics.map(SourceLyrics::Structured)),
             Implementation::Files(source) => source
                 .lyrics(database, media_uri)
                 .await
@@ -2072,6 +2315,11 @@ impl Source {
         music_folder_object_id: Option<&str>,
     ) -> SourceResult<LiveFolderPage> {
         match &self.implementation {
+            Implementation::Plex(source) => {
+                source
+                    .browse_folder(folder_object_id, music_folder_object_id)
+                    .await
+            }
             Implementation::Local(_) | Implementation::Files(_) => Err(
                 SourceError::InvalidRequest("File Folder browsing is Database-owned"),
             ),
@@ -2094,6 +2342,7 @@ impl Source {
         limit: usize,
     ) -> SourceResult<Vec<String>> {
         match &self.implementation {
+            Implementation::Plex(source) => source.generated_track_object_ids(seed, limit).await,
             Implementation::Local(_) | Implementation::Files(_) => Ok(Vec::new()),
             Implementation::Jellyfin(source) => {
                 source.generated_track_object_ids(seed, limit).await
@@ -2211,6 +2460,7 @@ impl Source {
         };
         let mut scan = Scan::begin_items(database, self.source_id.as_str()).await?;
         match &self.implementation {
+            Implementation::Plex(source) => source.stage_collection(&mut scan, &collection).await?,
             Implementation::Jellyfin(source) => {
                 source.stage_collection(&mut scan, &collection).await?
             }
@@ -2228,6 +2478,7 @@ impl Source {
         section: SourceHomeSection,
     ) -> SourceResult<Vec<library::HomeEntryInput>> {
         match &self.implementation {
+            Implementation::Plex(source) => source.home_section(section).await,
             Implementation::Local(_) | Implementation::Files(_) => Ok(Vec::new()),
             Implementation::Jellyfin(source) => source.home_section(section).await,
             Implementation::OpenSubsonic(source) => source.home_section(section).await,
@@ -2277,6 +2528,20 @@ impl Source {
                         }
                     });
             }
+            Implementation::Plex(_) => {
+                let producer = Arc::clone(&feed);
+                let task = runtime.spawn(async move {
+                    if let Implementation::Plex(source) = &producer.source.implementation {
+                        source
+                            .listen_library_changes(|change| {
+                                producer.submit(SelectedFeedChange::Plex(change))
+                            })
+                            .await;
+                    }
+                });
+                *feed.remote_task.lock().unwrap_or_else(|p| p.into_inner()) =
+                    Some(task.abort_handle());
+            }
             Implementation::Jellyfin(_) => {
                 let producer = Arc::clone(&feed);
                 let task = runtime.spawn(async move {
@@ -2284,9 +2549,8 @@ impl Source {
                     let mut ready = move || !ready_feed.cancelled.load(Ordering::Acquire);
                     let gap_feed = Arc::clone(&producer);
                     let mut gap = move || {
-                        gap_feed.submit(SelectedFeedChange::Jellyfin(
-                            JellyfinLiveChange::BoundaryLost,
-                        ))
+                        gap_feed
+                            .submit(SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost))
                     };
                     let change_feed = Arc::clone(&producer);
                     let mut changed =
@@ -2305,9 +2569,7 @@ impl Source {
                     if let Err(error) = result {
                         tracing::warn!(%error, "Jellyfin library change feed stopped");
                     }
-                    producer.submit(SelectedFeedChange::Jellyfin(
-                        JellyfinLiveChange::BoundaryLost,
-                    ));
+                    producer.submit(SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost));
                 });
                 *feed
                     .remote_task
@@ -2359,6 +2621,7 @@ impl Source {
     pub async fn report_playback(&self, report: &SourceReportFact) -> SourceResult<()> {
         let object_id = self.track_object_id(&report.media_uri)?;
         match &self.implementation {
+            Implementation::Plex(source) => source.report_playback(&object_id, report).await,
             Implementation::Local(_) | Implementation::Files(_) => Ok(()),
             Implementation::Jellyfin(source) => source.report_playback(&object_id, report).await,
             Implementation::OpenSubsonic(source) => {
@@ -2724,6 +2987,16 @@ async fn source_playlist_id(
     source: library::SourceKey,
     playlist: library::PlaylistKey,
 ) -> SourceResult<String> {
+    if database
+        .playlist_rows(&[playlist], &library::ReadCancellation::new())
+        .await?
+        .first()
+        .is_some_and(|row| !row.writable)
+    {
+        return Err(SourceError::InvalidRequest(
+            "This server playlist is managed by its rules and cannot be edited",
+        ));
+    }
     database
         .source_playlist_object_id(source, playlist, &library::ReadCancellation::new())
         .await?
@@ -2900,15 +3173,15 @@ mod refresh_laws {
 
     #[test]
     fn selected_feed_accumulates_exact_jellyfin_ids_with_one_bound() {
-        let merged = SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+        let merged = SelectedFeedChange::Jellyfin(RemoteItemChange::Items {
             upserts: vec!["two".to_string(), "one".to_string()],
             removals: Vec::new(),
         })
-        .merge(SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+        .merge(SelectedFeedChange::Jellyfin(RemoteItemChange::Items {
             upserts: vec!["one".to_string(), "three".to_string()],
             removals: vec!["gone".to_string()],
         }));
-        let SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items { upserts, removals }) = merged
+        let SelectedFeedChange::Jellyfin(RemoteItemChange::Items { upserts, removals }) = merged
         else {
             panic!("exact evidence widened unexpectedly");
         };
@@ -2918,38 +3191,37 @@ mod refresh_laws {
 
     #[test]
     fn selected_feed_overflow_coalesces_to_one_boundary_operation() {
-        let merged = SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+        let merged = SelectedFeedChange::Jellyfin(RemoteItemChange::Items {
             upserts: (0..LIVE_CHANGE_LIMIT)
                 .map(|index| format!("item-{index}"))
                 .collect(),
             removals: Vec::new(),
         })
-        .merge(SelectedFeedChange::Jellyfin(JellyfinLiveChange::Items {
+        .merge(SelectedFeedChange::Jellyfin(RemoteItemChange::Items {
             upserts: vec!["overflow".to_string()],
             removals: Vec::new(),
         }));
         assert!(matches!(
             merged,
-            SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost)
+            SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost)
         ));
     }
 
     #[test]
     fn repeated_boundary_evidence_admits_one_recovery() {
         let (wake, receiver) = async_channel::bounded(1);
-        let mut pending = Some(SelectedFeedChange::Jellyfin(
-            JellyfinLiveChange::BoundaryLost,
-        ));
-        pending = Some(pending.take().expect("first boundary").merge(
-            SelectedFeedChange::Jellyfin(JellyfinLiveChange::BoundaryLost),
-        ));
+        let mut pending = Some(SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost));
+        pending = Some(
+            pending
+                .take()
+                .expect("first boundary")
+                .merge(SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost)),
+        );
         assert!(wake.try_send(()).is_ok());
         let _ = wake.try_send(());
         assert!(matches!(
             pending.as_ref(),
-            Some(SelectedFeedChange::Jellyfin(
-                JellyfinLiveChange::BoundaryLost
-            ))
+            Some(SelectedFeedChange::Jellyfin(RemoteItemChange::BoundaryLost))
         ));
         assert!(receiver.try_recv().is_ok());
         assert!(receiver.try_recv().is_err());

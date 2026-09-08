@@ -143,6 +143,20 @@ type Reply<T> = SyncSender<PlaybackResult<T>>;
 type Clock = Arc<dyn Fn() -> ClockSample + Send + Sync>;
 
 enum RuntimeCommand {
+    HandoffSnapshot {
+        reply: Reply<(
+            library::QueueRestore,
+            Option<crate::SourceReportFact>,
+            String,
+        )>,
+    },
+    AdoptLocal {
+        queue: library::QueueRestore,
+        stream: PreparedStream,
+        playing: bool,
+        backend: Box<dyn PlaybackBackend>,
+        reply: Reply<()>,
+    },
     Session {
         command: SessionCommand,
         reply: Reply<()>,
@@ -281,6 +295,43 @@ impl Playback {
 
     pub fn command(&self, command: SessionCommand) -> PlaybackResult<()> {
         self.request(|reply| RuntimeCommand::Session { command, reply })
+    }
+
+    pub fn handoff_snapshot(
+        &self,
+    ) -> PlaybackResult<(
+        library::QueueRestore,
+        Option<crate::SourceReportFact>,
+        String,
+    )> {
+        self.request(|reply| RuntimeCommand::HandoffSnapshot { reply })
+    }
+
+    pub fn observe_external(
+        &self,
+        output: SelectedPlaybackOutput,
+        observation: crate::ExternalPlayback,
+    ) -> PlaybackResult<()> {
+        self.command(SessionCommand::ObserveExternal {
+            output,
+            observation,
+        })
+    }
+
+    pub fn adopt_local(
+        &self,
+        queue: library::QueueRestore,
+        stream: PreparedStream,
+        playing: bool,
+        backend: Box<dyn PlaybackBackend>,
+    ) -> PlaybackResult<()> {
+        self.request(|reply| RuntimeCommand::AdoptLocal {
+            queue,
+            stream,
+            playing,
+            backend,
+            reply,
+        })
     }
     /// Acknowledges the read after its accepted state reaches the output consumer.
     pub fn complete_queue(
@@ -499,6 +550,32 @@ fn apply_runtime_command(
 ) -> bool {
     let sample = clock();
     match command {
+        RuntimeCommand::HandoffSnapshot { reply } => {
+            let (queue, report) = runtime.session.handoff_snapshot();
+            let _ = reply.send(Ok((
+                queue,
+                report,
+                runtime.session.next_session_identifier(),
+            )));
+        }
+        RuntimeCommand::AdoptLocal {
+            queue,
+            stream,
+            playing,
+            backend,
+            reply,
+        } => {
+            let result = runtime
+                .session
+                .adopt_local(queue, stream, playing)
+                .map_err(PlaybackError::from)
+                .and_then(|update| {
+                    let mut previous = std::mem::replace(&mut runtime.backend, backend);
+                    let _ = previous.shutdown();
+                    runtime.finish(update, &sample)
+                });
+            reply_update(result, outputs, reply);
+        }
         RuntimeCommand::Session { command, reply } => {
             reply_update(runtime.command(command, &sample), outputs, reply);
         }
@@ -713,6 +790,38 @@ mod persistence_tests {
 
         fn drain_events(&mut self) -> Vec<BackendEvent> {
             Vec::new()
+        }
+    }
+
+    #[test]
+    fn repeated_operation_failures_publish_notices_without_a_current_track() {
+        let mut runtime = PlaybackRuntime::new(
+            Sequence::new(),
+            "failed-operation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            SelectedPlaybackOutput::Local,
+            Box::new(IdleBackend),
+        );
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 0,
+            local_period: "1970-01".into(),
+        };
+        for _ in 0..2 {
+            let update = runtime
+                .command(
+                    SessionCommand::OperationFailed("Unavailable".into()),
+                    &sample,
+                )
+                .unwrap();
+            let projection = update.projection.unwrap();
+            assert!(projection.view.transport.current.is_none());
+            assert_eq!(
+                projection.notices,
+                [PlaybackNotice::OperationFailed("Unavailable".into())]
+            );
         }
     }
 
@@ -1049,6 +1158,10 @@ impl PlaybackRuntime {
             let update = self.session.handle_backend(event, sample);
             output.merge(self.finish(update, sample)?);
         }
+        let update = self.session.advance_external_clock(sample);
+        if update.view_changed {
+            output.merge(self.commit(update));
+        }
         Ok(output)
     }
 
@@ -1153,6 +1266,10 @@ impl PlaybackRuntime {
                 }
                 SessionEffect::PositionDiscontinuity(discontinuity) => {
                     notices.push(PlaybackNotice::PositionDiscontinuity(discontinuity));
+                }
+                SessionEffect::NonfatalError(error) => {
+                    notices.push(PlaybackNotice::OperationFailed(error.clone()));
+                    effects.push(SessionEffect::NonfatalError(error));
                 }
                 SessionEffect::Visualizer { run, levels } => {
                     visualizer = Some((run, levels));

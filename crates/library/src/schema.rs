@@ -230,7 +230,7 @@ CREATE INDEX IF NOT EXISTS local_locators_precedence_idx ON local_locators(media
 "#;
 pub(crate) const CATALOG_SCHEMA: &str = r#"PRAGMA application_id = 1381320270;
 
-PRAGMA user_version = 45;
+PRAGMA user_version = 46;
 
 CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
@@ -487,6 +487,7 @@ CREATE TABLE IF NOT EXISTS native_playlists (
     normalized_name TEXT NOT NULL,
     sort_text TEXT NOT NULL,
     artwork_binding BLOB,
+    writable INTEGER NOT NULL DEFAULT 1,
     UNIQUE (source_key, object_id)
 ) STRICT;
 
@@ -523,6 +524,7 @@ CREATE TABLE IF NOT EXISTS home_entries (
     entity_key INTEGER NOT NULL,
     title TEXT NOT NULL,
     subtitle TEXT NOT NULL,
+    section_title TEXT,
     PRIMARY KEY (source_key, section_id, position)
 ) STRICT;
 
@@ -603,6 +605,8 @@ CREATE TABLE IF NOT EXISTS local_file_dependencies (
     UNIQUE (local_file_key, dependency_path)
 ) STRICT;
 
+CREATE INDEX IF NOT EXISTS local_file_dependencies_path_idx ON local_file_dependencies(dependency_path, local_file_key);
+
 CREATE TABLE IF NOT EXISTS local_access_metadata (
     access_uri TEXT PRIMARY KEY,
     size_bytes INTEGER NOT NULL, mtime_ns INTEGER NOT NULL, device_id INTEGER, inode INTEGER,
@@ -670,6 +674,24 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(CATALOG_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    for (table, column, definition) in [
+        ("native_playlists", "writable", "INTEGER NOT NULL DEFAULT 1"),
+        ("home_entries", "section_title", "TEXT"),
+    ] {
+        let present: bool =
+            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)")
+                .bind(table)
+                .bind(column)
+                .fetch_one(&mut *transaction)
+                .await?;
+        if !present {
+            sqlx::query(sqlx::AssertSqlSafe(format!(
+                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+            )))
+            .execute(&mut *transaction)
+            .await?;
+        }
+    }
     transaction.commit().await?;
     Ok(())
 }
@@ -719,7 +741,7 @@ pub(crate) async fn initialize_local_activity(
 
 const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           SELECT owned.playlist_key,source.source_key,owned.object_id,owned.name,
-                 owned.normalized_name,owned.sort_text,owned.position,NULL artwork_binding
+                 owned.normalized_name,owned.sort_text,owned.position,NULL artwork_binding,1 writable
           FROM main.playlists owned
           LEFT JOIN main.source_ids identity ON identity.source_key=owned.source_key
           LEFT JOIN catalog.sources source ON source.object_id=identity.object_id
@@ -728,7 +750,7 @@ const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           SELECT -observed.playlist_key,observed.source_key,observed.object_id,
                  observed.name,observed.normalized_name,observed.sort_text,
                  COALESCE(identity.position,(SELECT COALESCE(max(position),0) FROM main.playlists)+observed.playlist_key),
-                 observed.artwork_binding
+                 observed.artwork_binding,observed.writable
           FROM catalog.native_playlists observed
           JOIN catalog.sources source ON source.source_key=observed.source_key
           LEFT JOIN main.source_ids durable ON durable.object_id=source.object_id

@@ -75,6 +75,7 @@ pub struct ControlsView {
 pub enum RemoteOutputProtocol {
     Upnp,
     GoogleCast,
+    PlexCompanion,
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -110,6 +111,7 @@ pub struct PlaybackView {
 pub enum PlaybackNotice {
     RunStarted(RunId),
     PositionDiscontinuity(crate::PositionDiscontinuity),
+    OperationFailed(String),
 }
 
 #[derive(Clone, Debug, PartialEq)]
@@ -138,8 +140,15 @@ impl PlaybackSession {
     pub fn view(&self) -> PlaybackView {
         let sequence = self.sequence();
         let settings = self.settings();
+        let mut summary = sequence.summary();
+        if let Some((total, offset)) = self.external_queue_extent() {
+            summary.total = total;
+            summary.current_index = summary.current_index.map(|index| index + offset);
+            summary.can_next = summary.current_index.is_some_and(|index| index + 1 < total)
+                || sequence.repeat_mode() != RepeatMode::Off;
+        }
         PlaybackView {
-            queue: sequence.summary(),
+            queue: summary,
             queue_window: sequence.entries().to_vec(),
             transport: TransportView {
                 current: sequence.selected().map(|entry| {

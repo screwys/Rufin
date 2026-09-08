@@ -232,15 +232,21 @@ impl PlayerUi {
 
     pub fn update_lyrics_highlight(self: &Rc<Self>) {
         self.cancel_scheduled_lyrics_highlight();
-        self.update_lyrics_highlight_at(self.current_position_millis());
+        self.update_lyrics_highlight_at(self.current_position_millis(), std::time::Instant::now());
     }
 
-    pub fn update_lyrics_highlight_at(self: &Rc<Self>, position_millis: u64) {
+    pub fn update_lyrics_highlight_at(
+        self: &Rc<Self>,
+        position_millis: u64,
+        observed_at: std::time::Instant,
+    ) {
         if !self.lyrics_surface_visible() {
             return;
         }
         let lyrics = self.visible_lyrics();
-        let lyrics_position_millis = self.lyrics_position_millis(position_millis);
+        let current_position =
+            position_millis.saturating_add(observed_at.elapsed().as_millis() as u64);
+        let lyrics_position_millis = self.lyrics_position_millis(current_position);
         let Some(selected_lyrics) = self.selected_lyrics() else {
             return;
         };
@@ -254,7 +260,7 @@ impl PlayerUi {
                 .fullscreen_pane
                 .update_highlight(lyrics.as_deref(), lyrics_position_millis);
         }
-        self.schedule_next_lyrics_highlight(position_millis);
+        self.schedule_next_lyrics_highlight(position_millis, observed_at);
     }
 
     pub fn lyrics_position_millis(&self, position_millis: u64) -> i128 {
@@ -342,7 +348,7 @@ impl PlayerUi {
         drop(lyrics);
         let position_millis = playback_position_for_lyrics_position(position_millis, offset_millis);
         self.playback_handles.transport.seek_millis(position_millis);
-        self.update_lyrics_highlight_at(position_millis);
+        self.update_lyrics_highlight_at(position_millis, std::time::Instant::now());
     }
 }
 

@@ -168,7 +168,11 @@ pub trait TransportCommandPort: Send + Sync {
     fn available_cast_networks(&self) -> Vec<CastNetwork>;
     fn playback_output(&self) -> PlaybackOutput;
     fn discover_remote_outputs(&self) -> Result<Vec<RemoteOutput>, String>;
-    fn select_playback_output(&self, output: PlaybackOutput) -> Result<(), String>;
+    fn select_playback_output(
+        &self,
+        output: PlaybackOutput,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<(), String>;
     fn shutdown(&self);
 }
 

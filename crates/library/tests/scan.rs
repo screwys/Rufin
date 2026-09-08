@@ -994,6 +994,10 @@ async fn saved_source_opens_from_cache_without_starting_a_scan() {
     assert_eq!(cached.source, publication.source);
     assert_eq!(cached.display_name, "Source One");
     assert_eq!(cached.catalog_revision, 1);
+    assert_eq!(
+        reopened.all_source_counts().await.unwrap()[&library::SourceId::new("source-one")],
+        (1, 2)
+    );
 }
 
 #[tokio::test]

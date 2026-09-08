@@ -147,7 +147,7 @@ pub(crate) fn play_random(
     }))
 }
 
-async fn radio_candidates(
+pub(crate) async fn radio_candidates(
     database: &Database,
     source_key: SourceKey,
     source: Option<&Source>,

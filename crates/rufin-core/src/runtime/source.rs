@@ -75,6 +75,7 @@ pub struct CredentialInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSetup {
+    Plex(sources::PlexSetupInput),
     WebDav {
         name: String,
         settings: sources::FileSourceSettings,
@@ -110,6 +111,7 @@ pub struct CredentialPreset {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct EditableSource {
+    pub plex_settings: Option<sources::PlexSettingsInput>,
     pub file_settings: Option<sources::FileSourceSettings>,
     pub source: SourceSummary,
     pub credentials: CredentialPreset,
@@ -118,6 +120,10 @@ pub struct EditableSource {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSettingsChange {
+    Plex {
+        source_id: SourceId,
+        settings: sources::PlexSettingsInput,
+    },
     Files {
         source_id: SourceId,
         name: String,
@@ -191,12 +197,7 @@ impl SourceOperation {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct DiscoveredServer {
-    pub name: String,
-    pub address: String,
-    pub id: Option<String>,
-}
+pub use sources::{DiscoveredServer, DiscoveryProvider};
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum DiscoveryStatus {
@@ -209,6 +210,7 @@ pub enum DiscoveryStatus {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct DiscoveryUpdate {
+    pub provider: DiscoveryProvider,
     pub servers: Arc<[DiscoveredServer]>,
     pub status: DiscoveryStatus,
 }
@@ -219,6 +221,20 @@ pub enum NextcloudLoginEvent {
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentials,
     },
+}
+
+pub enum PlexLoginMethod {
+    Browser,
+    Password {
+        username: String,
+        password: String,
+        verification_code: Option<String>,
+    },
+}
+
+pub enum PlexLoginEvent {
+    OpenBrowser(String),
+    Authorized(sources::PlexLogin),
 }
 
 pub enum PlaylistExport {

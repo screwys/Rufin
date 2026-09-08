@@ -1,5 +1,6 @@
 //! The configured sources and the one selected Database-backed source session.
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
@@ -7,10 +8,10 @@ use std::sync::{Arc, Mutex, Weak};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use crate::runtime::source::{
-    ConfiguredSources, CredentialInput, CredentialPreset, DiscoveredServer, DiscoveryStatus,
-    DiscoveryUpdate, EditableSource, LocalAccessStatus, LocalFolder, OpenSubsonicKind,
-    SourceLocalAccess, SourceLocalAccessSummary, SourceOperation, SourceProgress,
-    SourceProgressStage, SourceSettingsChange, SourceSetup, SourceSummary,
+    ConfiguredSources, CredentialInput, CredentialPreset, DiscoveryStatus, DiscoveryUpdate,
+    EditableSource, LocalAccessStatus, LocalFolder, OpenSubsonicKind, SourceLocalAccess,
+    SourceLocalAccessSummary, SourceOperation, SourceProgress, SourceProgressStage,
+    SourceSettingsChange, SourceSetup, SourceSummary,
 };
 use crate::runtime::{
     CatalogChange, CatalogPublication, FavoriteSettlement, SelectedLibrary, SourceEvent,
@@ -51,7 +52,6 @@ pub(crate) struct SelectedSourceState {
     pub(crate) music_folder_key: Option<FolderKey>,
     pub(crate) music_folder_object_id: Option<String>,
     pub(crate) music_folders: Arc<[FolderRow]>,
-    pub(crate) album_count: usize,
     pub(crate) track_count: usize,
     pub(crate) formula_match_count: usize,
     pub(crate) sample_source_path: Option<String>,
@@ -295,9 +295,11 @@ pub(crate) struct Shared {
     downloads: Downloads,
     pub(crate) settings: SettingsFile,
     secrets: Arc<SwitchableSecretStore>,
+    plex_logins: Mutex<HashMap<String, Arc<tokio::sync::Mutex<sources::PlexLogin>>>>,
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
     selected: Mutex<Option<Arc<ActiveSource>>>,
+    catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
     acquisition: Mutex<Weak<AtomicBool>>,
     artwork_preparation: Mutex<ArtworkPreparationOwner>,
@@ -307,6 +309,50 @@ pub(crate) struct Shared {
 }
 
 impl Shared {
+    async fn refresh_source_counts(
+        &self,
+        source_id: &SourceId,
+        source: SourceKey,
+    ) -> Result<(usize, usize), String> {
+        let counts = self
+            .database
+            .source_counts(source, &ReadCancellation::new())
+            .await
+            .map_err(string_error)?;
+        self.catalog_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .insert(source_id.clone(), counts);
+        Ok(counts)
+    }
+
+    async fn load_source_counts(&self) -> Result<(), String> {
+        let counts = self
+            .database
+            .all_source_counts()
+            .await
+            .map_err(string_error)?;
+        *self
+            .catalog_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner()) = counts;
+        Ok(())
+    }
+
+    pub(crate) fn configured_sources(
+        &self,
+        selected: Option<&SelectedSourceState>,
+    ) -> ConfiguredSources {
+        configured_sources(
+            &self.settings.load(),
+            selected,
+            &self
+                .catalog_counts
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner()),
+        )
+    }
+
     pub(crate) fn selected(&self) -> Option<Arc<SelectedSourceState>> {
         self.selected_session()
             .and_then(|session| session.resolve())
@@ -421,9 +467,11 @@ impl SourceOwner {
             downloads,
             settings,
             secrets,
+            plex_logins: Mutex::new(HashMap::new()),
             runtime,
             outputs,
             selected: Mutex::new(None),
+            catalog_counts: Mutex::new(HashMap::new()),
             observer: Mutex::new(None),
             acquisition: Mutex::new(Weak::new()),
             artwork_preparation: Mutex::new(ArtworkPreparationOwner::default()),
@@ -432,7 +480,7 @@ impl SourceOwner {
             started: AtomicBool::new(false),
         });
         SourceBootstrap {
-            configured: configured_sources(&stored, None),
+            configured: shared.configured_sources(None),
             operation,
             owner: Arc::new(Self { shared }),
         }
@@ -450,9 +498,17 @@ impl SourceOwner {
         if self.shared.started.swap(true, Ordering::AcqRel) {
             return Err("the source owner is already running".to_string());
         }
-        if let Some(source_id) = self.shared.settings.load().sources.selected_source_id {
-            self.select_source(source_id);
-        }
+        self.spawn_serialized(|owner| async move {
+            let stored = owner.shared.settings.load();
+            if let Err(error) = owner.shared.load_source_counts().await {
+                owner.shared.warn_nonfatal(&error);
+            }
+            let configured = owner.shared.configured_sources(None);
+            owner.shared.send(SourceEvent::Configured(configured)).await;
+            if let Some(source_id) = stored.sources.selected_source_id {
+                owner.select_source(source_id);
+            }
+        });
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
             let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
@@ -477,6 +533,11 @@ impl SourceOwner {
     {
         let _lane = self.shared.lane.lock().await;
         let result = restore().await;
+        if result.is_ok()
+            && let Err(error) = self.shared.load_source_counts().await
+        {
+            self.shared.warn_nonfatal(&error);
+        }
         if result.is_ok() && setup {
             self.release_selected(true).await;
             let current = self.shared.settings.load();
@@ -491,10 +552,10 @@ impl SourceOwner {
             }
         }
         self.shared
-            .send(SourceEvent::Configured(configured_sources(
-                &self.shared.settings.load(),
-                self.shared.selected().as_deref(),
-            )))
+            .send(SourceEvent::Configured(
+                self.shared
+                    .configured_sources(self.shared.selected().as_deref()),
+            ))
             .await;
         self.publish_operation(SourceOperation::Idle).await;
         result
@@ -505,6 +566,11 @@ impl SourceOwner {
         source_id: &SourceId,
         credential_ref: Option<crate::settings::CredentialRef>,
     ) {
+        self.shared
+            .catalog_counts
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .remove(source_id);
         self.shared.downloads.clear(source_id.clone(), false);
         if let Ok(playback) = self.shared.playback() {
             if let Err(error) = playback.remove_waveform_cache(source_id) {
@@ -514,7 +580,25 @@ impl SourceOwner {
         if let Err(error) = self.shared.artwork.invalidate_source(source_id) {
             self.shared.warn_nonfatal(&error.to_string());
         }
-        if let Some(reference) = credential_ref {
+        if let Some(reference) = credential_ref
+            && !self
+                .shared
+                .settings
+                .load()
+                .sources
+                .configured
+                .iter()
+                .any(|source| {
+                    &source.configuration.source_id != source_id
+                        && source.credential_ref.as_ref() == Some(&reference)
+                })
+        {
+            let mut logins = self
+                .shared
+                .plex_logins
+                .lock()
+                .unwrap_or_else(|poisoned| poisoned.into_inner());
+            logins.remove(reference.as_str());
             let _ = delete_provider_secret(&self.shared.secrets, &reference);
         }
     }
@@ -579,6 +663,7 @@ impl SourceOwner {
         let device = self.shared.settings.load().jellyfin_device_id;
         let owner = self.clone();
         self.shared.runtime.spawn(async move {
+            let opener = owner.clone();
             let opened = owner
                 .shared
                 .runtime
@@ -589,9 +674,11 @@ impl SourceOwner {
                         .map(|reference| load_provider_secret(&secrets, reference))
                         .transpose()?
                         .flatten();
-                    Source::open(configured.configuration, credential, Some(device))
-                        .map(Arc::new)
-                        .map_err(string_error)
+                    let mut source =
+                        Source::open(configured.configuration.clone(), credential, Some(device))
+                            .map_err(string_error)?;
+                    opener.bind_plex_login(&configured, &mut source)?;
+                    Ok(Arc::new(source))
                 })
                 .await
                 .map_err(string_error)
@@ -665,12 +752,10 @@ impl SourceOwner {
                 .map_err(string_error)?,
             None => None,
         };
-        let (album_count, track_count) = self
+        let (_, track_count) = self
             .shared
-            .database
-            .source_counts(publication.source, &cancellation)
-            .await
-            .map_err(string_error)?;
+            .refresh_source_counts(&configured.configuration.source_id, publication.source)
+            .await?;
         let formula_match_count = match configured.local_access.as_ref() {
             Some(access) => self
                 .shared
@@ -703,7 +788,6 @@ impl SourceOwner {
             music_folder_key: folder_key,
             music_folder_object_id: requested_folder,
             music_folders: folders,
-            album_count,
             track_count,
             formula_match_count,
             sample_source_path,
@@ -742,10 +826,9 @@ impl SourceOwner {
             stored.sources.selected_source_id = Some(selected.source_id().clone());
             Ok(())
         })?;
-        let stored = self.shared.settings.load();
         self.shared
             .send(SourceEvent::Selected {
-                configured: configured_sources(&stored, Some(&selected)),
+                configured: self.shared.configured_sources(Some(&selected)),
                 selected: ui_selected(Arc::clone(&selected), Arc::clone(&session)),
             })
             .await;
@@ -925,15 +1008,32 @@ impl SourceOwner {
         connected: Box<sources::ConnectedSource>,
         cancelled: Arc<AtomicBool>,
     ) -> Result<(), String> {
-        let (configuration, source, credential) = (*connected).into_parts();
-        let source = Arc::new(source);
+        let (configuration, mut source, mut credential) = (*connected).into_parts();
         let result = async {
             if !self.shared.acquisition_is_current(&cancelled) {
                 return Ok(());
             }
             let mut replacement = configured;
             replacement.configuration = configuration;
+            if let Some(fresh) = source.plex_login() {
+                let existing = replacement.credential_ref.as_ref().and_then(|reference| {
+                    self.shared
+                        .plex_logins
+                        .lock()
+                        .unwrap_or_else(|p| p.into_inner())
+                        .get(reference.as_str())
+                        .cloned()
+                });
+                if let Some(existing) = existing {
+                    let fresh = fresh.lock().await.for_setup();
+                    let mut existing = existing.lock().await;
+                    existing.merge_authorization(&fresh).map_err(string_error)?;
+                    credential = Some(existing.encode().map_err(string_error)?);
+                }
+            }
             self.persist_connected_source(&replacement, credential)?;
+            self.bind_plex_login(&replacement, &mut source)?;
+            let source = Arc::new(source);
             let publication = self
                 .shared
                 .database
@@ -1051,10 +1151,10 @@ impl SourceOwner {
             }
         }?;
         self.shared
-            .send(SourceEvent::Configured(configured_sources(
-                &self.shared.settings.load(),
-                self.shared.selected().as_deref(),
-            )))
+            .send(SourceEvent::Configured(
+                self.shared
+                    .configured_sources(self.shared.selected().as_deref()),
+            ))
             .await;
         Ok(())
     }
@@ -1065,8 +1165,8 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
-        let refresh_summary =
-            matches!(outcome, ScanOutcome::Changed(_)) && change == CatalogChange::Acquired;
+        let refresh_counts = matches!(outcome, ScanOutcome::Changed(_));
+        let refresh_summary = refresh_counts && change == CatalogChange::Acquired;
         let (publication, catalog_changed, change) = match outcome {
             ScanOutcome::Changed(publication) => (publication, true, change),
             ScanOutcome::PlaylistsChanged(publication) => {
@@ -1102,10 +1202,7 @@ impl SourceOwner {
                         session.replace(selected);
                         if let Some(selected) = session.resolve() {
                             event = SourceEvent::CatalogReplaced {
-                                configured: configured_sources(
-                                    &self.shared.settings.load(),
-                                    Some(&selected),
-                                ),
+                                configured: self.shared.configured_sources(Some(&selected)),
                                 selected: ui_selected(selected, session.clone()),
                             };
                         }
@@ -1119,6 +1216,19 @@ impl SourceOwner {
         }
         if let Ok(playback) = self.shared.playback() {
             playback.catalog_changed();
+        }
+        if refresh_counts && matches!(event, SourceEvent::CatalogPublished(_)) {
+            if let Err(error) = self
+                .shared
+                .refresh_source_counts(source_id, publication.source)
+                .await
+            {
+                self.shared.warn_nonfatal(&error);
+            }
+            let configured = self
+                .shared
+                .configured_sources(self.shared.selected().as_deref());
+            self.shared.send(SourceEvent::Configured(configured)).await;
         }
         self.shared.send(event).await;
         if let Some(session) = self.shared.selected_session()
@@ -1189,10 +1299,9 @@ impl SourceOwner {
         };
         self.shared.playback()?.stream_inputs_changed()?;
         self.shared
-            .send(SourceEvent::Configured(configured_sources(
-                &self.shared.settings.load(),
-                Some(&current),
-            )))
+            .send(SourceEvent::Configured(
+                self.shared.configured_sources(Some(&current)),
+            ))
             .await;
         Ok(())
     }
@@ -1257,6 +1366,132 @@ impl SourceOwner {
         receive
     }
 
+    pub fn plex_login(
+        &self,
+        method: crate::runtime::source::PlexLoginMethod,
+    ) -> Receiver<Result<crate::runtime::source::PlexLoginEvent, String>> {
+        use crate::runtime::source::{PlexLoginEvent, PlexLoginMethod};
+        let (send, receive) = async_channel::bounded(2);
+        self.shared.runtime.spawn(async move {
+            let authorization = async {
+                let client_id = fresh_source_id().map_err(SourceError::Other)?.as_str().to_owned();
+                match method {
+                    PlexLoginMethod::Password { username, password, verification_code } => {
+                        sources::PlexLogin::password(client_id, &username, &password, verification_code.as_deref()).await
+                    }
+                    PlexLoginMethod::Browser => {
+                        let mut login = sources::PlexLogin::browser(client_id).await?;
+                        send.send(Ok(PlexLoginEvent::OpenBrowser(login.url().to_owned())))
+                            .await.map_err(|_| SourceError::Cancelled)?;
+                        let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+                        loop {
+                            if let Some(login) = login.poll().await? { break Ok(login); }
+                            if tokio::time::Instant::now() >= deadline {
+                                break Err(SourceError::Auth("Plex browser login expired".into()));
+                            }
+                            tokio::time::sleep(Duration::from_secs(1)).await;
+                        }
+                    }
+                }
+            };
+            tokio::select! {
+                _ = send.closed() => {},
+                result = authorization => {
+                    let _ = send.send(result.map(PlexLoginEvent::Authorized).map_err(string_error)).await;
+                }
+            }
+        });
+        receive
+    }
+
+    pub fn plex_profiles(
+        &self,
+        mut login: sources::PlexLogin,
+    ) -> Receiver<Result<(sources::PlexLogin, Vec<sources::PlexProfile>), String>> {
+        let (send, receive) = async_channel::bounded(1);
+        self.shared.runtime.spawn(async move {
+            tokio::select! {
+                _ = send.closed() => {},
+                result = login.profiles() => { let _ = send.send(result.map(|profiles| (login, profiles)).map_err(string_error)).await; }
+            }
+        });
+        receive
+    }
+
+    pub fn plex_servers(
+        &self,
+        mut login: sources::PlexLogin,
+        profile: sources::PlexProfile,
+        pin: Option<String>,
+        lan: Vec<sources::DiscoveredServer>,
+    ) -> Receiver<Result<(sources::PlexLogin, Vec<sources::PlexServer>), String>> {
+        let (send, receive) = async_channel::bounded(1);
+        self.shared.runtime.spawn(async move {
+            let operation = async {
+                login.authorize_profile(&profile, pin.as_deref()).await?;
+                login.servers(&profile.id, &lan).await
+            };
+            tokio::select! {
+                _ = send.closed() => {},
+                result = operation => { let _ = send.send(result.map(|servers| (login, servers)).map_err(string_error)).await; }
+            }
+        });
+        receive
+    }
+
+    pub fn plex_saved_logins(&self) -> Receiver<Result<Vec<(String, sources::PlexLogin)>, String>> {
+        self.reply(move |owner, _| async move {
+            let mut seen = std::collections::HashSet::new();
+            let mut logins = Vec::new();
+            for configured in owner.shared.settings.load().sources.configured {
+                if configured.configuration.kind != "plex" {
+                    continue;
+                }
+                let Some(reference) = configured.credential_ref.as_ref() else {
+                    continue;
+                };
+                if !seen.insert(reference.as_str().to_owned()) {
+                    continue;
+                }
+                let source = owner.client(&configured.configuration.source_id)?;
+                if let Some(login) = source.plex_login() {
+                    logins.push((
+                        configured.configuration.name,
+                        login.lock().await.for_setup(),
+                    ));
+                }
+            }
+            Ok(logins)
+        })
+    }
+
+    async fn reuse_plex_login(
+        &self,
+        input: &mut SourceSetupInput,
+    ) -> Result<Option<crate::settings::CredentialRef>, String> {
+        let SourceSetupInput::Plex(input) = input else {
+            return Ok(None);
+        };
+        for configured in self.shared.settings.load().sources.configured {
+            if configured.configuration.kind != "plex" {
+                continue;
+            }
+            let source = self.client(&configured.configuration.source_id)?;
+            let Some(login) = source.plex_login() else {
+                continue;
+            };
+            let mut login = login.lock().await;
+            if login.same_device(&input.login) {
+                login
+                    .merge_authorization(&input.login)
+                    .map_err(string_error)?;
+                input.login = login.for_setup();
+                return Ok(configured.credential_ref);
+            }
+        }
+        Ok(None)
+    }
+
     pub fn prepare_collection(&self, media_uri: String) -> Receiver<Result<(), String>> {
         self.reply(move |owner, database| async move {
             owner
@@ -1283,34 +1518,28 @@ impl SourceOwner {
             .transpose()
     }
 
-    pub fn discover_servers(&self) {
+    pub fn discover_servers(&self, provider: sources::DiscoveryProvider) {
         let events = self.shared.outputs.discovery.clone();
         let _ = events.try_send(DiscoveryUpdate {
+            provider,
             servers: Arc::from([]),
             status: DiscoveryStatus::Searching,
         });
         self.shared.runtime.spawn(async move {
             let update =
-                match sources::discover_jellyfin_servers(Duration::from_millis(1_500)).await {
+                match sources::discover_servers(provider, Duration::from_millis(1_500)).await {
                     Ok(servers) if servers.is_empty() => DiscoveryUpdate {
+                        provider,
                         servers: Arc::from([]),
                         status: DiscoveryStatus::Empty,
                     },
-                    Ok(servers) => {
-                        let servers = servers
-                            .into_iter()
-                            .map(|server| DiscoveredServer {
-                                name: server.name,
-                                address: server.address,
-                                id: server.id,
-                            })
-                            .collect::<Vec<_>>();
-                        DiscoveryUpdate {
-                            status: DiscoveryStatus::Found(servers.len() as u64),
-                            servers: servers.into(),
-                        }
-                    }
+                    Ok(servers) => DiscoveryUpdate {
+                        provider,
+                        status: DiscoveryStatus::Found(servers.len() as u64),
+                        servers: servers.into(),
+                    },
                     Err(error) => DiscoveryUpdate {
+                        provider,
                         servers: Arc::from([]),
                         status: DiscoveryStatus::Failed(error.to_string()),
                     },
@@ -1331,21 +1560,25 @@ impl SourceOwner {
                     progress: initial_progress(),
                 })
                 .await;
-            let input = source_setup_input(input, &owner.shared.settings.load().jellyfin_device_id);
+            let mut input =
+                source_setup_input(input, &owner.shared.settings.load().jellyfin_device_id);
             let mut persisted_source_id = None;
             let result = async {
+                let reused_credential = owner.reuse_plex_login(&mut input).await?;
                 let connected = Source::connect(fresh_source_id()?, input)
                     .await
                     .map_err(string_error)?;
-                let (configuration, source, credential) = connected.into_parts();
-                let source = Arc::new(source);
+                let (configuration, mut source, credential) = connected.into_parts();
                 if !owner.shared.acquisition_is_current(&cancelled) {
                     return Ok(());
                 }
-                let credential_ref = credential
-                    .as_ref()
-                    .map(|_| fresh_credential_ref())
-                    .transpose()?;
+                let credential_ref = match reused_credential {
+                    Some(reference) => Some(reference),
+                    None => credential
+                        .as_ref()
+                        .map(|_| fresh_credential_ref())
+                        .transpose()?,
+                };
                 let configured = ConfiguredSource {
                     configuration: configuration.clone(),
                     credential_ref,
@@ -1354,13 +1587,16 @@ impl SourceOwner {
                     enable_half_stars: false,
                 };
                 owner.persist_connected_source(&configured, credential)?;
+                owner.bind_plex_login(&configured, &mut source)?;
+                let source = Arc::new(source);
                 persisted_source_id = Some(configuration.source_id.clone());
                 owner
                     .shared
-                    .send(SourceEvent::Configured(configured_sources(
-                        &owner.shared.settings.load(),
-                        owner.shared.selected().as_deref(),
-                    )))
+                    .send(SourceEvent::Configured(
+                        owner
+                            .shared
+                            .configured_sources(owner.shared.selected().as_deref()),
+                    ))
                     .await;
                 let events = owner.shared.outputs.events.clone();
                 let progress = move |value| {
@@ -1454,10 +1690,11 @@ impl SourceOwner {
             }
             owner
                 .shared
-                .send(SourceEvent::Configured(configured_sources(
-                    &owner.shared.settings.load(),
-                    owner.shared.selected().as_deref(),
-                )))
+                .send(SourceEvent::Configured(
+                    owner
+                        .shared
+                        .configured_sources(owner.shared.selected().as_deref()),
+                ))
                 .await;
         });
     }
@@ -1741,10 +1978,11 @@ impl SourceOwner {
             });
             owner
                 .shared
-                .send(SourceEvent::Configured(configured_sources(
-                    &owner.shared.settings.load(),
-                    owner.shared.selected().as_deref(),
-                )))
+                .send(SourceEvent::Configured(
+                    owner
+                        .shared
+                        .configured_sources(owner.shared.selected().as_deref()),
+                ))
                 .await;
         });
     }
@@ -1784,13 +2022,7 @@ impl SourceOwner {
             if let Err(error) = owner.shared.database.remove_source(&source_id).await {
                 owner.shared.warn_nonfatal(&error.to_string());
             }
-            owner
-                .remove_source_resources(
-                    &source_id,
-                    configured.and_then(|item| item.credential_ref),
-                )
-                .await;
-            let _ = owner.shared.settings.update(|stored| {
+            if let Err(error) = owner.shared.settings.update(|stored| {
                 stored
                     .sources
                     .configured
@@ -1799,13 +2031,21 @@ impl SourceOwner {
                     stored.sources.selected_source_id = None;
                 }
                 Ok(())
-            });
+            }) {
+                owner.shared.warn_nonfatal(&error);
+                return;
+            }
+            owner
+                .remove_source_resources(
+                    &source_id,
+                    configured.and_then(|item| item.credential_ref),
+                )
+                .await;
             owner
                 .shared
-                .send(SourceEvent::Configured(configured_sources(
-                    &owner.shared.settings.load(),
-                    None,
-                )))
+                .send(SourceEvent::Configured(
+                    owner.shared.configured_sources(None),
+                ))
                 .await;
         });
     }
@@ -2003,10 +2243,7 @@ impl ActiveSource {
             owner
                 .shared
                 .send(SourceEvent::CatalogReplaced {
-                    configured: configured_sources(
-                        &owner.shared.settings.load(),
-                        Some(&replacement),
-                    ),
+                    configured: owner.shared.configured_sources(Some(&replacement)),
                     selected: ui_selected(replacement, session),
                 })
                 .await;
@@ -2103,7 +2340,8 @@ impl SourceOwner {
             .ok()
             .flatten()?
             .source;
-        let local = self.configuration(&source_id)?.is_file_library();
+        let configuration = self.configuration(&source_id)?;
+        let local = configuration.is_file_library() || configuration.kind == "plex";
         Some((source_id, source_key, local))
     }
 
@@ -2220,14 +2458,64 @@ impl SourceOwner {
             .map(|reference| load_provider_secret(&self.shared.secrets, reference))
             .transpose()?
             .flatten();
-        Ok(Arc::new(
-            Source::open(
-                configured.configuration,
-                credential,
-                Some(self.shared.settings.load().jellyfin_device_id),
-            )
-            .map_err(string_error)?,
-        ))
+        let mut source = Source::open(
+            configured.configuration.clone(),
+            credential,
+            Some(self.shared.settings.load().jellyfin_device_id),
+        )
+        .map_err(string_error)?;
+        self.bind_plex_login(&configured, &mut source)?;
+        Ok(Arc::new(source))
+    }
+
+    fn bind_plex_login(
+        &self,
+        configured: &ConfiguredSource,
+        source: &mut Source,
+    ) -> Result<(), String> {
+        let Some(login) = source.plex_login() else {
+            return Ok(());
+        };
+        let reference = configured
+            .credential_ref
+            .as_ref()
+            .ok_or("Plex credential reference is missing")?;
+        let mut logins = self
+            .shared
+            .plex_logins
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(existing) = logins.get(reference.as_str()) {
+            source.bind_plex_login(Arc::clone(existing));
+            return Ok(());
+        }
+        let shared = Arc::downgrade(&self.shared);
+        let reference = reference.clone();
+        let saved_reference = reference.clone();
+        login
+            .try_lock()
+            .map_err(string_error)?
+            .bind_save(Arc::new(move |secret| {
+                let shared = shared.upgrade().ok_or(SourceError::Cancelled)?;
+                let _logins = shared
+                    .plex_logins
+                    .lock()
+                    .unwrap_or_else(|poisoned| poisoned.into_inner());
+                if !shared
+                    .settings
+                    .load()
+                    .sources
+                    .configured
+                    .iter()
+                    .any(|source| source.credential_ref.as_ref() == Some(&saved_reference))
+                {
+                    return Err(SourceError::Cancelled);
+                }
+                save_provider_secret(&shared.secrets, &saved_reference, secret)
+                    .map_err(SourceError::Other)
+            }));
+        logins.insert(reference.as_str().to_owned(), login);
+        Ok(())
     }
 
     pub fn configuration(&self, source_id: &SourceId) -> Option<SourceConfiguration> {
@@ -2451,7 +2739,8 @@ fn configured_source(
 }
 
 fn half_stars_enabled(configured: &ConfiguredSource) -> bool {
-    configured.configuration.kind == "jellyfin" || configured.enable_half_stars
+    matches!(configured.configuration.kind.as_str(), "jellyfin" | "plex")
+        || configured.enable_half_stars
 }
 
 fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + Send + 'static) {
@@ -2481,9 +2770,10 @@ fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + 
     });
 }
 
-pub(crate) fn configured_sources(
+fn configured_sources(
     stored: &StoredSettings,
     selected: Option<&SelectedSourceState>,
+    counts: &HashMap<SourceId, (usize, usize)>,
 ) -> ConfiguredSources {
     let sources = stored
         .sources
@@ -2543,12 +2833,12 @@ pub(crate) fn configured_sources(
                             .find(|folder| &folder.object_id == wanted)
                     })
                     .map(|folder| folder.name.clone()),
-                album_count: selected
-                    .filter(|selected| selected.source_id() == &configured.configuration.source_id)
-                    .map_or(0, |selected| selected.album_count),
-                track_count: selected
-                    .filter(|selected| selected.source_id() == &configured.configuration.source_id)
-                    .map_or(0, |selected| selected.track_count),
+                album_count: counts
+                    .get(&configured.configuration.source_id)
+                    .map_or(0, |counts| counts.0),
+                track_count: counts
+                    .get(&configured.configuration.source_id)
+                    .map_or(0, |counts| counts.1),
             }
         })
         .collect::<Vec<_>>();
@@ -2589,12 +2879,33 @@ pub(crate) fn source_error_allows_cache(error: &SourceError) -> bool {
 
 fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource, String> {
     match configuration.editable().map_err(string_error)? {
+        sources::EditableSource::Plex { settings, .. } => Ok(EditableSource {
+            file_settings: None,
+            source: SourceSummary {
+                id: configuration.source_id.clone(),
+                kind: configuration.kind.clone(),
+                name: configuration.name.clone(),
+                transcoded_download_bitrate_limit_kbps: configuration
+                    .transcoded_download_bitrate_limit_kbps(),
+                half_stars_enabled: true,
+            },
+            credentials: CredentialPreset {
+                source_name: settings.name.clone(),
+                server_url: settings.address_override.clone().unwrap_or_default(),
+                username: String::new(),
+                trust_invalid_cert: settings.trust_invalid_cert,
+                open_subsonic_authentication: None,
+            },
+            jellyfin_use_instant_mix: None,
+            plex_settings: Some(settings),
+        }),
         sources::EditableSource::Credentials {
             credentials,
             jellyfin_use_instant_mix,
             subsonic_authentication,
             ..
         } => Ok(EditableSource {
+            plex_settings: None,
             file_settings: None,
             source: SourceSummary {
                 id: configuration.source_id.clone(),
@@ -2614,6 +2925,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
             jellyfin_use_instant_mix,
         }),
         sources::EditableSource::Files { settings, .. } => Ok(EditableSource {
+            plex_settings: None,
             source: SourceSummary {
                 id: configuration.source_id.clone(),
                 kind: configuration.kind.clone(),
@@ -2639,6 +2951,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
 
 fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSetupInput {
     match input {
+        SourceSetup::Plex(input) => SourceSetupInput::Plex(input),
         SourceSetup::WebDav {
             name,
             settings,
@@ -2680,6 +2993,7 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
 
 fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
     match input {
+        SourceSettingsChange::Plex { settings, .. } => SourceSettingsInput::Plex(settings),
         SourceSettingsChange::Files {
             name,
             settings,
@@ -2712,7 +3026,8 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
 
 fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
     match input {
-        SourceSettingsChange::Files { source_id, .. }
+        SourceSettingsChange::Plex { source_id, .. }
+        | SourceSettingsChange::Files { source_id, .. }
         | SourceSettingsChange::Jellyfin { source_id, .. }
         | SourceSettingsChange::OpenSubsonic { source_id, .. } => source_id,
     }
@@ -2833,6 +3148,119 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod artwork_preparation_tests {
     use super::*;
+
+    #[tokio::test]
+    async fn plex_sources_share_login_until_last_removal_and_cannot_resurrect_secrets() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = Arc::new(
+            Database::open(directory.path().join("library.sqlite"))
+                .await
+                .unwrap(),
+        );
+        let runtime = tokio::runtime::Handle::current();
+        let settings = SettingsFile::memory();
+        let secrets = Arc::new(SwitchableSecretStore::new(Arc::new(
+            secrets::MemorySecretStore::new(),
+        )));
+        let reference = crate::settings::CredentialRef::new("shared-plex");
+        let secret = serde_json::json!({"client_id":"test-device","token":"test-token","account_id":"profile","profiles":{},"resources":{"profile":{"one":"one-token","two":"two-token"}},"home_admin_subscription":false,"download_subscriptions":{}}).to_string();
+        let configured:Vec<_> = ["one","two"].into_iter().map(|server|ConfiguredSource {
+            configuration: SourceConfiguration {source_id:SourceId::new(server),kind:"plex".into(),name:server.into(),provider_payload:serde_json::json!({"version":1,"server_id":server,"profile_id":"profile","base_url":"http://127.0.0.1:9","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}).to_string()},
+            credential_ref:Some(reference.clone()),music_folder_id:None,local_access:None,enable_half_stars:false,
+        }).collect();
+        settings
+            .update(|stored| {
+                stored.sources.configured = configured.clone();
+                Ok(())
+            })
+            .unwrap();
+        save_provider_secret(&secrets, &reference, secret.clone()).unwrap();
+        let owner = SourceOwner::open_dormant(
+            Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+            Arc::clone(&database),
+            Downloads::new(
+                directory.path().join("downloads"),
+                database.as_ref().clone(),
+                runtime.clone(),
+                async_channel::unbounded().0,
+                Vec::new(),
+            ),
+            settings,
+            Arc::clone(&secrets),
+            runtime,
+            SourceOutputs {
+                events: async_channel::unbounded().0,
+                discovery: async_channel::unbounded().0,
+            },
+        )
+        .owner;
+        let mut first = Source::open(
+            configured[0].configuration.clone(),
+            Some(secret.clone()),
+            None,
+        )
+        .unwrap();
+        let mut second =
+            Source::open(configured[1].configuration.clone(), Some(secret), None).unwrap();
+        owner.bind_plex_login(&configured[0], &mut first).unwrap();
+        owner.bind_plex_login(&configured[1], &mut second).unwrap();
+        let detached = first.plex_login().unwrap();
+        assert!(Arc::ptr_eq(&detached, &second.plex_login().unwrap()));
+        owner
+            .shared
+            .settings
+            .update(|stored| {
+                stored.sources.configured.remove(0);
+                Ok(())
+            })
+            .unwrap();
+        owner
+            .remove_source_resources(
+                &configured[0].configuration.source_id,
+                Some(reference.clone()),
+            )
+            .await;
+        assert!(
+            load_provider_secret(&secrets, &reference)
+                .unwrap()
+                .is_some()
+        );
+        let snapshot = detached.lock().await.for_setup();
+        detached
+            .lock()
+            .await
+            .merge_authorization(&snapshot)
+            .unwrap();
+        owner
+            .shared
+            .settings
+            .update(|stored| {
+                stored.sources.configured.clear();
+                Ok(())
+            })
+            .unwrap();
+        owner
+            .remove_source_resources(
+                &configured[1].configuration.source_id,
+                Some(reference.clone()),
+            )
+            .await;
+        assert!(
+            load_provider_secret(&secrets, &reference)
+                .unwrap()
+                .is_none()
+        );
+        assert!(matches!(
+            detached.lock().await.merge_authorization(&snapshot),
+            Err(SourceError::Cancelled)
+        ));
+        assert!(
+            load_provider_secret(&secrets, &reference)
+                .unwrap()
+                .is_none()
+        );
+        assert!(owner.shared.plex_logins.lock().unwrap().is_empty());
+    }
 
     #[tokio::test]
     async fn adding_a_source_keeps_setup_progress_until_the_catalog_is_ready() {
@@ -2999,10 +3427,20 @@ mod artwork_preparation_tests {
                 },
             )
             .owner;
+            owner.shared.load_source_counts().await.unwrap();
+            assert_eq!(
+                owner.shared.configured_sources(None).local_access[0].album_count,
+                1
+            );
             owner.select_source(source_id.clone());
             let published = tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
-                    if let SourceEvent::Selected { selected, .. } = receiver.recv().await.unwrap() {
+                    if let SourceEvent::Selected {
+                        configured,
+                        selected,
+                    } = receiver.recv().await.unwrap()
+                    {
+                        assert_eq!(configured.local_access[0].album_count, 1);
                         break selected;
                     }
                 }
@@ -3011,7 +3449,6 @@ mod artwork_preparation_tests {
             .expect("cached selection must not wait for credentials");
             assert_eq!(published.source_id, source_id);
             assert_eq!(published.source_key, publication.source);
-            assert_eq!(owner.shared.selected().unwrap().album_count, 1);
             tokio::time::timeout(Duration::from_secs(2), started_receiver.recv())
                 .await
                 .unwrap()
@@ -3188,6 +3625,30 @@ mod artwork_preparation_tests {
                 .await
                 .expect("another cached source can be selected during unlock");
                 assert_eq!(replacement.source_id, local_id);
+                let configured = owner.shared.configured_sources(None);
+                assert_eq!(
+                    (
+                        configured.local_access[0].album_count,
+                        configured.local_access[0].track_count
+                    ),
+                    (1, 1)
+                );
+                assert_eq!(configured.local_access[1].track_count, 0);
+                let mut scan = library::Scan::begin_items(&database, source_id.as_str())
+                    .await
+                    .unwrap();
+                scan.remove_track("new-track").await.unwrap();
+                owner
+                    .accept_scan(
+                        &source_id,
+                        scan.finish().await.unwrap(),
+                        CatalogChange::Broad,
+                    )
+                    .await;
+                assert_eq!(
+                    owner.shared.configured_sources(None).local_access[0].track_count,
+                    0
+                );
                 assert!(session.resolve().is_none());
                 assert!(old_state.upgrade().is_none());
                 release.send(()).unwrap();
@@ -3259,7 +3720,6 @@ mod artwork_preparation_tests {
                 music_folder_key: None,
                 music_folder_object_id: None,
                 music_folders: Arc::from([]),
-                album_count: 0,
                 track_count: 0,
                 formula_match_count: 0,
                 sample_source_path: None,

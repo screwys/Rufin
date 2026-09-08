@@ -146,6 +146,7 @@ impl MountedHomeSection {
 #[derive(Clone)]
 struct HomeSectionView {
     root: gtk::Widget,
+    header: crate::home_layout::HomeSectionHeaderView,
     mounted: MountedHomeSection,
 }
 
@@ -244,29 +245,32 @@ impl HomeRouteProjection {
         let mut previous_provider = None::<gtk::Widget>;
         for provider in &home.provider_sections {
             live_provider_ids.push(provider.section_id.clone());
-            let title = provider
-                .section_id
-                .split(['-', '_'])
-                .filter(|part| !part.is_empty())
-                .map(title_case)
-                .collect::<Vec<_>>()
-                .join(" ");
+            let title = provider.title.clone().unwrap_or_else(|| {
+                provider
+                    .section_id
+                    .split(['-', '_'])
+                    .filter(|part| !part.is_empty())
+                    .map(title_case)
+                    .collect::<Vec<_>>()
+                    .join(" ")
+            });
             let items = home_items(&provider.rows);
             if !items.is_empty() {
-                let view = self
+                let existing = self
                     .provider_sections
                     .borrow()
                     .get(&provider.section_id)
-                    .cloned()
-                    .unwrap_or_else(|| {
-                        let view = shell.home_section_view(&title, Vec::new(), None);
-                        self.provider_slot.append(&view.root);
-                        self.provider_sections
-                            .borrow_mut()
-                            .insert(provider.section_id.clone(), view.clone());
-                        view
-                    });
+                    .cloned();
+                let view = existing.unwrap_or_else(|| {
+                    let view = shell.home_section_view(&title, Vec::new(), None);
+                    self.provider_slot.append(&view.root);
+                    self.provider_sections
+                        .borrow_mut()
+                        .insert(provider.section_id.clone(), view.clone());
+                    view
+                });
                 view.root.set_visible(true);
+                view.header.set_title(&title);
                 view.mounted.replace(items);
                 self.provider_slot
                     .reorder_child_after(&view.root, previous_provider.as_ref());
@@ -315,8 +319,21 @@ impl HomeRouteProjection {
             return;
         };
         let blocks = shell.settings.current.borrow().home_blocks.clone();
-        let mut previous = None::<gtk::Widget>;
+        let showcase = self.slots.get(&HomeBlockKind::Showcase).filter(|_| {
+            blocks.contains(&HomeBlockKind::Showcase) && slot_has_content(&self.provider_slot)
+        });
+        if let Some(showcase) = showcase {
+            showcase.set_visible(slot_has_content(showcase));
+            self.content
+                .reorder_child_after(showcase, None::<&gtk::Widget>);
+        }
+        self.content
+            .reorder_child_after(&self.provider_slot, showcase);
+        let mut previous = Some(self.provider_slot.clone().upcast::<gtk::Widget>());
         for block in &blocks {
+            if *block == HomeBlockKind::Showcase && showcase.is_some() {
+                continue;
+            }
             let Some(slot) = self.slots.get(block) else {
                 continue;
             };
@@ -353,12 +370,10 @@ impl HomeRouteProjection {
                 slot.set_visible(false);
             }
         }
-        self.content
-            .reorder_child_after(&self.provider_slot, previous.as_ref());
         self.provider_slot
             .set_visible(slot_has_content(&self.provider_slot));
         self.content
-            .reorder_child_after(&self.empty, Some(&self.provider_slot));
+            .reorder_child_after(&self.empty, previous.as_ref());
         self.empty.set_visible(
             blocks.iter().all(|block| {
                 self.slots
@@ -587,6 +602,7 @@ impl CatalogUi {
         }
         HomeSectionView {
             root: section.upcast(),
+            header,
             mounted,
         }
     }

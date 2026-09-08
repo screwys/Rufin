@@ -18,7 +18,7 @@ use tokio_tungstenite::{
 use tracing::{debug, warn};
 
 use super::*;
-use crate::JellyfinLiveChange;
+use crate::RemoteItemChange;
 use crate::source::LIVE_CHANGE_LIMIT;
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -72,7 +72,7 @@ impl JellyfinSource {
         &self,
         on_ready: &mut (dyn FnMut() -> bool + Send),
         on_gap: &mut (dyn FnMut() -> bool + Send),
-        on_change: &mut (dyn FnMut(JellyfinLiveChange) -> bool + Send),
+        on_change: &mut (dyn FnMut(RemoteItemChange) -> bool + Send),
     ) -> SourceResult<()> {
         let mut delay = FEED_RETRY_MIN;
         let mut boundary_established = false;
@@ -107,7 +107,7 @@ impl JellyfinSource {
     async fn listen_library_changes_once(
         &self,
         on_ready: &mut (dyn FnMut() -> bool + Send),
-        on_change: &mut (dyn FnMut(JellyfinLiveChange) -> bool + Send),
+        on_change: &mut (dyn FnMut(RemoteItemChange) -> bool + Send),
     ) -> SourceResult<bool> {
         let mut socket = self.connect_library_socket().await?;
         if !on_ready() {
@@ -158,7 +158,7 @@ struct SocketMessage {
 
 #[derive(Debug, Eq, PartialEq)]
 enum JellyfinSocketMessage {
-    Change(JellyfinLiveChange),
+    Change(RemoteItemChange),
     ForceKeepAlive,
     Other,
 }
@@ -205,20 +205,20 @@ fn library_socket_message(text: &str) -> SourceResult<JellyfinSocketMessage> {
             removals.dedup();
             if upserts.len().saturating_add(removals.len()) > LIVE_CHANGE_LIMIT {
                 Ok(JellyfinSocketMessage::Change(
-                    JellyfinLiveChange::BoundaryLost,
+                    RemoteItemChange::BoundaryLost,
                 ))
             } else if upserts.is_empty() && removals.is_empty() && folder_change {
                 Ok(JellyfinSocketMessage::Change(
-                    JellyfinLiveChange::BoundaryLost,
+                    RemoteItemChange::BoundaryLost,
                 ))
             } else if upserts.is_empty() && removals.is_empty() {
                 Ok(JellyfinSocketMessage::Other)
             } else if upserts.iter().any(|id| removals.binary_search(id).is_ok()) {
                 Ok(JellyfinSocketMessage::Change(
-                    JellyfinLiveChange::BoundaryLost,
+                    RemoteItemChange::BoundaryLost,
                 ))
             } else {
-                Ok(JellyfinSocketMessage::Change(JellyfinLiveChange::Items {
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
                     upserts,
                     removals,
                 }))
@@ -261,7 +261,7 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(JellyfinLiveChange::Items {
+            JellyfinSocketMessage::Change(RemoteItemChange::Items {
                 upserts: vec!["item-one".to_string(), "item-two".to_string()],
                 removals: vec!["item-three".to_string()],
             })
@@ -277,7 +277,7 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(JellyfinLiveChange::BoundaryLost)
+            JellyfinSocketMessage::Change(RemoteItemChange::BoundaryLost)
         );
     }
 
@@ -290,7 +290,7 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(JellyfinLiveChange::Items {
+            JellyfinSocketMessage::Change(RemoteItemChange::Items {
                 upserts: vec!["item-one".to_string(), "item-two".to_string()],
                 removals: vec!["item-three".to_string()],
             })
@@ -306,7 +306,7 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(JellyfinLiveChange::BoundaryLost)
+            JellyfinSocketMessage::Change(RemoteItemChange::BoundaryLost)
         );
     }
 
@@ -333,7 +333,7 @@ mod tests {
 
         assert_eq!(
             message,
-            JellyfinSocketMessage::Change(JellyfinLiveChange::BoundaryLost)
+            JellyfinSocketMessage::Change(RemoteItemChange::BoundaryLost)
         );
     }
 }

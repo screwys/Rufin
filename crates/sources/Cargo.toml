@@ -33,7 +33,7 @@ notify.workspace = true
 playback.workspace = true
 percent-encoding.workspace = true
 quick-xml.workspace = true
-reqwest = { workspace = true, features = ["json", "stream"] }
+reqwest = { workspace = true, features = ["json", "stream", "form", "query"] }
 sha2.workspace = true
 smb.workspace = true
 smb-fscc.workspace = true

@@ -36,6 +36,8 @@ pub(crate) const SOURCE_CHOICE_SELECTOR_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/choice_selector.ui";
 pub(crate) const FILE_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/file_host.ui";
+pub(crate) const PLEX_HOST_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/plex_host.ui";
 pub(crate) const CREDENTIAL_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/credential_host.ui";
 pub(crate) const LOCAL_SETUP_RESOURCE: &str =
@@ -74,6 +76,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     ONBOARDING_RESOURCE,
     CREDENTIAL_HOST_RESOURCE,
     FILE_HOST_RESOURCE,
+    PLEX_HOST_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     SERVER_ACTIONS_RESOURCE,
     NAVIGATION_RESOURCE,

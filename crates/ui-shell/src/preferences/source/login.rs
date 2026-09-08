@@ -1,4 +1,5 @@
 mod files;
+mod plex;
 
 use std::cell::{Cell, RefCell};
 use std::path::{Path, PathBuf};
@@ -64,8 +65,14 @@ static SMB: SourcePresentation = SourcePresentation {
     setup_flow: files::setup_flow,
     settings_group: Some(files::settings_group),
 };
-static SOURCE_PRESENTATIONS: [&SourcePresentation; 6] =
-    [&JELLYFIN, &NAVIDROME, &SUBSONIC, &WEBDAV, &SMB, &LOCAL];
+static PLEX: SourcePresentation = SourcePresentation {
+    kind: "plex",
+    setup_flow: plex::setup_flow,
+    settings_group: Some(plex::settings_group),
+};
+static SOURCE_PRESENTATIONS: [&SourcePresentation; 7] = [
+    &JELLYFIN, &PLEX, &NAVIDROME, &SUBSONIC, &WEBDAV, &SMB, &LOCAL,
+];
 
 fn source_presentations() -> &'static [&'static SourcePresentation] {
     &SOURCE_PRESENTATIONS
@@ -131,7 +138,8 @@ struct SetupActions {
 struct DiscoveredServersView {
     group: adw::PreferencesGroup,
     rows: Rc<RefCell<Vec<gtk::Widget>>>,
-    host: CredentialHost,
+    kind: &'static str,
+    select: Rc<dyn Fn(sources::DiscoveredServer)>,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -420,7 +428,18 @@ impl Shell {
         }
         self.source.discovery_running.set(true);
         *self.source.discovery_status.borrow_mut() = DiscoveryStatus::Searching;
-        self.products.source.discover_servers();
+        self.products
+            .source
+            .discover_servers(self.source.discovery_provider.get());
+    }
+
+    fn select_discovery_provider(&self, provider: sources::DiscoveryProvider) {
+        if self.source.discovery_provider.replace(provider) != provider {
+            self.source.discovery_started.set(false);
+            self.source.discovery_running.set(false);
+            self.source.discovered_servers.borrow_mut().clear();
+            *self.source.discovery_status.borrow_mut() = DiscoveryStatus::Idle;
+        }
     }
 
     fn refresh_server_discovery(self: &Rc<Self>) {
@@ -430,7 +449,9 @@ impl Shell {
         self.source.discovery_running.set(true);
         *self.source.discovered_servers.borrow_mut() = Vec::new();
         *self.source.discovery_status.borrow_mut() = DiscoveryStatus::Searching;
-        self.products.source.discover_servers();
+        self.products
+            .source
+            .discover_servers(self.source.discovery_provider.get());
         self.update_add_server_discovery();
     }
 }
@@ -663,6 +684,7 @@ impl SourceSetupFlow for CredentialSetupFlow {
 
 impl SourceSetupFlow for JellyfinSetupFlow {
     fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
+        shell.select_discovery_provider(sources::DiscoveryProvider::Jellyfin);
         shell.start_server_discovery_once();
         let (scroller, content, actions, status) =
             setup_scaffold(shell, context, self.presentation);
@@ -1311,7 +1333,19 @@ fn discovered_servers_view(host: &CredentialHost) -> DiscoveredServersView {
     DiscoveredServersView {
         group,
         rows: Rc::new(RefCell::new(Vec::new())),
-        host: host.clone(),
+        kind: "jellyfin",
+        select: {
+            let name = host.name.downgrade();
+            let url = host.url.downgrade();
+            Rc::new(move |server| {
+                if let Some(name) = name.upgrade() {
+                    name.set_text(&server.name);
+                }
+                if let Some(url) = url.upgrade() {
+                    url.set_text(&server.address);
+                }
+            })
+        },
     }
 }
 
@@ -1320,7 +1354,7 @@ fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersVi
     let running = shell.source.discovery_running.get();
     let servers = shell.source.discovered_servers.borrow().clone();
     view.group
-        .set_description(Some(&discovery_status_label(&status)));
+        .set_description(Some(&discovery_status_label(&status, view.kind)));
     for row in view.rows.borrow_mut().drain(..) {
         view.group.remove(&row);
     }
@@ -1347,14 +1381,13 @@ fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersVi
                 .subtitle(server.address.clone())
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name(
-                "io.github.screwys.Rufin.source.jellyfin",
+                ui_shared::source_labels::source_kind_icon_name(view.kind)
+                    .unwrap_or("rufin-network-server-symbolic"),
             ));
             row.set_activatable(true);
-            let name = view.host.name.clone();
-            let url = view.host.url.clone();
+            let select = Rc::clone(&view.select);
             row.connect_activated(move |_| {
-                name.set_text(&server.name);
-                url.set_text(&server.address);
+                select(server.clone());
             });
             view.group.add(&row);
             view.rows.borrow_mut().push(row.upcast());
@@ -1379,10 +1412,16 @@ fn refresh_discovered_servers_view(shell: &Rc<Shell>, view: &DiscoveredServersVi
     view.rows.borrow_mut().push(search.upcast());
 }
 
-fn discovery_status_label(status: &DiscoveryStatus) -> String {
+fn discovery_status_label(status: &DiscoveryStatus, kind: &str) -> String {
     match status {
         DiscoveryStatus::Idle => tr("Searching will start automatically"),
-        DiscoveryStatus::Searching => tr("Searching for Jellyfin servers on the local network..."),
+        DiscoveryStatus::Searching => tr_with(
+            "Searching for {provider} servers on the local network...",
+            &[(
+                "provider",
+                &tr(ui_shared::source_labels::source_kind_title(kind).unwrap_or(kind)),
+            )],
+        ),
         DiscoveryStatus::Empty => tr("No servers found, add one manually or try again"),
         DiscoveryStatus::Found(_) => String::new(),
         DiscoveryStatus::Failed(error) => {

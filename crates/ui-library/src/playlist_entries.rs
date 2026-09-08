@@ -150,6 +150,7 @@ impl CatalogUi {
         self: &Rc<Self>,
         playlist: PlaylistKey,
         playlist_name: String,
+        writable: bool,
         order: Vec<library::PlaylistEntryKey>,
         first_row_position: usize,
         first_rows: Vec<PlaylistEntryRow>,
@@ -182,7 +183,8 @@ impl CatalogUi {
         toolbar_widget.set_visible(!model.source_is_empty());
         wrapper.append(&toolbar_widget);
 
-        let collection = playlist_entry_collection(self, model.clone(), playlist, playlist_name);
+        let collection =
+            playlist_entry_collection(self, model.clone(), playlist, playlist_name, writable);
         let stack = gtk::Stack::new();
         stack.set_hexpand(true);
         stack.set_vexpand(true);
@@ -219,6 +221,7 @@ fn playlist_entry_collection(
     model: PlaylistEntryModel,
     playlist: PlaylistKey,
     playlist_name: String,
+    writable: bool,
 ) -> LibraryCollectionProjection {
     let settings = shell
         .settings
@@ -226,7 +229,7 @@ fn playlist_entry_collection(
         .borrow()
         .library_list(LibraryListKey::PlaylistTracks);
     let playing = TrackRowPlayingIndicator::new();
-    let selection = PlaylistEntrySelection::new(model.clone(), playlist_name);
+    let selection = PlaylistEntrySelection::new(model.clone(), playlist_name, writable);
     shell.set_current_playlist_entry_selection(selection.clone());
     let current_model = model.clone();
     let current_playing = playing.clone();
@@ -706,7 +709,7 @@ fn install_playlist_entry_drag(
                     .map(|selection| selection.single_entry(entry.playlist_entry_key))
             })?;
         let mut providers = Vec::new();
-        if selection.entries.len() == 1 {
+        if selection.writable && selection.entries.len() == 1 {
             providers.push(gtk::gdk::ContentProvider::for_value(
                 &entry.playlist_entry_key.raw().to_value(),
             ));
@@ -732,6 +735,12 @@ fn install_playlist_entry_drag(
         let Some(target) = current() else {
             return false;
         };
+        if !move_shell
+            .current_playlist_entry_selection_owner()
+            .is_some_and(|selection| selection.single_entry(target.playlist_entry_key).writable)
+        {
+            return false;
+        }
         let entry = PlaylistEntryKey::from_raw(entry);
         if entry == target.playlist_entry_key {
             return false;

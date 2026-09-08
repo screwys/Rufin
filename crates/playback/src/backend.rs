@@ -15,6 +15,8 @@ use thiserror::Error;
 pub struct StreamRequest {
     pub media_uri: String,
     pub quality: StreamQuality,
+    #[serde(default)]
+    pub session_identifier: Option<String>,
 }
 
 impl StreamRequest {
@@ -26,6 +28,7 @@ impl StreamRequest {
         Self {
             media_uri: media_uri.into(),
             quality,
+            session_identifier: None,
         }
     }
 

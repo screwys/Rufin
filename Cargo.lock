@@ -4669,6 +4669,7 @@ version = "0.14.0"
 dependencies = [
  "audio-processing",
  "fcast-sender-sdk",
+ "futures-util",
  "getrandom 0.4.3",
  "if-addrs",
  "library",
@@ -4678,8 +4679,10 @@ dependencies = [
  "roxmltree",
  "rustls",
  "socket2",
+ "sources",
  "tempfile",
  "tiny_http",
+ "tokio",
  "tracing",
  "url",
 ]

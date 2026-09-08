@@ -94,6 +94,7 @@ pub fn build(
         discovery_status: RefCell::new(rufin_core::runtime::source::DiscoveryStatus::Idle),
         discovery_running: Cell::new(false),
         discovery_started: Cell::new(false),
+        discovery_provider: Cell::new(rufin_core::runtime::source::DiscoveryProvider::Jellyfin),
         add_server: RefCell::new(None),
         refresh_feedback_generation: Rc::new(Cell::new(0)),
         artwork_preparation_revision: Cell::new(None),

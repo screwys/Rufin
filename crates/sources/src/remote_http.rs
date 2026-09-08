@@ -316,11 +316,18 @@ struct RequestMetadata {
 
 impl RequestMetadata {
     fn new(request: &reqwest::Request, service: &'static str) -> Self {
+        let path = request.url().path();
+        let endpoint = match path.strip_prefix("/library/metadata/") {
+            Some(ids) if service == "Plex" && ids.contains(',') => {
+                format!("/library/metadata/[{} items]", ids.split(',').count())
+            }
+            _ => path.to_string(),
+        };
         Self {
             id: NEXT_REQUEST_ID.fetch_add(1, Ordering::Relaxed),
             service,
             method: request.method().to_string(),
-            endpoint: request.url().path().to_string(),
+            endpoint,
             query_keys: request
                 .url()
                 .query_pairs()

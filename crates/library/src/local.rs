@@ -354,6 +354,26 @@ impl Database {
         ))
     }
 
+    pub async fn all_source_counts(
+        &self,
+    ) -> LibraryResult<std::collections::HashMap<crate::SourceId, (usize, usize)>> {
+        let mut connection = self.acquire_reader().await?;
+        let rows = sqlx::query_as::<_, (String, i64, i64)>(
+            "SELECT object_id,
+                (SELECT count(*) FROM albums WHERE source_key=source.source_key),
+                (SELECT count(*) FROM tracks WHERE source_key=source.source_key)
+             FROM sources source",
+        )
+        .fetch_all(&mut *connection)
+        .await?;
+        Ok(rows
+            .into_iter()
+            .map(|(id, albums, tracks)| {
+                (crate::SourceId::new(id), (albums as usize, tracks as usize))
+            })
+            .collect())
+    }
+
     pub async fn mapping_formula_match_count(
         &self,
         source: SourceKey,

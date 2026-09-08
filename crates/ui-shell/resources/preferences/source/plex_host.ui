@@ -1,0 +1,36 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <object class="GtkStringList" id="profile_options"/>
+  <object class="GtkStringList" id="server_options"/>
+  <object class="GtkStringList" id="saved_options"/>
+  <object class="GtkBox" id="section">
+    <property name="orientation">vertical</property><property name="spacing">12</property>
+    <child><object class="AdwPreferencesGroup" id="account">
+      <property name="title" translatable="yes">Plex Account</property>
+      <child><object class="AdwComboRow" id="saved_login"><property name="title" translatable="yes">Saved Plex Login</property><property name="visible">false</property><property name="model">saved_options</property></object></child>
+      <child><object class="AdwEntryRow" id="username"><property name="title" translatable="yes">Username</property></object></child>
+      <child><object class="AdwPasswordEntryRow" id="password"><property name="title" translatable="yes">Password</property></object></child>
+      <child><object class="AdwEntryRow" id="verification"><property name="title" translatable="yes">Verification Code (optional)</property></object></child>
+    </object></child>
+    <child><object class="GtkButton" id="reuse_login"><property name="label" translatable="yes">Use Saved Login</property><property name="visible">false</property><property name="halign">end</property></object></child>
+    <child><object class="GtkBox" id="login_actions">
+      <property name="spacing">6</property><property name="halign">end</property>
+      <child><object class="GtkButton" id="password_login"><property name="label" translatable="yes">Sign In with Password</property></object></child>
+      <child><object class="GtkButton" id="browser_login"><property name="label" translatable="yes">Sign In in Browser</property><style><class name="suggested-action"/></style></object></child>
+    </object></child>
+    <child><object class="AdwPreferencesGroup" id="profiles">
+      <child><object class="AdwComboRow" id="profile"><property name="title" translatable="yes">Home Profile</property><property name="model">profile_options</property></object></child>
+      <child><object class="AdwPasswordEntryRow" id="pin"><property name="title" translatable="yes">Profile PIN</property></object></child>
+    </object></child>
+    <child><object class="GtkButton" id="choose_server"><property name="label" translatable="yes">Choose Server</property><property name="halign">end</property></object></child>
+    <child><object class="AdwPreferencesGroup" id="connection">
+      <child><object class="AdwComboRow" id="server"><property name="title" translatable="yes">Server</property><property name="model">server_options</property></object></child>
+      <child><object class="AdwEntryRow" id="name"><property name="title" translatable="yes">Name</property></object></child>
+      <child><object class="AdwEntryRow" id="address"><property name="title" translatable="yes">Server Address Override (optional)</property></object></child>
+      <child><object class="AdwSwitchRow" id="cert_verify"><property name="title" translatable="yes">Verify server certificate</property><property name="subtitle" translatable="yes">Turn off only for a server you control</property><property name="active">true</property></object></child>
+    </object></child>
+    <child><object class="GtkButton" id="change_profile"><property name="label" translatable="yes">Change Profile</property><property name="halign">end</property></object></child>
+    <child><object class="GtkButton" id="connect"><property name="label" translatable="yes">Connect</property><property name="halign">end</property><style><class name="suggested-action"/></style></object></child>
+    <child><object class="GtkButton" id="save"><property name="label" translatable="yes">Save</property><property name="halign">end</property><style><class name="suggested-action"/></style></object></child>
+  </object>
+</interface>

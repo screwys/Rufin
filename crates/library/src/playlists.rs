@@ -35,6 +35,7 @@ pub struct PlaylistRow {
     pub source_key: Option<SourceKey>,
     pub object_id: String,
     pub name: String,
+    pub writable: bool,
     pub artwork_binding: Option<Vec<u8>>,
     pub track_count: i64,
     pub duration_millis: i64,
@@ -56,6 +57,7 @@ impl<'row> FromRow<'row, SqliteRow> for PlaylistRow {
             source_key: row.try_get("source_key")?,
             object_id: row.try_get("object_id")?,
             name: row.try_get("name")?,
+            writable: row.try_get("writable")?,
             artwork_binding: row.try_get("artwork_binding")?,
             track_count: row.try_get("track_count")?,
             duration_millis: row.try_get("duration_millis")?,
@@ -298,6 +300,7 @@ impl Database {
         for keys in order.chunks(PLAYLIST_ROW_LIMIT) {
             rows.extend(Self::load_playlist_rows(&mut transaction, keys).await?);
         }
+        rows.retain(|row| row.writable);
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(rows)
@@ -440,7 +443,7 @@ impl Database {
         });
         query.push(
             ") SELECT playlist.playlist_key, playlist.source_key,
-                      playlist.object_id, playlist.name,
+                      playlist.object_id, playlist.name, playlist.writable,
                       playlist.artwork_binding,
                       count(entry.playlist_entry_key) AS track_count,
                       COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)), 0) AS duration_millis,
