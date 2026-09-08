@@ -6,5 +6,5 @@ Icon=io.github.screwys.Rufin.Devel
 Terminal=false
 Type=Application
 Categories=AudioVideo;Audio;Music;Player;
-Keywords=Jellyfin;Subsonic;Navidrome;Music;GTK;Audio;Player;
+Keywords=Jellyfin;Emby;Plex;Navidrome;Subsonic;WebDAV;Samba;Music;GTK;Audio;Player;
 StartupNotify=true
