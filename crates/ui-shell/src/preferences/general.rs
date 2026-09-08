@@ -698,8 +698,6 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         sidebar_pins_row: adw::SwitchRow,
         home_blocks: adw::ExpanderRow,
         context_menus: adw::ExpanderRow,
-        context_menu_rating_row: adw::ActionRow,
-        context_menu_rating_visible: gtk::Switch,
     });
 
     populate_theme_group(shell, &theme_group);
@@ -713,7 +711,7 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
             })
             .is_some()
         {
-            waveform_shell.player_ui.update_bottom_player();
+            waveform_shell.player_ui.update_bottom_player_transport();
         }
     });
     populate_layout_group(
@@ -734,12 +732,7 @@ pub(crate) fn appearance_page(shell: &Rc<Shell>) -> adw::PreferencesPage {
         populate_home_block_rows(&home_shell, home_blocks, &rows);
     });
 
-    configure_context_menus_expander(
-        shell,
-        &context_menus,
-        &context_menu_rating_row,
-        &context_menu_rating_visible,
-    );
+    configure_context_menus_expander(shell, &builder, &context_menus);
 
     page
 }

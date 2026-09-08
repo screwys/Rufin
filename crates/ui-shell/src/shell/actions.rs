@@ -777,6 +777,7 @@ fn show_shortcuts_dialog(shell: &Shell) {
         ("shortcut_back", "Back <Meta>bracketleft"),
         ("shortcut_forward", "Forward <Meta>bracketright"),
         ("shortcut_sidebar_position", "<Meta>1...9 <Meta>0"),
+        ("shortcut_source_position", "<Meta><Alt>1...9 <Meta><Alt>0"),
     ];
     #[cfg(not(target_os = "macos"))]
     let platform_accelerators = [
@@ -792,6 +793,10 @@ fn show_shortcuts_dialog(shell: &Shell) {
         ("shortcut_back", "Back <Alt>Left"),
         ("shortcut_forward", "Forward <Alt>Right"),
         ("shortcut_sidebar_position", "<Control>1...9 <Control>0"),
+        (
+            "shortcut_source_position",
+            "<Control><Alt>1...9 <Control><Alt>0",
+        ),
     ];
     for (id, accelerator) in platform_accelerators {
         let item: adw::ShortcutsItem = ui_shared::ui_resource::object(&builder, resource, id);

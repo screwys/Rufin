@@ -2,7 +2,7 @@ use std::{rc::Rc, sync::Arc};
 
 use ::library::FolderRow;
 use adw::prelude::*;
-use gtk::gio;
+use gtk::{gio, glib};
 use localization::tr;
 use sources::SourceId;
 
@@ -33,6 +33,61 @@ struct SourceMenuContent {
 }
 
 pub(crate) fn install_source_menu_actions(shell: &Rc<Shell>) {
+    let select = gio::SimpleAction::new("select-source", Some(glib::VariantTy::UINT32));
+    let select_shell = Rc::clone(shell);
+    select.connect_activate(move |_, parameter| {
+        let Some(position) = parameter.and_then(|value| value.get::<u32>()) else {
+            return;
+        };
+        let source_id = position.checked_sub(1).and_then(|index| {
+            select_shell
+                .source
+                .configured
+                .borrow()
+                .sources
+                .get(index as usize)
+                .map(|source| source.id.clone())
+        });
+        if let Some(source_id) = source_id {
+            select_source(&select_shell, source_id);
+        }
+    });
+    shell.chrome.window.add_action(&select);
+    for position in 1..=10u32 {
+        let target = position.to_variant();
+        let action = gio::Action::print_detailed_name("win.select-source", Some(&target));
+        let digit = position % 10;
+        #[cfg(target_os = "macos")]
+        let accelerator = format!("<Meta><Alt>{digit}");
+        #[cfg(not(target_os = "macos"))]
+        let accelerator = format!("<Control><Alt>{digit}");
+        shell
+            .chrome
+            .application
+            .set_accels_for_action(&action, &[&accelerator]);
+    }
+
+    let next = gio::SimpleAction::new("next-source", None);
+    let next_shell = Rc::clone(shell);
+    next.connect_activate(move |_, _| {
+        let source_id = {
+            let configured = next_shell.source.configured.borrow();
+            next_source_id(&configured.sources, configured.selected_source_id.as_ref())
+        };
+        if let Some(source_id) = source_id {
+            select_source(&next_shell, source_id);
+        }
+    });
+    shell.chrome.window.add_action(&next);
+    #[cfg(target_os = "macos")]
+    let next_accelerator = "<Meta><Alt>Tab";
+    #[cfg(not(target_os = "macos"))]
+    let next_accelerator = "<Control><Alt>Tab";
+    shell
+        .chrome
+        .application
+        .set_accels_for_action("win.next-source", &[next_accelerator]);
+
     let manage_libraries = gio::SimpleAction::new(MANAGE_LIBRARIES_ACTION, None);
     let manage_libraries_shell = Rc::clone(shell);
     manage_libraries.connect_activate(move |_, _| {
@@ -172,14 +227,7 @@ fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent) {
             {
                 let shell = Rc::clone(shell);
                 let source_id = source.id.clone();
-                move || {
-                    popdown_primary_menu(&shell);
-                    if shell.source.configured.borrow().selected_source_id.as_ref()
-                        != Some(&source_id)
-                    {
-                        shell.products.source.select_source(source_id.clone());
-                    }
-                }
+                move || select_source(&shell, source_id.clone())
             },
         );
         shell.chrome.window.add_action(&action);
@@ -209,6 +257,20 @@ fn replace_selection_actions(shell: &Rc<Shell>, content: &SourceMenuContent) {
         );
         shell.chrome.window.add_action(&action);
     }
+}
+
+fn select_source(shell: &Shell, source_id: SourceId) {
+    popdown_primary_menu(shell);
+    if shell.source.configured.borrow().selected_source_id.as_ref() != Some(&source_id) {
+        shell.products.source.select_source(source_id);
+    }
+}
+
+fn next_source_id(sources: &[SourceSummary], selected: Option<&SourceId>) -> Option<SourceId> {
+    let index = selected
+        .and_then(|selected| sources.iter().position(|source| &source.id == selected))
+        .map_or(0, |index| (index + 1) % sources.len());
+    sources.get(index).map(|source| source.id.clone())
 }
 
 fn choice_action(name: &str, active: bool, select: impl Fn() + 'static) -> gio::SimpleAction {
@@ -268,6 +330,25 @@ mod tests {
             transcoded_download_bitrate_limit_kbps: None,
             half_stars_enabled: false,
         }
+    }
+
+    #[test]
+    fn next_source_cycles_in_configured_order() {
+        let sources = vec![source("first"), source("second"), source("third")];
+        assert_eq!(
+            next_source_id(&sources, Some(&sources[0].id)),
+            Some(sources[1].id.clone())
+        );
+        assert_eq!(
+            next_source_id(&sources, Some(&sources[2].id)),
+            Some(sources[0].id.clone())
+        );
+        assert_eq!(next_source_id(&sources, None), Some(sources[0].id.clone()));
+        assert_eq!(
+            next_source_id(&sources[..1], Some(&sources[0].id)),
+            Some(sources[0].id.clone())
+        );
+        assert_eq!(next_source_id(&[], None), None);
     }
 
     #[test]

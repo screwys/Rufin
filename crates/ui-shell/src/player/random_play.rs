@@ -341,7 +341,7 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
         .map(str::to_owned);
     let runtime = selected.runtime.clone();
     let queue = shell.products.playback.queue.clone();
-    runtime.spawn(async move {
+    let task = runtime.spawn(async move {
         let cancellation = ReadCancellation::new();
         let genre = match genre_object_id {
             Some(object_id) => database
@@ -363,8 +363,9 @@ pub(crate) fn play_saved_random(shell: &Rc<Shell>, placement: QueuePlacement) {
                 variation: random_variation(),
             },
         };
-        execute_random_task(selected, request, queue).await;
+        execute_random_task(selected, request, queue).await
     });
+    report_random_result(shell, task);
 }
 
 fn selected_genre(genres: &[GenreRow], selected: u32) -> Option<String> {
@@ -383,14 +384,28 @@ fn execute_random(
 ) {
     let runtime = selected.runtime.clone();
     let queue = shell.products.playback.queue.clone();
-    runtime.spawn(execute_random_task(selected, request, queue));
+    let task = runtime.spawn(execute_random_task(selected, request, queue));
+    report_random_result(shell, task);
+}
+
+fn report_random_result(shell: &Shell, task: tokio::task::JoinHandle<bool>) {
+    let feedback = Rc::clone(&shell.control_feedback);
+    glib::spawn_future_local(async move {
+        if matches!(task.await, Ok(true)) {
+            let resource = crate::ui_resource::RANDOM_PLAY_RESOURCE;
+            let builder = ui_shared::ui_resource::builder(resource);
+            let message: gtk::Label =
+                ui_shared::ui_resource::object(&builder, resource, "no_matches");
+            feedback.show_feedback_toast(message.text().to_string());
+        }
+    });
 }
 
 async fn execute_random_task(
     selected: rufin_core::runtime::SelectedLibrary,
     request: RandomPlayRequest,
     queue: playback::QueueHandle,
-) {
+) -> bool {
     let cancellation = ReadCancellation::new();
     let order = match selected
         .database
@@ -407,9 +422,12 @@ async fn execute_random_task(
         Ok(order) => Arc::<[String]>::from(order),
         Err(error) => {
             warn!(%error, "failed to select Random Play tracks");
-            return;
+            return false;
         }
     };
+    if order.is_empty() {
+        return true;
+    }
     let media = selected
         .database
         .queue_items_for_uris(&order, &cancellation)
@@ -418,6 +436,7 @@ async fn execute_random_task(
     if let Some(request) = playback::PlayRequest::random(media.into(), request.placement) {
         queue.play(request);
     }
+    false
 }
 
 fn random_variation() -> i64 {

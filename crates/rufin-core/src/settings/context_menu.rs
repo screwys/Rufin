@@ -76,13 +76,6 @@ impl ContextMenuSettings {
             .find(|entry| entry.item == item)
             .is_none_or(|entry| entry.visible)
     }
-
-    pub fn position(&self, item: ContextMenuItem) -> usize {
-        self.items
-            .iter()
-            .position(|entry| entry.item == item)
-            .unwrap_or(usize::MAX)
-    }
 }
 
 fn default_true() -> bool {

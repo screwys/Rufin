@@ -3,6 +3,10 @@
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
 
+  <object class="GtkLabel" id="no_matches">
+    <property name="label" translatable="yes">No matching tracks found</property>
+  </object>
+
   <object class="AdwDialog" id="random_play_dialog">
     <property name="content-width">460</property>
     <property name="child">

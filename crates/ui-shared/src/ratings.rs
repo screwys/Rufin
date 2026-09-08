@@ -175,9 +175,6 @@ pub fn context_rating_row(
 ) -> gtk::Box {
     let row = gtk::Box::new(gtk::Orientation::Vertical, 0);
     row.set_hexpand(true);
-    let separator = gtk::Separator::new(gtk::Orientation::Horizontal);
-    separator.set_margin_bottom(2);
-    row.append(&separator);
 
     let control = RatingControl::new(rating, half_stars);
     control.widget().set_hexpand(true);
