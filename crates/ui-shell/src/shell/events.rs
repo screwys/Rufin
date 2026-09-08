@@ -610,6 +610,9 @@ fn source_add_completed(previous: &SourceOperation, next: &SourceOperation) -> b
 }
 
 fn apply_source_discovery(shell: &Rc<Shell>, update: DiscoveryUpdate) {
+    if update.provider != shell.source.discovery_provider.get() {
+        return;
+    }
     *shell.source.discovered_servers.borrow_mut() = update.servers.to_vec();
     *shell.source.discovery_status.borrow_mut() = update.status.clone();
     shell
@@ -638,7 +641,7 @@ fn finish_playback_projection(
     notices: Vec<playback::PlaybackNotice>,
     queue_window_changed: bool,
 ) {
-    if let Some(folder) = unavailable_local_folder_for_failed_playback(
+    let unavailable_folder = unavailable_local_folder_for_failed_playback(
         previous_player.as_ref(),
         &next_player,
         &shell.source.configured.borrow(),
@@ -646,8 +649,9 @@ fn finish_playback_projection(
             .selected_library()
             .as_deref()
             .map(|selected| &selected.source_id),
-    ) {
-        show_local_folder_recovery(shell, folder);
+    );
+    if let Some(folder) = unavailable_folder.as_ref() {
+        show_local_folder_recovery(shell, folder.clone());
     }
     let previous_media = previous_player
         .as_ref()
@@ -726,6 +730,13 @@ fn finish_playback_projection(
             }
             playback::PlaybackNotice::RunStarted(run) => {
                 notification_started_run = Some(run);
+            }
+            playback::PlaybackNotice::OperationFailed(error) => {
+                if unavailable_folder.is_none() {
+                    shell
+                        .control_feedback
+                        .show_feedback_toast(playback_error_toast(&error));
+                }
             }
         }
     }
@@ -922,6 +933,22 @@ fn apply_lyrics_event(shell: &Rc<Shell>, event: rufin_core::lyrics::LyricsEvent)
     }
 }
 
+fn playback_error_toast(error: &str) -> String {
+    // Backend diagnostics remain intact in the log. Only present the message
+    // field from GStreamer's diagnostic envelope, never its pipeline or URL.
+    let message = error
+        .strip_prefix("GStreamer ")
+        .and_then(|details| details.split_once("; error="))
+        .and_then(|(_, message)| message.split_once("; debug="))
+        .map_or(error, |(message, _)| message);
+    match message {
+        "Not Found" | "File not found" | "Resource not found" | "Resource not found." => {
+            tr("Resource not found")
+        }
+        _ => message.to_owned(),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use playback::{
@@ -937,6 +964,24 @@ mod tests {
     use rufin_core::runtime::source::{
         LocalFolder, SourceOperation, SourceProgress, SourceProgressStage,
     };
+
+    #[test]
+    fn playback_toasts_omit_backend_diagnostics() {
+        let diagnostic = "GStreamer prepared playback failed; element=/GstPlayBin/player/GstSoupHTTPSrc/source; audio_sink=autoaudiosink; error=Not Found; debug=Not Found (404), URL: http://server/Audio/track/stream";
+        assert_eq!(
+            super::playback_error_toast(diagnostic),
+            localization::tr("Resource not found")
+        );
+        assert_eq!(
+            super::playback_error_toast(
+                &diagnostic.replace("error=Not Found;", "error=Internal data stream error.;")
+            ),
+            "Internal data stream error."
+        );
+        let rejected =
+            "Plex Companion queues require Plex music from one configured server and profile";
+        assert_eq!(super::playback_error_toast(rejected), rejected);
+    }
 
     fn adding() -> SourceOperation {
         SourceOperation::Adding {

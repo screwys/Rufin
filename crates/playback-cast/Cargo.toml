@@ -12,12 +12,14 @@ publish.workspace = true
 
 [dependencies]
 getrandom.workspace = true
+futures-util.workspace = true
+sources.workspace = true
 fcast-sender-sdk.workspace = true
 if-addrs.workspace = true
 mdns-sd.workspace = true
 playback.workspace = true
 audio-processing.workspace = true
-reqwest = { workspace = true, features = ["blocking"] }
+reqwest = { workspace = true, features = ["blocking", "query"] }
 roxmltree.workspace = true
 rustls.workspace = true
 socket2.workspace = true
@@ -28,6 +30,7 @@ url.workspace = true
 [dev-dependencies]
 library.workspace = true
 tempfile.workspace = true
+tokio = { workspace = true, features = ["rt", "time", "sync", "macros"] }
 
 [lints]
 workspace = true

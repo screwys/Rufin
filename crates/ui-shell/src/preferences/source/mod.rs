@@ -20,6 +20,7 @@ pub(crate) struct SourceState {
     pub(crate) discovery_status: RefCell<DiscoveryStatus>,
     pub(crate) discovery_running: Cell<bool>,
     pub(crate) discovery_started: Cell<bool>,
+    pub(crate) discovery_provider: Cell<rufin_core::runtime::source::DiscoveryProvider>,
     pub(crate) add_server: RefCell<Option<login::SourceSetupViewHandle>>,
     pub(crate) refresh_feedback_generation: Rc<Cell<u64>>,
     pub(crate) artwork_preparation_revision: Cell<Option<u64>>,

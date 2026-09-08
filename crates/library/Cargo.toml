@@ -29,7 +29,6 @@ url.workspace = true
 [dev-dependencies]
 proptest = "1.6.0"
 tokio = { workspace = true, features = ["macros", "rt-multi-thread"] }
-tracing-subscriber.workspace = true
 
 [lints]
 workspace = true

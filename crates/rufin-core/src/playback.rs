@@ -1,4 +1,5 @@
 //! Rufin crossings for compact Playback, Database Queue persistence, streams, and Activity.
+mod plex;
 #[cfg(test)]
 mod queue_tests;
 mod target;
@@ -64,6 +65,8 @@ pub(crate) struct PlaybackOwner {
     start_backend: Box<dyn Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync>,
     cast: playback_cast::CastManager,
     output: Mutex<OutputSelection>,
+    plex_targets: Mutex<std::collections::HashMap<String, playback_cast::plex::PlexPlayer>>,
+    plex: Mutex<Option<Arc<plex::PlexPlayback>>>,
 }
 
 struct PlaybackWork {
@@ -191,6 +194,8 @@ impl PlaybackOwner {
                 selected: playback::PlaybackOutput::Local,
                 prepared: None,
             }),
+            plex_targets: Mutex::new(std::collections::HashMap::new()),
+            plex: Mutex::new(None),
         });
         let weak = Arc::downgrade(&owner);
         owner.runtime.spawn(async move {
@@ -412,11 +417,21 @@ impl PlaybackOwner {
                     return;
                 }
                 let capturing = matches!(request, library::QueueReadRequest::Capture { .. });
+                let hydrate_entries = match &request {
+                    library::QueueReadRequest::Hydrate { entries } => Some(entries.clone()),
+                    _ => None,
+                };
                 let result = self
                     .database
                     .read_queue(request)
                     .await
                     .map_err(string_error);
+                let result = match (hydrate_entries, result) {
+                    (Some(entries), Ok(page)) => {
+                        self.import_missing_plex_queue_rows(entries, page).await
+                    }
+                    (_, result) => result,
+                };
                 let namespace = capturing
                     .then(|| {
                         result
@@ -523,15 +538,19 @@ impl PlaybackOwner {
                 }
             }
             SessionEffect::SourceReport(_) => {}
-            SessionEffect::RequestAutoDj(request) => crate::radio::request_auto_dj(
-                self.runtime.clone(),
-                Arc::clone(&self.database),
-                self.source_owner()
-                    .map(|source| Arc::downgrade(&source))
-                    .unwrap_or_default(),
-                active.playback.clone(),
-                request,
-            ),
+            SessionEffect::RequestAutoDj(request) => {
+                if !self.request_plex_auto_dj(&request) {
+                    crate::radio::request_auto_dj(
+                        self.runtime.clone(),
+                        Arc::clone(&self.database),
+                        self.source_owner()
+                            .map(|source| Arc::downgrade(&source))
+                            .unwrap_or_default(),
+                        active.playback.clone(),
+                        request,
+                    );
+                }
+            }
             SessionEffect::NonfatalError(error) => {
                 debug!(%error, "Playback operation was not available")
             }
@@ -726,6 +745,10 @@ impl PlaybackOwner {
             .and_then(|active| active.playback.projection().ok())
     }
     fn send(&self, command: SessionCommand) {
+        let command = match self.send_plex(command) {
+            Some(command) => command,
+            None => return,
+        };
         if let Some(active) = self.active() {
             if let Err(error) = active.playback.command(command) {
                 warn!(%error,"Playback command failed");
@@ -758,7 +781,11 @@ impl PlaybackOwner {
                 .map(|backend| Box::new(backend) as Box<dyn PlaybackBackend>),
         }
     }
-    fn select_output(&self, selected: playback::PlaybackOutput) -> Result<(), String> {
+    fn select_output(
+        &self,
+        selected: playback::PlaybackOutput,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<(), String> {
         if self
             .output
             .lock()
@@ -767,6 +794,21 @@ impl PlaybackOwner {
             == selected
         {
             return Ok(());
+        }
+        if matches!(&selected, playback::PlaybackOutput::Remote(output) if output.protocol == playback::RemoteOutputProtocol::PlexCompanion)
+        {
+            return self.select_plex(selected, cancelled);
+        }
+        if self
+            .plex
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .is_some()
+        {
+            self.leave_plex(cancelled)?;
+            if selected.is_local() {
+                return Ok(());
+            }
         }
         let backend = self.start_output_backend(&selected)?;
         if let Some(active) = self.active() {
@@ -809,6 +851,9 @@ fn prepend_playback_notices(
 
 impl QueueCommandPort for PlaybackOwner {
     fn play(&self, mut request: PlayRequest) {
+        if self.play_plex(&request) {
+            return;
+        }
         let Some(active) = self.active() else {
             return;
         };
@@ -855,6 +900,9 @@ impl QueueCommandPort for PlaybackOwner {
 
 impl RadioCommandPort for PlaybackOwner {
     fn play_random(&self, request: RandomPlayRequest) {
+        if self.random_plex(&request) {
+            return;
+        }
         if let (Some(active), Some(selected)) = (
             self.active(),
             self.source_owner()
@@ -869,6 +917,9 @@ impl RadioCommandPort for PlaybackOwner {
         }
     }
     fn play_radio(&self, request: RadioPlayRequest) {
+        if self.radio_plex(&request) {
+            return;
+        }
         if let (Some(active), Some(selected)) = (
             self.active(),
             self.source_owner()
@@ -989,12 +1040,24 @@ impl TransportCommandPort for PlaybackOwner {
             .clone()
     }
     fn discover_remote_outputs(&self) -> Result<Vec<playback::RemoteOutput>, String> {
-        self.cast.discover()
+        let mut outputs = self.cast.discover().unwrap_or_else(|error| {
+            debug!(%error, "generic receiver discovery unavailable");
+            Vec::new()
+        });
+        outputs.extend(self.discover_plex()?);
+        Ok(outputs)
     }
-    fn select_playback_output(&self, output: playback::PlaybackOutput) -> Result<(), String> {
-        self.select_output(output)
+    fn select_playback_output(
+        &self,
+        output: playback::PlaybackOutput,
+        cancelled: Arc<std::sync::atomic::AtomicBool>,
+    ) -> Result<(), String> {
+        self.select_output(output, cancelled)
     }
     fn shutdown(&self) {
+        if let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).take() {
+            plex.cancel();
+        }
         if let Some(mut backend) = self
             .output
             .lock()

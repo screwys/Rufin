@@ -376,11 +376,13 @@ pub fn present_playlist_entry_menu(
 ) {
     let surface = ContextMenuSurface::new(target, "playlist-entry", position);
     append_play_actions(&surface);
-    surface.append_fixed_action(
-        msgid("Remove from Playlist"),
-        "remove-from-playlist",
-        REMOVE_ICON,
-    );
+    if removal.as_ref().is_some_and(|selection| selection.writable) {
+        surface.append_fixed_action(
+            msgid("Remove from Playlist"),
+            "remove-from-playlist",
+            REMOVE_ICON,
+        );
+    }
     append_context_menu_picker_media(&surface, menus, row.media_uri.clone());
     install_download_actions(
         &surface,
@@ -455,11 +457,13 @@ pub fn present_playlist_entry_selection_menu(
     position: Option<(f64, f64)>,
 ) {
     let surface = ContextMenuSurface::new(target, "playlist-entry-selection", position);
-    surface.append_fixed_action(
-        msgid("Remove from Playlist"),
-        "remove-from-playlist",
-        REMOVE_ICON,
-    );
+    if selection.writable {
+        surface.append_fixed_action(
+            msgid("Remove from Playlist"),
+            "remove-from-playlist",
+            REMOVE_ICON,
+        );
+    }
     append_playlist_entry_selection_actions(&surface, menus, selection.clone());
     let remove_menus = Rc::clone(menus);
     surface.add_action("remove-from-playlist", move || {
@@ -472,7 +476,7 @@ pub fn remove_playlist_entry_selection(
     menus: &Rc<MediaMenus>,
     selection: PlaylistEntrySelectionSnapshot,
 ) -> bool {
-    if selection.entries.is_empty() {
+    if !selection.writable || selection.entries.is_empty() {
         return false;
     }
     let item_count = selection.entries.len();
@@ -963,9 +967,11 @@ pub fn present_playlist_context_menu(
             &export_name,
         )
     });
-    surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
-    surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
-    surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
+    if playlist.writable {
+        surface.append_fixed_action(msgid("Rename"), "rename", EDIT_ICON);
+        surface.append_fixed_action(msgid("Add current"), "add-current", ADD_ICON);
+        surface.append_fixed_action(msgid("Delete"), "delete", DELETE_ICON);
+    }
     let playback = PlaybackTarget::Playlist(playlist.playlist_key);
     install_download_actions(
         &surface,

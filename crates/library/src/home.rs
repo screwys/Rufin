@@ -134,11 +134,13 @@ struct HomeSectionFacts {
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct HomeProviderSection {
     pub section_id: String,
+    pub title: Option<String>,
     pub rows: HomeSectionRows,
 }
 
 struct HomeProviderFacts {
     section_id: String,
+    title: Option<String>,
     rows: HomeSectionFacts,
 }
 
@@ -464,18 +466,22 @@ impl Database {
             Vec::new()
         };
 
-        let provider_section_ids = sqlx::query_scalar::<_, String>(
-            "SELECT DISTINCT section_id FROM home_entries
+        let provider_section_ids = sqlx::query_as::<_, (String, Option<String>)>(
+            "SELECT section_id,max(section_title) FROM home_entries
              WHERE source_key=?1 AND section_id NOT IN ('most-played','newly-added','recently-played','recently-released')
-             ORDER BY section_id LIMIT 12",
+             GROUP BY section_id ORDER BY section_id LIMIT 12",
         )
         .bind(source)
         .fetch_all(&mut *transaction)
         .await?;
         let mut provider_sections = Vec::with_capacity(provider_section_ids.len());
-        for section_id in provider_section_ids {
+        for (section_id, title) in provider_section_ids {
             let rows = provider_section(&mut transaction, source, folder, &section_id).await?;
-            provider_sections.push(HomeProviderFacts { section_id, rows });
+            provider_sections.push(HomeProviderFacts {
+                section_id,
+                title,
+                rows,
+            });
         }
 
         transaction.commit().await?;
@@ -635,6 +641,7 @@ async fn enrich_home_page(
             .into_iter()
             .map(|provider| HomeProviderSection {
                 section_id: provider.section_id,
+                title: provider.title,
                 rows: section(provider.rows),
             })
             .collect(),

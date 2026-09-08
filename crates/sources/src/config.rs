@@ -63,6 +63,23 @@ pub struct JellyfinSettingsInput {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlexSetupInput {
+    pub name: String,
+    pub login: crate::plex::PlexLogin,
+    pub profile_id: String,
+    pub server: crate::plex::PlexServer,
+    pub address_override: Option<String>,
+    pub trust_invalid_cert: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PlexSettingsInput {
+    pub name: String,
+    pub address_override: Option<String>,
+    pub trust_invalid_cert: bool,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSetupInput {
     WebDav {
         name: String,
@@ -75,6 +92,7 @@ pub enum SourceSetupInput {
         credentials: crate::FileCredentials,
     },
     Jellyfin(JellyfinSetupInput),
+    Plex(PlexSetupInput),
     Subsonic {
         flavor: SubsonicFlavor,
         authentication: crate::subsonic::SubsonicAuthentication,
@@ -91,6 +109,7 @@ pub enum SourceSettingsInput {
         credentials: crate::FileCredentialsEdit,
     },
     Jellyfin(JellyfinSettingsInput),
+    Plex(PlexSettingsInput),
     Subsonic {
         authentication: crate::subsonic::SubsonicAuthentication,
         credentials: CredentialSettingsInput,
@@ -102,6 +121,11 @@ pub enum SourceSettingsInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum EditableSource {
+    Plex {
+        source_id: SourceId,
+        name: String,
+        settings: PlexSettingsInput,
+    },
     Files {
         source_id: SourceId,
         kind: String,
@@ -136,7 +160,7 @@ impl SourceConfiguration {
     }
 
     pub fn playlist_tracks_can_repeat(&self) -> bool {
-        self.kind != crate::jellyfin::JELLYFIN_SOURCE_ID
+        !matches!(self.kind.as_str(), "jellyfin" | "plex")
     }
 
     /// Encode an already configured Local source without touching its folders.
@@ -179,6 +203,11 @@ impl SourceConfiguration {
         digest_part(&mut digest, self.source_id.as_str().as_bytes());
         digest_part(&mut digest, self.kind.as_bytes());
         match self.kind.as_str() {
+            "plex" => {
+                let config = crate::plex::PlexSourceConfig::from_configuration(self)?;
+                digest_part(&mut digest, config.server_id.as_bytes());
+                digest_part(&mut digest, config.profile_id.as_bytes());
+            }
             "smb" | "webdav" => {
                 let settings = crate::FileSourceSettings::from_configuration(self)?;
                 digest_part(&mut digest, settings.url.as_bytes());
@@ -227,6 +256,18 @@ impl SourceConfiguration {
     /// here and accepts the corresponding edit through `Source::edit`.
     pub fn editable(&self) -> SourceResult<EditableSource> {
         match self.kind.as_str() {
+            "plex" => {
+                let config = crate::plex::PlexSourceConfig::from_configuration(self)?;
+                Ok(EditableSource::Plex {
+                    source_id: self.source_id.clone(),
+                    name: self.name.clone(),
+                    settings: PlexSettingsInput {
+                        name: self.name.clone(),
+                        address_override: config.address_override,
+                        trust_invalid_cert: config.trust_invalid_cert,
+                    },
+                })
+            }
             "smb" | "webdav" => Ok(EditableSource::Files {
                 source_id: self.source_id.clone(),
                 kind: self.kind.clone(),
@@ -320,6 +361,29 @@ mod tests {
     use crate::file::local::LocalSourceConfig;
     use crate::jellyfin::JellyfinSourceConfig;
     use crate::subsonic::SubsonicSourceConfig;
+
+    #[test]
+    fn plex_identity_depends_on_server_profile_not_connection_or_presentation() {
+        let mut source = migrated_source(
+            "plex",
+            serde_json::json!({"version":1,"server_id":"machine","profile_id":"profile","base_url":"https://old.test","address_override":null,"local":true,"relay":false,"owned":true,"trust_invalid_cert":false}),
+        );
+        let initial = source.input_identity().unwrap();
+        let mut payload: serde_json::Value =
+            serde_json::from_str(&source.provider_payload).unwrap();
+        payload["base_url"] = serde_json::json!("https://new.test");
+        payload["relay"] = serde_json::json!(true);
+        source.name = "Renamed".into();
+        source.provider_payload = payload.to_string();
+        assert_eq!(source.input_identity().unwrap(), initial);
+        payload["profile_id"] = serde_json::json!("another-profile");
+        source.provider_payload = payload.to_string();
+        assert_ne!(source.input_identity().unwrap(), initial);
+        payload["profile_id"] = serde_json::json!("profile");
+        payload["server_id"] = serde_json::json!("another-machine");
+        source.provider_payload = payload.to_string();
+        assert_ne!(source.input_identity().unwrap(), initial);
+    }
 
     fn migrated_source(kind: &str, payload: serde_json::Value) -> SourceConfiguration {
         SourceConfiguration {
@@ -455,6 +519,7 @@ mod tests {
     #[test]
     fn jellyfin_playlist_adds_do_not_offer_repeated_tracks() {
         assert!(!migrated_source("jellyfin", serde_json::Value::Null).playlist_tracks_can_repeat());
+        assert!(!migrated_source("plex", serde_json::Value::Null).playlist_tracks_can_repeat());
         assert!(migrated_source("subsonic", serde_json::Value::Null).playlist_tracks_can_repeat());
         assert!(migrated_source("local", serde_json::Value::Null).playlist_tracks_can_repeat());
     }

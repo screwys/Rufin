@@ -387,6 +387,9 @@ msgstr ""
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+msgid "Change Profile"
+msgstr ""
+
 msgid "Change Secret Storage"
 msgstr ""
 
@@ -406,6 +409,9 @@ msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
 msgid "Choose Folder"
+msgstr ""
+
+msgid "Choose Server"
 msgstr ""
 
 msgid "Choose a local music folder"
@@ -952,6 +958,9 @@ msgstr ""
 msgid "Home Blocks"
 msgstr ""
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr ""
 
@@ -1115,6 +1124,9 @@ msgid "Local music folder is unavailable"
 msgstr ""
 
 msgid "Local music folder"
+msgstr ""
+
+msgid "Local playback saved"
 msgstr ""
 
 msgid "Local"
@@ -1608,6 +1620,12 @@ msgstr ""
 msgid "Plays"
 msgstr ""
 
+msgid "Plex Account"
+msgstr ""
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr ""
 
@@ -1663,6 +1681,9 @@ msgid "Private mode is on"
 msgstr ""
 
 msgid "Private mode"
+msgstr ""
+
+msgid "Profile PIN"
 msgstr ""
 
 msgid "Pronunciation"
@@ -1827,6 +1848,9 @@ msgstr ""
 msgid "Reset"
 msgstr ""
 
+msgid "Resource not found"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -1890,6 +1914,9 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
+msgid "Saved Plex Login"
+msgstr ""
+
 msgid "Saved logins"
 msgstr ""
 
@@ -1903,9 +1930,6 @@ msgid "Saved to"
 msgstr ""
 
 msgid "Saved"
-msgstr ""
-
-msgid "Saved, sync to preview matches"
 msgstr ""
 
 msgid "Saves lyrics to your source"
@@ -1956,10 +1980,11 @@ msgstr ""
 msgid "Searching Local Network"
 msgstr ""
 
-msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for devices..."
 msgstr ""
 
-msgid "Searching for devices..."
+#, rust-format
+msgid "Searching for {provider} servers on the local network..."
 msgstr ""
 
 msgid "Searching will start automatically"
@@ -2011,6 +2036,9 @@ msgid "Separate .lrc file"
 msgstr ""
 
 msgid "Server Actions"
+msgstr ""
+
+msgid "Server Address Override (optional)"
 msgstr ""
 
 msgid "Server Address"
@@ -2124,6 +2152,12 @@ msgid "Sidebar item {position}"
 msgstr ""
 
 msgid "Sidebar route by position"
+msgstr ""
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
 msgstr ""
 
 msgid "Sign in with Nextcloud"
@@ -2327,6 +2361,9 @@ msgstr ""
 msgid "Use Rufin data folder"
 msgstr ""
 
+msgid "Use Saved Login"
+msgstr ""
+
 msgid "Use This Source"
 msgstr ""
 
@@ -2358,6 +2395,9 @@ msgid "Username"
 msgstr ""
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr ""
+
+msgid "Verification Code (optional)"
 msgstr ""
 
 msgid "Verify server certificate"

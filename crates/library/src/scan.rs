@@ -268,7 +268,7 @@ impl Scan {
         self.stage(
             sqlx::query(
                 "INSERT INTO temp.scan_playlists
-             SELECT object_id,name,normalized_name,sort_text,artwork_binding
+             SELECT object_id,name,normalized_name,sort_text,artwork_binding,writable
              FROM catalog.native_playlists WHERE source_key=?1",
             )
             .bind(self.existing_source_key),
@@ -289,7 +289,7 @@ impl Scan {
             "INSERT OR IGNORE INTO temp.scan_home_entries
              SELECT entry.section_id,entry.position,entry.entity_kind,
                COALESCE(track.object_id,album.object_id,artist.object_id,playlist.object_id),
-               entry.title,entry.subtitle
+               entry.title,entry.subtitle,entry.section_title
              FROM home_entries entry
              LEFT JOIN tracks track ON entry.entity_kind='track' AND track.track_key=entry.entity_key
              LEFT JOIN albums album ON entry.entity_kind='album' AND album.album_key=entry.entity_key
@@ -1176,9 +1176,9 @@ impl Scan {
                      UNION
                      SELECT file.path
                      FROM component current
-                     JOIN local_file_dependencies dependency
+                     CROSS JOIN local_file_dependencies dependency
                        ON dependency.dependency_path=current.path
-                     JOIN local_files file
+                     CROSS JOIN local_files file
                        ON file.source_key=?1
                       AND file.local_file_key=dependency.local_file_key
                  )
@@ -1317,16 +1317,16 @@ impl Scan {
                 "INSERT OR IGNORE INTO temp.scan_albums(object_id,media_uri,title,normalized_title,display_artist,sort_text,year,release_date,date_added,musicbrainz_release_id,musicbrainz_release_group_id,is_compilation,artwork_binding,favorite,rating,first_seen_at,source_loudness_analysis_key,loudness_analysis_key) SELECT DISTINCT album.object_id,album.media_uri,album.title,album.normalized_title,album.display_artist,album.sort_text,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.artwork_binding,album.source_favorite,album.source_rating,album.first_seen_at,album.source_loudness_analysis_key,album.loudness_analysis_key FROM albums album JOIN tracks track USING(album_key) WHERE track.source_key=?1 AND {predicate}"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_artists SELECT DISTINCT artist.object_id,artist.media_uri,artist.name,artist.normalized_name,artist.sort_text,artist.musicbrainz_artist_id,artist.artwork_binding,artist.source_favorite,artist.source_rating FROM artists artist WHERE artist.source_key=?1 AND (EXISTS(SELECT 1 FROM track_artists relation JOIN tracks track USING(track_key) WHERE relation.artist_key=artist.artist_key AND {predicate}) OR EXISTS(SELECT 1 FROM album_artists relation JOIN albums album USING(album_key) JOIN tracks track USING(album_key) WHERE relation.artist_key=artist.artist_key AND {predicate}))"
+                "INSERT OR IGNORE INTO temp.scan_artists SELECT DISTINCT artist.object_id,artist.media_uri,artist.name,artist.normalized_name,artist.sort_text,artist.musicbrainz_artist_id,artist.artwork_binding,artist.source_favorite,artist.source_rating FROM artists artist WHERE artist.artist_key IN (SELECT relation.artist_key FROM tracks track JOIN track_artists relation USING(track_key) WHERE track.source_key=?1 AND {predicate} UNION SELECT relation.artist_key FROM tracks track JOIN album_artists relation USING(album_key) WHERE track.source_key=?1 AND {predicate})"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_genres SELECT DISTINCT genre.object_id,genre.name,genre.normalized_name,genre.sort_text,genre.artwork_binding FROM genres genre WHERE genre.source_key=?1 AND (EXISTS(SELECT 1 FROM track_genres relation JOIN tracks track USING(track_key) WHERE relation.genre_key=genre.genre_key AND {predicate}) OR EXISTS(SELECT 1 FROM album_genres relation JOIN albums album USING(album_key) JOIN tracks track USING(album_key) WHERE relation.genre_key=genre.genre_key AND {predicate}))"
+                "INSERT OR IGNORE INTO temp.scan_genres SELECT DISTINCT genre.object_id,genre.name,genre.normalized_name,genre.sort_text,genre.artwork_binding FROM genres genre WHERE genre.genre_key IN (SELECT relation.genre_key FROM tracks track JOIN track_genres relation USING(track_key) WHERE track.source_key=?1 AND {predicate} UNION SELECT relation.genre_key FROM tracks track JOIN album_genres relation USING(album_key) WHERE track.source_key=?1 AND {predicate})"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_moods SELECT DISTINCT mood.object_id,mood.name,mood.normalized_name,mood.sort_text FROM moods mood WHERE mood.source_key=?1 AND EXISTS(SELECT 1 FROM track_moods relation JOIN tracks track USING(track_key) WHERE relation.mood_key=mood.mood_key AND {predicate})"
+                "INSERT OR IGNORE INTO temp.scan_moods SELECT DISTINCT mood.object_id,mood.name,mood.normalized_name,mood.sort_text FROM moods mood WHERE mood.mood_key IN (SELECT relation.mood_key FROM tracks track JOIN track_moods relation USING(track_key) WHERE track.source_key=?1 AND {predicate})"
             ),
             format!(
-                "INSERT OR IGNORE INTO temp.scan_folders SELECT DISTINCT folder.object_id,folder.name,folder.normalized_name,folder.sort_text,folder.artwork_binding FROM folders folder WHERE folder.source_key=?1 AND EXISTS(SELECT 1 FROM track_folders relation JOIN tracks track USING(track_key) WHERE relation.folder_key=folder.folder_key AND {predicate})"
+                "INSERT OR IGNORE INTO temp.scan_folders SELECT DISTINCT folder.object_id,folder.name,folder.normalized_name,folder.sort_text,folder.artwork_binding FROM folders folder WHERE folder.folder_key IN (SELECT relation.folder_key FROM tracks track JOIN track_folders relation USING(track_key) WHERE track.source_key=?1 AND {predicate})"
             ),
             format!(
                 "INSERT OR IGNORE INTO temp.scan_track_artists SELECT track.object_id,artist.object_id,relation.position FROM track_artists relation JOIN tracks track USING(track_key) JOIN artists artist USING(artist_key) WHERE track.source_key=?1 AND {predicate}"
@@ -1496,6 +1496,16 @@ impl Scan {
         .await
     }
 
+    /// A membership reference must not replace the section's advertised display name.
+    pub async fn write_folder_reference(&mut self, object_id: &str) -> LibraryResult<()> {
+        self.require_id("folder", object_id)?;
+        self.stage(sqlx::query("INSERT OR IGNORE INTO temp.scan_folders
+            SELECT ?1,COALESCE(folder.name,?1),COALESCE(folder.normalized_name,?1),
+                COALESCE(folder.sort_text,?1),folder.artwork_binding
+            FROM (SELECT 1) LEFT JOIN folders folder ON folder.source_key=?2 AND folder.object_id=?1")
+            .bind(object_id).bind(self.existing_source_key)).await
+    }
+
     pub async fn write_track_relations(
         &mut self,
         artists: &[(&str, &str)],
@@ -1549,12 +1559,25 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_playlists VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,artwork_binding=COALESCE(excluded.artwork_binding,scan_playlists.artwork_binding)")
+            sqlx::query("INSERT INTO temp.scan_playlists(object_id,name,normalized_name,sort_text,artwork_binding) VALUES (?1, ?2, ?3, ?4, ?5) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,artwork_binding=COALESCE(excluded.artwork_binding,scan_playlists.artwork_binding)")
                 .bind(object_id)
                 .bind(name)
                 .bind(normalized_name)
                 .bind(sort_text)
                 .bind(artwork_binding),
+        )
+        .await
+    }
+
+    pub async fn write_playlist_writable(
+        &mut self,
+        object_id: &str,
+        writable: bool,
+    ) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query("UPDATE temp.scan_playlists SET writable=?2 WHERE object_id=?1")
+                .bind(object_id)
+                .bind(writable),
         )
         .await
     }
@@ -1609,7 +1632,7 @@ impl Scan {
         ])?;
         self.stage(
             sqlx::query(
-                "INSERT INTO temp.scan_home_entries SELECT ?1, ?2, ?3, ?4, ?5, ?6
+                "INSERT INTO temp.scan_home_entries SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL
                 WHERE CASE ?3
                   WHEN 'track' THEN EXISTS(SELECT 1 FROM temp.scan_tracks WHERE object_id=?4)
                   WHEN 'album' THEN EXISTS(SELECT 1 FROM temp.scan_albums WHERE object_id=?4)
@@ -1623,6 +1646,20 @@ impl Scan {
             .bind(&input.entity_object_id)
             .bind(&input.title)
             .bind(&input.subtitle),
+        )
+        .await
+    }
+
+    pub async fn write_home_section_title(
+        &mut self,
+        section_id: &str,
+        title: &str,
+    ) -> LibraryResult<()> {
+        self.require_row_bytes(&[section_id.as_bytes(), title.as_bytes()])?;
+        self.stage(
+            sqlx::query("UPDATE temp.scan_home_entries SET section_title=?2 WHERE owner_id=?1")
+                .bind(section_id)
+                .bind(title),
         )
         .await
     }
@@ -2577,7 +2614,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
          CREATE TEMP TABLE scan_playlists(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
-             artwork_binding BLOB
+             artwork_binding BLOB, writable INTEGER NOT NULL DEFAULT 1
          ) STRICT;
          CREATE TEMP TABLE scan_playlist_entries(
              playlist_id TEXT NOT NULL, object_id TEXT NOT NULL,
@@ -2589,7 +2626,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              entity_kind TEXT NOT NULL CHECK (
                  entity_kind IN ('track', 'album', 'artist', 'playlist')
              ), entity_object_id TEXT NOT NULL,
-             title TEXT NOT NULL, subtitle TEXT NOT NULL,
+             title TEXT NOT NULL, subtitle TEXT NOT NULL, section_title TEXT,
              PRIMARY KEY(owner_id, position)
          ) STRICT;",
     )
@@ -3107,8 +3144,8 @@ async fn staged_playlists_changed(
 ) -> LibraryResult<bool> {
     for (staged, current) in [
         (
-            "SELECT object_id,name,normalized_name,sort_text FROM temp.scan_playlists",
-            "SELECT object_id,name,normalized_name,sort_text FROM playlists WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_playlists) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='playlist'))",
+            "SELECT object_id,name,normalized_name,sort_text,writable FROM temp.scan_playlists",
+            "SELECT object_id,name,normalized_name,sort_text,writable FROM playlists WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_playlists) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='playlist'))",
         ),
         (
             "SELECT playlist_id,object_id,media_uri,position FROM temp.scan_playlist_entries",
@@ -3269,12 +3306,12 @@ async fn publish_entities(
                   +row_number() OVER(ORDER BY sort_text,object_id)-1
          FROM temp.scan_playlists WHERE true
          ON CONFLICT(source_key,object_id) DO NOTHING",
-        "INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,artwork_binding)
-         SELECT ?1,staged.object_id,staged.name,staged.normalized_name,staged.sort_text,staged.artwork_binding
+        "INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,artwork_binding,writable)
+         SELECT ?1,staged.object_id,staged.name,staged.normalized_name,staged.sort_text,staged.artwork_binding,staged.writable
          FROM temp.scan_playlists staged
          WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET
            name=excluded.name,normalized_name=excluded.normalized_name,
-           sort_text=excluded.sort_text,artwork_binding=excluded.artwork_binding",
+           sort_text=excluded.sort_text,artwork_binding=excluded.artwork_binding,writable=excluded.writable",
     ] {
         sqlx::query(sql)
             .bind(source_key)
@@ -3342,7 +3379,7 @@ async fn publish_entities(
         sqlx::query(
             "INSERT INTO home_entries(
              source_key, section_id, position, entity_kind, entity_key,
-             title, subtitle
+             title, subtitle, section_title
          ) SELECT ?1, entry.owner_id, entry.position, entry.entity_kind,
                   CASE entry.entity_kind
                     WHEN 'track' THEN (SELECT track_key FROM tracks
@@ -3354,7 +3391,7 @@ async fn publish_entities(
                     WHEN 'playlist' THEN (SELECT playlist_key FROM playlists
                       WHERE source_key=?1 AND object_id=entry.entity_object_id)
                   END,
-                  entry.title, entry.subtitle
+                  entry.title, entry.subtitle, entry.section_title
            FROM temp.scan_home_entries AS entry",
         )
         .bind(source_key)

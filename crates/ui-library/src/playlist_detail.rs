@@ -246,6 +246,7 @@ impl CatalogUi {
         let entries = Rc::new(self.playlist_entries_view(
             key,
             owner.name().to_string(),
+            matches!(&owner, PlaylistDetailOwner::Saved { summary, .. } if summary.writable),
             detail.order,
             detail.first_row_position,
             detail.first_rows,
@@ -403,7 +404,7 @@ impl CatalogUi {
             Rc::clone(&play),
         );
         match &owner {
-            PlaylistDetailOwner::Saved { key, summary } => {
+            PlaylistDetailOwner::Saved { key, summary } if summary.writable => {
                 let rename = detail_action_button(EDIT_ICON, "Rename");
                 let rename_shell = Rc::clone(self);
                 let playlist = *key;
@@ -449,6 +450,7 @@ impl CatalogUi {
                 });
                 actions.append(&delete);
             }
+            PlaylistDetailOwner::Saved { .. } => {}
             PlaylistDetailOwner::Smart { summary, .. } => {
                 let edit = detail_action_button(EDIT_ICON, "Edit");
                 let edit_shell = Rc::clone(self);
@@ -715,6 +717,7 @@ mod tests {
         let owner = PlaylistDetailOwner::Saved {
             key: PlaylistKey::from_raw(1),
             summary: PlaylistRow {
+                writable: true,
                 playlist_key: PlaylistKey::from_raw(1),
                 source_key: Some(library::SourceKey::from_raw(1)),
                 object_id: "playlist".to_string(),

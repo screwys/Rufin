@@ -74,15 +74,17 @@ pub struct PlaylistEntrySelection {
     model: PlaylistEntryModel,
     selection: PositionSelectionModel,
     playlist_name: Arc<str>,
+    writable: bool,
 }
 
 impl PlaylistEntrySelection {
-    pub fn new(model: PlaylistEntryModel, playlist_name: String) -> Self {
+    pub fn new(model: PlaylistEntryModel, playlist_name: String, writable: bool) -> Self {
         let selection = PositionSelectionModel::new(model.list_model());
         Self {
             model,
             selection,
             playlist_name: playlist_name.into(),
+            writable,
         }
     }
 
@@ -107,6 +109,7 @@ impl PlaylistEntrySelection {
 
     pub fn single_entry(&self, entry: PlaylistEntryKey) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
+            writable: self.writable,
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
             entries: Arc::from([entry]),
@@ -115,6 +118,7 @@ impl PlaylistEntrySelection {
 
     fn snapshot(&self, entries: Vec<PlaylistEntryKey>) -> PlaylistEntrySelectionSnapshot {
         PlaylistEntrySelectionSnapshot {
+            writable: self.writable,
             playlist: self.model.playlist_key(),
             playlist_name: Arc::clone(&self.playlist_name),
             entries: entries.into(),

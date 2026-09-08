@@ -546,12 +546,9 @@ impl LyricsPane {
             self.body.remove(&child);
         }
         self.rows.borrow_mut().clear();
-        // Keep scaled-font cache entries scoped to this document.
-        if matches!(&content, LyricsPaneContent::Document { .. }) {
-            self.body.set_font_map(Some(&pangocairo::FontMap::new()));
-        } else {
-            self.body.set_font_map(None::<&gtk::pango::FontMap>);
-        }
+        // Release the previous document's scaled-font cache. Use a fresh map even
+        // for placeholders: GTK 4.22 refs NULL when resetting a map to None.
+        self.body.set_font_map(Some(&pangocairo::FontMap::new()));
         self.active_index.set(None);
         self.active_row.borrow_mut().take();
         self.cancel_scroll_animation();

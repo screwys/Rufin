@@ -222,6 +222,12 @@ impl Sequence {
     pub fn shuffle_enabled(&self) -> bool {
         self.shuffle_enabled
     }
+    pub(crate) fn observe_shuffle(&mut self, enabled: bool) {
+        self.shuffle_enabled = enabled;
+    }
+    pub(crate) fn persist_membership(&mut self) {
+        self.changed(QueuePersistenceKind::Membership);
+    }
     pub fn revision(&self) -> u64 {
         self.revision
     }
@@ -620,6 +626,24 @@ mod tests {
         s.take_persistence();
         s
     }
+    #[test]
+    fn restored_membership_hydrates_a_later_duplicate_on_navigation() {
+        let mut s = Sequence::from_window(sequence(10_000).snapshot(), 1).unwrap();
+        let selected = OccurrenceId::new("entry:9999");
+        assert!(s.activate_index(9999));
+        assert_eq!(s.selected_id(), Some(&selected));
+        assert!(s.selected().is_none());
+        let Some(library::QueueReadRequest::Hydrate { entries }) = s.read_request() else {
+            panic!("later membership needs nearby metadata");
+        };
+        assert!(entries.len() <= library::QUEUE_CONTEXT_LIMIT);
+        assert!(entries.iter().any(|entry| entry.occurrence == selected));
+        s.hydrate(page(9989, 11));
+        assert_eq!(s.selected().unwrap().occurrence, selected);
+        assert_eq!(s.total(), 10_000);
+        assert!(s.entries().len() <= library::QUEUE_CONTEXT_LIMIT);
+    }
+
     #[test]
     fn complete_membership_and_bounded_metadata_have_separate_ownership() {
         let mut s = sequence(10_000);

@@ -5,7 +5,6 @@ use crate::{
     ConnectedSource, CredentialHostInput, ImageBytes, JellyfinSettingsInput, JellyfinSetupInput,
     SourceConfiguration, SourceEditResult, SourceError, SourceId, SourceResult,
 };
-pub use discovery::{DiscoveredJellyfinServer, discover_jellyfin_servers};
 use item::{
     ALBUM_FIELDS, ImageRef, MIXED_ITEM_FIELDS, PLAYLIST_FIELDS, TRACK_FIELDS, album_from_item,
     artist_from_item, genre_from_item, is_audio_item, playlist_from_item, primary_image_ref,
@@ -20,7 +19,6 @@ use std::sync::Arc;
 use tracing::instrument;
 
 mod client;
-mod discovery;
 mod events;
 mod item;
 pub(crate) mod metadata;

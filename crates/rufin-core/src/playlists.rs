@@ -2,7 +2,6 @@
 use crate::runtime::source::PlaylistExport;
 use crate::runtime::{CatalogChange, CatalogPublication, SourceEvent};
 use crate::settings::{ConfiguredSource, fresh_source_id};
-use crate::source::configured_sources;
 use crate::source::{SourceOwner, string_error};
 use async_channel::Receiver;
 use library::{
@@ -464,10 +463,11 @@ async fn enrich_imported_playlist(
             .map_err(string_error)?;
             owner
                 .shared
-                .send(SourceEvent::Configured(configured_sources(
-                    &owner.shared.settings.load(),
-                    owner.shared.selected().as_deref(),
-                )))
+                .send(SourceEvent::Configured(
+                    owner
+                        .shared
+                        .configured_sources(owner.shared.selected().as_deref()),
+                ))
                 .await;
             Arc::new(source)
         };

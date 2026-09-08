@@ -10,7 +10,9 @@
 extern crate self as sources;
 
 mod config;
+pub mod discovery;
 mod operations;
+mod plex;
 mod policy;
 mod source;
 
@@ -30,8 +32,8 @@ mod local_change_integration_tests {
 
 pub use config::{
     CredentialHostInput, CredentialHostPreset, CredentialSettingsInput, EditableSource,
-    JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, SourceConfiguration,
-    SourceSettingsInput, SourceSetupInput,
+    JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, PlexSettingsInput,
+    PlexSetupInput, SourceConfiguration, SourceSettingsInput, SourceSetupInput,
 };
 pub use file::metadata::read_embedded_lyrics;
 pub use file::remote::smb::list_smb_shares;
@@ -48,10 +50,15 @@ pub use operations::{
 };
 pub use source::*;
 
+pub use discovery::{DiscoveredServer, DiscoveryProvider, discover_servers};
 pub use file::local::{
     LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_local_image, verify_local_media_file,
 };
-pub use jellyfin::{DiscoveredJellyfinServer, discover_jellyfin_servers};
+pub use plex::{
+    PLEX_QUEUE_WINDOW, PlexCompanionContext, PlexCompanionPlayer, PlexQueueItem, PlexQueueMutation,
+    PlexQueuePlacement, PlexQueueWindow, plex_queue_write_batches,
+};
+pub use plex::{PlexBrowserLogin, PlexConnection, PlexLogin, PlexProfile, PlexServer};
 pub use subsonic::{SubsonicAuthentication, SubsonicFlavor};
 
 use thiserror::Error;

@@ -1518,6 +1518,7 @@ fn add_output_row(
             let protocol = glib::markup_escape_text(&match remote.protocol {
                 RemoteOutputProtocol::Upnp => tr("UPnP"),
                 RemoteOutputProtocol::GoogleCast => tr("Google Cast"),
+                RemoteOutputProtocol::PlexCompanion => "Plex Companion".into(),
             });
             format!("{name}  <span size=\"small\" alpha=\"55%\">{protocol}</span>").into()
         }
@@ -1580,8 +1581,11 @@ fn select_output_async(
     let (sender, receiver) = std::sync::mpsc::channel();
     let transport = shell.playback_handles.transport.clone();
     let selected = output.clone();
+    let cancelled = Arc::new(AtomicBool::new(false));
+    let closing = Arc::clone(&cancelled);
+    popover.connect_closed(move |_| closing.store(true, Ordering::Release));
     thread::spawn(move || {
-        let _ = sender.send(transport.select_playback_output(selected));
+        let _ = sender.send(transport.select_playback_output(selected, cancelled));
     });
     let shell = Rc::downgrade(shell);
     let outputs = outputs.downgrade();
