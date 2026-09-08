@@ -1840,6 +1840,9 @@ impl Scan {
         .execute(&mut *transaction)
         .await?;
         transaction.commit().await?;
+        sqlx::raw_sql("PRAGMA optimize=0x10002")
+            .execute(&mut *connection)
+            .await?;
         Ok(ScanOutcome::Changed(publication(
             source_key,
             revision,

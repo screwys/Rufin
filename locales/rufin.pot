@@ -2303,6 +2303,10 @@ msgstr ""
 msgid "This isn't available"
 msgstr ""
 
+#, rust-format
+msgid "This playlist only accepts {source} tracks"
+msgstr ""
+
 msgid "This source cannot edit this field"
 msgstr ""
 

@@ -379,6 +379,312 @@ async fn saved_queue_contains_only_the_window_and_retains_compact_explicit_choic
         assert_eq!(row.occurrence, occurrence.occurrence);
         assert_eq!(row.title, occurrence.title);
     }
+    let mut exported = Vec::new();
+    fixture
+        .database
+        .export_queue_jsonl(&mut exported)
+        .await
+        .unwrap();
+    let target = super::support::fixture().await;
+    target
+        .database
+        .import_queue_jsonl(std::io::Cursor::new(exported))
+        .await
+        .unwrap();
+    assert_eq!(target.database.restore_queue().await.unwrap(), state);
+}
+
+#[tokio::test]
+async fn saved_membership_keeps_provenance_snapshots_and_source_identity_across_formats() {
+    let fixture = fixture().await;
+    let mut unavailable = QueueItem::direct(
+        "https://example.test/İstanbul/%2Fduplicate?name=\"a\"",
+        "Unavailable title",
+        "Saved artist",
+        "Saved album",
+        12345,
+    );
+    unavailable.album_display_artist = Some("Saved album artist".into());
+    unavailable.disc_number = Some(2);
+    unavailable.track_number = Some(7);
+    unavailable.year = Some(1998);
+    unavailable.release_date = Some("1998-04-03".into());
+    unavailable.source_format = Some("flac".into());
+    unavailable.musicbrainz_recording_id = Some("recording".into());
+    unavailable.musicbrainz_release_track_id = Some("release-track".into());
+    unavailable.musicbrainz_album_id = Some("album".into());
+    unavailable.musicbrainz_release_group_id = Some("release-group".into());
+    unavailable.primary_artist_musicbrainz_id = Some("artist".into());
+    let rows = [
+        QueueProvenance::Context {
+            context_id: "shared context".into(),
+            source_rank: 37,
+        },
+        QueueProvenance::Context {
+            context_id: "shared context".into(),
+            source_rank: 2,
+        },
+        QueueProvenance::Context {
+            context_id: "other \"context\"".into(),
+            source_rank: 900,
+        },
+        QueueProvenance::Manual,
+        QueueProvenance::Random,
+        QueueProvenance::Radio,
+        QueueProvenance::AutoDj,
+        QueueProvenance::Legacy,
+    ]
+    .into_iter()
+    .enumerate()
+    .map(|(index, provenance)| {
+        let mut row = occurrence(format!("queue:shared:{index}"), unavailable.clone(), index);
+        row.provenance = provenance;
+        row.playlist_entry_id =
+            (index % 2 == 0).then(|| format!("[\"playlist\",\"entry-{index}\"]"));
+        row
+    })
+    .collect::<Vec<_>>();
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &rows,
+        Some("queue:shared:4"),
+        42000,
+        QueueRepeatMode::All,
+        true,
+    )
+    .await;
+    let mut state = fixture.database.restore_queue().await.unwrap();
+    let mut entries = state.entries.to_vec();
+    entries[6].media_uri = fixture.track_uris[0].clone().into();
+    entries[7].media_uri = library::source_entity_uri(
+        &library::SourceId::new("source"),
+        "track",
+        "missing-catalog-track",
+    )
+    .into();
+    state.entries = entries.into();
+    state.order = vec![2, 1, 0, 3, 4, 5, 7, 6].into();
+    state.next_id = 987;
+    let mut raw = connection(&fixture.path).await;
+    for compact in [false, true] {
+        fixture.database.save_queue(&state).await.unwrap();
+        if !compact {
+            sqlx::query("UPDATE queue_saved SET state=?1")
+                .bind(serde_json::to_string(&state).unwrap())
+                .execute(&mut raw)
+                .await
+                .unwrap();
+            sqlx::raw_sql("DELETE FROM queue_order;DELETE FROM queue_state")
+                .execute(&mut raw)
+                .await
+                .unwrap();
+        }
+        let restored = fixture.database.restore_queue().await.unwrap();
+        assert_eq!(restored.entries, state.entries);
+        assert_eq!(restored.order, state.order);
+        assert_eq!(restored.current(), state.current());
+        assert_eq!(restored.next_id, state.next_id);
+        assert_eq!(restored.progress_millis, 42000);
+        assert_eq!(restored.repeat_mode, QueueRepeatMode::All);
+        assert!(restored.shuffled);
+        for restored in &restored.occurrences {
+            if restored.media_uri == unavailable.media_uri {
+                assert_eq!(restored.item, unavailable);
+            }
+        }
+        let mut source_members = fixture
+            .database
+            .queue_occurrences_for_source(fixture.source)
+            .await
+            .unwrap();
+        source_members.sort();
+        assert_eq!(source_members, ["queue:shared:6", "queue:shared:7"]);
+        fixture
+            .database
+            .read_queue(library::QueueReadRequest::Capture {
+                input: Box::new(library::QueueInput::Items(vec![(
+                    unavailable.clone(),
+                    QueueProvenance::Manual,
+                )])),
+                anchor_index: 0,
+                random_start: None,
+            })
+            .await
+            .unwrap();
+        fixture
+            .database
+            .discard_queue_capture("queue:")
+            .await
+            .unwrap();
+        let retained: Vec<String> =
+            sqlx::query_scalar("SELECT object_id FROM queue_occurrences ORDER BY object_id")
+                .fetch_all(&mut raw)
+                .await
+                .unwrap();
+        assert_eq!(
+            retained,
+            rows.iter()
+                .map(|row| row.occurrence.to_string())
+                .collect::<Vec<_>>()
+        );
+        let mut exported = Vec::new();
+        fixture
+            .database
+            .export_queue_jsonl(&mut exported)
+            .await
+            .unwrap();
+        let header: serde_json::Value = serde_json::from_slice(&exported).unwrap();
+        assert_eq!(header["version"], 3);
+        let exported_state: library::QueueRestore =
+            serde_json::from_value(header["queue"].clone()).unwrap();
+        assert_eq!(exported_state.entries, state.entries);
+        let target = super::support::fixture().await;
+        target
+            .database
+            .import_queue_jsonl(std::io::Cursor::new(exported))
+            .await
+            .unwrap();
+        assert_eq!(target.database.restore_queue().await.unwrap(), restored);
+    }
+    state.entries = state.entries[..6].to_vec().into();
+    state.order = state
+        .order
+        .iter()
+        .copied()
+        .filter(|index| *index < 6)
+        .collect();
+    fixture.database.save_queue(&state).await.unwrap();
+    let removed = fixture.database.restore_queue().await.unwrap();
+    assert_eq!(removed.entries, state.entries);
+    assert_eq!(removed.order, state.order);
+    assert_eq!(removed.current(), state.current());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM queue_occurrences")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        6
+    );
+    let membership: String = sqlx::query_scalar("SELECT state FROM queue_saved")
+        .fetch_one(&mut raw)
+        .await
+        .unwrap();
+    fixture
+        .database
+        .persist_queue_settings(None, 0, QueueRepeatMode::One, false)
+        .await
+        .unwrap();
+    let stopped = fixture.database.restore_queue().await.unwrap();
+    assert_eq!(stopped.entries, state.entries);
+    assert_eq!(stopped.current(), None);
+    assert_eq!(stopped.progress_millis, 0);
+    assert_eq!(stopped.repeat_mode, QueueRepeatMode::One);
+    assert!(!stopped.shuffled);
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        membership
+    );
+}
+
+#[tokio::test]
+async fn imported_snapshot_batches_keep_order_and_existing_fallback_facts() {
+    let fixture = fixture().await;
+    let mut rows = (0..205)
+        .map(|index| {
+            let mut row = occurrence(
+                format!("snapshot:{index}"),
+                QueueItem::direct(
+                    format!("https://example.test/duplicate/{}", index % 3),
+                    format!("Saved title {index}"),
+                    "Artist",
+                    "Album",
+                    index as i64,
+                ),
+                500 + index,
+            );
+            row.source_index = Some(index % 2);
+            row.playlist_entry_id = Some(format!("[null,\"playlist\",\"entry-{index}\"]"));
+            row.provenance = QueueProvenance::Context {
+                context_id: "original".into(),
+                source_rank: 700 + index,
+            };
+            row
+        })
+        .collect::<Vec<_>>();
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &rows,
+        Some("snapshot:150"),
+        900,
+        QueueRepeatMode::All,
+        true,
+    )
+    .await;
+    let mut exported = Vec::new();
+    fixture
+        .database
+        .export_queue_jsonl(&mut exported)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&exported).unwrap();
+    assert_eq!(
+        serde_json::from_value::<Vec<QueueOccurrence>>(value["snapshots"].clone()).unwrap(),
+        rows
+    );
+
+    let original = rows.clone();
+    rows.reverse();
+    for row in &mut rows {
+        row.item.title = "Changed supplied metadata".into();
+        row.canonical_position = 9000;
+        row.source_index = None;
+        row.playlist_entry_id = None;
+        row.provenance = QueueProvenance::Radio;
+    }
+    persist_queue(
+        &fixture.database,
+        fixture.source,
+        &rows,
+        Some("snapshot:150"),
+        1200,
+        QueueRepeatMode::One,
+        false,
+    )
+    .await;
+    let restored = fixture.database.restore_queue().await.unwrap();
+    assert_eq!(
+        restored
+            .entries
+            .iter()
+            .map(|entry| &entry.occurrence)
+            .collect::<Vec<_>>(),
+        rows.iter().map(|row| &row.occurrence).collect::<Vec<_>>()
+    );
+    assert_eq!(restored.current().unwrap().as_str(), "snapshot:150");
+    assert_eq!(restored.progress_millis, 1200);
+    exported.clear();
+    fixture
+        .database
+        .export_queue_jsonl(&mut exported)
+        .await
+        .unwrap();
+    let value: serde_json::Value = serde_json::from_slice(&exported).unwrap();
+    let snapshots: Vec<QueueOccurrence> =
+        serde_json::from_value(value["snapshots"].clone()).unwrap();
+    let expected = original
+        .into_iter()
+        .rev()
+        .map(|mut row| {
+            row.provenance = QueueProvenance::Radio;
+            row
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(snapshots, expected);
 }
 
 #[tokio::test]
@@ -486,6 +792,9 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
     latest.order = vec![1, 0].into();
     latest.current_index = Some(1);
     latest.shuffled = true;
+    latest.next_id = 37;
+    latest.progress_millis = 1234;
+    latest.repeat_mode = QueueRepeatMode::All;
     fixture.database.save_queue_order(&latest).await.unwrap();
     assert_eq!(
         sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved")
@@ -506,6 +815,10 @@ async fn coalesced_replacements_retire_snapshots_without_rewriting_them_on_order
     assert_eq!(restored.entries, latest.entries);
     assert_eq!(restored.order, latest.order);
     assert_eq!(restored.current(), latest.current());
+    assert_eq!(restored.next_id, latest.next_id);
+    assert_eq!(restored.progress_millis, latest.progress_millis);
+    assert_eq!(restored.repeat_mode, latest.repeat_mode);
+    assert_eq!(restored.shuffled, latest.shuffled);
 }
 
 #[tokio::test]

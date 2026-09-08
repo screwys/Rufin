@@ -410,6 +410,7 @@ pub struct ArtistRow {
 pub struct GenreRow {
     pub genre_key: GenreKey,
     pub source_key: SourceKey,
+    pub source_id: String,
     pub object_id: String,
     pub name: String,
     pub artwork_binding: Option<Vec<u8>>,
@@ -425,6 +426,7 @@ impl<'row> FromRow<'row, SqliteRow> for GenreRow {
         Ok(Self {
             genre_key: row.try_get("genre_key")?,
             source_key: row.try_get("source_key")?,
+            source_id: row.try_get("source_id")?,
             object_id: row.try_get("object_id")?,
             name: row.try_get("name")?,
             artwork_binding: row.try_get("artwork_binding")?,
@@ -570,6 +572,54 @@ fn push_artist_role_scope(
 }
 
 impl Database {
+    pub async fn collection_source(
+        &self,
+        collection: &crate::QueueCollection,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<SourceKey>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let result = collection_source_on(&mut connection, collection).await;
+        Database::clear_progress(&mut connection).await?;
+        result
+    }
+
+    pub async fn collection_media_uri_order(
+        &self,
+        collection: &crate::QueueCollection,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        use crate::QueueCollection as C;
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let query = if let C::Playlist(key) = collection {
+            crate::playlists::playlist_query(
+                *key,
+                None,
+                crate::PlaylistEntrySort::Position,
+                false,
+                "",
+            )
+        } else {
+            let Some(source) = collection_source_on(&mut transaction, collection).await? else {
+                transaction.commit().await?;
+                Database::clear_progress(&mut connection).await?;
+                return Ok(Vec::new());
+            };
+            let sort = if matches!(collection, C::Album(_) | C::AlbumKey(_)) {
+                TrackSort::TrackNumber
+            } else {
+                TrackSort::Title
+            };
+            collection_track_query(source, sort, false, collection)
+        };
+        let result = sqlx::query_scalar(sqlx::AssertSqlSafe(query.select(&query.uri)))
+            .fetch_all(&mut *transaction)
+            .await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result)
+    }
+
     pub async fn album_release_classifications(
         &self,
         source: SourceKey,
@@ -1918,7 +1968,7 @@ impl Database {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let genre = sqlx::query_as::<_, GenreRow>(
-            "SELECT genre.genre_key,genre.source_key,genre.object_id,genre.name,genre.artwork_binding,
+            "SELECT genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,genre.name,genre.artwork_binding,
               count(DISTINCT track.album_key) album_count,
               count(DISTINCT track.track_key) track_count,
               COALESCE(sum(track.duration_millis),0) duration_millis,
@@ -2212,6 +2262,38 @@ fn collection_track_query(
     query
 }
 
+async fn collection_source_on(
+    connection: &mut SqliteConnection,
+    collection: &crate::QueueCollection,
+) -> LibraryResult<Option<SourceKey>> {
+    use crate::QueueCollection as C;
+    let query = match collection {
+        C::Album(uri) => {
+            sqlx::query_scalar("SELECT source_key FROM albums WHERE media_uri=?1").bind(uri)
+        }
+        C::Artist { media_uri, .. } => {
+            sqlx::query_scalar("SELECT source_key FROM artists WHERE media_uri=?1").bind(media_uri)
+        }
+        C::AlbumKey(key) => {
+            sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1").bind(key)
+        }
+        C::ArtistKey { key, .. } => {
+            sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1").bind(key)
+        }
+        C::Genre(key) => {
+            sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1").bind(key)
+        }
+        C::Mood(key) => {
+            sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1").bind(key)
+        }
+        C::Playlist(key) => sqlx::query_scalar(
+            "SELECT source_key FROM playlists WHERE playlist_key=?1 AND source_key IS NOT NULL",
+        )
+        .bind(key),
+    };
+    Ok(query.fetch_optional(connection).await?)
+}
+
 pub(crate) async fn playback_query(
     connection: &mut SqliteConnection,
     collection: &crate::QueueCollection,
@@ -2222,53 +2304,18 @@ pub(crate) async fn playback_query(
     favorites_only: bool,
 ) -> LibraryResult<crate::source_window::SourceQuery> {
     use crate::QueueCollection as C;
-    let source = match collection {
-        C::Album(uri) => {
-            sqlx::query_scalar("SELECT source_key FROM albums WHERE media_uri=?1")
-                .bind(uri)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::Artist { media_uri, .. } => {
-            sqlx::query_scalar("SELECT source_key FROM artists WHERE media_uri=?1")
-                .bind(media_uri)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::AlbumKey(key) => {
-            sqlx::query_scalar("SELECT source_key FROM albums WHERE album_key=?1")
-                .bind(key)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::ArtistKey { key, .. } => {
-            sqlx::query_scalar("SELECT source_key FROM artists WHERE artist_key=?1")
-                .bind(key)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::Genre(key) => {
-            sqlx::query_scalar("SELECT source_key FROM genres WHERE genre_key=?1")
-                .bind(key)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::Mood(key) => {
-            sqlx::query_scalar("SELECT source_key FROM moods WHERE mood_key=?1")
-                .bind(key)
-                .fetch_one(&mut *connection)
-                .await?
-        }
-        C::Playlist(key) => {
-            return Ok(crate::playlists::playlist_query(
-                *key,
-                folder,
-                crate::PlaylistEntrySort::Position,
-                descending,
-                filter,
-            ));
-        }
-    };
+    if let C::Playlist(key) = collection {
+        return Ok(crate::playlists::playlist_query(
+            *key,
+            folder,
+            crate::PlaylistEntrySort::Position,
+            descending,
+            filter,
+        ));
+    }
+    let source = collection_source_on(connection, collection)
+        .await?
+        .ok_or(sqlx::Error::RowNotFound)?;
     let mut query = collection_track_query(source, sort, descending, collection);
     crate::tracks::track_filter(&mut query, folder, filter, favorites_only);
     Ok(query)
@@ -2336,11 +2383,10 @@ async fn artist_facts_rows(
           CROSS JOIN listens listen ON listen.media_uri=item.media_uri GROUP BY listen.media_uri)
         SELECT requested.artist_key,count(DISTINCT item.album_key) album_count,
           count(DISTINCT item.track_key) track_count,COALESCE(sum(item.duration_millis),0) duration_millis,
-          COALESCE(sum(COALESCE(baseline.play_count,0)+COALESCE(listen.play_count,0)),0) play_count,
-          max(CASE WHEN baseline.last_played_at IS NULL THEN listen.last_played WHEN listen.last_played IS NULL THEN baseline.last_played_at ELSE max(baseline.last_played_at,listen.last_played) END) last_played,
+          COALESCE(sum(COALESCE((SELECT baseline.play_count FROM activity_baseline baseline WHERE baseline.source_key=item.source_key AND baseline.track_object_id=item.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0)+COALESCE(listen.play_count,0)),0) play_count,
+          max((SELECT max(value) FROM (SELECT baseline.last_played_at value FROM activity_baseline baseline WHERE baseline.source_key=item.source_key AND baseline.track_object_id=item.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' UNION ALL SELECT listen.last_played))) last_played,
           count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=item.media_uri AND access.origin='download') THEN item.track_key END) downloaded_count
         FROM requested LEFT JOIN members item USING(artist_key)
-        LEFT JOIN activity_baseline baseline ON baseline.source_key=item.source_key AND baseline.track_object_id=item.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'
         LEFT JOIN listen_activity listen USING(media_uri)
         GROUP BY requested.artist_key ORDER BY requested.position");
     Ok(query
@@ -2363,7 +2409,7 @@ pub(crate) async fn load_album_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push("),scoped_tracks AS (SELECT track.* FROM requested JOIN tracks track USING(album_key) WHERE track.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push("))),track_facts AS (SELECT track.album_key,count(track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN 1 END) downloaded_count,COALESCE(sum(COALESCE(baseline.play_count,0)),0) baseline_plays,max(baseline.last_played_at) baseline_last_played FROM scoped_tracks track LEFT JOIN activity_baseline baseline ON baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track' GROUP BY track.album_key),listen_facts AS (SELECT track.album_key,count(*) listen_plays,max(listen.started_at) listen_last_played FROM listens listen JOIN scoped_tracks track USING(media_uri) GROUP BY track.album_key) SELECT album.album_key,album.source_key,album.object_id,album.media_uri,album.title,album.display_artist,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.release_lookup_identity,album.artwork_binding,COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) favorite,COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating)/10 rating,COALESCE(track_facts.baseline_plays,0)+COALESCE(listen_facts.listen_plays,0) play_count,CASE WHEN track_facts.baseline_last_played IS NULL THEN listen_facts.listen_last_played WHEN listen_facts.listen_last_played IS NULL THEN track_facts.baseline_last_played ELSE max(track_facts.baseline_last_played,listen_facts.listen_last_played) END last_played,COALESCE(track_facts.track_count,0) track_count,COALESCE(track_facts.duration_millis,0) duration_millis,COALESCE(track_facts.downloaded_count,0) downloaded_count FROM requested JOIN albums album USING(album_key) LEFT JOIN track_facts USING(album_key) LEFT JOIN listen_facts USING(album_key) WHERE album.source_key=").push_bind(source).push(" ORDER BY requested.position");
+    query.push("),scoped_tracks AS MATERIALIZED (SELECT track.track_key,track.source_key,track.object_id,track.album_key,track.media_uri,track.duration_millis FROM (SELECT DISTINCT album_key FROM requested) requested CROSS JOIN tracks track USING(album_key) WHERE track.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push("))),track_facts AS (SELECT track.album_key,count(track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN 1 END) downloaded_count,COALESCE(sum(COALESCE((SELECT baseline.play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0)),0) baseline_plays,max((SELECT baseline.last_played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track')) baseline_last_played FROM scoped_tracks track GROUP BY track.album_key),listen_facts AS (SELECT track.album_key,count(*) listen_plays,max(listen.started_at) listen_last_played FROM scoped_tracks track CROSS JOIN listens listen USING(media_uri) GROUP BY track.album_key) SELECT album.album_key,album.source_key,album.object_id,album.media_uri,album.title,album.display_artist,album.year,album.release_date,album.date_added,album.musicbrainz_release_id,album.musicbrainz_release_group_id,album.is_compilation,album.release_lookup_identity,album.artwork_binding,COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) favorite,COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating)/10 rating,COALESCE(track_facts.baseline_plays,0)+COALESCE(listen_facts.listen_plays,0) play_count,CASE WHEN track_facts.baseline_last_played IS NULL THEN listen_facts.listen_last_played WHEN listen_facts.listen_last_played IS NULL THEN track_facts.baseline_last_played ELSE max(track_facts.baseline_last_played,listen_facts.listen_last_played) END last_played,COALESCE(track_facts.track_count,0) track_count,COALESCE(track_facts.duration_millis,0) duration_millis,COALESCE(track_facts.downloaded_count,0) downloaded_count FROM requested JOIN albums album USING(album_key) LEFT JOIN track_facts USING(album_key) LEFT JOIN listen_facts USING(album_key) WHERE album.source_key=").push_bind(source).push(" ORDER BY requested.position");
     let scalars = query
         .build_query_as::<AlbumScalar>()
         .persistent(false)
@@ -2460,6 +2506,45 @@ pub(crate) async fn load_album_rows(
     Ok(rows)
 }
 
+async fn named_collection_artwork(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    folder: Option<FolderKey>,
+    keys: &[impl serde::Serialize],
+    kind: &str,
+    limit: usize,
+) -> LibraryResult<BTreeMap<i64, Vec<Vec<u8>>>> {
+    if keys.is_empty() {
+        return Ok(BTreeMap::new());
+    }
+    let sql = format!(
+        "WITH requested AS (SELECT DISTINCT value FROM json_each(?1))
+         SELECT requested.value,album.artwork_binding FROM requested
+         CROSS JOIN json_each((SELECT json_group_array(album_key) FROM (
+             SELECT album.album_key FROM track_{kind}s relation
+             JOIN tracks track USING(track_key) JOIN albums album USING(album_key)
+             WHERE relation.{kind}_key=requested.value AND track.source_key=?2
+               AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope
+                   WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+               AND album.artwork_binding IS NOT NULL
+             GROUP BY album.album_key
+             ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT {limit}
+         ))) artwork JOIN albums album ON album.album_key=artwork.value
+         ORDER BY requested.value,artwork.key"
+    );
+    let mut artwork = BTreeMap::<i64, Vec<Vec<u8>>>::new();
+    for (key, binding) in sqlx::query_as::<_, (i64, Vec<u8>)>(sqlx::AssertSqlSafe(sql))
+        .bind(serde_json::to_string(keys)?)
+        .bind(source)
+        .bind(folder)
+        .fetch_all(connection)
+        .await?
+    {
+        artwork.entry(key).or_default().push(binding);
+    }
+    Ok(artwork)
+}
+
 async fn load_genre_rows(
     connection: &mut SqliteConnection,
     source: SourceKey,
@@ -2473,21 +2558,19 @@ async fn load_genre_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT genre.genre_key,genre.source_key,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE genre.source_key=").push_bind(source).push(" GROUP BY genre.genre_key ORDER BY requested.position");
+    query.push(") SELECT genre.genre_key,genre.source_key,(SELECT object_id FROM sources WHERE source_key=genre.source_key) source_id,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE genre.source_key=").push_bind(source).push(" GROUP BY requested.position ORDER BY requested.position");
     let mut rows = query
         .build_query_as::<GenreRow>()
         .persistent(false)
         .fetch_all(&mut *connection)
         .await?;
+    let keys = rows.iter().map(|row| row.genre_key).collect::<Vec<_>>();
+    let artwork = named_collection_artwork(connection, source, folder, &keys, "genre", 1).await?;
     for row in &mut rows {
-        row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT album.artwork_binding FROM track_genres relation JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE relation.genre_key=?1 AND track.source_key=?2 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3)) AND album.artwork_binding IS NOT NULL GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 1",
-        )
-        .bind(row.genre_key)
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await?;
+        row.representative_artwork = artwork
+            .get(&row.genre_key.raw())
+            .cloned()
+            .unwrap_or_default();
     }
     Ok(rows)
 }
@@ -2505,21 +2588,19 @@ async fn load_mood_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT mood.mood_key,mood.source_key,mood.name,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN moods mood USING(mood_key) LEFT JOIN track_moods relation USING(mood_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE mood.source_key=").push_bind(source).push(" GROUP BY mood.mood_key ORDER BY requested.position");
+    query.push(") SELECT mood.mood_key,mood.source_key,mood.name,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN moods mood USING(mood_key) LEFT JOIN track_moods relation USING(mood_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE mood.source_key=").push_bind(source).push(" GROUP BY requested.position ORDER BY requested.position");
     let mut rows = query
         .build_query_as::<MoodRow>()
         .persistent(false)
         .fetch_all(&mut *connection)
         .await?;
+    let keys = rows.iter().map(|row| row.mood_key).collect::<Vec<_>>();
+    let artwork = named_collection_artwork(connection, source, folder, &keys, "mood", 4).await?;
     for row in &mut rows {
-        row.representative_artwork = sqlx::query_scalar::<_, Vec<u8>>(
-            "SELECT album.artwork_binding FROM track_moods relation JOIN tracks track USING(track_key) JOIN albums album USING(album_key) WHERE relation.mood_key=?1 AND track.source_key=?2 AND (?3 IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3)) AND album.artwork_binding IS NOT NULL GROUP BY album.album_key ORDER BY max(track.date_added) DESC NULLS LAST,album.album_key LIMIT 4",
-        )
-        .bind(row.mood_key)
-        .bind(source)
-        .bind(folder)
-        .fetch_all(&mut *connection)
-        .await?;
+        row.representative_artwork = artwork
+            .get(&row.mood_key.raw())
+            .cloned()
+            .unwrap_or_default();
     }
     Ok(rows)
 }

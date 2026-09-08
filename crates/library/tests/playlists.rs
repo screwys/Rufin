@@ -3,6 +3,41 @@ use library::{FavoriteTarget, PlaylistEntrySort, PlaylistSort, ReadCancellation}
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
+    let fixture = fixture().await;
+    let database = &fixture.database;
+    let (_, authored) = database
+        .create_playlist(Some(fixture.source), "Z saved", &[])
+        .await
+        .unwrap()
+        .unwrap();
+    database.create_playlist(None, "Global", &[]).await.unwrap();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'native','A native','a native','a native')")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    let other: library::SourceKey = sqlx::query_scalar("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('emby','Emby','emby',zeroblob(32),zeroblob(32)) RETURNING source_key")
+        .fetch_one(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'other','Other','other','other')")
+        .bind(other).execute(&mut raw).await.unwrap();
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    assert_eq!(
+        database
+            .source_playlist_object_ids(fixture.source, &cancel)
+            .await
+            .unwrap(),
+        ["native".to_string(), authored]
+    );
+    assert_eq!(
+        database
+            .source_playlist_object_ids(other, &cancel)
+            .await
+            .unwrap(),
+        ["other"]
+    );
+}
+
+#[tokio::test]
 async fn playlist_destinations_keep_global_rank_without_a_current_source() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
@@ -565,6 +600,126 @@ async fn provider_playlist_payload_resolves_uri_only_at_the_protocol_boundary() 
             .await
             .expect("provider payload"),
         ["track-1", "track-1"]
+    );
+}
+
+#[tokio::test]
+async fn source_owned_playlist_additions_report_the_destination_without_partial_writes() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO main.source_ids(object_id) VALUES('destination')")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let destination: library::SourceKey = sqlx::query_scalar(
+        "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest)
+         VALUES('destination','Destination','destination',zeroblob(32),zeroblob(32)) RETURNING source_key",
+    ).fetch_one(&mut raw).await.unwrap();
+    let own_uri = "test:destination-track".to_string();
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_artist,display_album,sort_text,duration_millis)
+        VALUES(?1,'destination-track',?2,'Destination Track','destination track','','','destination track',1000)")
+        .bind(destination).bind(&own_uri).execute(&mut raw).await.unwrap();
+    drop(raw);
+    let database = &fixture.database;
+    let cancel = ReadCancellation::new();
+    let playlist = database
+        .create_playlist(Some(destination), "Destination", &[])
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    assert_eq!(
+        database
+            .source_playlist_media_object_ids(
+                destination,
+                Some(playlist),
+                std::slice::from_ref(&own_uri),
+                false,
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        ["destination-track"]
+    );
+    assert_eq!(
+        database
+            .add_playlist_media(
+                Some(destination),
+                playlist,
+                std::slice::from_ref(&own_uri),
+                false
+            )
+            .await
+            .unwrap(),
+        1
+    );
+    for selection in [
+        vec![fixture.track_uris[0].clone()],
+        vec![own_uri.clone(), fixture.track_uris[0].clone()],
+    ] {
+        let provider_error = database
+            .source_playlist_media_object_ids(
+                destination,
+                Some(playlist),
+                &selection,
+                true,
+                &cancel,
+            )
+            .await
+            .unwrap_err();
+        let authored_error = database
+            .add_playlist_media(Some(destination), playlist, &selection, false)
+            .await
+            .unwrap_err();
+        for error in [provider_error, authored_error] {
+            assert!(
+                matches!(error, library::LibraryError::PlaylistSourceMismatch(source)
+                if source.as_str() == "destination")
+            );
+        }
+    }
+    let missing = vec![own_uri.clone(), "test:missing-track".to_string()];
+    assert!(matches!(
+        database
+            .source_playlist_media_object_ids(destination, Some(playlist), &missing, false, &cancel)
+            .await
+            .unwrap_err(),
+        library::LibraryError::InvalidRequest(message) if message == "Playlist Track is no longer current"
+    ));
+    assert_eq!(
+        database
+            .add_playlist_media(Some(destination), playlist, &missing, false)
+            .await
+            .unwrap(),
+        0
+    );
+    assert_eq!(
+        database
+            .playlist_media_uri_order(playlist, None, &cancel)
+            .await
+            .unwrap(),
+        std::slice::from_ref(&own_uri)
+    );
+    let global = database
+        .create_playlist(None, "Global", &[])
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    let mixed = vec![own_uri, fixture.track_uris[0].clone()];
+    assert_eq!(
+        database
+            .add_playlist_media(None, global, &mixed, false)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        database
+            .playlist_media_uri_order(global, None, &cancel)
+            .await
+            .unwrap(),
+        mixed
     );
 }
 

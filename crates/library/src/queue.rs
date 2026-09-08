@@ -364,6 +364,107 @@ pub struct QueueRestore {
     pub next_id: u64,
 }
 
+// Stored membership uses [occurrence, URI, provenance, playlist identity] rows.
+// Context provenance is [context index, source rank]; other provenance keeps its name.
+// QueueRestore remains the public export format. Order and settings have their own tables.
+#[derive(serde::Serialize, serde::Deserialize)]
+struct SavedQueue<E, C> {
+    entries: E,
+    contexts: C,
+    next_id: u64,
+}
+
+#[derive(serde::Serialize, serde::Deserialize)]
+#[serde(untagged)]
+enum SavedProvenance<P> {
+    Context(usize, usize),
+    Other(P),
+}
+
+struct SavedEntries<'a> {
+    entries: &'a [QueueEntry],
+    context_ids: &'a std::collections::HashMap<&'a str, usize>,
+}
+
+impl serde::Serialize for SavedEntries<'_> {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        serializer.collect_seq(self.entries.iter().map(|entry| {
+            let provenance = match &entry.provenance {
+                QueueProvenance::Context {
+                    context_id,
+                    source_rank,
+                } => SavedProvenance::Context(self.context_ids[context_id.as_ref()], *source_rank),
+                other => SavedProvenance::Other(other),
+            };
+            (
+                &entry.occurrence,
+                &entry.media_uri,
+                provenance,
+                &entry.playlist_entry_id,
+            )
+        }))
+    }
+}
+
+fn encode_saved_queue(state: &QueueRestore) -> LibraryResult<String> {
+    let mut contexts = Vec::new();
+    let mut context_ids = std::collections::HashMap::new();
+    for entry in state.entries.iter() {
+        if let QueueProvenance::Context { context_id, .. } = &entry.provenance {
+            context_ids.entry(context_id.as_ref()).or_insert_with(|| {
+                contexts.push(context_id.as_ref());
+                contexts.len() - 1
+            });
+        }
+    }
+    Ok(serde_json::to_string(&SavedQueue {
+        entries: SavedEntries {
+            entries: &state.entries,
+            context_ids: &context_ids,
+        },
+        contexts,
+        next_id: state.next_id,
+    })?)
+}
+
+fn decode_saved_queue(value: serde_json::Value) -> LibraryResult<QueueRestore> {
+    if value.get("contexts").is_none() {
+        return Ok(serde_json::from_value(value)?);
+    }
+    type SavedEntry = (
+        OccurrenceId,
+        Arc<str>,
+        SavedProvenance<QueueProvenance>,
+        Option<Arc<str>>,
+    );
+    let saved: SavedQueue<Vec<SavedEntry>, Vec<Arc<str>>> = serde_json::from_value(value)?;
+    let entries = saved
+        .entries
+        .into_iter()
+        .map(|(occurrence, media_uri, provenance, playlist_entry_id)| {
+            Ok(QueueEntry {
+                occurrence,
+                media_uri,
+                playlist_entry_id,
+                provenance: match provenance {
+                    SavedProvenance::Context(context, source_rank) => QueueProvenance::Context {
+                        context_id: Arc::clone(saved.contexts.get(context).ok_or_else(|| {
+                            LibraryError::InvalidStore("saved Queue context is missing".into())
+                        })?),
+                        source_rank,
+                    },
+                    SavedProvenance::Other(provenance) => provenance,
+                },
+            })
+        })
+        .collect::<LibraryResult<Vec<_>>>()?;
+    Ok(QueueRestore {
+        entries: entries.into(),
+        next_id: saved.next_id,
+        ..Default::default()
+    })
+}
+
 #[derive(Clone, Debug, PartialEq)]
 pub enum QueueReadRequest {
     Capture {
@@ -767,10 +868,16 @@ impl Database {
             .collect::<Vec<_>>();
         let keys=sqlx::query_as::<_,(i64,crate::PlaylistEntryKey)>(
             "SELECT requested.key,entry.playlist_entry_key FROM json_each(?1) requested
-             JOIN playlist_entries entry ON entry.object_id=json_extract(requested.value,'$[2]')
-             JOIN playlists playlist ON playlist.playlist_key=entry.playlist_key AND playlist.object_id=json_extract(requested.value,'$[1]')
-             LEFT JOIN source_ids source USING(source_key)
-             WHERE source.object_id IS json_extract(requested.value,'$[0]') ORDER BY requested.key")
+             CROSS JOIN main.playlists playlist ON playlist.object_id=json_extract(requested.value,'$[1]')
+               AND playlist.source_key IS (SELECT source_key FROM main.source_ids WHERE object_id=json_extract(requested.value,'$[0]'))
+               AND (json_extract(requested.value,'$[0]') IS NULL OR playlist.source_key IS NOT NULL)
+             CROSS JOIN main.playlist_entries entry ON entry.playlist_key=playlist.playlist_key AND entry.object_id=json_extract(requested.value,'$[2]')
+             UNION ALL
+             SELECT requested.key,-entry.playlist_entry_key FROM json_each(?1) requested
+             CROSS JOIN catalog.native_playlists playlist ON playlist.object_id=json_extract(requested.value,'$[1]')
+               AND playlist.source_key=(SELECT source_key FROM catalog.sources WHERE object_id=json_extract(requested.value,'$[0]'))
+             CROSS JOIN catalog.native_playlist_entries entry ON entry.playlist_key=playlist.playlist_key AND entry.object_id=json_extract(requested.value,'$[2]')
+             ORDER BY 1")
             .bind(serde_json::to_string(&identities)?).fetch_all(&mut *transaction).await?;
         let playlist_keys = keys.iter().map(|(_, key)| *key).collect::<Vec<_>>();
         let mut playlist_items = keys
@@ -885,7 +992,7 @@ impl Database {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         sqlx::query("DELETE FROM queue_occurrences WHERE substr(object_id,1,length(?1))=?1
-                    AND object_id NOT IN(SELECT json_extract(value,'$.occurrence') FROM queue_saved,json_each(queue_saved.state,'$.entries'))")
+                    AND object_id NOT IN(SELECT COALESCE(json_extract(value,'$[0]'),json_extract(value,'$.occurrence')) FROM queue_saved,json_each(queue_saved.state,'$.entries'))")
             .bind(namespace).execute(connection).await?;
         Ok(())
     }
@@ -900,20 +1007,15 @@ impl Database {
             sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved WHERE singleton=1")
                 .fetch_optional(&mut *transaction)
                 .await?;
-        let migrated = json.as_ref().is_none_or(|json| {
-            serde_json::from_str::<serde_json::Value>(json)
-                .ok()
-                .is_none_or(|value| value.get("entries").is_none())
-        });
-        let mut state = match json {
-            Some(json)
-                if serde_json::from_str::<serde_json::Value>(&json)?
-                    .get("entries")
-                    .is_some() =>
-            {
-                serde_json::from_str(&json)?
-            }
-            Some(json) => migrate_saved(&mut transaction, serde_json::from_str(&json)?).await?,
+        let saved = json
+            .map(|json| serde_json::from_str::<serde_json::Value>(&json))
+            .transpose()?;
+        let migrated = saved
+            .as_ref()
+            .is_none_or(|value| value.get("entries").is_none());
+        let mut state = match saved {
+            Some(value) if !migrated => decode_saved_queue(value)?,
+            Some(value) => migrate_saved(&mut transaction, value).await?,
             None => {
                 let rows = read_all_occurrences(&mut transaction).await?;
                 state_from_rows(rows)
@@ -995,9 +1097,9 @@ impl Database {
         };
         let prefix = crate::keys::source_entity_prefix(&SourceId::new(source_id), "track");
         Ok(sqlx::query_scalar::<_, String>(
-            "SELECT json_extract(entry.value,'$.occurrence') FROM queue_saved,json_each(queue_saved.state,'$.entries') entry
-             WHERE substr(json_extract(entry.value,'$.media_uri'),1,length(?2))=?2
-                OR EXISTS(SELECT 1 FROM tracks WHERE source_key=?1 AND media_uri=json_extract(entry.value,'$.media_uri'))")
+            "SELECT COALESCE(json_extract(entry.value,'$[0]'),json_extract(entry.value,'$.occurrence')) FROM queue_saved,json_each(queue_saved.state,'$.entries') entry
+             WHERE substr(COALESCE(json_extract(entry.value,'$[1]'),json_extract(entry.value,'$.media_uri')),1,length(?2))=?2
+                OR EXISTS(SELECT 1 FROM tracks WHERE source_key=?1 AND media_uri=COALESCE(json_extract(entry.value,'$[1]'),json_extract(entry.value,'$.media_uri')))")
             .bind(source).bind(prefix).fetch_all(&mut *connection).await?)
     }
 }
@@ -1303,8 +1405,15 @@ async fn playlist_identity(
     connection: &mut sqlx::SqliteConnection,
     key: crate::PlaylistEntryKey,
 ) -> LibraryResult<Option<String>> {
-    Ok(sqlx::query_scalar("SELECT json_array(source.object_id,playlist.object_id,entry.object_id) FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) LEFT JOIN source_ids source USING(source_key) WHERE entry.playlist_entry_key=?1")
-        .bind(key).fetch_optional(connection).await?)
+    let sql = if key.raw() < 0 {
+        "SELECT json_array(source.object_id,playlist.object_id,entry.object_id) FROM catalog.native_playlist_entries entry JOIN catalog.native_playlists playlist USING(playlist_key) JOIN catalog.sources source USING(source_key) WHERE entry.playlist_entry_key=?1"
+    } else {
+        "SELECT json_array(source.object_id,playlist.object_id,entry.object_id) FROM main.playlist_entries entry JOIN main.playlists playlist USING(playlist_key) LEFT JOIN main.source_ids source USING(source_key) WHERE entry.playlist_entry_key=?1"
+    };
+    Ok(sqlx::query_scalar(sql)
+        .bind(key.raw().abs())
+        .fetch_optional(connection)
+        .await?)
 }
 async fn save_settings(
     connection: &mut sqlx::SqliteConnection,
@@ -1321,7 +1430,7 @@ async fn save_queue_on(
     connection: &mut sqlx::SqliteConnection,
     state: &QueueRestore,
 ) -> LibraryResult<()> {
-    let saved = serde_json::to_string(state)?;
+    let saved = encode_saved_queue(state)?;
     let occurrences = state
         .entries
         .iter()
@@ -1547,7 +1656,7 @@ pub(crate) async fn export_queue_jsonl_on(
         sqlx::query_scalar::<_, String>("SELECT state FROM queue_saved WHERE singleton=1")
             .fetch_optional(&mut *connection)
             .await?
-            .map(|json| serde_json::from_str(&json))
+            .map(|json| decode_saved_queue(serde_json::from_str(&json)?))
             .transpose()?
             .unwrap_or_default();
     if let Some(order) =
@@ -1643,10 +1752,8 @@ async fn persist_occurrence_page(
     occurrences: &[QueueOccurrence],
     traversal_offset: usize,
 ) -> LibraryResult<()> {
-    for (traversal_position, occurrence) in occurrences.iter().enumerate() {
-        let item = &occurrence.item;
-        let (kind, context, rank) = occurrence.provenance.columns();
-        sqlx::query(
+    for (page, occurrences) in occurrences.chunks(QUEUE_CONTEXT_LIMIT).enumerate() {
+        let mut query = sqlx::QueryBuilder::<Sqlite>::new(
             "INSERT INTO queue_occurrences(
                  object_id,media_uri,position,traversal_position,
                  provenance_kind,provenance_context_id,provenance_source_rank,
@@ -1655,42 +1762,49 @@ async fn persist_occurrence_page(
                  musicbrainz_recording_id,musicbrainz_release_track_id,
                  musicbrainz_album_id,musicbrainz_release_group_id,
                  primary_artist_musicbrainz_id,origin_source,origin_position,playlist_entry_id
-             ) VALUES (
-                 ?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,
-                 ?17,?18,?19,?20,?21,?22,?23,?24,?25
-             ) ON CONFLICT(object_id) DO UPDATE SET
+             )",
+        );
+        query.push_values(
+            occurrences.iter().enumerate(),
+            |mut row, (position, occurrence)| {
+                let item = &occurrence.item;
+                let (kind, context, rank) = occurrence.provenance.columns();
+                let position = (traversal_offset + page * QUEUE_CONTEXT_LIMIT + position) as i64;
+                row.push_bind(occurrence.occurrence.as_str())
+                    .push_bind(&item.media_uri)
+                    .push_bind(position)
+                    .push_bind(position)
+                    .push_bind(kind)
+                    .push_bind(context)
+                    .push_bind(rank)
+                    .push_bind(&item.title)
+                    .push_bind(&item.artist)
+                    .push_bind(&item.album)
+                    .push_bind(&item.album_display_artist)
+                    .push_bind(item.duration_millis)
+                    .push_bind(item.disc_number)
+                    .push_bind(item.track_number)
+                    .push_bind(item.year)
+                    .push_bind(&item.release_date)
+                    .push_bind(&item.source_format)
+                    .push_bind(&item.musicbrainz_recording_id)
+                    .push_bind(&item.musicbrainz_release_track_id)
+                    .push_bind(&item.musicbrainz_album_id)
+                    .push_bind(&item.musicbrainz_release_group_id)
+                    .push_bind(&item.primary_artist_musicbrainz_id)
+                    .push_bind(occurrence.source_index.map(|i| i as i64))
+                    .push_bind(occurrence.canonical_position as i64)
+                    .push_bind(&occurrence.playlist_entry_id);
+            },
+        );
+        query.push(
+            " ON CONFLICT(object_id) DO UPDATE SET
                  position=excluded.position,traversal_position=excluded.traversal_position,
                  provenance_kind=excluded.provenance_kind,
                  provenance_context_id=excluded.provenance_context_id,
                  provenance_source_rank=excluded.provenance_source_rank",
-        )
-        .bind(occurrence.occurrence.as_str())
-        .bind(&item.media_uri)
-        .bind((traversal_offset + traversal_position) as i64)
-        .bind((traversal_offset + traversal_position) as i64)
-        .bind(kind)
-        .bind(context)
-        .bind(rank)
-        .bind(&item.title)
-        .bind(&item.artist)
-        .bind(&item.album)
-        .bind(&item.album_display_artist)
-        .bind(item.duration_millis)
-        .bind(item.disc_number)
-        .bind(item.track_number)
-        .bind(item.year)
-        .bind(&item.release_date)
-        .bind(&item.source_format)
-        .bind(&item.musicbrainz_recording_id)
-        .bind(&item.musicbrainz_release_track_id)
-        .bind(&item.musicbrainz_album_id)
-        .bind(&item.musicbrainz_release_group_id)
-        .bind(&item.primary_artist_musicbrainz_id)
-        .bind(occurrence.source_index.map(|i| i as i64))
-        .bind(occurrence.canonical_position as i64)
-        .bind(&occurrence.playlist_entry_id)
-        .execute(&mut *transaction)
-        .await?;
+        );
+        query.build().execute(&mut *transaction).await?;
     }
     Ok(())
 }

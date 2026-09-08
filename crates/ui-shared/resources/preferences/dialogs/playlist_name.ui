@@ -49,6 +49,7 @@
         <property name="activates-default">true</property>
       </object>
     </property>
+    <property name="focus-widget">rename_entry</property>
     <responses>
       <response id="cancel" translatable="yes">Cancel</response>
       <response id="rename" translatable="yes" appearance="suggested">Rename</response>

@@ -252,18 +252,19 @@ pub fn add_playlist_tracks(
                 .add_playlist_media(source_key, playlist, &media_uris, skip_duplicates)
                 .await
                 .map(|accepted| (accepted, None))
-                .map_err(string_error),
-            Ok(PlaylistOwner::Server(source, source_key)) => source
-                .add_playlist_tracks(
-                    &owner.shared.database,
-                    source_key,
-                    playlist,
-                    &media_uris,
-                    skip_duplicates,
-                )
-                .await
-                .map_err(string_error),
-            Err(error) => Err(error),
+                .map_err(sources::SourceError::from),
+            Ok(PlaylistOwner::Server(source, source_key)) => {
+                source
+                    .add_playlist_tracks(
+                        &owner.shared.database,
+                        source_key,
+                        playlist,
+                        &media_uris,
+                        skip_duplicates,
+                    )
+                    .await
+            }
+            Err(error) => Err(sources::SourceError::Other(error)),
         };
         let reply = match result {
             Ok((accepted, outcome)) => {
@@ -277,8 +278,18 @@ pub fn add_playlist_tracks(
                 Ok(accepted)
             }
             Err(error) => {
-                owner.shared.warn_nonfatal(&error);
-                Err(error)
+                if let sources::SourceError::Library(
+                    library::LibraryError::PlaylistSourceMismatch(source_id),
+                ) = &error
+                {
+                    owner
+                        .shared
+                        .send(SourceEvent::PlaylistSourceMismatch(source_id.clone()))
+                        .await;
+                } else {
+                    owner.shared.warn_nonfatal(&error.to_string());
+                }
+                Err(error.to_string())
             }
         };
         let _ = sender.send(reply).await;

@@ -65,9 +65,6 @@ pub struct PlaylistEntriesView {
 }
 
 impl PlaylistEntriesView {
-    pub fn set_queue_folder(&self, folder: Option<library::FolderKey>) {
-        self.model.set_queue_folder(folder);
-    }
     pub fn play(&self, queue: playback::QueueHandle, placement: playback::QueuePlacement) {
         self.model.play(0, queue, placement, true);
     }

@@ -89,7 +89,6 @@ pub struct MediaMenus {
     pub set_favorite: Rc<dyn Fn(FavoriteTarget, bool)>,
     pub edit_metadata: Rc<dyn Fn(MetadataItemId)>,
     pub set_sidebar_pin: Rc<dyn Fn(SidebarPin, bool)>,
-    pub sidebar_pin_source: Rc<dyn Fn() -> Option<sources::SourceId>>,
     pub source_download_available: Rc<dyn Fn(&sources::SourceId) -> bool>,
     pub export_playlist_dialog: Rc<dyn Fn(rufin_core::runtime::source::PlaylistExport, &str)>,
     pub rename_playlist_dialog: Rc<dyn Fn(library::PlaylistKey, String)>,
@@ -927,8 +926,8 @@ pub fn present_genre_context_menu(
     install_sidebar_pin_action(
         &surface,
         menus,
-        sidebar_pin_source(menus).map(|source_id| SidebarPin::Genre {
-            source_id,
+        Some(SidebarPin::Genre {
+            source_id: sources::SourceId::new(genre.source_id.clone()),
             genre_id: genre.object_id.clone(),
         }),
     );
@@ -984,17 +983,10 @@ pub fn present_playlist_context_menu(
     install_sidebar_pin_action(
         &surface,
         menus,
-        if playlist.source_key.is_none() {
-            Some(SidebarPin::Playlist {
-                source_id: None,
-                playlist_id: playlist.object_id.clone(),
-            })
-        } else {
-            sidebar_pin_source(menus).map(|source_id| SidebarPin::Playlist {
-                source_id: Some(source_id),
-                playlist_id: playlist.object_id.clone(),
-            })
-        },
+        Some(SidebarPin::Playlist {
+            source_id: playlist.source_id.clone().map(sources::SourceId::new),
+            playlist_id: playlist.object_id.clone(),
+        }),
     );
     surface.append_fixed_action(
         msgid("Export playlist"),
@@ -1196,10 +1188,6 @@ fn install_sidebar_pin_action(
     );
     let menus = Rc::clone(menus);
     surface.add_action("pin", move || (menus.set_sidebar_pin)(pin.clone(), !pinned));
-}
-
-fn sidebar_pin_source(menus: &MediaMenus) -> Option<sources::SourceId> {
-    (menus.sidebar_pin_source)()
 }
 
 fn install_loaded_actions(

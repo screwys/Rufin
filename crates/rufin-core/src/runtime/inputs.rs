@@ -35,6 +35,7 @@ pub enum SourceEvent {
     },
     CatalogPublished(CatalogPublication),
     Notice(SourceNotice),
+    PlaylistSourceMismatch(sources::SourceId),
     ReleaseSelected {
         acknowledged: async_channel::Sender<()>,
     },

@@ -38,7 +38,7 @@ impl TrackSort {
         matches!(self, Self::LastPlayed | Self::PlayCount)
     }
 
-    pub(crate) fn order_terms(self, descending: bool) -> Vec<(String, bool)> {
+    pub(crate) fn order_terms(self, descending: bool) -> Vec<String> {
         let fields: &[(&str, bool)] = match self {
             Self::Title => &[("track.sort_text", false), ("track.track_key", false)],
             Self::TrackNumber => &[
@@ -120,18 +120,15 @@ impl TrackSort {
         let mut terms = Vec::new();
         for (i, (field, nulls_last)) in fields.iter().enumerate() {
             let desc = descending && (i == 0 || (self == Self::TrackNumber && i == 1));
-            if *nulls_last {
-                terms.push((format!("({field}) IS NULL"), false));
-            }
-            terms.push((
-                if *nulls_last {
-                    format!("COALESCE({field},'')")
-                } else if self == Self::TrackNumber && i < 2 {
-                    format!("coalesce({field},-1)")
-                } else {
-                    (*field).to_string()
-                },
-                desc,
+            let field = if self == Self::TrackNumber && i < 2 {
+                format!("coalesce({field},-1)")
+            } else {
+                (*field).to_string()
+            };
+            terms.push(format!(
+                "{field} {}{}",
+                if desc { "DESC" } else { "ASC" },
+                if *nulls_last { " NULLS LAST" } else { "" },
             ));
         }
         terms
@@ -747,7 +744,7 @@ pub(crate) fn track_query(
     }
     track_filter(&mut query, folder, filter, favorites_only);
     if sort.uses_activity() {
-        for (field, _) in &mut query.order {
+        for field in &mut query.order {
             *field=field.replace("activity.play_count","(track.local_play_count+COALESCE((SELECT play_count FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'),0))")
                 .replace("activity.last_played","(SELECT max(value) FROM (SELECT max(started_at) value FROM listens WHERE media_uri=track.media_uri UNION ALL SELECT last_played_at FROM activity_baseline baseline WHERE baseline.source_key=track.source_key AND baseline.track_object_id=track.object_id AND baseline.period='lifetime' AND baseline.item_kind='track'))");
         }

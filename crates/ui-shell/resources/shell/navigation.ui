@@ -48,7 +48,8 @@
     </child>
     <child>
       <object class="GtkScrolledWindow" id="normal_nav_scroller">
-        <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">external</property>
+        <style><class name="sidebar-scroller"/></style>
+        <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
         <property name="width-request">1</property><property name="min-content-width">1</property><property name="max-content-width">-1</property>
         <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
         <property name="child">
@@ -69,9 +70,9 @@
   </object>
 
   <object class="GtkScrolledWindow" id="compact_nav_slot">
-    <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">external</property>
+    <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
     <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
-    <style><class name="sidebar-pane"/><class name="compact-rail-slot"/></style>
+    <style><class name="sidebar-pane"/><class name="compact-rail-slot"/><class name="sidebar-scroller"/></style>
     <property name="child">
       <object class="GtkViewport">
         <property name="vscroll-policy">natural</property>

@@ -7,6 +7,178 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE tracks SET year=CASE object_id WHEN 'track-0' THEN NULL WHEN 'track-1' THEN 0 ELSE 2000 END")
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("DELETE FROM track_genres WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let empty_genre = sqlx::query_scalar::<_, library::GenreKey>(
+        "INSERT INTO genres(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'empty','','','') RETURNING genre_key",
+    ).bind(fixture.source).fetch_one(&mut raw).await.unwrap();
+    sqlx::query("UPDATE track_genres SET genre_key=?1 WHERE track_key=?2")
+        .bind(empty_genre)
+        .bind(fixture.tracks[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    for sort in [TrackSort::Year, TrackSort::Genre] {
+        for (descending, expected) in [(false, [1, 3, 2, 0]), (true, [3, 2, 1, 0])] {
+            let page = fixture
+                .database
+                .track_route_page(
+                    fixture.source,
+                    None,
+                    false,
+                    "",
+                    sort,
+                    descending,
+                    RouteSeedWindow::top(),
+                    &ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                page.order,
+                expected.map(|i| fixture.track_uris[i].clone()),
+                "{sort:?}, descending={descending}"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn repeated_album_cards_keep_scoped_counts_and_legacy_activity_precedence() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::raw_sql("DELETE FROM catalog.activity_baseline;
+      INSERT INTO main.legacy_activity(source_id,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+      VALUES('source','lifetime','track','track-0',7,0,100),('source','lifetime','track','track-1',99,0,900);
+      INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at)
+      SELECT source_key,'lifetime','track','track-1',3,0,200 FROM sources;")
+        .execute(&mut raw).await.unwrap();
+    let cancel = ReadCancellation::new();
+    let keys = [fixture.albums[0], fixture.albums[0]];
+    let rows = fixture
+        .database
+        .album_rows(fixture.source, &keys, None, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 2);
+    for row in &rows {
+        assert_eq!(row.track_count, 2);
+        assert_eq!(row.play_count, 10);
+        assert_eq!(row.last_played, Some(200));
+        assert_eq!(row.album_artists.len(), 1);
+    }
+    sqlx::query("DELETE FROM track_folders WHERE track_key=?1")
+        .bind(fixture.tracks[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let rows = fixture
+        .database
+        .album_rows(fixture.source, &keys, Some(fixture.folder), &cancel)
+        .await
+        .unwrap();
+    for row in &rows {
+        assert_eq!(row.track_count, 1);
+        assert_eq!(row.play_count, 7);
+        assert_eq!(row.last_played, Some(100));
+    }
+    let artist = fixture
+        .database
+        .artist_rows(
+            fixture.source,
+            &[fixture.artists[0]],
+            false,
+            Some(fixture.folder),
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(artist[0].play_count, 7);
+    assert_eq!(artist[0].last_played, Some(100));
+}
+
+#[tokio::test]
+async fn named_card_batches_preserve_requested_rows_and_scoped_cover_order() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    for (index, album) in fixture.albums.iter().enumerate() {
+        sqlx::query("UPDATE albums SET artwork_binding=?1 WHERE album_key=?2")
+            .bind(vec![index as u8 + 1])
+            .bind(album)
+            .execute(&mut raw)
+            .await
+            .unwrap();
+    }
+    sqlx::query("UPDATE tracks SET date_added=CASE WHEN album_key=?1 THEN '2026-09-08' END")
+        .bind(fixture.albums[1])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_folders WHERE track_key IN (SELECT track_key FROM tracks WHERE album_key=?1)")
+        .bind(fixture.albums[1]).execute(&mut raw).await.unwrap();
+    drop(raw);
+    let cancel = ReadCancellation::new();
+    for (folder, covers, count) in [
+        (None, vec![vec![2], vec![1]], 4),
+        (Some(fixture.folder), vec![vec![1]], 2),
+    ] {
+        let genres = fixture
+            .database
+            .genre_rows(
+                fixture.source,
+                &[
+                    fixture.genre,
+                    library::GenreKey::from_raw(-100),
+                    fixture.genre,
+                ],
+                folder,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(genres.len(), 2);
+        assert_eq!(genres[0], genres[1]);
+        assert_eq!(genres[0].track_count, count);
+        assert_eq!(genres[0].representative_artwork, covers[..1]);
+        let single = fixture
+            .database
+            .genre_rows(fixture.source, &[fixture.genre], folder, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(genres[0].duration_millis, single[0].duration_millis);
+        let moods = fixture
+            .database
+            .mood_rows(
+                fixture.source,
+                &[fixture.mood, fixture.mood],
+                folder,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(moods.len(), 2);
+        assert_eq!(moods[0], moods[1]);
+        assert_eq!(moods[0].track_count, count);
+        assert_eq!(moods[0].representative_artwork, covers);
+        let single = fixture
+            .database
+            .mood_rows(fixture.source, &[fixture.mood], folder, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(moods[0].duration_millis, single[0].duration_millis);
+    }
+}
+
+#[tokio::test]
 async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
@@ -305,7 +477,20 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
             .windows(2)
             .all(|pair| pair[0].title.to_lowercase() <= pair[1].title.to_lowercase())
     );
-    for page in pages {
+    let collections = [
+        library::QueueCollection::AlbumKey(fixture.albums[0]),
+        library::QueueCollection::ArtistKey {
+            key: fixture.artists[0],
+            album_artist: false,
+        },
+        library::QueueCollection::ArtistKey {
+            key: fixture.artists[0],
+            album_artist: true,
+        },
+        library::QueueCollection::Genre(fixture.genre),
+        library::QueueCollection::Mood(fixture.mood),
+    ];
+    for (page, collection) in pages.into_iter().zip(collections) {
         let total = page.order.len();
         assert!(total > 100);
         assert!(
@@ -313,17 +498,41 @@ async fn collection_play_retains_full_order_with_bounded_queue_projection() {
                 .iter()
                 .all(|row| row.source_key == fixture.source)
         );
+        assert_eq!(
+            fixture
+                .database
+                .collection_source(&collection, &cancel)
+                .await
+                .unwrap(),
+            Some(fixture.source)
+        );
+        assert_eq!(
+            fixture
+                .database
+                .collection_media_uri_order(&collection, &cancel)
+                .await
+                .unwrap(),
+            page.order
+        );
         let state = super::support::resolve_queue(
             &fixture.database,
-            library::QueueInput::Uris {
-                order: page.order.into(),
+            library::QueueInput::Collection {
+                collection,
+                folder: None,
                 context_id: "collection".into(),
-                source_start: 0,
             },
             Default::default(),
         )
         .await;
         assert_eq!(state.entries.len(), total);
+        assert_eq!(
+            state
+                .entries
+                .iter()
+                .map(|entry| entry.media_uri.as_ref())
+                .collect::<Vec<_>>(),
+            page.order.iter().map(String::as_str).collect::<Vec<_>>()
+        );
         assert!(state.occurrences.len() <= 100);
     }
     assert_eq!(

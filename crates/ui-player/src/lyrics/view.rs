@@ -291,6 +291,7 @@ pub struct LyricsPane {
     resize_anchor_y: Rc<Cell<Option<f32>>>,
     scroll_generation: Rc<Cell<u64>>,
     follow_pause_until: Rc<Cell<Option<Instant>>>,
+    scrollbar_dragging: Rc<Cell<bool>>,
 }
 
 #[derive(Clone)]
@@ -419,6 +420,7 @@ impl LyricsPane {
             resize_anchor_y: Rc::new(Cell::new(None)),
             scroll_generation: Rc::new(Cell::new(0)),
             follow_pause_until: Rc::new(Cell::new(None)),
+            scrollbar_dragging: Rc::new(Cell::new(false)),
         };
         pane.connect_user_scroll_pause();
         pane
@@ -1009,18 +1011,52 @@ impl LyricsPane {
     fn connect_user_scroll_pause(&self) {
         let controller = gtk::EventControllerScroll::new(gtk::EventControllerScrollFlags::VERTICAL);
         controller.set_propagation_phase(gtk::PropagationPhase::Capture);
-        let follow_pause_until = Rc::clone(&self.follow_pause_until);
+        let pause = {
+            let until = Rc::clone(&self.follow_pause_until);
+            let generation = Rc::clone(&self.scroll_generation);
+            move || {
+                generation.set(generation.get().saturating_add(1));
+                until.set(Some(
+                    Instant::now() + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS),
+                ));
+            }
+        };
+        let scroll_pause = pause.clone();
         controller.connect_scroll(move |_, _, _| {
-            follow_pause_until.set(Some(
-                Instant::now() + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS),
-            ));
+            scroll_pause();
             glib::Propagation::Proceed
         });
         self.scroller.add_controller(controller);
+
+        let events = gtk::EventControllerLegacy::new();
+        events.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let dragging = Rc::clone(&self.scrollbar_dragging);
+        events.connect_event(move |_, event| {
+            match event.event_type() {
+                gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin => {
+                    dragging.set(true);
+                    pause();
+                }
+                gtk::gdk::EventType::ButtonRelease
+                | gtk::gdk::EventType::TouchEnd
+                | gtk::gdk::EventType::TouchCancel
+                | gtk::gdk::EventType::GrabBroken => {
+                    dragging.set(false);
+                    pause();
+                }
+                _ => {}
+            }
+            glib::Propagation::Proceed
+        });
+        self.scroller.vscrollbar().add_controller(events);
     }
 
     fn follow_scroll_pause(&self) -> LyricsFollowScrollPause {
-        let pause = lyrics_follow_scroll_pause_state(self.follow_pause_until.get(), Instant::now());
+        let pause = lyrics_follow_scroll_pause_state(
+            self.follow_pause_until.get(),
+            self.scrollbar_dragging.get(),
+            Instant::now(),
+        );
         if pause == LyricsFollowScrollPause::Expired {
             self.follow_pause_until.set(None);
         }
@@ -1320,8 +1356,12 @@ pub fn should_highlight_all_lyrics_lines(lines: &[LyricsLine]) -> bool {
 
 pub fn lyrics_follow_scroll_pause_state(
     paused_until: Option<Instant>,
+    dragging: bool,
     now: Instant,
 ) -> LyricsFollowScrollPause {
+    if dragging {
+        return LyricsFollowScrollPause::Active;
+    }
     match paused_until {
         Some(paused_until) if now < paused_until => LyricsFollowScrollPause::Active,
         Some(_) => LyricsFollowScrollPause::Expired,
@@ -1615,10 +1655,10 @@ mod tests {
 
     use super::karaoke_text::KaraokeText;
     use super::{
-        LyricsFollowScrollPause, active_lyrics_line_index, centered_scroll_target,
-        intro_lyrics_line_index, karaoke_rows_need_full_sync, lyrics_follow_scroll_pause_state,
-        lyrics_follow_scroll_target, lyrics_scroll_animation_millis,
-        should_highlight_all_lyrics_lines,
+        LYRICS_USER_SCROLL_PAUSE_MS, LyricsFollowScrollPause, active_lyrics_line_index,
+        centered_scroll_target, intro_lyrics_line_index, karaoke_rows_need_full_sync,
+        lyrics_follow_scroll_pause_state, lyrics_follow_scroll_target,
+        lyrics_scroll_animation_millis, should_highlight_all_lyrics_lines,
     };
     use gtk::prelude::WidgetExt;
     use lyrics::LyricsLine as LyricLine;
@@ -1727,16 +1767,35 @@ mod tests {
         let now = Instant::now();
 
         assert_eq!(
-            lyrics_follow_scroll_pause_state(None, now),
+            lyrics_follow_scroll_pause_state(None, false, now),
             LyricsFollowScrollPause::Inactive
         );
         assert_eq!(
-            lyrics_follow_scroll_pause_state(Some(now + Duration::from_millis(1)), now),
+            lyrics_follow_scroll_pause_state(Some(now + Duration::from_millis(1)), false, now),
             LyricsFollowScrollPause::Active
         );
         assert_eq!(
-            lyrics_follow_scroll_pause_state(Some(now), now),
+            lyrics_follow_scroll_pause_state(Some(now), false, now),
             LyricsFollowScrollPause::Expired
+        );
+    }
+
+    #[test]
+    fn scrollbar_drag_suppresses_line_follow_even_after_the_pause_deadline() {
+        let started = Instant::now();
+        let later = started + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS * 2);
+        let held = lyrics_follow_scroll_pause_state(Some(started), true, later);
+        assert_eq!(lyrics_follow_scroll_target(Some(4), Some(3), held), None);
+        let released_until = later + Duration::from_millis(LYRICS_USER_SCROLL_PAUSE_MS);
+        let released = lyrics_follow_scroll_pause_state(Some(released_until), false, later);
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(4), released),
+            None
+        );
+        let expired = lyrics_follow_scroll_pause_state(Some(released_until), false, released_until);
+        assert_eq!(
+            lyrics_follow_scroll_target(Some(4), Some(4), expired),
+            Some(4)
         );
     }
 

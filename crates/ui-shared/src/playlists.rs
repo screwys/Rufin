@@ -65,6 +65,7 @@ pub fn rename_playlist_dialog(
         rename_entry: gtk::Entry,
     });
     rename_entry.set_text(&current_name);
+    rename_entry.select_region(0, -1);
     rename_dialog.connect_response(None, move |_, response| {
         if response == "rename" {
             let name = rename_entry.text().trim().to_string();

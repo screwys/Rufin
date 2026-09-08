@@ -585,6 +585,18 @@ impl Shell {
                 self.queue_smart_playlist_detail_route(route, key, render_started);
                 return;
             }
+            Route::GenreDetail(genre_id) => {
+                let id = NamedDetailId::Genre(genre_id);
+                let settings = self.settings.current.borrow().library_list(id.key());
+                self.queue_named_detail_route(route, id, settings, render_started);
+                return;
+            }
+            Route::MoodDetail(mood_id) => {
+                let id = NamedDetailId::Mood(mood_id);
+                let settings = self.settings.current.borrow().library_list(id.key());
+                self.queue_named_detail_route(route, id, settings, render_started);
+                return;
+            }
             Route::AlbumDetail(album_id) => {
                 let settings = self
                     .settings
@@ -802,16 +814,7 @@ impl Shell {
             | Route::AlbumArtistFavoriteTracks(_) => {
                 unreachable!("media routes are application-owned")
             }
-            Route::GenreDetail(genre_id) => {
-                let id = NamedDetailId::Genre(genre_id);
-                let settings = self.settings.current.borrow().library_list(id.key());
-                self.queue_named_detail_route(selected, route, id, settings, render_started);
-            }
-            Route::MoodDetail(mood_id) => {
-                let id = NamedDetailId::Mood(mood_id);
-                let settings = self.settings.current.borrow().library_list(id.key());
-                self.queue_named_detail_route(selected, route, id, settings, render_started);
-            }
+            Route::GenreDetail(_) | Route::MoodDetail(_) => unreachable!("application-owned route"),
             Route::PlaylistDetail(_) => unreachable!("application-owned route"),
         }
     }
@@ -986,6 +989,11 @@ impl Shell {
         key: library::SmartPlaylistKey,
         render_started: RouteTiming,
     ) {
+        let settings = self
+            .settings
+            .current
+            .borrow()
+            .library_list(LibraryListKey::SmartPlaylistTracks);
         let selected = self.selected_library();
         let source = selected.as_deref().map(|selected| selected.source_key);
         let folder = selected
@@ -998,8 +1006,16 @@ impl Shell {
             render_started,
             "Smart Playlist detail route",
             move |window, cancellation| async move {
-                load_smart_playlist_detail(&database, source, folder, key, window, &cancellation)
-                    .await
+                load_smart_playlist_detail(
+                    &database,
+                    source,
+                    folder,
+                    key,
+                    settings,
+                    window,
+                    &cancellation,
+                )
+                .await
             },
             move |shell, detail| shell.smart_playlist_detail_route(key, detail, source, folder),
         );
@@ -1012,12 +1028,6 @@ impl Shell {
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
-        let selected = self.selected_library();
-        let source = selected.as_deref().map(|selected| selected.source_key);
-        let folder = selected
-            .as_deref()
-            .and_then(|selected| selected.music_folder_key);
-        drop(selected);
         let database = Arc::clone(&self.products.library);
         self.queue_application_route(
             route,
@@ -1027,7 +1037,7 @@ impl Shell {
                 database
                     .playlist_detail_page(
                         key,
-                        folder,
+                        None,
                         settings.sort_key.playlist_entry_sort(),
                         settings.descending,
                         window,
@@ -1035,7 +1045,7 @@ impl Shell {
                     )
                     .await
             },
-            move |shell, detail| shell.playlist_detail_route(key, detail, source, folder),
+            move |shell, detail| shell.playlist_detail_route(key, detail),
         );
     }
 
@@ -1202,46 +1212,26 @@ impl Shell {
 
     fn queue_named_detail_route(
         self: &Rc<Self>,
-        selected: rufin_core::runtime::SelectedLibrary,
         route: Route,
         id: NamedDetailId,
         settings: LibraryListSettings,
         render_started: RouteTiming,
     ) {
-        let database = Arc::clone(&selected.database);
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        self.queue_prepared_route(
-            selected,
+        let database = Arc::clone(&self.products.library);
+        self.queue_application_route(
             route,
             render_started,
             "Named detail route",
             move |window, cancellation| async move {
-                load_named_detail(
-                    &database,
-                    source,
-                    folder,
-                    id,
-                    &settings,
-                    window,
-                    &cancellation,
-                )
-                .await
+                load_named_detail(&database, id, &settings, window, &cancellation).await
             },
-            move |shell, (summary, page), selected| {
+            move |shell, (summary, page)| {
                 let library::TrackRoutePage {
                     order,
                     first_row_position,
                     first_rows,
                 } = page;
-                shell.named_detail_view(
-                    id,
-                    summary,
-                    order,
-                    first_row_position,
-                    first_rows,
-                    selected,
-                )
+                shell.named_detail_view(id, summary, order, first_row_position, first_rows)
             },
         );
     }
