@@ -433,6 +433,11 @@ msgstr "Pārraide"
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Profile"
+msgstr "Saglabātie avoti"
+
 msgid "Change Secret Storage"
 msgstr "Mainīt slepeno krātuvi"
 
@@ -454,6 +459,11 @@ msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
 msgid "Choose Folder"
+msgstr "Izvēlēties mapi"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose Server"
 msgstr "Izvēlēties mapi"
 
 msgid "Choose a local music folder"
@@ -1030,6 +1040,9 @@ msgstr "Turiet un velciet, lai mainītu izmēru"
 msgid "Home Blocks"
 msgstr "Sākuma bloki"
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "Sākums"
 
@@ -1207,6 +1220,11 @@ msgstr "Lokālā mūzikas mape nav pieejama"
 
 msgid "Local music folder"
 msgstr "Lokālā mūzikas mape"
+
+#, fuzzy
+#| msgid "Local Playback Mapping"
+msgid "Local playback saved"
+msgstr "Lokālās atskaņošanas kartējums"
 
 msgid "Local"
 msgstr "Lokāls"
@@ -1713,6 +1731,14 @@ msgstr "Atskaņošanas saraksti"
 msgid "Plays"
 msgstr "Atskaņošanas reizes"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Plex Account"
+msgstr "Atskaņošanas skaits"
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr "Popmūzika"
 
@@ -1769,6 +1795,9 @@ msgstr "Privātais režīms ir ieslēgts"
 
 msgid "Private mode"
 msgstr "Privātais režīms"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr "Izruna"
@@ -1936,6 +1965,9 @@ msgstr "Atiestatīt uz noklusējuma iestatījumiem"
 msgid "Reset"
 msgstr "Atiestatīt"
 
+msgid "Resource not found"
+msgstr ""
+
 #, fuzzy
 #| msgid "Restore Default"
 msgid "Restore User State"
@@ -2003,6 +2035,11 @@ msgstr "Saglabāt"
 
 #, fuzzy
 #| msgid "Saved to"
+msgid "Saved Plex Login"
+msgstr "Saglabāts:"
+
+#, fuzzy
+#| msgid "Saved to"
 msgid "Saved logins"
 msgstr "Saglabāts:"
 
@@ -2017,9 +2054,6 @@ msgstr "Saglabāts:"
 
 msgid "Saved"
 msgstr "Saglabāts"
-
-msgid "Saved, sync to preview matches"
-msgstr "Saglabāts, sinhronizē ar priekšskatījumu, lai atrastu atbilstības"
 
 msgid "Saves lyrics to your source"
 msgstr "Saglabāt tekstus avotā"
@@ -2069,11 +2103,13 @@ msgstr "Meklēt"
 msgid "Searching Local Network"
 msgstr "Meklē lokālajā tīklā"
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr "Tiek meklēti Jellyfin serveri lokālajā tīklā…"
-
 msgid "Searching for devices..."
 msgstr "Tiek meklētas ierīces..."
+
+#, fuzzy
+#| msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Tiek meklēti Jellyfin serveri lokālajā tīklā…"
 
 msgid "Searching will start automatically"
 msgstr "Meklēšana tiks automātiski uzsākta"
@@ -2129,6 +2165,9 @@ msgstr "atsevišķs .lrc fails"
 
 msgid "Server Actions"
 msgstr "Servera darbības"
+
+msgid "Server Address Override (optional)"
+msgstr ""
 
 msgid "Server Address"
 msgstr "Servera adrese"
@@ -2242,6 +2281,12 @@ msgstr "Sānjoslas elements {pozīcija}"
 
 msgid "Sidebar route by position"
 msgstr "Sānjoslas maršruts pēc pozīcijas"
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
+msgstr ""
 
 msgid "Sign in with Nextcloud"
 msgstr ""
@@ -2444,6 +2489,11 @@ msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 msgid "Use Rufin data folder"
 msgstr "Izmantot Rufin datu mapi"
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Use Saved Login"
+msgstr "Saglabāts:"
+
 msgid "Use This Source"
 msgstr "Izmantot šo avotu"
 
@@ -2478,6 +2528,9 @@ msgstr "Lietotājvārds"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr "Izmanto pieejamos karaoke tekstus vai lejupielādē tos no interneta"
+
+msgid "Verification Code (optional)"
+msgstr ""
 
 msgid "Verify server certificate"
 msgstr "Pārbaudīt servera sertifikātu"
@@ -2640,6 +2693,9 @@ msgid_plural "{count} years ago"
 msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
+
+#~ msgid "Saved, sync to preview matches"
+#~ msgstr "Saglabāts, sinhronizē ar priekšskatījumu, lai atrastu atbilstības"
 
 #~ msgid "Add server"
 #~ msgstr "Pievienot serveri"
@@ -2856,9 +2912,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "Loaded in lyrics panel."
 #~ msgstr "Ielādēts tekstu panelī."
-
-#~ msgid "Local Playback Mapping"
-#~ msgstr "Lokālās atskaņošanas kartējums"
 
 #~ msgid "Local library folder is saved."
 #~ msgstr "Lokālās bibliotēkas mape saglabāta."
