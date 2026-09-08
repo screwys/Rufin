@@ -1043,9 +1043,17 @@ pub fn present_playlist_context_menu(
         }
     });
     let delete_menus = Rc::clone(menus);
+    let delete_target = target.downgrade();
     surface.add_action("delete", move || {
-        rufin_core::playlists::delete_playlist(&delete_menus.source, playlist_key);
-        (delete_menus.navigate)(Route::Playlists);
+        let Some(target) = delete_target.upgrade() else {
+            return;
+        };
+        let menus = Rc::clone(&delete_menus);
+        let dialog = crate::playlists::delete_playlist_dialog(&playlist.name, move || {
+            rufin_core::playlists::delete_playlist(&menus.source, playlist_key);
+            (menus.navigate)(Route::Playlists);
+        });
+        dialog.present(Some(&target));
     });
     surface.popup(&menus.settings.current.borrow().context_menu);
 }
@@ -1097,16 +1105,24 @@ pub fn present_smart_playlist_context_menu(
     });
     let delete_menus = Rc::clone(menus);
     let key = playlist.smart_playlist_key;
+    let delete_target = target.downgrade();
     surface.add_action("delete", move || {
-        let navigate = Rc::clone(&delete_menus);
-        (delete_menus.publish_smart_playlist_change)(
-            SmartPlaylistChange::Delete(key),
-            Some(Rc::new(move |result| {
-                if result.is_ok() {
-                    (navigate.navigate)(Route::SmartPlaylists);
-                }
-            })),
-        );
+        let Some(target) = delete_target.upgrade() else {
+            return;
+        };
+        let menus = Rc::clone(&delete_menus);
+        let dialog = crate::playlists::delete_playlist_dialog(&playlist.name, move || {
+            let navigate = Rc::clone(&menus);
+            (menus.publish_smart_playlist_change)(
+                SmartPlaylistChange::Delete(key),
+                Some(Rc::new(move |result| {
+                    if result.is_ok() {
+                        (navigate.navigate)(Route::SmartPlaylists);
+                    }
+                })),
+            );
+        });
+        dialog.present(Some(&target));
     });
     surface.popup(&menus.settings.current.borrow().context_menu);
 }

@@ -97,6 +97,7 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     MANAGE_SERVER_RESOURCE,
     SMART_PLAYLIST_DIALOG_RESOURCE,
     PLAYLIST_NAME_DIALOG_RESOURCE,
+    PLAYLIST_DELETE_DIALOG_RESOURCE,
     METADATA_DIALOG_RESOURCE,
     RECYCLED_ARTWORK_CELL_RESOURCE,
     RECYCLED_BADGED_TEXT_CELL_RESOURCE,
@@ -110,6 +111,9 @@ pub const METADATA_DIALOG_RESOURCE: &str =
 
 pub const PLAYLIST_NAME_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_name.ui";
+
+pub const PLAYLIST_DELETE_DIALOG_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_delete.ui";
 
 pub const SMART_PLAYLIST_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/smart_playlist.ui";

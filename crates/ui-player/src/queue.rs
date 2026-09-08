@@ -913,6 +913,13 @@ fn render_panel(
             } else {
                 item.set_child(Some(&QueueSidebarRow::for_item(&shell, item)));
             }
+            item.child().expect("Queue row").connect_map(|child| {
+                // The wrapper handles click focus and is fully owned by GTK once mapped.
+                child
+                    .parent()
+                    .expect("Queue list-item widget")
+                    .set_focus_on_click(false);
+            });
         });
         let bind_shell = Rc::downgrade(shell);
         connect_sparse_bind(&factory, move |item| {

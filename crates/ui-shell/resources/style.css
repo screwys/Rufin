@@ -919,11 +919,6 @@ entry.metadata-identified-change:dir(rtl) {
   box-shadow: 0 -1px color-mix(in srgb, var(--window-fg-color) 10%, transparent);
 }
 
-.preferences-tabs-bottom .preferences-tab-bar {
-  padding-top: 4px;
-  padding-bottom: 4px;
-}
-
 .preferences-tabs-bottom preferencespage > scrolledwindow > viewport > clamp > box {
   margin-top: 12px;
 }
@@ -960,6 +955,14 @@ entry.metadata-identified-change:dir(rtl) {
   min-height: 28px;
   padding: 0;
   border-radius: 999px;
+}
+
+button.rufin-ownership-icon image {
+  -gtk-icon-size: 20px;
+}
+
+dialog.alert.playlist-delete-dialog .message-area {
+  padding-top: 20px;
 }
 
 .playlist-name-owner:checked:not(:hover) {

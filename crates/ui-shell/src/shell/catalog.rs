@@ -12,13 +12,16 @@ impl Shell {
         let operations = selected
             .as_ref()
             .map(|selected| selected.operations.clone());
-        let history_source_name = {
+        let (history_source_name, source_label) = {
             let configured = self.source.configured.borrow();
-            configured
+            let source = configured
                 .sources
                 .iter()
-                .find(|source| Some(&source.id) == configured.selected_source_id.as_ref())
-                .map(ui_shared::source_labels::configured_source_display_name)
+                .find(|source| Some(&source.id) == configured.selected_source_id.as_ref());
+            (
+                source.map(ui_shared::source_labels::configured_source_display_name),
+                ui_shared::source_labels::source_display_label(source),
+            )
         };
         Rc::new(ui_library::CatalogUi {
             library: self.products.library.clone(),
@@ -31,6 +34,7 @@ impl Shell {
             downloads: Rc::clone(&self.downloads),
             media_menus: Rc::clone(&self.media_menus),
             selected,
+            source_label,
             favorites: self
                 .selected_ui
                 .session()

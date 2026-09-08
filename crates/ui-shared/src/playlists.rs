@@ -3,6 +3,16 @@ use adw::prelude::*;
 use library::PlaylistKey;
 use rufin_core::runtime::source::SourceSummary;
 use std::rc::Rc;
+
+pub fn delete_playlist_dialog(name: &str, delete: impl Fn() + 'static) -> adw::AlertDialog {
+    let resource = crate::ui_resource::PLAYLIST_DELETE_DIALOG_RESOURCE;
+    let builder = crate::ui_resource::builder(resource);
+    crate::objects!(builder, resource, { dialog: adw::AlertDialog });
+    dialog.set_body(&dialog.body().replace("{name}", name));
+    dialog.connect_response(Some("delete"), move |_, _| delete());
+    dialog
+}
+
 pub fn add_media_to_playlist(
     source: &rufin_core::source::SourceOwner,
     playlist: PlaylistKey,

@@ -17,6 +17,25 @@ use adw::prelude::*;
 use app_identity::{DISPLAY_NAME, STABLE_APP_ID};
 use localization::{tr, tr_with};
 use rufin_core::runtime::source::SourceSummary;
+
+pub fn source_icon_pixel_size(icon: &str, size: i32) -> i32 {
+    if icon == STABLE_APP_ID {
+        size + 4
+    } else {
+        size
+    }
+}
+
+pub fn source_display_label(source: Option<&SourceSummary>) -> (&'static str, String) {
+    match source {
+        Some(source) => (
+            configured_source_icon_name(source),
+            configured_source_display_name(source),
+        ),
+        None => (STABLE_APP_ID, DISPLAY_NAME.to_string()),
+    }
+}
+
 pub fn configured_source_display_name(source: &SourceSummary) -> String {
     let name = source.name.trim();
     if name.is_empty() {
@@ -44,6 +63,11 @@ pub fn configure_ownership_toggle(
         } else {
             STABLE_APP_ID
         });
+        if current {
+            button.remove_css_class("rufin-ownership-icon");
+        } else {
+            button.add_css_class("rufin-ownership-icon");
+        }
         let tooltip = if current {
             tr_with(
                 "This is owned by {source}. Regular playlists are synced to your remote.",

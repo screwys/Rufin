@@ -4,13 +4,13 @@
   <requires lib="libadwaita" version="1.9"/>
 
   <template class="RufinSearchRouteView" parent="GtkBox">
-    <property name="orientation">vertical</property><property name="spacing">14</property>
+    <property name="orientation">vertical</property><property name="spacing">10</property>
     <property name="margin-top">10</property>
     <property name="hexpand">true</property><property name="vexpand">true</property>
     <style><class name="route-content"/><class name="search-route"/></style>
     <child>
       <object class="GtkBox">
-        <property name="orientation">vertical</property><property name="spacing">8</property>
+        <property name="orientation">vertical</property><property name="spacing">10</property>
         <property name="margin-start">10</property><property name="margin-end">10</property>
         <property name="hexpand">true</property><property name="halign">fill</property>
         <child><object class="GtkBox" id="toolbar_host"><property name="orientation">vertical</property></object></child>

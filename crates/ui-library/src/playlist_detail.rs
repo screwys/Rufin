@@ -8,7 +8,7 @@ use gtk::glib;
 use library::{
     Database, PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow,
 };
-use localization::{msgid, tr, track_count_text};
+use localization::{msgid, track_count_text};
 
 use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
@@ -50,6 +50,18 @@ enum PlaylistDetailOwner {
 }
 
 impl PlaylistDetailOwner {
+    fn source_label(&self, selected: &(&'static str, String)) -> (&'static str, String) {
+        let belongs_to_source = match self {
+            Self::Saved { summary, .. } => summary.source_key.is_some(),
+            Self::Smart { summary, .. } => summary.definition.current,
+        };
+        if belongs_to_source {
+            selected.clone()
+        } else {
+            ui_shared::source_labels::source_display_label(None)
+        }
+    }
+
     fn key(&self) -> LibraryListKey {
         match self {
             Self::Saved { .. } => LibraryListKey::PlaylistTracks,
@@ -394,6 +406,8 @@ impl CatalogUi {
                 format_duration_units((owner.duration_millis().max(0) / 1_000) as u32),
             ),
         ]);
+        let (source_icon, source_name) = owner.source_label(&self.source_label);
+        showcase_view.set_source_summary(source_icon, &source_name);
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let controls = detail_playback_controls(
@@ -431,18 +445,8 @@ impl CatalogUi {
                 let delete_owner = Rc::clone(&owner_state);
                 delete.connect_clicked(move |_| {
                     let name = delete_owner.borrow().name().to_string();
-                    let dialog = adw::AlertDialog::builder()
-                        .heading(tr("Delete Playlist"))
-                        .body(format!("Delete \"{name}\"?"))
-                        .build();
-                    dialog.add_response("cancel", &localization::tr("Cancel"));
-                    dialog.add_response("delete", &localization::tr("Delete"));
-                    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
                     let shell = Rc::clone(&delete_shell);
-                    dialog.connect_response(None, move |_, response| {
-                        if response != "delete" {
-                            return;
-                        }
+                    let dialog = ui_shared::playlists::delete_playlist_dialog(&name, move || {
                         rufin_core::playlists::delete_playlist(&shell.source, playlist);
                         shell.navigate(ui_shared::route::Route::Playlists);
                     });
@@ -451,7 +455,7 @@ impl CatalogUi {
                 actions.append(&delete);
             }
             PlaylistDetailOwner::Saved { .. } => {}
-            PlaylistDetailOwner::Smart { summary, .. } => {
+            PlaylistDetailOwner::Smart { key, .. } => {
                 let edit = detail_action_button(EDIT_ICON, "Edit");
                 let edit_shell = Rc::clone(self);
                 let edit_owner = Rc::clone(&owner_state);
@@ -464,15 +468,19 @@ impl CatalogUi {
 
                 let delete = detail_delete_button("Delete");
                 let delete_shell = Rc::clone(self);
-                let delete_summary = summary.clone();
+                let playlist = *key;
+                let delete_owner = Rc::clone(&owner_state);
                 delete.connect_clicked(move |_| {
-                    (delete_shell.media_menus.publish_smart_playlist_change)(
-                        ui_shared::smart_playlist::SmartPlaylistChange::Delete(
-                            delete_summary.smart_playlist_key,
-                        ),
-                        None,
-                    );
-                    delete_shell.navigate(ui_shared::route::Route::SmartPlaylists);
+                    let name = delete_owner.borrow().name().to_string();
+                    let shell = Rc::clone(&delete_shell);
+                    let dialog = ui_shared::playlists::delete_playlist_dialog(&name, move || {
+                        (shell.media_menus.publish_smart_playlist_change)(
+                            ui_shared::smart_playlist::SmartPlaylistChange::Delete(playlist),
+                            None,
+                        );
+                        shell.navigate(ui_shared::route::Route::SmartPlaylists);
+                    });
+                    (delete_shell.present_selected_dialog)(dialog.upcast_ref());
                 });
                 actions.append(&delete);
             }
@@ -536,6 +544,8 @@ impl CatalogUi {
                             format_duration_units((next.duration_millis().max(0) / 1_000) as u32),
                         ),
                     ]);
+                    let (source_icon, source_name) = next.source_label(&shell.source_label);
+                    showcase.set_source_summary(source_icon, &source_name);
                     cover.replace(
                         &shell.artwork,
                         &next.artwork(

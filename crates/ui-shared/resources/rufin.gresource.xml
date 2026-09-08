@@ -126,6 +126,7 @@
     <file compressed="true">routes/recycled_text_cell.ui</file>
     <file compressed="true">preferences/dialogs/metadata.ui</file>
     <file compressed="true">preferences/dialogs/playlist_name.ui</file>
+    <file compressed="true">preferences/dialogs/playlist_delete.ui</file>
     <file compressed="true">preferences/dialogs/smart_playlist.ui</file>
     <file compressed="true">routes/playlist_picker.ui</file>
     <file compressed="true">routes/playlist_picker_context.ui</file>
