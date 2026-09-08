@@ -374,7 +374,7 @@ impl Shared {
         warn!(message, "source operation was ignored");
     }
 
-    fn playback(&self) -> Result<Arc<PlaybackOwner>, String> {
+    pub(crate) fn playback(&self) -> Result<Arc<PlaybackOwner>, String> {
         self.playback
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())

@@ -3624,6 +3624,20 @@ mod orchestration_tests {
                 .occurrence,
             selected
         );
+        let update = session
+            .adopt_local(
+                session.sequence.snapshot(),
+                crate::ResolvedStream::new("file:///return.flac").into(),
+                true,
+            )
+            .unwrap();
+        assert!(
+            update.effects.iter().any(|effect| matches!(
+                effect,
+                SessionEffect::Backend(BackendCommand::Start { .. })
+            ))
+        );
+        assert_eq!(session.playback_output, PlaybackOutput::Local);
     }
 
     #[tokio::test]

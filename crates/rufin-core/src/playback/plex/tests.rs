@@ -238,6 +238,7 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         playback: owner.active().unwrap().playback,
         database: owner.database.clone(),
         queue: tokio::sync::Mutex::new(Some(cached)),
+        timeline: Mutex::new(stopped_timeline()),
         commands: tokio::sync::Mutex::new(()),
         prior_volume: Mutex::new(None),
         cancelled: AtomicBool::new(false),
@@ -263,7 +264,16 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         plex_occurrence(&receiver_occurrence(&first.source_id, 7, 1)),
         Some(1)
     );
+    // The receiver endpoint refuses connections. Returning to Rufin must still work.
+    plex.observe(stopped_timeline(), false).await.unwrap();
+    let plex = Arc::new(plex);
+    *owner.plex.lock().unwrap() = Some(plex.clone());
+    owner.output.lock().unwrap().selected = plex.output.clone();
     tokio::task::spawn_blocking(move || {
+        owner.leave_plex(Arc::new(AtomicBool::new(false))).unwrap();
+        assert!(owner.plex.lock().unwrap().is_none());
+        assert_eq!(owner.output.lock().unwrap().selected, PlaybackOutput::Local);
+        assert!(plex.cancelled.load(Ordering::Acquire));
         drop(plex);
         owner.shutdown();
     })

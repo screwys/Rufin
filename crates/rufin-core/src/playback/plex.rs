@@ -20,6 +20,7 @@ pub(super) struct PlexPlayback {
     playback: Playback,
     database: Arc<Database>,
     queue: tokio::sync::Mutex<Option<PlexQueueWindow>>,
+    timeline: Mutex<Timeline>,
     commands: tokio::sync::Mutex<()>,
     prior_volume: Mutex<Option<u8>>,
     cancelled: AtomicBool,
@@ -322,6 +323,7 @@ impl PlexPlayback {
         }
         self.resolve_timeline_source(&timeline).await?;
         let mut cached = self.queue.lock().await;
+        *self.timeline.lock().unwrap_or_else(|p| p.into_inner()) = timeline.clone();
         if timeline.play_queue_id.is_none() {
             let clear = cached.take().is_some()
                 || !self
@@ -1176,6 +1178,7 @@ impl PlaybackOwner {
             playback: active.playback.clone(),
             database: self.database.clone(),
             queue: tokio::sync::Mutex::new(None),
+            timeline: Mutex::new(stopped_timeline()),
             commands: tokio::sync::Mutex::new(()),
             prior_volume: Mutex::new(None),
             cancelled: AtomicBool::new(false),
@@ -1275,9 +1278,21 @@ impl PlaybackOwner {
             .selected = output;
         let observed = plex.clone();
         let task = self.runtime.spawn(async move {
+            let mut failed_since = None;
             while !observed.cancelled.load(Ordering::Acquire) {
-                match observed.client.timeline_async(true).await {
+                let result = if let Some(since) = failed_since {
+                    tokio::time::timeout_at(
+                        since + std::time::Duration::from_secs(5),
+                        observed.client.timeline_async(false),
+                    )
+                    .await
+                    .unwrap_or_else(|_| Err("Plex player disconnected".into()))
+                } else {
+                    observed.client.timeline_async(true).await
+                };
+                match result {
                     Ok(Some(timeline)) => {
+                        failed_since = None;
                         // A queue load briefly clears Plexamp's current item. Its
                         // next periodic timeline will publish the completed command.
                         let Ok(_guard) = observed.commands.try_lock() else {
@@ -1293,10 +1308,34 @@ impl PlaybackOwner {
                         }
                     }
                     Ok(None) => {
+                        failed_since = None;
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                     Err(error) => {
-                        warn!(%error,"The Plex player timeline unavailable");
+                        let since = *failed_since.get_or_insert_with(|| {
+                            warn!(%error,"The Plex player timeline unavailable");
+                            tokio::time::Instant::now()
+                        });
+                        if since.elapsed() >= std::time::Duration::from_secs(5) {
+                            if let Some(owner) = observed
+                                .source_owner
+                                .upgrade()
+                                .and_then(|source| source.shared.playback().ok())
+                            {
+                                let observed = observed.clone();
+                                tokio::task::spawn_blocking(move || {
+                                    if !observed.cancelled.load(Ordering::Acquire)
+                                        && let Err(error) =
+                                            owner.leave_plex(Arc::new(AtomicBool::new(false)))
+                                    {
+                                        let _ = observed
+                                            .playback
+                                            .command(SessionCommand::OperationFailed(error));
+                                    }
+                                });
+                            }
+                            break;
+                        }
                         tokio::time::sleep(std::time::Duration::from_secs(1)).await;
                     }
                 }
@@ -1317,7 +1356,13 @@ impl PlaybackOwner {
         let backend = (self.start_backend)()?;
         self.runtime.block_on(async {
             let _guard = plex.commands.lock().await;
-            let timeline = plex.current().await?;
+            check_cancelled(&plex.cancelled)?;
+            // Leaving a receiver never requires its permission or a fresh response.
+            let timeline = plex
+                .timeline
+                .lock()
+                .unwrap_or_else(|p| p.into_inner())
+                .clone();
             let (_, context) = plex.connection();
             if timeline.play_queue_id.is_none() {
                 let playback = plex.playback.clone();
@@ -1401,38 +1446,26 @@ impl PlaybackOwner {
                 },
                 occurrence,
             );
-            let fresh = plex.current().await?;
             check_cancelled(&cancelled)?;
-            if fresh.machine_identifier != timeline.machine_identifier
-                || fresh.play_queue_id != timeline.play_queue_id
-                || fresh.play_queue_item_id != timeline.play_queue_item_id
-                || fresh.play_queue_version != timeline.play_queue_version
-            {
-                return Err(
-                    "The Plex player changed its queue during transfer; select local output again"
-                        .into(),
-                );
-            }
-            if let Some(time) = fresh.time {
-                queue.progress_millis = time.min(i64::MAX as u64) as i64;
-            }
-            queue.repeat_mode = repeat(&fresh);
-            queue.shuffled = fresh.shuffle.unwrap_or(false);
+            queue.progress_millis = plex
+                .playback
+                .handoff_snapshot()
+                .map_err(string_error)?
+                .0
+                .progress_millis;
             let playback = plex.playback.clone();
             tokio::task::spawn_blocking(move || {
-                playback.adopt_local(queue, prepared, fresh.state == "playing", backend)
+                playback.adopt_local(
+                    queue,
+                    prepared,
+                    matches!(timeline.state.as_str(), "playing" | "buffering"),
+                    backend,
+                )
             })
             .await
             .map_err(string_error)?
             .map_err(string_error)?;
             plex.cancel();
-            if let Err(error) = plex.control(|client| client.stop()).await {
-                let _ = plex
-                    .playback
-                    .command(SessionCommand::OperationFailed(format!(
-                        "Local playback resumed, but the Plex player could not be stopped: {error}"
-                    )));
-            }
             Ok::<_, String>(())
         })?;
         self.plex.lock().unwrap_or_else(|p| p.into_inner()).take();
@@ -1440,6 +1473,11 @@ impl PlaybackOwner {
             .lock()
             .unwrap_or_else(|p| p.into_inner())
             .selected = PlaybackOutput::Local;
+        self.runtime.spawn(async move {
+            if let Err(error) = plex.control(|client| client.stop()).await {
+                tracing::debug!(%error, "Could not stop the previous Plex player");
+            }
+        });
         Ok(())
     }
     fn plex_sources(&self) -> Result<Vec<(Arc<Source>, PlexCompanionContext)>, String> {
