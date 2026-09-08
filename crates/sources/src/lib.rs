@@ -10,6 +10,7 @@
 extern crate self as sources;
 
 mod config;
+mod detail_links;
 pub mod discovery;
 mod operations;
 mod plex;

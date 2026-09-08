@@ -24,7 +24,6 @@ use crate::route_layout::{detail_showcase_cover_only, detail_showcase_cover_size
 use ui_shared::cover_controls::{
     CoverHoverControls, cover_hover_controls, cover_play_hover_controls, showcase_cover_overlay,
 };
-use ui_shared::detail_links::{DetailEntityKind, DetailExternalLink, server_entity_link};
 use ui_shared::media_menus::CollectionPlay;
 use ui_shared::route::Route;
 
@@ -701,20 +700,19 @@ pub fn album_external_links(shell: &Rc<CatalogUi>, album: &AlbumRow) -> Option<g
         ));
     }
     if link_settings.server
-        && let Some(link) = server_entity_url(shell, DetailEntityKind::Album, &album.object_id)
+        && let Some(button) = detail_source_button(shell, &album.media_uri, false)
     {
-        row.append(&detail_external_link_button(
-            shell,
-            link.icon_name,
-            link.label,
-            link.url,
-        ));
+        row.append(&button);
     }
 
     row.first_child().is_some().then(|| row.upcast())
 }
 
-pub fn artist_external_links(shell: &Rc<CatalogUi>, artist: &ArtistRow) -> Option<gtk::Widget> {
+pub fn artist_external_links(
+    shell: &Rc<CatalogUi>,
+    artist: &ArtistRow,
+    album_artist: bool,
+) -> Option<gtk::Widget> {
     let settings = shell.settings.current.borrow();
     let link_settings = &settings.external_site_links;
     if !settings.shows_external_site_links() {
@@ -743,14 +741,9 @@ pub fn artist_external_links(shell: &Rc<CatalogUi>, artist: &ArtistRow) -> Optio
         ));
     }
     if link_settings.server
-        && let Some(link) = server_entity_url(shell, DetailEntityKind::Artist, &artist.object_id)
+        && let Some(button) = detail_source_button(shell, &artist.media_uri, album_artist)
     {
-        row.append(&detail_external_link_button(
-            shell,
-            link.icon_name,
-            link.label,
-            link.url,
-        ));
+        row.append(&button);
     }
 
     row.first_child().is_some().then(|| row.upcast())
@@ -794,6 +787,30 @@ fn detail_external_link_button(
     label: &str,
     url: String,
 ) -> gtk::Button {
+    let button = detail_link_button(icon_name, label);
+    connect_web_link(&button, shell.window.clone(), url);
+    button
+}
+
+fn connect_web_link(
+    button: &gtk::Button,
+    window: glib::WeakRef<gtk::ApplicationWindow>,
+    url: String,
+) {
+    button.connect_clicked(move |_| {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        let launcher = gtk::UriLauncher::new(&url);
+        gtk::glib::spawn_future_local(async move {
+            if let Err(error) = launcher.launch_future(Some(&window)).await {
+                warn!(%error, "failed to open external detail link");
+            }
+        });
+    });
+}
+
+fn detail_link_button(icon_name: &str, label: &str) -> gtk::Button {
     let button = gtk::Button::new();
     button.add_css_class("icon-button");
     button.add_css_class("flat");
@@ -803,16 +820,6 @@ fn detail_external_link_button(
     let image = gtk::Image::from_icon_name(icon_name);
     image.set_pixel_size(18);
     button.set_child(Some(&image));
-    let window = shell.window.upgrade().expect("mounted catalog window");
-    button.connect_clicked(move |_| {
-        let launcher = gtk::UriLauncher::new(&url);
-        let window = window.clone();
-        gtk::glib::spawn_future_local(async move {
-            if let Err(error) = launcher.launch_future(Some(&window)).await {
-                warn!(%error, "failed to open external detail link");
-            }
-        });
-    });
     button
 }
 
@@ -857,22 +864,60 @@ fn musicbrainz_artist_url(artist: &ArtistRow) -> Option<String> {
     Some(format!("https://musicbrainz.org/artist/{artist_id}"))
 }
 
-fn server_entity_url(
+fn detail_source_button(
     shell: &CatalogUi,
-    kind: DetailEntityKind,
-    entity_id: &str,
-) -> Option<DetailExternalLink> {
-    let source_id = shell
+    media_uri: &str,
+    album_artist: bool,
+) -> Option<gtk::Button> {
+    let (source_id, kind, object_id) = library::source_entity_parts(media_uri)?;
+    let source = shell.source.configuration(&source_id)?;
+    let folder = matches!(source.kind.as_str(), "local" | "webdav" | "smb");
+    let label = match source.kind.as_str() {
+        "local" | "webdav" | "smb" => msgid("Open Folder"),
+        "jellyfin" => msgid("Open on Jellyfin"),
+        "emby" => msgid("Open on Emby"),
+        "plex" => msgid("Open on Plex"),
+        "navidrome" => msgid("Open on Navidrome"),
+        "subsonic" => msgid("Open on server"),
+        _ => return None,
+    };
+    let button = detail_link_button(
+        ui_shared::source_labels::source_kind_icon_name(&source.kind)?,
+        label,
+    );
+    if !folder {
+        let uri = source.detail_web_url(&kind, &object_id).ok()?;
+        connect_web_link(&button, shell.window.clone(), uri);
+        return Some(button);
+    }
+    let source = shell.source.clone();
+    let window = shell.window.clone();
+    let media_uri = media_uri.to_owned();
+    let scope = shell
         .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_id.clone())?;
-    let source = shell.source.configured_source(&source_id).ok().flatten()?;
-    server_entity_link(
-        &source.source.kind,
-        &source.credentials.server_url,
-        kind,
-        entity_id,
-    )
+        .and_then(|selected| selected.music_folder_key);
+    button.connect_clicked(move |button| {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
+        button.set_sensitive(false);
+        let button = button.downgrade();
+        let receiver = source.collection_folder_uri(media_uri.clone(), album_artist, scope);
+        glib::spawn_future_local(async move {
+            let result = async {
+                let uri = receiver.recv().await.map_err(|error| error.to_string())??;
+                ui_shared::folder_launcher::open_folder_uri(&window, &uri).await
+            }
+            .await;
+            if let Some(button) = button.upgrade() {
+                button.set_sensitive(true);
+            }
+            if let Err(error) = result {
+                warn!(%error, "failed to open source detail location");
+            }
+        });
+    });
+    Some(button)
 }
 
 fn clean_url_label(value: &str) -> Option<&str> {

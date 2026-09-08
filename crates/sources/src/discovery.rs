@@ -4,7 +4,7 @@ use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
 use crate::{SourceError, SourceResult};
 use if_addrs::IfAddr;
 use reqwest::{Client, StatusCode, header, redirect};
-use serde::Deserialize;
+use serde_json::Value;
 use std::io;
 use std::net::{Ipv4Addr, SocketAddr, SocketAddrV4};
 use std::time::Duration;
@@ -260,9 +260,12 @@ async fn discover_jellyfin_emby_servers(
 }
 
 fn jellyfin_server_from_packet(packet: &[u8]) -> Option<DiscoveredServer> {
-    let response: JellyfinDiscoveryResponse = serde_json::from_slice(packet).ok()?;
-    let address = response.address?;
-    jellyfin_server(response.id, response.name, &address)
+    let response: Value = serde_json::from_slice(packet).ok()?;
+    jellyfin_server(
+        response["Id"].as_str(),
+        response["Name"].as_str(),
+        response["Address"].as_str()?,
+    )
 }
 
 async fn probe_jellyfin_localhost_server(
@@ -286,24 +289,29 @@ async fn probe_jellyfin_localhost_server(
     )
     .await
     .ok()?;
-    let response: JellyfinPublicSystemInfo = serde_json::from_slice(&body).ok()?;
+    let response: Value = serde_json::from_slice(&body).ok()?;
     jellyfin_server(
-        response.id.or(response.source_id),
-        response.server_name.or(response.local_address),
+        response["Id"]
+            .as_str()
+            .or_else(|| response["SourceId"].as_str()),
+        response["ServerName"]
+            .as_str()
+            .or_else(|| response["LocalAddress"].as_str()),
         JELLYFIN_LOCALHOST_URL,
     )
 }
 
 fn jellyfin_server(
-    id: Option<String>,
-    name: Option<String>,
+    id: Option<&str>,
+    name: Option<&str>,
     address: &str,
 ) -> Option<DiscoveredServer> {
     Some(DiscoveredServer {
-        id: id.filter(|id| !id.trim().is_empty()),
+        id: id.filter(|id| !id.trim().is_empty()).map(str::to_owned),
         name: name
             .filter(|name| !name.trim().is_empty())
-            .unwrap_or_else(|| "Jellyfin".to_string()),
+            .unwrap_or("Jellyfin")
+            .to_string(),
         address: normalize_base_url(address)
             .ok()?
             .as_str()
@@ -344,23 +352,6 @@ fn is_loopback_endpoint(url: &url::Url) -> bool {
     }
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct JellyfinDiscoveryResponse {
-    address: Option<String>,
-    id: Option<String>,
-    name: Option<String>,
-}
-
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct JellyfinPublicSystemInfo {
-    id: Option<String>,
-    source_id: Option<String>,
-    server_name: Option<String>,
-    local_address: Option<String>,
-}
-
 #[cfg(test)]
 mod jellyfin_tests {
     use super::*;
@@ -393,6 +384,40 @@ mod jellyfin_tests {
         .to_string();
 
         assert!(jellyfin_server_from_packet(packet.as_bytes()).is_none());
+        for address in [
+            serde_json::json!(42),
+            serde_json::json!(""),
+            serde_json::json!("http://["),
+        ] {
+            let packet = serde_json::json!({"Address": address, "Name": "Music Box"});
+            assert!(jellyfin_server_from_packet(packet.to_string().as_bytes()).is_none());
+        }
+    }
+
+    #[test]
+    fn discovery_response_keeps_address_with_malformed_optional_fields() {
+        for (id, name, expected_id, expected_name) in [
+            (
+                serde_json::json!({}),
+                serde_json::json!("Music Box"),
+                None,
+                "Music Box",
+            ),
+            (
+                serde_json::json!("server-one"),
+                serde_json::json!([]),
+                Some("server-one"),
+                "Jellyfin",
+            ),
+        ] {
+            let packet =
+                serde_json::json!({"Address": "http://192.0.2.20:8096", "Id": id, "Name": name});
+            let server = jellyfin_server_from_packet(packet.to_string().as_bytes())
+                .expect("usable discovery address");
+            assert_eq!(server.address, "http://192.0.2.20:8096");
+            assert_eq!(server.id.as_deref(), expected_id);
+            assert_eq!(server.name, expected_name);
+        }
     }
 
     #[test]
@@ -445,25 +470,39 @@ mod jellyfin_tests {
         assert_eq!(servers[2].address, "http://127.0.0.1:8096");
     }
 
-    #[test]
-    fn localhost_public_info_maps_server() {
-        let response: JellyfinPublicSystemInfo = serde_json::from_value(serde_json::json!({
-            "Id": "server-one",
-            "ServerName": "Local Jellyfin",
-            "LocalAddress": "http://127.0.0.1:8096"
-        }))
-        .expect("public system info");
-
-        let server = jellyfin_server(
-            response.id.or(response.source_id),
-            response.server_name.or(response.local_address),
-            "http://localhost:8096",
-        )
-        .expect("localhost server");
-
-        assert_eq!(server.id.as_deref(), Some("server-one"));
-        assert_eq!(server.name, "Local Jellyfin");
-        assert_eq!(server.address, "http://localhost:8096");
+    #[tokio::test]
+    async fn localhost_probe_keeps_endpoint_with_malformed_optional_fields() {
+        let client = Client::builder().no_proxy().build().expect("client");
+        for (body, expected_id, expected_name) in [
+            (
+                serde_json::json!({"Id": {}, "ServerName": "Local Jellyfin", "LocalAddress": []}),
+                None,
+                "Local Jellyfin",
+            ),
+            (
+                serde_json::json!({"Id": "server-one", "ServerName": [], "LocalAddress": {}}),
+                Some("server-one"),
+                "Jellyfin",
+            ),
+            (
+                serde_json::json!({"Id": {}, "SourceId": "server-one", "ServerName": false, "LocalAddress": "http://127.0.0.1:8096"}),
+                Some("server-one"),
+                "http://127.0.0.1:8096",
+            ),
+        ] {
+            let server = MockServer::start().await;
+            Mock::given(method("GET"))
+                .and(path("/System/Info/Public"))
+                .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                .mount(&server)
+                .await;
+            let discovered = probe_jellyfin_localhost_server(&client, &server.uri())
+                .await
+                .expect("known localhost endpoint");
+            assert_eq!(discovered.id.as_deref(), expected_id);
+            assert_eq!(discovered.name, expected_name);
+            assert_eq!(discovered.address, JELLYFIN_LOCALHOST_URL);
+        }
     }
 
     #[tokio::test]

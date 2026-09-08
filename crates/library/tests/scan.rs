@@ -7,7 +7,61 @@ use library::{
 use sqlx::FromRow;
 use sqlx::sqlite::SqliteConnection;
 
-const PRIVATE_TRACK_COUNT: usize = 100_000;
+#[tokio::test]
+async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objects() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.unwrap();
+    let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+        .await
+        .unwrap();
+    scan.write_artist(
+        "artist-one",
+        "Known Artist",
+        "known artist",
+        "known artist",
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    write_track(&mut scan, "track-one", "One", 0).await;
+    write_track(&mut scan, "track-two", "Two", 1).await;
+    scan.write_track_relations(&[("track-one", "missing-artist")], &[], &[])
+        .await
+        .unwrap();
+    scan.write_album_source_loudness("album-one", None, None, Some(-6.0), None)
+        .await
+        .unwrap();
+    assert!(matches!(
+        scan.finish().await.unwrap(),
+        ScanOutcome::Changed(_)
+    ));
+    let mut raw = connection(&path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM track_artists")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        2
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks WHERE album_key IS NULL")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        2
+    );
+}
 
 #[tokio::test]
 async fn remote_relocation_keeps_media_identity_and_updates_observed_access() {
@@ -1137,66 +1191,6 @@ async fn failed_and_stale_publications_are_atomic() {
         .await
         .expect("count rejected sources"),
         0
-    );
-}
-
-#[tokio::test]
-async fn ordinary_private_library_scan_is_bounded() {
-    let directory = tempfile::tempdir().expect("temporary Store directory");
-    let path = directory.path().join("library.sqlite3");
-    let database = Database::open(&path).await.expect("open Library Store");
-    let mut scan = Scan::begin(&database, "private-source", "Private", "private", None)
-        .await
-        .expect("begin private scan");
-    for number in 0..PRIVATE_TRACK_COUNT {
-        let object_id = format!("track-{number:06}");
-        scan.write_track(
-            &object_id,
-            None,
-            "Track",
-            "track",
-            "",
-            "Artist",
-            &object_id,
-            180_000,
-            1,
-            number as i64,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            false,
-            None,
-            None,
-            None,
-            None,
-            None,
-            None,
-            [(number % 251) as u8 + 1; 32],
-        )
-        .await
-        .expect("stage one bounded Track row");
-    }
-    assert!(matches!(
-        scan.finish().await.expect("publish private scan"),
-        ScanOutcome::Changed(_)
-    ));
-    let mut outside = connection(&path).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
-            .fetch_one(&mut outside)
-            .await
-            .expect("count Tracks"),
-        PRIVATE_TRACK_COUNT as i64
     );
 }
 

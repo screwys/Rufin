@@ -925,6 +925,7 @@ fn connect_save(
                 Err(error) => {
                     editor.show_error(&error.to_string());
                     editor.set_busy(false, &tr("Save"));
+                    refresh_save_state(&editor);
                 }
             }
         });

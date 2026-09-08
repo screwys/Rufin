@@ -1,5 +1,5 @@
 use super::*;
-use serde::{Deserialize, Serialize};
+use serde::Serialize;
 
 impl JellyfinEmbySource {
     pub(crate) fn jellyfin_download(
@@ -89,14 +89,13 @@ impl JellyfinEmbySource {
         let raw_track_id = raw_item_id(track_id);
         let mut url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Lyrics"))?;
         url.query_pairs_mut().append_pair("fileName", "lyrics.lrc");
-        self.send_json::<LyricDto>(
+        self.send_unit(
             self.client
                 .post(url)
                 .header(header::CONTENT_TYPE, "text/plain; charset=utf-8")
                 .body(lyrics.to_string()),
         )
         .await
-        .map(|_| ())
     }
 
     pub(super) async fn jellyfin_lyrics(
@@ -105,8 +104,8 @@ impl JellyfinEmbySource {
     ) -> SourceResult<Option<LyricsBundle>> {
         let raw_track_id = raw_item_id(track_id);
         let local_url = endpoint(&self.base_url, &format!("Audio/{raw_track_id}/Lyrics"))?;
-        match self.send_json::<LyricDto>(self.client.get(local_url)).await {
-            Ok(dto) => Ok(Some(lyrics_from_dto(dto))),
+        match self.send_json::<Value>(self.client.get(local_url)).await {
+            Ok(item) => Ok(Some(lyrics_from_item(&item))),
             Err(SourceError::NotFound) => Ok(None),
             Err(error) => Err(error),
         }
@@ -170,22 +169,20 @@ pub(super) fn stream_descriptor(
     )
 }
 
-pub(super) fn lyrics_from_dto(dto: LyricDto) -> LyricsBundle {
+fn lyrics_from_item(item: &Value) -> LyricsBundle {
     LyricsBundle::from_documents(
         LyricsOrigin::Native,
         vec![LyricsDocument {
             role: LyricsRole::Original,
             language: None,
             offset_millis: 0,
-            lines: dto
-                .lyrics
-                .unwrap_or_default()
-                .into_iter()
+            lines: items(&item["Lyrics"])
+                .iter()
                 .filter_map(|line| {
-                    let text = line.text.unwrap_or_default();
+                    let text: String = field(line, "Text")?;
                     (!text.trim().is_empty()).then_some(LyricsLine {
                         text,
-                        start_millis: ticks_to_millis(line.start),
+                        start_millis: ticks_to_millis(field(line, "Start")),
                         end_millis: None,
                         cue_lines: Vec::new(),
                     })
@@ -212,15 +209,66 @@ pub(super) struct UpdatePlaylistDto {
     pub(super) name: Option<String>,
 }
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub(super) struct LyricDto {
-    pub(super) lyrics: Option<Vec<LyricLineDto>>,
-}
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+    use wiremock::matchers::{method, path};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
 
-#[derive(Clone, Debug, Deserialize)]
-#[serde(rename_all = "PascalCase")]
-pub(super) struct LyricLineDto {
-    pub(super) text: Option<String>,
-    pub(super) start: Option<i64>,
+    #[tokio::test]
+    async fn jellyfin_lyrics_preserve_usable_lines_and_accept_successful_uploads() {
+        let server = MockServer::start().await;
+        let source = JellyfinEmbySource::open(
+            JellyfinEmbySourceConfig {
+                kind: ServerKind::Jellyfin,
+                base_url: server.uri(),
+                server_id: Some("server".into()),
+                user_id: "listener".into(),
+                username: "Listener".into(),
+                trust_invalid_cert: false,
+                use_instant_mix: false,
+            },
+            "token".into(),
+            "device".into(),
+        )
+        .unwrap();
+        Mock::given(method("GET"))
+            .and(path("/Audio/track/Lyrics"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"Lyrics":[
+                {"Text":"First","Start":"10000"}, null, {"Text":{}},
+                {"Text":"Second","Start":{}}, {"Text":"Third","Start":30000}
+            ]})))
+            .mount(&server)
+            .await;
+        let bundle = source
+            .jellyfin_lyrics("jellyfin:track:track")
+            .await
+            .unwrap()
+            .unwrap();
+        let lines = &bundle.documents()[0].lines;
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.text.as_str())
+                .collect::<Vec<_>>(),
+            ["First", "Second", "Third"]
+        );
+        assert_eq!(
+            lines
+                .iter()
+                .map(|line| line.start_millis)
+                .collect::<Vec<_>>(),
+            [Some(1), None, Some(3)]
+        );
+        Mock::given(method("POST"))
+            .and(path("/Audio/track/Lyrics"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("saved"))
+            .mount(&server)
+            .await;
+        source
+            .write_lyrics("jellyfin:track:track", "First")
+            .await
+            .unwrap();
+    }
 }

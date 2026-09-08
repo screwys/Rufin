@@ -1812,9 +1812,6 @@ impl Scan {
         } else {
             ensure_source_identity(&mut transaction, &self.source_id).await?
         };
-        if self.authoritative {
-            validate_references(&mut transaction).await?;
-        }
         publish_entities(&mut transaction, source_key, self.authoritative).await?;
         if !self.authoritative {
             publish_artwork_bindings(&mut transaction, source_key, self.distinct_track_covers)
@@ -1910,7 +1907,6 @@ impl Scan {
                 ScanOutcome::Identical(publication(source_key, revision, &artwork_digest)?)
             });
         }
-        validate_references(&mut transaction).await?;
         publish_entities(&mut transaction, source_key, false).await?;
         let affected_albums = sqlx::query_scalar::<_, crate::AlbumKey>(
             "SELECT DISTINCT track.album_key FROM tracks track
@@ -2084,13 +2080,7 @@ impl Scan {
             query().execute(&mut *connection).await
         };
         match result {
-            Ok(result) if result.rows_affected() == 1 => Ok(()),
-            Ok(_) => {
-                self.failed = true;
-                Err(LibraryError::InvalidScan(
-                    "source loudness entity has not been staged".to_string(),
-                ))
-            }
+            Ok(_) => Ok(()),
             Err(error) => {
                 if matches!(error, sqlx::Error::WorkerCrashed | sqlx::Error::Io(_)) {
                     if let Some(writer) = self.batch_writer.as_mut() {
@@ -3069,54 +3059,6 @@ fn hash_row(hasher: &mut Hasher, row: &SqliteRow) -> LibraryResult<()> {
 fn hash_bytes(hasher: &mut Hasher, value: &[u8]) {
     hasher.update(&(value.len() as u64).to_be_bytes());
     hasher.update(value);
-}
-
-async fn validate_references(transaction: &mut Transaction<'_, Sqlite>) -> LibraryResult<()> {
-    let checks = [
-        "SELECT 1 FROM temp.scan_playlist_entries AS child
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_playlists WHERE object_id = child.playlist_id)",
-        "SELECT 1 FROM temp.scan_album_artists AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_albums WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_artists WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_track_artists AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_tracks WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_artists WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_album_genres AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_albums WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_genres WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_track_genres AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_tracks WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_genres WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_track_moods AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_tracks WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_moods WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_track_folders AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_tracks WHERE object_id = link.owner_id)
-            OR NOT EXISTS (SELECT 1 FROM temp.scan_folders WHERE object_id = link.related_id)",
-        "SELECT 1 FROM temp.scan_album_release_types AS link
-         WHERE NOT EXISTS (SELECT 1 FROM temp.scan_albums WHERE object_id = link.owner_id)",
-        "SELECT 1 FROM temp.scan_home_entries AS entry WHERE
-           (entry.entity_kind='track' AND NOT EXISTS (
-              SELECT 1 FROM temp.scan_tracks WHERE object_id=entry.entity_object_id))
-           OR (entry.entity_kind='album' AND NOT EXISTS (
-              SELECT 1 FROM temp.scan_albums WHERE object_id=entry.entity_object_id))
-           OR (entry.entity_kind='artist' AND NOT EXISTS (
-              SELECT 1 FROM temp.scan_artists WHERE object_id=entry.entity_object_id))
-           OR (entry.entity_kind='playlist' AND NOT EXISTS (
-              SELECT 1 FROM temp.scan_playlists WHERE object_id=entry.entity_object_id))",
-    ];
-    for sql in checks {
-        if sqlx::query_scalar::<_, i64>(sql)
-            .fetch_optional(&mut **transaction)
-            .await?
-            .is_some()
-        {
-            return Err(LibraryError::InvalidScan(
-                "scan contains a relationship to a missing staged object".to_string(),
-            ));
-        }
-    }
-    Ok(())
 }
 
 async fn symmetric_point_change(
