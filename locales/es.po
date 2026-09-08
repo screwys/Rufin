@@ -1370,6 +1370,9 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
+msgid "Next source"
+msgstr ""
+
 msgid "Next"
 msgstr ""
 
@@ -1407,6 +1410,9 @@ msgid "No local folders configured"
 msgstr ""
 
 msgid "No lyrics"
+msgstr ""
+
+msgid "No matching tracks found"
 msgstr ""
 
 msgid "No matching tracks"
@@ -2246,6 +2252,9 @@ msgid "Sort title"
 msgstr ""
 
 msgid "Sort"
+msgstr ""
+
+msgid "Source by position"
 msgstr ""
 
 msgid "Source to use for cover images and song/artist links"

@@ -1329,6 +1329,11 @@ msgstr "Seuraava äänilaite"
 msgid "Next page"
 msgstr ""
 
+#, fuzzy
+#| msgid "Metadata source"
+msgid "Next source"
+msgstr "Metatietojen lähde"
+
 msgid "Next"
 msgstr ""
 
@@ -1367,6 +1372,11 @@ msgstr ""
 
 msgid "No lyrics"
 msgstr "Ei sanoituksia"
+
+#, fuzzy
+#| msgid "Nothing in this folder"
+msgid "No matching tracks found"
+msgstr "Tässä kansiossa ei ole mitään"
 
 msgid "No matching tracks"
 msgstr ""
@@ -2200,6 +2210,9 @@ msgstr ""
 
 msgid "Sort"
 msgstr "Lajittelu"
+
+msgid "Source by position"
+msgstr ""
 
 msgid "Source to use for cover images and song/artist links"
 msgstr ""

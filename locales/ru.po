@@ -1405,6 +1405,11 @@ msgstr "Следующее аудиоустройство"
 msgid "Next page"
 msgstr "Следующая страница"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Источник не найден"
+
 msgid "Next"
 msgstr "Следующий"
 
@@ -1443,6 +1448,11 @@ msgstr "Не настроено ни одной локальной папки"
 
 msgid "No lyrics"
 msgstr "Текст песни отсутствует"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Нет соответствующих треков"
 
 msgid "No matching tracks"
 msgstr "Нет соответствующих треков"
@@ -2298,6 +2308,11 @@ msgstr "Сортировать по названию"
 
 msgid "Sort"
 msgstr "Сортировать"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Маршрут в боковой панели по расположению"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Источник для обложек и ссылок на песни/исполнителей"

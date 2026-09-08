@@ -1455,6 +1455,11 @@ msgstr "Další zvukové zařízení"
 msgid "Next page"
 msgstr "Další strana"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Žádný zdroj"
+
 msgid "Next"
 msgstr "Další"
 
@@ -1497,6 +1502,11 @@ msgstr "Nebyly nakonfigurovány žádné místní složky"
 
 msgid "No lyrics"
 msgstr "Žádné texty skladeb"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Žádné odpovídající skladby"
 
 msgid "No matching tracks"
 msgstr "Žádné odpovídající skladby"
@@ -2380,6 +2390,11 @@ msgstr "Seřadit podle názvu"
 
 msgid "Sort"
 msgstr "Seřadit"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Rozložení postranního panelu podle pozice"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"

@@ -1394,6 +1394,11 @@ msgstr "Nächstes Audiogerät"
 msgid "Next page"
 msgstr "Nächste Seite"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Keine Quelle"
+
 msgid "Next"
 msgstr "Nächster Titel"
 
@@ -1432,6 +1437,11 @@ msgstr "Keine lokalen Ordner konfiguriert"
 
 msgid "No lyrics"
 msgstr "Keine Songtexte"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Keine passenden Titel"
 
 msgid "No matching tracks"
 msgstr "Keine passenden Titel"
@@ -2272,6 +2282,11 @@ msgstr "Sortiertitel"
 
 msgid "Sort"
 msgstr "Sortieren"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Seitenleistenroute nach Position"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Quelle für Coverbilder und Titel-/Künstlerlinks"

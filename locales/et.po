@@ -1423,6 +1423,11 @@ msgstr "Järgmine heliseade"
 msgid "Next page"
 msgstr "Järgmine leht"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Allikat pole"
+
 msgid "Next"
 msgstr "Järgmine"
 
@@ -1461,6 +1466,11 @@ msgstr "Ühtegi kohalikku kausta pole seadistatud"
 
 msgid "No lyrics"
 msgstr "Laulusõnu pole"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Sobivaid lugusid pole"
 
 msgid "No matching tracks"
 msgstr "Sobivaid lugusid pole"
@@ -2324,6 +2334,11 @@ msgstr "Järjesta pealkirja alusel"
 
 msgid "Sort"
 msgstr "Järjestus"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Külgriba teekond asukoha alusel"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Allikas kaanepiltide ning lugude ja esitajate linkide jaoks"

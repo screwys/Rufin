@@ -1405,6 +1405,11 @@ msgstr "下一個音訊裝置"
 msgid "Next page"
 msgstr "下一頁"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "無來源"
+
 msgid "Next"
 msgstr "下一首"
 
@@ -1447,6 +1452,11 @@ msgstr ""
 
 msgid "No lyrics"
 msgstr "無歌詞"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "無匹配的曲目"
 
 msgid "No matching tracks"
 msgstr "無匹配的曲目"
@@ -2317,6 +2327,11 @@ msgstr ""
 
 msgid "Sort"
 msgstr "排序"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "按位置瀏覽側邊欄"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr ""

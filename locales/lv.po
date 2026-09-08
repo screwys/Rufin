@@ -1436,6 +1436,11 @@ msgstr "Nākamā skaņas ierīce"
 msgid "Next page"
 msgstr "Nākamā lapa"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Nav avota"
+
 msgid "Next"
 msgstr "Nākamais"
 
@@ -1474,6 +1479,11 @@ msgstr "Nav konfigurētas lokālās mapes"
 
 msgid "No lyrics"
 msgstr "Nav teksta"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 msgid "No matching tracks"
 msgstr "Nav atrasts neviens atbilstošs celiņš"
@@ -2340,6 +2350,11 @@ msgstr "Kārto pēc nosaukuma"
 
 msgid "Sort"
 msgstr "Kārtot"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Sānjoslas maršruts pēc pozīcijas"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Avots, ko izmantot vāku attēliem un dziesmu/izpildītāju saitēm"
