@@ -50,6 +50,18 @@ enum PlaylistDetailOwner {
 }
 
 impl PlaylistDetailOwner {
+    fn source_label(&self, selected: &(&'static str, String)) -> (&'static str, String) {
+        let belongs_to_source = match self {
+            Self::Saved { summary, .. } => summary.source_key.is_some(),
+            Self::Smart { summary, .. } => summary.definition.current,
+        };
+        if belongs_to_source {
+            selected.clone()
+        } else {
+            ui_shared::source_labels::source_display_label(None)
+        }
+    }
+
     fn key(&self) -> LibraryListKey {
         match self {
             Self::Saved { .. } => LibraryListKey::PlaylistTracks,
@@ -394,6 +406,8 @@ impl CatalogUi {
                 format_duration_units((owner.duration_millis().max(0) / 1_000) as u32),
             ),
         ]);
+        let (source_icon, source_name) = owner.source_label(&self.source_label);
+        showcase_view.set_source_summary(source_icon, &source_name);
         let actions = showcase_view.actions();
         actions.set_halign(gtk::Align::Start);
         let controls = detail_playback_controls(
@@ -530,6 +544,8 @@ impl CatalogUi {
                             format_duration_units((next.duration_millis().max(0) / 1_000) as u32),
                         ),
                     ]);
+                    let (source_icon, source_name) = next.source_label(&shell.source_label);
+                    showcase.set_source_summary(source_icon, &source_name);
                     cover.replace(
                         &shell.artwork,
                         &next.artwork(

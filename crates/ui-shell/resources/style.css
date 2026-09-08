@@ -957,6 +957,10 @@ entry.metadata-identified-change:dir(rtl) {
   border-radius: 999px;
 }
 
+button.rufin-ownership-icon image {
+  -gtk-icon-size: 20px;
+}
+
 dialog.alert.playlist-delete-dialog .message-area {
   padding-top: 20px;
 }

@@ -1536,7 +1536,25 @@ fn sidebar_pin_row(
     title_label.set_width_chars(1);
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     identity.append(&title_label);
-    identity.append(&sidebar_pin_metadata(track_count, duration_seconds));
+    let metadata = sidebar_pin_metadata(track_count, duration_seconds);
+    let belongs_to_source = match &pin {
+        SidebarPinItem::Playlist(playlist) => Some(playlist.source_key.is_some()),
+        SidebarPinItem::SmartPlaylist(playlist) => Some(playlist.definition.current),
+        _ => None,
+    };
+    if let Some(belongs_to_source) = belongs_to_source {
+        let configured = shell.source.configured.borrow();
+        let source = configured.sources.iter().find(|source| {
+            belongs_to_source && configured.selected_source_id.as_ref() == Some(&source.id)
+        });
+        let (icon, name) = ui_shared::source_labels::source_display_label(source);
+        let source = gtk::Image::from_icon_name(icon);
+        source.set_pixel_size(ui_shared::source_labels::source_icon_pixel_size(icon, 12));
+        source.set_tooltip_text(Some(&name));
+        source.update_property(&[gtk::accessible::Property::Label(&name)]);
+        metadata.append(&source);
+    }
+    identity.append(&metadata);
     content.append(&identity);
     activate.set_child(Some(&content));
 
@@ -1893,7 +1911,6 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
 
     let duration_metadata = gtk::Box::new(gtk::Orientation::Horizontal, 3);
     duration_metadata.add_css_class("sidebar-pin-metadata-item");
-    duration_metadata.set_hexpand(true);
     duration_metadata.set_width_request(1);
     duration_metadata.set_valign(gtk::Align::Center);
     duration_metadata.set_overflow(gtk::Overflow::Hidden);
@@ -1907,7 +1924,6 @@ fn sidebar_pin_metadata(track_count: u32, duration_seconds: u32) -> gtk::Box {
     let duration = gtk::Label::new(Some(&format_duration_units(duration_seconds)));
     duration.add_css_class("sidebar-pin-metadata-label");
     duration.add_css_class("sidebar-pin-duration");
-    duration.set_hexpand(true);
     duration.set_width_request(1);
     duration.set_xalign(0.0);
     duration.set_valign(gtk::Align::Center);

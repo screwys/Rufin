@@ -190,6 +190,20 @@ impl DetailShowcaseView {
         self.imp().summary.set_visible(any);
     }
 
+    pub fn set_source_summary(&self, icon: &str, name: &str) {
+        self.imp().summary_icon_2.set_icon_name(Some(icon));
+        self.imp()
+            .summary_icon_2
+            .set_pixel_size(ui_shared::source_labels::source_icon_pixel_size(icon, 14));
+        self.imp()
+            .summary_icon_2
+            .update_property(&[gtk::accessible::Property::Label(name)]);
+        self.imp().summary_label_2.set_visible(false);
+        self.imp().summary_item_2.set_tooltip_text(Some(name));
+        self.imp().summary_item_2.set_visible(true);
+        self.imp().summary.set_visible(true);
+    }
+
     pub fn bind_summary_text_with(&self, index: usize, text: impl Fn() -> String + 'static) {
         let labels = [
             self.imp().summary_label_0.get(),

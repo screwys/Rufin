@@ -913,6 +913,13 @@ fn render_panel(
             } else {
                 item.set_child(Some(&QueueSidebarRow::for_item(&shell, item)));
             }
+            item.child().expect("Queue row").connect_map(|child| {
+                // The wrapper handles click focus and is fully owned by GTK once mapped.
+                child
+                    .parent()
+                    .expect("Queue list-item widget")
+                    .set_focus_on_click(false);
+            });
         });
         let bind_shell = Rc::downgrade(shell);
         connect_sparse_bind(&factory, move |item| {
@@ -959,7 +966,6 @@ fn render_panel(
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("queue-list");
-        list.set_focus_on_click(false);
         list.set_vscroll_policy(gtk::ScrollablePolicy::Minimum);
         let activate = shell.playback_handles.queue.clone();
         let activate_model = model.clone();
