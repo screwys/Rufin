@@ -159,7 +159,7 @@ jobs:
                 cmake/RufinMacOS*)
                   add_jobs macos
                   ;;
-                cmake/RufinWindows*)
+                cmake/RufinWindows*|crates/xtask/src/windows_i18n.rs|crates/xtask/src/windows_installer.rs)
                   add_jobs windows
                   ;;
                 CMakeLists.txt|CMakePresets.json|cmake/*)

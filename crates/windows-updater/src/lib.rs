@@ -145,8 +145,7 @@ impl InstalledUpdater {
         #[cfg(target_os = "windows")]
         {
             let executable = std::env::current_exe().map_err(|error| error.to_string())?;
-            let install_root = directories::BaseDirs::new()
-                .map(|dirs| dirs.data_local_dir().join("Programs").join(PROJECT_NAME))
+            let install_root = registered_install_root()
                 .and_then(|expected| detect_install_root(&executable, &expected).ok());
             if let Some(install_root) = install_root.as_ref() {
                 cleanup_legacy_helpers(&install_root.join("updater"));
@@ -184,6 +183,22 @@ impl InstalledUpdater {
         {
             true
         }
+    }
+}
+
+#[cfg(target_os = "windows")]
+fn registered_install_root() -> Option<PathBuf> {
+    let key = windows_registry::CURRENT_USER
+        .open(format!(
+            "Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\{PROJECT_NAME}"
+        ))
+        .ok()?;
+    // Releases before the directory page used this fixed destination and did
+    // not write InstallLocation. They still have an uninstall registration.
+    match key.get_hstring("InstallLocation") {
+        Ok(path) => Some(PathBuf::from(path.to_os_string())),
+        Err(_) => directories::BaseDirs::new()
+            .map(|dirs| dirs.data_local_dir().join("Programs").join(PROJECT_NAME)),
     }
 }
 

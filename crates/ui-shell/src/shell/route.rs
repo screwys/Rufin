@@ -543,7 +543,10 @@ impl Shell {
             .is_some_and(|entry| entry.route == route);
         if !force && mounted_current {
             self.cancel_root_order_read();
-            self.cancel_route_loading();
+            // Repeat navigation must preserve the mounted view's deferred artwork.
+            self.route_viewport
+                .route_loading
+                .set_visible(self.route_viewport.route_cover_generation.get() != 0);
             return;
         }
 
@@ -1559,6 +1562,7 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(true);
         let generation = self.artwork.begin_route_cover_prime();
         self.route_viewport.route_cover_generation.set(generation);
+        debug!(generation, "route artwork loading started");
         Some(generation)
     }
 
@@ -1577,6 +1581,10 @@ impl Shell {
         self.route_viewport.route_loading.set_visible(false);
         self.route_viewport.route_cover_generation.set(0);
         self.artwork.finish_route_cover_prime_gate();
+        debug!(
+            generation = cover_generation,
+            "route artwork loading finished"
+        );
     }
 
     fn cancel_route_loading(&self) {

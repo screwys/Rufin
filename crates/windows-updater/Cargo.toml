@@ -24,6 +24,7 @@ thiserror.workspace = true
 [target.'cfg(target_os = "windows")'.dependencies]
 reqwest = { workspace = true, features = ["blocking", "json"] }
 sha2.workspace = true
+windows-registry.workspace = true
 
 [dev-dependencies]
 sha2.workspace = true

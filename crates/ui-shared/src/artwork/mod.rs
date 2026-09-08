@@ -6,7 +6,7 @@ use std::sync::Arc;
 use adw::prelude::*;
 use artwork::{ArtworkBinding, ArtworkRequest};
 use gtk::glib;
-use tracing::warn;
+use tracing::{debug, warn};
 
 use rufin_core::settings::app::Settings as UiSettings;
 
@@ -438,6 +438,7 @@ impl ArtworkState {
     pub fn close_route_cover_registration(&self, generation: u64, route_viewport: &gtk::Widget) {
         if self.route_prime.generation.get() == generation && self.route_registration_open.get() {
             let registrations = self.route_registrations.take();
+            let registered = registrations.len();
             let mut warm = Vec::new();
             for (widget, start) in registrations {
                 if artwork_tile_intersects_viewport(&widget, route_viewport) {
@@ -447,6 +448,13 @@ impl ArtworkState {
                 }
             }
             self.route_registration_open.set(false);
+            debug!(
+                generation,
+                registered,
+                visible = registered - warm.len(),
+                pending = self.route_prime.pending(),
+                "route artwork registration closed"
+            );
             for start in warm {
                 start();
             }

@@ -96,6 +96,20 @@ pub(crate) fn template(root: &Path) -> Result<String> {
     let mut catalog = Catalog::default();
     extract_rust(root, &mut catalog)?;
     extract_builder(root, &mut catalog)?;
+    for (id, message) in crate::windows_i18n::source_strings(root)? {
+        let mut comment = format!("Windows installer: {id}.");
+        if message.contains("{app_name}") {
+            comment.push_str(" {app_name} is the application display name.");
+        }
+        let formatted = rust_format(&message);
+        catalog.insert(
+            Some(crate::windows_i18n::CONTEXT),
+            message,
+            None,
+            Some(&comment),
+            formatted,
+        )?;
+    }
     render(&catalog)
 }
 
