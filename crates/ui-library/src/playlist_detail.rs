@@ -8,7 +8,7 @@ use gtk::glib;
 use library::{
     Database, PlaylistKey, PlaylistRow, ReadCancellation, SmartPlaylistKey, SmartPlaylistRow,
 };
-use localization::{msgid, tr, track_count_text};
+use localization::{msgid, track_count_text};
 
 use crate::CatalogUi;
 use crate::{LibraryListKey, LibraryListSettings};
@@ -431,18 +431,8 @@ impl CatalogUi {
                 let delete_owner = Rc::clone(&owner_state);
                 delete.connect_clicked(move |_| {
                     let name = delete_owner.borrow().name().to_string();
-                    let dialog = adw::AlertDialog::builder()
-                        .heading(tr("Delete Playlist"))
-                        .body(format!("Delete \"{name}\"?"))
-                        .build();
-                    dialog.add_response("cancel", &localization::tr("Cancel"));
-                    dialog.add_response("delete", &localization::tr("Delete"));
-                    dialog.set_response_appearance("delete", adw::ResponseAppearance::Destructive);
                     let shell = Rc::clone(&delete_shell);
-                    dialog.connect_response(None, move |_, response| {
-                        if response != "delete" {
-                            return;
-                        }
+                    let dialog = ui_shared::playlists::delete_playlist_dialog(&name, move || {
                         rufin_core::playlists::delete_playlist(&shell.source, playlist);
                         shell.navigate(ui_shared::route::Route::Playlists);
                     });
@@ -451,7 +441,7 @@ impl CatalogUi {
                 actions.append(&delete);
             }
             PlaylistDetailOwner::Saved { .. } => {}
-            PlaylistDetailOwner::Smart { summary, .. } => {
+            PlaylistDetailOwner::Smart { key, .. } => {
                 let edit = detail_action_button(EDIT_ICON, "Edit");
                 let edit_shell = Rc::clone(self);
                 let edit_owner = Rc::clone(&owner_state);
@@ -464,15 +454,19 @@ impl CatalogUi {
 
                 let delete = detail_delete_button("Delete");
                 let delete_shell = Rc::clone(self);
-                let delete_summary = summary.clone();
+                let playlist = *key;
+                let delete_owner = Rc::clone(&owner_state);
                 delete.connect_clicked(move |_| {
-                    (delete_shell.media_menus.publish_smart_playlist_change)(
-                        ui_shared::smart_playlist::SmartPlaylistChange::Delete(
-                            delete_summary.smart_playlist_key,
-                        ),
-                        None,
-                    );
-                    delete_shell.navigate(ui_shared::route::Route::SmartPlaylists);
+                    let name = delete_owner.borrow().name().to_string();
+                    let shell = Rc::clone(&delete_shell);
+                    let dialog = ui_shared::playlists::delete_playlist_dialog(&name, move || {
+                        (shell.media_menus.publish_smart_playlist_change)(
+                            ui_shared::smart_playlist::SmartPlaylistChange::Delete(playlist),
+                            None,
+                        );
+                        shell.navigate(ui_shared::route::Route::SmartPlaylists);
+                    });
+                    (delete_shell.present_selected_dialog)(dialog.upcast_ref());
                 });
                 actions.append(&delete);
             }

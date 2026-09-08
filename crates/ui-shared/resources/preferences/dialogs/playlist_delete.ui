@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwAlertDialog" id="dialog">
+    <property name="heading" translatable="yes">Delete Playlist</property>
+    <property name="body" translatable="yes">Delete "{name}"?</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <style><class name="playlist-delete-dialog"/></style>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="delete" translatable="yes" appearance="destructive">Delete</response>
+    </responses>
+  </object>
+</interface>

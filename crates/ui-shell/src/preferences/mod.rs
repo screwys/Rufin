@@ -123,7 +123,8 @@ fn preferences_tab_layout_for(
 ) -> PreferencesTabLayout {
     const TOP_BAR_HORIZONTAL_PADDING: i32 = 24;
     let top_required = top_tabs_width
-        .saturating_add(top_start_width.max(top_end_width).saturating_mul(2))
+        .saturating_add(top_start_width)
+        .saturating_add(top_end_width)
         .saturating_add(TOP_BAR_HORIZONTAL_PADDING);
     if width >= top_required {
         PreferencesTabLayout::Top
@@ -797,11 +798,11 @@ mod search_tests {
     #[test]
     fn preference_tabs_move_then_drop_labels_as_width_contracts() {
         assert_eq!(
-            preferences_tab_layout_for(600, 400, 60, 40, 330),
+            preferences_tab_layout_for(524, 400, 60, 40, 330),
             PreferencesTabLayout::Top
         );
         assert_eq!(
-            preferences_tab_layout_for(500, 400, 60, 40, 330),
+            preferences_tab_layout_for(523, 400, 60, 40, 330),
             PreferencesTabLayout::BottomLabels
         );
         assert_eq!(

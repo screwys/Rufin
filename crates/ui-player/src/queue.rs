@@ -959,6 +959,7 @@ fn render_panel(
         });
         let list = gtk::ListView::new(Some(selection.clone()), Some(factory));
         list.add_css_class("queue-list");
+        list.set_focus_on_click(false);
         list.set_vscroll_policy(gtk::ScrollablePolicy::Minimum);
         let activate = shell.playback_handles.queue.clone();
         let activate_model = model.clone();
