@@ -1366,6 +1366,67 @@ impl SourceOwner {
         receive
     }
 
+    pub fn emby_connect_login(
+        &self,
+        method: crate::runtime::source::EmbyConnectLoginMethod,
+    ) -> Receiver<Result<crate::runtime::source::EmbyConnectLoginEvent, String>> {
+        use crate::runtime::source::{EmbyConnectLoginEvent, EmbyConnectLoginMethod};
+        let (send, receive) = async_channel::bounded(2);
+        let device_id = self.shared.settings.load().jellyfin_device_id;
+        self.shared.runtime.spawn(async move {
+            let authorization = async {
+                let login = match method {
+                    EmbyConnectLoginMethod::Password { username, password } => sources::EmbyConnectLogin::password(&username, &password).await?,
+                    EmbyConnectLoginMethod::Pin => {
+                        let pin = sources::EmbyConnectPin::start(device_id).await?;
+                        send.send(Ok(EmbyConnectLoginEvent::Code { code: pin.code.clone(), url: pin.approval_url().into() }))
+                            .await.map_err(|_| SourceError::Cancelled)?;
+                        loop {
+                            if let Some(login) = pin.poll().await? { break login; }
+                            tokio::time::sleep(Duration::from_secs(2)).await;
+                        }
+                    }
+                };
+                login.servers().await
+            };
+            tokio::select! {
+                _ = send.closed() => {},
+                result = authorization => {
+                    let _ = send.send(result.map(EmbyConnectLoginEvent::Servers).map_err(string_error)).await;
+                }
+            }
+        });
+        receive
+    }
+
+    pub fn jellyfin_quick_connect(
+        &self,
+        server_url: String,
+        trust_invalid_cert: bool,
+    ) -> Receiver<Result<crate::runtime::source::JellyfinQuickConnectEvent, String>> {
+        use crate::runtime::source::JellyfinQuickConnectEvent;
+        let (send, receive) = async_channel::bounded(2);
+        let device_id = self.shared.settings.load().jellyfin_device_id;
+        self.shared.runtime.spawn(async move {
+            let authorization = async {
+                let quick = sources::JellyfinQuickConnect::start(server_url, trust_invalid_cert, device_id).await?;
+                send.send(Ok(JellyfinQuickConnectEvent::Code { code: quick.code.clone(), url: quick.approval_url.clone() }))
+                    .await.map_err(|_| SourceError::Cancelled)?;
+                loop {
+                    if let Some(login) = quick.poll().await? { break Ok::<_, SourceError>(login); }
+                    tokio::time::sleep(Duration::from_secs(2)).await;
+                }
+            };
+            tokio::select! {
+                _ = send.closed() => {},
+                result = authorization => {
+                    let _ = send.send(result.map(JellyfinQuickConnectEvent::Authorized).map_err(string_error)).await;
+                }
+            }
+        });
+        receive
+    }
+
     pub fn plex_login(
         &self,
         method: crate::runtime::source::PlexLoginMethod,
@@ -2921,12 +2982,14 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 trust_invalid_cert: settings.trust_invalid_cert,
                 open_subsonic_authentication: None,
             },
-            jellyfin_use_instant_mix: None,
+            use_instant_mix: None,
+            emby_connect: false,
             plex_settings: Some(settings),
         }),
         sources::EditableSource::Credentials {
             credentials,
-            jellyfin_use_instant_mix,
+            use_instant_mix,
+            emby_connect,
             subsonic_authentication,
             ..
         } => Ok(EditableSource {
@@ -2947,7 +3010,8 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 trust_invalid_cert: credentials.trust_invalid_cert,
                 open_subsonic_authentication: subsonic_authentication,
             },
-            jellyfin_use_instant_mix,
+            use_instant_mix,
+            emby_connect,
         }),
         sources::EditableSource::Files { settings, .. } => Ok(EditableSource {
             plex_settings: None,
@@ -2965,7 +3029,8 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 trust_invalid_cert: settings.trust_invalid_certificate,
                 open_subsonic_authentication: None,
             },
-            jellyfin_use_instant_mix: None,
+            use_instant_mix: None,
+            emby_connect: false,
             file_settings: Some(settings),
         }),
         sources::EditableSource::Local { .. } => {
@@ -2976,6 +3041,25 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
 
 fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSetupInput {
     match input {
+        SourceSetup::EmbyConnect {
+            server,
+            source_name,
+            use_instant_mix,
+        } => SourceSetupInput::EmbyConnect {
+            server,
+            source_name,
+            use_instant_mix,
+            device_id: jellyfin_device_id.to_owned(),
+        },
+        SourceSetup::JellyfinQuickConnect {
+            login,
+            source_name,
+            use_instant_mix,
+        } => SourceSetupInput::JellyfinQuickConnect {
+            login,
+            source_name,
+            use_instant_mix,
+        },
         SourceSetup::Plex(input) => SourceSetupInput::Plex(input),
         SourceSetup::WebDav {
             name,
@@ -3020,6 +3104,26 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
 
 fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
     match input {
+        SourceSettingsChange::EmbyConnect {
+            server,
+            source_name,
+            use_instant_mix,
+            ..
+        } => SourceSettingsInput::EmbyConnect {
+            server,
+            source_name,
+            use_instant_mix,
+        },
+        SourceSettingsChange::JellyfinQuickConnect {
+            login,
+            source_name,
+            use_instant_mix,
+            ..
+        } => SourceSettingsInput::JellyfinQuickConnect {
+            login,
+            source_name,
+            use_instant_mix,
+        },
         SourceSettingsChange::Plex { settings, .. } => SourceSettingsInput::Plex(settings),
         SourceSettingsChange::Files {
             name,
@@ -3032,10 +3136,12 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
             credentials,
         },
         SourceSettingsChange::JellyfinEmby {
+            connect_manually,
             source_id: _,
             credentials,
             use_instant_mix,
         } => SourceSettingsInput::JellyfinEmby(JellyfinEmbySettingsInput {
+            connect_manually,
             credentials: credential_settings_input(credentials),
             use_instant_mix,
         }),
@@ -3053,7 +3159,9 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
 
 fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
     match input {
-        SourceSettingsChange::Plex { source_id, .. }
+        SourceSettingsChange::EmbyConnect { source_id, .. }
+        | SourceSettingsChange::JellyfinQuickConnect { source_id, .. }
+        | SourceSettingsChange::Plex { source_id, .. }
         | SourceSettingsChange::Files { source_id, .. }
         | SourceSettingsChange::JellyfinEmby { source_id, .. }
         | SourceSettingsChange::OpenSubsonic { source_id, .. } => source_id,

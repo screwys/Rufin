@@ -1,0 +1,32 @@
+[
+  {
+    "Id": "3272",
+    "Type": "MusicAlbum",
+    "Name": "AG! Calling",
+    "ImageTags": {},
+    "PrimaryImageItemId": "2304",
+    "PrimaryImageTag": "954aae7510af7c8bf42e586b22aa3971",
+    "ParentBackdropItemId": "3259",
+    "ParentBackdropImageTags": ["c9c414f53f4439cf148b7d4bca58e300"]
+  },
+  {
+    "Id": "3263",
+    "Type": "MusicAlbum",
+    "Name": "HANAKO",
+    "ImageTags": {},
+    "PrimaryImageItemId": "2287",
+    "PrimaryImageTag": "762869f42eb9cee3ed6837f50dc19c88",
+    "ParentBackdropItemId": "3259",
+    "ParentBackdropImageTags": ["c9c414f53f4439cf148b7d4bca58e300"]
+  },
+  {
+    "Id": "3271",
+    "Type": "MusicAlbum",
+    "Name": "NAINAINAI",
+    "ImageTags": {},
+    "PrimaryImageItemId": "2296",
+    "PrimaryImageTag": "7053c0f257e13720647bb413ebaa16fd",
+    "ParentBackdropItemId": "3259",
+    "ParentBackdropImageTags": ["c9c414f53f4439cf148b7d4bca58e300"]
+  }
+]

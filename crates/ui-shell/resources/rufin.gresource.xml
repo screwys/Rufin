@@ -26,6 +26,8 @@
     <file compressed="true">preferences/source/local_setup.ui</file>
     <file compressed="true">preferences/source/server_actions.ui</file>
     <file compressed="true">preferences/source/plex_host.ui</file>
+    <file compressed="true">preferences/source/jellyfin_emby_host.ui</file>
+    <file compressed="true">preferences/source/code_login.ui</file>
     <file compressed="true">preferences/source/setup_scaffold.ui</file>
     <file compressed="true">shell/diagnostics.ui</file>
     <file compressed="true">shell/content_chrome.ui</file>

@@ -1,7 +1,7 @@
 use super::*;
 
 impl JellyfinEmbySource {
-    pub(super) fn emby_stream(
+    pub(super) async fn emby_stream(
         &self,
         track: &str,
         quality: StreamQuality,
@@ -26,11 +26,12 @@ impl JellyfinEmbySource {
         } else {
             format!("Audio/{raw}/universal")
         };
+        let token = self.session_access_token().await?;
         let mut url = endpoint(&self.base_url, &path)?;
         url.query_pairs_mut()
             .append_pair("UserId", &self.user_id)
             .append_pair("DeviceId", &self.device_id)
-            .append_pair("api_key", &self.access_token)
+            .append_pair("api_key", token)
             .append_pair("PlaySessionId", &session);
         if let StreamQuality::MaxBitrateKbps(kbps) = quality {
             let bitrate = kbps.saturating_mul(1000).to_string();
@@ -65,7 +66,7 @@ impl JellyfinEmbySource {
             stop.query_pairs_mut()
                 .append_pair("DeviceId", &self.device_id)
                 .append_pair("PlaySessionId", &session);
-            let stop = self.authenticated(self.client.delete(stop));
+            let stop = self.authenticated(self.client.delete(stop)).await?;
             let (release, released) = tokio::sync::oneshot::channel();
             tokio::spawn(async move {
                 let _ = released.await;
@@ -196,6 +197,7 @@ mod tests {
     fn source(base: String) -> JellyfinEmbySource {
         JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: ServerKind::Emby,
                 base_url: base,
                 server_id: Some("server".into()),
@@ -385,6 +387,7 @@ mod tests {
         );
         let download = source
             .resolve_download("emby:track:11", StreamQuality::MaxBitrateKbps(320))
+            .await
             .unwrap();
         assert_eq!(download.transcoded_extension(), Some("mp3"));
         assert!(download.stream().uri().contains("AudioBitRate=320000"));

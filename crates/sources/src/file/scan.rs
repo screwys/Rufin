@@ -112,7 +112,11 @@ async fn stage_album(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<()> 
         &track.album,
         &track.album.to_lowercase(),
         &track.album_artist,
-        &track.album.to_lowercase(),
+        &track
+            .sort_album
+            .as_deref()
+            .unwrap_or(&track.album)
+            .to_lowercase(),
         Some(i64::from(track.year)).filter(|year| *year > 0),
         None,
         None,
@@ -149,7 +153,11 @@ async fn stage_track_row(scan: &mut Scan, track: &ScannedTrack) -> SourceResult<
         &normalized_search,
         &track.album,
         &track.artist,
-        &track.title.to_lowercase(),
+        &track
+            .sort_title
+            .as_deref()
+            .unwrap_or(&track.title)
+            .to_lowercase(),
         i64::from(track.duration_seconds) * 1_000,
         i64::from(track.disc_number),
         i64::from(track.track_number),
@@ -232,7 +240,13 @@ async fn stage_artist(scan: &mut Scan, artist: &media::ArtistCredit) -> SourceRe
             &artist.id,
             &artist.name,
             &artist.name.to_lowercase(),
-            &artist.name.to_lowercase(),
+            Some(
+                &artist
+                    .sort_name
+                    .as_deref()
+                    .unwrap_or(&artist.name)
+                    .to_lowercase(),
+            ),
             artist.musicbrainz_artist_id.as_deref(),
             None,
             None,

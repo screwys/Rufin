@@ -51,6 +51,10 @@ pub(crate) struct Metadata {
     pub(crate) album: Option<String>,
     pub(crate) artist: Option<String>,
     pub(crate) album_artist: Option<String>,
+    pub(crate) sort_title: Option<String>,
+    pub(crate) sort_album: Option<String>,
+    pub(crate) artist_sort: Vec<String>,
+    pub(crate) album_artist_sort: Vec<String>,
     pub(crate) artist_mbids: Vec<String>,
     pub(crate) album_artist_mbids: Vec<String>,
     pub(crate) genres: Vec<String>,
@@ -400,6 +404,18 @@ fn metadata_from_tags(tags: &ScopedTags, duration_seconds: u32, is_asf: bool) ->
     });
     Metadata {
         title: tags.string::<gst::tags::Title>(),
+        sort_title: tags.string::<gst::tags::TitleSortname>(),
+        sort_album: tags.string::<gst::tags::AlbumSortname>(),
+        artist_sort: tags
+            .strings::<gst::tags::ArtistSortname>()
+            .iter()
+            .flat_map(|value| super::media::split_names(value))
+            .collect(),
+        album_artist_sort: tags
+            .strings::<gst::tags::AlbumArtistSortname>()
+            .iter()
+            .flat_map(|value| super::media::split_names(value))
+            .collect(),
         album: tags.string::<gst::tags::Album>(),
         artist,
         album_artist,
@@ -947,6 +963,11 @@ mod tests {
         container.add::<gst::tags::Title>(&"Container title", gst::TagMergeMode::Append);
         container.add::<gst::tags::Artist>(&"Container artist", gst::TagMergeMode::Append);
         container.add::<gst::tags::Album>(&"Album", gst::TagMergeMode::Append);
+        container.add::<gst::tags::TitleSortname>(&"A Title", gst::TagMergeMode::Append);
+        container.add::<gst::tags::AlbumSortname>(&"An Album", gst::TagMergeMode::Append);
+        container.add::<gst::tags::ArtistSortname>(&"Artist, Stream", gst::TagMergeMode::Append);
+        container
+            .add::<gst::tags::AlbumArtistSortname>(&"Artist, Album", gst::TagMergeMode::Append);
         container.add::<gst::tags::ExtendedComment>(
             &"ALBUM_ARTIST=Album artist",
             gst::TagMergeMode::Append,
@@ -981,6 +1002,10 @@ mod tests {
         assert_eq!(metadata.title.as_deref(), Some("Stream title"));
         assert_eq!(metadata.artist.as_deref(), Some("Stream artist"));
         assert_eq!(metadata.album.as_deref(), Some("Album"));
+        assert_eq!(metadata.sort_title.as_deref(), Some("A Title"));
+        assert_eq!(metadata.sort_album.as_deref(), Some("An Album"));
+        assert_eq!(metadata.artist_sort, ["Artist, Stream"]);
+        assert_eq!(metadata.album_artist_sort, ["Artist, Album"]);
         assert_eq!(metadata.album_artist.as_deref(), Some("Album artist"));
         assert_eq!(metadata.track_number, Some(7));
         assert_eq!(metadata.disc_number, Some(2));

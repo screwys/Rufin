@@ -59,6 +59,7 @@ pub struct CredentialSettingsInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct JellyfinEmbySettingsInput {
+    pub connect_manually: bool,
     pub credentials: CredentialSettingsInput,
     pub use_instant_mix: bool,
 }
@@ -92,6 +93,17 @@ pub enum SourceSetupInput {
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentials,
     },
+    EmbyConnect {
+        server: crate::EmbyConnectServer,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+        device_id: String,
+    },
+    JellyfinQuickConnect {
+        login: crate::JellyfinQuickConnectLogin,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
     JellyfinEmby(JellyfinEmbySetupInput),
     Plex(PlexSetupInput),
     Subsonic {
@@ -108,6 +120,16 @@ pub enum SourceSettingsInput {
         name: String,
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentialsEdit,
+    },
+    EmbyConnect {
+        server: crate::EmbyConnectServer,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
+    JellyfinQuickConnect {
+        login: crate::JellyfinQuickConnectLogin,
+        source_name: Option<String>,
+        use_instant_mix: bool,
     },
     JellyfinEmby(JellyfinEmbySettingsInput),
     Plex(PlexSettingsInput),
@@ -137,7 +159,8 @@ pub enum EditableSource {
         source_id: SourceId,
         kind: String,
         credentials: CredentialHostPreset,
-        jellyfin_use_instant_mix: Option<bool>,
+        use_instant_mix: Option<bool>,
+        emby_connect: bool,
         subsonic_authentication: Option<crate::subsonic::SubsonicAuthentication>,
     },
     Local {
@@ -288,8 +311,8 @@ impl SourceConfiguration {
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
                     },
-                    jellyfin_use_instant_mix: (config.kind == crate::ServerKind::Jellyfin)
-                        .then_some(config.use_instant_mix),
+                    use_instant_mix: Some(config.use_instant_mix),
+                    emby_connect: config.emby_connect,
                     subsonic_authentication: None,
                 })
             }
@@ -304,7 +327,8 @@ impl SourceConfiguration {
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
                     },
-                    jellyfin_use_instant_mix: None,
+                    use_instant_mix: None,
+                    emby_connect: false,
                     subsonic_authentication: Some(config.authentication),
                 })
             }

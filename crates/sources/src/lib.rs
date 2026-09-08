@@ -43,6 +43,10 @@ pub use file::remote::webdav::nextcloud::authorize_nextcloud;
 pub use file::remote::{
     FileAuthentication, FileCredentials, FileCredentialsEdit, FileSourceSettings,
 };
+pub use jellyfin_emby::{
+    EmbyConnectLogin, EmbyConnectPin, EmbyConnectServer, JellyfinQuickConnect,
+    JellyfinQuickConnectLogin,
+};
 pub use library::SourceId;
 pub use operations::{
     AlbumMetadata, AlbumMetadataEdit, AlbumMetadataMixed, AlbumMetadataValues,

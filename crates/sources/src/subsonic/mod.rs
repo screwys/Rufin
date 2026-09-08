@@ -37,6 +37,7 @@ type TrackId = String;
 struct ArtistCredit {
     id: String,
     name: String,
+    sort_name: Option<String>,
     musicbrainz_artist_id: Option<String>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -67,6 +68,7 @@ struct TrackRelations {
 struct Album {
     id: AlbumId,
     title: String,
+    sort_name: Option<String>,
     artist: String,
     year: u16,
     release_date: Option<String>,
@@ -89,6 +91,7 @@ struct Track {
     id: TrackId,
     album_id: Option<AlbumId>,
     title: String,
+    sort_name: Option<String>,
     artist: String,
     album: String,
     year: u16,
@@ -121,6 +124,7 @@ struct Track {
 struct Artist {
     id: ArtistId,
     name: String,
+    sort_name: Option<String>,
     favorite: bool,
     last_played: Option<String>,
     play_count: Option<u32>,

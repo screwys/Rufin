@@ -22,7 +22,11 @@ pub(super) async fn stage_album(
         &album.title,
         &album.title.to_lowercase(),
         &album.artist,
-        &album.title.to_lowercase(),
+        &album
+            .sort_name
+            .as_deref()
+            .unwrap_or(&album.title)
+            .to_lowercase(),
         Some(i64::from(album.year)).filter(|year| *year > 0),
         album.release_date.as_deref(),
         album.date_added.as_deref(),
@@ -103,7 +107,11 @@ pub(super) async fn stage_track(
         &normalized_search,
         &track.album,
         &track.artist,
-        &track.title.to_lowercase(),
+        &track
+            .sort_name
+            .as_deref()
+            .unwrap_or(&track.title)
+            .to_lowercase(),
         i64::from(track.duration_seconds) * 1_000,
         i64::from(track.disc_number),
         i64::from(track.track_number),
@@ -181,7 +189,13 @@ pub(super) async fn stage_artist(
         &artist.id,
         &artist.name,
         &artist.name.to_lowercase(),
-        &artist.name.to_lowercase(),
+        Some(
+            &artist
+                .sort_name
+                .as_deref()
+                .unwrap_or(&artist.name)
+                .to_lowercase(),
+        ),
         artist.musicbrainz_artist_id.as_deref(),
         artwork.as_deref(),
         Some(artist.favorite),
@@ -217,7 +231,7 @@ async fn stage_artist_credit(
         &artist.id,
         &artist.name,
         &artist.name.to_lowercase(),
-        &artist.name.to_lowercase(),
+        None,
         artist.musicbrainz_artist_id.as_deref(),
         None,
         None,
@@ -273,6 +287,7 @@ pub(super) struct TrackRelations {
 pub(super) struct Album {
     pub id: String,
     pub title: String,
+    pub sort_name: Option<String>,
     pub artist: String,
     pub year: u16,
     pub release_date: Option<String>,
@@ -296,6 +311,7 @@ pub(super) struct Track {
     pub id: String,
     pub album_id: Option<String>,
     pub title: String,
+    pub sort_name: Option<String>,
     pub artist: String,
     pub album: String,
     pub album_artwork: Option<()>,
@@ -328,6 +344,7 @@ pub(super) struct Track {
 pub(super) struct Artist {
     pub id: String,
     pub name: String,
+    pub sort_name: Option<String>,
     pub favorite: bool,
     pub last_played: Option<String>,
     pub play_count: Option<u32>,
@@ -354,15 +371,16 @@ pub(super) struct Playlist {
     pub track_count: usize,
 }
 
-pub(super) const ALBUM_FIELDS: &str = "Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
-pub(super) const TRACK_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
+pub(super) const ALBUM_FIELDS: &str = "SortName,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount";
+pub(super) const TRACK_FIELDS: &str = "SortName,Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,NormalizationGain,AlbumNormalizationGain";
 pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ChildCount";
-pub(super) const MIXED_ITEM_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
+pub(super) const MIXED_ITEM_FIELDS: &str = "SortName,Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
 pub(super) fn album_from_item(server: ServerKind, item: Value) -> Option<Album> {
     let item_id = id(&item["Id"])?;
 
     let image_ref = primary_image_ref(server, "album", &item_id, &item["ImageTags"])
+        .or_else(|| alternate_primary_image_ref(server, &item))
         .or_else(|| backdrop_image_ref(server, &item));
     let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
     let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
@@ -375,6 +393,7 @@ pub(super) fn album_from_item(server: ServerKind, item: Value) -> Option<Album> 
     Some(Album {
         id: String::from(server.object_id("album", &item_id)),
         title: field(&item, "Name").unwrap_or_else(|| "Untitled Album".to_string()),
+        sort_name: sort_name(&item),
         artist,
         year: u16_from_option(field(&item, "ProductionYear")),
         release_date: normalized_date(field(&item, "PremiereDate")),
@@ -402,6 +421,7 @@ pub(super) fn track_from_item(server: ServerKind, item: Value) -> Option<Track> 
     let item_id = id(&item["Id"])?;
     let image_ref = album_image_ref(server, &item)
         .or_else(|| primary_image_ref(server, "track", &item_id, &item["ImageTags"]))
+        .or_else(|| alternate_primary_image_ref(server, &item))
         .or_else(|| backdrop_image_ref(server, &item));
     let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
     let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
@@ -418,6 +438,7 @@ pub(super) fn track_from_item(server: ServerKind, item: Value) -> Option<Track> 
         id: String::from(server.object_id("track", &item_id)),
         album_id,
         title: field(&item, "Name").unwrap_or_else(|| "Untitled Track".to_string()),
+        sort_name: sort_name(&item),
         artist: joined_artist_names(Some(&strings(&item["Artists"])))
             .or_else(|| joined_credit_names(&artist_credits))
             .unwrap_or_else(|| {
@@ -487,6 +508,7 @@ pub(super) fn artist_from_item(server: ServerKind, item: Value) -> Option<Artist
     Some(Artist {
         id: String::from(server.object_id("artist", &item_id)),
         name: field(&item, "Name").unwrap_or_else(|| "Unknown Artist".to_string()),
+        sort_name: sort_name(&item),
         favorite: favorite(&item["UserData"]),
         last_played: normalized_timestamp(field(&item["UserData"], "LastPlayedDate")),
         play_count: play_count(&item["UserData"]),
@@ -611,6 +633,20 @@ pub(super) fn primary_image_ref(
         tag: Some(tag),
     })
 }
+fn alternate_primary_image_ref(server: ServerKind, item: &Value) -> Option<ImageRef> {
+    let tag = field::<String>(item, "PrimaryImageTag").filter(|tag| !tag.trim().is_empty())?;
+    let owner = id(&item["PrimaryImageItemId"]).or_else(|| id(&item["Id"]))?;
+    Some(ImageRef {
+        item_id: server.object_id("track", &owner),
+        tag: Some(tag),
+    })
+}
+
+fn sort_name(item: &Value) -> Option<String> {
+    field::<String>(item, "SortName")
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| field::<String>(item, "ForcedSortName").filter(|name| !name.trim().is_empty()))
+}
 fn album_image_ref(server: ServerKind, item: &Value) -> Option<ImageRef> {
     let album_id = id(&item["AlbumId"])?;
     let tag = field::<String>(item, "AlbumPrimaryImageTag").filter(|tag| !tag.trim().is_empty())?;
@@ -638,4 +674,120 @@ fn first_image_tag(tags: &Value) -> Option<String> {
         .into_iter()
         .map(|tag| tag.trim().to_string())
         .find(|tag| !tag.is_empty())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn emby_import_preserves_distinct_alternate_album_covers() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let mut scan = library::Scan::begin(&database, "emby", "Emby", "emby", None)
+            .await
+            .unwrap();
+        let albums: Vec<Value> =
+            serde_json::from_str(include_str!("fixtures/alternate-album-covers.json")).unwrap();
+        for album in &albums {
+            let mut mapped = album_from_item(ServerKind::Emby, album.clone()).unwrap();
+            mapped.image_ref = Some(ImageRef::new(
+                "emby:backdrop:3259",
+                Some("c9c414f53f4439cf148b7d4bca58e300".into()),
+            ));
+            stage_album(&mut scan, mapped).await.unwrap();
+        }
+        scan.finish().await.unwrap();
+        let mut scan = library::Scan::begin_items(&database, "emby").await.unwrap();
+        for album in &albums {
+            stage_album(
+                &mut scan,
+                album_from_item(ServerKind::Emby, album.clone()).unwrap(),
+            )
+            .await
+            .unwrap();
+        }
+        scan.finish().await.unwrap();
+        for album in albums {
+            let object = format!("emby:album:{}", album["Id"].as_str().unwrap());
+            let uri = library::source_entity_uri(&crate::SourceId::new("emby"), "album", &object);
+            let row = database
+                .album_row_by_media_uri(&uri, &library::ReadCancellation::new())
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.title, album["Name"].as_str().unwrap());
+            let binding: crate::NativeArtworkBinding =
+                serde_json::from_slice(row.artwork_binding.as_deref().unwrap()).unwrap();
+            assert_eq!(
+                binding.image.item_id,
+                format!(
+                    "emby:track:{}",
+                    album["PrimaryImageItemId"].as_str().unwrap()
+                )
+            );
+            assert_eq!(
+                binding.image.tag.as_deref(),
+                album["PrimaryImageTag"].as_str()
+            );
+        }
+    }
+
+    #[test]
+    fn effective_sort_names_and_existing_image_precedence_are_preserved() {
+        for server in [ServerKind::Jellyfin, ServerKind::Emby] {
+            let item = json!({"Id":"1", "Name":"The Name", "SortName":"effective override", "ForcedSortName":"Raw override"});
+            assert_eq!(
+                album_from_item(server, item.clone())
+                    .unwrap()
+                    .sort_name
+                    .as_deref(),
+                Some("effective override")
+            );
+            assert_eq!(
+                artist_from_item(server, item.clone())
+                    .unwrap()
+                    .sort_name
+                    .as_deref(),
+                Some("effective override")
+            );
+            assert_eq!(
+                track_from_item(server, item).unwrap().sort_name.as_deref(),
+                Some("effective override")
+            );
+            let forced = album_from_item(
+                server,
+                json!({"Id":"1", "Name":"Name", "ForcedSortName":"Override"}),
+            )
+            .unwrap();
+            assert_eq!(forced.sort_name.as_deref(), Some("Override"));
+            let plain = album_from_item(
+                server,
+                json!({"Id":"1", "Name":"Name", "SortName":"", "ForcedSortName":null}),
+            )
+            .unwrap();
+            assert_eq!(plain.sort_name, None);
+            assert_eq!(plain.title, "Name");
+            let item = json!({"Id":"1", "ImageTags":{"Primary":"own"}, "PrimaryImageItemId":"2", "PrimaryImageTag":"alternate", "AlbumId":"3", "AlbumPrimaryImageTag":"album"});
+            assert_eq!(
+                album_from_item(server, item.clone())
+                    .unwrap()
+                    .image_ref
+                    .unwrap()
+                    .item_id,
+                server.object_id("album", "1")
+            );
+            assert_eq!(
+                track_from_item(server, item)
+                    .unwrap()
+                    .image_ref
+                    .unwrap()
+                    .item_id,
+                server.object_id("album", "3")
+            );
+        }
+    }
 }

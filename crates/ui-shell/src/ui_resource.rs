@@ -38,6 +38,10 @@ pub(crate) const FILE_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/file_host.ui";
 pub(crate) const PLEX_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/plex_host.ui";
+pub(crate) const JELLYFIN_EMBY_HOST_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/jellyfin_emby_host.ui";
+pub(crate) const CODE_LOGIN_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/preferences/source/code_login.ui";
 pub(crate) const CREDENTIAL_HOST_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/source/credential_host.ui";
 pub(crate) const LOCAL_SETUP_RESOURCE: &str =
@@ -77,6 +81,8 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     CREDENTIAL_HOST_RESOURCE,
     FILE_HOST_RESOURCE,
     PLEX_HOST_RESOURCE,
+    JELLYFIN_EMBY_HOST_RESOURCE,
+    CODE_LOGIN_RESOURCE,
     LOCAL_SETUP_RESOURCE,
     SERVER_ACTIONS_RESOURCE,
     NAVIGATION_RESOURCE,
