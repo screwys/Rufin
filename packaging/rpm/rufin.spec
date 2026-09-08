@@ -39,7 +39,9 @@ Requires:       hicolor-icon-theme
 # Generated Linux package dependencies end.
 
 %description
-Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.
+Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;
+local folders,  WebDAV including a direct Nextcloud browser login path, Samba
+and NAS shares.
 
 %prep
 %autosetup -n Rufin-%{version} -a1

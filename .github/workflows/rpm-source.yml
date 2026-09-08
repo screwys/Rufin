@@ -40,7 +40,7 @@ jobs:
       - name: Install build tooling
         run: >-
           dnf -y --setopt=install_weak_deps=False install
-          bash cargo coreutils findutils git gnupg2 rpm-build tar xz
+          bash cargo coreutils findutils git gnupg2 rpm-build rpmlint tar xz
 
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -92,6 +92,7 @@ jobs:
           (cd dist && sha256sum --check SHA256SUMS)
           rpm -K "${source_rpms[0]}"
           test "$(rpm -qp --queryformat '%{NAME}' "${source_rpms[0]}")" = rufin
+          rpmlint "${source_rpms[0]}"
 
       - name: Upload source RPM
         if: inputs.upload_artifact

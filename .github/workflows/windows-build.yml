@@ -89,7 +89,7 @@ jobs:
           cache-on-failure: true
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
           shared-key: windows-package-ucrt64
           workspaces: ". -> .local/target"
 
