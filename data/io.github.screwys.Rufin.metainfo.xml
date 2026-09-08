@@ -37,51 +37,51 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/albums.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/albums.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/album_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the appearance</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/appearance_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/appearance_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/customize_display.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/download_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/download_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>View keyboard shortcuts</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/keyboard_shortcuts.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/keyboard_shortcuts.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.14.0/data/screenshots/visualizer.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.0/data/screenshots/visualizer.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -92,6 +92,53 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.15.0" date="2026-09-08">
+      <description>
+        <p>This release brings multiple new sources and a major change to how Rufin playback operates: playback and queue no longer belong to the current source but to Rufin.</p>
+        <ul>
+          <li>Rufin now supports Plex, including Plex Companion handoff, Emby, WebDAV including custom certificates and headers, Nextcloud login (note that Nextcloud Music Subsonic path offers a better experience), and Samba including share discovery, guest and domain logins, signing/encryption, and much more! I also worked on OpenSubsonic compatibility more; confirmed that it works with Nextcloud Music, Gonic, and Funkwhale OpenSubsonic path.</li>
+        </ul>
+        <ul>
+          <li>You can now switch between sources without the song being interrupted, and you can add tracks from different sources to the same queue.</li>
+        </ul>
+        <ul>
+          <li>You can also define Rufin-owned playlists, in which you can combine tracks from different sources. This also works for smart playlists; you can edit their scope from the editing menu.</li>
+        </ul>
+        <ul>
+          <li>.m3u8 support is added. This means you can import and export playlists to and from Rufin. As long as the playlist file has a reachable media_uri, Rufin can play that file-for example, a random URL.</li>
+        </ul>
+        <ul>
+          <li>Backup functionality is added. You can export your settings, including server credentials, and set up Rufin with the import button on a fresh launch. You can enable automatic backups, set a backup location, and also choose to encrypt these backups with a password.</li>
+        </ul>
+        <ul>
+          <li>Rufin activity can now be exported as ListenBrainz/Last.fm compatible .csv files.</li>
+        </ul>
+        <ul>
+          <li>The Windows installer got a polish, and its strings are now extracted for translation through Weblate.</li>
+        </ul>
+        <ul>
+          <li>The Japanese dictionary is upgraded to Lindera. This one uses more resources but is now also out of the Rufin binary and is downloaded on demand when Furigana/Romanization settings are enabled.</li>
+        </ul>
+        <ul>
+          <li>Context menu custom orders are removed to use separators. Each entry can still be enabled or disabled.</li>
+        </ul>
+        <ul>
+          <li>Added keyboard shortcuts for switching sources (because I have 10 sources configured now for testing...).</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with karaoke mode evaluating Japanese readings based on kanji splits, producing wrong readings.</li>
+        </ul>
+        <ul>
+          <li>Fixed several issues with the Windows package, including automatic installation and local playback from the latest release.</li>
+        </ul>
+        <ul>
+          <li>Fixed several issues with GStreamer clock sync. In some hi-res tracks, there could be intermittent cuts, which are now fixed.</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with the visualizer showing only 2 updates per second for hi-res songs.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.14.0" date="2026-08-29">
       <description>
         <p>Been a while! Even though we added several features just after the previous release, this release had to wait because of a some pretty important changes. We now use sqlx instead of rustqlite, and this migration also made us do a partial library rewrite. There are a lot of exciting features and bug fixes in this release but first, let's thank @Commenter25 for providing Rufin a new icon! We also got a lot of new contributors; I'm thankful to them and to the people who tested our new features before the new release. The most time on this release was spent on app performance and UX: I also made some pragmatic choices for the sake of performance, one of them being removing row columns to be resizeable. This is definitely the biggest release ever, even the highlights list is quite big:</p>
