@@ -7,6 +7,8 @@ pub const VISUALIZER_RISE_WEIGHT: f64 = 0.72;
 pub const VISUALIZER_FALL_WEIGHT: f64 = 0.16;
 pub const VISUALIZER_ZERO_THRESHOLD: f64 = 0.004;
 pub const VISUALIZER_TOP_GAP: f64 = 50.0;
+const VISUALIZER_REFERENCE_FRAME_MICROS: f64 = 1_000_000.0 / 60.0;
+const VISUALIZER_STALE_MICROS: i64 = 133_333;
 
 pub struct VisualizerParts {
     pub sidebar_area: gtk::DrawingArea,
@@ -283,19 +285,25 @@ impl crate::PlayerUi {
         let sidebar_area = self.views.visualizer.sidebar_area.clone();
         let shell = Rc::downgrade(self);
         let seen_generation = Cell::new(generation.get());
-        let stale_frames = Cell::new(0_u8);
+        let last_data_time = Cell::new(None);
+        let last_frame_time = Cell::new(None);
         let Some(window) = self.window.upgrade() else {
             return;
         };
-        let tick = window.add_tick_callback(move |_, _| {
+        let tick = window.add_tick_callback(move |_, clock| {
+            let now = clock.frame_time();
+            let elapsed_frames = last_frame_time.replace(Some(now)).map_or(1.0, |last| {
+                (now - last) as f64 / VISUALIZER_REFERENCE_FRAME_MICROS
+            });
+            let rise_weight = 1.0 - (1.0 - VISUALIZER_RISE_WEIGHT).powf(elapsed_frames);
+            let fall_weight = 1.0 - (1.0 - VISUALIZER_FALL_WEIGHT).powf(elapsed_frames);
             let next_generation = generation.get();
-            if next_generation == seen_generation.get() {
-                stale_frames.set(stale_frames.get().saturating_add(1));
-            } else {
+            if next_generation != seen_generation.get() || last_data_time.get().is_none() {
                 seen_generation.set(next_generation);
-                stale_frames.set(0);
+                last_data_time.set(Some(now));
             }
-            if stale_frames.get() >= 8 {
+            let stale = now - last_data_time.get().unwrap_or(now) >= VISUALIZER_STALE_MICROS;
+            if stale {
                 targets.borrow_mut().fill(0.0);
             }
             let mut current = levels.borrow_mut();
@@ -307,9 +315,9 @@ impl crate::PlayerUi {
                 let next = target.get(index).copied().unwrap_or(0.0);
                 let value = current[index];
                 let weight = if next >= value {
-                    VISUALIZER_RISE_WEIGHT
+                    rise_weight
                 } else {
-                    VISUALIZER_FALL_WEIGHT
+                    fall_weight
                 };
                 let mut smoothed = next * weight + value * (1.0 - weight);
                 if next == 0.0 && smoothed < VISUALIZER_ZERO_THRESHOLD {
@@ -323,13 +331,10 @@ impl crate::PlayerUi {
             } else if sidebar_area.is_mapped() {
                 sidebar_area.queue_draw();
             }
-            if stale_frames.get() >= 8 && !changed {
-                let shell = shell.clone();
-                glib::idle_add_local_once(move || {
-                    if let Some(shell) = shell.upgrade() {
-                        shell.views.visualizer.tick.borrow_mut().take();
-                    }
-                });
+            if stale && !changed {
+                if let Some(shell) = shell.upgrade() {
+                    shell.views.visualizer.tick.borrow_mut().take();
+                }
                 return glib::ControlFlow::Break;
             }
             glib::ControlFlow::Continue

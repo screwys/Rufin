@@ -27,13 +27,16 @@ BuildRequires:  pkgconfig(gtk4)
 BuildRequires:  pkgconfig(libadwaita-1) >= 1.9
 BuildRequires:  rust >= 1.95.0
 
+# Generated Linux package dependencies start.
+Requires:       gstreamer1
+Requires:       gstreamer1-plugin-libav
+Requires:       gstreamer1-plugins-bad-free
+Requires:       gstreamer1-plugins-bad-free-extras
+Requires:       gstreamer1-plugins-base
+Requires:       gstreamer1-plugins-good
+Requires:       gstreamer1-plugins-ugly-free
 Requires:       hicolor-icon-theme
-Recommends:     gstreamer1-plugins-base
-Recommends:     gstreamer1-plugins-good
-Recommends:     gstreamer1-plugins-bad-free
-Recommends:     gstreamer1-plugins-bad-free-extras
-Recommends:     gstreamer1-plugins-ugly-free
-Recommends:     gstreamer1-plugin-libav
+# Generated Linux package dependencies end.
 
 %description
 Rufin is a native GTK4/libadwaita music player for Jellyfin, Subsonic,

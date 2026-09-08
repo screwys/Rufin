@@ -57,6 +57,16 @@ const ARCH_DEPENDENCIES: &[&str] = &[
 ];
 const ARCH_GIT_BUILD_DEPENDENCIES: &[&str] =
     &["cargo", "cmake", "gettext", "git", "ninja", "pkgconf"];
+const RPM_RUNTIME_DEPENDENCIES: &[&str] = &[
+    "gstreamer1",
+    "gstreamer1-plugin-libav",
+    "gstreamer1-plugins-bad-free",
+    "gstreamer1-plugins-bad-free-extras",
+    "gstreamer1-plugins-base",
+    "gstreamer1-plugins-good",
+    "gstreamer1-plugins-ugly-free",
+    "hicolor-icon-theme",
+];
 
 pub(crate) fn command(args: Vec<String>) -> Result<()> {
     let Some(check) = parse_check_flag(
@@ -97,6 +107,13 @@ fn generate(check: bool) -> Result<()> {
     project_generated_block(
         &root.join("packaging/aur/rufin-git/PKGBUILD"),
         &render_pkgbuild(ARCH_GIT_BUILD_DEPENDENCIES),
+        check,
+        PACKAGE_START_MARKER,
+        PACKAGE_END_MARKER,
+    )?;
+    project_generated_block(
+        &root.join("packaging/rpm/rufin.spec"),
+        &render_rpm_runtime(),
         check,
         PACKAGE_START_MARKER,
         PACKAGE_END_MARKER,
@@ -195,6 +212,14 @@ fn render_pkgbuild(build_dependencies: &[&str]) -> String {
         let _ = writeln!(output, "  '{dependency}'");
     }
     output.push_str(")\n");
+    output
+}
+
+fn render_rpm_runtime() -> String {
+    let mut output = String::new();
+    for dependency in RPM_RUNTIME_DEPENDENCIES {
+        let _ = writeln!(output, "Requires:       {dependency}");
+    }
     output
 }
 

@@ -39,6 +39,7 @@ set(RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS
   alaw
   apetag
   asf
+  audiobuffersplit
   audioconvert
   audiofx
   audioparsers
@@ -141,6 +142,7 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
     set(RUFIN_AUDIO_SINK autoaudiosink)
   endif()
   set(RUFIN_REQUIRED_GSTREAMER_ELEMENTS
+    audiobuffersplit
     audioconvert
     audioresample
     "${RUFIN_AUDIO_SINK}"
