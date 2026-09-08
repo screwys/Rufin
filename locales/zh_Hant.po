@@ -1563,6 +1563,11 @@ msgstr "資料夾"
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "在 Last.fm 上打開"
+
 msgid "Open on Jellyfin"
 msgstr "在 Jellyfin 上打開"
 
@@ -1573,6 +1578,16 @@ msgid "Open on MusicBrainz"
 msgstr "在 MusicBrainz 上打開"
 
 msgid "Open on Navidrome"
+msgstr "在 Navidrome 上打開"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "資料夾"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "在 Navidrome 上打開"
 
 msgid "Open release notes"

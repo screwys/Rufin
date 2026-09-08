@@ -1614,6 +1614,11 @@ msgstr "Složka"
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Otevřít na Last.fm"
+
 msgid "Open on Jellyfin"
 msgstr "Otevřít v Jellyfin"
 
@@ -1624,6 +1629,16 @@ msgid "Open on MusicBrainz"
 msgstr "Otevřít na MusicBrainz"
 
 msgid "Open on Navidrome"
+msgstr "Otevřít v Navidrome"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Složka"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "Otevřít v Navidrome"
 
 msgid "Open release notes"

@@ -1555,6 +1555,11 @@ msgstr "Открыть папку"
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Открыть на Last.fm"
+
 msgid "Open on Jellyfin"
 msgstr "Открыть в Jellyfin"
 
@@ -1566,6 +1571,16 @@ msgstr "Открыть на MusicBrainz"
 
 msgid "Open on Navidrome"
 msgstr "Открыть в Navidrome"
+
+#, fuzzy
+#| msgid "Open Folder"
+msgid "Open on Plex"
+msgstr "Открыть папку"
+
+#, fuzzy
+#| msgid "No server"
+msgid "Open on server"
+msgstr "Сервер не найден"
 
 msgid "Open release notes"
 msgstr "Открыть примечания к выпуску"
@@ -3132,9 +3147,6 @@ msgstr ""
 
 #~ msgid "No queue items match the search."
 #~ msgstr "В очереди нет элементов, соответствующих запросу поиска."
-
-#~ msgid "No server"
-#~ msgstr "Сервер не найден"
 
 #~ msgid ""
 #~ "No server lyrics for the current track. External lyric lookup is off."

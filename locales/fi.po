@@ -1477,6 +1477,11 @@ msgstr ""
 msgid "Open fullscreen player"
 msgstr ""
 
+#, fuzzy
+#| msgid "Open on Jellyfin"
+msgid "Open on Emby"
+msgstr "Avaa Jellyfinissä"
+
 msgid "Open on Jellyfin"
 msgstr "Avaa Jellyfinissä"
 
@@ -1487,6 +1492,16 @@ msgid "Open on MusicBrainz"
 msgstr ""
 
 msgid "Open on Navidrome"
+msgstr "Avaa Navidromessa"
+
+#, fuzzy
+#| msgid "Open on Jellyfin"
+msgid "Open on Plex"
+msgstr "Avaa Jellyfinissä"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "Avaa Navidromessa"
 
 msgid "Open release notes"

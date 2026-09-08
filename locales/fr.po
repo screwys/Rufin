@@ -1476,6 +1476,9 @@ msgstr ""
 msgid "Open fullscreen player"
 msgstr ""
 
+msgid "Open on Emby"
+msgstr ""
+
 msgid "Open on Jellyfin"
 msgstr ""
 
@@ -1486,6 +1489,12 @@ msgid "Open on MusicBrainz"
 msgstr ""
 
 msgid "Open on Navidrome"
+msgstr ""
+
+msgid "Open on Plex"
+msgstr ""
+
+msgid "Open on server"
 msgstr ""
 
 msgid "Open release notes"

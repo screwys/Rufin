@@ -1577,6 +1577,11 @@ msgstr "Kaust"
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Ava Last.fm-is"
+
 msgid "Open on Jellyfin"
 msgstr "Ava Jellyfinis"
 
@@ -1588,6 +1593,16 @@ msgstr "Ava MusicBrainzis"
 
 msgid "Open on Navidrome"
 msgstr "Ava Navidrome'is"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Kaust"
+
+#, fuzzy
+#| msgid "No server"
+msgid "Open on server"
+msgstr "Serverit pole"
 
 msgid "Open release notes"
 msgstr "Vaata versiooniteavet"
@@ -3217,9 +3232,6 @@ msgstr ""
 
 #~ msgid "No queue items match the search"
 #~ msgstr "Otsingule ei vasta ükski esitusjärjekorra kirje"
-
-#~ msgid "No server"
-#~ msgstr "Serverit pole"
 
 #~ msgid "Not set"
 #~ msgstr "Määratlemata"

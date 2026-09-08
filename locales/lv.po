@@ -1590,6 +1590,11 @@ msgstr "Mape"
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Atvērt vietnē Last.fm"
+
 msgid "Open on Jellyfin"
 msgstr "Atvērt vietnē Jellyfin"
 
@@ -1601,6 +1606,16 @@ msgstr "Atvērt vietnē MusicBrainz"
 
 msgid "Open on Navidrome"
 msgstr "Atvērt Navidrome"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Mape"
+
+#, fuzzy
+#| msgid "No server"
+msgid "Open on server"
+msgstr "Nav servera"
 
 msgid "Open release notes"
 msgstr "Atvērt izdevuma piezīmes"
@@ -3253,9 +3268,6 @@ msgstr ""
 
 #~ msgid "No queue items match the search"
 #~ msgstr "Neviena rindas vieta neatbilst meklējumam"
-
-#~ msgid "No server"
-#~ msgstr "Nav servera"
 
 #~ msgid "Not set"
 #~ msgstr "Nav iestatīts"

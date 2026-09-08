@@ -1545,6 +1545,11 @@ msgstr "Ordner öffnen"
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "In Last.fm öffnen"
+
 msgid "Open on Jellyfin"
 msgstr "In Jellyfin öffnen"
 
@@ -1555,6 +1560,16 @@ msgid "Open on MusicBrainz"
 msgstr "In MusicBrainz öffnen"
 
 msgid "Open on Navidrome"
+msgstr "In Navidrome öffnen"
+
+#, fuzzy
+#| msgid "Open Folder"
+msgid "Open on Plex"
+msgstr "Ordner öffnen"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "In Navidrome öffnen"
 
 msgid "Open release notes"
