@@ -127,7 +127,22 @@
     <child><object class="GtkLabel" id="fullscreen_queue_year"><property name="label" translatable="yes">Year</property><property name="width-request">64</property><style><class name="muted"/></style></object></child>
     <child><object class="GtkImage"><property name="icon-name">rufin-heart-outline-symbolic</property><property name="width-request">32</property><style><class name="muted"/></style></object></child>
   </object>
-  <object class="GtkBox" id="queue_panel"><property name="orientation">vertical</property><property name="spacing">6</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/><class name="fullscreen-player-queue-panel"/></style></object>
+  <object class="GtkBox" id="queue_panel">
+    <property name="orientation">vertical</property><property name="spacing">6</property><property name="hexpand">true</property><property name="vexpand">true</property>
+    <style><class name="fullscreen-player-pane"/><class name="fullscreen-player-queue-panel"/></style>
+    <child><object class="GtkOverlay">
+      <property name="vexpand">true</property>
+      <property name="child"><object class="GtkScrolledWindow" id="queue_scroller">
+        <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
+        <property name="vexpand">true</property><style><class name="queue-scroller"/></style>
+      </object></property>
+      <child type="overlay"><object class="AdwSpinner" id="queue_loading">
+        <property name="visible">false</property>
+        <property name="halign">center</property><property name="valign">center</property>
+        <property name="width-request">32</property><property name="height-request">32</property>
+      </object></child>
+    </object></child>
+  </object>
   <object class="GtkBox" id="lyrics_host"><property name="orientation">vertical</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/></style></object>
   <object class="GtkBox" id="visualizer_panel"><property name="orientation">vertical</property><property name="hexpand">true</property><property name="vexpand">true</property><style><class name="fullscreen-player-pane"/><class name="fullscreen-player-visualizer"/></style></object>
   <object class="GtkScrolledWindow" id="equalizer_panel">

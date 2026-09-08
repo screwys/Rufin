@@ -479,6 +479,7 @@ pub(crate) mod tests {
             }),
         });
         PlaybackView {
+            queue_loading: false,
             queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: run,

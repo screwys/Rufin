@@ -1,6 +1,7 @@
 use adw::prelude::*;
 use std::cell::Cell;
 pub struct RightPanelWidgets {
+    pub queue_loading: adw::Spinner,
     pub root: gtk::Box,
     pub queue_header_host: gtk::Box,
     pub queue_panel: gtk::Box,
@@ -12,6 +13,7 @@ pub struct RightPanelWidgets {
     pub visualizer_visible: Cell<bool>,
 }
 pub struct RightPanelParts {
+    pub queue_loading: adw::Spinner,
     pub root: gtk::Box,
     pub queue_header_host: gtk::Box,
     pub queue_panel: gtk::Box,
@@ -29,6 +31,7 @@ pub fn build_right_panel(
     let resource = crate::ui_resource::RIGHT_PANEL_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
+        queue_loading: adw::Spinner,
         root: gtk::Box,
         queue_lyrics_overlay: gtk::Overlay,
         queue_fixed_top: gtk::Box,
@@ -83,6 +86,7 @@ pub fn build_right_panel(
     root.append(&queue_lyrics_overlay);
 
     RightPanelParts {
+        queue_loading,
         root,
         queue_header_host,
         queue_panel,

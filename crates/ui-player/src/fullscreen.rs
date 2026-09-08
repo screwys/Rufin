@@ -43,6 +43,7 @@ pub struct FullscreenPlayerParts {
     pub lyrics_host: gtk::Box,
     pub queue_header: gtk::Widget,
     pub queue_panel: gtk::Box,
+    pub queue_loading: adw::Spinner,
     pub equalizer: EqualizerSurface,
 }
 
@@ -84,6 +85,7 @@ pub fn build_fullscreen_player(
         inline_start: gtk::Box,
         inline_end: gtk::Box,
         queue_panel: gtk::Box,
+        queue_loading: adw::Spinner,
         fullscreen_queue_header: gtk::Box,
         fullscreen_queue_album: gtk::Label,
         fullscreen_queue_year: gtk::Label,
@@ -111,7 +113,7 @@ pub fn build_fullscreen_player(
         },
     );
     queue_header.set_visible(false);
-    queue_panel.append(&queue_header);
+    queue_panel.prepend(&queue_header);
     stack.add_titled(&queue_panel, Some("queue"), &tr("Queue"));
     stack.add_titled(&lyrics_host, Some("lyrics"), &tr("Lyrics"));
     visualizer_panel.append(visualizer_area);
@@ -167,6 +169,7 @@ pub fn build_fullscreen_player(
         lyrics_host,
         queue_header,
         queue_panel,
+        queue_loading,
         equalizer,
     }
 }
@@ -959,6 +962,7 @@ mod playback_refresh_tests {
     ) -> PlaybackView {
         let current_occurrence = current.as_ref().map(|media| media.id.occurrence.clone());
         PlaybackView {
+            queue_loading: false,
             queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: 1,

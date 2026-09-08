@@ -100,6 +100,7 @@ impl PlaybackOutput {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackView {
+    pub queue_loading: bool,
     pub queue: QueueSummaryView,
     /// Retained history, current, and upcoming rows in the bounded playback window.
     pub queue_window: Vec<Arc<QueueOccurrence>>,
@@ -148,6 +149,7 @@ impl PlaybackSession {
                 || sequence.repeat_mode() != RepeatMode::Off;
         }
         PlaybackView {
+            queue_loading: self.queue_loading(),
             queue: summary,
             queue_window: sequence.entries().to_vec(),
             transport: TransportView {
