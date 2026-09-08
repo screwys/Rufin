@@ -1175,6 +1175,9 @@ mod tests {
                 tags.get_mut()
                     .unwrap()
                     .add::<gst::tags::TrackPeak>(&0.5, gst::TagMergeMode::Replace);
+                tags.get_mut()
+                    .unwrap()
+                    .add::<gst::tags::ReferenceLevel>(&-18.0, gst::TagMergeMode::Replace);
                 pad.push_event(gst::event::Tag::new(tags));
                 gst::PadProbeReturn::Ok
             });
@@ -1211,49 +1214,69 @@ mod tests {
     }
 
     #[test]
-    fn embedded_gain_matches_gstreamer_scope_fallback_and_peak_protection() {
+    fn embedded_gain_respects_scope_reference_levels_and_peak_protection() {
         initialize_gstreamer();
-        let cases: &[&[(&str, f64)]] = &[
-            &[],
-            &[("replaygain-track-gain", -6.0)],
-            &[("replaygain-album-gain", -4.0)],
-            &[
-                ("replaygain-track-gain", -6.0),
-                ("replaygain-album-gain", -4.0),
-            ],
-            &[
-                ("replaygain-track-gain", 6.0),
-                ("replaygain-track-peak", 0.8),
-            ],
-            &[
-                ("replaygain-track-gain", -3.0),
-                ("replaygain-reference-level", 83.0),
-            ],
-            &[
-                ("replaygain-track-gain", -3.0),
-                ("replaygain-reference-level", -18.0),
-            ],
+        // Older rgvolume versions mistake negative LUFS references for dBSPL,
+        // so the installed plugin is not a portable oracle for these gains.
+        let cases: &[(&[(&str, f64)], [f64; 2])] = &[
+            (&[], [0.0, 0.0]),
+            (&[("replaygain-track-gain", -6.0)], [-6.0, -6.0]),
+            (&[("replaygain-album-gain", -4.0)], [-4.0, -4.0]),
+            (
+                &[
+                    ("replaygain-track-gain", -6.0),
+                    ("replaygain-album-gain", -4.0),
+                ],
+                [-6.0, -4.0],
+            ),
+            (
+                &[
+                    ("replaygain-track-gain", 6.0),
+                    ("replaygain-track-peak", 0.8),
+                ],
+                [1.938200260161128, 1.938200260161128],
+            ),
+            (
+                &[
+                    ("replaygain-track-gain", -3.0),
+                    ("replaygain-reference-level", 83.0),
+                ],
+                [0.0, 0.0],
+            ),
+            (
+                &[
+                    ("replaygain-track-gain", -3.0),
+                    ("replaygain-reference-level", 83.0),
+                    ("replaygain-track-peak", 0.5),
+                ],
+                [3.0, 3.0],
+            ),
+            (
+                &[
+                    ("replaygain-track-gain", -3.0),
+                    ("replaygain-reference-level", -18.0),
+                ],
+                [-3.0, -3.0],
+            ),
         ];
-        for case in cases {
-            for scope in [
+        for (case, expected) in cases {
+            for (scope, expected) in [
                 LoudnessNormalizationScope::Track,
                 LoudnessNormalizationScope::Album,
-            ] {
+            ]
+            .into_iter()
+            .zip(expected)
+            {
                 let mut tags = gst::TagList::new();
                 for (name, value) in *case {
                     tags.make_mut()
                         .add_generic(*name, *value, gst::TagMergeMode::Replace)
                         .unwrap();
                 }
-                let reference = make_element("rgvolume", "reference-normalizer").unwrap();
-                reference.set_property("album-mode", scope == LoudnessNormalizationScope::Album);
-                reference.set_state(gst::State::Paused).unwrap();
-                reference.send_event(gst::event::Tag::new(tags.clone()));
-                let expected = reference.property::<f64>("result-gain");
-                reference.set_state(gst::State::Null).unwrap();
+                let actual = embedded_replaygain(&tags, scope);
                 assert!(
-                    (embedded_replaygain(&tags, scope) - expected).abs() < 0.00001,
-                    "{case:?}, {scope:?}"
+                    (actual - expected).abs() < 0.00001,
+                    "{case:?}, {scope:?}: expected {expected}, got {actual}"
                 );
             }
         }
