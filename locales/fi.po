@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-08 18:00+0000\n"
+"PO-Revision-Date: 2026-09-08 21:18+0000\n"
 "Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
 "Language-Team: Finnish <https://hosted.weblate.org/projects/rufin/app/fi/>\n"
 "Language: fi\n"
@@ -553,7 +553,7 @@ msgid "Control notifications"
 msgstr "Säädinilmoitukset"
 
 msgid "Copy"
-msgstr ""
+msgstr "Kopioi"
 
 msgid "Could not open folder: {error}"
 msgstr "Kansiota ei voitu avata: {error}"
@@ -880,7 +880,7 @@ msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
 
 msgid "Forget Source"
-msgstr ""
+msgstr "Unohda lähde"
 
 msgid "Forward"
 msgstr ""
@@ -889,7 +889,7 @@ msgid "Found Servers"
 msgstr "Löydetyt palvelimet"
 
 msgid "Friday"
-msgstr ""
+msgstr "Perjantai"
 
 msgid "Full Bass"
 msgstr ""
@@ -943,7 +943,7 @@ msgid "Google Cast"
 msgstr ""
 
 msgid "Green"
-msgstr ""
+msgstr "Vihreä"
 
 msgid "Grid labels"
 msgstr ""
@@ -970,16 +970,16 @@ msgid "Hold and drag to resize"
 msgstr ""
 
 msgid "Home Blocks"
-msgstr ""
+msgstr "Kotilohkot"
 
 msgid "Home Profile"
-msgstr ""
+msgstr "Kotiprofiili"
 
 msgid "Home"
 msgstr "Koti"
 
 msgid "Hour"
-msgstr ""
+msgstr "Tunti"
 
 msgid "Identify"
 msgstr ""
@@ -994,7 +994,7 @@ msgid "If you do not have API keys, create them"
 msgstr "Jos sinulla ei ole API-avaimia, luo ne"
 
 msgid "Image"
-msgstr ""
+msgstr "Kuva"
 
 msgid "Import Backup"
 msgstr "Tuo varmuuskopio"
@@ -1018,7 +1018,7 @@ msgid "Installed"
 msgstr "Asennettu"
 
 msgid "Instrumental"
-msgstr ""
+msgstr "Instrumentaalinen"
 
 msgid "Integrations"
 msgstr "Integraatiot"
@@ -1090,7 +1090,7 @@ msgid "Libre.fm"
 msgstr "Libre.fm"
 
 msgid "Light"
-msgstr ""
+msgstr "Vaalea"
 
 msgid "Limit"
 msgstr "Raja"
@@ -1114,7 +1114,7 @@ msgid "Local Folders"
 msgstr "Paikalliset kansiot"
 
 msgid "Local Prefix"
-msgstr ""
+msgstr "Paikallinen etuliite"
 
 msgid "Local file access configured"
 msgstr ""
@@ -1148,7 +1148,7 @@ msgid "Local"
 msgstr "Paikallinen"
 
 msgid "Locate Folder"
-msgstr ""
+msgstr "Paikanna kansio"
 
 msgid "Lock metadata"
 msgstr ""
@@ -1169,13 +1169,13 @@ msgid "Lyrics settings"
 msgstr "Sanoitusten asetukset"
 
 msgid "Lyrics storage"
-msgstr ""
+msgstr "Sanoitusten tallennustila"
 
 msgid "Lyrics"
 msgstr "Sanoitukset"
 
 msgid "Manage"
-msgstr ""
+msgstr "Hallitse"
 
 msgid "Mapped Local Path"
 msgstr ""
@@ -1184,13 +1184,13 @@ msgid "Mapped local file not found"
 msgstr ""
 
 msgid "Maximum year"
-msgstr ""
+msgstr "Vuosi enintään"
 
 msgid "Menu"
 msgstr "Valikko"
 
 msgid "Metadata editing is no longer available"
-msgstr ""
+msgstr "Metatietojen muokkaaminen ei ole enää saatavilla"
 
 msgid "Metadata editing requires Local access"
 msgstr ""
@@ -1202,7 +1202,7 @@ msgid "Metadata"
 msgstr "Metatieto"
 
 msgid "Minimum year"
-msgstr ""
+msgstr "Vuosi vähintään"
 
 msgid "Monday"
 msgstr "Maanantai"
@@ -1211,13 +1211,13 @@ msgid "Mood tracks"
 msgstr ""
 
 msgid "Mood"
-msgstr ""
+msgstr "Mieliala"
 
 msgid "Moods"
-msgstr ""
+msgstr "Mielialat"
 
 msgid "More actions"
-msgstr ""
+msgstr "Lisää toimintoja"
 
 msgid "Most Played (Monthly)"
 msgstr "Eniten toistettu (kuukausittain)"
@@ -1238,7 +1238,7 @@ msgid "Most played"
 msgstr "Eniten toistettu"
 
 msgid "Move down"
-msgstr ""
+msgstr "Siirrä alas"
 
 msgid "Move provider down"
 msgstr ""
@@ -1247,19 +1247,19 @@ msgid "Move provider up"
 msgstr ""
 
 msgid "Move up"
-msgstr ""
+msgstr "Siirrä ylös"
 
 msgid "Multi-selection"
 msgstr "Monivalinta"
 
 msgid "Multiple values"
-msgstr ""
+msgstr "Useita arvoja"
 
 msgid "Music Folder"
-msgstr ""
+msgstr "Musiikkikansio"
 
 msgid "MusicBrainz + Last.fm"
-msgstr ""
+msgstr "MusicBrainz + Last.fm"
 
 msgid "MusicBrainz artist ID"
 msgstr ""
@@ -1277,7 +1277,7 @@ msgid "MusicBrainz release track ID"
 msgstr ""
 
 msgid "MusicBrainz"
-msgstr ""
+msgstr "MusicBrainz"
 
 msgid "Mute"
 msgstr "Mykistä"
@@ -1289,13 +1289,13 @@ msgid "Name"
 msgstr "Nimi"
 
 msgid "Narrow layout threshold"
-msgstr ""
+msgstr "Kapean asettelun kynnysarvo"
 
 msgid "Narrow left sidebar"
-msgstr ""
+msgstr "Kapea vasen sivupalkki"
 
 msgid "Narrow right sidebar"
-msgstr ""
+msgstr "Kapea oikea sivupalkki"
 
 msgid "Navidrome"
 msgstr "Navidrome"
@@ -1307,10 +1307,10 @@ msgid "Navigate to Search"
 msgstr ""
 
 msgid "Navigation"
-msgstr ""
+msgstr "Liikkuminen"
 
 msgid "Needs attention"
-msgstr ""
+msgstr "Vaatii huomiota"
 
 msgid "NetEase"
 msgstr ""
@@ -1328,33 +1328,31 @@ msgid "New Smart Playlist"
 msgstr "Uusi älykäs soittolista"
 
 msgid "New download rule"
-msgstr ""
+msgstr "Uusi lataussääntö"
 
 msgid "Newly added"
 msgstr "Äskettäin lisätty"
 
 msgid "Next Track"
-msgstr ""
+msgstr "Seuraava kappale"
 
 msgid "Next audio device"
 msgstr "Seuraava äänilaite"
 
 msgid "Next page"
-msgstr ""
+msgstr "Seuraava sivu"
 
-#, fuzzy
-#| msgid "Metadata source"
 msgid "Next source"
-msgstr "Metatietojen lähde"
+msgstr "Seuraava lähde"
 
 msgid "Next"
-msgstr ""
+msgstr "Seuraava"
 
 msgid "No Servers Found"
 msgstr "Palvelimia ei löytynyt"
 
 msgid "No albums from this artist yet"
-msgstr ""
+msgstr "Tältä esittäjältä ei ole albumeja vielä"
 
 msgid "No cached server path yet"
 msgstr ""
@@ -1369,10 +1367,10 @@ msgid "No favorites yet"
 msgstr "Ei suosikkeja vielä"
 
 msgid "No folder selected"
-msgstr ""
+msgstr "Kansiota ei ole valittu"
 
 msgid "No folders selected"
-msgstr ""
+msgstr "Kansioita ei ole valittu"
 
 msgid "No limit"
 msgstr ""
@@ -1398,22 +1396,22 @@ msgid "No music from this artist yet"
 msgstr ""
 
 msgid "No network devices found"
-msgstr ""
+msgstr "Verkkolaitteita ei löytynyt"
 
 msgid "No servers found, add one manually or try again"
-msgstr ""
+msgstr "Palvelimia ei löytynyt, lisää manuaalisesti tai yritä uudelleen"
 
 msgid "No smart playlists yet"
-msgstr ""
+msgstr "Ei älykkäitä soittolistoja vielä"
 
 msgid "No source"
-msgstr ""
+msgstr "Ei lähdettä"
 
 msgid "No sources configured"
-msgstr ""
+msgstr "Lähteitä ei ole määritetty"
 
 msgid "No tracks here yet"
-msgstr ""
+msgstr "Täällä ei ole kappaleita vielä"
 
 msgid "No"
 msgstr ""
@@ -1425,7 +1423,7 @@ msgid "Normalization scope"
 msgstr ""
 
 msgid "Not connected"
-msgstr ""
+msgstr "Ei yhdistetty"
 
 msgid "Not needed for most servers"
 msgstr ""
@@ -1458,7 +1456,7 @@ msgid "Number of backups"
 msgstr ""
 
 msgid "Number of songs"
-msgstr ""
+msgstr "Kappaleiden määrä"
 
 msgid "Off only for a server you control"
 msgstr ""
@@ -1485,58 +1483,52 @@ msgid "Only unplayed tracks"
 msgstr ""
 
 msgid "Open Folder"
-msgstr ""
+msgstr "Avaa kansio"
 
 msgid "Open fullscreen player"
 msgstr ""
 
-#, fuzzy
-#| msgid "Open on Jellyfin"
 msgid "Open on Emby"
-msgstr "Avaa Jellyfinissä"
+msgstr "Avaa Embyssä"
 
 msgid "Open on Jellyfin"
 msgstr "Avaa Jellyfinissä"
 
 msgid "Open on Last.fm"
-msgstr ""
+msgstr "Avaa Last.fm:ssä"
 
 msgid "Open on MusicBrainz"
-msgstr ""
+msgstr "Avaa MusicBrainzissa"
 
 msgid "Open on Navidrome"
 msgstr "Avaa Navidromessa"
 
-#, fuzzy
-#| msgid "Open on Jellyfin"
 msgid "Open on Plex"
-msgstr "Avaa Jellyfinissä"
+msgstr "Avaa Plexissä"
 
-#, fuzzy
-#| msgid "Open on Navidrome"
 msgid "Open on server"
-msgstr "Avaa Navidromessa"
+msgstr "Avaa palvelimella"
 
 msgid "Open release notes"
-msgstr ""
+msgstr "Avaa julkaisutiedot"
 
 msgid "OpenSubsonic"
-msgstr ""
+msgstr "OpenSubsonic"
 
 msgid "Opening Last.fm authorization..."
-msgstr ""
+msgstr "Avataan Last.fm-valtuutusta..."
 
 msgid "Opening Libre.fm authorization..."
-msgstr ""
+msgstr "Avataan Libre.fm-valtuutusta..."
 
 msgid "Orange"
-msgstr ""
+msgstr "Oranssi"
 
 msgid "Original"
-msgstr ""
+msgstr "Alkuperäinen"
 
 msgid "Other releases"
-msgstr ""
+msgstr "Muut julkaisut"
 
 msgid "Overview"
 msgstr ""
@@ -1545,13 +1537,13 @@ msgid "Password"
 msgstr "Salasana"
 
 msgid "Paste"
-msgstr ""
+msgstr "Liitä"
 
 msgid "Path in Source"
 msgstr ""
 
 msgid "Pause"
-msgstr ""
+msgstr "Keskeytä"
 
 msgid "Perceptual for a finer control at low volume; Linear for a direct scale"
 msgstr ""
@@ -1560,7 +1552,7 @@ msgid "Perceptual"
 msgstr ""
 
 msgid "Pink"
-msgstr ""
+msgstr "Pinkki"
 
 msgid "Pins"
 msgstr "Kiinnitykset"
@@ -1653,16 +1645,16 @@ msgid "Playlists"
 msgstr "Soittolistat"
 
 msgid "Plays"
-msgstr ""
+msgstr "Toistokertoja"
 
 msgid "Plex Account"
-msgstr ""
+msgstr "Plex-tili"
 
 msgid "Plex"
-msgstr ""
+msgstr "Plex"
 
 msgid "Pop"
-msgstr ""
+msgstr "Pop"
 
 msgid "Position"
 msgstr ""
@@ -1728,7 +1720,7 @@ msgid "Proxy casting through Rufin"
 msgstr ""
 
 msgid "Purple"
-msgstr ""
+msgstr "Violetti"
 
 msgid "Queue a track to begin"
 msgstr "Aseta kappale jonoon aloittaaksesi"
@@ -1737,10 +1729,10 @@ msgid "Queue and transitions"
 msgstr "Jono ja siirtymät"
 
 msgid "Queue"
-msgstr ""
+msgstr "Jono"
 
 msgid "Queued"
-msgstr ""
+msgstr "Asetettu jonoon"
 
 msgid "Quit Rufin"
 msgstr "Lopeta Rufin"
@@ -1836,7 +1828,7 @@ msgid "Remove from Playlist"
 msgstr "Poisto soittolistalta"
 
 msgid "Remove from Queue"
-msgstr ""
+msgstr "Poista jonosta"
 
 msgid "Remove rule"
 msgstr "Poista sääntö"
@@ -1902,7 +1894,7 @@ msgid "Retry"
 msgstr "Yritä uudelleen"
 
 msgid "Rock"
-msgstr ""
+msgstr "Rock"
 
 msgid "Romaji"
 msgstr ""
@@ -1914,7 +1906,7 @@ msgid "Rufin data folder"
 msgstr "Rufin-datakansio"
 
 msgid "Rule actions"
-msgstr ""
+msgstr "Säännön toiminnot"
 
 msgid "SMB / Samba"
 msgstr "SMB / Samba"
@@ -2069,7 +2061,7 @@ msgid "Separate .lrc file"
 msgstr "Erillinen .lrc-tiedosto"
 
 msgid "Server Actions"
-msgstr ""
+msgstr "Palvelimen toiminnot"
 
 msgid "Server Address Override (optional)"
 msgstr ""
@@ -2177,10 +2169,10 @@ msgid "Shuffle"
 msgstr "Satunnaistoisto"
 
 msgid "Sidebar Items"
-msgstr ""
+msgstr "Sivupalkin tietueet"
 
 msgid "Sidebar item {position}"
-msgstr ""
+msgstr "Sivupalkin tietue {position}"
 
 msgid "Sidebar route by position"
 msgstr ""
@@ -2189,13 +2181,13 @@ msgid "Sign In in Browser"
 msgstr "Kirjaudu sisään selaimessa"
 
 msgid "Sign In with Password"
-msgstr ""
+msgstr "Kirjaudu sisään salasanalla"
 
 msgid "Sign in with Nextcloud"
-msgstr ""
+msgstr "Kirjaudu sisään Nextcloudilla"
 
 msgid "SimpMusic"
-msgstr ""
+msgstr "SimpMusic"
 
 msgid "Single"
 msgstr ""
@@ -2246,13 +2238,13 @@ msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
 msgid "Source"
-msgstr ""
+msgstr "Lähde"
 
 msgid "Sources"
-msgstr ""
+msgstr "Lähteet"
 
 msgid "Start minimized"
-msgstr ""
+msgstr "Käynnistä pienennettynä"
 
 msgid "Status display"
 msgstr ""
@@ -2261,10 +2253,10 @@ msgid "Store calculated loudness in supported Local music files"
 msgstr ""
 
 msgid "Stream quality"
-msgstr ""
+msgstr "Suoratoiston laatu"
 
 msgid "Sunday"
-msgstr ""
+msgstr "Sunnuntai"
 
 msgid "Switch Search/Favorites tabs"
 msgstr "Vaihda Hae/Suosikit-välilehtiä"
@@ -2276,19 +2268,19 @@ msgid "Switching library..."
 msgstr "Vaihdetaan kirjastoa..."
 
 msgid "Synced lyrics"
-msgstr ""
+msgstr "Synkronoidut sanoitukset"
 
 msgid "System default"
 msgstr "Järjestelmän oletus"
 
 msgid "System"
-msgstr ""
+msgstr "Järjestelmä"
 
 msgid "Target loudness"
 msgstr ""
 
 msgid "Teal"
-msgstr ""
+msgstr "Sinivihreä"
 
 msgid "Techno"
 msgstr ""
@@ -2297,7 +2289,7 @@ msgid "Template"
 msgstr "Mallipohja"
 
 msgid "Text"
-msgstr ""
+msgstr "Teksti"
 
 msgid "Theme"
 msgstr "Teema"
@@ -2309,13 +2301,16 @@ msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
 msgid "This isn't available"
+msgstr "Tämä ei ole saatavilla"
+
+msgid "This playlist only accepts {source} tracks"
 msgstr ""
 
 msgid "This source cannot edit this field"
-msgstr ""
+msgstr "Lähde ei voi muokata tätä kenttää"
 
 msgid "Thursday"
-msgstr ""
+msgstr "Torstai"
 
 msgid "Title (merged)"
 msgstr ""
@@ -2333,13 +2328,13 @@ msgid "Track radio"
 msgstr ""
 
 msgid "Track"
-msgstr ""
+msgstr "Kappale"
 
 msgid "Tracks from every playlist"
-msgstr ""
+msgstr "Kappaleet kaikilta soittolistoilta"
 
 msgid "Tracks from your five latest albums"
-msgstr ""
+msgstr "Kappaleet viideltä uusimmalta albumilta"
 
 msgid "Tracks"
 msgstr "Kappaleet"
@@ -2402,7 +2397,7 @@ msgid "Use Saved Login"
 msgstr ""
 
 msgid "Use This Source"
-msgstr ""
+msgstr "Käytä tätä lähdettä"
 
 msgid "Use a number above zero"
 msgstr ""
@@ -2423,7 +2418,7 @@ msgid "User token"
 msgstr ""
 
 msgid "User"
-msgstr ""
+msgstr "Käyttäjä"
 
 msgid "Username and password"
 msgstr "Käyttäjätunnus ja salana"
@@ -2435,10 +2430,10 @@ msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 
 msgid "Verification Code (optional)"
-msgstr ""
+msgstr "Vahvistuskoodi (valinnainen)"
 
 msgid "Verify server certificate"
-msgstr ""
+msgstr "Vahvista palvelimen varmenne"
 
 msgid "Version History"
 msgstr "Versiohistoria"
@@ -2450,7 +2445,7 @@ msgid "Visible"
 msgstr "Näkyvissä"
 
 msgid "Visualizer"
-msgstr ""
+msgstr "Visualisointi"
 
 msgid "Volume Down"
 msgstr ""
@@ -2462,37 +2457,37 @@ msgid "Volume scale"
 msgstr ""
 
 msgid "Waiting for connection"
-msgstr ""
+msgstr "Odotetaan yhteyttä"
 
 msgid "Waveform seekbar"
-msgstr ""
+msgstr "Aaltomuotoinen kelauspalkki"
 
 msgid "WebDAV"
-msgstr ""
+msgstr "WebDAV"
 
 msgid "Wednesday"
-msgstr ""
+msgstr "Keskiviikko"
 
 msgid "Weekday"
-msgstr ""
+msgstr "Viikonpäivä"
 
 msgid "Weekly"
-msgstr ""
+msgstr "Viikottain"
 
 msgid "Window"
-msgstr ""
+msgstr "Ikkuna"
 
 msgid "Write EBU R128 tags to files"
 msgstr ""
 
 msgid "Year"
-msgstr ""
+msgstr "Vuosi"
 
 msgid "Yellow"
-msgstr ""
+msgstr "Keltainen"
 
 msgid "Yes"
-msgstr ""
+msgstr "Kyllä"
 
 msgid "above"
 msgstr ""
@@ -2531,13 +2526,13 @@ msgid "is not empty"
 msgstr "ei ole tyhjä"
 
 msgid "is not"
-msgstr ""
+msgstr "ei ole"
 
 msgid "is"
-msgstr ""
+msgstr "on"
 
 msgid "kbps"
-msgstr ""
+msgstr "kbps"
 
 msgid "range"
 msgstr ""
@@ -2546,10 +2541,10 @@ msgid "to"
 msgstr ""
 
 msgid "today"
-msgstr ""
+msgstr "tänään"
 
 msgid "yesterday"
-msgstr ""
+msgstr "eilen"
 
 msgid "{count} album"
 msgid_plural "{count} albums"
@@ -2558,23 +2553,23 @@ msgstr[1] "{count} albumia"
 
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} päivä sitten"
+msgstr[1] "{count} päivää sitten"
 
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} kansio valittu"
+msgstr[1] "{count} kansiota valittu"
 
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} kuukausi sitten"
+msgstr[1] "{count} kuukautta sitten"
 
 msgid "{count} result"
 msgid_plural "{count} results"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} tulos"
+msgstr[1] "{count} tulosta"
 
 msgid "{count} track"
 msgid_plural "{count} tracks"
@@ -2583,13 +2578,13 @@ msgstr[1] "{count} kappaletta"
 
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} viikko sitten"
+msgstr[1] "{count} viikkoa sitten"
 
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
-msgstr[0] ""
-msgstr[1] ""
+msgstr[0] "{count} vuosi sitten"
+msgstr[1] "{count} vuotta sitten"
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"
@@ -2598,6 +2593,9 @@ msgid ""
 "\n"
 "Click Finish to finalize Setup."
 msgstr ""
+"Rufin on asennettu tietokoneellesi..\n"
+"\n"
+"Napsauta \"Valmis\" viimeistelläksesi asennuksen."
 
 #. Windows installer: WelcomeText.
 msgctxt "Windows installer"
@@ -2642,7 +2640,7 @@ msgstr ""
 #. Windows installer: DesktopShortcut.
 msgctxt "Windows installer"
 msgid "Create desktop shortcut"
-msgstr ""
+msgstr "Luo pikakuvake työpöydälle"
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
 msgctxt "Windows installer"
@@ -2662,4 +2660,4 @@ msgstr ""
 #. Windows installer: WelcomeTitle.
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
-msgstr ""
+msgstr "Tervetuloa Rufinin asennukseen"

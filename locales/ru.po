@@ -2403,6 +2403,9 @@ msgstr ""
 msgid "This isn't available"
 msgstr "Это недоступно"
 
+msgid "This playlist only accepts {source} tracks"
+msgstr ""
+
 msgid "This source cannot edit this field"
 msgstr "Этот источник не может редактировать это поле"
 
