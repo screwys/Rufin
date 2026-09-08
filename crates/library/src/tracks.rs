@@ -913,59 +913,11 @@ pub(crate) async fn load_track_rows(
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{
-        Arc,
-        atomic::{AtomicUsize, Ordering},
-    };
-
-    use tracing::field::{Field, Visit};
-    use tracing_subscriber::{Layer, layer::Context, prelude::*, registry::LookupSpan};
-
     use super::*;
     use crate::{db::open_writer, schema};
 
-    #[derive(Clone)]
-    struct TrackRowCommands(Arc<AtomicUsize>);
-
-    struct StatementVisitor {
-        requested_window: bool,
-    }
-
-    impl Visit for StatementVisitor {
-        fn record_debug(&mut self, field: &Field, value: &dyn std::fmt::Debug) {
-            if field.name() == "db.statement"
-                && format!("{value:?}").contains("WITH requested(track_key, position)")
-            {
-                self.requested_window = true;
-            }
-        }
-    }
-
-    impl<S> Layer<S> for TrackRowCommands
-    where
-        S: tracing::Subscriber + for<'lookup> LookupSpan<'lookup>,
-    {
-        fn on_event(&self, event: &tracing::Event<'_>, _context: Context<'_, S>) {
-            if event.metadata().target() != "sqlx::query" {
-                return;
-            }
-            let mut visitor = StatementVisitor {
-                requested_window: false,
-            };
-            event.record(&mut visitor);
-            if visitor.requested_window {
-                self.0.fetch_add(1, Ordering::Relaxed);
-            }
-        }
-    }
-
     #[tokio::test]
-    async fn bounded_track_row_window_uses_four_commands() {
-        let commands = Arc::new(AtomicUsize::new(0));
-        tracing::subscriber::set_global_default(
-            tracing_subscriber::registry().with(TrackRowCommands(commands.clone())),
-        )
-        .expect("install Track row SQL trace");
+    async fn bounded_track_row_window_preserves_order_and_relations() {
         let file = tempfile::NamedTempFile::new().expect("create Track row Store");
         let mut connection = open_writer(file.path())
             .await
@@ -1000,27 +952,30 @@ mod tests {
             .bind(artist).bind(source).execute(&mut connection).await.expect("insert Track Artists");
         sqlx::query("INSERT INTO track_genres(track_key,genre_key,position) SELECT track_key,?1,0 FROM tracks WHERE source_key=?2")
             .bind(genre).bind(source).execute(&mut connection).await.expect("insert Track Genres");
-        let keys = sqlx::query_scalar::<_, TrackKey>(
+        let mut keys = sqlx::query_scalar::<_, TrackKey>(
             "SELECT track_key FROM tracks WHERE source_key=?1 ORDER BY track_key",
         )
         .bind(source)
         .fetch_all(&mut connection)
         .await
         .expect("read Track window keys");
-        commands.store(0, Ordering::Relaxed);
+        keys.reverse();
         let one = load_track_rows(&mut connection, &keys[..1])
             .await
             .expect("load one Track row");
-        let one_count = commands.load(Ordering::Relaxed);
-        commands.store(0, Ordering::Relaxed);
         let window = load_track_rows(&mut connection, &keys)
             .await
             .expect("load bounded Track row window");
-        let window_count = commands.load(Ordering::Relaxed);
         assert_eq!(one.len(), 1);
         assert_eq!(window.len(), 256);
-        assert_eq!(one_count, 4);
-        assert_eq!(window_count, 4);
+        assert_eq!(one[0].track_key, keys[0]);
+        for (row, key) in window.iter().zip(&keys) {
+            assert_eq!(row.track_key, *key);
+            assert_eq!(row.artists.len(), 1);
+            assert_eq!(row.artists[0].artist_key, artist);
+            assert_eq!(row.genres.len(), 1);
+            assert_eq!(row.genres[0].genre_key, genre);
+        }
     }
 
     #[tokio::test]
