@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-08 15:12+0000\n"
+"PO-Revision-Date: 2026-09-08 18:00+0000\n"
 "Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
 "Language-Team: Finnish <https://hosted.weblate.org/projects/rufin/app/fi/>\n"
 "Language: fi\n"
@@ -30,6 +30,8 @@ msgid ""
 "Downloads from this server will be removed, and automatic rules will be "
 "turned off"
 msgstr ""
+"Lataukset tältä palvelimelta poistetaan, ja automaattiset säännöt poistetaan "
+"käytöstä"
 
 msgid ""
 "List shared folders on this server using the entered credentials or guest "
@@ -48,11 +50,15 @@ msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
+"Vain tästä säännöstä johtuvat lataukset poistetaan. Jaetut ja manuaaliset "
+"lataukset säilyvät"
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
 "deleted."
 msgstr ""
+"Poistetaanko paikallinen kirjasto ja sen välimuisti Rufinista? "
+"Musiikkitiedostoja ei poisteta."
 
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
@@ -88,11 +94,15 @@ msgid ""
 "Thank you for trying out Rufin! If you have problems or suggestions, please "
 "open an issue in Github."
 msgstr ""
+"Kiitos, että kokeilit Rufinia! Jos kohtasit ongelmia tai sinulla on "
+"ehdotuksia, avaa ongelma Githubiin."
 
 msgid ""
 "These folders are combined into the Local source and shown through folder "
 "browsing"
 msgstr ""
+"Nämä kansiot on yhdistetty paikalliseksi lähteeksi ja ne näytetään kansiota "
+"selatessa"
 
 msgid ""
 "This is not supported natively by this source, but Rufin can show partial "
@@ -167,10 +177,10 @@ msgid "Add Rule"
 msgstr "Lisää sääntö"
 
 msgid "Add Source"
-msgstr ""
+msgstr "Lisää lähde"
 
 msgid "Add a matching server prefix"
-msgstr ""
+msgstr "Lisää vastaava palvelimen etuliite"
 
 msgid "Add a music folder"
 msgstr "Lisää musiikkikansio"
@@ -284,7 +294,7 @@ msgid "Artist tracks"
 msgstr ""
 
 msgid "Artist"
-msgstr ""
+msgstr "Esittäjä"
 
 msgid "Artists"
 msgstr "Esittäjät"
@@ -317,13 +327,13 @@ msgid "Auto DJ"
 msgstr "Automaattinen DJ"
 
 msgid "Automatic Backups"
-msgstr ""
+msgstr "Automaattiset varmuuskopiot"
 
 msgid "Automatic updates"
-msgstr ""
+msgstr "Automaattiset päivitykset"
 
 msgid "Automatic"
-msgstr ""
+msgstr "Automaattinen"
 
 msgid "BPM"
 msgstr ""
@@ -344,13 +354,13 @@ msgid "Backup exported"
 msgstr ""
 
 msgid "Backup failed: {error}"
-msgstr ""
+msgstr "Varmuuskopiointi epäonnistui: {error}"
 
 msgid "Backup restored with warnings: {warnings}"
-msgstr ""
+msgstr "Varmuuskopio palautettu varoitusten kera: {warnings}"
 
 msgid "Backup restored"
-msgstr ""
+msgstr "Varmuuskopio palautettu"
 
 msgid "Backups"
 msgstr "Varmuuskopiot"
@@ -411,10 +421,8 @@ msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
 msgid "Choose Folder"
 msgstr "Valitse kansio"
 
-#, fuzzy
-#| msgid "Choose Folder"
 msgid "Choose Server"
-msgstr "Valitse kansio"
+msgstr "Valitse palvelin"
 
 msgid "Choose a local music folder"
 msgstr "Valitse paikallinen musiikkikansio"
@@ -427,6 +435,8 @@ msgstr "Valitse vähintään yksi paikallinen musiikkikansio"
 
 msgid "Choose one or more folders to scan and play directly from this computer"
 msgstr ""
+"Valitse yksi tai useampi kansio läpikäytäväksi ja toista suoraan tältä "
+"tietokoneelta"
 
 msgid "Choose playback output"
 msgstr "Valitse toiston ulostulo"
@@ -435,7 +445,7 @@ msgid "Choose"
 msgstr "Valitse"
 
 msgid "Classical"
-msgstr ""
+msgstr "Klassinen"
 
 msgid "Clear Mapping"
 msgstr ""
@@ -465,7 +475,7 @@ msgid "Close fullscreen player"
 msgstr ""
 
 msgid "Close"
-msgstr ""
+msgstr "Sulje"
 
 msgid "Club"
 msgstr ""
@@ -477,58 +487,58 @@ msgid "Collapse/expand sidebar"
 msgstr "Supista/laajenna sivupalkki"
 
 msgid "Collection"
-msgstr ""
+msgstr "Kokoelma"
 
 msgid "Collections"
-msgstr ""
+msgstr "Kokoelmat"
 
 msgid "Color for the active word during playback"
 msgstr ""
 
 msgid "Color scheme"
-msgstr ""
+msgstr "Väriteema"
 
 msgid "Columns"
 msgstr "Sarakkeet"
 
 msgid "Comment text"
-msgstr ""
+msgstr "Kommenttiteksti"
 
 msgid "Comment"
-msgstr ""
+msgstr "Kommentti"
 
 msgid "Compact"
-msgstr ""
+msgstr "Kompakti"
 
 msgid "Complete sign-in in your browser"
 msgstr "Viimeistele kirjautuminen selaimessa"
 
 msgid "Confirm"
-msgstr ""
+msgstr "Vahvista"
 
 msgid "Connect"
-msgstr ""
+msgstr "Yhdistä"
 
 msgid "Connected as {username}"
 msgstr "Yhdistetty käyttäjänä {username}"
 
 msgid "Connected"
-msgstr ""
+msgstr "Yhdistetty"
 
 msgid "Connecting to music server..."
-msgstr ""
+msgstr "Yhdistetään musiikkipalvelimeen..."
 
 msgid "Connecting to {device}..."
-msgstr ""
+msgstr "Yhdistetään laitteeseen {device}..."
 
 msgid "Connection failed"
-msgstr ""
+msgstr "Yhteys epäonnistui"
 
 msgid "Connection options"
 msgstr ""
 
 msgid "Connection"
-msgstr ""
+msgstr "Yhteys"
 
 msgid "Contents"
 msgstr ""
@@ -537,7 +547,7 @@ msgid "Context Menus"
 msgstr "Kontekstivalikot"
 
 msgid "Continue"
-msgstr ""
+msgstr "Jatka"
 
 msgid "Control notifications"
 msgstr "Säädinilmoitukset"
@@ -546,25 +556,25 @@ msgid "Copy"
 msgstr ""
 
 msgid "Could not open folder: {error}"
-msgstr ""
+msgstr "Kansiota ei voitu avata: {error}"
 
 msgid "Could not save diagnostic log"
-msgstr ""
+msgstr "Diagnostiikkalokia ei voitu tallentaa"
 
 msgid "Could not update favorites"
 msgstr "Suosikkeja ei voitu päivittää"
 
 msgid "Couldn't connect to {service}"
-msgstr ""
+msgstr "Yhteyttä palveluun {service} ei voitu muodostaa"
 
 msgid "Couldn't load this folder"
-msgstr ""
+msgstr "Tätä kansiota ei voitu ladata"
 
 msgid "Couldn't search for lyrics"
-msgstr ""
+msgstr "Sanoituksia ei voitu hakea"
 
 msgid "Couldn’t download Japanese dictionary"
-msgstr ""
+msgstr "Japaninkielistä sanastoa ei voitu ladata"
 
 msgid "Create"
 msgstr "Luo"
@@ -573,31 +583,31 @@ msgid "Crossfade duration"
 msgstr "Ristihäivytyksen kesto"
 
 msgid "Crossfade mode"
-msgstr ""
+msgstr "Ristihäivytystila"
 
 msgid "Crossfade"
-msgstr ""
+msgstr "Ristihäivytys"
 
 msgid "Custom HTTP headers"
-msgstr ""
+msgstr "Mukautetut HTTP-otsakkeet"
 
 msgid "Custom"
-msgstr ""
+msgstr "Mukautettu"
 
 msgid "Customize display"
 msgstr "Mukauta näkymää"
 
 msgid "Cut"
-msgstr ""
+msgstr "Leikkaa"
 
 msgid "Daily"
-msgstr ""
+msgstr "Päivittäin"
 
 msgid "Dance"
 msgstr ""
 
 msgid "Dark"
-msgstr ""
+msgstr "Tumma"
 
 msgid "Date added"
 msgstr "Lisäyspäivä"
@@ -609,19 +619,19 @@ msgid "Decrease"
 msgstr ""
 
 msgid "Default left sidebar"
-msgstr ""
+msgstr "Oletusarvoinen vasen sivupalkki"
 
 msgid "Default right sidebar"
-msgstr ""
+msgstr "Oletusarvoinen oikea sivupalkki"
 
 msgid "Default"
-msgstr ""
+msgstr "Oletus"
 
 msgid "Delete Playlist"
 msgstr "Poista soittolista"
 
 msgid "Delete"
-msgstr ""
+msgstr "Poista"
 
 msgid "Descending"
 msgstr "Laskevasti"
@@ -633,10 +643,10 @@ msgid "Detail"
 msgstr ""
 
 msgid "Diagnostic log saved"
-msgstr ""
+msgstr "Diagnostiikkaloki tallennettu"
 
 msgid "Diagnostic log"
-msgstr ""
+msgstr "Diagnostiikkaloki"
 
 msgid "Direction"
 msgstr "Suunta"
@@ -645,10 +655,10 @@ msgid "Disable private mode"
 msgstr "Poista yksityinen tila käytöstä"
 
 msgid "Disc number"
-msgstr ""
+msgstr "Levynumero"
 
 msgid "Disc"
-msgstr ""
+msgstr "Levy"
 
 msgid "Discography"
 msgstr ""
@@ -660,40 +670,40 @@ msgid "Discord"
 msgstr "Discord"
 
 msgid "Do not encrypt"
-msgstr ""
+msgstr "Älä salaa"
 
 msgid "Don't duplicate"
-msgstr ""
+msgstr "Älä kahdenna"
 
 msgid "Download Folder"
-msgstr ""
+msgstr "Latauskansio"
 
 msgid "Download Queue"
-msgstr ""
+msgstr "Latausjono"
 
 msgid "Download quality"
-msgstr ""
+msgstr "Latauslaatu"
 
 msgid "Download queued"
-msgstr ""
+msgstr "Lataus asetettu jonoon"
 
 msgid "Download started"
-msgstr ""
+msgstr "Lataus aloitettu"
 
 msgid "Download"
 msgstr ""
 
 msgid "Downloaded"
-msgstr ""
+msgstr "Ladattu"
 
 msgid "Downloading Japanese dictionary..."
-msgstr ""
+msgstr "Ladataan japaninkielistä sanastoa..."
 
 msgid "Downloading"
-msgstr ""
+msgstr "Ladataan"
 
 msgid "Downloads"
-msgstr ""
+msgstr "Lataukset"
 
 msgid "Drag to reorder"
 msgstr "Vedä järjestääksesi uudelleen"
@@ -714,22 +724,22 @@ msgid "EPs"
 msgstr ""
 
 msgid "Edit Lyrics"
-msgstr ""
+msgstr "Muokkaa sanoituksia"
 
 msgid "Edit Smart Playlist"
 msgstr "Muokkaa älykästä soittolistaa"
 
 msgid "Edit lyrics"
-msgstr ""
+msgstr "Muokkaa sanoituksia"
 
 msgid "Edit metadata"
 msgstr "Muokkaa metatietoja"
 
 msgid "Edit"
-msgstr ""
+msgstr "Muokkaa"
 
 msgid "Embed in track"
-msgstr ""
+msgstr "Upota kappaleeseen"
 
 msgid "Emby"
 msgstr ""
@@ -738,7 +748,7 @@ msgid "Enable EBU R128 Analysis?"
 msgstr ""
 
 msgid "Enable automatic backups"
-msgstr ""
+msgstr "Ota automaattiset varmuuskopiot käyttöön"
 
 msgid "Enable equalizer"
 msgstr ""
@@ -753,13 +763,13 @@ msgid "Enable"
 msgstr ""
 
 msgid "Encrypt backups"
-msgstr ""
+msgstr "Salaa varmuuskopiot"
 
 msgid "Enter API credentials first"
 msgstr ""
 
 msgid "Enter a server address and API key"
-msgstr ""
+msgstr "Kirjoita palvelimen osoite ja API-avain"
 
 msgid "Enter a server address, username, and password"
 msgstr "Syötä palvelimen osoite, käyttäjätunnus ja salasana"
@@ -771,7 +781,7 @@ msgid "Entire Library"
 msgstr "Koko kirjasto"
 
 msgid "Equalizer"
-msgstr ""
+msgstr "Taajuuskorjain"
 
 msgid "Everything, including new tracks"
 msgstr ""
@@ -780,7 +790,7 @@ msgid "Expand sidebar"
 msgstr "Laajenna sivupalkki"
 
 msgid "Explore"
-msgstr ""
+msgstr "Tutki"
 
 msgid "Export Activity"
 msgstr ""
@@ -801,7 +811,7 @@ msgid "Export your listening history in Rufin"
 msgstr ""
 
 msgid "Export"
-msgstr ""
+msgstr "Vie"
 
 msgid "External lyric lookup is off"
 msgstr ""
@@ -813,7 +823,7 @@ msgid "External metadata lookup"
 msgstr "Ulkoinen metatietojen nouto"
 
 msgid "External site links"
-msgstr ""
+msgstr "Ulkoisten sivujen linkit"
 
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Häivytä ääni kun toisto keskeytetään tai palautetaan"
@@ -852,16 +862,16 @@ msgid "Flat"
 msgstr ""
 
 msgid "Folder"
-msgstr ""
+msgstr "Kansio"
 
 msgid "Folders"
-msgstr ""
+msgstr "Kansiot"
 
 msgid "Font family"
-msgstr ""
+msgstr "Fonttiperhe"
 
 msgid "Font size (px)"
-msgstr ""
+msgstr "Fonttikoko (px)"
 
 msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
@@ -1318,7 +1328,7 @@ msgid "New download rule"
 msgstr ""
 
 msgid "Newly added"
-msgstr ""
+msgstr "Äskettäin lisätty"
 
 msgid "Next Track"
 msgstr ""
@@ -2152,7 +2162,7 @@ msgid "Show/hide right sidebar"
 msgstr "Näytä/piilota oikea sivupalkki"
 
 msgid "Showcase"
-msgstr ""
+msgstr "Esittelyssä"
 
 msgid "Shuffle off"
 msgstr "Satunnaistoisto pois"
