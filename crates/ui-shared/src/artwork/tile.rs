@@ -162,7 +162,7 @@ impl ArtworkTile {
         self.known_missing.set(terminal_missing);
 
         let has_texture = self.image.paintable().is_some();
-        if has_texture || terminal_missing {
+        if has_texture || terminal_missing || self.area.has_css_class("cover-fallback") {
             self.sync_presentation(has_texture, true);
         } else {
             self.image.set_visible(false);

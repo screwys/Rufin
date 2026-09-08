@@ -25,6 +25,7 @@ pub fn register_resources() -> Result<(), String> {
 #[cfg(test)]
 mod cell_lifetime_tests;
 pub mod detail_links;
+pub mod folder_launcher;
 pub mod recycled_cells;
 pub mod source_labels;
 

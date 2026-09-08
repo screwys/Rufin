@@ -89,7 +89,7 @@ fn notification(text: &str) -> Option<RemoteItemChange> {
         let Some(id) = crate::remote_json::id(&entry["itemID"])
             .or_else(|| crate::remote_json::id(&entry["ratingKey"]))
         else {
-            return Some(RemoteItemChange::BoundaryLost);
+            continue;
         };
         let id = if crate::remote_json::field::<u8>(entry, "type") == Some(15) {
             super::plex_id("playlist", &id)
@@ -107,15 +107,6 @@ fn notification(text: &str) -> Option<RemoteItemChange> {
             }
         }
     }
-    for entry in crate::remote_json::items(&container["ActivityNotification"]) {
-        if entry["event"] == "ended"
-            && entry["Activity"]["type"]
-                .as_str()
-                .is_some_and(|kind| kind.starts_with("library."))
-        {
-            return Some(RemoteItemChange::BoundaryLost);
-        }
-    }
     upserts.sort();
     upserts.dedup();
     removals.sort();
@@ -130,6 +121,31 @@ fn notification(text: &str) -> Option<RemoteItemChange> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn opening_web_details_does_not_invalidate_the_catalog() {
+        let mut input = serde_json::json!({"NotificationContainer":{
+            "type":"activity",
+            "ActivityNotification":[{"event":"ended","Activity":{
+                "type":"library.refresh.items","progress":100,
+                "Context":{"key":"/library/metadata/1763/children",
+                    "accessible":true,"exists":true,"analyzed":false,"refreshed":false}
+            }}]
+        }});
+        assert_eq!(notification(&input.to_string()), None);
+        input["NotificationContainer"]["TimelineEntry"] = serde_json::json!([
+            {"identifier":"com.plexapp.plugins.library","state":5},
+            {"identifier":"com.plexapp.plugins.library","state":5,"itemID":"1763"}
+        ]);
+        assert_eq!(
+            notification(&input.to_string()),
+            Some(RemoteItemChange::Items {
+                upserts: vec!["1763".into()],
+                removals: vec![]
+            })
+        );
+    }
+
     #[test]
     fn library_hints_include_all_processing_states_and_ignore_playback() {
         let entries:Vec<_>=(0..=5).map(|state|serde_json::json!({"identifier":"com.plexapp.plugins.library","state":state,"itemID":state.to_string()})).collect();

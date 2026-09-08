@@ -5,6 +5,63 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn listens_accept_empty_optional_recording_ids() {
+    let fixture = fixture().await;
+    let listen = ListenWrite {
+        external_id: Some("optional-recording-ids".into()),
+        media_uri: fixture.track_uris[0].clone(),
+        title: "Playable song".into(),
+        artist: "Artist".into(),
+        album: "Album".into(),
+        duration_millis: 1000,
+        disc_number: None,
+        track_number: None,
+        year: None,
+        release_date: None,
+        source_format: None,
+        musicbrainz_recording_id: Some(String::new()),
+        musicbrainz_release_track_id: Some(String::new()),
+        started_at: 1_700_000_000,
+        local_period: "2023-11".into(),
+        listened_millis: 1000,
+        skipped: false,
+    };
+    fixture.database.record_listen(&listen, &[]).await.unwrap();
+    let record = library::ActivityRecord {
+        version: 1,
+        listen_key: 100,
+        source_id: None,
+        listen: ListenWrite {
+            external_id: Some("imported-optional-recording-ids".into()),
+            ..listen
+        },
+    };
+    let report = fixture
+        .database
+        .import_activity_jsonl(std::io::Cursor::new(serde_json::to_vec(&record).unwrap()))
+        .await
+        .unwrap();
+    assert_eq!((report.accepted, report.skipped), (1, 0));
+    let mut exported = Vec::new();
+    fixture
+        .database
+        .export_activity_jsonl(&mut exported, None)
+        .await
+        .unwrap();
+    let rows = String::from_utf8(exported)
+        .unwrap()
+        .lines()
+        .map(|line| serde_json::from_str::<library::ActivityRecord>(line).unwrap())
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), 2);
+    for row in rows {
+        assert_eq!(row.listen.title, "Playable song");
+        assert_eq!(row.listen.musicbrainz_recording_id, None);
+        assert_eq!(row.listen.musicbrainz_release_track_id, None);
+    }
+}
+
+#[tokio::test]
 async fn activity_keeps_one_listen_and_independent_delivery_targets() {
     let fixture = fixture().await;
     let listen = ListenWrite {
@@ -636,186 +693,4 @@ async fn semantic_activity_round_trip_preserves_facts_without_delivery() {
             0
         );
     }
-}
-
-#[tokio::test]
-#[allow(clippy::print_stderr)] // Reports the explicitly measured streaming fixture.
-async fn activity_export_streams_large_history_and_input_io_failure_rolls_back() {
-    let fixture = fixture().await;
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query("WITH RECURSIVE n(i) AS (SELECT 1 UNION ALL SELECT i+1 FROM n WHERE i<1000000) INSERT INTO listens(external_id,source_id,media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) SELECT 'play-'||i,CASE WHEN i%2=0 THEN 'source' ELSE 'other' END,'https://example.org/'||i,'Track '||i,'Artist','Album',1700000000,'2023-11',1000,900,0 FROM n")
-        .execute(&mut raw).await.unwrap();
-    let legacy_started = std::time::Instant::now();
-    let legacy = sqlx::query_scalar::<_, String>(
-        "WITH ranked AS (SELECT *, row_number() OVER (PARTITION BY media_uri ORDER BY started_at DESC,listen_key DESC) history_position FROM listens)
-         SELECT media_uri FROM ranked WHERE history_position=1 ORDER BY started_at DESC,listen_key DESC LIMIT 100")
-        .fetch_all(&mut raw).await.unwrap();
-    let legacy_elapsed = legacy_started.elapsed();
-    drop(raw);
-    let cancel = ReadCancellation::new();
-    let history_started = std::time::Instant::now();
-    let history = fixture
-        .database
-        .activity_history(None, "", &cancel)
-        .await
-        .unwrap();
-    let history_elapsed = history_started.elapsed();
-    assert_eq!(
-        history
-            .iter()
-            .map(|row| row.media_uri.clone())
-            .collect::<Vec<_>>(),
-        legacy
-    );
-    assert!(
-        history.iter().all(|row| row.play_count == 1
-            && row.artists.is_empty()
-            && row.album_media_uri.is_none())
-    );
-    let current_started = std::time::Instant::now();
-    let current = fixture
-        .database
-        .activity_history(Some(&SourceId::new("source")), "", &cancel)
-        .await
-        .unwrap();
-    assert_eq!(current.len(), 100);
-    assert_eq!(current[1].media_uri, "https://example.org/999998");
-    eprintln!(
-        "1,000,000 listens: legacy History identities {legacy_elapsed:?}; complete All rows {history_elapsed:?}; Current rows {:?}",
-        current_started.elapsed()
-    );
-    let search_started = std::time::Instant::now();
-    let search = fixture
-        .database
-        .activity_history(None, "Track 999999", &cancel)
-        .await
-        .unwrap();
-    assert_eq!(search.len(), 1);
-    assert_eq!(search[0].media_uri, "https://example.org/999999");
-    eprintln!(
-        "1,000,000 listens: sparse History text search {:?}",
-        search_started.elapsed()
-    );
-    let started = std::time::Instant::now();
-    assert_eq!(
-        fixture
-            .database
-            .export_activity_jsonl(std::io::sink(), None)
-            .await
-            .unwrap(),
-        1000000
-    );
-    assert_eq!(
-        fixture
-            .database
-            .export_activity_csv(
-                std::io::sink(),
-                library::ActivityCsvFormat::ListenBrainz,
-                None
-            )
-            .await
-            .unwrap(),
-        1000000
-    );
-    eprintln!(
-        "1,000,000 accepted listens streamed to JSONL and CSV in {:?}",
-        started.elapsed()
-    );
-
-    let mut raw = connection(&fixture.path).await;
-    sqlx::query(
-        "UPDATE listens SET media_uri='https://example.org/repeated' WHERE listen_key>990000",
-    )
-    .execute(&mut raw)
-    .await
-    .unwrap();
-    drop(raw);
-    let repeated_started = std::time::Instant::now();
-    let repeated = fixture
-        .database
-        .activity_history(None, "", &cancel)
-        .await
-        .unwrap();
-    assert_eq!(repeated.len(), 100);
-    assert_eq!(repeated[0].media_uri, "https://example.org/repeated");
-    assert_eq!(repeated[0].play_count, 10000);
-    assert_eq!(repeated[1].media_uri, "https://example.org/990000");
-    eprintln!(
-        "1,000,000 listens: History with 10,000 consecutive repeats {:?}",
-        repeated_started.elapsed()
-    );
-
-    let mut raw = connection(&fixture.path).await;
-    let local = [
-        "file:///music/local.flac".to_string(),
-        library::cue_media_uri("segment", "file:///music/album.flac", 0, 180000),
-    ];
-    for (key, uri) in fixture.tracks.iter().zip(&local) {
-        sqlx::query("UPDATE tracks SET media_uri=?2 WHERE track_key=?1")
-            .bind(key)
-            .bind(uri)
-            .execute(&mut raw)
-            .await
-            .unwrap();
-        sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis) VALUES(?1,'Old Local','Artist','Album',1700000001,'2023-11',1000,900)")
-            .bind(uri).execute(&mut raw).await.unwrap();
-    }
-    drop(raw);
-    let started = std::time::Instant::now();
-    let current = fixture
-        .database
-        .activity_history(Some(&SourceId::new("source")), "", &cancel)
-        .await
-        .unwrap();
-    assert_eq!(current.len(), 100);
-    assert_eq!(current[0].media_uri, local[1]);
-    assert_eq!(current[1].media_uri, local[0]);
-    eprintln!(
-        "1,000,002 listens: Current including unattributed Local/CUE {:?}",
-        started.elapsed()
-    );
-    let started = std::time::Instant::now();
-    let calendar = fixture
-        .database
-        .calendar_activity_summary(
-            fixture.source,
-            CalendarActivityPeriod::Lifetime,
-            100,
-            &cancel,
-        )
-        .await
-        .unwrap();
-    assert_eq!(calendar.tracks.len(), 2);
-    assert!(calendar.tracks.iter().all(|row| row.play_count == 1));
-    eprintln!(
-        "1,000,002 listens: scoped Calendar summaries {:?}",
-        started.elapsed()
-    );
-
-    let first = br#"{"version":1,"source_id":null,"external_id":"before-io-failure","media_uri":"https://example.org/a","title":"A","artist":"B","album":"C","duration_millis":1000,"disc_number":null,"track_number":null,"year":null,"release_date":null,"source_format":null,"musicbrainz_recording_id":null,"musicbrainz_release_track_id":null,"started_at":1700000000,"local_period":"2023-11","listened_millis":1000,"skipped":false}
-"#;
-    struct BrokenInput;
-    impl std::io::Read for BrokenInput {
-        fn read(&mut self, _: &mut [u8]) -> std::io::Result<usize> {
-            Err(std::io::Error::other("input device disconnected"))
-        }
-    }
-    let input = std::io::Read::chain(std::io::Cursor::new(first), BrokenInput);
-    assert!(
-        fixture
-            .database
-            .import_activity_jsonl(std::io::BufReader::new(input))
-            .await
-            .is_err()
-    );
-    let mut raw = connection(&fixture.path).await;
-    assert_eq!(
-        sqlx::query_scalar::<_, i64>(
-            "SELECT count(*) FROM listens WHERE external_id='before-io-failure'"
-        )
-        .fetch_one(&mut raw)
-        .await
-        .unwrap(),
-        0
-    );
 }

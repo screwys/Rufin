@@ -766,7 +766,7 @@ async fn track_artist_and_album_artist_roles_keep_exact_membership_and_own_artwo
 }
 
 #[tokio::test]
-async fn artist_orders_and_rows_require_the_requested_credit_role() {
+async fn artist_orders_filter_roles_but_known_artists_remain_addressable() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
@@ -775,6 +775,7 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
         ("role-track", "Performer One", 30),
         ("role-album", "Release Owner", 40),
         ("role-both", "Dual Credit", 50),
+        ("role-none", "No Credits", 20),
     ] {
         let media_uri =
             library::source_entity_uri(&library::SourceId::new("source"), "artist", object_id);
@@ -793,10 +794,11 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
             .expect("insert role fixture Artist"),
         );
     }
-    let [track_only, album_only, both] = role_artists.as_slice() else {
+    let [track_only, album_only, both, uncredited] = role_artists.as_slice() else {
         unreachable!()
     };
     let (track_only, album_only, both) = (*track_only, *album_only, *both);
+    let uncredited = *uncredited;
     sqlx::query(
         "INSERT INTO track_artists(track_key,artist_key,position) VALUES(?1,?2,1),(?1,?3,2)",
     )
@@ -889,38 +891,31 @@ async fn artist_orders_and_rows_require_the_requested_credit_role() {
         .pop()
         .expect("role-matched Album Artist");
     assert_eq!((album_row.album_count, album_row.track_count), (1, 2));
-    assert!(
-        fixture
+    for (artist, album_artist) in [
+        (album_only, false),
+        (track_only, true),
+        (uncredited, false),
+        (uncredited, true),
+    ] {
+        let row = fixture
             .database
-            .artist_rows(fixture.source, &[album_only], false, None, &cancel)
+            .artist_rows(fixture.source, &[artist], album_artist, None, &cancel)
             .await
-            .expect("mismatched Track Artist row")
-            .is_empty()
-    );
-    assert!(
-        fixture
+            .expect("known artist row")
+            .pop()
+            .unwrap();
+        assert_eq!(row.artist_key, artist);
+        assert_eq!(row.track_count, 0);
+        let detail = fixture
             .database
-            .artist_rows(fixture.source, &[track_only], true, None, &cancel)
+            .artist_detail(fixture.source, artist, album_artist, None, &cancel)
             .await
-            .expect("mismatched Album Artist row")
-            .is_empty()
-    );
-    assert!(
-        fixture
-            .database
-            .artist_detail(fixture.source, album_only, false, None, &cancel)
-            .await
-            .expect("mismatched Artist detail")
-            .is_none()
-    );
-    assert!(
-        fixture
-            .database
-            .artist_detail(fixture.source, track_only, true, None, &cancel)
-            .await
-            .expect("mismatched Album Artist detail")
-            .is_none()
-    );
+            .expect("known artist detail")
+            .unwrap();
+        assert_eq!(detail.artist.artist_key, artist);
+        assert_eq!(detail.artist.track_count, 0);
+        assert!(detail.representative_albums.is_empty());
+    }
     assert_eq!(
         fixture
             .database

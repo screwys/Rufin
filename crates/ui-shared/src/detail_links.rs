@@ -2,11 +2,9 @@ use std::cell::RefCell;
 use std::ops::Range;
 use std::rc::Rc;
 
-use crate::source_labels::source_kind_icon_name;
 use ::library::{AlbumArtistLink, AlbumRow, TrackArtistLink, TrackRow};
 use gtk::glib;
 use gtk::prelude::ObjectExt;
-use localization::msgid;
 
 use crate::route::Route;
 
@@ -296,90 +294,6 @@ pub fn album_artist_links(album: &AlbumRow) -> DetailLinks {
         |credit| credit.name.as_str(),
         true,
     )
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum DetailEntityKind {
-    Album,
-    Artist,
-}
-
-impl DetailEntityKind {
-    fn id_prefix(self) -> &'static str {
-        match self {
-            Self::Album => "album",
-            Self::Artist => "artist",
-        }
-    }
-}
-
-pub struct DetailExternalLink {
-    pub label: &'static str,
-    pub icon_name: &'static str,
-    pub url: String,
-}
-
-pub fn server_entity_link(
-    source_kind: &str,
-    base_url: &str,
-    kind: DetailEntityKind,
-    entity_id: &str,
-) -> Option<DetailExternalLink> {
-    let base_url = clean_source_base_url(base_url)?;
-    match source_kind {
-        "jellyfin" => {
-            let item_id = raw_source_entity_id(entity_id, "jellyfin", kind)?;
-            Some(DetailExternalLink {
-                label: msgid("Open on Jellyfin"),
-                icon_name: source_kind_icon_name("jellyfin")?,
-                url: format!("{base_url}/web/index.html#!/details?id={item_id}"),
-            })
-        }
-        "navidrome" => {
-            let item_id = raw_source_entity_id(entity_id, "navidrome", kind)?;
-            Some(DetailExternalLink {
-                label: msgid("Open on Navidrome"),
-                icon_name: source_kind_icon_name("navidrome")?,
-                url: format!(
-                    "{base_url}/app/#/{}/{}/show",
-                    kind.id_prefix(),
-                    percent_encode_path_segment(item_id)
-                ),
-            })
-        }
-        _ => None,
-    }
-}
-
-fn raw_source_entity_id<'a>(
-    entity_id: &'a str,
-    source_kind: &str,
-    kind: DetailEntityKind,
-) -> Option<&'a str> {
-    let raw_id = entity_id.strip_prefix(&format!("{source_kind}:{}:", kind.id_prefix()))?;
-    let raw_id = raw_id.trim();
-    (!raw_id.is_empty()).then_some(raw_id)
-}
-
-fn clean_source_base_url(base_url: &str) -> Option<&str> {
-    let base_url = base_url.trim().trim_end_matches('/');
-    (!base_url.is_empty()).then_some(base_url)
-}
-
-fn percent_encode_path_segment(value: &str) -> String {
-    let mut encoded = String::new();
-    for byte in value.as_bytes() {
-        match byte {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
-                encoded.push(*byte as char);
-            }
-            _ => {
-                encoded.push('%');
-                encoded.push_str(&format!("{byte:02X}"));
-            }
-        }
-    }
-    encoded
 }
 
 #[cfg(test)]

@@ -237,6 +237,39 @@ impl LocalFileState {
 }
 
 impl Database {
+    /// Lexical endpoints are sufficient to find the common directory of all
+    /// member paths. Keep the result bounded even for a very large artist.
+    pub async fn collection_source_path_bounds(
+        &self,
+        media_uri: &str,
+        album_artist: bool,
+        folder: Option<crate::FolderKey>,
+    ) -> LibraryResult<Option<(String, String)>> {
+        let (_permit, mut connection) = self.acquire_general(&ReadCancellation::new()).await?;
+        let members = match crate::source_entity_parts(media_uri).map(|(_, kind, _)| kind) {
+            Some(kind) if kind == "album" => {
+                "SELECT track.track_key,track.source_path FROM albums album JOIN tracks track USING(album_key) WHERE album.media_uri=?1"
+            }
+            Some(kind) if kind == "artist" && album_artist => {
+                "SELECT track.track_key,track.source_path FROM artists artist JOIN album_artists credit USING(artist_key) JOIN tracks track USING(album_key) WHERE artist.media_uri=?1"
+            }
+            Some(kind) if kind == "artist" => {
+                "SELECT track.track_key,track.source_path FROM artists artist JOIN track_artists credit USING(artist_key) JOIN tracks track USING(track_key) WHERE artist.media_uri=?1"
+            }
+            _ => return Ok(None),
+        };
+        let mut query =
+            QueryBuilder::<Sqlite>::new("SELECT min(source_path),max(source_path) FROM (");
+        query.push(members).push(") member WHERE source_path<>'' AND (?2 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=member.track_key AND scope.folder_key=?2))");
+        let (first, last): (Option<String>, Option<String>) = query
+            .build_query_as()
+            .bind(media_uri)
+            .bind(folder)
+            .fetch_one(&mut *connection)
+            .await?;
+        Ok(first.zip(last))
+    }
+
     pub async fn file_metadata_track_page(
         &self,
         collection_uri: &str,

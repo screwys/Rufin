@@ -512,10 +512,9 @@ pub(super) fn native_lyrics_from_structured(entries: &[Value]) -> LyricsBundle {
         .iter()
         .filter_map(|entry| {
             let role = match entry["kind"].as_str().unwrap_or("main") {
-                "main" => LyricsRole::Original,
                 "translation" => LyricsRole::Translation,
                 "pronunciation" => LyricsRole::Pronunciation,
-                _ => return None,
+                _ => LyricsRole::Original,
             };
             let agents = json::items(&entry["agents"])
                 .iter()
@@ -838,18 +837,9 @@ impl SubsonicCredential {
 
     fn validate(&self) -> SourceResult<()> {
         let invalid = match self {
-            Self::Token {
-                salt,
-                token,
-                navidrome_password,
-            } => {
-                salt.is_empty()
-                    || token.is_empty()
-                    || navidrome_password
-                        .as_ref()
-                        .is_some_and(|password| password.is_empty())
-            }
-            Self::ApiKey(secret) | Self::LegacyPassword(secret) => secret.is_empty(),
+            Self::Token { salt, token, .. } => salt.is_empty() || token.is_empty(),
+            Self::ApiKey(secret) => secret.is_empty(),
+            Self::LegacyPassword(_) => false,
         };
         if invalid {
             return Err(SourceError::Other(
@@ -1153,6 +1143,23 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     #[test]
+    fn saved_empty_passwords_reopen_without_weakening_token_validation() {
+        for credential in [
+            SubsonicCredential::LegacyPassword(String::new()),
+            SubsonicCredential::from_password(""),
+            SubsonicCredential::from_navidrome_password(""),
+        ] {
+            let saved = credential.serialize();
+            let restored = SubsonicCredential::parse(&saved).unwrap();
+            assert_eq!(restored.serialize(), saved);
+        }
+        assert!(
+            SubsonicCredential::parse("{\"version\":1,\"salt\":\"\",\"token\":\"token\"}").is_err()
+        );
+        assert!(SubsonicCredential::from_api_key("").is_err());
+    }
+
+    #[test]
     fn subsonic_urls_and_credentials_never_expose_authentication_values() {
         let url = Url::parse(
             "https://music.example/rest/stream?apiKey=secret-key&p=password&s=salt&t=token&id=track-one",
@@ -1338,7 +1345,7 @@ mod tests {
             .and(query_param("enhanced", "true"))
             .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
                 "subsonic-response":{"status":"ok","lyricsList":{"structuredLyrics":[{
-                    "lang":"en","offset":{},
+                    "kind":"unrecognized","lang":"en","offset":{},
                     "agents":[null,{"id":"singer","role":"main","name":false}],
                     "line":[{"value":"Hi","start":10},{"value":{}},{"value":"There","start":{}}],
                     "cueLine":[{"index":2,"value":"There","agentId":"singer","cue":[
@@ -1351,6 +1358,7 @@ mod tests {
             .await;
         let lyrics = source(&server.uri()).lyrics("one").await.unwrap().unwrap();
         let document = &lyrics.documents()[0];
+        assert_eq!(document.role, LyricsRole::Original);
         assert_eq!(document.language.as_deref(), Some("en"));
         assert_eq!(document.offset_millis, 0);
         assert_eq!(document.agents.len(), 1);

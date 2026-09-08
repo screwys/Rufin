@@ -7,6 +7,185 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn named_collection_lookups_retain_identity_when_selected_folder_is_empty() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("DELETE FROM track_folders")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    let folder = Some(fixture.folder);
+    let genre = fixture
+        .database
+        .genre_rows(fixture.source, &[fixture.genre], folder, &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .expect("existing genre");
+    assert_eq!(
+        (
+            genre.track_count,
+            genre.album_count,
+            genre.duration_millis,
+            genre.downloaded_count
+        ),
+        (0, 0, 0, 0)
+    );
+    assert!(genre.representative_artwork.is_empty());
+    let mood = fixture
+        .database
+        .mood_rows(fixture.source, &[fixture.mood], folder, &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .expect("existing mood");
+    assert_eq!(
+        (
+            mood.track_count,
+            mood.duration_millis,
+            mood.downloaded_count
+        ),
+        (0, 0, 0)
+    );
+    assert!(mood.representative_artwork.is_empty());
+    let genre = fixture
+        .database
+        .genre_detail(fixture.source, fixture.genre, folder, &cancel)
+        .await
+        .unwrap()
+        .expect("existing genre detail");
+    assert_eq!(
+        (
+            genre.genre.track_count,
+            genre.genre.album_count,
+            genre.genre.duration_millis
+        ),
+        (0, 0, 0)
+    );
+    assert!(genre.representative_albums.is_empty());
+    let mood = fixture
+        .database
+        .mood_detail(fixture.source, fixture.mood, folder, &cancel)
+        .await
+        .unwrap()
+        .expect("existing mood detail");
+    assert_eq!((mood.mood.track_count, mood.mood.duration_millis), (0, 0));
+    assert!(mood.representative_albums.is_empty());
+    for sort in [GenreSort::Title, GenreSort::TrackCount] {
+        let (order, _, _) = fixture
+            .database
+            .genre_route_page(
+                fixture.source,
+                folder,
+                "",
+                sort,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert!(order.is_empty());
+    }
+    for sort in [MoodSort::Title, MoodSort::TrackCount] {
+        let (order, _, _) = fixture
+            .database
+            .mood_route_page(
+                fixture.source,
+                folder,
+                "",
+                sort,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert!(order.is_empty());
+    }
+}
+
+#[tokio::test]
+async fn detail_folder_bounds_follow_collection_roles_and_selected_folder() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    let paths = [
+        "Artist/Album/Disc 1/a.flac",
+        "Artist/Album/Disc 2/z.flac",
+        "Other/Album/c.flac",
+        "Other/Album/d.flac",
+    ]
+    .map(|path| {
+        fixture
+            ._directory
+            .path()
+            .join(path)
+            .to_str()
+            .unwrap()
+            .to_owned()
+    });
+    for (track, path) in fixture.tracks.iter().zip(&paths) {
+        sqlx::query("UPDATE tracks SET source_path=?1 WHERE track_key=?2")
+            .bind(path)
+            .bind(track)
+            .execute(&mut raw)
+            .await
+            .unwrap();
+    }
+    // A guest appearance belongs to the artist view, not their album-artist view.
+    sqlx::query("INSERT INTO track_artists(track_key,artist_key,position) VALUES(?1,?2,1)")
+        .bind(fixture.tracks[2])
+        .bind(fixture.artists[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_folders WHERE track_key<>?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    let database = &fixture.database;
+    assert_eq!(
+        database
+            .collection_source_path_bounds(&fixture.album_uris[0], false, None)
+            .await
+            .unwrap(),
+        Some((paths[0].clone(), paths[1].clone()))
+    );
+    assert_eq!(
+        database
+            .collection_source_path_bounds(&fixture.artist_uris[0], false, None)
+            .await
+            .unwrap(),
+        Some((paths[0].clone(), paths[2].clone()))
+    );
+    assert_eq!(
+        database
+            .collection_source_path_bounds(&fixture.artist_uris[0], true, None)
+            .await
+            .unwrap(),
+        Some((paths[0].clone(), paths[1].clone()))
+    );
+    assert_eq!(
+        database
+            .collection_source_path_bounds(&fixture.artist_uris[0], false, Some(fixture.folder))
+            .await
+            .unwrap(),
+        Some((paths[0].clone(), paths[0].clone()))
+    );
+    assert_eq!(
+        database
+            .collection_source_path_bounds(&fixture.album_uris[1], false, Some(fixture.folder))
+            .await
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
 async fn collection_play_retains_full_order_with_bounded_queue_projection() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
@@ -661,6 +840,28 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
         .execute(&mut raw)
         .await
         .expect("separate direct Track Artist from Album Artist");
+    let album_artist_uri: String =
+        sqlx::query_scalar("SELECT media_uri FROM artists WHERE artist_key=?1")
+            .bind(fixture.artists[0])
+            .fetch_one(&mut raw)
+            .await
+            .unwrap();
+    let resolved = fixture
+        .database
+        .artist_row_by_media_uri(&album_artist_uri, &cancel)
+        .await
+        .expect("resolve an artist credited only on albums")
+        .unwrap();
+    assert_eq!(resolved.artist_key, fixture.artists[0]);
+    assert_eq!(resolved.source_key, fixture.source);
+    let detail = fixture
+        .database
+        .artist_detail(fixture.source, resolved.artist_key, false, None, &cancel)
+        .await
+        .expect("known artist can open with no tracks in the requested role")
+        .unwrap();
+    assert_eq!(detail.artist.artist_key, resolved.artist_key);
+    assert_eq!(detail.artist.track_count, 0);
     assert_eq!(
         fixture
             .database
@@ -712,13 +913,14 @@ async fn tracks_and_collections_keep_complete_orders_and_bounded_rows() {
             .track_count,
         2
     );
-    assert!(
+    assert_eq!(
         fixture
             .database
             .artist_rows(fixture.source, &[fixture.artists[0]], false, None, &cancel)
             .await
-            .expect("role-mismatched direct Artist row")
-            .is_empty()
+            .expect("known artist without direct track credits")[0]
+            .track_count,
+        0
     );
     assert_eq!(
         fixture

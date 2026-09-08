@@ -1,6 +1,5 @@
 //! Jellyfin metadata reads, writes, and remote identification for exact provider objects.
 
-use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::client::endpoint;
@@ -12,19 +11,6 @@ use crate::{
 };
 
 const ITEM_FIELDS: &str = "Genres,ProviderIds,AlbumArtists,ArtistItems,Overview,ProductionYear,Settings,OriginalTitle,CustomRating,Etag";
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct EditorInfo {
-    #[serde(default)]
-    external_id_infos: Vec<ExternalId>,
-}
-
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct ExternalId {
-    key: String,
-}
 
 impl JellyfinEmbySource {
     pub(crate) async fn read_track_metadata(
@@ -112,14 +98,11 @@ impl JellyfinEmbySource {
         })
     }
 
-    async fn read_item_and_editor(
-        &self,
-        raw: &str,
-    ) -> Result<(Value, EditorInfo), SourceMetadataError> {
+    async fn read_item_and_editor(&self, raw: &str) -> Result<(Value, Value), SourceMetadataError> {
         let editor = endpoint(&self.base_url, &format!("Items/{raw}/MetadataEditor"))
             .map_err(metadata_write)?;
         let editor = self
-            .get_json::<EditorInfo>(editor)
+            .get_json::<Value>(editor)
             .await
             .map_err(metadata_write)?;
         let item = self.read_metadata_item(raw).await.map_err(metadata_write)?;
@@ -496,7 +479,7 @@ fn artist_values(
     }
 }
 
-fn track_writable(info: &EditorInfo) -> TrackMetadataWritable {
+fn track_writable(info: &Value) -> TrackMetadataWritable {
     TrackMetadataWritable {
         title: true,
         sort_title: true,
@@ -518,7 +501,7 @@ fn track_writable(info: &EditorInfo) -> TrackMetadataWritable {
     }
 }
 
-fn album_writable(info: &EditorInfo) -> AlbumMetadataWritable {
+fn album_writable(info: &Value) -> AlbumMetadataWritable {
     AlbumMetadataWritable {
         title: true,
         sort_title: true,
@@ -533,7 +516,7 @@ fn album_writable(info: &EditorInfo) -> AlbumMetadataWritable {
     }
 }
 
-fn artist_writable(info: &EditorInfo) -> ArtistMetadataWritable {
+fn artist_writable(info: &Value) -> ArtistMetadataWritable {
     ArtistMetadataWritable {
         name: true,
         sort_name: true,
@@ -544,10 +527,14 @@ fn artist_writable(info: &EditorInfo) -> ArtistMetadataWritable {
     }
 }
 
-fn external(info: &EditorInfo, key: &str) -> bool {
-    info.external_id_infos
+fn external(info: &Value, key: &str) -> bool {
+    crate::remote_json::items(&info["ExternalIdInfos"])
         .iter()
-        .any(|value| value.key.eq_ignore_ascii_case(key))
+        .any(|value| {
+            value["Key"]
+                .as_str()
+                .is_some_and(|value| value.eq_ignore_ascii_case(key))
+        })
 }
 
 fn select_album_identification(
@@ -806,6 +793,23 @@ mod tests {
     use super::*;
 
     #[test]
+    fn unavailable_external_ids_leave_ordinary_metadata_writable() {
+        for info in [
+            json!({}),
+            json!({"ExternalIdInfos":null}),
+            json!({"ExternalIdInfos":{}}),
+        ] {
+            let track = track_writable(&info);
+            assert!(track.title && track.artist && track.genre);
+            assert!(!track.musicbrainz_recording_id);
+            assert!(album_writable(&info).title);
+            assert!(!album_writable(&info).musicbrainz_album_id);
+            assert!(artist_writable(&info).name);
+            assert!(!artist_writable(&info).musicbrainz_artist_id);
+        }
+    }
+
+    #[test]
     fn emby_genre_edits_preserve_identifiers_and_unedited_metadata() {
         let mut item = json!({"Id":"11","Name":"Song","GenreItems":[{"Id":"1","Name":"Rock"},{"Id":"2","Name":"Pop"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"ProviderIds":{"MusicBrainzTrack":"release-track"}}).as_object().unwrap().clone();
         let original = item.clone();
@@ -837,7 +841,7 @@ mod tests {
         Mock::given(method("GET"))
             .and(path("/Items/track/MetadataEditor"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "ExternalIdInfos": [{"Key":"MusicBrainzRecording"}]
+                "ExternalIdInfos": [null, {"Key":{}}, {"Key":"MusicBrainzRecording"}]
             })))
             .mount(&server)
             .await;

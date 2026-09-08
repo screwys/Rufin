@@ -1518,6 +1518,29 @@ impl SourceOwner {
             .transpose()
     }
 
+    pub fn collection_folder_uri(
+        &self,
+        media_uri: String,
+        album_artist: bool,
+        folder: Option<library::FolderKey>,
+    ) -> Receiver<Result<String, String>> {
+        self.reply(move |owner, database| async move {
+            let (source_id, _, _) =
+                library::source_entity_parts(&media_uri).ok_or_else(source_access_unavailable)?;
+            let configuration = owner
+                .configuration(&source_id)
+                .ok_or_else(source_access_unavailable)?;
+            let (first, last) = database
+                .collection_source_path_bounds(&media_uri, album_artist, folder)
+                .await
+                .map_err(string_error)?
+                .ok_or_else(source_access_unavailable)?;
+            configuration
+                .detail_folder_uri(&first, &last)
+                .map_err(string_error)
+        })
+    }
+
     pub fn discover_servers(&self, provider: sources::DiscoveryProvider) {
         let events = self.shared.outputs.discovery.clone();
         let _ = events.try_send(DiscoveryUpdate {

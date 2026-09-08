@@ -641,18 +641,6 @@ fn validate_listen(listen: &ListenWrite, deliveries: &[ListenDeliveryTarget]) ->
             "listen identities cannot be empty".to_string(),
         ));
     }
-    if [
-        listen.musicbrainz_recording_id.as_deref(),
-        listen.musicbrainz_release_track_id.as_deref(),
-    ]
-    .into_iter()
-    .flatten()
-    .any(str::is_empty)
-    {
-        return Err(LibraryError::InvalidRequest(
-            "listen recording identities cannot be empty".into(),
-        ));
-    }
     if listen.started_at < 0 || listen.duration_millis < 0 || listen.listened_millis < 0 {
         return Err(LibraryError::InvalidRequest(
             "listen time values cannot be negative".to_string(),
@@ -736,8 +724,18 @@ pub(crate) async fn write_imported_listen(
     .bind(listen.year)
     .bind(&listen.release_date)
     .bind(&listen.source_format)
-    .bind(&listen.musicbrainz_recording_id)
-    .bind(&listen.musicbrainz_release_track_id)
+    .bind(
+        listen
+            .musicbrainz_recording_id
+            .as_deref()
+            .filter(|id| !id.is_empty()),
+    )
+    .bind(
+        listen
+            .musicbrainz_release_track_id
+            .as_deref()
+            .filter(|id| !id.is_empty()),
+    )
     .bind(listen.started_at)
     .bind(&listen.local_period)
     .bind(listen.duration_millis)

@@ -1924,9 +1924,9 @@ impl Database {
               COALESCE(sum(track.duration_millis),0) duration_millis,
               count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count
              FROM genres genre LEFT JOIN track_genres credit USING(genre_key)
-             LEFT JOIN tracks track USING(track_key)
-             WHERE genre.source_key=?1 AND genre.genre_key=?2
+             LEFT JOIN tracks track ON track.track_key=credit.track_key
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+             WHERE genre.source_key=?1 AND genre.genre_key=?2
              GROUP BY genre.genre_key",
         )
         .bind(source)
@@ -1974,9 +1974,9 @@ impl Database {
               COALESCE(sum(track.duration_millis),0) duration_millis,
               count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count
              FROM moods mood LEFT JOIN track_moods credit USING(mood_key)
-             LEFT JOIN tracks track USING(track_key)
-             WHERE mood.source_key=?1 AND mood.mood_key=?2
+             LEFT JOIN tracks track ON track.track_key=credit.track_key
                AND (?3 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?3))
+             WHERE mood.source_key=?1 AND mood.mood_key=?2
              GROUP BY mood.mood_key",
         )
         .bind(source)
@@ -2113,7 +2113,6 @@ pub(crate) async fn load_artist_rows(
            WHERE artist.source_key=",
         );
     query.push_bind(source);
-    push_artist_role_scope(&mut query, album_artist, folder);
     query.push(" ORDER BY requested.position");
     let mut result = query
         .build_query_as::<ArtistRow>()
@@ -2474,7 +2473,7 @@ async fn load_genre_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT genre.genre_key,genre.source_key,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track USING(track_key) WHERE genre.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) GROUP BY genre.genre_key ORDER BY requested.position");
+    query.push(") SELECT genre.genre_key,genre.source_key,genre.object_id,genre.name,genre.artwork_binding,count(DISTINCT track.album_key) album_count,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN genres genre USING(genre_key) LEFT JOIN track_genres relation USING(genre_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE genre.source_key=").push_bind(source).push(" GROUP BY genre.genre_key ORDER BY requested.position");
     let mut rows = query
         .build_query_as::<GenreRow>()
         .persistent(false)
@@ -2506,7 +2505,7 @@ async fn load_mood_rows(
     query.push_values(keys.iter().enumerate(), |mut row, (position, key)| {
         row.push_bind(*key).push_bind(position as i64);
     });
-    query.push(") SELECT mood.mood_key,mood.source_key,mood.name,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN moods mood USING(mood_key) LEFT JOIN track_moods relation USING(mood_key) LEFT JOIN tracks track USING(track_key) WHERE mood.source_key=").push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) GROUP BY mood.mood_key ORDER BY requested.position");
+    query.push(") SELECT mood.mood_key,mood.source_key,mood.name,count(DISTINCT track.track_key) track_count,COALESCE(sum(track.duration_millis),0) duration_millis,count(DISTINCT CASE WHEN EXISTS(SELECT 1 FROM local_access_files access WHERE access.media_uri=track.media_uri AND access.origin='download') THEN track.track_key END) downloaded_count FROM requested JOIN moods mood USING(mood_key) LEFT JOIN track_moods relation USING(mood_key) LEFT JOIN tracks track ON track.track_key=relation.track_key AND (").push_bind(folder).push(" IS NULL OR EXISTS(SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE mood.source_key=").push_bind(source).push(" GROUP BY mood.mood_key ORDER BY requested.position");
     let mut rows = query
         .build_query_as::<MoodRow>()
         .persistent(false)

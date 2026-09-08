@@ -121,24 +121,21 @@ impl JellyfinEmbySource {
             Err(SourceError::NotFound) => return Ok(None),
             Err(error) => return Err(error),
         };
-        let Some(source) = items(&item["MediaSources"]).first() else {
-            return Ok(None);
-        };
-        let Some(source_id) = id(&source["Id"]) else {
-            return Ok(None);
-        };
-        let subtitles = || {
-            items(&source["MediaStreams"])
-                .iter()
-                .filter(|stream| stream["Type"].as_str() == Some("Subtitle"))
-        };
-        let subtitle = subtitles()
-            .find(|stream| stream["Index"] == source["DefaultSubtitleStreamIndex"])
-            .or_else(|| subtitles().next());
-        let Some(subtitle) = subtitle else {
-            return Ok(None);
-        };
-        let Some(index) = field::<u32>(subtitle, "Index") else {
+        let selected = items(&item["MediaSources"]).iter().find_map(|source| {
+            let source_id = id(&source["Id"])?;
+            let subtitles = || {
+                items(&source["MediaStreams"])
+                    .iter()
+                    .filter(|stream| stream["Type"].as_str() == Some("Subtitle"))
+                    .filter_map(|stream| Some((field::<u32>(stream, "Index")?, stream)))
+            };
+            let default = field::<u32>(source, "DefaultSubtitleStreamIndex");
+            let (index, subtitle) = subtitles()
+                .find(|(index, _)| Some(*index) == default)
+                .or_else(|| subtitles().next())?;
+            Some((source_id, index, subtitle))
+        });
+        let Some((source_id, index, subtitle)) = selected else {
             return Ok(None);
         };
         let url = endpoint(
@@ -447,7 +444,7 @@ mod tests {
             .rename_playlist("emby:playlist:playlist", "New")
             .await
             .unwrap();
-        Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[{"Id":"media-source","DefaultSubtitleStreamIndex":2,"MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;
+        Mock::given(path("/emby/Users/listener/Items/11")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"Id":"11","MediaSources":[null,{"Id":"without-lyrics"},{"Id":"media-source","DefaultSubtitleStreamIndex":"2","MediaStreams":[{"Type":"Audio","Index":0},{"Type":"Subtitle","Index":{}},{"Type":"Subtitle","Index":1},{"Type":"Subtitle","Index":2,"Language":"eng"}]}]}))).mount(&server).await;
         Mock::given(path("/emby/Items/11/media-source/Subtitles/2/Stream.js")).respond_with(ResponseTemplate::new(200).set_body_json(json!({"TrackEvents":[{"Text":"Timed","StartPositionTicks":1250000,"EndPositionTicks":2250000},{"Text":"Untimed"},{"Text":" "}]}))).mount(&server).await;
         let lyrics = source.lyrics("emby:track:11").await.unwrap().unwrap();
         let document = &lyrics.documents()[0];

@@ -228,8 +228,8 @@ impl CredentialHost {
             &self.url,
             &self.username,
             &self.password,
-            self.authentication.as_ref().is_none_or(|authentication| {
-                authentication.get() != OpenSubsonicAuthentication::ApiKey
+            self.authentication.as_ref().is_some_and(|authentication| {
+                authentication.get() == OpenSubsonicAuthentication::ApiKey
             }),
         )
     }
@@ -1270,8 +1270,8 @@ fn append_credential_connect(
                 &url,
                 &username,
                 &password,
-                authentication.as_ref().is_none_or(|authentication| {
-                    authentication.get() != OpenSubsonicAuthentication::ApiKey
+                authentication.as_ref().is_some_and(|authentication| {
+                    authentication.get() == OpenSubsonicAuthentication::ApiKey
                 }),
             )
         })
@@ -1564,7 +1564,7 @@ fn remote_login_ready(
     url: &adw::EntryRow,
     username: &adw::EntryRow,
     password: &adw::PasswordEntryRow,
-    username_required: bool,
+    api_key: bool,
 ) -> bool {
     let address = url.text();
     let address = address.trim().trim_end_matches('/');
@@ -1573,8 +1573,11 @@ fn remote_login_ready(
         .or_else(|| address.strip_prefix("https://"))
         .unwrap_or(address);
     !address_without_scheme.trim().is_empty()
-        && (!username_required || !username.text().trim().is_empty())
-        && !password.text().trim().is_empty()
+        && if api_key {
+            !password.text().trim().is_empty()
+        } else {
+            !username.text().trim().is_empty()
+        }
 }
 
 fn default_music_folder() -> Option<PathBuf> {

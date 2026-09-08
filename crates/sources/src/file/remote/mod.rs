@@ -145,6 +145,46 @@ struct Payload {
     settings: FileSourceSettings,
 }
 
+pub(crate) fn detail_folder_uri(
+    configuration: &SourceConfiguration,
+    first: &str,
+    last: &str,
+) -> SourceResult<String> {
+    let payload: Payload = crate::config::decode_provider_payload(configuration)?;
+    let namespace = collection_url(&payload.namespace_url)?;
+    let first = Url::parse(first).map_err(|_| SourceError::NotFound)?;
+    let last = Url::parse(last).map_err(|_| SourceError::NotFound)?;
+    let first = first
+        .path()
+        .strip_prefix(namespace.path())
+        .ok_or(SourceError::NotFound)?;
+    let last = last
+        .path()
+        .strip_prefix(namespace.path())
+        .ok_or(SourceError::NotFound)?;
+    let first = first.rsplit_once('/').map_or("", |(parent, _)| parent);
+    let last = last.rsplit_once('/').map_or("", |(parent, _)| parent);
+    let common = first
+        .split('/')
+        .zip(last.split('/'))
+        .take_while(|(a, b)| a == b)
+        .map(|(part, _)| part)
+        .collect::<Vec<_>>()
+        .join("/");
+    let mut url = collection_url(&payload.settings.url)?;
+    let path = if common.is_empty() {
+        url.path().to_owned()
+    } else {
+        format!("{}{common}/", url.path())
+    };
+    url.set_path(&path);
+    let _ = url.set_username("");
+    let _ = url.set_password(None);
+    url.set_query(None);
+    url.set_fragment(None);
+    Ok(url.into())
+}
+
 pub(crate) struct RemoteSource {
     source_id: SourceId,
     kind: String,

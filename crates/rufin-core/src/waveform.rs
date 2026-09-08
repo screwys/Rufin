@@ -129,9 +129,7 @@ impl WaveformOwner {
     }
 
     pub(crate) fn current_changed(self: &Arc<Self>, input: Option<WaveformMedia>) {
-        let Some(input) = input.filter(|input| {
-            self.enabled.load(Ordering::Acquire) && input.media.duration_millis > 0
-        }) else {
+        let Some(input) = input.filter(|_| self.enabled.load(Ordering::Acquire)) else {
             self.clear();
             return;
         };
@@ -413,7 +411,7 @@ mod tests {
     use super::*;
 
     #[tokio::test]
-    async fn enabling_waveform_uses_cached_peaks_without_a_provider() {
+    async fn enabling_waveform_uses_cached_peaks_without_a_provider_or_duration() {
         let directory = tempfile::tempdir().expect("waveform directory");
         let database = library::Database::open(directory.path().join("library.db"))
             .await
@@ -432,7 +430,7 @@ mod tests {
                     "Track",
                     "Artist",
                     "Album",
-                    3_000,
+                    0,
                 ),
                 canonical_position: 0,
                 source_index: None,

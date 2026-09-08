@@ -8,7 +8,7 @@ use base64::{Engine as _, engine::general_purpose};
 use futures_util::{SinkExt, StreamExt};
 use getrandom::fill;
 use reqwest::StatusCode;
-use serde::Deserialize;
+use serde_json::Value;
 use std::time::Instant;
 use tokio::time::{Duration, interval, sleep};
 use tokio_tungstenite::{
@@ -19,6 +19,7 @@ use tracing::{debug, warn};
 
 use super::*;
 use crate::RemoteItemChange;
+use crate::remote_json::{id, items};
 use crate::source::LIVE_CHANGE_LIMIT;
 
 const KEEP_ALIVE_INTERVAL: Duration = Duration::from_secs(30);
@@ -161,14 +162,6 @@ impl JellyfinEmbySource {
     }
 }
 
-#[derive(Deserialize)]
-struct SocketMessage {
-    #[serde(rename = "MessageType")]
-    message_type: String,
-    #[serde(rename = "Data", default)]
-    data: Option<serde_json::Value>,
-}
-
 #[derive(Debug, Eq, PartialEq)]
 enum JellyfinSocketMessage {
     Change(RemoteItemChange),
@@ -176,44 +169,22 @@ enum JellyfinSocketMessage {
     Other,
 }
 
-#[derive(Deserialize)]
-#[serde(rename_all = "PascalCase")]
-struct LibraryChangedData {
-    #[serde(default)]
-    items_added: Vec<String>,
-    #[serde(default)]
-    items_updated: Vec<String>,
-    #[serde(default)]
-    items_removed: Vec<String>,
-    #[serde(default)]
-    folders_added_to: Vec<String>,
-    #[serde(default)]
-    folders_removed_from: Vec<String>,
-    #[serde(default)]
-    collection_folders: Vec<String>,
-}
-
 fn library_socket_message(text: &str) -> SourceResult<JellyfinSocketMessage> {
-    let message = serde_json::from_str::<SocketMessage>(text)
+    let message = serde_json::from_str::<Value>(text)
         .map_err(|error| SourceError::Other(error.to_string()))?;
-    match message.message_type.as_str() {
-        "LibraryChanged" => {
-            let Some(data) = message.data else {
-                return Ok(JellyfinSocketMessage::Other);
-            };
-            let data = serde_json::from_value::<LibraryChangedData>(data)
-                .map_err(|error| SourceError::Other(error.to_string()))?;
-            let folder_change = !data.folders_added_to.is_empty()
-                || !data.folders_removed_from.is_empty()
-                || !data.collection_folders.is_empty();
-            let mut upserts = data
-                .items_added
-                .into_iter()
-                .chain(data.items_updated)
+    match message["MessageType"].as_str() {
+        Some("LibraryChanged") => {
+            let data = &message["Data"];
+            let ids = |key: &str| items(&data[key]).iter().filter_map(id);
+            let folder_change = ["FoldersAddedTo", "FoldersRemovedFrom", "CollectionFolders"]
+                .iter()
+                .any(|key| ids(key).next().is_some());
+            let mut upserts = ids("ItemsAdded")
+                .chain(ids("ItemsUpdated"))
                 .collect::<Vec<_>>();
             upserts.sort();
             upserts.dedup();
-            let mut removals = data.items_removed;
+            let mut removals = ids("ItemsRemoved").collect::<Vec<_>>();
             removals.sort();
             removals.dedup();
             if upserts.len().saturating_add(removals.len()) > LIVE_CHANGE_LIMIT {
@@ -237,7 +208,7 @@ fn library_socket_message(text: &str) -> SourceResult<JellyfinSocketMessage> {
                 }))
             }
         }
-        "ForceKeepAlive" => Ok(JellyfinSocketMessage::ForceKeepAlive),
+        Some("ForceKeepAlive") => Ok(JellyfinSocketMessage::ForceKeepAlive),
         _ => Ok(JellyfinSocketMessage::Other),
     }
 }
@@ -264,6 +235,36 @@ fn websocket_error(error: tokio_tungstenite::tungstenite::Error) -> SourceError 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn optional_notification_fields_do_not_discard_usable_changes() {
+        let message = library_socket_message(
+            r#"{"MessageType":"LibraryChanged","Data":{"ItemsAdded":[null,"added",{},42],"ItemsUpdated":false,"ItemsRemoved":[false,"removed", ""],"CollectionFolders":{},"FoldersAddedTo":[null]}}"#,
+        )
+        .unwrap();
+        assert_eq!(
+            message,
+            JellyfinSocketMessage::Change(RemoteItemChange::Items {
+                upserts: vec!["42".into(), "added".into()],
+                removals: vec!["removed".into()],
+            })
+        );
+        for text in [
+            r#"{"MessageType":42,"Data":{"ItemsAdded":false}}"#,
+            r#"{"MessageType":"LibraryChanged","Data":null}"#,
+            r#"{"MessageType":"SomethingElse","Data":false}"#,
+        ] {
+            assert_eq!(
+                library_socket_message(text).unwrap(),
+                JellyfinSocketMessage::Other
+            );
+        }
+        assert_eq!(
+            library_socket_message(r#"{"MessageType":"ForceKeepAlive","Data":false}"#).unwrap(),
+            JellyfinSocketMessage::ForceKeepAlive
+        );
+        assert!(library_socket_message("not JSON").is_err());
+    }
 
     #[test]
     fn exact_item_ids_remain_authoritative_with_folder_context() {

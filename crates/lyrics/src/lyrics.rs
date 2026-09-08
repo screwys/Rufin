@@ -6,7 +6,7 @@ use std::sync::OnceLock;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::time::{Duration, Instant};
 
-use serde::Deserialize;
+use serde_json::Value;
 use tracing::debug;
 
 use crate::{
@@ -440,142 +440,30 @@ fn inline_search_content(
     }
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-pub(crate) struct LrcLibLyricsDto {
-    id: u64,
-    #[serde(default)]
-    track_name: String,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    artist_name: String,
-    #[serde(default)]
-    album_name: Option<String>,
-    #[serde(default)]
-    duration: Option<f64>,
-    #[serde(default)]
-    synced_lyrics: Option<String>,
-    #[serde(default)]
-    plain_lyrics: Option<String>,
-    #[serde(default)]
-    instrumental: bool,
-}
-impl From<LrcLibLyricsDto> for LyricsSearchResult {
-    fn from(value: LrcLibLyricsDto) -> Self {
-        Self {
-            provider: ExternalLyricsProvider::Lrclib,
-            id: value.id.to_string(),
-            track_name: if value.track_name.trim().is_empty() {
-                value.name
-            } else {
-                value.track_name
-            },
-            artist_name: value.artist_name,
-            album_name: value.album_name.unwrap_or_default(),
-            duration_seconds: value.duration.unwrap_or_default().round() as u32,
-            content: if value.instrumental {
-                LyricsSearchContent::Instrumental
-            } else {
-                inline_search_content(value.synced_lyrics, value.plain_lyrics)
-            },
-        }
-    }
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseSearchResponse {
-    result: Option<NeteaseSearchResult>,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseSearchResult {
-    songs: Option<Vec<NeteaseSong>>,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseSong {
-    id: u64,
-    #[serde(default)]
-    name: String,
-    #[serde(default)]
-    artists: Vec<NeteaseArtist>,
-    #[serde(default)]
-    album: Option<NeteaseAlbum>,
-    #[serde(default)]
-    duration: Option<u64>,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseArtist {
-    #[serde(default)]
-    name: String,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseAlbum {
-    #[serde(default)]
-    name: String,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseLyricsResponse {
-    lrc: Option<NeteaseLyricsBody>,
-    #[serde(default)]
-    tlyric: Option<NeteaseLyricsBody>,
-    #[serde(default)]
-    yrc: Option<NeteaseLyricsBody>,
-    #[serde(default)]
-    romalrc: Option<NeteaseLyricsBody>,
-}
-#[derive(Debug, Deserialize)]
-struct NeteaseLyricsBody {
-    lyric: Option<String>,
-}
-#[derive(Debug, Deserialize)]
-struct GeniusSearchResponse {
-    response: Option<GeniusResponseBody>,
-}
-#[derive(Debug, Deserialize)]
-struct GeniusResponseBody {
-    sections: Option<Vec<GeniusSection>>,
-}
-#[derive(Debug, Deserialize)]
-struct GeniusSection {
-    hits: Option<Vec<GeniusHit>>,
-}
-#[derive(Debug, Deserialize)]
-struct GeniusHit {
-    result: GeniusSong,
-}
-#[derive(Debug, Deserialize)]
-struct GeniusSong {
-    #[serde(default)]
-    artist_names: String,
-    #[serde(default)]
-    full_title: String,
-    #[serde(default)]
-    title: String,
-    #[serde(default)]
-    url: String,
-    #[serde(default)]
-    instrumental: bool,
-}
-#[derive(Debug, Deserialize)]
-struct SimpMusicSearchResponse {
-    data: Option<Vec<SimpMusicLyric>>,
-}
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct SimpMusicLyric {
-    #[serde(default)]
-    artist_name: String,
-    #[serde(default)]
-    album_name: Option<String>,
-    #[serde(default)]
-    duration_seconds: Option<u32>,
-    #[serde(default)]
-    plain_lyric: Option<String>,
-    #[serde(default)]
-    song_title: String,
-    #[serde(default)]
-    synced_lyrics: Option<String>,
-    #[serde(default)]
-    video_id: String,
+fn lrclib_result(value: &Value) -> Option<LyricsSearchResult> {
+    let id = value["id"].as_u64()?.to_string();
+    let track_name = value["trackName"]
+        .as_str()
+        .filter(|name| !name.trim().is_empty())
+        .or_else(|| value["name"].as_str())
+        .unwrap_or_default()
+        .to_owned();
+    Some(LyricsSearchResult {
+        provider: ExternalLyricsProvider::Lrclib,
+        id,
+        track_name,
+        artist_name: value["artistName"].as_str().unwrap_or_default().to_owned(),
+        album_name: value["albumName"].as_str().unwrap_or_default().to_owned(),
+        duration_seconds: value["duration"].as_f64().unwrap_or_default().round() as u32,
+        content: if value["instrumental"].as_bool() == Some(true) {
+            LyricsSearchContent::Instrumental
+        } else {
+            inline_search_content(
+                value["syncedLyrics"].as_str().map(str::to_owned),
+                value["plainLyrics"].as_str().map(str::to_owned),
+            )
+        },
+    })
 }
 pub(crate) fn lrclib_search(
     artist_name: &str,
@@ -1010,59 +898,58 @@ fn netease_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearc
     parse_netease_search_body(&body)
 }
 pub(crate) fn parse_netease_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
-    let response = serde_json::from_str::<NeteaseSearchResponse>(body)
+    let response: Value = serde_json::from_str(body)
         .map_err(|error| format!("NetEase lyric search returned invalid data: {error}"))?;
-    Ok(response
-        .result
-        .and_then(|result| result.songs)
-        .unwrap_or_default()
+    Ok(response["result"]["songs"]
+        .as_array()
         .into_iter()
-        .filter(|song| !song.name.trim().is_empty() || !song.artists.is_empty())
-        .map(|song| LyricsSearchResult {
-            provider: ExternalLyricsProvider::Netease,
-            id: song.id.to_string(),
-            track_name: song.name,
-            artist_name: song
-                .artists
-                .into_iter()
-                .map(|artist| artist.name)
-                .filter(|name| !name.trim().is_empty())
-                .collect::<Vec<_>>()
-                .join(", "),
-            album_name: song.album.map(|album| album.name).unwrap_or_default(),
-            duration_seconds: song.duration.unwrap_or_default().div_ceil(1000) as u32,
-            content: LyricsSearchContent::Deferred,
+        .flatten()
+        .filter_map(|song| {
+            Some(LyricsSearchResult {
+                provider: ExternalLyricsProvider::Netease,
+                id: song["id"].as_u64()?.to_string(),
+                track_name: song["name"].as_str().unwrap_or_default().to_owned(),
+                artist_name: song["artists"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|artist| artist["name"].as_str())
+                    .filter(|name| !name.trim().is_empty())
+                    .collect::<Vec<_>>()
+                    .join(", "),
+                album_name: song["album"]["name"]
+                    .as_str()
+                    .unwrap_or_default()
+                    .to_owned(),
+                duration_seconds: song["duration"].as_u64().unwrap_or_default().div_ceil(1000)
+                    as u32,
+                content: LyricsSearchContent::Deferred,
+            })
         })
         .collect())
 }
 fn netease_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
-    Ok(netease_fetch_lyrics_response(id)?
-        .lrc
-        .and_then(|body| body.lyric)
-        .filter(|lyrics| !lyrics.trim().is_empty()))
+    Ok(netease_fetch_lyrics_response(id)?["lrc"]["lyric"]
+        .as_str()
+        .filter(|lyrics| !lyrics.trim().is_empty())
+        .map(str::to_owned))
 }
 fn netease_fetch_lyrics_bundle(id: &str) -> Result<Option<Lyrics>, String> {
     Ok(lyrics_from_netease_response(netease_fetch_lyrics_response(
         id,
     )?))
 }
-fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyrics> {
-    if response
-        .lrc
-        .as_ref()
-        .and_then(|body| body.lyric.as_deref())
-        .is_some_and(|content| {
-            content_marks_instrumental(content, Some(ExternalLyricsProvider::Netease))
-        })
-    {
+fn lyrics_from_netease_response(response: Value) -> Option<Lyrics> {
+    if response["lrc"]["lyric"].as_str().is_some_and(|content| {
+        content_marks_instrumental(content, Some(ExternalLyricsProvider::Netease))
+    }) {
         return Some(Lyrics::instrumental(LyricsOrigin::External(
             ExternalLyricsProvider::Netease,
         )));
     }
     let mut documents = Vec::new();
-    let yrc_lines = response
-        .yrc
-        .and_then(|body| body.lyric)
+    let yrc_lines = response["yrc"]["lyric"]
+        .as_str()
         .map(|content| {
             content
                 .lines()
@@ -1075,7 +962,7 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
         yrc_lines = yrc_lines.as_ref().map_or(0, Vec::len),
         "parsed NetEase word timing"
     );
-    let lrc = response.lrc.and_then(|body| body.lyric);
+    let lrc = response["lrc"]["lyric"].as_str();
     let original_lines = yrc_lines.or_else(|| {
         lrc.filter(|lyrics| !lyrics.trim().is_empty())
             .map(|content| {
@@ -1095,9 +982,8 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
             agents: Vec::new(),
         });
     }
-    if let Some(content) = response
-        .tlyric
-        .and_then(|body| body.lyric)
+    if let Some(content) = response["tlyric"]["lyric"]
+        .as_str()
         .filter(|lyrics| !lyrics.trim().is_empty())
     {
         documents.push(LyricsDocument {
@@ -1112,9 +998,8 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
             agents: Vec::new(),
         });
     }
-    if let Some(content) = response
-        .romalrc
-        .and_then(|body| body.lyric)
+    if let Some(content) = response["romalrc"]["lyric"]
+        .as_str()
         .filter(|lyrics| !lyrics.trim().is_empty())
     {
         documents.push(LyricsDocument {
@@ -1134,7 +1019,7 @@ fn lyrics_from_netease_response(response: NeteaseLyricsResponse) -> Option<Lyric
         documents,
     ))
 }
-fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, String> {
+fn netease_fetch_lyrics_response(id: &str) -> Result<Value, String> {
     let mut url = reqwest::Url::parse("https://music.163.com/api/song/lyric")
         .map_err(|error| error.to_string())?;
     {
@@ -1147,24 +1032,12 @@ fn netease_fetch_lyrics_response(id: &str) -> Result<NeteaseLyricsResponse, Stri
         pairs.append_pair("rv", "-1");
     }
     let body = fetch_text(external_lyrics_client()?, url, "NetEase lyric lookup")?;
-    let response = serde_json::from_str::<NeteaseLyricsResponse>(&body)
+    let response = serde_json::from_str::<Value>(&body)
         .map_err(|error| format!("NetEase lyric lookup returned invalid data: {error}"))?;
     debug!(
-        yrc_bytes = response
-            .yrc
-            .as_ref()
-            .and_then(|body| body.lyric.as_deref())
-            .map_or(0, str::len),
-        lrc_bytes = response
-            .lrc
-            .as_ref()
-            .and_then(|body| body.lyric.as_deref())
-            .map_or(0, str::len),
-        romalrc_bytes = response
-            .romalrc
-            .as_ref()
-            .and_then(|body| body.lyric.as_deref())
-            .map_or(0, str::len),
+        yrc_bytes = response["yrc"]["lyric"].as_str().map_or(0, str::len),
+        lrc_bytes = response["lrc"]["lyric"].as_str().map_or(0, str::len),
+        romalrc_bytes = response["romalrc"]["lyric"].as_str().map_or(0, str::len),
         "received NetEase lyric payload"
     );
     Ok(response)
@@ -1189,31 +1062,32 @@ fn genius_search(artist_name: &str, track_name: &str) -> Result<Vec<LyricsSearch
     parse_genius_search_body(&body)
 }
 pub(crate) fn parse_genius_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
-    let response = serde_json::from_str::<GeniusSearchResponse>(body)
+    let response: Value = serde_json::from_str(body)
         .map_err(|error| format!("Genius lyric search returned invalid data: {error}"))?;
     let mut results = Vec::new();
-    for section in response
-        .response
-        .and_then(|body| body.sections)
-        .unwrap_or_default()
+    for section in response["response"]["sections"]
+        .as_array()
+        .into_iter()
+        .flatten()
     {
-        for hit in section.hits.unwrap_or_default() {
-            let Some(url) = trusted_genius_lyrics_url(&hit.result.url) else {
+        for hit in section["hits"].as_array().into_iter().flatten() {
+            let song = &hit["result"];
+            let Some(url) = song["url"].as_str().and_then(trusted_genius_lyrics_url) else {
                 continue;
-            };
-            let track_name = if hit.result.full_title.trim().is_empty() {
-                hit.result.title
-            } else {
-                hit.result.full_title
             };
             results.push(LyricsSearchResult {
                 provider: ExternalLyricsProvider::Genius,
                 id: url.to_string(),
-                track_name,
-                artist_name: hit.result.artist_names,
+                track_name: song["full_title"]
+                    .as_str()
+                    .filter(|title| !title.trim().is_empty())
+                    .or_else(|| song["title"].as_str())
+                    .unwrap_or_default()
+                    .to_owned(),
+                artist_name: song["artist_names"].as_str().unwrap_or_default().to_owned(),
                 album_name: String::new(),
                 duration_seconds: 0,
-                content: if hit.result.instrumental {
+                content: if song["instrumental"].as_bool() == Some(true) {
                     LyricsSearchContent::Instrumental
                 } else {
                     LyricsSearchContent::Deferred
@@ -1258,24 +1132,34 @@ fn simpmusic_search(
     parse_simpmusic_search_body(&body)
 }
 pub(crate) fn parse_simpmusic_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
-    let response = serde_json::from_str::<SimpMusicSearchResponse>(body)
+    let response: Value = serde_json::from_str(body)
         .map_err(|error| format!("SimpMusic lyric search returned invalid data: {error}"))?;
-    Ok(response
-        .data
-        .unwrap_or_default()
+    Ok(response["data"]
+        .as_array()
         .into_iter()
-        .filter(|song| !song.video_id.trim().is_empty())
-        .map(|song| LyricsSearchResult {
-            provider: ExternalLyricsProvider::SimpMusic,
-            id: song.video_id,
-            track_name: song.song_title,
-            artist_name: song.artist_name,
-            album_name: song.album_name.unwrap_or_default(),
-            duration_seconds: song.duration_seconds.unwrap_or_default(),
-            content: match inline_search_content(song.synced_lyrics, song.plain_lyric) {
-                LyricsSearchContent::Unavailable => LyricsSearchContent::Deferred,
-                content => content,
-            },
+        .flatten()
+        .filter_map(|song| {
+            Some(LyricsSearchResult {
+                provider: ExternalLyricsProvider::SimpMusic,
+                id: song["videoId"]
+                    .as_str()
+                    .filter(|id| !id.trim().is_empty())?
+                    .to_owned(),
+                track_name: song["songTitle"].as_str().unwrap_or_default().to_owned(),
+                artist_name: song["artistName"].as_str().unwrap_or_default().to_owned(),
+                album_name: song["albumName"].as_str().unwrap_or_default().to_owned(),
+                duration_seconds: song["durationSeconds"]
+                    .as_u64()
+                    .and_then(|value| u32::try_from(value).ok())
+                    .unwrap_or_default(),
+                content: match inline_search_content(
+                    song["syncedLyrics"].as_str().map(str::to_owned),
+                    song["plainLyric"].as_str().map(str::to_owned),
+                ) {
+                    LyricsSearchContent::Unavailable => LyricsSearchContent::Deferred,
+                    content => content,
+                },
+            })
         })
         .collect())
 }
@@ -1286,20 +1170,22 @@ fn simpmusic_fetch_lyrics(id: &str) -> Result<Option<String>, String> {
     parse_simpmusic_lyrics_body(&body)
 }
 fn parse_simpmusic_lyrics_body(body: &str) -> Result<Option<String>, String> {
-    if let Ok(song) = serde_json::from_str::<SimpMusicLyric>(body) {
-        return Ok(song
-            .synced_lyrics
-            .filter(|lyrics| !lyrics.trim().is_empty())
-            .or_else(|| song.plain_lyric.filter(|lyrics| !lyrics.trim().is_empty())));
-    }
-    let response = serde_json::from_str::<SimpMusicSearchResponse>(body)
+    let response: Value = serde_json::from_str(body)
         .map_err(|error| format!("SimpMusic lyric lookup returned invalid data: {error}"))?;
-    Ok(response.data.and_then(|mut songs| {
-        songs.drain(..).find_map(|song| {
-            song.synced_lyrics
-                .filter(|lyrics| !lyrics.trim().is_empty())
-                .or_else(|| song.plain_lyric.filter(|lyrics| !lyrics.trim().is_empty()))
-        })
+    let songs = response["data"]
+        .as_array()
+        .map(Vec::as_slice)
+        .unwrap_or(std::slice::from_ref(&response));
+    Ok(songs.iter().find_map(|song| {
+        song["syncedLyrics"]
+            .as_str()
+            .filter(|lyrics| !lyrics.trim().is_empty())
+            .or_else(|| {
+                song["plainLyric"]
+                    .as_str()
+                    .filter(|lyrics| !lyrics.trim().is_empty())
+            })
+            .map(str::to_owned)
     }))
 }
 fn fetch_text(
@@ -1473,9 +1359,9 @@ pub(crate) fn lrclib_fetch_get(
     parse_lrclib_get_body(&body).map(Some)
 }
 pub(crate) fn parse_lrclib_get_body(body: &str) -> Result<LyricsSearchResult, String> {
-    serde_json::from_str::<LrcLibLyricsDto>(body)
-        .map(LyricsSearchResult::from)
-        .map_err(|error| format!("Lyric lookup returned invalid data: {error}"))
+    let value: Value = serde_json::from_str(body)
+        .map_err(|error| format!("Lyric lookup returned invalid data: {error}"))?;
+    lrclib_result(&value).ok_or_else(|| "Lyric lookup has no result identity".to_owned())
 }
 pub(crate) fn lrclib_search_urls(
     artist_name: &str,
@@ -1544,23 +1430,9 @@ pub(crate) fn lrclib_fetch_search(
     parse_lrclib_search_body(&body)
 }
 pub(crate) fn parse_lrclib_search_body(body: &str) -> Result<Vec<LyricsSearchResult>, String> {
-    let values = serde_json::from_str::<Vec<serde_json::Value>>(body)
+    let values: Vec<Value> = serde_json::from_str(body)
         .map_err(|error| format!("Lyric search returned invalid data: {error}"))?;
-    let mut results = Vec::new();
-    for value in values {
-        match serde_json::from_value::<LrcLibLyricsDto>(value) {
-            Ok(dto) => {
-                let result = LyricsSearchResult::from(dto);
-                if !result.track_name.trim().is_empty() || !result.artist_name.trim().is_empty() {
-                    results.push(result);
-                }
-            }
-            Err(error) => {
-                debug!(%error, "skipped invalid LRCLIB search result");
-            }
-        }
-    }
-    Ok(results)
+    Ok(values.iter().filter_map(lrclib_result).collect())
 }
 pub(crate) fn order_lrclib_results(
     results: &mut [LyricsSearchResult],
@@ -2039,6 +1911,94 @@ mod tests {
     use super::*;
 
     #[test]
+    fn provider_searches_keep_valid_siblings_and_independent_metadata() {
+        let lrclib = parse_lrclib_search_body(
+            r#"[
+            {"id":1,"trackName":"Song","albumName":[],"duration":"bad","plainLyrics":"Words"},
+            {"id":{},"plainLyrics":"No identity"},
+            {"id":2,"instrumental":true,"artistName":42}
+        ]"#,
+        )
+        .unwrap();
+        assert_eq!(lrclib.len(), 2);
+        assert_eq!(lrclib[0].album_name, "");
+        assert_eq!(lrclib[0].duration_seconds, 0);
+        assert!(matches!(
+            &lrclib[0].content,
+            LyricsSearchContent::Inline { .. }
+        ));
+        assert!(matches!(
+            lrclib[1].content,
+            LyricsSearchContent::Instrumental
+        ));
+        let exact = parse_lrclib_get_body(
+            r#"{"id":1,"albumName":false,"duration":{},"syncedLyrics":[],"plainLyrics":"Words"}"#,
+        )
+        .unwrap();
+        assert!(lyrics_from_search_result(&exact).unwrap().is_some());
+
+        let netease = parse_netease_search_body(r#"{"result":{"songs":[
+            {"id":1,"name":"Song","artists":[false,{"name":7},{"name":"Artist"}],"album":[],"duration":"bad"},
+            {"id":null}, {"id":2,"name":"Sibling"}
+        ]}}"#).unwrap();
+        assert_eq!(netease.len(), 2);
+        assert_eq!(netease[0].artist_name, "Artist");
+        assert_eq!(netease[0].duration_seconds, 0);
+        assert_eq!(netease[1].id, "2");
+
+        let genius = parse_genius_search_body(r#"{"response":{"sections":[false,{"hits":[
+            {"result":{"url":"https://genius.com/Artist-song-lyrics","title":"Song","full_title":[],"artist_names":false,"instrumental":{}}},
+            {"result":{"url":5}},
+            {"result":{"url":"https://genius.com/Artist-other-lyrics","instrumental":true}}
+        ]}]}}"#).unwrap();
+        assert_eq!(genius.len(), 2);
+        assert_eq!(genius[0].track_name, "Song");
+        assert!(matches!(
+            genius[1].content,
+            LyricsSearchContent::Instrumental
+        ));
+
+        let simp = parse_simpmusic_search_body(r#"{"data":[
+            {"videoId":"one","albumName":[],"durationSeconds":"bad","syncedLyrics":5,"plainLyric":"Words"},
+            {"videoId":false}, {"videoId":"two","artistName":{}}
+        ]}"#).unwrap();
+        assert_eq!(simp.len(), 2);
+        assert!(lyrics_from_search_result(&simp[0]).unwrap().is_some());
+        assert_eq!(simp[0].duration_seconds, 0);
+        assert!(matches!(simp[1].content, LyricsSearchContent::Deferred));
+    }
+
+    #[test]
+    fn provider_lyric_variants_survive_malformed_optional_fields() {
+        let response = serde_json::json!({
+            "lrc": {"lyric":"[00:01.00]Original"},
+            "yrc": {"lyric":42},
+            "tlyric": {"lyric":"[00:01.00]Translation"},
+            "romalrc": {"lyric":"[00:01.00]Pronunciation"}
+        });
+        let lyrics = lyrics_from_netease_response(response).unwrap();
+        assert_eq!(lyrics.documents().len(), 3);
+        assert_eq!(lyrics.documents()[0].lines[0].text, "Original");
+        assert_eq!(lyrics.documents()[1].role, LyricsRole::Translation);
+        assert_eq!(lyrics.documents()[2].role, LyricsRole::Pronunciation);
+        for body in [
+            r#"{"albumName":[],"durationSeconds":"bad","syncedLyrics":{},"plainLyric":"Words"}"#,
+            r#"{"data":[false,{"syncedLyrics":5},{"albumName":[],"plainLyric":"Words"}]}"#,
+        ] {
+            assert_eq!(
+                parse_simpmusic_lyrics_body(body).unwrap().as_deref(),
+                Some("Words")
+            );
+        }
+        assert!(parse_lrclib_get_body("{").is_err());
+        assert!(parse_lrclib_search_body("{").is_err());
+        assert!(parse_netease_search_body("{").is_err());
+        assert!(parse_genius_search_body("{").is_err());
+        assert!(parse_simpmusic_search_body("{").is_err());
+        assert!(parse_simpmusic_lyrics_body("{").is_err());
+    }
+
+    #[test]
     fn local_sidecar_candidates_are_bounded_and_prefer_the_audio_stem() {
         let input = LocalLyricsInput {
             audio_path: PathBuf::from("/music/01 - Track.flac"),
@@ -2092,7 +2052,7 @@ mod tests {
 
     #[test]
     fn netease_yrc_becomes_the_original_word_timed_document() {
-        let response = serde_json::from_str::<NeteaseLyricsResponse>(
+        let response = serde_json::from_str::<Value>(
             r#"{
                 "lrc":{"lyric":"[00:01.00]line timed fallback"},
                 "yrc":{"lyric":"[1000,1000](1000,400,0)君と (1400,600,0)blue"}
@@ -2111,7 +2071,7 @@ mod tests {
 
     #[test]
     fn netease_romalrc_becomes_a_pronunciation_document() {
-        let response = serde_json::from_str::<NeteaseLyricsResponse>(
+        let response = serde_json::from_str::<Value>(
             r#"{
                 "lrc":{"lyric":"[00:01.00]あの娘たぶんいいひと"},
                 "romalrc":{"lyric":"[00:01.00]ano ko tabun ii hito"}
