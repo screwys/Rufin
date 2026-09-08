@@ -234,7 +234,7 @@ pub enum PlexLoginMethod {
 
 pub enum PlexLoginEvent {
     OpenBrowser(String),
-    Authorized(sources::PlexLogin),
+    Authorized(Box<sources::PlexLogin>),
 }
 
 pub enum PlaylistExport {

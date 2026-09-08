@@ -302,7 +302,7 @@ impl SourceSetupFlow for PlexFlow {
                                 .map_err(|error| error.to_string())
                             }
                             Ok(PlexLoginEvent::Authorized(login)) => {
-                                match source.plex_profiles(login).recv().await {
+                                match source.plex_profiles(*login).recv().await {
                                     Ok(Ok((login, profiles))) => {
                                         {
                                             let mut draft = state.borrow_mut();

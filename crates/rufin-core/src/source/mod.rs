@@ -1397,7 +1397,7 @@ impl SourceOwner {
             tokio::select! {
                 _ = send.closed() => {},
                 result = authorization => {
-                    let _ = send.send(result.map(PlexLoginEvent::Authorized).map_err(string_error)).await;
+                    let _ = send.send(result.map(|login| PlexLoginEvent::Authorized(Box::new(login))).map_err(string_error)).await;
                 }
             }
         });
