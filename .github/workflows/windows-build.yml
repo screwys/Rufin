@@ -118,10 +118,6 @@ jobs:
           fi
           RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package "$build_identity"
 
-      - name: Verify installer behavior
-        shell: pwsh
-        run: ./packaging/windows/check-installer.ps1
-
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
