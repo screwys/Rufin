@@ -41,8 +41,9 @@ impl JellyfinEmbySource {
             self.send_unit(self.client.post(endpoint(&self.base_url, "Sessions/Capabilities/Full")?).json(&serde_json::json!({
                 "PlayableMediaTypes": ["Audio"], "SupportedCommands": [], "SupportsMediaControl": false, "SupportsSync": false
             }))).await?;
+            let token = self.session_access_token().await?;
             url.query_pairs_mut()
-                .append_pair("api_key", &self.access_token)
+                .append_pair("api_key", token)
                 .append_pair("deviceId", &self.device_id);
         }
         debug!(
@@ -54,6 +55,7 @@ impl JellyfinEmbySource {
         let started = Instant::now();
         let response = self
             .authenticated(build_websocket_client(self.trust_invalid_cert)?.get(url))
+            .await?
             .header(header::CONNECTION, "Upgrade")
             .header(header::UPGRADE, "websocket")
             .header("Sec-WebSocket-Version", "13")
@@ -138,7 +140,7 @@ impl JellyfinEmbySource {
                         return Ok(true);
                     };
                     match message.map_err(websocket_error)? {
-                        Message::Text(text) => match library_socket_message(&text)? {
+                        Message::Text(text) => match library_socket_message(&text, &self.user_id)? {
                             JellyfinSocketMessage::Change(change) => {
                                 if !on_change(change) {
                                     return Ok(false);
@@ -169,10 +171,34 @@ enum JellyfinSocketMessage {
     Other,
 }
 
-fn library_socket_message(text: &str) -> SourceResult<JellyfinSocketMessage> {
+fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSocketMessage> {
     let message = serde_json::from_str::<Value>(text)
         .map_err(|error| SourceError::Other(error.to_string()))?;
     match message["MessageType"].as_str() {
+        Some("UserDataChanged") => {
+            let data = &message["Data"];
+            if id(&data["UserId"]).as_deref() != Some(user_id) {
+                return Ok(JellyfinSocketMessage::Other);
+            }
+            let mut upserts = items(&data["UserDataList"])
+                .iter()
+                .filter_map(|item| id(&item["ItemId"]))
+                .collect::<Vec<_>>();
+            upserts.sort();
+            upserts.dedup();
+            if upserts.is_empty() {
+                Ok(JellyfinSocketMessage::Other)
+            } else if upserts.len() > LIVE_CHANGE_LIMIT {
+                Ok(JellyfinSocketMessage::Change(
+                    RemoteItemChange::BoundaryLost,
+                ))
+            } else {
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
+                    upserts,
+                    removals: Vec::new(),
+                }))
+            }
+        }
         Some("LibraryChanged") => {
             let data = &message["Data"];
             let ids = |key: &str| items(&data[key]).iter().filter_map(id);
@@ -237,9 +263,120 @@ mod tests {
     use super::*;
 
     #[test]
+    fn user_data_changes_refresh_only_the_connected_users_items() {
+        let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"album","IsFavorite":true},{"ItemId":42,"PlayCount":3},{"ItemId":"album"},{"ItemId":null}]}}"#;
+        assert_eq!(
+            library_socket_message(event, "user").unwrap(),
+            JellyfinSocketMessage::Change(RemoteItemChange::Items {
+                upserts: vec!["42".into(), "album".into()],
+                removals: vec![],
+            })
+        );
+        assert_eq!(
+            library_socket_message(event, "another-user").unwrap(),
+            JellyfinSocketMessage::Other
+        );
+        for event in [
+            r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[]}}"#,
+            r#"{"MessageType":"UserDataChanged","Data":{"UserDataList":[{"ItemId":"album"}]}}"#,
+        ] {
+            assert_eq!(
+                library_socket_message(event, "user").unwrap(),
+                JellyfinSocketMessage::Other
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn user_data_event_refreshes_one_album_without_replacing_the_catalog() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        for kind in [ServerKind::Jellyfin, ServerKind::Emby] {
+            let server = MockServer::start().await;
+            let item_path = match kind {
+                ServerKind::Jellyfin => "/Items/3272",
+                ServerKind::Emby => "/emby/Users/user/Items/3272",
+            };
+            Mock::given(method("GET"))
+                .and(path(item_path))
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "Id":"3272", "Name":"AG! Calling", "Type":"MusicAlbum",
+                    "UserData":{"IsFavorite":true}
+                })))
+                .expect(2)
+                .mount(&server)
+                .await;
+            let source = JellyfinEmbySource::open(
+                JellyfinEmbySourceConfig {
+                    kind,
+                    emby_connect: false,
+                    base_url: server.uri(),
+                    server_id: None,
+                    user_id: "user".into(),
+                    username: "listener".into(),
+                    trust_invalid_cert: false,
+                    use_instant_mix: false,
+                },
+                "token".into(),
+                "device".into(),
+            )
+            .unwrap();
+            let root = tempfile::tempdir().unwrap();
+            let database = library::Database::open(root.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let mut scan =
+                library::Scan::begin(&database, "source", kind.name(), kind.source_kind(), None)
+                    .await
+                    .unwrap();
+            for (id, name) in [("3272", "AG! Calling"), ("other", "Another Album")] {
+                stage_album(
+                    &mut scan,
+                    album_from_item(kind, serde_json::json!({"Id":id,"Name":name})).unwrap(),
+                )
+                .await
+                .unwrap();
+            }
+            scan.finish().await.unwrap();
+            let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true}]}}"#;
+            for repeated in [false, true] {
+                let JellyfinSocketMessage::Change(RemoteItemChange::Items { upserts, removals }) =
+                    library_socket_message(event, "user").unwrap()
+                else {
+                    panic!("user data must retain the item boundary");
+                };
+                let outcome = source
+                    .apply_live_items(&database, "source", upserts, removals)
+                    .await
+                    .unwrap();
+                assert_eq!(
+                    matches!(outcome, library::ScanOutcome::Identical(_)),
+                    repeated
+                );
+            }
+            let cancellation = library::ReadCancellation::new();
+            for (raw, favorite) in [("3272", true), ("other", false)] {
+                let uri = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    "album",
+                    &kind.object_id("album", raw),
+                );
+                let album = database
+                    .album_row_by_media_uri(&uri, &cancellation)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(album.favorite, favorite);
+            }
+        }
+    }
+
+    #[test]
     fn optional_notification_fields_do_not_discard_usable_changes() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"ItemsAdded":[null,"added",{},42],"ItemsUpdated":false,"ItemsRemoved":[false,"removed", ""],"CollectionFolders":{},"FoldersAddedTo":[null]}}"#,
+            "user",
         )
         .unwrap();
         assert_eq!(
@@ -255,21 +392,23 @@ mod tests {
             r#"{"MessageType":"SomethingElse","Data":false}"#,
         ] {
             assert_eq!(
-                library_socket_message(text).unwrap(),
+                library_socket_message(text, "user").unwrap(),
                 JellyfinSocketMessage::Other
             );
         }
         assert_eq!(
-            library_socket_message(r#"{"MessageType":"ForceKeepAlive","Data":false}"#).unwrap(),
+            library_socket_message(r#"{"MessageType":"ForceKeepAlive","Data":false}"#, "user")
+                .unwrap(),
             JellyfinSocketMessage::ForceKeepAlive
         );
-        assert!(library_socket_message("not JSON").is_err());
+        assert!(library_socket_message("not JSON", "user").is_err());
     }
 
     #[test]
     fn exact_item_ids_remain_authoritative_with_folder_context() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"ItemsAdded":["item-one"],"ItemsUpdated":["item-two","item-one"],"ItemsRemoved":["item-three"],"FoldersAddedTo":["folder-one"]}}"#,
+            "user",
         )
         .expect("parse message");
 
@@ -286,6 +425,7 @@ mod tests {
     fn folder_only_change_loses_the_item_boundary() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"FoldersAddedTo":["folder-one"]}}"#,
+            "user",
         )
         .expect("parse message");
 
@@ -299,6 +439,7 @@ mod tests {
     fn library_update_preserves_upserts_and_removals() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"ItemsAdded":["item-one"],"ItemsUpdated":["item-two","item-one"],"ItemsRemoved":["item-three"]}}"#,
+            "user",
         )
         .expect("parse message");
 
@@ -315,6 +456,7 @@ mod tests {
     fn conflicting_item_change_widens_to_full() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"ItemsUpdated":["item-one"],"ItemsRemoved":["item-one"]}}"#,
+            "user",
         )
         .expect("parse message");
 
@@ -328,6 +470,7 @@ mod tests {
     fn empty_library_update_emits_no_change() {
         let message = library_socket_message(
             r#"{"MessageType":"LibraryChanged","Data":{"ItemsAdded":[],"ItemsUpdated":[],"ItemsRemoved":[]}}"#,
+            "user",
         )
         .expect("parse message");
 
@@ -340,9 +483,10 @@ mod tests {
             .map(|index| format!(r#""item-{index}""#))
             .collect::<Vec<_>>()
             .join(",");
-        let message = library_socket_message(&format!(
-            r#"{{"MessageType":"LibraryChanged","Data":{{"ItemsUpdated":[{ids}]}}}}"#
-        ))
+        let message = library_socket_message(
+            &format!(r#"{{"MessageType":"LibraryChanged","Data":{{"ItemsUpdated":[{ids}]}}}}"#),
+            "user",
+        )
         .expect("parse message");
 
         assert_eq!(

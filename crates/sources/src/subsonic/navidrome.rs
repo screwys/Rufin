@@ -331,6 +331,7 @@ fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) ->
             id(&album["albumArtistId"]).unwrap_or_default(),
             artist.clone(),
             field(album, "mbzAlbumArtistId"),
+            field(album, "sortAlbumArtistName"),
         )
         .into_iter()
         .collect();
@@ -345,6 +346,7 @@ fn album_from_navidrome(source: &SubsonicSource, raw_id: &str, album: &Value) ->
         })
         .unwrap_or_default();
     Album {
+        sort_name: clean_optional(field(album, "sortAlbumName")),
         id: String::from(source.id("album", raw_id)),
         title: clean_optional(field(album, "name")).unwrap_or_else(|| "Untitled Album".to_string()),
         artist,
@@ -392,6 +394,7 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
             id(&track["artistId"]).unwrap_or_default(),
             artist.clone(),
             field(track, "mbzArtistId"),
+            field(track, "sortArtistName"),
         )
         .into_iter()
         .collect();
@@ -412,12 +415,14 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
             id(&track["albumArtistId"]).unwrap_or_default(),
             album_artist,
             field(track, "mbzAlbumArtistId"),
+            field(track, "sortAlbumArtistName"),
         )
         .into_iter()
         .collect();
     }
     let album_id = id(&track["albumId"]).map(|id| String::from(source.id("album", &id)));
     Track {
+        sort_name: clean_optional(field(track, "sortTitle")),
         id: String::from(source.id("track", raw_id)),
         album_id,
         title: clean_optional(field(track, "title"))
@@ -471,6 +476,7 @@ fn track_from_navidrome(source: &SubsonicSource, raw_id: &str, track: &Value) ->
 
 fn artist_from_navidrome(source: &SubsonicSource, raw_id: &str, artist: &Value) -> Artist {
     Artist {
+        sort_name: clean_optional(field(artist, "sortArtistName")),
         id: String::from(source.id("artist", raw_id)),
         name: clean_optional(field(artist, "name")).unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: boolean(&artist["starred"]).unwrap_or_default(),
@@ -488,8 +494,10 @@ fn artist_credit(
     raw_id: String,
     name: String,
     musicbrainz_artist_id: Option<String>,
+    sort_name: Option<String>,
 ) -> Option<ArtistCredit> {
     clean(raw_id).map(|raw_id| ArtistCredit {
+        sort_name: clean_optional(sort_name),
         id: String::from(source.id("artist", &raw_id)),
         name,
         musicbrainz_artist_id: clean_optional(musicbrainz_artist_id),
@@ -508,6 +516,7 @@ fn participant_credits(
         .filter_map(|participant| {
             let raw_id = id(&participant["id"])?;
             Some(ArtistCredit {
+                sort_name: clean_optional(field(participant, "sortArtistName")),
                 id: String::from(source.id("artist", &raw_id)),
                 name: clean_optional(field(participant, "name"))
                     .unwrap_or_else(|| "Unknown Artist".to_string()),
@@ -600,6 +609,74 @@ mod tests {
         SubsonicAuthentication, SubsonicCredential, SubsonicFlavor, SubsonicSourceConfig,
     };
     use super::*;
+
+    #[test]
+    fn native_and_opensubsonic_sort_names_keep_display_names_and_optional_credits() {
+        let source = navidrome_source("http://localhost/");
+        let album = album_from_navidrome(
+            &source,
+            "album",
+            &serde_json::json!({"name":"The Album", "sortAlbumName":"Album, The", "albumArtistId":"artist", "albumArtist":"The Artist", "sortAlbumArtistName":"Artist, The"}),
+        );
+        assert_eq!(album.title, "The Album");
+        assert_eq!(album.sort_name.as_deref(), Some("Album, The"));
+        assert_eq!(
+            album.relations.album_artists[0].sort_name.as_deref(),
+            Some("Artist, The")
+        );
+        let track = track_from_navidrome(
+            &source,
+            "track",
+            &serde_json::json!({"title":"The Song", "sortTitle":"Song, The", "participants":{"artist":[{"id":"artist", "name":"The Artist", "sortArtistName":"Artist, The"}]}}),
+        );
+        assert_eq!(track.title, "The Song");
+        assert_eq!(track.sort_name.as_deref(), Some("Song, The"));
+        assert_eq!(
+            track.relations.artists[0].sort_name.as_deref(),
+            Some("Artist, The")
+        );
+        let artist = artist_from_navidrome(
+            &source,
+            "artist",
+            &serde_json::json!({"name":"The Artist", "sortArtistName":"Artist, The"}),
+        );
+        assert_eq!(artist.name, "The Artist");
+        assert_eq!(artist.sort_name.as_deref(), Some("Artist, The"));
+
+        let value = serde_json::json!({"id":"1", "title":"The Name", "name":"The Name", "sortName":"Name, The", "artists":[{"id":"artist", "name":"The Artist", "sortName":"Artist, The"}]});
+        let album = super::super::item::album_from_json(&source, &value).unwrap();
+        assert_eq!(album.title, "The Name");
+        assert_eq!(album.sort_name.as_deref(), Some("Name, The"));
+        assert_eq!(
+            album.relations.album_artists[0].sort_name.as_deref(),
+            Some("Artist, The")
+        );
+        let track = super::super::item::track_from_json(&source, &value).unwrap();
+        assert_eq!(track.title, "The Name");
+        assert_eq!(track.sort_name.as_deref(), Some("Name, The"));
+        let artist = super::super::item::artist_from_json(&source, &value).unwrap();
+        assert_eq!(artist.name, "The Name");
+        assert_eq!(artist.sort_name.as_deref(), Some("Name, The"));
+        let plain = serde_json::json!({"id":"1", "name":"Plain", "sortName":""});
+        assert!(
+            super::super::item::album_from_json(&source, &plain)
+                .unwrap()
+                .sort_name
+                .is_none()
+        );
+        assert!(
+            super::super::item::track_from_json(&source, &plain)
+                .unwrap()
+                .sort_name
+                .is_none()
+        );
+        assert!(
+            super::super::item::artist_from_json(&source, &plain)
+                .unwrap()
+                .sort_name
+                .is_none()
+        );
+    }
 
     #[test]
     fn navidrome_file_path_combines_the_reported_library_and_relative_path() {

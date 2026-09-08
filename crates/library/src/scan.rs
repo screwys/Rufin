@@ -1367,12 +1367,14 @@ impl Scan {
     }
 
     #[allow(clippy::too_many_arguments)]
+    /// Full artist records supply their effective sort name, including the display-name fallback.
+    /// Sparse credits leave it absent so they retain the staged or published artist sort name.
     pub async fn write_artist(
         &mut self,
         object_id: &str,
         name: &str,
         normalized_name: &str,
-        sort_text: &str,
+        sort_text: Option<&str>,
         musicbrainz_artist_id: Option<&str>,
         artwork_binding: Option<&[u8]>,
         favorite: Option<bool>,
@@ -1387,12 +1389,12 @@ impl Scan {
             object_id.as_bytes(),
             name.as_bytes(),
             normalized_name.as_bytes(),
-            sort_text.as_bytes(),
+            sort_text.unwrap_or_default().as_bytes(),
             musicbrainz_artist_id.unwrap_or_default().as_bytes(),
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=excluded.sort_text,musicbrainz_artist_id=COALESCE(excluded.musicbrainz_artist_id,scan_artists.musicbrainz_artist_id),artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=COALESCE(excluded.rating,scan_artists.rating)")
+            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, ?3, ?4, COALESCE(?5,(SELECT sort_text FROM artists WHERE source_key=?10 AND object_id=?1),?4), ?6, ?7, ?8, ?9) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=COALESCE(?5,scan_artists.sort_text),musicbrainz_artist_id=COALESCE(excluded.musicbrainz_artist_id,scan_artists.musicbrainz_artist_id),artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=COALESCE(excluded.rating,scan_artists.rating)")
                 .bind(object_id)
                 .bind(media_uri)
                 .bind(name)
@@ -1401,7 +1403,8 @@ impl Scan {
                 .bind(musicbrainz_artist_id)
                 .bind(artwork_binding)
                 .bind(favorite)
-                .bind(rating),
+                .bind(rating)
+                .bind(self.existing_source_key),
         )
         .await
     }

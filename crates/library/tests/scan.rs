@@ -19,7 +19,7 @@ async fn publication_keeps_tracks_and_known_credits_beside_missing_related_objec
         "artist-one",
         "Known Artist",
         "known artist",
-        "known artist",
+        Some("known artist"),
         None,
         None,
         None,
@@ -356,6 +356,80 @@ async fn connection(path: &Path) -> SqliteConnection {
     super::support::connection(path).await
 }
 
+#[tokio::test]
+async fn artist_sort_names_survive_sparse_credits_and_reset_with_complete_records() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite3");
+    let database = Database::open(&path).await.unwrap();
+    let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+        .await
+        .unwrap();
+    scan.write_artist(
+        "artist",
+        "The Cure",
+        "the cure",
+        Some("cure, the"),
+        None,
+        None,
+        Some(false),
+        None,
+    )
+    .await
+    .unwrap();
+    scan.write_artist(
+        "artist", "The Cure", "the cure", None, None, None, None, None,
+    )
+    .await
+    .unwrap();
+    scan.write_artist(
+        "fallback",
+        "Missing Sort",
+        "missing sort",
+        None,
+        None,
+        None,
+        None,
+        None,
+    )
+    .await
+    .unwrap();
+    scan.finish().await.unwrap();
+    let mut reader = connection(&path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT name,sort_text FROM artists ORDER BY sort_text"
+        )
+        .fetch_all(&mut reader)
+        .await
+        .unwrap(),
+        [
+            ("The Cure".into(), "cure, the".into()),
+            ("Missing Sort".into(), "missing sort".into())
+        ]
+    );
+
+    for sort in [None, Some("the cure"), Some("cure, the")] {
+        let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+        scan.write_artist(
+            "artist", "The Cure", "the cure", sort, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        scan.write_artist(
+            "artist", "The Cure", "the cure", None, None, None, None, None,
+        )
+        .await
+        .unwrap();
+        scan.finish().await.unwrap();
+        let actual: String =
+            sqlx::query_scalar("SELECT sort_text FROM artists WHERE object_id='artist'")
+                .fetch_one(&mut reader)
+                .await
+                .unwrap();
+        assert_eq!(actual, sort.unwrap_or("cure, the"));
+    }
+}
+
 async fn write_small_catalog(
     database: &Database,
     freshness: &str,
@@ -395,7 +469,7 @@ async fn write_small_catalog(
         "artist-one",
         "Artist One",
         "artist one",
-        "artist one",
+        Some("artist one"),
         Some("artist-mbid-one"),
         Some(b"artist-art"),
         Some(false),
@@ -785,7 +859,7 @@ async fn point_album_artwork_updates_cached_members_without_replacing_distinct_c
                     "artist-one",
                     "Artist One",
                     "artist one",
-                    "artist one",
+                    Some("artist one"),
                     Some("artist-mbid-one"),
                     Some(b"artist-art"),
                     Some(false),
@@ -1464,7 +1538,7 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
             "artist-one",
             "Artist",
             "artist",
-            "artist",
+            Some("artist"),
             None,
             None,
             favorite,
@@ -1477,7 +1551,7 @@ async fn artist_credits_preserve_favorites_and_explicit_false_clears_them() {
             "artist-one",
             "Artist",
             "artist",
-            "artist",
+            Some("artist"),
             None,
             None,
             None,

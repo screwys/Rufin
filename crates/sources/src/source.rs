@@ -678,6 +678,34 @@ impl Source {
         input: SourceSetupInput,
     ) -> SourceResult<ConnectedSource> {
         match input {
+            SourceSetupInput::EmbyConnect {
+                server,
+                source_name,
+                use_instant_mix,
+                device_id,
+            } => {
+                crate::jellyfin_emby::connect::connect_server(
+                    source_id,
+                    server,
+                    source_name,
+                    use_instant_mix,
+                    device_id,
+                )
+                .await
+            }
+            SourceSetupInput::JellyfinQuickConnect {
+                login,
+                source_name,
+                use_instant_mix,
+            } => {
+                crate::jellyfin_emby::quick_connect::connect_quick(
+                    source_id,
+                    login,
+                    source_name,
+                    use_instant_mix,
+                )
+                .await
+            }
             SourceSetupInput::Plex(input) => crate::plex::connect(source_id, input).await,
             SourceSetupInput::WebDav {
                 name,
@@ -710,6 +738,36 @@ impl Source {
         jellyfin_device_id: Option<String>,
     ) -> SourceResult<SourceEditResult> {
         match input {
+            SourceSettingsInput::EmbyConnect {
+                server,
+                source_name,
+                use_instant_mix,
+            } => {
+                let device_id = jellyfin_device_id.ok_or_else(|| {
+                    SourceError::InvalidConfig("The app-wide device ID is missing".into())
+                })?;
+                crate::jellyfin_emby::connect::connect_server(
+                    current.source_id,
+                    server,
+                    source_name,
+                    use_instant_mix,
+                    device_id,
+                )
+                .await
+                .map(|source| SourceEditResult::Connected(Box::new(source)))
+            }
+            SourceSettingsInput::JellyfinQuickConnect {
+                login,
+                source_name,
+                use_instant_mix,
+            } => crate::jellyfin_emby::quick_connect::connect_quick(
+                current.source_id,
+                login,
+                source_name,
+                use_instant_mix,
+            )
+            .await
+            .map(|source| SourceEditResult::Connected(Box::new(source))),
             SourceSettingsInput::Plex(input) => {
                 crate::plex::edit(current, current_credential, input).await
             }
@@ -979,7 +1037,7 @@ impl Source {
                 .map(|stream| ResolvedDownload::new(stream, None)),
             Implementation::Local(_) => Err(SourceError::NotFound),
             Implementation::JellyfinEmby(source) => {
-                source.resolve_download(&object_id, request.quality)
+                source.resolve_download(&object_id, request.quality).await
             }
             Implementation::OpenSubsonic(source) => {
                 source.resolve_download(&object_id, request.quality)

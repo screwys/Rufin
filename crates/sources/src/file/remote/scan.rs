@@ -9,7 +9,7 @@ use crate::file::remote::input::{FileInput, FileInputServer};
 use crate::file::{media, scan::stage_audio_tracks_batch};
 use crate::{LocalImageRef, SourceError, SourceReadProgress, SourceReadStage, SourceResult};
 
-pub(crate) const PARSER_VERSION: i64 = 1;
+pub(crate) const PARSER_VERSION: i64 = 2;
 
 impl RemoteSource {
     pub(crate) async fn stat(

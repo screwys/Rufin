@@ -671,6 +671,7 @@ mod tests {
             .await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server".into()),
@@ -865,6 +866,7 @@ mod tests {
             .await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server-one".to_string()),
@@ -915,6 +917,7 @@ mod tests {
             .await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server-one".to_string()),

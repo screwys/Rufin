@@ -221,6 +221,7 @@ mod tests {
         let server = MockServer::start().await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server".into()),

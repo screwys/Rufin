@@ -1,0 +1,42 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <requires lib="libadwaita" version="1.9"/>
+  <object class="GtkStringList" id="server_options"/>
+  <object class="GtkBox" id="section">
+    <property name="orientation">vertical</property>
+    <property name="spacing">10</property>
+    <child><object class="GtkBox" id="manual_host"><property name="orientation">vertical</property><property name="spacing">10</property></object></child>
+    <child><object class="AdwPreferencesGroup" id="account">
+      <property name="title" translatable="yes">Emby Connect</property>
+      <child><object class="AdwEntryRow" id="username"><property name="title" translatable="yes">Username or email</property></object></child>
+      <child><object class="AdwPasswordEntryRow" id="password"><property name="title" translatable="yes">Password</property></object></child>
+    </object></child>
+    <child><object class="AdwPreferencesGroup" id="options">
+      <child><object class="AdwSwitchRow" id="instant_mix">
+        <property name="title" translatable="yes">Use Instant Mix for recommendations</property>
+        <property name="subtitle" translatable="yes">Use the server's Instant Mix for Radio and Auto DJ.</property>
+      </object></child>
+      <child><object class="AdwSwitchRow" id="manual"><property name="title" translatable="yes">Connect manually</property></object></child>
+    </object></child>
+    <child><object class="GtkBox" id="manual_extras">
+      <property name="orientation">vertical</property><property name="spacing">10</property>
+    </object></child>
+    <child><object class="AdwWrapBox" id="sign_in_actions">
+      <property name="child-spacing">8</property><property name="line-spacing">8</property><property name="align">1</property>
+      <child><object class="GtkButton" id="code_sign_in"><property name="label" translatable="yes">Sign in with a code</property></object></child>
+      <child><object class="GtkButton" id="sign_in"><property name="label" translatable="yes">Sign in</property><style><class name="suggested-action"/></style></object></child>
+    </object></child>
+    <child><object class="AdwPreferencesGroup" id="connection">
+      <child><object class="AdwComboRow" id="server"><property name="title" translatable="yes">Server</property><property name="model">server_options</property></object></child>
+      <child><object class="AdwEntryRow" id="name"><property name="title" translatable="yes">Name</property></object></child>
+    </object></child>
+    <child><object class="AdwWrapBox" id="connect_actions">
+      <property name="child-spacing">8</property><property name="line-spacing">8</property><property name="align">1</property>
+      <child><object class="GtkButton" id="quick_connect"><property name="label" translatable="yes">Quick Connect</property></object></child>
+      <child><object class="GtkButton" id="connect"><property name="label" translatable="yes">Connect</property><style><class name="suggested-action"/></style></object></child>
+      <child><object class="GtkButton" id="save"><property name="label" translatable="yes">Save Server Settings</property><style><class name="suggested-action"/></style></object></child>
+    </object></child>
+    <child><object class="GtkLabel" id="status"><property name="visible">false</property><property name="wrap">true</property><property name="xalign">0</property></object></child>
+  </object>
+</interface>

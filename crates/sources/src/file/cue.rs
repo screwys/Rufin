@@ -301,6 +301,10 @@ pub(crate) fn cue_track(
         .title
         .clone()
         .unwrap_or_else(|| format!("Track {}", cue.number));
+    track.sort_title = None;
+    if album_title.is_some() {
+        track.sort_album = None;
+    }
     track.duration_seconds = end_millis
         .saturating_sub(cue.index_start_ms)
         .div_euclid(1_000)

@@ -75,6 +75,16 @@ pub struct CredentialInput {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSetup {
+    EmbyConnect {
+        server: sources::EmbyConnectServer,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
+    JellyfinQuickConnect {
+        login: sources::JellyfinQuickConnectLogin,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
     Plex(sources::PlexSetupInput),
     WebDav {
         name: String,
@@ -116,11 +126,24 @@ pub struct EditableSource {
     pub file_settings: Option<sources::FileSourceSettings>,
     pub source: SourceSummary,
     pub credentials: CredentialPreset,
-    pub jellyfin_use_instant_mix: Option<bool>,
+    pub use_instant_mix: Option<bool>,
+    pub emby_connect: bool,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum SourceSettingsChange {
+    EmbyConnect {
+        source_id: SourceId,
+        server: sources::EmbyConnectServer,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
+    JellyfinQuickConnect {
+        source_id: SourceId,
+        login: sources::JellyfinQuickConnectLogin,
+        source_name: Option<String>,
+        use_instant_mix: bool,
+    },
     Plex {
         source_id: SourceId,
         settings: sources::PlexSettingsInput,
@@ -132,6 +155,7 @@ pub enum SourceSettingsChange {
         credentials: sources::FileCredentialsEdit,
     },
     JellyfinEmby {
+        connect_manually: bool,
         source_id: SourceId,
         credentials: CredentialInput,
         use_instant_mix: bool,
@@ -222,6 +246,21 @@ pub enum NextcloudLoginEvent {
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentials,
     },
+}
+
+pub enum EmbyConnectLoginMethod {
+    Password { username: String, password: String },
+    Pin,
+}
+
+pub enum EmbyConnectLoginEvent {
+    Code { code: String, url: String },
+    Servers(Vec<sources::EmbyConnectServer>),
+}
+
+pub enum JellyfinQuickConnectEvent {
+    Code { code: String, url: String },
+    Authorized(sources::JellyfinQuickConnectLogin),
 }
 
 pub enum PlexLoginMethod {

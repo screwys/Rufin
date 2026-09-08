@@ -18,8 +18,13 @@ const JELLYFIN_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
         max_bytes: JELLYFIN_ERROR_BODY_MAX_BYTES,
         context: "Jellyfin error response",
     },
-    redact_error_url: None,
+    redact_error_url: Some(redact_auth_query),
 };
+
+fn redact_auth_query(url: &mut Url) {
+    url.set_query(None);
+    url.set_fragment(None);
+}
 
 fn http_policy(kind: ServerKind) -> RemoteHttpPolicy {
     match kind {
@@ -37,16 +42,19 @@ fn http_policy(kind: ServerKind) -> RemoteHttpPolicy {
 }
 
 impl JellyfinEmbySource {
-    pub(super) fn authenticated(
+    pub(super) async fn authenticated(
         &self,
         request: reqwest::RequestBuilder,
-    ) -> reqwest::RequestBuilder {
-        let request = request.header(self.kind.authorization_header(), self.authorization.clone());
-        if self.kind == ServerKind::Emby {
-            request.header("X-Emby-Token", self.access_token.as_ref())
+    ) -> SourceResult<reqwest::RequestBuilder> {
+        let request = request.header(
+            self.kind.authorization_header(),
+            self.session_authorization().await?,
+        );
+        Ok(if self.kind == ServerKind::Emby {
+            request.header("X-Emby-Token", self.session_access_token().await?)
         } else {
             request
-        }
+        })
     }
 
     pub(super) fn item_url(&self, raw: &str) -> SourceResult<Url> {
@@ -153,10 +161,10 @@ impl JellyfinEmbySource {
             | crate::SourceRadioSeed::Genre(id) => raw_item_id(id),
         };
         let path = match seed {
-            _ if self.kind == ServerKind::Emby => format!("Items/{raw}/InstantMix"),
             crate::SourceRadioSeed::Track(_) if !self.use_instant_mix => {
                 format!("Items/{raw}/Similar")
             }
+            _ if self.kind == ServerKind::Emby => format!("Items/{raw}/InstantMix"),
             crate::SourceRadioSeed::Track(_) => format!("Songs/{raw}/InstantMix"),
             crate::SourceRadioSeed::Album(_) => format!("Albums/{raw}/InstantMix"),
             crate::SourceRadioSeed::Artist(_) => format!("Artists/{raw}/InstantMix"),
@@ -175,11 +183,14 @@ impl JellyfinEmbySource {
             .cloned()
             .unwrap_or_default();
         if items.is_empty()
-            && self.kind == ServerKind::Jellyfin
             && matches!(seed, crate::SourceRadioSeed::Track(_))
             && !self.use_instant_mix
         {
-            let mut url = endpoint(&self.base_url, &format!("Songs/{raw}/InstantMix"))?;
+            let kind = match self.kind {
+                ServerKind::Jellyfin => "Songs",
+                ServerKind::Emby => "Items",
+            };
+            let mut url = endpoint(&self.base_url, &format!("{kind}/{raw}/InstantMix"))?;
             url.query_pairs_mut()
                 .append_pair("UserId", &self.user_id)
                 .append_pair("Limit", &limit.clamp(1, 500).to_string());
@@ -332,7 +343,7 @@ impl JellyfinEmbySource {
     }
     async fn search_people(&self, query: &str, limit: usize) -> SourceResult<Vec<Value>> {
         let mut url = endpoint(&self.base_url, "Artists")?;
-        url.query_pairs_mut().append_pair("UserId",&self.user_id).append_pair("SearchTerm",query).append_pair("StartIndex","0").append_pair("Limit",&limit.to_string()).append_pair("Fields","ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds");
+        url.query_pairs_mut().append_pair("UserId",&self.user_id).append_pair("SearchTerm",query).append_pair("StartIndex","0").append_pair("Limit",&limit.to_string()).append_pair("Fields","ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds,SortName");
         let body: serde_json::Value = self.get_json(url).await?;
         Ok(body["Items"]
             .as_array()
@@ -408,7 +419,9 @@ impl JellyfinEmbySource {
         session_identifier: Option<&str>,
     ) -> SourceResult<ResolvedStream> {
         if self.kind == ServerKind::Emby {
-            return self.emby_stream(track_object_id, quality, session_identifier, false);
+            return self
+                .emby_stream(track_object_id, quality, session_identifier, false)
+                .await;
         }
         let stream = stream_descriptor(
             &self.base_url,
@@ -430,7 +443,7 @@ impl JellyfinEmbySource {
             .with_transcoding(quality != StreamQuality::Original))
     }
 
-    pub(crate) fn resolve_download(
+    pub(crate) async fn resolve_download(
         &self,
         track: &str,
         quality: StreamQuality,
@@ -438,7 +451,7 @@ impl JellyfinEmbySource {
         match self.kind {
             ServerKind::Jellyfin => self.jellyfin_download(track, quality),
             ServerKind::Emby => Ok(crate::ResolvedDownload::new(
-                self.emby_stream(track, quality, None, true)?,
+                self.emby_stream(track, quality, None, true).await?,
                 (quality != StreamQuality::Original).then_some("mp3"),
             )),
         }
@@ -530,7 +543,7 @@ impl JellyfinEmbySource {
         if let Some(tag) = image_ref.tag.as_deref().filter(|tag| !tag.is_empty()) {
             url.query_pairs_mut().append_pair("tag", tag);
         }
-        send_bytes(self.kind, self.authenticated(self.client.get(url))).await
+        send_bytes(self.kind, self.authenticated(self.client.get(url)).await?).await
     }
 }
 
@@ -829,7 +842,7 @@ impl JellyfinEmbySource {
             .append_pair("Limit", &limit.to_string())
             .append_pair(
                 "Fields",
-                "ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds",
+                "ParentId,UserData,ItemCounts,ChildCount,AlbumCount,SongCount,ImageTags,ProviderIds,SortName",
             );
 
         self.get_json::<Value>(url).await
@@ -884,11 +897,11 @@ impl JellyfinEmbySource {
         &self,
         request: reqwest::RequestBuilder,
     ) -> SourceResult<T> {
-        send_json(self.kind, self.authenticated(request)).await
+        send_json(self.kind, self.authenticated(request).await?).await
     }
 
     pub(super) async fn send_unit(&self, request: reqwest::RequestBuilder) -> SourceResult<()> {
-        send_unit(self.kind, self.authenticated(request)).await
+        send_unit(self.kind, self.authenticated(request).await?).await
     }
 }
 
@@ -1038,6 +1051,7 @@ mod tests {
         }
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: None,
@@ -1156,6 +1170,7 @@ mod tests {
             },{"Type":"Audio","Name":"Missing identity"}],"TotalRecordCount":2}))).mount(&server).await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server".into()),
@@ -1244,6 +1259,7 @@ mod tests {
             .await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server-one".to_string()),
@@ -1264,50 +1280,79 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn empty_similar_tracks_fall_back_to_jellyfin_instant_mix() {
-        let server = MockServer::start().await;
-        Mock::given(method("GET"))
-            .and(path("/Items/track-one/Similar"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "Items": [], "TotalRecordCount": 0
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        Mock::given(method("GET"))
-            .and(path("/Songs/track-one/InstantMix"))
-            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                "Items": [{"Id": "track-two"}],
-                "TotalRecordCount": 1
-            })))
-            .expect(1)
-            .mount(&server)
-            .await;
-        let source = JellyfinEmbySource::open(
-            JellyfinEmbySourceConfig {
-                kind: crate::ServerKind::Jellyfin,
-                base_url: server.uri(),
-                server_id: Some("server-one".to_string()),
-                user_id: "user-one".to_string(),
-                username: "listener".to_string(),
-                trust_invalid_cert: false,
-                use_instant_mix: false,
-            },
-            "secret-token".to_string(),
-            "device-one".to_string(),
-        )
-        .expect("Jellyfin source");
-
-        assert_eq!(
-            source
-                .generated_track_object_ids(
-                    &crate::SourceRadioSeed::Track("jellyfin:track:track-one".to_string()),
-                    20,
-                )
-                .await
-                .expect("Jellyfin recommendations"),
-            ["jellyfin:track:track-two"]
-        );
+    async fn recommendation_policy_is_shared_and_preserves_similar_candidates() {
+        for kind in [crate::ServerKind::Jellyfin, crate::ServerKind::Emby] {
+            for use_instant_mix in [false, true] {
+                for similar_is_empty in [false, true] {
+                    let server = MockServer::start().await;
+                    let prefix = if kind == crate::ServerKind::Emby {
+                        "/emby"
+                    } else {
+                        ""
+                    };
+                    let mix_kind = if kind == crate::ServerKind::Emby {
+                        "Items"
+                    } else {
+                        "Songs"
+                    };
+                    let similar_items = if similar_is_empty {
+                        serde_json::json!([])
+                    } else {
+                        serde_json::json!([{"Id":"similar-track"}])
+                    };
+                    Mock::given(method("GET"))
+                        .and(path(format!("{prefix}/Items/track-one/Similar")))
+                        .respond_with(
+                            ResponseTemplate::new(200)
+                                .set_body_json(serde_json::json!({"Items":similar_items})),
+                        )
+                        .expect(u64::from(!use_instant_mix))
+                        .mount(&server)
+                        .await;
+                    Mock::given(method("GET"))
+                        .and(path(format!("{prefix}/{mix_kind}/track-one/InstantMix")))
+                        .respond_with(
+                            ResponseTemplate::new(200)
+                                .set_body_json(serde_json::json!({"Items":[{"Id":"mix-track"}]})),
+                        )
+                        .expect(u64::from(use_instant_mix || similar_is_empty))
+                        .mount(&server)
+                        .await;
+                    let source = JellyfinEmbySource::open(
+                        JellyfinEmbySourceConfig {
+                            kind,
+                            emby_connect: false,
+                            base_url: server.uri(),
+                            server_id: Some("server-one".into()),
+                            user_id: "user-one".into(),
+                            username: "listener".into(),
+                            trust_invalid_cert: false,
+                            use_instant_mix,
+                        },
+                        "secret-token".into(),
+                        "device-one".into(),
+                    )
+                    .unwrap();
+                    let expected = if use_instant_mix || similar_is_empty {
+                        "mix-track"
+                    } else {
+                        "similar-track"
+                    };
+                    assert_eq!(
+                        source
+                            .generated_track_object_ids(
+                                &crate::SourceRadioSeed::Track(
+                                    kind.object_id("track", "track-one")
+                                ),
+                                20,
+                            )
+                            .await
+                            .unwrap(),
+                        [kind.object_id("track", expected)]
+                    );
+                }
+            }
+        }
     }
 
     #[tokio::test]
@@ -1321,6 +1366,7 @@ mod tests {
             }))).expect(1).mount(&server).await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: None,
@@ -1397,6 +1443,7 @@ mod tests {
             .await;
         let source = JellyfinEmbySource::open(
             JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: Some("server-one".to_string()),
