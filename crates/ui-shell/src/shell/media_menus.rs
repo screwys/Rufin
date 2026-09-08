@@ -149,17 +149,6 @@ pub(super) fn build(
                     .is_some_and(|shell| shell.half_stars_enabled(uri, source))
             })
         },
-        sidebar_pin_source: {
-            let weak = weak.clone();
-            Rc::new(move || {
-                weak.upgrade().and_then(|shell| {
-                    shell
-                        .selected_library()
-                        .as_deref()
-                        .map(|selected| selected.source_id.clone())
-                })
-            })
-        },
         source_download_available: {
             let weak = weak.clone();
             Rc::new(move |source_id| {

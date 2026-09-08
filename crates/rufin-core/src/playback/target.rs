@@ -65,115 +65,25 @@ impl PlaybackTarget {
         folder: Option<library::FolderKey>,
     ) -> Result<Vec<String>, String> {
         let cancellation = library::ReadCancellation::new();
-        let target = match self {
-            Self::Contextual { target, .. } => target.as_ref(),
-            target => target,
-        };
-        match (target, source_key) {
-            (Self::AlbumKey(key), Some(source)) => database
-                .album_track_route_page(
-                    source,
-                    *key,
-                    folder,
-                    "",
-                    library::TrackSort::TrackNumber,
-                    false,
-                    library::RouteSeedWindow::top(),
-                    &cancellation,
-                )
+        match self.queue_input(source_key, folder) {
+            library::QueueInput::Uris { order, .. } => Ok(order.to_vec()),
+            library::QueueInput::Collection { collection, .. } => database
+                .collection_media_uri_order(&collection, &cancellation)
                 .await
-                .map(|page| page.order)
                 .map_err(|error| error.to_string()),
-            (Self::ArtistKey(key, album_artist), Some(source)) => database
-                .artist_track_route_page(
-                    source,
-                    *key,
-                    *album_artist,
-                    folder,
-                    "",
-                    library::TrackSort::Title,
-                    false,
-                    false,
-                    library::RouteSeedWindow::top(),
-                    &cancellation,
-                )
+            library::QueueInput::Smart {
+                key,
+                source,
+                folder,
+                now,
+                ..
+            } => database
+                .smart_playlist_media_uri_order(source, key, folder, now, &cancellation)
                 .await
-                .map(|page| page.order)
                 .map_err(|error| error.to_string()),
-            (Self::Track(media_uri), _) => Ok(vec![media_uri.clone()]),
-            (Self::Album(uri), _) => database
-                .album_detail(uri, library::TrackSort::TrackNumber, false, &cancellation)
-                .await
-                .map(|detail| detail.map(|detail| detail.track_order).unwrap_or_default())
-                .map_err(|error| error.to_string()),
-            (Self::Artist(uri) | Self::AlbumArtist(uri), _) => {
-                let Some(row) = database
-                    .artist_row_by_media_uri(uri, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())?
-                else {
-                    return Ok(Vec::new());
-                };
-                database
-                    .artist_track_route_page(
-                        row.source_key,
-                        row.artist_key,
-                        matches!(target, Self::AlbumArtist(_)),
-                        None,
-                        "",
-                        library::TrackSort::Title,
-                        false,
-                        false,
-                        library::RouteSeedWindow::top(),
-                        &cancellation,
-                    )
-                    .await
-                    .map(|page| page.order)
-                    .map_err(|error| error.to_string())
+            _ => {
+                unreachable!("PlaybackTarget produces a track, collection, or smart playlist input")
             }
-            (Self::Genre(key), Some(source_key)) => database
-                .genre_track_route_page(
-                    source_key,
-                    *key,
-                    folder,
-                    "",
-                    library::TrackSort::Title,
-                    false,
-                    library::RouteSeedWindow::top(),
-                    &cancellation,
-                )
-                .await
-                .map(|page| page.order)
-                .map_err(|error| error.to_string()),
-            (Self::Mood(key), Some(source_key)) => database
-                .mood_track_route_page(
-                    source_key,
-                    *key,
-                    folder,
-                    "",
-                    library::TrackSort::Title,
-                    false,
-                    library::RouteSeedWindow::top(),
-                    &cancellation,
-                )
-                .await
-                .map(|page| page.order)
-                .map_err(|error| error.to_string()),
-            (Self::Playlist(key), _) => database
-                .playlist_media_uri_order(*key, folder, &cancellation)
-                .await
-                .map_err(|error| error.to_string()),
-            (Self::SmartPlaylist(key), _) => {
-                let now = std::time::SystemTime::now()
-                    .duration_since(std::time::UNIX_EPOCH)
-                    .map_or(0, |duration| duration.as_secs().min(i64::MAX as u64) as i64);
-                database
-                    .smart_playlist_media_uri_order(source_key, *key, folder, now, &cancellation)
-                    .await
-                    .map_err(|error| error.to_string())
-            }
-            (Self::Contextual { .. }, _) => unreachable!(),
-            (_, None) => Ok(Vec::new()),
         }
     }
 
@@ -224,8 +134,63 @@ impl PlaybackTarget {
         };
         library::QueueInput::Collection {
             collection,
-            folder,
+            folder: None,
             context_id,
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn explicit_collections_keep_their_full_scope_without_current() {
+        let targets = [
+            PlaybackTarget::Album("album:uri".into()),
+            PlaybackTarget::AlbumKey(library::AlbumKey::from_raw(2)),
+            PlaybackTarget::Artist("artist:uri".into()),
+            PlaybackTarget::AlbumArtist("artist:uri".into()),
+            PlaybackTarget::ArtistKey(library::ArtistKey::from_raw(3), false),
+            PlaybackTarget::ArtistKey(library::ArtistKey::from_raw(3), true),
+            PlaybackTarget::Genre(GenreKey::from_raw(4)),
+            PlaybackTarget::Mood(MoodKey::from_raw(5)),
+            PlaybackTarget::Playlist(PlaylistKey::from_raw(-6)),
+        ];
+        for target in targets {
+            let target = target.in_context("pinned");
+            let expected = target.queue_input(None, None);
+            for source in [None, Some(library::SourceKey::from_raw(99))] {
+                let input = target.queue_input(source, Some(library::FolderKey::from_raw(100)));
+                assert_eq!(input, expected);
+                assert!(matches!(
+                    input,
+                    library::QueueInput::Collection { folder: None, .. }
+                ));
+            }
+        }
+    }
+
+    #[test]
+    fn smart_playlist_inputs_keep_definition_scope_inputs() {
+        let key = SmartPlaylistKey::from_raw(1);
+        let target = PlaybackTarget::SmartPlaylist(key).in_context("smart pin");
+        for source in [None, Some(library::SourceKey::from_raw(99))] {
+            let folder = Some(library::FolderKey::from_raw(100));
+            let library::QueueInput::Smart {
+                key: actual,
+                source: actual_source,
+                folder: actual_folder,
+                context_id,
+                ..
+            } = target.queue_input(source, folder)
+            else {
+                panic!("expected smart input")
+            };
+            assert_eq!(actual, key);
+            assert_eq!(actual_source, source);
+            assert_eq!(actual_folder, folder);
+            assert_eq!(context_id.as_ref(), "smart pin");
         }
     }
 }

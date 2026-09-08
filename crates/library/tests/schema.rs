@@ -4,6 +4,34 @@ use library::{Database, ReadCancellation, SourceId};
 use sqlx::Connection;
 use sqlx::sqlite::{SqliteConnectOptions, SqliteConnection};
 
+#[tokio::test]
+async fn scan_publication_and_reopening_an_unanalyzed_catalog_populate_statistics() {
+    let fixture = super::support::fixture().await;
+    let mut raw = super::support::connection(&fixture.path).await;
+    let stat: String =
+        sqlx::query_scalar("SELECT stat FROM catalog.sqlite_stat1 WHERE idx='tracks_key_idx'")
+            .fetch_one(&mut raw)
+            .await
+            .expect("publication analyzed tracks");
+    assert_eq!(stat.split_whitespace().next(), Some("4"));
+    sqlx::raw_sql("DROP TABLE catalog.sqlite_stat1")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+    fixture.database.close().await.unwrap();
+    let reopened = Database::open(&fixture.path).await.unwrap();
+    let mut raw = super::support::connection(&fixture.path).await;
+    let stat: String =
+        sqlx::query_scalar("SELECT stat FROM catalog.sqlite_stat1 WHERE idx='tracks_key_idx'")
+            .fetch_one(&mut raw)
+            .await
+            .expect("opening populated catalog analyzed tracks");
+    assert_eq!(stat.split_whitespace().next(), Some("4"));
+    raw.close().await.unwrap();
+    reopened.close().await.unwrap();
+}
+
 const SCHEMA_43: &str = r#"BEGIN IMMEDIATE;
 PRAGMA application_id = 1381320270;
 PRAGMA user_version = 43;

@@ -144,17 +144,7 @@ pub(super) fn build_compact_navigation(shell: &Rc<Shell>) {
 }
 
 pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
-    if !request_sidebar_pins(shell) {
-        clear_box(&shell.navigation_view.normal_nav_pins);
-        let mut child = shell.navigation_view.compact_nav.first_child();
-        while let Some(widget) = child {
-            child = widget.next_sibling();
-            if widget.has_css_class(SIDEBAR_PIN_ROW_CLASS) {
-                shell.navigation_view.compact_nav.remove(&widget);
-            }
-        }
-        return;
-    }
+    request_sidebar_pins(shell);
     shell.navigation_view.normal_nav_routes.remove_all();
     clear_box(&shell.navigation_view.normal_nav_pins);
     while let Some(widget) = shell
@@ -178,76 +168,66 @@ impl Shell {
     }
 
     pub(crate) fn import_remote_playlist_pins_once(self: &Rc<Self>) {
-        let Some(selected) = self.selected_library().as_deref().cloned() else {
-            return;
-        };
-        let source_id = selected.source_id.clone();
-        let remote = self
-            .source
-            .configured
-            .borrow()
-            .sources
-            .iter()
-            .any(|source| source.id == source_id && source.kind != "local");
-        if !remote
-            || self
-                .settings
-                .current
+        let sources = {
+            let settings = self.settings.current.borrow();
+            self.source
+                .configured
                 .borrow()
-                .sidebar
-                .playlist_pin_imported_sources
-                .contains(&source_id)
-        {
+                .sources
+                .iter()
+                .filter(|source| {
+                    source.kind != "local"
+                        && !settings
+                            .sidebar
+                            .playlist_pin_imported_sources
+                            .contains(&source.id)
+                })
+                .map(|source| source.id.clone())
+                .collect::<Vec<_>>()
+        };
+        if sources.is_empty() {
             return;
         }
-        let database = Arc::clone(&selected.database);
-        let runtime = selected.runtime.clone();
-        let source = selected.source_key;
-        let folder = selected.music_folder_key;
-        let cancellation = library::ReadCancellation::new();
-        let task = runtime.spawn(async move {
-            let order = database
-                .playlist_order(
-                    source,
-                    folder,
-                    library::PlaylistSort::Title,
-                    false,
-                    "",
-                    &cancellation,
-                )
-                .await?;
-            let mut object_ids = Vec::with_capacity(order.len());
-            for keys in order.chunks(128) {
-                object_ids.extend(
-                    database
-                        .playlist_rows(keys, &cancellation)
-                        .await?
-                        .into_iter()
-                        .map(|row| row.object_id),
-                );
+        let database = Arc::clone(&self.products.library);
+        let task = self.products.runtime.spawn(async move {
+            let cancellation = library::ReadCancellation::new();
+            let mut imports = Vec::new();
+            for source_id in sources {
+                let Some(source) = database.source_identity_key(&source_id).await? else {
+                    continue;
+                };
+                let ids = database
+                    .source_playlist_object_ids(source, &cancellation)
+                    .await?;
+                if !ids.is_empty() {
+                    imports.push((source_id, ids));
+                }
             }
-            Ok::<_, library::LibraryError>(object_ids)
+            Ok::<_, library::LibraryError>(imports)
         });
-        let shell = Rc::downgrade(self);
+        let weak = Rc::downgrade(self);
         glib::spawn_future_local(async move {
-            let Some(shell) = shell.upgrade() else {
+            let result = task.await.ok().and_then(Result::ok);
+            let Some(shell) = weak.upgrade() else { return };
+            let Some(imports) = result else {
+                warn!("failed to read remote playlists for Pins import");
                 return;
             };
-            match task.await.ok().and_then(Result::ok) {
-                Some(playlist_ids) => {
-                    let changed = shell
-                        .settings
-                        .update_app_settings("remote playlist Pins import", |settings| {
-                            settings
-                                .sidebar
-                                .import_playlist_pins_once(source_id.clone(), playlist_ids)
-                        })
-                        .is_some();
-                    if changed {
-                        shell.rebuild_sidebar_navigation();
+            if imports.is_empty() {
+                return;
+            }
+            if shell
+                .settings
+                .update_app_settings("remote playlist Pins import", |settings| {
+                    let mut changed = false;
+                    for (source, ids) in imports {
+                        changed |= settings.sidebar.import_playlist_pins_once(source, ids);
                     }
-                }
-                None => warn!("failed to read remote playlists for Pins import"),
+                    changed
+                })
+                .is_some()
+            {
+                request_sidebar_pins(&shell);
             }
         });
     }
@@ -260,7 +240,7 @@ impl Shell {
             })
             .is_some()
         {
-            let _ = request_sidebar_pins(self);
+            request_sidebar_pins(self);
         }
     }
 
@@ -747,33 +727,32 @@ enum SidebarPinItem {
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct SidebarPinIdentity {
-    source: Option<library::SourceKey>,
-    folder: Option<library::FolderKey>,
+    smart_context: Option<(library::SourceKey, Option<library::FolderKey>)>,
     pins: Vec<SidebarPin>,
 }
 
 impl SidebarPinItem {
-    fn stored_pin(&self, source_id: Option<&sources::SourceId>) -> SidebarPin {
+    fn stored_pin(&self) -> SidebarPin {
         match self {
             Self::Album(album) => SidebarPin::Album {
-                source_id: source_id.expect("catalog pin has a Current source").clone(),
+                source_id: library::source_entity_parts(&album.media_uri)
+                    .expect("catalog entity has a source identity")
+                    .0,
                 album_id: album.object_id.clone(),
             },
             Self::Artist(artist, album_artist) => SidebarPin::Artist {
-                source_id: source_id.expect("catalog pin has a Current source").clone(),
+                source_id: library::source_entity_parts(&artist.media_uri)
+                    .expect("catalog entity has a source identity")
+                    .0,
                 artist_id: artist.object_id.clone(),
                 album_artist: *album_artist,
             },
             Self::Genre(genre) => SidebarPin::Genre {
-                source_id: source_id.expect("catalog pin has a Current source").clone(),
+                source_id: sources::SourceId::new(genre.source_id.clone()),
                 genre_id: genre.object_id.clone(),
             },
             Self::Playlist(playlist) => SidebarPin::Playlist {
-                source_id: playlist.source_key.map(|_| {
-                    source_id
-                        .expect("scoped Playlist pin has a Current source")
-                        .clone()
-                }),
+                source_id: playlist.source_id.clone().map(sources::SourceId::new),
                 playlist_id: playlist.object_id.clone(),
             },
             Self::SmartPlaylist(playlist) => SidebarPin::SmartPlaylist {
@@ -986,42 +965,31 @@ fn append_compact_sidebar_pins(shell: &Rc<Shell>) {
     }
 }
 
-pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
+pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) {
     let selected = shell.selected_library().as_deref().cloned();
-    let source_id = selected.as_ref().map(|selected| selected.source_id.clone());
     let pins = {
         let settings = shell.settings.current.borrow();
         if !settings.sidebar.pins_visible {
             Vec::new()
         } else {
-            settings
-                .sidebar
-                .pins
-                .iter()
-                .filter(|pin| pin.visible_for(source_id.as_ref()))
-                .cloned()
-                .collect()
+            settings.sidebar.pins.clone()
         }
     };
     let identity = SidebarPinIdentity {
-        source: selected.as_ref().map(|selected| selected.source_key),
-        folder: selected
-            .as_ref()
-            .and_then(|selected| selected.music_folder_key),
+        smart_context: pins
+            .iter()
+            .any(|pin| matches!(pin, SidebarPin::SmartPlaylist { .. }))
+            .then(|| {
+                selected
+                    .as_ref()
+                    .map(|selected| (selected.source_key, selected.music_folder_key))
+            })
+            .flatten(),
         pins: pins.clone(),
     };
     if shell.navigation.pin_identity.borrow().as_ref() == Some(&identity) {
-        return shell.navigation.pin_cancellation.borrow().is_none();
+        return;
     }
-    let can_reconcile_current =
-        shell
-            .navigation
-            .pin_identity
-            .borrow()
-            .as_ref()
-            .is_some_and(|current| {
-                current.source == identity.source && current.folder == identity.folder
-            });
     if let Some(cancellation) = shell.navigation.pin_cancellation.borrow_mut().take() {
         cancellation.cancel();
     }
@@ -1031,10 +999,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
         .navigation
         .pin_identity
         .replace(Some(identity.clone()));
-    if can_reconcile_current {
+    {
         let retained = {
             let mut items = shell.navigation.pin_items.borrow_mut();
-            items.retain(|item| pins.contains(&item.stored_pin(source_id.as_ref())));
+            items.retain(|item| pins.contains(&item.stored_pin()));
             items.clone()
         };
         reconcile_sidebar_pin_widgets(shell, &retained);
@@ -1042,7 +1010,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
     if pins.is_empty() {
         shell.navigation.pin_items.borrow_mut().clear();
         reconcile_sidebar_pin_widgets(shell, &[]);
-        return true;
+        return;
     }
     let cancellation = library::ReadCancellation::new();
     shell
@@ -1050,7 +1018,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
         .pin_cancellation
         .replace(Some(cancellation.clone()));
     let database = Arc::clone(&shell.products.library);
-    let source = selected.as_ref().map(|selected| selected.source_key);
+    let current_source = selected.as_ref().map(|selected| selected.source_key);
     let folder = selected
         .as_ref()
         .and_then(|selected| selected.music_folder_key);
@@ -1058,6 +1026,14 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
     let task = runtime.spawn(async move {
         let mut items = Vec::with_capacity(pins.len());
         for pin in pins {
+            let source = match &pin {
+                SidebarPin::Album { source_id, .. }
+                | SidebarPin::Artist { source_id, .. }
+                | SidebarPin::Genre { source_id, .. } => {
+                    database.source_identity_key(source_id).await?
+                }
+                _ => None,
+            };
             let item = match pin {
                 SidebarPin::Album { album_id, .. } => {
                     let Some(source) = source else { continue };
@@ -1068,7 +1044,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
                         continue;
                     };
                     database
-                        .album_rows(source, &[key], folder, &cancellation)
+                        .album_rows(source, &[key], None, &cancellation)
                         .await?
                         .pop()
                         .map(SidebarPinItem::Album)
@@ -1086,7 +1062,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
                         continue;
                     };
                     database
-                        .artist_rows(source, &[key], album_artist, folder, &cancellation)
+                        .artist_rows(source, &[key], album_artist, None, &cancellation)
                         .await?
                         .pop()
                         .map(|artist| SidebarPinItem::Artist(artist, album_artist))
@@ -1100,7 +1076,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
                         continue;
                     };
                     database
-                        .genre_rows(source, &[key], folder, &cancellation)
+                        .genre_rows(source, &[key], None, &cancellation)
                         .await?
                         .pop()
                         .map(SidebarPinItem::Genre)
@@ -1109,16 +1085,9 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
                     source_id,
                     playlist_id,
                 } => {
-                    let key = if source_id.is_some() {
-                        let Some(source) = source else { continue };
-                        database
-                            .playlist_key_by_object(source, &playlist_id, &cancellation)
-                            .await?
-                    } else {
-                        database
-                            .global_playlist_key_by_object(&playlist_id, &cancellation)
-                            .await?
-                    };
+                    let key = database
+                        .playlist_key_by_identity(source_id.as_ref(), &playlist_id, &cancellation)
+                        .await?;
                     let Some(key) = key else { continue };
                     database
                         .playlist_rows(&[key], &cancellation)
@@ -1137,7 +1106,7 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
                         .duration_since(UNIX_EPOCH)
                         .map_or(0, |duration| duration.as_secs() as i64);
                     database
-                        .smart_playlist_rows(source, &[key], folder, now, &cancellation)
+                        .smart_playlist_rows(current_source, &[key], folder, now, &cancellation)
                         .await?
                         .pop()
                         .map(SidebarPinItem::SmartPlaylist)
@@ -1151,10 +1120,10 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
     });
     let shell = Rc::downgrade(shell);
     glib::spawn_future_local(async move {
+        let items = task.await.ok().and_then(Result::ok);
         let Some(shell) = shell.upgrade() else {
             return;
         };
-        let items = task.await.ok().and_then(Result::ok);
         if !sidebar_pin_publication_is_current(
             generation,
             shell.navigation.pin_generation.get(),
@@ -1175,7 +1144,6 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
             }
         }
     });
-    false
 }
 
 fn sidebar_pin_publication_is_current(
@@ -1189,7 +1157,7 @@ fn sidebar_pin_publication_is_current(
 
 pub(crate) fn refresh_sidebar_pins(shell: &Rc<Shell>) {
     shell.navigation.pin_identity.borrow_mut().take();
-    let _ = request_sidebar_pins(shell);
+    request_sidebar_pins(shell);
 }
 
 pub(crate) fn update_sidebar_smart_playlist_pin_metadata(
@@ -1227,33 +1195,14 @@ fn reorder_current_sidebar_pin_projection(
     target: &SidebarPin,
     after: bool,
 ) {
-    let source_id = shell
-        .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_id.clone());
-    let desired = shell
-        .settings
-        .current
-        .borrow()
-        .sidebar
-        .pins
-        .iter()
-        .filter(|pin| pin.visible_for(source_id.as_ref()))
-        .cloned()
-        .collect::<Vec<_>>();
+    let desired = shell.settings.current.borrow().sidebar.pins.clone();
     let (moved_key, target_key) = {
         let mut items = shell.navigation.pin_items.borrow_mut();
-        let Some(moved_index) = items
-            .iter()
-            .position(|item| item.stored_pin(source_id.as_ref()) == *moved)
-        else {
+        let Some(moved_index) = items.iter().position(|item| item.stored_pin() == *moved) else {
             return;
         };
         let moved_item = items.remove(moved_index);
-        let Some(target_index) = items
-            .iter()
-            .position(|item| item.stored_pin(source_id.as_ref()) == *target)
-        else {
+        let Some(target_index) = items.iter().position(|item| item.stored_pin() == *target) else {
             return;
         };
         let target_key = sidebar_pin_route_key(&items[target_index].route());
@@ -1315,16 +1264,20 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .current
         .borrow()
         .prefer_server_playlist_covers;
-    let previous_artwork = shell
+    let previous_items = shell
         .navigation
         .pin_items
         .borrow()
         .iter()
-        .filter_map(|item| {
-            sidebar_pin_route_key(&item.route())
-                .map(|key| (key, item.artwork(prefer_server_playlist_covers)))
-        })
+        .filter_map(|item| sidebar_pin_route_key(&item.route()).map(|key| (key, item.clone())))
         .collect::<HashMap<_, _>>();
+    let row_changed = |key: &str, item: &SidebarPinItem| {
+        previous_items.get(key).is_some_and(|previous| {
+            previous.artwork(prefer_server_playlist_covers) != item.artwork(prefer_server_playlist_covers)
+                || matches!((previous, item), (SidebarPinItem::SmartPlaylist(previous), SidebarPinItem::SmartPlaylist(next))
+                    if previous.definition.current != next.definition.current)
+        })
+    };
     let desired_keys = items
         .iter()
         .filter_map(|item| sidebar_pin_route_key(&item.route()))
@@ -1351,9 +1304,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         let widget = normal_widgets
             .remove(&key)
             .filter(|widget| {
-                if previous_artwork.get(&key).is_some_and(|previous| {
-                    *previous != item.artwork(prefer_server_playlist_covers)
-                }) {
+                if row_changed(&key, item) {
                     normal.remove(widget);
                     false
                 } else {
@@ -1383,9 +1334,7 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         let widget = compact_widgets
             .remove(&key)
             .filter(|widget| {
-                if previous_artwork.get(&key).is_some_and(|previous| {
-                    *previous != item.artwork(prefer_server_playlist_covers)
-                }) {
+                if row_changed(&key, item) {
                     compact.remove(widget);
                     false
                 } else {
@@ -1537,17 +1486,29 @@ fn sidebar_pin_row(
     title_label.set_ellipsize(gtk::pango::EllipsizeMode::End);
     identity.append(&title_label);
     let metadata = sidebar_pin_metadata(track_count, duration_seconds);
-    let belongs_to_source = match &pin {
-        SidebarPinItem::Playlist(playlist) => Some(playlist.source_key.is_some()),
-        SidebarPinItem::SmartPlaylist(playlist) => Some(playlist.definition.current),
-        _ => None,
-    };
-    if let Some(belongs_to_source) = belongs_to_source {
+    let source_label = {
         let configured = shell.source.configured.borrow();
-        let source = configured.sources.iter().find(|source| {
-            belongs_to_source && configured.selected_source_id.as_ref() == Some(&source.id)
-        });
-        let (icon, name) = ui_shared::source_labels::source_display_label(source);
+        let source_id = match &pin {
+            SidebarPinItem::Playlist(playlist) => Some(playlist.source_id.as_deref()),
+            SidebarPinItem::SmartPlaylist(playlist) => Some(
+                configured
+                    .selected_source_id
+                    .as_ref()
+                    .filter(|_| playlist.definition.current)
+                    .map(sources::SourceId::as_str),
+            ),
+            _ => None,
+        };
+        source_id.map(|source_id| {
+            ui_shared::source_labels::source_display_label(
+                configured
+                    .sources
+                    .iter()
+                    .find(|source| Some(source.id.as_str()) == source_id),
+            )
+        })
+    };
+    if let Some((icon, name)) = source_label {
         let source = gtk::Image::from_icon_name(icon);
         source.set_pixel_size(ui_shared::source_labels::source_icon_pixel_size(icon, 12));
         source.set_tooltip_text(Some(&name));
@@ -1708,11 +1669,7 @@ fn install_sidebar_pin_reorder(
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
-    let source_id = shell
-        .selected_library()
-        .as_deref()
-        .map(|selected| selected.source_id.clone());
-    let pin = pin.stored_pin(source_id.as_ref());
+    let pin = pin.stored_pin();
     let payload = sidebar_pin_drag_variant(&pin);
     let drag = gtk::DragSource::builder()
         .actions(gtk::gdk::DragAction::MOVE)
@@ -2125,8 +2082,7 @@ mod tests {
     #[test]
     fn stale_sidebar_pin_result_cannot_rebuild_navigation() {
         let identity = SidebarPinIdentity {
-            source: Some(library::SourceKey::from_raw(1)),
-            folder: None,
+            smart_context: None,
             pins: Vec::new(),
         };
         assert!(sidebar_pin_publication_is_current(

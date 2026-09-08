@@ -17,7 +17,7 @@ use ui_shared::favorites::{
     album_favorite_key, favorite_button_is_active, favorite_icon_button, set_favorite_button_active,
 };
 use ui_shared::format_duration_units;
-use ui_shared::mounted_route::{LatestMountedRouteRead, MountedRoute};
+use ui_shared::mounted_route::MountedRoute;
 
 use super::collections::library_route_inset;
 use super::detail_showcase::{
@@ -33,11 +33,6 @@ use crate::track_model::{PreparedTrackProjection, TrackCollectionModel, TrackPro
 use ui_shared::detail_links::{DetailLinkBinding, album_artist_links};
 use ui_shared::media_menus::present_album_context_menu;
 use ui_shared::route::Route;
-
-#[derive(Clone)]
-struct AlbumDetailReadRequest {
-    tracks: TrackProjectionRequest,
-}
 
 impl CatalogUi {
     pub fn album_detail_view(
@@ -78,13 +73,6 @@ impl CatalogUi {
                 .current
                 .borrow()
                 .library_list(LibraryListKey::AlbumDetailTracks),
-        );
-        model.set_queue_source(
-            library::QueueQuery::Collection {
-                collection: library::QueueCollection::AlbumKey(album_id),
-                favorites_only: false,
-            },
-            None,
         );
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
@@ -225,42 +213,21 @@ impl CatalogUi {
         );
         route_stack.set_visible_child_name("content");
 
-        let apply = {
-            let shell = Rc::downgrade(self);
-            let track_projection = track_projection.clone();
-            Rc::new(
-                move |_: AlbumDetailReadRequest,
-                      result: Result<PreparedTrackProjection, String>| {
-                    let Some(shell) = shell.upgrade() else {
-                        return;
-                    };
-                    if !(shell.is_current)() {
-                        return;
-                    }
-                    match result {
-                        Ok(prepared) => {
-                            track_projection.replace_prepared(prepared);
-                        }
-                        Err(error) => tracing::warn!(%error, "failed to read Album Track order"),
-                    }
-                },
-            )
-        };
         let database = Arc::clone(&self.library);
         let source = album.source_key;
         let folder = None;
-        let load = Arc::new(move |request: AlbumDetailReadRequest| {
+        let load = move |request: TrackProjectionRequest| {
             let database = Arc::clone(&database);
-            Box::pin(async move {
+            async move {
                 let cancellation = library::ReadCancellation::new();
                 let page = database
                     .album_track_route_page(
                         source,
                         album_id,
                         folder,
-                        &request.tracks.query,
-                        request.tracks.settings.sort_key.track_sort(),
-                        request.tracks.settings.descending,
+                        &request.query,
+                        request.settings.sort_key.track_sort(),
+                        request.settings.descending,
                         library::RouteSeedWindow::top(),
                         &cancellation,
                     )
@@ -270,25 +237,12 @@ impl CatalogUi {
                     order: page.order,
                     first_row_position: page.first_row_position,
                     first_rows: page.first_rows,
-                    request: request.tracks,
+                    request,
                 })
-            }) as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
-        });
-        let read = LatestMountedRouteRead::new_with_request(
-            self.runtime.clone(),
-            apply,
-            load,
-            "mounted Album route",
-        );
-        {
-            let read = Rc::downgrade(&read);
-            track_projection.connect_search_request(move |tracks| {
-                let Some(read) = read.upgrade() else {
-                    return;
-                };
-                read.request_with(AlbumDetailReadRequest { tracks });
-            });
-        }
+            }
+        };
+        let refresh =
+            track_projection.connect_read(self, |request| request, load, "mounted Album route");
         let layout_cycle = track_toolbar.layout_cycle();
         let resume = {
             let shell = Rc::downgrade(self);
@@ -296,7 +250,7 @@ impl CatalogUi {
             let showcase = showcase_view.clone();
             let applied_external_link_settings = Rc::clone(&applied_external_link_settings);
             let track_projection = track_projection.clone();
-            let read = Rc::clone(&read);
+            let refresh = Rc::clone(&refresh);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
                     return;
@@ -318,16 +272,8 @@ impl CatalogUi {
                 track_toolbar.apply(LibraryListKey::AlbumDetailTracks, &settings);
                 let tracks = track_projection.projection_request();
                 if !previous.same_query(&tracks) {
-                    read.request_with(AlbumDetailReadRequest { tracks });
+                    refresh();
                 }
-            })
-        };
-        let refresh = {
-            let track_projection = track_projection.clone();
-            Rc::new(move || {
-                read.request_with(AlbumDetailReadRequest {
-                    tracks: track_projection.projection_request(),
-                });
             })
         };
         let download_target = current_album.borrow().media_uri.clone();

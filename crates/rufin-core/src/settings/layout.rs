@@ -334,21 +334,6 @@ pub enum SidebarPin {
 fn is_false(value: &bool) -> bool {
     !*value
 }
-impl SidebarPin {
-    pub fn source_id(&self) -> Option<&SourceId> {
-        match self {
-            Self::Album { source_id, .. }
-            | Self::Artist { source_id, .. }
-            | Self::Genre { source_id, .. } => Some(source_id),
-            Self::Playlist { source_id, .. } => source_id.as_ref(),
-            Self::SmartPlaylist { .. } => None,
-        }
-    }
-
-    pub fn visible_for(&self, source_id: Option<&SourceId>) -> bool {
-        self.source_id().is_none() || self.source_id() == source_id
-    }
-}
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct SidebarSettings {
     #[serde(default = "default_sidebar_route_items")]
@@ -409,7 +394,7 @@ impl SidebarSettings {
         self.pins.retain(|pin| seen.insert(pin.clone()));
         let mut seen = HashSet::new();
         self.playlist_pin_imported_sources
-            .retain(|source_id| seen.insert(source_id.clone()));
+            .retain(|source| seen.insert(source.clone()));
     }
 
     pub fn is_pinned(&self, pin: &SidebarPin) -> bool {
@@ -454,7 +439,6 @@ impl SidebarSettings {
         let target_index = self.pins.iter().position(|pin| pin == target)?;
         (moved_index != target_index).then_some(moved_index < target_index)
     }
-
     pub fn import_playlist_pins_once(
         &mut self,
         source_id: SourceId,
@@ -1166,6 +1150,60 @@ mod sidebar_tests {
             source_id: Some(SourceId::new("test:source")),
             playlist_id: id.to_string(),
         }
+    }
+
+    #[test]
+    fn saved_pins_keep_cross_source_identity_and_global_order() {
+        let first = SidebarPin::Genre {
+            source_id: SourceId::new("first"),
+            genre_id: "rock".into(),
+        };
+        let second = SidebarPin::Genre {
+            source_id: SourceId::new("second"),
+            genre_id: "rock".into(),
+        };
+        let global = SidebarPin::Playlist {
+            source_id: None,
+            playlist_id: "mix".into(),
+        };
+        let saved = serde_json::json!({
+            "pins": [first, second, global, first],
+            "playlist_pin_imported_sources": ["first", "second"]
+        });
+        let mut settings: SidebarSettings = serde_json::from_value(saved).unwrap();
+        settings.sanitize();
+        assert_eq!(
+            settings.pins,
+            [first.clone(), second.clone(), global.clone()]
+        );
+        assert!(settings.reorder_pin(&second, &global, true));
+        assert_eq!(settings.pins, [first, global, second]);
+        let encoded = serde_json::to_value(&settings).unwrap();
+        assert_eq!(
+            encoded["playlist_pin_imported_sources"],
+            serde_json::json!(["first", "second"])
+        );
+        assert_eq!(
+            serde_json::from_value::<SidebarSettings>(encoded).unwrap(),
+            settings
+        );
+    }
+
+    #[test]
+    fn playlist_import_appends_globally_once_and_preserves_unpinning() {
+        let first = SourceId::new("plex");
+        let second = SourceId::new("emby");
+        let mut settings = SidebarSettings::default();
+        assert!(settings.import_playlist_pins_once(first.clone(), ["mix".into()]));
+        assert!(settings.import_playlist_pins_once(second.clone(), ["mix".into()]));
+        let removed = settings.pins[0].clone();
+        let retained = settings.pins[1].clone();
+        settings.set_pinned(removed, false);
+        let mut restored: SidebarSettings =
+            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
+        assert!(!restored.import_playlist_pins_once(first, ["mix".into()]));
+        assert!(!restored.import_playlist_pins_once(second, ["mix".into()]));
+        assert_eq!(restored.pins, [retained]);
     }
 
     #[test]

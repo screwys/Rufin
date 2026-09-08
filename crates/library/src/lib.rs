@@ -74,11 +74,10 @@ pub use scan::{
 };
 pub use search::{SearchRequest, SearchResults};
 pub use smart_playlists::{
-    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistDetailPage,
-    SmartPlaylistListSort, SmartPlaylistRow, SmartPlaylistRule, SmartPlaylistRuleField,
-    SmartPlaylistRuleOperator, SmartPlaylistRuleValue, SmartPlaylistRuleValueKind,
-    SmartPlaylistSort, SmartPlaylistTrackRow, SmartPlaylistValueSuggestions, SmartPlaylistWrite,
-    SmartSourceReference,
+    SmartPlaylistActivityPeriod, SmartPlaylistDefinition, SmartPlaylistListSort, SmartPlaylistRow,
+    SmartPlaylistRule, SmartPlaylistRuleField, SmartPlaylistRuleOperator, SmartPlaylistRuleValue,
+    SmartPlaylistRuleValueKind, SmartPlaylistSort, SmartPlaylistTrackRow,
+    SmartPlaylistValueSuggestions, SmartPlaylistWrite, SmartSourceReference,
 };
 pub use tracks::{
     TrackArtistLink, TrackGenreLink, TrackMetadataWrite, TrackRoutePage, TrackRow, TrackSort,
@@ -103,6 +102,8 @@ pub enum LibraryError {
     InvalidScan(String),
     #[error("Library request is invalid: {0}")]
     InvalidRequest(String),
+    #[error("Playlist only accepts Tracks from Source {0}")]
+    PlaylistSourceMismatch(SourceId),
     #[error("scan staging failed; the candidate cannot be published")]
     ScanFailed,
     #[error("another source scan is already active")]

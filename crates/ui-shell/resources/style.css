@@ -305,6 +305,7 @@ button.release-note-update:hover {
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical,
+scrolledwindow.sidebar-scroller scrollbar.vertical,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical {
   min-width: 9px;
   opacity: 1;
@@ -315,6 +316,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical,
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range,
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
+scrolledwindow.sidebar-scroller scrollbar.vertical > range,
+scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough {
   min-width: 9px;
@@ -326,6 +329,7 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough,
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
+scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider {
   min-width: 7px;
   min-height: 42px;
@@ -339,6 +343,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:hover,
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:active,
+scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider:hover,
+scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough > slider:active,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:hover,
 .right-panel scrolledwindow.right-panel-scroller scrollbar.vertical > range > trough > slider:active {
   background: color-mix(in srgb, var(--window-fg-color) 56%, transparent);
@@ -346,6 +352,8 @@ scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider:a
 
 scrolledwindow.route-scroll-owner undershoot,
 scrolledwindow.route-scroll-owner overshoot,
+scrolledwindow.sidebar-scroller undershoot,
+scrolledwindow.sidebar-scroller overshoot,
 .right-panel scrolledwindow.right-panel-scroller undershoot,
 .right-panel scrolledwindow.right-panel-scroller overshoot {
   background: transparent;

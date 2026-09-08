@@ -174,13 +174,16 @@ impl CatalogUi {
         order: Vec<String>,
         first_row_position: usize,
         first_rows: Vec<library::TrackRow>,
-        selected: rufin_core::runtime::SelectedLibrary,
     ) -> MountedRoute {
         let Some(summary) = summary else {
             return MountedRoute::static_widget(crate::route_layout::placeholder_view(
                 id.kind(),
                 id.missing_body(),
             ));
+        };
+        let source = match &summary {
+            NamedDetailSummary::Genre(row) => row.source_key,
+            NamedDetailSummary::Mood(row) => row.source_key,
         };
         let current = Rc::new(RefCell::new(summary));
         let borrowed = current.borrow();
@@ -212,27 +215,16 @@ impl CatalogUi {
             play_label: id.play_label(),
         });
         let tracks = Rc::new(grouped.tracks().clone());
-        tracks.set_queue_source(
-            library::QueueQuery::Collection {
-                collection: match id {
-                    NamedDetailId::Genre(key) => library::QueueCollection::Genre(key),
-                    NamedDetailId::Mood(key) => library::QueueCollection::Mood(key),
-                },
-                favorites_only: false,
-            },
-            selected.music_folder_key,
-        );
         let lane = Rc::new(NamedOrderLane::new());
         {
             let shell = Rc::downgrade(self);
             let projection = Rc::downgrade(&tracks);
-            let selected = selected.clone();
             let lane = Rc::clone(&lane);
             grouped.tracks().connect_search_request(move |request| {
                 request_named_order(
                     shell.clone(),
                     projection.clone(),
-                    selected.clone(),
+                    source,
                     id,
                     request,
                     Rc::clone(&lane),
@@ -242,7 +234,6 @@ impl CatalogUi {
         let refresh = {
             let shell = Rc::downgrade(self);
             let projection = Rc::clone(&tracks);
-            let selected = selected.clone();
             let lane = Rc::clone(&lane);
             Rc::new(move || {
                 let Some(shell) = shell.upgrade() else {
@@ -251,7 +242,7 @@ impl CatalogUi {
                 request_named_order(
                     Rc::downgrade(&shell),
                     Rc::downgrade(&projection),
-                    selected.clone(),
+                    source,
                     id,
                     projection.projection_request(),
                     Rc::clone(&lane),
@@ -303,26 +294,25 @@ impl CatalogUi {
 fn request_named_order(
     shell: std::rc::Weak<CatalogUi>,
     projection: std::rc::Weak<super::routes::TrackListProjection>,
-    selected: rufin_core::runtime::SelectedLibrary,
+    source: library::SourceKey,
     id: NamedDetailId,
     request: TrackProjectionRequest,
     lane: Rc<NamedOrderLane>,
 ) {
     let (generation, cancellation) = lane.begin();
-    let database = Arc::clone(&selected.database);
-    let source = selected.source_key;
-    let folder = selected.music_folder_key;
+    let Some(owner) = shell.upgrade() else { return };
+    let database = Arc::clone(&owner.library);
     let query = request.query.clone();
     let sort = request.settings.sort_key.track_sort();
     let descending = request.settings.descending;
-    let task = selected.runtime.spawn(async move {
+    let task = owner.runtime.spawn(async move {
         match id {
             NamedDetailId::Genre(key) => {
                 database
                     .genre_track_route_page(
                         source,
                         key,
-                        folder,
+                        None,
                         &query,
                         sort,
                         descending,
@@ -336,7 +326,7 @@ fn request_named_order(
                     .mood_track_route_page(
                         source,
                         key,
-                        folder,
+                        None,
                         &query,
                         sort,
                         descending,
@@ -372,25 +362,41 @@ fn request_named_order(
 
 pub async fn load_named_detail(
     database: &Database,
-    source: library::SourceKey,
-    folder: Option<library::FolderKey>,
     id: NamedDetailId,
     settings: &LibraryListSettings,
     window: library::RouteSeedWindow,
     cancellation: &ReadCancellation,
 ) -> Result<(Option<NamedDetailSummary>, library::TrackRoutePage), String> {
+    let collection = match id {
+        NamedDetailId::Genre(key) => library::QueueCollection::Genre(key),
+        NamedDetailId::Mood(key) => library::QueueCollection::Mood(key),
+    };
+    let Some(source) = database
+        .collection_source(&collection, cancellation)
+        .await
+        .map_err(|error| error.to_string())?
+    else {
+        return Ok((
+            None,
+            library::TrackRoutePage {
+                order: Vec::new(),
+                first_row_position: 0,
+                first_rows: Vec::new(),
+            },
+        ));
+    };
     let sort = settings.sort_key.track_sort();
     let descending = settings.descending;
     match id {
         NamedDetailId::Genre(key) => {
             let detail = database
-                .genre_detail(source, key, folder, cancellation)
+                .genre_detail(source, key, None, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
             let detail = if let Some(detail) = detail {
                 let mut row = detail.genre;
                 row.representative_artwork = database
-                    .album_rows(source, &detail.representative_albums, folder, cancellation)
+                    .album_rows(source, &detail.representative_albums, None, cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                     .into_iter()
@@ -404,7 +410,7 @@ pub async fn load_named_detail(
                 .genre_track_route_page(
                     source,
                     key,
-                    folder,
+                    None,
                     "",
                     sort,
                     descending,
@@ -417,13 +423,13 @@ pub async fn load_named_detail(
         }
         NamedDetailId::Mood(key) => {
             let detail = database
-                .mood_detail(source, key, folder, cancellation)
+                .mood_detail(source, key, None, cancellation)
                 .await
                 .map_err(|error| error.to_string())?;
             let detail = if let Some(detail) = detail {
                 let mut row = detail.mood;
                 row.representative_artwork = database
-                    .album_rows(source, &detail.representative_albums, folder, cancellation)
+                    .album_rows(source, &detail.representative_albums, None, cancellation)
                     .await
                     .map_err(|error| error.to_string())?
                     .into_iter()
@@ -437,7 +443,7 @@ pub async fn load_named_detail(
                 .mood_track_route_page(
                     source,
                     key,
-                    folder,
+                    None,
                     "",
                     sort,
                     descending,

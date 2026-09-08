@@ -16,7 +16,7 @@ pub struct CatalogUi {
     pub downloads: Rc<ui_shared::downloads::DownloadsState>,
     pub media_menus: Rc<ui_shared::media_menus::MediaMenus>,
     pub selected: Option<rufin_core::runtime::SelectedLibrary>,
-    pub source_label: (&'static str, String),
+    pub source_label: Rc<dyn Fn(Option<&str>) -> (&'static str, String)>,
     pub favorites: Option<Rc<ui_shared::favorites::FavoriteSessionState>>,
     pub window: gtk::glib::WeakRef<gtk::ApplicationWindow>,
     pub route_width: Rc<dyn Fn() -> i32>,

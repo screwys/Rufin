@@ -52,9 +52,6 @@ pub struct TrackListProjection<T: TrackPresentation = library::TrackRow> {
 }
 
 impl<T: TrackPresentation> TrackListProjection<T> {
-    pub fn set_queue_source(&self, query: library::QueueQuery, folder: Option<library::FolderKey>) {
-        self.model.set_queue_source(query, folder);
-    }
     pub fn download_change(&self) -> ui_shared::mounted_route::MountedDownloadChange {
         let model = self.model.clone();
         Rc::new(move |event| {
@@ -119,12 +116,13 @@ impl<T: TrackPresentation> TrackListProjection<T> {
                 return;
             }
             let callback = Rc::clone(&callback);
+            let model = model.clone();
             let pending_timeout = Rc::clone(&pending);
             pending.replace(Some(glib::timeout_add_local_once(
                 TRACK_FILTER_DEBOUNCE,
                 move || {
                     pending_timeout.borrow_mut().take();
-                    callback(request);
+                    callback(model.projection_request());
                 },
             )));
         });
@@ -132,6 +130,53 @@ impl<T: TrackPresentation> TrackListProjection<T> {
 
     pub fn replace_prepared(&self, prepared: PreparedTrackProjection<T>) -> bool {
         self.model.replace_prepared(prepared)
+    }
+
+    pub fn connect_read<R, F>(
+        &self,
+        shell: &Rc<CatalogUi>,
+        request: impl Fn(TrackProjectionRequest) -> R + 'static,
+        load: impl Fn(R) -> F + Send + Sync + 'static,
+        context: &'static str,
+    ) -> Rc<dyn Fn()>
+    where
+        R: Clone + Send + 'static,
+        F: std::future::Future<Output = Result<PreparedTrackProjection<T>, String>>
+            + Send
+            + 'static,
+    {
+        let runtime = shell.runtime.clone();
+        let shell = Rc::downgrade(shell);
+        let model = self.model.clone();
+        let apply = Rc::new(move |_, result| {
+            let Some(shell) = shell.upgrade() else { return };
+            if !(shell.is_current)() {
+                return;
+            }
+            match result {
+                Ok(prepared) => {
+                    model.replace_prepared(prepared);
+                }
+                Err(error) => warn!(%error, context, "failed to read Track order"),
+            }
+        });
+        let load = Arc::new(move |request| {
+            Box::pin(load(request))
+                as std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send>>
+        });
+        let read = LatestMountedRouteRead::new_with_request(runtime, apply, load, context);
+        let request = Rc::new(request);
+        {
+            let read = Rc::downgrade(&read);
+            let request = request.clone();
+            self.connect_search_request(move |tracks| {
+                if let Some(read) = read.upgrade() {
+                    read.request_with(request(tracks));
+                }
+            });
+        }
+        let model = self.model.clone();
+        Rc::new(move || read.request_with(request(model.projection_request())))
     }
 
     pub fn resume_initial_demand(&self) {
@@ -481,14 +526,6 @@ impl CatalogUi {
                 fixed_layout: None,
                 search: None,
             },
-        );
-        projection.set_queue_source(
-            library::QueueQuery::Tracks {
-                source: selected.source_key,
-                favorites_only,
-                recursive: true,
-            },
-            selected.music_folder_key,
         );
         self.track_page_route(options, projection, selected, favorites_only)
     }

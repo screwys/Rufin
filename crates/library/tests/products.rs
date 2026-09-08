@@ -8,6 +8,159 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definition_limits() {
+    use library::TrackSort;
+    let fixture = fixture().await;
+    let database = &fixture.database;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    let mut uris = Vec::new();
+    for index in 0..11 {
+        let uri = format!("test:toolbar:{index:02}");
+        sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,album_key,title,normalized_search,display_artist,display_album,sort_text,duration_millis,disc_number,track_number,year,release_date,date_added,bpm,source_rating,source_favorite) VALUES(?1,?2,?2,?3,?4,?4,?5,'Toolbar album',?4,?6,1,?7,?8,'2026-01-01','2026-01-01',?9,?10,?11)")
+            .bind(fixture.source).bind(&uri).bind(fixture.albums[0])
+            .bind(format!("Toolbar {index:02}{}", if index == 9 { " İstanbul" } else { "" }))
+            .bind(format!("Artist {:02}", 10-index)).bind(1000+index).bind(index)
+            .bind(2020+index).bind(100+index).bind(index*10).bind(index%2)
+            .execute(&mut raw).await.unwrap();
+        sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(?1,'Toolbar','Artist','Album',?2,'2026-01',1000,1000,0)")
+            .bind(&uri).bind(100+index).execute(&mut raw).await.unwrap();
+        uris.push(uri);
+    }
+    let mut definition = SmartPlaylistDefinition {
+        match_all: vec![SmartPlaylistRule {
+            field: SmartPlaylistRuleField::Title,
+            operator: SmartPlaylistRuleOperator::Contains,
+            value: Some(SmartPlaylistRuleValue::Text("Toolbar".into())),
+        }],
+        descending: true,
+        ..SmartPlaylistDefinition::default()
+    };
+    let key = database
+        .create_smart_playlist("Toolbar", &definition)
+        .await
+        .unwrap();
+    let (_, members) = database
+        .smart_playlist_membership(None, key, None, 500, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(members, uris.iter().rev().cloned().collect::<Vec<_>>());
+    for sort in [
+        TrackSort::Title,
+        TrackSort::TrackNumber,
+        TrackSort::Artist,
+        TrackSort::AlbumArtist,
+        TrackSort::Album,
+        TrackSort::Year,
+        TrackSort::ReleaseDate,
+        TrackSort::DateAdded,
+        TrackSort::LastPlayed,
+        TrackSort::PlayCount,
+        TrackSort::UserRating,
+        TrackSort::Genre,
+        TrackSort::Bpm,
+        TrackSort::Duration,
+        TrackSort::Favorite,
+    ] {
+        let ascending = database
+            .smart_playlist_track_order(&members, "", sort, false, &cancel)
+            .await
+            .unwrap();
+        let descending = database
+            .smart_playlist_track_order(&members, "", sort, true, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(ascending.len(), 11, "{sort:?}");
+        assert_eq!(
+            ascending.iter().rev().collect::<Vec<_>>(),
+            descending.iter().collect::<Vec<_>>(),
+            "{sort:?}"
+        );
+        if matches!(
+            sort,
+            TrackSort::Title
+                | TrackSort::TrackNumber
+                | TrackSort::Year
+                | TrackSort::Bpm
+                | TrackSort::Duration
+                | TrackSort::UserRating
+                | TrackSort::LastPlayed
+        ) {
+            assert_eq!(ascending, uris, "{sort:?}");
+        }
+        if sort == TrackSort::Artist {
+            assert_eq!(ascending, members);
+        }
+    }
+    for (query, expected) in [
+        ("toolbar 09", vec![uris[9].clone()]),
+        ("i\u{307}st", vec![uris[9].clone()]),
+        ("202", uris[..10].to_vec()),
+        ("no match", vec![]),
+        ("", uris.clone()),
+    ] {
+        let order = database
+            .smart_playlist_track_order(&members, query, TrackSort::Title, false, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(order, expected, "{query}");
+    }
+    let rows = database
+        .smart_playlist_track_rows(&uris, &cancel)
+        .await
+        .unwrap();
+    assert!(rows.iter().all(
+        |row| row.album_media_uri.as_ref() == Some(&fixture.album_uris[0])
+            && !row.album_artists.is_empty()
+    ));
+    definition.limit = Some(3);
+    database
+        .update_smart_playlist(key, "Toolbar", &definition)
+        .await
+        .unwrap();
+    let (_, limited) = database
+        .smart_playlist_membership(None, key, None, 500, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(limited, members[..3]);
+    let order = database
+        .smart_playlist_track_order(&limited, "", TrackSort::TrackNumber, false, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(order, uris[8..]);
+    // A view change uses its captured set; the next catalog refresh renews that set.
+    assert_eq!(
+        database
+            .smart_playlist_track_order(&members, "", TrackSort::Title, false, &cancel)
+            .await
+            .unwrap(),
+        uris
+    );
+    sqlx::query("DELETE FROM listens WHERE media_uri=?1")
+        .bind(&uris[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    for descending in [false, true] {
+        let order = database
+            .smart_playlist_track_order(&members, "", TrackSort::LastPlayed, descending, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(order.last(), Some(&uris[0]));
+    }
+    assert_eq!(
+        database
+            .smart_playlist_track_rows(&uris[..1], &cancel)
+            .await
+            .unwrap()[0]
+            .last_played,
+        None
+    );
+}
+
+#[tokio::test]
 async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_entries() {
     let fixture = fixture().await;
     let database = &fixture.database;
@@ -52,8 +205,23 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         .smart_playlist_track_rows(&uris, &cancel)
         .await
         .unwrap();
+    let captured = super::support::resolve_queue(
+        database,
+        library::QueueInput::Uris {
+            order: uris.clone().into(),
+            context_id: "metadata-links".into(),
+            source_start: 0,
+        },
+        0,
+    )
+    .await;
+    let queued = database
+        .prepared_queue_page(&captured.occurrences)
+        .await
+        .unwrap();
     assert_eq!(entries.len(), 4);
     assert_eq!(smart.len(), 4);
+    assert_eq!(queued.len(), 4);
     for index in [0, 2] {
         assert_eq!(entries[index].media_uri, uris[index]);
         assert_eq!(entries[index].source_id.as_deref(), Some("source"));
@@ -69,6 +237,10 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
         assert_eq!(smart[index].album_media_uri, entries[index].album_media_uri);
         assert_eq!(smart[index].artists, entries[index].artists);
         assert_eq!(smart[index].album_artists, entries[index].album_artists);
+        assert_eq!(
+            queued[index].primary_artist_media_uri.as_ref(),
+            Some(&fixture.artist_uris[0])
+        );
     }
     assert_eq!(entries[1].media_uri, uris[1]);
     assert!(entries[1].source_id.is_none());
@@ -78,6 +250,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
     assert!(smart[1].album_media_uri.is_none());
     assert!(smart[1].artists.is_empty());
     assert!(smart[1].album_artists.is_empty());
+    assert!(queued[1].primary_artist_media_uri.is_none());
     assert_eq!(entries[3].media_uri, local_uri);
     assert_eq!(entries[3].source_id.as_deref(), Some("local"));
 }
@@ -186,17 +359,17 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
                 assert_eq!(row.artwork_binding, binding);
             }
             let result = database
-                .smart_playlist_detail(source, smart, folder, 500, RouteSeedWindow::top(), &cancel)
+                .smart_playlist_membership(source, smart, folder, 500, &cancel)
                 .await
                 .unwrap()
                 .unwrap();
-            let row = result
-                .first_rows
-                .iter()
-                .find(|row| &row.media_uri == uri)
+            let rows = database
+                .smart_playlist_track_rows(&result.1, &cancel)
+                .await
                 .unwrap();
+            let row = rows.iter().find(|row| &row.media_uri == uri).unwrap();
             assert_eq!(row.artwork_binding, binding);
-            assert_eq!(result.summary.artwork_bindings, expected_sample);
+            assert_eq!(result.0.artwork_bindings, expected_sample);
         }
         let current_rows = database.playlist_rows(&[current], &cancel).await.unwrap();
         assert_eq!(current_rows[0].representative_artwork, expected_sample);
@@ -457,6 +630,181 @@ async fn downloaded_row_facts_require_download_owned_local_access() {
         .pop()
         .expect("Mood row");
     assert_eq!(mood.downloaded_count, 1);
+}
+
+#[tokio::test]
+async fn collection_rows_carry_their_own_stable_source_identity() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let authored = fixture
+        .database
+        .create_playlist(Some(fixture.source), "Authored", &[])
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    let mut raw = connection(&fixture.path).await;
+    sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest)
+        VALUES(55,'other-source','Other','other',zeroblob(32),zeroblob(32));
+        INSERT INTO catalog.genres(genre_key,source_key,object_id,name,normalized_name,sort_text)
+        VALUES(55,55,'genre','Other genre','other genre','other genre');
+        INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)
+        VALUES(55,55,'native','Native','native','native');
+        INSERT INTO main.source_ids(source_key,object_id) VALUES(55,'absent-source');
+        INSERT INTO main.playlists(playlist_key,source_key,object_id,name,position)
+        VALUES(55,55,'offline-authored','Offline authored',55),(56,NULL,'global','Global',56);")
+        .execute(&mut raw).await.unwrap();
+
+    let other = library::SourceKey::from_raw(55);
+    let genre = library::GenreKey::from_raw(55);
+    let row = fixture
+        .database
+        .genre_rows(other, &[genre], None, &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(row.source_id, "other-source");
+    let detail = fixture
+        .database
+        .genre_detail(other, genre, None, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(detail.genre.source_id, row.source_id);
+    let original = fixture
+        .database
+        .genre_rows(fixture.source, &[fixture.genre], None, &cancel)
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    assert_eq!(original.source_id, "source");
+
+    let keys = [
+        library::PlaylistKey::from_raw(-55),
+        library::PlaylistKey::from_raw(55),
+        library::PlaylistKey::from_raw(56),
+        authored,
+    ];
+    let rows = fixture
+        .database
+        .playlist_rows(&keys, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(
+        rows.iter().map(|row| row.playlist_key).collect::<Vec<_>>(),
+        keys
+    );
+    assert_eq!(
+        rows.iter()
+            .map(|row| row.source_id.as_deref())
+            .collect::<Vec<_>>(),
+        [
+            Some("other-source"),
+            Some("absent-source"),
+            None,
+            Some("source")
+        ]
+    );
+    assert_eq!(rows[0].source_key, Some(other));
+    assert_eq!(rows[1].source_key, None);
+    assert_eq!(rows[2].source_key, None);
+    assert_eq!(rows[3].source_key, Some(fixture.source));
+    for row in &rows {
+        let source = row
+            .source_id
+            .as_ref()
+            .map(|id| library::SourceId::new(id.clone()));
+        assert_eq!(
+            fixture
+                .database
+                .playlist_key_by_identity(source.as_ref(), &row.object_id, &cancel)
+                .await
+                .unwrap(),
+            Some(row.playlist_key)
+        );
+    }
+    assert_eq!(
+        fixture
+            .database
+            .playlist_key_by_identity(None, "offline-authored", &cancel)
+            .await
+            .unwrap(),
+        None
+    );
+    assert_eq!(
+        fixture
+            .database
+            .playlist_key_by_identity(
+                Some(&library::SourceId::new("missing-source")),
+                "global",
+                &cancel,
+            )
+            .await
+            .unwrap(),
+        None
+    );
+    sqlx::raw_sql(
+        "INSERT INTO main.playlist_entries(playlist_entry_key,playlist_key,object_id,media_uri,title,position) VALUES
+        (55,55,'first','https://example.test/unavailable','Saved',0),
+        (56,55,'second','https://example.test/unavailable','Duplicate',1);
+        INSERT INTO catalog.native_playlist_entries(playlist_entry_key,playlist_key,object_id,media_uri,title,position) VALUES
+        (55,55,'first','https://example.test/unavailable','Saved',0),
+        (56,55,'second','https://example.test/unavailable','Duplicate',1);",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    for (key, source_id, object_id, entry_keys) in [
+        (keys[0], "other-source", "native", [-55, -56]),
+        (keys[1], "absent-source", "offline-authored", [55, 56]),
+    ] {
+        let collection = library::QueueCollection::Playlist(key);
+        assert_eq!(
+            fixture
+                .database
+                .collection_media_uri_order(&collection, &cancel)
+                .await
+                .unwrap(),
+            [
+                "https://example.test/unavailable",
+                "https://example.test/unavailable"
+            ]
+        );
+        for input in [
+            library::QueueInput::Collection {
+                collection,
+                folder: None,
+                context_id: "playlist".into(),
+            },
+            library::QueueInput::PlaylistEntries {
+                order: entry_keys.map(library::PlaylistEntryKey::from_raw).into(),
+                context_id: "selected entries".into(),
+            },
+        ] {
+            let captured = super::support::resolve_queue(&fixture.database, input, 0).await;
+            assert_eq!(captured.entries.len(), 2);
+            for (entry, entry_id) in captured.entries.iter().zip(["first", "second"]) {
+                assert_eq!(
+                    entry.playlist_entry_id.as_deref(),
+                    Some(
+                        serde_json::json!([source_id, object_id, entry_id])
+                            .to_string()
+                            .as_str()
+                    )
+                );
+            }
+            assert_eq!(
+                captured
+                    .occurrences
+                    .iter()
+                    .map(|row| row.title.as_str())
+                    .collect::<Vec<_>>(),
+                ["Saved", "Duplicate"]
+            );
+        }
+    }
 }
 
 #[tokio::test]
@@ -1168,6 +1516,8 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO queue_occurrences(object_id,media_uri,position,traversal_position,provenance_kind,title,artist,album,duration_millis,snapshot_at) VALUES('window-owner',?1,0,0,'manual','Latest snapshot','Artist','Album',42000,300)")
         .bind(&direct).execute(&mut raw).await.expect("retain Queue snapshot");
+    sqlx::query("INSERT INTO queue_occurrences(object_id,media_uri,position,traversal_position,provenance_kind,title,artist,album,duration_millis,snapshot_at) VALUES('catalog-owner',?1,1,1,'manual','Saved Alpha','Artist','Album',42000,999)")
+        .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO listens(media_uri,track_title,artist_name,album_title,started_at,local_period,duration_millis,listened_millis,skipped) VALUES(?1,'Old snapshot','Artist','Album',100,'1970-01',42000,42000,0)")
         .bind(&direct).execute(&mut raw).await.expect("retain historical snapshot");
     drop(raw);
@@ -1189,20 +1539,12 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     assert!(order.contains(&direct));
     let detail = fixture
         .database
-        .smart_playlist_detail(None, key, None, 500, RouteSeedWindow::top(), &cancel)
+        .smart_playlist_membership(None, key, None, 500, &cancel)
         .await
         .unwrap()
         .unwrap();
-    assert_eq!(detail.tracks, order);
-    assert_eq!(detail.summary.track_count as usize, detail.tracks.len());
-    assert_eq!(
-        detail
-            .first_rows
-            .iter()
-            .map(|row| &row.media_uri)
-            .collect::<Vec<_>>(),
-        detail.tracks.iter().take(64).collect::<Vec<_>>()
-    );
+    assert_eq!(detail.1, order);
+    assert_eq!(detail.0.track_count as usize, detail.1.len());
     definition.match_all.push(SmartPlaylistRule {
         field: SmartPlaylistRuleField::Title,
         operator: SmartPlaylistRuleOperator::Equals,
@@ -1229,6 +1571,19 @@ async fn smart_visible_window_keeps_uri_order_and_latest_snapshot_without_rechec
     assert_eq!(rows[1].title, "Alpha");
     assert_eq!(rows[2].duration_millis, 42000);
     assert_eq!(rows[0].play_count, 1);
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("DELETE FROM tracks WHERE media_uri=?1")
+        .bind(&fixture.track_uris[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    let rows = fixture
+        .database
+        .smart_playlist_track_rows(&requested, &cancel)
+        .await
+        .unwrap();
+    assert_eq!(rows[1].title, "Saved Alpha");
 }
 
 #[tokio::test]

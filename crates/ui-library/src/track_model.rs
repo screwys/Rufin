@@ -38,7 +38,6 @@ struct TrackModelState<T: TrackPresentation> {
     sparse: Rc<SparseRouteModel<String, T>>,
     request: RefCell<TrackProjectionRequest>,
     applied: RefCell<TrackProjectionRequest>,
-    queue_source: RefCell<Option<(library::QueueQuery, Option<library::FolderKey>)>>,
 }
 
 #[derive(Clone)]
@@ -91,7 +90,6 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         });
         Self(Rc::new(TrackModelState {
             sparse,
-            queue_source: RefCell::new(None),
             applied: RefCell::new(TrackProjectionRequest {
                 query: String::new(),
                 settings: settings.clone(),
@@ -105,10 +103,6 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
 
     pub fn list_model(&self) -> SparseObjectModel {
         self.0.sparse.list_model()
-    }
-
-    pub fn set_queue_source(&self, query: library::QueueQuery, folder: Option<library::FolderKey>) {
-        self.0.queue_source.replace(Some((query, folder)));
     }
 
     pub fn sparse_model(&self) -> Rc<SparseRouteModel<String, T>> {
@@ -203,26 +197,13 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
         collection_start: bool,
     ) {
         let order = self.0.sparse.order();
-        let Some(anchor_uri) = order.get(anchor_index).cloned() else {
+        if anchor_index >= order.len() {
             return;
-        };
-        let input = if let Some((query, folder)) = self.0.queue_source.borrow().as_ref() {
-            let applied = self.0.applied.borrow();
-            library::QueueInput::Query {
-                query: query.clone(),
-                folder: *folder,
-                filter: applied.query.clone(),
-                sort: applied.settings.sort_key.track_sort(),
-                descending: applied.settings.descending,
-                context_id: self.visible_context_id(context_base).into(),
-                anchor_uri: Some(anchor_uri),
-            }
-        } else {
-            library::QueueInput::Uris {
-                order,
-                context_id: self.visible_context_id(context_base).into(),
-                source_start: 0,
-            }
+        }
+        let input = library::QueueInput::Uris {
+            order,
+            context_id: self.visible_context_id(context_base).into(),
+            source_start: 0,
         };
         let request = if collection_start {
             PlayRequest::ordered

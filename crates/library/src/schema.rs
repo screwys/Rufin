@@ -495,6 +495,8 @@ CREATE INDEX IF NOT EXISTS native_playlists_order_idx ON native_playlists(source
 
 CREATE INDEX IF NOT EXISTS native_playlists_title_idx ON native_playlists(source_key, sort_text, playlist_key);
 
+CREATE INDEX IF NOT EXISTS native_playlists_public_key_idx ON native_playlists(-playlist_key);
+
 CREATE TABLE IF NOT EXISTS native_playlist_entries (
     playlist_entry_key INTEGER PRIMARY KEY,
     playlist_key INTEGER NOT NULL REFERENCES native_playlists ON DELETE CASCADE,
@@ -512,6 +514,8 @@ CREATE TABLE IF NOT EXISTS native_playlist_entries (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS native_playlist_entries_order_idx ON native_playlist_entries(playlist_key, position);
+CREATE INDEX IF NOT EXISTS native_playlist_entries_public_order_idx ON native_playlist_entries(-playlist_key,position,-playlist_entry_key);
+CREATE INDEX IF NOT EXISTS native_playlist_entries_public_key_idx ON native_playlist_entries(-playlist_entry_key);
 CREATE INDEX IF NOT EXISTS native_playlist_entries_shuffle_idx ON native_playlist_entries(playlist_key,((playlist_entry_key*1103515245)%2147483647),playlist_entry_key);
 
 CREATE INDEX IF NOT EXISTS native_playlist_entries_media_idx ON native_playlist_entries(media_uri,(title IS NULL),snapshot_at DESC,playlist_entry_key ASC);

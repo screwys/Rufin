@@ -26,7 +26,6 @@ struct PlaylistEntryModelState {
     sparse: Rc<SparseRouteModel<PlaylistEntryKey, PlaylistEntryRow>>,
     request: RefCell<PlaylistEntryProjectionRequest>,
     applied: RefCell<PlaylistEntryProjectionRequest>,
-    folder: std::cell::Cell<Option<library::FolderKey>>,
 }
 
 impl PlaylistEntryModel {
@@ -56,7 +55,6 @@ impl PlaylistEntryModel {
         Self {
             inner: Rc::new(PlaylistEntryModelState {
                 playlist_key,
-                folder: std::cell::Cell::new(None),
                 sparse,
                 applied: RefCell::new(PlaylistEntryProjectionRequest {
                     query: String::new(),
@@ -84,10 +82,6 @@ impl PlaylistEntryModel {
 
     pub fn playlist_key(&self) -> PlaylistKey {
         self.inner.playlist_key
-    }
-
-    pub fn set_queue_folder(&self, folder: Option<library::FolderKey>) {
-        self.inner.folder.set(folder);
     }
 
     pub fn source_is_empty(&self) -> bool {
@@ -198,7 +192,7 @@ impl PlaylistEntryModel {
         queue.play(request(
             library::QueueInput::PlaylistQuery {
                 key: self.inner.playlist_key,
-                folder: self.inner.folder.get(),
+                folder: None,
                 filter: applied.query.clone(),
                 sort: applied.settings.sort_key.playlist_entry_sort(),
                 descending: applied.settings.descending,

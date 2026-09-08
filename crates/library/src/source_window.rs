@@ -11,7 +11,7 @@ pub(crate) fn quote(value: &str) -> String {
 pub(crate) struct SourceQuery {
     pub from: String,
     pub predicate: String,
-    pub order: Vec<(String, bool)>,
+    pub order: Vec<String>,
     pub uri: String,
     pub entry_key: String,
 }
@@ -22,18 +22,8 @@ impl SourceQuery {
             "SELECT {columns} FROM {} WHERE {} ORDER BY {}",
             self.from,
             self.predicate,
-            self.order_sql(false)
+            self.order.join(",")
         )
-    }
-
-    fn order_sql(&self, backwards: bool) -> String {
-        self.order
-            .iter()
-            .map(|(field, desc)| {
-                format!("{field} {}", if *desc ^ backwards { "DESC" } else { "ASC" })
-            })
-            .collect::<Vec<_>>()
-            .join(",")
     }
 }
 
@@ -201,15 +191,22 @@ async fn source_members_on(
             pivot = value;
         }
         query.order = vec![
-            (format!("(({hash})<{pivot})"), false),
-            (hash, false),
-            (key, false),
+            format!("(({hash})<{pivot}) ASC"),
+            format!("{hash} ASC"),
+            format!("{key} ASC"),
         ];
     }
     let identity = if query.entry_key == "NULL" {
         "NULL".to_string()
     } else {
-        "json_array((SELECT object_id FROM source_ids WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)".to_string()
+        let sources = if query.entry_key == "-entry.playlist_entry_key" {
+            "catalog.sources"
+        } else {
+            "main.source_ids"
+        };
+        format!(
+            "json_array((SELECT object_id FROM {sources} WHERE source_key=playlist.source_key),playlist.object_id,entry.object_id)"
+        )
     };
     let columns = format!(
         "{},{identity},COALESCE(({}),0)",

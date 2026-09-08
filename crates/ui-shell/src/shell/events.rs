@@ -5,7 +5,7 @@ use std::time::Duration;
 
 use gtk::prelude::{FileExt, WidgetExt};
 use gtk::{gio, glib};
-use localization::tr;
+use localization::{tr, tr_with};
 use tracing::warn;
 
 use crate::player::{now_playing_notification_can_send, now_playing_notification_should_withdraw};
@@ -128,6 +128,21 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
         } => apply_source_artwork_preparation(shell, source_key, revision, progress),
         SourceEvent::CatalogPublished(publication) => apply_catalog_publication(shell, publication),
         SourceEvent::Notice(notice) => apply_source_notice(shell, notice),
+        SourceEvent::PlaylistSourceMismatch(source_id) => {
+            let source_name = shell
+                .source
+                .configured
+                .borrow()
+                .sources
+                .iter()
+                .find(|source| source.id == source_id)
+                .map(ui_shared::source_labels::configured_source_display_name)
+                .unwrap_or_else(|| source_id.as_str().to_string());
+            shell.control_feedback.show_feedback_toast(tr_with(
+                "This playlist only accepts {source} tracks",
+                &[("source", &source_name)],
+            ));
+        }
         SourceEvent::ReleaseSelected { acknowledged } => {
             release_selected_source(shell);
             let _ = acknowledged.try_send(());
@@ -303,19 +318,15 @@ fn apply_selected_library_replacement(
 fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication) {
     if matches!(
         publication.change,
+        CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Playlists(_)
+    ) {
+        shell.import_remote_playlist_pins_once();
+    }
+    if matches!(
+        publication.change,
         CatalogChange::Acquired | CatalogChange::Broad | CatalogChange::Album(_)
     ) {
         shell.player_ui.refresh_queue_window();
-    }
-    let matches_selected = shell
-        .selected_library()
-        .as_deref()
-        .is_some_and(|selected| Some(selected.source_key) == publication.source_key);
-    if publication.source_key.is_some()
-        && !matches_selected
-        && !matches!(publication.change, CatalogChange::Playlists(_))
-    {
-        return;
     }
     if let Some(favorite) = publication.favorite {
         shell.apply_favorite_settlement(
@@ -332,10 +343,32 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
         return;
     }
     let current = shell.navigation.routes.borrow().current().clone();
+    let affects_current = publication.source_key.is_none()
+        || shell
+            .selected_library()
+            .as_deref()
+            .is_some_and(|selected| Some(selected.source_key) == publication.source_key);
     match publication.change {
         CatalogChange::Acquired | CatalogChange::Broad => {
             refresh_context_playlist_picker(shell);
             super::navigation::refresh_sidebar_pins(shell);
+            if !affects_current
+                && matches!(
+                    current,
+                    Route::Home
+                        | Route::Search
+                        | Route::Favorites
+                        | Route::Albums
+                        | Route::Tracks
+                        | Route::Artists
+                        | Route::AlbumArtists
+                        | Route::Genres
+                        | Route::Moods
+                        | Route::Folders { .. }
+                )
+            {
+                return;
+            }
             if current == Route::Home {
                 shell.refresh_mounted_home();
             } else {
@@ -343,7 +376,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             }
         }
         CatalogChange::Home => {
-            if current == Route::Home {
+            if affects_current && current == Route::Home {
                 shell.refresh_mounted_home();
             }
         }
@@ -357,6 +390,7 @@ fn apply_catalog_publication(shell: &Rc<Shell>, publication: CatalogPublication)
             }
         }
         CatalogChange::Album(album) => {
+            super::navigation::refresh_sidebar_pins(shell);
             if current == Route::AlbumDetail(album)
                 || matches!(
                     current,
