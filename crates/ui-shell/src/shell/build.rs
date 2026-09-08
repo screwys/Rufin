@@ -309,6 +309,7 @@ pub fn build(
     };
     let route_viewport = RouteViewport::new(route_host, route_loading);
     let player_right_panel = ui_player::right_panel::RightPanelWidgets {
+        queue_loading: right_panel_parts.queue_loading,
         root: right_panel,
         queue_header_host,
         queue_panel,

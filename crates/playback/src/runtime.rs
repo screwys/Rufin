@@ -1213,11 +1213,13 @@ impl PlaybackRuntime {
 
     fn finish(
         &mut self,
-        update: SessionUpdate,
+        mut update: SessionUpdate,
         sample: &ClockSample,
     ) -> PlaybackResult<PlaybackUpdate> {
+        let hydration = self.session.hydrate_queue();
+        update.view_changed |= hydration.is_some();
         let mut output = self.commit(update);
-        if let Some(effect) = self.session.hydrate_queue() {
+        if let Some(effect) = hydration {
             output.effects.push(effect);
         }
         let mut backend_failures = Vec::new();

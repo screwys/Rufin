@@ -71,10 +71,18 @@
         <property name="margin-start">10</property>
         <style><class name="queue-panel"/></style>
         <child>
-          <object class="GtkScrolledWindow" id="queue_scroller">
+          <object class="GtkOverlay">
+            <property name="vexpand">true</property>
+            <property name="child"><object class="GtkScrolledWindow" id="queue_scroller">
             <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
             <property name="vexpand">true</property>
             <style><class name="queue-scroller"/><class name="right-panel-scroller"/></style>
+            </object></property>
+            <child type="overlay"><object class="AdwSpinner" id="queue_loading">
+              <property name="visible">false</property>
+              <property name="halign">center</property><property name="valign">center</property>
+              <property name="width-request">32</property><property name="height-request">32</property>
+            </object></child>
           </object>
         </child>
       </object>

@@ -627,6 +627,7 @@ fn apply_playback_projection(shell: &Rc<Shell>, projection: playback::PlaybackPr
     let playback::PlaybackProjection { view, notices } = projection;
     let queue_window_changed = previous_player.as_ref().is_none_or(|previous| {
         previous.queue.revision != view.queue.revision
+            || previous.queue_loading != view.queue_loading
             || previous.queue.total != view.queue.total
             || previous.queue_window != view.queue_window
     });
@@ -1137,6 +1138,7 @@ mod tests {
 
     fn idle_playback_view() -> PlaybackView {
         PlaybackView {
+            queue_loading: false,
             queue_window: Vec::new(),
             queue: QueueSummaryView {
                 revision: 0,

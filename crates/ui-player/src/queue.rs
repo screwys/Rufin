@@ -18,6 +18,7 @@ pub struct QueueState {
     pub generation: Cell<u64>,
     pub current: RefCell<Option<OccurrenceId>>,
     pub render_queued: Cell<bool>,
+    reveal_current: [Cell<bool>; 2],
     hydration: RefCell<Option<tokio::task::AbortHandle>>,
 }
 
@@ -33,6 +34,7 @@ impl QueueState {
             generation: Cell::new(0),
             current: RefCell::new(None),
             render_queued: Cell::new(false),
+            reveal_current: Default::default(),
             hydration: RefCell::new(None),
         }
     }
@@ -58,6 +60,20 @@ impl QueueState {
     pub fn accept(&self, generation: u64, rows: Vec<QueuePageRow>) -> bool {
         if self.generation.get() != generation {
             return false;
+        }
+        // Playback can publish the selected occurrence before the surrounding
+        // queue arrives. Reveal again when that window changes, even if the
+        // playing occurrence itself is unchanged. Metadata refreshes don't scroll.
+        if self
+            .window
+            .borrow()
+            .iter()
+            .map(|row| &row.occurrence)
+            .ne(rows.iter().map(|row| &row.occurrence))
+        {
+            for pending in &self.reveal_current {
+                pending.set(true);
+            }
         }
         let mut previous = self
             .window
@@ -725,7 +741,19 @@ impl crate::PlayerUi {
             self.refresh_queue_window();
             return;
         }
-        let current_changed = queue.update_current(current);
+        // The accepted window owns the row positions used for highlighting and reveal.
+        if queue.hydration.borrow().is_some()
+            || self
+                .selected_playback()
+                .is_some_and(|player| player.queue_loading)
+        {
+            return;
+        }
+        if queue.update_current(current) {
+            for pending in &queue.reveal_current {
+                pending.set(true);
+            }
+        }
         let reorderable = queue.filter.borrow().trim().is_empty();
         let selection = queue.selection_model();
         render_panel(
@@ -735,7 +763,6 @@ impl crate::PlayerUi {
             &queue.model,
             &selection,
             false,
-            current_changed,
             reorderable,
         );
         if self.fullscreen_player_visible() {
@@ -746,7 +773,6 @@ impl crate::PlayerUi {
                 &queue.model,
                 &selection,
                 true,
-                current_changed,
                 reorderable,
             );
         }
@@ -757,6 +783,14 @@ impl crate::PlayerUi {
             return;
         };
         let generation = queue.begin();
+        self.set_queue_loading(false, true);
+        self.set_queue_loading(true, true);
+        if self
+            .selected_playback()
+            .is_some_and(|player| player.queue_loading)
+        {
+            return;
+        }
         let window = self
             .selected_playback()
             .as_deref()
@@ -781,23 +815,68 @@ impl crate::PlayerUi {
                 return;
             }
             queue.hydration.take();
-            let accepted = rows.is_some_and(|rows| queue.accept(generation, rows));
-            drop(queue);
-            if accepted {
-                shell.render_queue_panel();
+            if let Some(rows) = rows {
+                queue.accept(generation, rows);
             }
+            drop(queue);
+            shell.render_queue_panel();
         });
     }
 
-    pub fn position_startup_queue_for_reveal(self: &Rc<Self>) {
-        if !self.right_panel.root.is_visible() {
-            return;
+    fn queue_loading_icon(&self, fullscreen: bool) -> &adw::Spinner {
+        if fullscreen {
+            &self.views.fullscreen_player.queue_loading
+        } else {
+            &self.right_panel.queue_loading
         }
-        let Some(scroller) = queue_panel_scroller(&self.right_panel.queue_panel) else {
-            self.refresh_queue_window();
+    }
+
+    fn set_queue_loading(&self, fullscreen: bool, loading: bool) {
+        self.queue_loading_icon(fullscreen).set_visible(loading);
+        let panel = if fullscreen {
+            &self.views.fullscreen_player.queue_panel
+        } else {
+            &self.right_panel.queue_panel
+        };
+        if let Some(scroller) = queue_panel_scroller(panel) {
+            // Keep the same mapped list allocating underneath the spinner.
+            scroller.set_opacity(if loading { 0.0 } else { 1.0 });
+            scroller.set_sensitive(!loading);
+        }
+    }
+
+    fn reveal_queue_current(&self, scroller: &gtk::ScrolledWindow, fullscreen: bool) {
+        let Some(queue) = self.selected_queue() else {
             return;
         };
-        reveal_queue_current_row(&scroller, current_queue_row(self));
+        let pending = &queue.reveal_current[usize::from(fullscreen)];
+        if queue.hydration.borrow().is_some()
+            || self
+                .selected_playback()
+                .is_some_and(|player| player.queue_loading)
+        {
+            return;
+        }
+        if !pending.get() {
+            self.set_queue_loading(fullscreen, false);
+            return;
+        }
+        let position = queue.current.borrow().as_ref().and_then(|current| {
+            queue
+                .rows
+                .borrow()
+                .iter()
+                .position(|row| &row.occurrence == current)
+        });
+        let Some(position) = position else {
+            pending.set(false);
+            self.set_queue_loading(fullscreen, false);
+            return;
+        };
+        if reveal_queue_current_row(scroller, position) {
+            pending.set(false);
+            self.set_queue_loading(fullscreen, false);
+        }
     }
 }
 
@@ -808,7 +887,6 @@ fn render_panel(
     model: &gio::ListStore,
     selection: &gtk::MultiSelection,
     fullscreen: bool,
-    reveal_current: bool,
     reorderable: bool,
 ) {
     let scroller = queue_panel_scroller(panel).expect("Queue controls are connected before render");
@@ -939,21 +1017,17 @@ fn render_panel(
             "No matching tracks"
         }));
     }
-    if has_rows && reveal_current {
-        reveal_queue_current_row_later(&scroller, current_queue_row(shell));
+    if shell
+        .selected_queue()
+        .is_some_and(|queue| queue.reveal_current[usize::from(fullscreen)].get())
+        || shell.queue_loading_icon(fullscreen).is_visible()
+    {
+        reveal_queue_after_layout(shell, &scroller, fullscreen);
     }
 }
 
 fn fullscreen_queue_row(item: &gtk::ListItem) -> Option<QueueFullscreenRow> {
     item.child()?.first_child()?.downcast().ok()
-}
-
-fn new_queue_scroller() -> gtk::ScrolledWindow {
-    let scroller = gtk::ScrolledWindow::new();
-    scroller.add_css_class("queue-scroller");
-    scroller.set_policy(gtk::PolicyType::Never, gtk::PolicyType::Automatic);
-    scroller.set_vexpand(true);
-    scroller
 }
 
 fn queue_panel_scroller(panel: &gtk::Box) -> Option<gtk::ScrolledWindow> {
@@ -981,28 +1055,33 @@ fn queue_scroller_in(widget: &gtk::Widget) -> Option<gtk::ScrolledWindow> {
     None
 }
 
-fn reveal_queue_current_row_later(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) {
-    let scroller = scroller.clone();
-    glib::idle_add_local_once(move || {
-        reveal_queue_current_row(&scroller, current_row);
+fn reveal_queue_after_layout(
+    shell: &Rc<crate::PlayerUi>,
+    scroller: &gtk::ScrolledWindow,
+    fullscreen: bool,
+) {
+    let shell = Rc::downgrade(shell);
+    // Tick callbacks wait for mapping and run before layout. Connect after the
+    // layout handlers for this frame, then disconnect: no resize-driven follow.
+    scroller.add_tick_callback(move |scroller, clock| {
+        let scroller = scroller.downgrade();
+        let shell = shell.clone();
+        let handler = Rc::new(RefCell::new(None));
+        let disconnect = handler.clone();
+        *handler.borrow_mut() = Some(clock.connect_local("layout", true, move |values| {
+            let clock = values[0].get::<gtk::gdk::FrameClock>().unwrap();
+            clock.disconnect(disconnect.take().unwrap());
+            if let (Some(shell), Some(scroller)) = (shell.upgrade(), scroller.upgrade()) {
+                shell.reveal_queue_current(&scroller, fullscreen);
+            }
+            None
+        }));
+        clock.request_phase(gtk::gdk::FrameClockPhase::LAYOUT);
+        glib::ControlFlow::Break
     });
 }
 
-fn current_queue_row(shell: &crate::PlayerUi) -> Option<usize> {
-    shell.selected_queue().and_then(|queue| {
-        let current = queue.current.borrow().clone()?;
-        queue
-            .rows
-            .borrow()
-            .iter()
-            .position(|row| row.occurrence == current)
-    })
-}
-
-fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<usize>) -> bool {
-    let Some(current_row) = current_row.and_then(|position| u32::try_from(position).ok()) else {
-        return false;
-    };
+fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: usize) -> bool {
     let Some(list) = scroller
         .child()
         .and_downcast::<gtk::Viewport>()
@@ -1013,20 +1092,13 @@ fn reveal_queue_current_row(scroller: &gtk::ScrolledWindow, current_row: Option<
     else {
         return false;
     };
-    if scroller.has_css_class("right-panel-scroller") {
-        let adjustment = scroller.vadjustment();
-        let count = list.model().map_or(0, |model| model.n_items()).max(1);
-        // Sidebar rows have the same layout; include their measured CSS and text size.
-        let row_height = f64::from(list.measure(gtk::Orientation::Vertical, scroller.width()).0)
-            / f64::from(count);
-        let row_center = (f64::from(current_row) + 0.5) * row_height;
-        let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
-        adjustment.set_value(
-            (row_center - adjustment.page_size() / 2.0).clamp(adjustment.lower(), maximum),
-        );
-        return true;
-    }
-    list.scroll_to(current_row, gtk::ListScrollFlags::NONE, None);
+    let adjustment = scroller.vadjustment();
+    let extent = f64::from(list.measure(gtk::Orientation::Vertical, scroller.width()).0);
+    let count = list.model().map_or(0, |model| model.n_items()).max(1);
+    let row_center = (current_row as f64 + 0.5) * extent / f64::from(count);
+    let maximum = (adjustment.upper() - adjustment.page_size()).max(adjustment.lower());
+    adjustment
+        .set_value((row_center - adjustment.page_size() / 2.0).clamp(adjustment.lower(), maximum));
     true
 }
 
@@ -1037,16 +1109,6 @@ pub fn clear_queue_panel_children(panel: &gtk::Box) {
 }
 
 pub fn connect_queue_panel_controls(shell: &Rc<crate::PlayerUi>) {
-    for panel in [
-        &shell.right_panel.queue_panel,
-        &shell.views.fullscreen_player.queue_panel,
-    ] {
-        queue_panel_scroller(panel).unwrap_or_else(|| {
-            let scroller = new_queue_scroller();
-            panel.append(&scroller);
-            scroller
-        });
-    }
     let sidebar_shell = Rc::downgrade(shell);
     shell
         .right_panel
@@ -1143,6 +1205,38 @@ mod tests {
         assert!(state.accept(current, vec![row("new", "New")]));
         assert!(!state.accept(stale, vec![row("old", "Old")]));
         assert_eq!(state.rows.borrow()[0].occurrence, OccurrenceId::new("new"));
+    }
+
+    #[test]
+    fn expanding_the_queue_reveals_the_same_playing_occurrence_again() {
+        let state = QueueState::new();
+        let current = row("playing", "Playing");
+        let generation = state.begin();
+        assert!(state.accept(generation, vec![current.clone()]));
+        state.update_current(Some(current.occurrence.clone()));
+        let object = state.model.item(0).unwrap();
+        for pending in &state.reveal_current {
+            pending.set(false);
+        }
+
+        let mut window = (0..10)
+            .map(|i| row(&format!("previous-{i}"), "Previous"))
+            .collect::<Vec<_>>();
+        window.push(current.clone());
+        window.push(row("next", "Next"));
+        let generation = state.begin();
+        assert!(state.accept(generation, window.clone()));
+        assert!(!state.update_current(Some(current.occurrence.clone())));
+        assert_eq!(state.model.item(10).unwrap(), object);
+        assert!(state.reveal_current.iter().all(Cell::get));
+
+        for pending in &state.reveal_current {
+            pending.set(false);
+        }
+        window[10].title = "Updated metadata".into();
+        let generation = state.begin();
+        assert!(state.accept(generation, window));
+        assert!(state.reveal_current.iter().all(|pending| !pending.get()));
     }
 
     #[test]

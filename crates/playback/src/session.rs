@@ -1161,6 +1161,10 @@ impl PlaybackSession {
         ))
     }
 
+    pub(crate) fn queue_loading(&self) -> bool {
+        self.pending_queue.is_some()
+    }
+
     fn request_queue(
         &mut self,
         request: library::QueueReadRequest,
@@ -1171,6 +1175,7 @@ impl PlaybackSession {
         self.pending_queue = Some((id, completion));
         SessionUpdate {
             effects: vec![SessionEffect::Queue { id, request }],
+            view_changed: true,
             ..SessionUpdate::default()
         }
     }
@@ -2791,6 +2796,7 @@ mod orchestration_tests {
                 _ => None,
             })
             .unwrap();
+        assert!(session.view().queue_loading);
         let failed = session
             .handle_command(
                 SessionCommand::QueueComplete {
@@ -2808,6 +2814,7 @@ mod orchestration_tests {
         );
         assert_eq!(session.current_run(), run);
         assert_eq!(session.view().queue_window, before);
+        assert!(!session.view().queue_loading);
         let retry = session
             .handle_command(
                 SessionCommand::ApplyBatch {
@@ -2855,6 +2862,7 @@ mod orchestration_tests {
         let effect = session
             .hydrate_queue()
             .expect("replenish after retained history grows");
+        assert!(session.view().queue_loading);
         // Playback can move within the loaded window while the Store fills its tail.
         session
             .handle_command(SessionCommand::Next, &sample)
@@ -2873,6 +2881,7 @@ mod orchestration_tests {
         )
         .await;
         assert!(update.queue_changed);
+        assert!(!session.view().queue_loading);
         assert_eq!(session.current_run(), run);
         assert_eq!(session.sequence.progress_millis(), 12_000);
         assert!(Arc::ptr_eq(session.sequence.selected().unwrap(), &current));
