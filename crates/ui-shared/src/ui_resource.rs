@@ -129,6 +129,7 @@ pub fn verify_icons() -> Result<(), String> {
         "64x64/apps/io.github.screwys.Rufin.source.webdav.png",
         "64x64/apps/io.github.screwys.Rufin.source.smb.png",
         "scalable/apps/io.github.screwys.Rufin.source.plex.svg",
+        "scalable/apps/io.github.screwys.Rufin.source.emby.svg",
         "scalable/actions/rufin-go-last-symbolic.svg",
         "scalable/actions/rufin-audio-only-symbolic.svg",
         "scalable/actions/rufin-library-music-symbolic.svg",

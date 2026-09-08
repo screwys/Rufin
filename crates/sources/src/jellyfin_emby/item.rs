@@ -6,7 +6,7 @@ use serde_json::Value;
 
 use crate::policy::{normalized_date, u16_from_option};
 
-use super::{jellyfin_id, stable_hash};
+use super::{ServerKind, stable_hash};
 
 pub(super) async fn stage_album(
     scan: &mut library::Scan,
@@ -359,21 +359,21 @@ pub(super) const TRACK_FIELDS: &str = "Path,Overview,Container,Genres,DateCreate
 pub(super) const PLAYLIST_FIELDS: &str = "RunTimeTicks,ImageTags,ChildCount";
 pub(super) const MIXED_ITEM_FIELDS: &str = "Path,Overview,Container,Genres,DateCreated,PremiereDate,ProductionYear,RunTimeTicks,ParentId,AlbumId,AlbumPrimaryImageTag,AlbumArtists,ArtistItems,ProviderIds,UserData,ImageTags,BackdropImageTags,ParentBackdropItemId,ParentBackdropImageTags,ChildCount,AlbumCount,SongCount,NormalizationGain,AlbumNormalizationGain";
 
-pub(super) fn album_from_item(item: Value) -> Option<Album> {
+pub(super) fn album_from_item(server: ServerKind, item: Value) -> Option<Album> {
     let item_id = id(&item["Id"])?;
 
-    let image_ref = primary_image_ref("album", &item_id, &item["ImageTags"])
-        .or_else(|| backdrop_image_ref(&item));
-    let album_artist_credits = artist_credits_from_pairs(&item["AlbumArtists"]);
-    let artist_credits = artist_credits_from_pairs(&item["ArtistItems"]);
-    let genres = genre_credits_from_pairs(&item["GenreItems"]);
+    let image_ref = primary_image_ref(server, "album", &item_id, &item["ImageTags"])
+        .or_else(|| backdrop_image_ref(server, &item));
+    let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
+    let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
+    let genres = genre_credits_from_pairs(server, &item["GenreItems"]);
     let artist = field::<String>(&item, "AlbumArtist")
         .filter(|artist| !artist.trim().is_empty())
         .or_else(|| joined_credit_names(&album_artist_credits))
         .or_else(|| joined_artist_names(Some(&strings(&item["Artists"]))))
         .unwrap_or_else(|| "Unknown Artist".to_string());
     Some(Album {
-        id: String::from(jellyfin_id("album", &item_id)),
+        id: String::from(server.object_id("album", &item_id)),
         title: field(&item, "Name").unwrap_or_else(|| "Untitled Album".to_string()),
         artist,
         year: u16_from_option(field(&item, "ProductionYear")),
@@ -398,24 +398,24 @@ pub(super) fn album_from_item(item: Value) -> Option<Album> {
     })
 }
 
-pub(super) fn track_from_item(item: Value) -> Option<Track> {
+pub(super) fn track_from_item(server: ServerKind, item: Value) -> Option<Track> {
     let item_id = id(&item["Id"])?;
-    let image_ref = album_image_ref(&item)
-        .or_else(|| primary_image_ref("track", &item_id, &item["ImageTags"]))
-        .or_else(|| backdrop_image_ref(&item));
-    let artist_credits = artist_credits_from_pairs(&item["ArtistItems"]);
-    let album_artist_credits = artist_credits_from_pairs(&item["AlbumArtists"]);
-    let genres = genre_credits_from_pairs(&item["GenreItems"]);
+    let image_ref = album_image_ref(server, &item)
+        .or_else(|| primary_image_ref(server, "track", &item_id, &item["ImageTags"]))
+        .or_else(|| backdrop_image_ref(server, &item));
+    let artist_credits = artist_credits_from_pairs(server, &item["ArtistItems"]);
+    let album_artist_credits = artist_credits_from_pairs(server, &item["AlbumArtists"]);
+    let genres = genre_credits_from_pairs(server, &item["GenreItems"]);
     let album_id = id(&item["AlbumId"])
         .as_deref()
         .filter(|id| !id.trim().is_empty())
-        .map(|id| String::from(jellyfin_id("album", id)));
+        .map(|id| String::from(server.object_id("album", id)));
     let source_format = source_format_from_item(
         field::<String>(&item, "Container").as_deref(),
         field::<String>(&item, "Path").as_deref(),
     );
     Some(Track {
-        id: String::from(jellyfin_id("track", &item_id)),
+        id: String::from(server.object_id("track", &item_id)),
         album_id,
         title: field(&item, "Name").unwrap_or_else(|| "Untitled Track".to_string()),
         artist: joined_artist_names(Some(&strings(&item["Artists"])))
@@ -482,37 +482,37 @@ pub(super) fn is_audio_item(item: &Value) -> bool {
         .is_some_and(|kind| kind.eq_ignore_ascii_case("Audio"))
 }
 
-pub(super) fn artist_from_item(item: Value) -> Option<Artist> {
+pub(super) fn artist_from_item(server: ServerKind, item: Value) -> Option<Artist> {
     let item_id = id(&item["Id"])?;
     Some(Artist {
-        id: String::from(jellyfin_id("artist", &item_id)),
+        id: String::from(server.object_id("artist", &item_id)),
         name: field(&item, "Name").unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: favorite(&item["UserData"]),
         last_played: normalized_timestamp(field(&item["UserData"], "LastPlayedDate")),
         play_count: play_count(&item["UserData"]),
         user_rating: user_rating(&item["UserData"]),
         musicbrainz_artist_id: source_id(&item["ProviderIds"], "MusicBrainzArtist"),
-        image_ref: primary_image_ref("artist", &item_id, &item["ImageTags"]),
+        image_ref: primary_image_ref(server, "artist", &item_id, &item["ImageTags"]),
         local_artwork: None,
     })
 }
 
-pub(super) fn genre_from_item(item: Value) -> Option<Genre> {
+pub(super) fn genre_from_item(server: ServerKind, item: Value) -> Option<Genre> {
     let item_id = id(&item["Id"])?;
     Some(Genre {
-        id: String::from(jellyfin_id("genre", &item_id)),
+        id: String::from(server.object_id("genre", &item_id)),
         name: field(&item, "Name").unwrap_or_else(|| "Unknown Genre".to_string()),
-        image_ref: primary_image_ref("genre", &item_id, &item["ImageTags"]),
+        image_ref: primary_image_ref(server, "genre", &item_id, &item["ImageTags"]),
         local_artwork: None,
     })
 }
 
-pub(super) fn playlist_from_item(item: Value) -> Option<Playlist> {
+pub(super) fn playlist_from_item(server: ServerKind, item: Value) -> Option<Playlist> {
     let item_id = id(&item["Id"])?;
     Some(Playlist {
-        id: String::from(jellyfin_id("playlist", &item_id)),
+        id: String::from(server.object_id("playlist", &item_id)),
         name: field(&item, "Name").unwrap_or_else(|| "Untitled Playlist".to_string()),
-        image_ref: primary_image_ref("playlist", &item_id, &item["ImageTags"]),
+        image_ref: primary_image_ref(server, "playlist", &item_id, &item["ImageTags"]),
         duration_seconds: duration_seconds(field(&item, "RunTimeTicks")),
         track_count: field::<i32>(&item, "ChildCount")
             .and_then(|count| usize::try_from(count).ok())
@@ -520,12 +520,12 @@ pub(super) fn playlist_from_item(item: Value) -> Option<Playlist> {
     })
 }
 
-fn artist_credits_from_pairs(pairs: &Value) -> Vec<ArtistCredit> {
+fn artist_credits_from_pairs(server: ServerKind, pairs: &Value) -> Vec<ArtistCredit> {
     items(pairs)
         .iter()
         .filter_map(|pair| {
             Some(ArtistCredit {
-                id: jellyfin_id("artist", &id(&pair["Id"])?),
+                id: server.object_id("artist", &id(&pair["Id"])?),
                 name: field::<String>(pair, "Name")
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| "Unknown Artist".into()),
@@ -534,12 +534,12 @@ fn artist_credits_from_pairs(pairs: &Value) -> Vec<ArtistCredit> {
         })
         .collect()
 }
-fn genre_credits_from_pairs(pairs: &Value) -> Vec<GenreCredit> {
+fn genre_credits_from_pairs(server: ServerKind, pairs: &Value) -> Vec<GenreCredit> {
     items(pairs)
         .iter()
         .filter_map(|pair| {
             Some(GenreCredit {
-                id: jellyfin_id("genre", &id(&pair["Id"])?),
+                id: server.object_id("genre", &id(&pair["Id"])?),
                 name: field::<String>(pair, "Name")
                     .filter(|name| !name.trim().is_empty())
                     .unwrap_or_else(|| "Unknown Genre".into()),
@@ -599,22 +599,27 @@ fn normalized_timestamp(value: Option<String>) -> Option<String> {
         .filter(|value| !value.is_empty())
 }
 
-pub(super) fn primary_image_ref(kind: &str, item_id: &str, tags: &Value) -> Option<ImageRef> {
+pub(super) fn primary_image_ref(
+    server: ServerKind,
+    kind: &str,
+    item_id: &str,
+    tags: &Value,
+) -> Option<ImageRef> {
     let tag = field::<String>(tags, "Primary").filter(|tag| !tag.is_empty())?;
     Some(ImageRef {
-        item_id: jellyfin_id(kind, item_id),
+        item_id: server.object_id(kind, item_id),
         tag: Some(tag),
     })
 }
-fn album_image_ref(item: &Value) -> Option<ImageRef> {
+fn album_image_ref(server: ServerKind, item: &Value) -> Option<ImageRef> {
     let album_id = id(&item["AlbumId"])?;
     let tag = field::<String>(item, "AlbumPrimaryImageTag").filter(|tag| !tag.trim().is_empty())?;
     Some(ImageRef {
-        item_id: jellyfin_id("album", &album_id),
+        item_id: server.object_id("album", &album_id),
         tag: Some(tag.trim().to_string()),
     })
 }
-fn backdrop_image_ref(item: &Value) -> Option<ImageRef> {
+fn backdrop_image_ref(server: ServerKind, item: &Value) -> Option<ImageRef> {
     let (item_id, tags) = if first_image_tag(&item["BackdropImageTags"]).is_some() {
         (id(&item["Id"])?, &item["BackdropImageTags"])
     } else {
@@ -624,7 +629,7 @@ fn backdrop_image_ref(item: &Value) -> Option<ImageRef> {
         )
     };
     Some(ImageRef {
-        item_id: jellyfin_id("backdrop", &item_id),
+        item_id: server.object_id("backdrop", &item_id),
         tag: first_image_tag(tags),
     })
 }

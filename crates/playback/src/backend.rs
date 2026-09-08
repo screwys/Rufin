@@ -45,6 +45,7 @@ pub struct StreamWindow {
 
 #[derive(Clone)]
 pub struct ResolvedStream {
+    transcoded: bool,
     pub content_type: Option<String>,
     uri: String,
     redacted_uri: String,
@@ -56,6 +57,7 @@ pub struct ResolvedStream {
 impl PartialEq for ResolvedStream {
     fn eq(&self, other: &Self) -> bool {
         self.uri == other.uri
+            && self.transcoded == other.transcoded
             && self.redacted_uri == other.redacted_uri
             && self.trust_invalid_certificate == other.trust_invalid_certificate
             && self.window == other.window
@@ -70,6 +72,7 @@ impl ResolvedStream {
         let uri = uri.into();
         Self {
             redacted_uri: redact_sensitive_uri(&uri),
+            transcoded: false,
             uri,
             trust_invalid_certificate: false,
             window: None,
@@ -80,6 +83,7 @@ impl ResolvedStream {
 
     pub fn with_redacted(uri: impl Into<String>, redacted_uri: impl Into<String>) -> Self {
         Self {
+            transcoded: false,
             uri: uri.into(),
             redacted_uri: redacted_uri.into(),
             trust_invalid_certificate: false,
@@ -92,6 +96,15 @@ impl ResolvedStream {
     pub fn with_trust_invalid_certificate(mut self, trust: bool) -> Self {
         self.trust_invalid_certificate = trust;
         self
+    }
+
+    pub fn with_transcoding(mut self, transcoded: bool) -> Self {
+        self.transcoded = transcoded;
+        self
+    }
+
+    pub fn transcoded(&self) -> bool {
+        self.transcoded
     }
 
     pub fn with_content_type(mut self, content_type: Option<String>) -> Self {

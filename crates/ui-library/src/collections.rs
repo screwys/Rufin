@@ -1047,6 +1047,7 @@ pub fn install_smart_playlist_reorder(
             PlaybackTarget::SmartPlaylist(key) => Some(key.raw()),
             _ => None,
         },
+        Rc::new(|_| false),
         Rc::new(move |dragged, target| {
             if let Some(shell) = shell.upgrade() {
                 shell.update_library_list_settings(LibraryListKey::SmartPlaylists, |settings| {
@@ -1070,6 +1071,8 @@ pub fn install_playlist_reorder(
     shell: &Rc<CatalogUi>,
     current: Rc<dyn Fn() -> Option<PlaylistRow>>,
 ) {
+    let drop_current = Rc::clone(&current);
+    let menus = Rc::downgrade(&shell.media_menus);
     let shell = Rc::downgrade(shell);
     install_playlist_order_drop(
         target,
@@ -1078,6 +1081,12 @@ pub fn install_playlist_reorder(
             PlaybackTarget::Playlist(key) => Some(key.raw()),
             _ => None,
         },
+        Rc::new(move |source| {
+            let (Some(menus), Some(playlist)) = (menus.upgrade(), drop_current()) else {
+                return false;
+            };
+            ui_shared::media_menus::add_drag_to_playlist(&menus, playlist, source)
+        }),
         Rc::new(move |dragged, target| {
             let Some(shell) = shell.upgrade() else { return };
             shell.update_library_list_settings(LibraryListKey::Playlists, |settings| {
@@ -1113,6 +1122,7 @@ fn install_playlist_order_drop(
     widget: &impl IsA<gtk::Widget>,
     current: Rc<dyn Fn() -> Option<i64>>,
     key: fn(&PlaybackTarget) -> Option<i64>,
+    drop_media: Rc<dyn Fn(ui_shared::media_drag::MediaDragSource) -> bool>,
     reorder: Rc<dyn Fn(i64, i64)>,
 ) {
     let drop = gtk::DropTarget::new(
@@ -1127,13 +1137,16 @@ fn install_playlist_order_drop(
         let target = match &source {
             MediaDragSource::Target { target, .. } => target,
             MediaDragSource::Targets { targets, .. } if targets.len() == 1 => &targets[0],
-            _ => return false,
+            _ => return drop_media(source),
         };
         let target = match target {
             PlaybackTarget::Contextual { target, .. } => target.as_ref(),
             target => target,
         };
-        let (Some(dragged), Some(current)) = (key(target), current()) else {
+        let Some(dragged) = key(target) else {
+            return drop_media(source);
+        };
+        let Some(current) = current() else {
             return false;
         };
         if dragged == current {

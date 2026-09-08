@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use ui_shared::format_duration_units;
-use ui_shared::media_drag::{MediaDragSource, media_drag_source};
+use ui_shared::media_drag::media_drag_source;
 
 use crate::preferences::source::selector::source_submenu;
 use rufin_core::playback::PlaybackTarget;
@@ -23,7 +23,6 @@ use gtk::{gio, glib};
 use library::{AlbumRow, ArtistRow, GenreRow, PlaylistRow, SmartPlaylistRow};
 use playback::QueuePlacement;
 use tracing::warn;
-use ui_shared::downloads::{OperationFeedback, OperationFeedbackKind};
 use ui_shared::interactions::{
     CONTEXT_MENU_HOVER_HELD_CLASS, CONTEXT_MENU_HOVER_OWNER_CLASS, install_context_menu_openers,
     keep_parent_grab_for_nested_native_menus, popdown_native_menu, replace_native_menu_checkmarks,
@@ -1167,8 +1166,8 @@ pub(crate) fn request_sidebar_pins(shell: &Rc<Shell>) -> bool {
         shell.navigation.pin_cancellation.borrow_mut().take();
         match items {
             Some(items) => {
-                shell.navigation.pin_items.replace(items.clone());
                 reconcile_sidebar_pin_widgets(&shell, &items);
+                shell.navigation.pin_items.replace(items);
             }
             None => {
                 shell.navigation.pin_identity.borrow_mut().take();
@@ -1316,6 +1315,16 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         .current
         .borrow()
         .prefer_server_playlist_covers;
+    let previous_artwork = shell
+        .navigation
+        .pin_items
+        .borrow()
+        .iter()
+        .filter_map(|item| {
+            sidebar_pin_route_key(&item.route())
+                .map(|key| (key, item.artwork(prefer_server_playlist_covers)))
+        })
+        .collect::<HashMap<_, _>>();
     let desired_keys = items
         .iter()
         .filter_map(|item| sidebar_pin_route_key(&item.route()))
@@ -1339,9 +1348,21 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         let Some(key) = sidebar_pin_route_key(&item.route()) else {
             continue;
         };
-        let widget = normal_widgets.remove(&key).unwrap_or_else(|| {
-            sidebar_pin_row(shell, item.clone(), prefer_server_playlist_covers).upcast()
-        });
+        let widget = normal_widgets
+            .remove(&key)
+            .filter(|widget| {
+                if previous_artwork.get(&key).is_some_and(|previous| {
+                    *previous != item.artwork(prefer_server_playlist_covers)
+                }) {
+                    normal.remove(widget);
+                    false
+                } else {
+                    true
+                }
+            })
+            .unwrap_or_else(|| {
+                sidebar_pin_row(shell, item.clone(), prefer_server_playlist_covers).upcast()
+            });
         update_sidebar_pin_widget_metadata(&widget, item);
         if widget.parent().is_some() {
             normal.reorder_child_after(&widget, previous.as_ref());
@@ -1359,9 +1380,21 @@ fn reconcile_sidebar_pin_widgets(shell: &Rc<Shell>, items: &[SidebarPinItem]) {
         let Some(key) = sidebar_pin_route_key(&item.route()) else {
             continue;
         };
-        let widget = compact_widgets.remove(&key).unwrap_or_else(|| {
-            compact_sidebar_pin(shell, item.clone(), prefer_server_playlist_covers).upcast()
-        });
+        let widget = compact_widgets
+            .remove(&key)
+            .filter(|widget| {
+                if previous_artwork.get(&key).is_some_and(|previous| {
+                    *previous != item.artwork(prefer_server_playlist_covers)
+                }) {
+                    compact.remove(widget);
+                    false
+                } else {
+                    true
+                }
+            })
+            .unwrap_or_else(|| {
+                compact_sidebar_pin(shell, item.clone(), prefer_server_playlist_covers).upcast()
+            });
         if widget.parent().is_some() {
             compact.reorder_child_after(&widget, previous.as_ref());
         } else {
@@ -1507,8 +1540,12 @@ fn sidebar_pin_row(
     content.append(&identity);
     activate.set_child(Some(&content));
 
-    let navigation_shell = Rc::clone(shell);
-    activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
+    let navigation_shell = Rc::downgrade(shell);
+    activate.connect_clicked(move |_| {
+        if let Some(shell) = navigation_shell.upgrade() {
+            shell.navigate(route.clone());
+        }
+    });
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
     install_sidebar_pin_reorder(&row, shell, &pin);
@@ -1559,12 +1596,14 @@ fn sidebar_pin_row(
     });
     row.add_controller(motion);
 
-    let context_shell = Rc::clone(shell);
+    let context_shell = Rc::downgrade(shell);
     let context_pin = pin.clone();
     install_context_menu_openers(
         &row,
         Rc::new(move |target, position| {
-            context_pin.present_context_menu(target, &context_shell, position);
+            if let Some(shell) = context_shell.upgrade() {
+                context_pin.present_context_menu(target, &shell, position);
+            }
         }),
     );
     row
@@ -1604,8 +1643,12 @@ fn compact_sidebar_pin(
         .widget();
     cover.set_can_target(false);
     activate.set_child(Some(&cover));
-    let navigation_shell = Rc::clone(shell);
-    activate.connect_clicked(move |_| navigation_shell.navigate(route.clone()));
+    let navigation_shell = Rc::downgrade(shell);
+    activate.connect_clicked(move |_| {
+        if let Some(shell) = navigation_shell.upgrade() {
+            shell.navigate(route.clone());
+        }
+    });
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
     install_sidebar_pin_reorder(&row, shell, &pin);
@@ -1615,9 +1658,12 @@ fn compact_sidebar_pin(
     play.add_css_class("compact-sidebar-pin-play");
     play.set_size_request(32, 32);
     play.set_tooltip_text(Some(&title));
-    let playback_shell = Rc::clone(shell);
+    let playback_shell = Rc::downgrade(shell);
     let playback_target = pin.playback_target();
     play.connect_clicked(move |_| {
+        let Some(playback_shell) = playback_shell.upgrade() else {
+            return;
+        };
         crate::shell::catalog_actions::play_target(
             &playback_target,
             &playback_shell,
@@ -1627,11 +1673,13 @@ fn compact_sidebar_pin(
     controls.add_to_overlay(&row);
     controls.connect_hover(&row);
 
-    let context_shell = Rc::clone(shell);
+    let context_shell = Rc::downgrade(shell);
     install_context_menu_openers(
         &row,
         Rc::new(move |target, position| {
-            pin.present_context_menu(target, &context_shell, position);
+            if let Some(shell) = context_shell.upgrade() {
+                pin.present_context_menu(target, &shell, position);
+            }
         }),
     );
     row
@@ -1793,63 +1841,9 @@ fn install_playlist_pin_drop(
         let Some(source) = media_drag_source(value) else {
             return false;
         };
-        add_source_to_playlist_pin(&shell, &playlist, source)
+        ui_shared::media_menus::add_drag_to_playlist(&shell.media_menus, playlist.clone(), source)
     });
     target.add_controller(drop_target);
-}
-
-fn add_source_to_playlist_pin(
-    shell: &Rc<Shell>,
-    playlist: &PlaylistRow,
-    source: MediaDragSource,
-) -> bool {
-    let database = shell.products.library.clone();
-    let task = shell
-        .products
-        .runtime
-        .spawn(async move { source.resolve(&database).await });
-    let shell = Rc::downgrade(shell);
-    let playlist = playlist.clone();
-    gtk::glib::spawn_future_local(async move {
-        let Some((media, subject)) = task.await.ok().and_then(Result::ok) else {
-            return;
-        };
-        let Some(shell) = shell.upgrade() else { return };
-        add_media_to_playlist_pin(&shell, &playlist, media, subject);
-    });
-    true
-}
-
-fn add_media_to_playlist_pin(
-    shell: &Rc<Shell>,
-    playlist: &PlaylistRow,
-    media: Vec<String>,
-    subject: ::downloads::DownloadSubject,
-) -> bool {
-    let feedback_shell = Rc::downgrade(shell);
-    let destination = playlist.name.clone();
-    let preview_uris = media.iter().take(4).cloned().collect::<Vec<_>>();
-    ui_shared::playlists::add_media_to_playlist(
-        &shell.products.source,
-        playlist.playlist_key,
-        media,
-        false,
-        Rc::new(move |accepted| {
-            if accepted > 0
-                && let Some(shell) = feedback_shell.upgrade()
-            {
-                shell.show_operation_feedback(&OperationFeedback {
-                    subject: subject.clone(),
-                    preview_uris: preview_uris.clone(),
-                    item_count: accepted,
-                    kind: OperationFeedbackKind::PlaylistAdded {
-                        destination: destination.clone(),
-                    },
-                });
-            }
-        }),
-    );
-    true
 }
 
 fn install_sidebar_pin_double_click(
@@ -1860,8 +1854,9 @@ fn install_sidebar_pin_double_click(
     let click = gtk::GestureClick::new();
     click.set_button(1);
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
-    let shell = Rc::clone(shell);
+    let shell = Rc::downgrade(shell);
     click.connect_pressed(move |gesture, presses, _, _| {
+        let Some(shell) = shell.upgrade() else { return };
         if presses >= 2 && presses % 2 == 0 {
             gesture.set_state(gtk::EventSequenceState::Claimed);
             crate::shell::catalog_actions::play_target(&playback, &shell, QueuePlacement::Now);
@@ -1932,9 +1927,10 @@ fn sidebar_pin_transport_button(
 ) -> gtk::Button {
     let button = icon_button(icon_name, label);
     button.add_css_class("sidebar-pin-control");
-    let shell = Rc::clone(shell);
+    let shell = Rc::downgrade(shell);
     let target = target.clone();
     button.connect_clicked(move |_| {
+        let Some(shell) = shell.upgrade() else { return };
         crate::shell::catalog_actions::play_target(&target, &shell, placement);
     });
     button

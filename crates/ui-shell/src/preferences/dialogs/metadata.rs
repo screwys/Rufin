@@ -28,7 +28,6 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
         };
         match draft {
             Ok(draft) => {
-                let retry_shell = Rc::downgrade(&shell);
                 let dialog = build_dialog(
                     &shell.products.source,
                     item,
@@ -39,11 +38,6 @@ pub(crate) fn present_metadata_dialog(shell: &Rc<Shell>, item: MetadataItemId) {
                         .borrow()
                         .allows_external_metadata_lookup(),
                     shell.chrome.window.height(),
-                    Rc::new(move |item| {
-                        if let Some(shell) = retry_shell.upgrade() {
-                            present_metadata_dialog(&shell, item);
-                        }
-                    }),
                 );
                 shell.present_selected_dialog(&dialog);
             }

@@ -36,7 +36,8 @@ pub struct CredentialHostPreset {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JellyfinSetupInput {
+pub struct JellyfinEmbySetupInput {
+    pub kind: crate::ServerKind,
     pub credentials: CredentialHostInput,
     pub use_instant_mix: bool,
     pub device_id: String,
@@ -57,7 +58,7 @@ pub struct CredentialSettingsInput {
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub struct JellyfinSettingsInput {
+pub struct JellyfinEmbySettingsInput {
     pub credentials: CredentialSettingsInput,
     pub use_instant_mix: bool,
 }
@@ -91,7 +92,7 @@ pub enum SourceSetupInput {
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentials,
     },
-    Jellyfin(JellyfinSetupInput),
+    JellyfinEmby(JellyfinEmbySetupInput),
     Plex(PlexSetupInput),
     Subsonic {
         flavor: SubsonicFlavor,
@@ -108,7 +109,7 @@ pub enum SourceSettingsInput {
         settings: crate::FileSourceSettings,
         credentials: crate::FileCredentialsEdit,
     },
-    Jellyfin(JellyfinSettingsInput),
+    JellyfinEmby(JellyfinEmbySettingsInput),
     Plex(PlexSettingsInput),
     Subsonic {
         authentication: crate::subsonic::SubsonicAuthentication,
@@ -155,12 +156,12 @@ impl SourceConfiguration {
     }
 
     pub fn transcoded_download_bitrate_limit_kbps(&self) -> Option<u32> {
-        (self.kind == crate::jellyfin::JELLYFIN_SOURCE_ID)
-            .then_some(crate::jellyfin::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)
+        (self.kind == crate::jellyfin_emby::JELLYFIN_SOURCE_ID)
+            .then_some(crate::jellyfin_emby::JELLYFIN_TRANSCODED_DOWNLOAD_BITRATE_LIMIT_KBPS)
     }
 
     pub fn playlist_tracks_can_repeat(&self) -> bool {
-        !matches!(self.kind.as_str(), "jellyfin" | "plex")
+        playlist_tracks_can_repeat(&self.kind)
     }
 
     /// Encode an already configured Local source without touching its folders.
@@ -218,11 +219,12 @@ impl SourceConfiguration {
                     digest_part(&mut digest, root.to_string_lossy().as_bytes());
                 }
             }
-            crate::jellyfin::JELLYFIN_SOURCE_ID => {
-                let config = crate::jellyfin::JellyfinSourceConfig::from_configuration(self)?;
+            "jellyfin" | "emby" => {
+                let config =
+                    crate::jellyfin_emby::JellyfinEmbySourceConfig::from_configuration(self)?;
                 digest_part(&mut digest, config.user_id.as_bytes());
-                if jellyfin_artist_reader_v2 {
-                    // Jellyfin MusicArtist changed from raw dual-access rows to one
+                if jellyfin_artist_reader_v2 && self.kind == "jellyfin" {
+                    // JellyfinEmby MusicArtist changed from raw dual-access rows to one
                     // name-aggregate representation. Released caches remain usable
                     // while a live reader upgrade rebuilds their source facts.
                     digest_part(&mut digest, b"jellyfin-artist-reader-v2");
@@ -274,8 +276,9 @@ impl SourceConfiguration {
                 name: self.name.clone(),
                 settings: crate::FileSourceSettings::from_configuration(self)?,
             }),
-            crate::jellyfin::JELLYFIN_SOURCE_ID => {
-                let config = crate::jellyfin::JellyfinSourceConfig::from_configuration(self)?;
+            "jellyfin" | "emby" => {
+                let config =
+                    crate::jellyfin_emby::JellyfinEmbySourceConfig::from_configuration(self)?;
                 Ok(EditableSource::Credentials {
                     source_id: self.source_id.clone(),
                     kind: self.kind.clone(),
@@ -285,7 +288,8 @@ impl SourceConfiguration {
                         username: config.username,
                         trust_invalid_cert: config.trust_invalid_cert,
                     },
-                    jellyfin_use_instant_mix: Some(config.use_instant_mix),
+                    jellyfin_use_instant_mix: (config.kind == crate::ServerKind::Jellyfin)
+                        .then_some(config.use_instant_mix),
                     subsonic_authentication: None,
                 })
             }
@@ -316,6 +320,10 @@ impl SourceConfiguration {
             ))),
         }
     }
+}
+
+pub(crate) fn playlist_tracks_can_repeat(kind: &str) -> bool {
+    !matches!(kind, "jellyfin" | "plex")
 }
 
 fn digest_part(digest: &mut blake3::Hasher, value: &[u8]) {
@@ -359,7 +367,7 @@ mod tests {
 
     use super::*;
     use crate::file::local::LocalSourceConfig;
-    use crate::jellyfin::JellyfinSourceConfig;
+    use crate::jellyfin_emby::JellyfinEmbySourceConfig;
     use crate::subsonic::SubsonicSourceConfig;
 
     #[test]
@@ -407,8 +415,8 @@ mod tests {
                 "use_jellyfin_instant_mix": true,
             }),
         );
-        let jellyfin =
-            JellyfinSourceConfig::from_configuration(&jellyfin_stored).expect("Jellyfin payload");
+        let jellyfin = JellyfinEmbySourceConfig::from_configuration(&jellyfin_stored)
+            .expect("JellyfinEmby payload");
         assert_eq!(jellyfin.base_url, "https://jellyfin.example");
         assert_eq!(jellyfin.user_id, "account-id");
         assert_eq!(jellyfin.username, "listener");
@@ -421,7 +429,7 @@ mod tests {
                 "Test Source",
                 jellyfin.clone().into_payload(),
             ))
-            .expect("round-trip Jellyfin payload"),
+            .expect("round-trip JellyfinEmby payload"),
             jellyfin.into_payload(),
         );
 
@@ -511,7 +519,7 @@ mod tests {
             }),
         );
 
-        let error = JellyfinSourceConfig::from_configuration(&stored)
+        let error = JellyfinEmbySourceConfig::from_configuration(&stored)
             .expect_err("unsupported payload version");
         assert!(matches!(error, SourceError::InvalidConfig(_)));
     }
@@ -536,16 +544,25 @@ impl SourceConfiguration {
             return None;
         }
         let path = uri.path().strip_prefix(base.path().trim_end_matches('/'))?;
-        let object = if self.kind == "jellyfin" {
-            let mut parts = path.trim_start_matches('/').split('/');
+        let object = if matches!(self.kind.as_str(), "jellyfin" | "emby") {
+            let path = path.trim_start_matches('/');
+            let path = if self.kind == "emby" {
+                path.strip_prefix("emby/").unwrap_or(path)
+            } else {
+                path
+            };
+            let mut parts = path.split('/');
             if !parts.next()?.eq_ignore_ascii_case("Audio") {
                 return None;
             }
             let id = parts.next()?;
-            if !parts.next()?.starts_with("stream") {
+            let route = parts.next()?;
+            if !route.starts_with("stream")
+                && !(self.kind == "emby" && route.eq_ignore_ascii_case("universal"))
+            {
                 return None;
             }
-            format!("jellyfin:track:{id}")
+            format!("{}:track:{id}", self.kind)
         } else if matches!(self.kind.as_str(), "subsonic" | "navidrome") {
             if !matches!(
                 path,

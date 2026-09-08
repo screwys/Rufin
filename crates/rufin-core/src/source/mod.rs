@@ -25,10 +25,10 @@ use library::{
 };
 use secrets::{SecretStorageMode, SecretStore, SwitchableSecretStore};
 use sources::{
-    CredentialHostInput, CredentialSettingsInput, JellyfinSettingsInput, JellyfinSetupInput,
-    LiveFolderPage, LocalFolderHostInput, SelectedFeed, Source, SourceConfiguration,
-    SourceEntityKind, SourceError, SourceId, SourceReadProgress, SourceReadStage,
-    SourceSettingsInput, SourceSetupInput, SubsonicFlavor,
+    CredentialHostInput, CredentialSettingsInput, JellyfinEmbySettingsInput,
+    JellyfinEmbySetupInput, LiveFolderPage, LocalFolderHostInput, SelectedFeed, Source,
+    SourceConfiguration, SourceEntityKind, SourceError, SourceId, SourceReadProgress,
+    SourceReadStage, SourceSettingsInput, SourceSetupInput, SubsonicFlavor,
 };
 use tracing::{info, warn};
 
@@ -2739,8 +2739,10 @@ fn configured_source(
 }
 
 fn half_stars_enabled(configured: &ConfiguredSource) -> bool {
-    matches!(configured.configuration.kind.as_str(), "jellyfin" | "plex")
-        || configured.enable_half_stars
+    matches!(
+        configured.configuration.kind.as_str(),
+        "jellyfin" | "emby" | "plex"
+    ) || configured.enable_half_stars
 }
 
 fn edit_local_roots(owner: &SourceOwner, edit: impl FnOnce(&mut Vec<PathBuf>) + Send + 'static) {
@@ -2913,7 +2915,7 @@ fn editable_source(configuration: &SourceConfiguration) -> Result<EditableSource
                 name: configuration.name.clone(),
                 transcoded_download_bitrate_limit_kbps: configuration
                     .transcoded_download_bitrate_limit_kbps(),
-                half_stars_enabled: configuration.kind == "jellyfin",
+                half_stars_enabled: matches!(configuration.kind.as_str(), "jellyfin" | "emby"),
             },
             credentials: CredentialPreset {
                 source_name: credentials.server_name,
@@ -2970,10 +2972,12 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
             settings,
             credentials,
         },
-        SourceSetup::Jellyfin {
+        SourceSetup::JellyfinEmby {
+            kind,
             credentials,
             use_instant_mix,
-        } => SourceSetupInput::Jellyfin(JellyfinSetupInput {
+        } => SourceSetupInput::JellyfinEmby(JellyfinEmbySetupInput {
+            kind,
             credentials: credential_host_input(credentials),
             use_instant_mix,
             device_id: jellyfin_device_id.to_string(),
@@ -3004,11 +3008,11 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
             settings,
             credentials,
         },
-        SourceSettingsChange::Jellyfin {
+        SourceSettingsChange::JellyfinEmby {
             source_id: _,
             credentials,
             use_instant_mix,
-        } => SourceSettingsInput::Jellyfin(JellyfinSettingsInput {
+        } => SourceSettingsInput::JellyfinEmby(JellyfinEmbySettingsInput {
             credentials: credential_settings_input(credentials),
             use_instant_mix,
         }),
@@ -3028,7 +3032,7 @@ fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
     match input {
         SourceSettingsChange::Plex { source_id, .. }
         | SourceSettingsChange::Files { source_id, .. }
-        | SourceSettingsChange::Jellyfin { source_id, .. }
+        | SourceSettingsChange::JellyfinEmby { source_id, .. }
         | SourceSettingsChange::OpenSubsonic { source_id, .. } => source_id,
     }
 }

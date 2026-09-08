@@ -18,8 +18,9 @@
     <color type="primary" scheme_preference="dark">#28596b</color>
   </branding>
   <description>
-    <p>Enjoy your music library, either a server or local folders; with a powerful all-in-one music player.</p>
+    <p>Enjoy your music library, local/remote folders or music server; with a powerful all-in-one music player.</p>
     <ul>
+      <li>Supports Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers; local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.</li>
       <li>Powerful transition and loudness normalization implementation</li>
       <li>Auto DJ with server or app-matched recommendations and random play filters</li>
       <li>Built-in Last.fm, Libre.fm, ListenBrainz and Discord Rich presence integrations</li>

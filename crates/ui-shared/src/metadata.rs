@@ -137,7 +137,6 @@ pub fn build_dialog(
     draft: MetadataDraft,
     external_lookup_allowed: bool,
     window_height: i32,
-    on_saved: Rc<dyn Fn(MetadataItemId)>,
 ) -> adw::Dialog {
     let resource = crate::ui_resource::METADATA_DIALOG_RESOURCE;
     let builder = crate::ui_resource::builder(resource);
@@ -195,7 +194,7 @@ pub fn build_dialog(
         }
     });
     connect_identify(source, item.clone(), &editor);
-    connect_save(source, item, &editor_dialog, &editor, on_saved);
+    connect_save(source, item, &editor_dialog, &editor);
     editor_dialog
 }
 
@@ -855,7 +854,6 @@ fn connect_save(
     item: MetadataItemId,
     dialog: &adw::Dialog,
     editor: &Rc<Editor>,
-    on_saved: Rc<dyn Fn(MetadataItemId)>,
 ) {
     let source = Arc::downgrade(source);
     let dialog = dialog.downgrade();
@@ -909,8 +907,6 @@ fn connect_save(
         };
         let editor = Rc::downgrade(&editor);
         let dialog = dialog.clone();
-        let on_saved = Rc::clone(&on_saved);
-        let retry_item = item.clone();
         gtk::glib::spawn_future_local(async move {
             let response = receiver.recv().await;
             let Some(editor) = editor.upgrade() else {
@@ -921,7 +917,6 @@ fn connect_save(
                     if let Some(dialog) = dialog.upgrade() {
                         dialog.force_close();
                     }
-                    gtk::glib::idle_add_local_once(move || on_saved(retry_item));
                 }
                 Err(error @ SourceMetadataError::SavedRefreshFailed(_)) => {
                     editor.show_error(&error.to_string());

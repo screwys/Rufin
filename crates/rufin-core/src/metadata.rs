@@ -194,9 +194,9 @@ pub fn identify_album_metadata(
         let native_source = library::source_entity_parts(&media_uri)
             .map(|(id, _, _)| id)
             .filter(|id| {
-                owner
-                    .configuration(id)
-                    .is_some_and(|configuration| configuration.kind == "jellyfin")
+                owner.configuration(id).is_some_and(|configuration| {
+                    matches!(configuration.kind.as_str(), "jellyfin" | "emby")
+                })
             });
         let source = match native_source {
             Some(id) => tokio::task::spawn_blocking(move || owner.client(&id).ok())
@@ -252,9 +252,9 @@ pub fn identify_artist_metadata(
         let native_source = library::source_entity_parts(&media_uri)
             .map(|(id, _, _)| id)
             .filter(|id| {
-                owner
-                    .configuration(id)
-                    .is_some_and(|configuration| configuration.kind == "jellyfin")
+                owner.configuration(id).is_some_and(|configuration| {
+                    matches!(configuration.kind.as_str(), "jellyfin" | "emby")
+                })
             });
         let source = match native_source {
             Some(id) => tokio::task::spawn_blocking(move || owner.client(&id).ok())

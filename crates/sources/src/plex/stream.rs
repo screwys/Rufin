@@ -276,6 +276,7 @@ mod tests {
             .mount(&server)
             .await;
         let mut report = SourceReportFact {
+            transcoded: false,
             run: playback::RunId::new(1),
             media_uri: "plex:test".into(),
             session_identifier: "outgoing".into(),

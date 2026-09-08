@@ -8,7 +8,7 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local and remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. It also has broad set of features and optimizations around these features for the ideal user experience.
 
 <br clear="left">
 
@@ -20,9 +20,11 @@
 
 **Jellyfin**: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-**Plex**: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
+**Navidrome / OpenSubsonic**: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
 
-**Navidrome / OpenSubsonic**: Supports API key authorization , normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
+**Emby**: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
+
+**Plex**: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
 **WebDAV**: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag editing, lyrics, and playlists. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 

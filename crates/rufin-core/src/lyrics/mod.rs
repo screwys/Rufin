@@ -1420,7 +1420,15 @@ impl LyricsHandle {
                 .publish(LyricsEvent::JapaneseDictionaryChanged(status.clone()));
             let service = Arc::clone(&self.service);
             self.service.runtime.spawn_blocking(move || {
-                let result = ::lyrics::prepare_dictionary(&service.dictionary_directory);
+                let result = ::lyrics::prepare_dictionary(&service.dictionary_directory, || {
+                    *service
+                        .dictionary_status
+                        .lock()
+                        .unwrap_or_else(|e| e.into_inner()) = JapaneseDictionaryStatus::Downloading;
+                    service.publish(LyricsEvent::JapaneseDictionaryChanged(
+                        JapaneseDictionaryStatus::Downloading,
+                    ));
+                });
                 let status = match result {
                     Ok(path) => JapaneseDictionaryStatus::Ready(path),
                     Err(error) => {

@@ -39,8 +39,7 @@ Requires:       hicolor-icon-theme
 # Generated Linux package dependencies end.
 
 %description
-Rufin is a native GTK4/libadwaita music player for Jellyfin, Subsonic,
-Navidrome, and local music libraries.
+Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.
 
 %prep
 %autosetup -n Rufin-%{version} -a1

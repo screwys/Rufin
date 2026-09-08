@@ -1,7 +1,7 @@
 # The marked Linux dependency blocks are generated. Edit `NIX_PACKAGES` in
 # `crates/xtask/src/linux_packaging.rs`, then run `just deps` to update them.
 {
-  description = "Native GTK4/libadwaita music player for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
+  description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
 
   inputs.nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
 
@@ -115,7 +115,7 @@
             '';
 
             meta = {
-              description = "Native GTK4/libadwaita music player for Jellyfin, Subsonic, Navidrome and local libraries written in Rust";
+              description = "Native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and Emby servers;  local folders,  WebDAV including a direct Nextcloud browser login path, Samba and NAS shares.";
               homepage = "https://github.com/screwys/Rufin";
               license = lib.licenses.gpl3Plus;
               mainProgram = "rufin";
