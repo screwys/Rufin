@@ -2,6 +2,7 @@ use localization::msgid;
 pub fn source_kind_title(kind: &str) -> Option<&'static str> {
     Some(match kind {
         "jellyfin" => msgid("Jellyfin"),
+        "emby" => msgid("Emby"),
         "plex" => msgid("Plex"),
         "navidrome" => msgid("Navidrome"),
         "subsonic" => msgid("OpenSubsonic"),
@@ -43,17 +44,17 @@ pub fn configure_ownership_toggle(
         } else {
             STABLE_APP_ID
         });
-        button.set_tooltip_text(Some(&tr_with(
-            "Ownership of this item belongs to {source}",
-            &[(
-                "source",
-                if current {
-                    source_name.as_deref().unwrap_or(DISPLAY_NAME)
-                } else {
-                    DISPLAY_NAME
-                },
-            )],
-        )));
+        let tooltip = if current {
+            tr_with(
+                "This is owned by {source}. Regular playlists are synced to your remote.",
+                &[("source", source_name.as_deref().unwrap_or(DISPLAY_NAME))],
+            )
+        } else {
+            tr(
+                "This is owned by Rufin. It can include entries from all configured sources but it is not synced to remotes.",
+            )
+        };
+        button.set_tooltip_text(Some(&tooltip));
     };
     update(button);
     button.connect_toggled(update);
@@ -62,10 +63,11 @@ pub fn configure_ownership_toggle(
 pub fn source_kind_icon_name(kind: &str) -> Option<&'static str> {
     Some(match kind {
         "jellyfin" => "io.github.screwys.Rufin.source.jellyfin",
+        "emby" => "io.github.screwys.Rufin.source.emby",
         "plex" => "io.github.screwys.Rufin.source.plex",
         "navidrome" => "io.github.screwys.Rufin.source.navidrome",
         "subsonic" => "io.github.screwys.Rufin.source.opensubsonic",
-        "local" => "rufin-folders-symbolic",
+        "local" => "io.github.screwys.Rufin-symbolic",
         "webdav" => "io.github.screwys.Rufin.source.webdav",
         "smb" => "io.github.screwys.Rufin.source.smb",
         _ => return None,

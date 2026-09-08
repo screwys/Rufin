@@ -17,7 +17,8 @@ mod policy;
 mod source;
 
 mod file;
-mod jellyfin;
+mod jellyfin_emby;
+pub use jellyfin_emby::ServerKind;
 mod remote_http;
 mod remote_json;
 mod subsonic;
@@ -32,7 +33,7 @@ mod local_change_integration_tests {
 
 pub use config::{
     CredentialHostInput, CredentialHostPreset, CredentialSettingsInput, EditableSource,
-    JellyfinSettingsInput, JellyfinSetupInput, LocalFolderHostInput, PlexSettingsInput,
+    JellyfinEmbySettingsInput, JellyfinEmbySetupInput, LocalFolderHostInput, PlexSettingsInput,
     PlexSetupInput, SourceConfiguration, SourceSettingsInput, SourceSetupInput,
 };
 pub use file::metadata::read_embedded_lyrics;

@@ -213,7 +213,7 @@
     </property>
   </object>
   <object class="AdwPreferencesPage" id="local_page"><property name="title" translatable="yes">Local</property></object>
-  <object class="AdwActionRow" id="local_source_row"><property name="title" translatable="yes">Local</property><property name="activatable">true</property><child type="prefix"><object class="GtkImage"><property name="icon-name">rufin-folders-symbolic</property><property name="pixel-size">28</property></object></child><child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child></object>
+  <object class="AdwActionRow" id="local_source_row"><property name="title" translatable="yes">Local</property><property name="activatable">true</property><child type="prefix"><object class="GtkImage"><property name="icon-name">io.github.screwys.Rufin-symbolic</property><property name="pixel-size">28</property></object></child><child type="suffix"><object class="GtkImage"><property name="icon-name">rufin-go-next-symbolic</property></object></child></object>
   <object class="GtkButton" id="add_source"><property name="label" translatable="yes">Add Source</property></object>
   <object class="AdwAlertDialog" id="forget_local_confirm">
     <property name="heading" translatable="yes">Forget Source</property>

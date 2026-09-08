@@ -73,13 +73,13 @@ impl PlayerUi {
             toast.dismiss();
         }
         let id = match status {
-            JapaneseDictionaryStatus::Loading => "loading",
+            JapaneseDictionaryStatus::Downloading => "loading",
             JapaneseDictionaryStatus::Failed => "failed",
             JapaneseDictionaryStatus::Ready(_) => {
                 self.render_lyrics_panel();
                 return;
             }
-            JapaneseDictionaryStatus::Idle => return,
+            JapaneseDictionaryStatus::Idle | JapaneseDictionaryStatus::Loading => return,
         };
         let resource = crate::ui_resource::LYRICS_DICTIONARY_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);

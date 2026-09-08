@@ -47,6 +47,7 @@ pub enum SourceReportPhase {
 
 #[derive(Clone, Debug, PartialEq)]
 pub struct SourceReportFact {
+    pub transcoded: bool,
     pub run: RunId,
     pub session_identifier: String,
     pub queue_id: Option<u64>,
@@ -2447,6 +2448,10 @@ impl PlaybackSession {
         failed: bool,
     ) -> SourceReportFact {
         SourceReportFact {
+            transcoded: current
+                .resolved_stream
+                .as_ref()
+                .is_some_and(|stream| stream.transcoded()),
             run: current.id,
             session_identifier: current.play_id.clone(),
             queue_id: None,
@@ -3316,8 +3321,10 @@ mod orchestration_tests {
                 _ => None,
             })
             .expect("next resolution");
-        let prepared =
-            session.stream_resolved(next_run, crate::ResolvedStream::new("file:///next.flac"));
+        let prepared = session.stream_resolved(
+            next_run,
+            crate::ResolvedStream::new("https://music.example/next.m3u8").with_transcoding(true),
+        );
         assert!(prepared.effects.iter().any(|effect| matches!(
             effect,
             SessionEffect::Backend(BackendCommand::PrepareNext {
@@ -3378,6 +3385,7 @@ mod orchestration_tests {
                 .iter()
                 .any(|report| report.phase == SourceReportPhase::Ended
                     && report.session_identifier == identifiers[&current_run]
+                    && !report.transcoded
                     && report.position_millis == 179_500)
         );
         assert!(
@@ -3385,6 +3393,7 @@ mod orchestration_tests {
                 .iter()
                 .any(|report| report.phase == SourceReportPhase::Started
                     && report.session_identifier == identifiers[&next_run]
+                    && report.transcoded
                     && report.position_millis == 0)
         );
     }

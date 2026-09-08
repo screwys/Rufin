@@ -86,7 +86,8 @@ pub enum SourceSetup {
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentials,
     },
-    Jellyfin {
+    JellyfinEmby {
+        kind: sources::ServerKind,
         credentials: CredentialInput,
         use_instant_mix: bool,
     },
@@ -130,7 +131,7 @@ pub enum SourceSettingsChange {
         settings: sources::FileSourceSettings,
         credentials: sources::FileCredentialsEdit,
     },
-    Jellyfin {
+    JellyfinEmby {
         source_id: SourceId,
         credentials: CredentialInput,
         use_instant_mix: bool,

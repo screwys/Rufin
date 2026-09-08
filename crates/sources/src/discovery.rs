@@ -1,5 +1,5 @@
 //! Deadline-bounded LAN discovery shared by source and output providers.
-use crate::jellyfin::normalize_base_url;
+use crate::jellyfin_emby::normalize_base_url;
 use crate::remote_http::{self, BodyLimit, RemoteHttpPolicy};
 use crate::{SourceError, SourceResult};
 use if_addrs::IfAddr;
@@ -15,6 +15,7 @@ use tracing::instrument;
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum DiscoveryProvider {
     Jellyfin,
+    Emby,
     Plex,
 }
 
@@ -30,7 +31,12 @@ pub async fn discover_servers(
     timeout: Duration,
 ) -> SourceResult<Vec<DiscoveredServer>> {
     match provider {
-        DiscoveryProvider::Jellyfin => discover_jellyfin_servers(timeout).await,
+        DiscoveryProvider::Jellyfin => {
+            discover_jellyfin_emby_servers(crate::ServerKind::Jellyfin, timeout).await
+        }
+        DiscoveryProvider::Emby => {
+            discover_jellyfin_emby_servers(crate::ServerKind::Emby, timeout).await
+        }
         DiscoveryProvider::Plex => discover_plex_servers(timeout).await,
     }
 }
@@ -199,6 +205,7 @@ mod tests {
 const JELLYFIN_DISCOVERY_PORT: u16 = 7359;
 const JELLYFIN_DISCOVERY_MESSAGES: &[&[u8]] =
     &[b"Who is JellyfinServer?", b"who is JellyfinServer?"];
+const EMBY_DISCOVERY_MESSAGES: &[&[u8]] = &[b"who is EmbyServer?"];
 const JELLYFIN_LOCALHOST_URL: &str = "http://localhost:8096";
 const JELLYFIN_LOCALHOST_TARGETS: &[&str] = &["http://127.0.0.1:8096", "http://[::1]:8096"];
 const JELLYFIN_LOCALHOST_PROBE_TIMEOUT: Duration = Duration::from_millis(250);
@@ -214,11 +221,17 @@ const JELLYFIN_DISCOVERY_HTTP: RemoteHttpPolicy = RemoteHttpPolicy {
 };
 
 #[instrument(skip_all, fields(timeout_ms = timeout.as_millis()))]
-async fn discover_jellyfin_servers(timeout: Duration) -> SourceResult<Vec<DiscoveredServer>> {
+async fn discover_jellyfin_emby_servers(
+    kind: crate::ServerKind,
+    timeout: Duration,
+) -> SourceResult<Vec<DiscoveredServer>> {
     let mut servers = Vec::new();
     for server in probe(
         &broadcast_targets(JELLYFIN_DISCOVERY_PORT),
-        JELLYFIN_DISCOVERY_MESSAGES,
+        match kind {
+            crate::ServerKind::Jellyfin => JELLYFIN_DISCOVERY_MESSAGES,
+            crate::ServerKind::Emby => EMBY_DISCOVERY_MESSAGES,
+        },
         timeout,
         |packet, _sender| jellyfin_server_from_packet(packet),
     )
@@ -227,12 +240,13 @@ async fn discover_jellyfin_servers(timeout: Duration) -> SourceResult<Vec<Discov
         push_server(&mut servers, server);
     }
 
-    if let Ok(client) = Client::builder()
-        .no_proxy()
-        .redirect(redirect::Policy::none())
-        .connect_timeout(JELLYFIN_LOCALHOST_PROBE_TIMEOUT)
-        .timeout(JELLYFIN_LOCALHOST_PROBE_TIMEOUT)
-        .build()
+    if kind == crate::ServerKind::Jellyfin
+        && let Ok(client) = Client::builder()
+            .no_proxy()
+            .redirect(redirect::Policy::none())
+            .connect_timeout(JELLYFIN_LOCALHOST_PROBE_TIMEOUT)
+            .timeout(JELLYFIN_LOCALHOST_PROBE_TIMEOUT)
+            .build()
     {
         for target in JELLYFIN_LOCALHOST_TARGETS {
             if let Some(server) = probe_jellyfin_localhost_server(&client, target).await {

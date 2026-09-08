@@ -151,23 +151,21 @@ mod restore_owner_imp {
             if width <= 1 || height <= 1 {
                 return;
             }
-            let Some(target) = self.target.take() else {
-                self.adjustment.take();
-                if let Some(ready) = self.ready.take() {
-                    ready();
-                }
-                return;
-            };
-            let Some(adjustment) = self.adjustment.take() else {
-                return;
-            };
-            adjustment.set_value(super::clamp_route_position(
-                target,
-                adjustment.lower(),
-                adjustment.upper(),
-                adjustment.page_size(),
-            ));
-            self.obj().queue_allocate();
+            if let (Some(target), Some(adjustment)) = (self.target.take(), self.adjustment.take()) {
+                adjustment.set_value(super::clamp_route_position(
+                    target,
+                    adjustment.lower(),
+                    adjustment.upper(),
+                    adjustment.page_size(),
+                ));
+                // Apply the restored viewport before admitting visible artwork.
+                // Queuing this owner during allocation does not schedule another
+                // call to size_allocate when only its descendants need layout.
+                child.allocate(width, height, baseline, None);
+            }
+            if let Some(ready) = self.ready.take() {
+                ready();
+            }
         }
 
         fn snapshot(&self, snapshot: &gtk::Snapshot) {

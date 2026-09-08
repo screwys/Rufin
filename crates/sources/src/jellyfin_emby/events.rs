@@ -26,29 +26,42 @@ const JELLYFIN_WEBSOCKET_KEY_BYTES: usize = 16;
 const FEED_RETRY_MIN: Duration = Duration::from_secs(5);
 const FEED_RETRY_MAX: Duration = Duration::from_secs(60);
 
-impl JellyfinSource {
+impl JellyfinEmbySource {
     async fn connect_library_socket(&self) -> SourceResult<WebSocketStream<reqwest::Upgraded>> {
         let key = websocket_key()?;
-        let url = endpoint(&self.base_url, "socket")?;
+        let mut url = endpoint(
+            &self.socket_base_url,
+            match self.kind {
+                ServerKind::Jellyfin => "socket",
+                ServerKind::Emby => "embywebsocket",
+            },
+        )?;
+        if self.kind == ServerKind::Emby {
+            self.send_unit(self.client.post(endpoint(&self.base_url, "Sessions/Capabilities/Full")?).json(&serde_json::json!({
+                "PlayableMediaTypes": ["Audio"], "SupportedCommands": [], "SupportsMediaControl": false, "SupportsSync": false
+            }))).await?;
+            url.query_pairs_mut()
+                .append_pair("api_key", &self.access_token)
+                .append_pair("deviceId", &self.device_id);
+        }
         debug!(
-            service = "jellyfin",
+            service = self.kind.source_kind(),
             method = "GET",
-            %url,
+            endpoint = url.path(),
             "sending WebSocket upgrade request"
         );
         let started = Instant::now();
-        let response = build_websocket_client(self.trust_invalid_cert)?
-            .get(url)
-            .header(header::AUTHORIZATION, self.authorization.clone())
+        let response = self
+            .authenticated(build_websocket_client(self.trust_invalid_cert)?.get(url))
             .header(header::CONNECTION, "Upgrade")
             .header(header::UPGRADE, "websocket")
             .header("Sec-WebSocket-Version", "13")
             .header("Sec-WebSocket-Key", key)
             .send()
             .await
-            .map_err(|error| SourceError::Network(error.to_string()))?;
+            .map_err(|error| SourceError::Network(error.without_url().to_string()))?;
         debug!(
-            service = "jellyfin",
+            service = self.kind.source_kind(),
             method = "GET",
             endpoint = "/socket",
             status = response.status().as_u16(),
@@ -58,7 +71,7 @@ impl JellyfinSource {
         if response.status() != StatusCode::SWITCHING_PROTOCOLS {
             return Err(SourceError::Server {
                 status: response.status().as_u16(),
-                message: "Jellyfin WebSocket upgrade was rejected".to_string(),
+                message: format!("{} WebSocket upgrade was rejected", self.kind.name()),
             });
         }
         let upgraded = response
@@ -86,7 +99,7 @@ impl JellyfinSource {
             let keep_listening = match self.listen_library_changes_once(ready, on_change).await {
                 Ok(keep_listening) => keep_listening,
                 Err(error) => {
-                    warn!(%error, "Jellyfin library change feed disconnected");
+                    warn!(%error, "Library change feed disconnected");
                     true
                 }
             };

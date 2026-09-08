@@ -32,6 +32,49 @@ pub type CollectionPlay = Rc<dyn Fn(QueuePlacement)>;
 use crate::route::Route;
 use crate::selection::{PlaylistEntrySelectionSnapshot, TrackSelectionSnapshot};
 
+pub fn add_drag_to_playlist(
+    menus: &Rc<MediaMenus>,
+    playlist: PlaylistRow,
+    source: crate::media_drag::MediaDragSource,
+) -> bool {
+    let database = Arc::clone(&menus.library);
+    let task = menus
+        .runtime
+        .spawn(async move { source.resolve(&database).await });
+    let menus = Rc::downgrade(menus);
+    glib::spawn_future_local(async move {
+        let Some((media, subject)) = task.await.ok().and_then(Result::ok) else {
+            return;
+        };
+        let Some(owner) = menus.upgrade() else { return };
+        let preview_uris = media.iter().take(4).cloned().collect::<Vec<_>>();
+        crate::playlists::add_media_to_playlist(
+            &owner.source,
+            playlist.playlist_key,
+            media,
+            false,
+            Rc::new(move |accepted| {
+                if accepted > 0
+                    && let Some(menus) = menus.upgrade()
+                {
+                    (menus.operation_feedback)(
+                        &OperationFeedback {
+                            subject: subject.clone(),
+                            preview_uris: preview_uris.clone(),
+                            item_count: accepted,
+                            kind: OperationFeedbackKind::PlaylistAdded {
+                                destination: playlist.name.clone(),
+                            },
+                        },
+                        None,
+                    );
+                }
+            }),
+        );
+    });
+    true
+}
+
 pub struct MediaMenus {
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,

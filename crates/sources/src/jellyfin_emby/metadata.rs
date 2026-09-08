@@ -4,7 +4,7 @@ use serde::Deserialize;
 use serde_json::{Map, Value, json};
 
 use super::client::endpoint;
-use super::{JellyfinSource, SourceError, SourceResult};
+use super::{JellyfinEmbySource, ServerKind, SourceError, SourceResult};
 use crate::{
     AlbumMetadata, AlbumMetadataValues, AlbumMetadataWritable, ArtistMetadata,
     ArtistMetadataValues, ArtistMetadataWritable, SourceMetadataError, TrackMetadata,
@@ -26,14 +26,14 @@ struct ExternalId {
     key: String,
 }
 
-impl JellyfinSource {
+impl JellyfinEmbySource {
     pub(crate) async fn read_track_metadata(
         &self,
         track: library::TrackRow,
     ) -> Result<TrackMetadata, SourceMetadataError> {
-        let raw = raw_id(&track.object_id, "track")?;
+        let raw = raw_id(self.kind, &track.object_id, "track")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
-        let source_values = track_values(&item, &track);
+        let source_values = track_values(self.kind, &item, &track);
         let mut values = source_values.clone();
         let mut rufin_filled = crate::TrackMetadataWritable::default();
         if values.musicbrainz_recording_id.is_none() && track.musicbrainz_recording_id.is_some() {
@@ -60,9 +60,9 @@ impl JellyfinSource {
         &self,
         album: library::AlbumRow,
     ) -> Result<AlbumMetadata, SourceMetadataError> {
-        let raw = raw_id(&album.object_id, "album")?;
+        let raw = raw_id(self.kind, &album.object_id, "album")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
-        let source_values = album_values(&item, &album);
+        let source_values = album_values(self.kind, &item, &album);
         let mut values = source_values.clone();
         let mut rufin_filled = crate::AlbumMetadataWritable::default();
         if values.musicbrainz_album_id.is_none() && album.musicbrainz_release_id.is_some() {
@@ -91,9 +91,9 @@ impl JellyfinSource {
         &self,
         artist: library::ArtistRow,
     ) -> Result<ArtistMetadata, SourceMetadataError> {
-        let raw = raw_id(&artist.object_id, "artist")?;
+        let raw = raw_id(self.kind, &artist.object_id, "artist")?;
         let (item, editor) = self.read_item_and_editor(raw).await?;
-        let source_values = artist_values(&item, &artist);
+        let source_values = artist_values(self.kind, &item, &artist);
         let mut values = source_values.clone();
         let mut rufin_filled = crate::ArtistMetadataWritable::default();
         if values.musicbrainz_artist_id.is_none() && artist.musicbrainz_artist_id.is_some() {
@@ -127,7 +127,7 @@ impl JellyfinSource {
     }
 
     async fn read_metadata_item(&self, raw: &str) -> SourceResult<Value> {
-        let mut url = endpoint(&self.base_url, &format!("Items/{raw}"))?;
+        let mut url = self.item_url(raw)?;
         url.query_pairs_mut().append_pair("Fields", ITEM_FIELDS);
         self.get_json(url).await
     }
@@ -140,7 +140,7 @@ impl JellyfinSource {
         application: Option<&str>,
         update: impl FnOnce(&mut Map<String, Value>),
     ) -> Result<String, SourceMetadataError> {
-        let raw = raw_id(object_id, kind)?;
+        let raw = raw_id(self.kind, object_id, kind)?;
         let mut item = self.read_metadata_item(raw).await.map_err(metadata_write)?;
         if revision(&item)? != expected_revision {
             return Err(SourceMetadataError::Conflict);
@@ -178,7 +178,7 @@ impl JellyfinSource {
         object_id: &str,
         values: &AlbumMetadataValues,
     ) -> Result<Option<(AlbumMetadataValues, String)>, String> {
-        let raw = raw_id(object_id, "album").map_err(|error| error.to_string())?;
+        let raw = raw_id(self.kind, object_id, "album").map_err(|error| error.to_string())?;
         let mut search_info = json!({
             "Name": values.title,
             "Year": values.year,
@@ -207,7 +207,7 @@ impl JellyfinSource {
         object_id: &str,
         values: &ArtistMetadataValues,
     ) -> Result<Option<(ArtistMetadataValues, String)>, String> {
-        let raw = raw_id(object_id, "artist").map_err(|error| error.to_string())?;
+        let raw = raw_id(self.kind, object_id, "artist").map_err(|error| error.to_string())?;
         let search_info = json!({
             "Name": values.name,
             "ProviderIds": identification_provider_ids([
@@ -263,7 +263,11 @@ fn split_values(value: Option<&str>) -> Vec<String> {
         .collect()
 }
 
-pub(crate) fn apply_track_edit(item: &mut Map<String, Value>, edit: &crate::TrackMetadataEdit) {
+pub(crate) fn apply_track_edit(
+    server: ServerKind,
+    item: &mut Map<String, Value>,
+    edit: &crate::TrackMetadataEdit,
+) {
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.title {
@@ -291,7 +295,7 @@ pub(crate) fn apply_track_edit(item: &mut Map<String, Value>, edit: &crate::Trac
         set_number(item, "ProductionYear", values.year);
     }
     if changed.genre {
-        set_strings(item, "Genres", values.genre.as_deref());
+        set_genres(server, item, values.genre.as_deref());
     }
     if changed.comment {
         set_string(item, "Overview", values.comment.as_deref());
@@ -338,7 +342,11 @@ pub(crate) fn apply_track_edit(item: &mut Map<String, Value>, edit: &crate::Trac
     }
 }
 
-pub(crate) fn apply_album_edit(item: &mut Map<String, Value>, edit: &crate::AlbumMetadataEdit) {
+pub(crate) fn apply_album_edit(
+    server: ServerKind,
+    item: &mut Map<String, Value>,
+    edit: &crate::AlbumMetadataEdit,
+) {
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.title {
@@ -357,7 +365,7 @@ pub(crate) fn apply_album_edit(item: &mut Map<String, Value>, edit: &crate::Albu
         set_number(item, "ProductionYear", values.year);
     }
     if changed.genre {
-        set_strings(item, "Genres", values.genre.as_deref());
+        set_genres(server, item, values.genre.as_deref());
     }
     if changed.comment {
         set_string(item, "Overview", values.comment.as_deref());
@@ -383,7 +391,11 @@ pub(crate) fn apply_album_edit(item: &mut Map<String, Value>, edit: &crate::Albu
     }
 }
 
-pub(crate) fn apply_artist_edit(item: &mut Map<String, Value>, edit: &crate::ArtistMetadataEdit) {
+pub(crate) fn apply_artist_edit(
+    server: ServerKind,
+    item: &mut Map<String, Value>,
+    edit: &crate::ArtistMetadataEdit,
+) {
     let values = &edit.values;
     let changed = &edit.changed;
     if changed.name {
@@ -393,7 +405,7 @@ pub(crate) fn apply_artist_edit(item: &mut Map<String, Value>, edit: &crate::Art
         set_string(item, "ForcedSortName", values.sort_name.as_deref());
     }
     if changed.genre {
-        set_strings(item, "Genres", values.genre.as_deref());
+        set_genres(server, item, values.genre.as_deref());
     }
     if changed.comment {
         set_string(item, "Overview", values.comment.as_deref());
@@ -412,7 +424,11 @@ pub(crate) fn apply_artist_edit(item: &mut Map<String, Value>, edit: &crate::Art
     }
 }
 
-fn track_values(item: &Value, fallback: &library::TrackRow) -> TrackMetadataValues {
+fn track_values(
+    server: ServerKind,
+    item: &Value,
+    fallback: &library::TrackRow,
+) -> TrackMetadataValues {
     TrackMetadataValues {
         title: string(item, "Name").unwrap_or_else(|| fallback.title.clone()),
         sort_title: string(item, "ForcedSortName"),
@@ -422,7 +438,11 @@ fn track_values(item: &Value, fallback: &library::TrackRow) -> TrackMetadataValu
         track_number: number(item, "IndexNumber"),
         disc_number: number(item, "ParentIndexNumber"),
         year: number(item, "ProductionYear"),
-        genre: string_array(item, "Genres"),
+        genre: if server == ServerKind::Emby {
+            named(item, "GenreItems")
+        } else {
+            string_array(item, "Genres")
+        },
         comment: string(item, "Overview"),
         bpm: fallback.bpm.and_then(|value| u16::try_from(value).ok()),
         locked: boolean(item, "LockData"),
@@ -434,14 +454,22 @@ fn track_values(item: &Value, fallback: &library::TrackRow) -> TrackMetadataValu
     }
 }
 
-fn album_values(item: &Value, fallback: &library::AlbumRow) -> AlbumMetadataValues {
+fn album_values(
+    server: ServerKind,
+    item: &Value,
+    fallback: &library::AlbumRow,
+) -> AlbumMetadataValues {
     AlbumMetadataValues {
         title: string(item, "Name").unwrap_or_else(|| fallback.title.clone()),
         sort_title: string(item, "ForcedSortName"),
         artist: named(item, "ArtistItems").or_else(|| Some(fallback.display_artist.clone())),
         album_artist: named(item, "AlbumArtists").or_else(|| Some(fallback.display_artist.clone())),
         year: number(item, "ProductionYear"),
-        genre: string_array(item, "Genres"),
+        genre: if server == ServerKind::Emby {
+            named(item, "GenreItems")
+        } else {
+            string_array(item, "Genres")
+        },
         comment: string(item, "Overview"),
         locked: boolean(item, "LockData"),
         musicbrainz_album_id: provider(item, "MusicBrainzAlbum"),
@@ -449,11 +477,19 @@ fn album_values(item: &Value, fallback: &library::AlbumRow) -> AlbumMetadataValu
     }
 }
 
-fn artist_values(item: &Value, fallback: &library::ArtistRow) -> ArtistMetadataValues {
+fn artist_values(
+    server: ServerKind,
+    item: &Value,
+    fallback: &library::ArtistRow,
+) -> ArtistMetadataValues {
     ArtistMetadataValues {
         name: string(item, "Name").unwrap_or_else(|| fallback.name.clone()),
         sort_name: string(item, "ForcedSortName"),
-        genre: string_array(item, "Genres"),
+        genre: if server == ServerKind::Emby {
+            named(item, "GenreItems")
+        } else {
+            string_array(item, "Genres")
+        },
         comment: string(item, "Overview"),
         locked: boolean(item, "LockData"),
         musicbrainz_artist_id: provider(item, "MusicBrainzArtist"),
@@ -589,9 +625,13 @@ fn select_result<'a>(name: &str, year: Option<u16>, results: &'a [Value]) -> Opt
     }
 }
 
-fn raw_id<'a>(object_id: &'a str, kind: &str) -> Result<&'a str, SourceMetadataError> {
+fn raw_id<'a>(
+    server: ServerKind,
+    object_id: &'a str,
+    kind: &str,
+) -> Result<&'a str, SourceMetadataError> {
     object_id
-        .strip_prefix(&format!("jellyfin:{kind}:"))
+        .strip_prefix(&server.object_id(kind, ""))
         .filter(|raw| !raw.is_empty())
         .ok_or(SourceMetadataError::Unavailable)
 }
@@ -673,6 +713,27 @@ fn set_number(item: &mut Map<String, Value>, key: &str, value: Option<u16>) {
         value.map(Value::from).unwrap_or(Value::Null),
     );
 }
+fn set_genres(server: ServerKind, item: &mut Map<String, Value>, value: Option<&str>) {
+    if server == ServerKind::Jellyfin {
+        return set_strings(item, "Genres", value);
+    }
+    let genres = split(value)
+        .into_iter()
+        .map(|name| {
+            item.get("GenreItems")
+                .and_then(Value::as_array)
+                .and_then(|genres| {
+                    genres
+                        .iter()
+                        .find(|genre| genre["Name"].as_str() == Some(&name))
+                })
+                .cloned()
+                .unwrap_or_else(|| json!({"Name": name}))
+        })
+        .collect();
+    item.insert("GenreItems".into(), Value::Array(genres));
+}
+
 fn set_strings(item: &mut Map<String, Value>, key: &str, value: Option<&str>) {
     item.insert(
         key.to_string(),
@@ -743,6 +804,32 @@ mod tests {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     use super::*;
+
+    #[test]
+    fn emby_genre_edits_preserve_identifiers_and_unedited_metadata() {
+        let mut item = json!({"Id":"11","Name":"Song","GenreItems":[{"Id":"1","Name":"Rock"},{"Id":"2","Name":"Pop"}],"ArtistItems":[{"Id":"artist","Name":"Artist"}],"ProviderIds":{"MusicBrainzTrack":"release-track"}}).as_object().unwrap().clone();
+        let original = item.clone();
+        let mut edit = crate::TrackMetadataEdit {
+            values: crate::TrackMetadataValues::default(),
+            changed: crate::TrackMetadataWritable::default(),
+        };
+        edit.changed.genre = true;
+        edit.values.genre = Some("Rock; Jazz".into());
+        apply_track_edit(ServerKind::Emby, &mut item, &edit);
+        assert_eq!(
+            item["GenreItems"],
+            json!([{"Id":"1","Name":"Rock"},{"Name":"Jazz"}])
+        );
+        for field in ["Id", "Name", "ArtistItems", "ProviderIds"] {
+            assert_eq!(item[field], original[field]);
+        }
+        edit.values.genre = None;
+        apply_track_edit(ServerKind::Emby, &mut item, &edit);
+        assert_eq!(item["GenreItems"], json!([]));
+        assert!(!item.contains_key("Genres"));
+        assert!(raw_id(ServerKind::Emby, "emby:track:11", "track").is_ok());
+        assert!(raw_id(ServerKind::Emby, "jellyfin:track:11", "track").is_err());
+    }
 
     #[tokio::test]
     async fn available_jellyfin_track_metadata_reads_the_exact_provider_item() {
@@ -835,6 +922,7 @@ mod tests {
             .unwrap();
         preserve_complete_artist_items(&mut item);
         apply_track_edit(
+            crate::ServerKind::Jellyfin,
             &mut item,
             &crate::TrackMetadataEdit {
                 values: TrackMetadataValues {
@@ -900,9 +988,10 @@ mod tests {
         }
     }
 
-    fn test_source(server: &MockServer) -> JellyfinSource {
-        JellyfinSource::open(
-            super::super::JellyfinSourceConfig {
+    fn test_source(server: &MockServer) -> JellyfinEmbySource {
+        JellyfinEmbySource::open(
+            super::super::JellyfinEmbySourceConfig {
+                kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: None,
                 user_id: "user".to_string(),

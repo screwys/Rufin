@@ -13,15 +13,20 @@ pub enum JapaneseDictionaryStatus {
     #[default]
     Idle,
     Loading,
+    Downloading,
     Ready(PathBuf),
     Failed,
 }
 
-pub fn prepare_dictionary(directory: &Path) -> Result<PathBuf, String> {
-    install_dictionary(directory, DICTIONARY_URL).map_err(|error| error.to_string())
+pub fn prepare_dictionary(directory: &Path, downloading: impl FnOnce()) -> Result<PathBuf, String> {
+    install_dictionary(directory, DICTIONARY_URL, downloading).map_err(|error| error.to_string())
 }
 
-fn install_dictionary(directory: &Path, url: &str) -> Result<PathBuf, Box<dyn std::error::Error>> {
+fn install_dictionary(
+    directory: &Path,
+    url: &str,
+    downloading: impl FnOnce(),
+) -> Result<PathBuf, Box<dyn std::error::Error>> {
     let destination = directory.join(DICTIONARY_DIRECTORY);
     if destination.is_dir() {
         load_fs_dictionary(&destination)?;
@@ -33,6 +38,7 @@ fn install_dictionary(directory: &Path, url: &str) -> Result<PathBuf, Box<dyn st
     // so publication is a rename. Dropping the temporary directory cleans up failures.
     let staging = tempfile::tempdir_in(directory)?;
     let mut archive = tempfile::tempfile_in(staging.path())?;
+    downloading();
     reqwest::blocking::Client::builder()
         .timeout(Duration::from_secs(180))
         .build()?
@@ -55,7 +61,9 @@ mod tests {
     #[test]
     fn failed_download_does_not_install_partial_dictionary() {
         let directory = tempfile::tempdir().unwrap();
-        assert!(install_dictionary(directory.path(), "http://127.0.0.1:0/unavailable").is_err());
+        assert!(
+            install_dictionary(directory.path(), "http://127.0.0.1:0/unavailable", || {}).is_err()
+        );
         assert_eq!(fs::read_dir(directory.path()).unwrap().count(), 0);
     }
 }
