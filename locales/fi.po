@@ -630,6 +630,9 @@ msgstr "Oletus"
 msgid "Delete Playlist"
 msgstr "Poista soittolista"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Poista"
 

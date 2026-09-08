@@ -659,6 +659,9 @@ msgstr "回復預設值"
 msgid "Delete Playlist"
 msgstr "刪除播放清單"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "刪除"
 

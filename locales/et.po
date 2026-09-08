@@ -679,6 +679,9 @@ msgstr "Vaikimisi"
 msgid "Delete Playlist"
 msgstr "Kustuta esitusloend"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Kustuta"
 

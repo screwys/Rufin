@@ -687,6 +687,9 @@ msgstr "Noklusējums"
 msgid "Delete Playlist"
 msgstr "Dzēst atskaņošanas sarakstu"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Dzēst"
 

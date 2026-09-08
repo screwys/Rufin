@@ -691,6 +691,9 @@ msgstr "Obnovit výchozí"
 msgid "Delete Playlist"
 msgstr "Smazat playlist"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Smazat"
 

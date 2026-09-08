@@ -677,6 +677,9 @@ msgstr "По умолчанию"
 msgid "Delete Playlist"
 msgstr "Удалить плейлист"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Удалить"
 
