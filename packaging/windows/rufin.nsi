@@ -1,5 +1,6 @@
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "TextFunc.nsh"
 !include "LogicLib.nsh"
 !include "nsDialogs.nsh"
 !include "Win\COM.nsh"
@@ -43,7 +44,7 @@
 
 Unicode true
 Name "${RUFIN_DISPLAY_NAME}"
-OutFile "${RUFIN_OUTPUT_DIR}/${RUFIN_PROJECT_NAME}-${RUFIN_VERSION}-setup.exe"
+OutFile "${RUFIN_OUTPUT_DIR}\${RUFIN_PROJECT_NAME}-${RUFIN_VERSION}-setup.exe"
 InstallDir "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
 InstallDirRegKey HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" "InstallLocation"
 RequestExecutionLevel user
@@ -82,6 +83,7 @@ Var UpdateMode
 Var UpdateWaitAttempts
 Var PurgeCache
 Var PurgeCacheCheckbox
+Var CleanupDir
 
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_LICENSE "${RUFIN_STAGE_DIR}\LICENSE"
@@ -138,6 +140,50 @@ UninstPage custom un.CachePageCreate un.CachePageLeave
 
 ${LABEL}_not_running:
 !macroend
+
+!macro RemoveInstalledFilesFunction PREFIX
+Function ${PREFIX}RemoveInstalledFiles
+    StrCpy $0 "$CleanupDir\install-files.txt"
+    IfFileExists "$0" inventory_ready
+    ; Older releases did not record their files. Only remove filenames known
+    ; to this package; unlisted files must be left alone.
+    InitPluginsDir
+    File /oname=$PLUGINSDIR\install-files.txt "${RUFIN_FILES_FILE}"
+    StrCpy $0 "$PLUGINSDIR\install-files.txt"
+
+inventory_ready:
+    ClearErrors
+    FileOpen $1 "$0" r
+    IfErrors inventory_failed
+inventory_next:
+    ClearErrors
+    FileReadUTF16LE $1 $2
+    IfErrors inventory_done
+    ${TrimNewLines} $2 $2
+    StrCpy $3 $2 1
+    StrCpy $2 $2 "" 1
+    StrCmp $3 "F" inventory_file
+    ; RMDir without /r leaves directories containing unrelated files intact.
+    RMDir "$CleanupDir\$2"
+    Goto inventory_next
+inventory_file:
+    Delete "$CleanupDir\$2"
+    IfErrors inventory_close_failed
+    Goto inventory_next
+inventory_done:
+    FileClose $1
+    ClearErrors
+    Delete "$CleanupDir\install-files.txt"
+    Return
+inventory_close_failed:
+    FileClose $1
+inventory_failed:
+    SetErrors
+FunctionEnd
+!macroend
+
+!insertmacro RemoveInstalledFilesFunction ""
+!insertmacro RemoveInstalledFilesFunction "un."
 
 !macro WriteRufinUninstallRegistration
     WriteRegStr HKCU "Software\Microsoft\Windows\CurrentVersion\Uninstall\${RUFIN_PROJECT_NAME}" \
@@ -303,20 +349,12 @@ runtime_silent_abort:
 
 runtime_not_running:
     SetOutPath "$TEMP"
-    ClearErrors
-    RMDir /r "$INSTDIR\bin"
-    RMDir /r "$INSTDIR\etc"
-    RMDir /r "$INSTDIR\lib"
-    RMDir /r "$INSTDIR\libexec"
-    RMDir /r "$INSTDIR\share"
-    Delete "$INSTDIR\update-channel"
-    Delete "$INSTDIR\rufin.exe"
-    Delete "$INSTDIR\*.dll"
-    Delete "$INSTDIR\gspawn-win64-helper.exe"
-    Delete "$INSTDIR\gspawn-win64-helper-console.exe"
+    StrCpy $CleanupDir "$INSTDIR"
+    Call RemoveInstalledFiles
     IfErrors runtime_cleanup_failed
     SetOutPath "$INSTDIR"
     File /r "${RUFIN_STAGE_FILES}"
+    File /oname=install-files.txt "${RUFIN_FILES_FILE}"
     WriteUninstaller "$INSTDIR\Uninstall.exe"
     IfErrors install_write_failed
     Goto install_written
@@ -332,19 +370,13 @@ runtime_cleanup_failed:
 install_written:
 
     StrCmp $LegacyInstallOwned 1 0 legacy_install_removed
-    ClearErrors
-    RMDir /r "$LegacyInstallDir\bin"
-    RMDir /r "$LegacyInstallDir\etc"
-    RMDir /r "$LegacyInstallDir\lib"
-    RMDir /r "$LegacyInstallDir\libexec"
-    RMDir /r "$LegacyInstallDir\share"
-    RMDir /r "$LegacyInstallDir\updater"
+    StrCpy $CleanupDir "$LegacyInstallDir"
+    Call RemoveInstalledFiles
+    IfErrors runtime_cleanup_failed
     Delete "$LegacyInstallDir\rufin.exe"
-    Delete "$LegacyInstallDir\*.dll"
     Delete "$LegacyInstallDir\gspawn-win64-helper.exe"
     Delete "$LegacyInstallDir\gspawn-win64-helper-console.exe"
-    Delete "$LegacyInstallDir\LICENSE"
-    Delete "$LegacyInstallDir\rufin.ico"
+    Delete "$LegacyInstallDir\update-channel"
     IfErrors runtime_cleanup_failed
     Delete "$LegacyInstallDir\Uninstall.exe"
     IfErrors runtime_cleanup_failed
@@ -441,19 +473,16 @@ uninstall_silent_abort:
 
 uninstall_runtime_not_running:
     SetOutPath "$TEMP"
+    StrCpy $CleanupDir "$INSTDIR"
+    Call un.RemoveInstalledFiles
+    IfErrors uninstall_cleanup_failed
     ClearErrors
     Delete "$DESKTOP\${RUFIN_DISPLAY_NAME}.lnk"
-    RMDir /r "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}"
-    RMDir /r "$INSTDIR\bin"
-    RMDir /r "$INSTDIR\etc"
-    RMDir /r "$INSTDIR\lib"
-    RMDir /r "$INSTDIR\libexec"
-    RMDir /r "$INSTDIR\share"
-    RMDir /r "$INSTDIR\updater"
-    Delete "$INSTDIR\update-channel"
-    Delete "$INSTDIR\LICENSE"
-    Delete "$INSTDIR\rufin.ico"
+    Delete "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}\${RUFIN_DISPLAY_NAME}.lnk"
+    Delete "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}\Uninstall ${RUFIN_DISPLAY_NAME}.lnk"
     IfErrors uninstall_cleanup_failed
+    RMDir "$SMPROGRAMS\${RUFIN_DISPLAY_NAME}"
+    ClearErrors
 
     StrCmp $PurgeCache 1 0 uninstall_cache_preserved
     ClearErrors

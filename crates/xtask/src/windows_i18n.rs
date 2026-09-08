@@ -104,10 +104,10 @@ $result = @{}
 foreach ($locale in $data.locales) {
     try {
         $culture = [Globalization.CultureInfo]::GetCultureInfo($locale.Replace('_', '-'))
-        $id = [Globalization.CultureInfo]::CreateSpecificCulture($culture.Name).LCID
+        $id = $culture.LCID
         if ($data.ids -notcontains $id) {
             $id = $data.ids | Where-Object {
-                [Globalization.CultureInfo]::GetCultureInfo([int]$_).Parent.Name -eq $culture.Name
+                [Globalization.CultureInfo]::GetCultureInfo([int]$_).Parent.LCID -eq $culture.LCID
             } | Select-Object -First 1
         }
         if ($null -ne $id) { $result[$locale] = [int]$id }

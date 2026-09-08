@@ -16,6 +16,7 @@ pub(crate) fn run(mut args: Vec<String>) -> Result<()> {
         "flatpak-sources" => flatpak_sources_command(args),
         "i18n-template" => i18n_template_command(args),
         "windows-installer-languages" => crate::windows_i18n::command(args),
+        "windows-installer-files" => crate::windows_installer::files(args),
         "linux-packaging" => crate::linux_packaging::command(args),
         "media-verification-files" => crate::media::verification_files_command(args),
         "rpm-srpm" => crate::rpm::srpm_command(args),
