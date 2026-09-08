@@ -8,7 +8,7 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can combine any sources you want and combine them into a one listening session with app-wide playlists. It also has broad set of features and optimizations around these features for the ideal user experience.
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. 
 
 <br clear="left">
 
@@ -26,9 +26,9 @@
 
 **Plex**: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
-**WebDAV**: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tag editing, lyrics, and playlists. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+**WebDAV**: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
-**SMB / Samba**: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, downloads, tag editing, lyrics, and playlists. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
+**SMB / Samba**: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 # Features
 
@@ -44,7 +44,7 @@
 - CUE sheet support with separate playable tracks
 - Broad codec support [^codecs]
 - Audio output device selection
-- Configurable playback speed
+- Configurable playback speed and pitch
 
 ## 📚 Library
 
@@ -66,11 +66,10 @@
 ## 🌍️ Discovery
 
 - Server-provided artist, track, album, playlist and genre radios, including recommendations from server plugins
-- App owned smart playlists with custom sorting and limits; can use metadata, play/skip history or pre-defined dynamic lists
+- App owned smart (i.e. dynamic) playlists with custom sorting and limits; can use metadata, play/skip history or pre-defined dynamic lists
 - Dedicated Search, Folders and History pages
-- Moods browsing and mood/BPM-based smart playlists for Plex, Navidrome, Subsonic and local libraries
-- Synchronized lyrics with built-in search and adjustable offset
-
+- Moods browsing and mood/BPM-based smart playlists for Plex, Navidrome, Subsonic and local/remote libraries
+- Synchronized lyrics (including word-by-word) with built-in search and adjustable offset
 
 ## 🧩 Integrations
 
