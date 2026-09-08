@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-07 19:22+0000\n"
+"PO-Revision-Date: 2026-09-08 11:58+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1.dev0\n"
+"X-Generator: Weblate 2026.9.1\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
@@ -59,7 +59,7 @@ msgid ""
 "stay"
 msgstr ""
 "Nur Downloads, die durch diese Regel erstellt wurden, werden gelöscht. "
-"Freigegebene und manuelle Downloads bleiben erhalten."
+"Freigegebene und manuelle Downloads bleiben erhalten"
 
 msgid ""
 "Remove Local and its cached library from Rufin? Your music files will not be "
@@ -137,6 +137,11 @@ msgstr ""
 "aufrunden"
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -172,7 +177,7 @@ msgid ""
 "within each album"
 msgstr ""
 "Track gleicht jeden Song aus, während Album die beabsichtigten Unterschiede "
-"innerhalb eines Albums beibehält."
+"innerhalb eines Albums beibehält"
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -434,10 +439,8 @@ msgstr "Übertragen"
 msgid "Certificate authority (PEM)"
 msgstr "Zertifizierungsstelle (PEM)"
 
-#, fuzzy
-#| msgid "Change Source"
 msgid "Change Profile"
-msgstr "Quelle ändern"
+msgstr "Profil wechseln"
 
 msgid "Change Secret Storage"
 msgstr "Anmeldedaten-Speicher ändern"
@@ -459,10 +462,8 @@ msgstr "Änderungen werden nach einem Neustart von Rufin wirksam"
 msgid "Choose Folder"
 msgstr "Ordner auswählen"
 
-#, fuzzy
-#| msgid "Choose Folder"
 msgid "Choose Server"
-msgstr "Ordner auswählen"
+msgstr "Server auswählen"
 
 msgid "Choose a local music folder"
 msgstr "Lokalen Musikordner auswählen"
@@ -670,6 +671,9 @@ msgstr "Standard"
 msgid "Delete Playlist"
 msgstr "Playlist löschen"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Löschen"
 
@@ -780,6 +784,9 @@ msgstr "Bearbeiten"
 
 msgid "Embed in track"
 msgstr "In Titel einbetten"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "EBU-R128-Analyse aktivieren?"
@@ -1016,7 +1023,7 @@ msgid "Home Blocks"
 msgstr "Startseiten-Bereiche"
 
 msgid "Home Profile"
-msgstr ""
+msgstr "Home-Profil"
 
 msgid "Home"
 msgstr "Übersicht"
@@ -1187,10 +1194,8 @@ msgstr "Lokaler Musikordner ist nicht verfügbar"
 msgid "Local music folder"
 msgstr "Lokaler Musikordner"
 
-#, fuzzy
-#| msgid "Local Playback Mapping"
 msgid "Local playback saved"
-msgstr "Lokale Wiedergabezuordnung"
+msgstr "Lokale Wiedergabe gespeichert"
 
 msgid "Local"
 msgstr "Lokal"
@@ -1392,6 +1397,11 @@ msgstr "Nächstes Audiogerät"
 msgid "Next page"
 msgstr "Nächste Seite"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Keine Quelle"
+
 msgid "Next"
 msgstr "Nächster Titel"
 
@@ -1430,6 +1440,11 @@ msgstr "Keine lokalen Ordner konfiguriert"
 
 msgid "No lyrics"
 msgstr "Keine Songtexte"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Keine passenden Titel"
 
 msgid "No matching tracks"
 msgstr "Keine passenden Titel"
@@ -1533,6 +1548,11 @@ msgstr "Ordner öffnen"
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "In Last.fm öffnen"
+
 msgid "Open on Jellyfin"
 msgstr "In Jellyfin öffnen"
 
@@ -1543,6 +1563,16 @@ msgid "Open on MusicBrainz"
 msgstr "In MusicBrainz öffnen"
 
 msgid "Open on Navidrome"
+msgstr "In Navidrome öffnen"
+
+#, fuzzy
+#| msgid "Open Folder"
+msgid "Open on Plex"
+msgstr "Ordner öffnen"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "In Navidrome öffnen"
 
 msgid "Open release notes"
@@ -1568,9 +1598,6 @@ msgstr "Andere Veröffentlichungen"
 
 msgid "Overview"
 msgstr "Übersicht"
-
-msgid "Ownership of this item belongs to {source}"
-msgstr "Dieses Element gehört {source}"
 
 msgid "Password"
 msgstr "Passwort"
@@ -1688,13 +1715,11 @@ msgstr "Playlists"
 msgid "Plays"
 msgstr "Wiedergaben"
 
-#, fuzzy
-#| msgid "Play count"
 msgid "Plex Account"
-msgstr "Wiedergabezähler"
+msgstr "Plex Konto"
 
 msgid "Plex"
-msgstr ""
+msgstr "Plex"
 
 msgid "Pop"
 msgstr "Pop"
@@ -1755,7 +1780,7 @@ msgid "Private mode"
 msgstr "Privater Modus"
 
 msgid "Profile PIN"
-msgstr ""
+msgstr "Profil PIN"
 
 msgid "Pronunciation"
 msgstr "Aussprache"
@@ -1919,10 +1944,8 @@ msgstr "Auf Standardeinstellungen zurücksetzen"
 msgid "Reset"
 msgstr "Zurücksetzen"
 
-#, fuzzy
-#| msgid "Mapped local file not found"
 msgid "Resource not found"
-msgstr "Zugeordnete lokale Datei nicht gefunden"
+msgstr "Ressource nicht gefunden"
 
 msgid "Restore User State"
 msgstr "Benutzerstatus wiederherstellen"
@@ -1987,10 +2010,8 @@ msgstr "Zum erneuten Scannen speichern"
 msgid "Save"
 msgstr "Speichern"
 
-#, fuzzy
-#| msgid "Saved logins"
 msgid "Saved Plex Login"
-msgstr "Gespeicherte Logins"
+msgstr "Gespeicherte Plex-Anmeldedaten"
 
 msgid "Saved logins"
 msgstr "Gespeicherte Logins"
@@ -2058,10 +2079,8 @@ msgstr "Lokales Netzwerk durchsuchen"
 msgid "Searching for devices..."
 msgstr "Nach Geräten wird gesucht …"
 
-#, fuzzy
-#| msgid "Searching for Jellyfin servers on the local network..."
 msgid "Searching for {provider} servers on the local network..."
-msgstr "Im lokalen Netzwerk wird nach Jellyfin-Servern gesucht..."
+msgstr "Suche nach {provider}-Servern im lokalen Netzwerk …"
 
 msgid "Searching will start automatically"
 msgstr "Die Suche startet automatisch"
@@ -2115,7 +2134,7 @@ msgid "Server Actions"
 msgstr "Server-Aktionen"
 
 msgid "Server Address Override (optional)"
-msgstr ""
+msgstr "Serveradresse überschreiben (optional)"
 
 msgid "Server Address"
 msgstr "Server-Adresse"
@@ -2229,12 +2248,10 @@ msgid "Sidebar route by position"
 msgstr "Seitenleistenroute nach Position"
 
 msgid "Sign In in Browser"
-msgstr ""
+msgstr "Im Browser anmelden"
 
-#, fuzzy
-#| msgid "Sign in with Nextcloud"
 msgid "Sign In with Password"
-msgstr "Mit Nextcloud anmelden"
+msgstr "Mit Passwort anmelden"
 
 msgid "Sign in with Nextcloud"
 msgstr "Mit Nextcloud anmelden"
@@ -2283,6 +2300,11 @@ msgstr "Sortiertitel"
 
 msgid "Sort"
 msgstr "Sortieren"
+
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Seitenleistenroute nach Position"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Quelle für Coverbilder und Titel-/Künstlerlinks"
@@ -2346,6 +2368,9 @@ msgstr "Darstellung"
 
 msgid "This device"
 msgstr "Dieses Gerät"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "Dies ist nicht verfügbar"
@@ -2437,10 +2462,8 @@ msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
 
-#, fuzzy
-#| msgid "Saved logins"
 msgid "Use Saved Login"
-msgstr "Gespeicherte Logins"
+msgstr "Gespeicherte Anmeldedaten verwenden"
 
 msgid "Use This Source"
 msgstr "Diese Quelle verwenden"
@@ -2479,7 +2502,7 @@ msgstr ""
 "Verwendet verfügbare Karaoke-Liedtexte oder ruft sie aus dem Internet ab"
 
 msgid "Verification Code (optional)"
-msgstr ""
+msgstr "Bestätigungscode (optional)"
 
 msgid "Verify server certificate"
 msgstr "Serverzertifikat überprüfen"
@@ -2634,6 +2657,82 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Vorhandenen lokalen Ordner auswählen"
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
+
+#~ msgid "Ownership of this item belongs to {source}"
+#~ msgstr "Dieses Element gehört {source}"
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Gespeichert, mit den Übereinstimmungen der Vorschau synchronisieren"

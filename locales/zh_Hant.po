@@ -102,6 +102,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
@@ -654,6 +659,9 @@ msgstr "回復預設值"
 msgid "Delete Playlist"
 msgstr "刪除播放清單"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "刪除"
 
@@ -776,6 +784,9 @@ msgstr "編輯"
 #| msgid "Genre tracks"
 msgid "Embed in track"
 msgstr "曲風曲目"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
@@ -1397,6 +1408,11 @@ msgstr "下一個音訊裝置"
 msgid "Next page"
 msgstr "下一頁"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "無來源"
+
 msgid "Next"
 msgstr "下一首"
 
@@ -1439,6 +1455,11 @@ msgstr ""
 
 msgid "No lyrics"
 msgstr "無歌詞"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "無匹配的曲目"
 
 msgid "No matching tracks"
 msgstr "無匹配的曲目"
@@ -1545,6 +1566,11 @@ msgstr "資料夾"
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "在 Last.fm 上打開"
+
 msgid "Open on Jellyfin"
 msgstr "在 Jellyfin 上打開"
 
@@ -1555,6 +1581,16 @@ msgid "Open on MusicBrainz"
 msgstr "在 MusicBrainz 上打開"
 
 msgid "Open on Navidrome"
+msgstr "在 Navidrome 上打開"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "資料夾"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "在 Navidrome 上打開"
 
 msgid "Open release notes"
@@ -1582,9 +1618,6 @@ msgstr "開啟更新記錄"
 
 msgid "Overview"
 msgstr "總覽"
-
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
 
 msgid "Password"
 msgstr "密碼"
@@ -2313,6 +2346,11 @@ msgstr ""
 msgid "Sort"
 msgstr "排序"
 
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "按位置瀏覽側邊欄"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
@@ -2377,6 +2415,9 @@ msgstr "主題"
 
 msgid "This device"
 msgstr "此裝置"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr ""
@@ -2654,6 +2695,79 @@ msgstr[0] "{count} 週之前"
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "選擇已存在的本地資料夾"
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
 
 #~ msgid "Add server"
 #~ msgstr "新增伺服器"

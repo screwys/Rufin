@@ -116,6 +116,11 @@ msgstr ""
 "osalisi tärne ja seejärel need allika jaoks ümardada"
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -674,6 +679,9 @@ msgstr "Vaikimisi"
 msgid "Delete Playlist"
 msgstr "Kustuta esitusloend"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Kustuta"
 
@@ -788,6 +796,9 @@ msgstr "Muuda"
 
 msgid "Embed in track"
 msgstr "Lõimi loo sisse"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Kas lülitad EBU R128 analüüsi sisse?"
@@ -1415,6 +1426,11 @@ msgstr "Järgmine heliseade"
 msgid "Next page"
 msgstr "Järgmine leht"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Allikat pole"
+
 msgid "Next"
 msgstr "Järgmine"
 
@@ -1453,6 +1469,11 @@ msgstr "Ühtegi kohalikku kausta pole seadistatud"
 
 msgid "No lyrics"
 msgstr "Laulusõnu pole"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Sobivaid lugusid pole"
 
 msgid "No matching tracks"
 msgstr "Sobivaid lugusid pole"
@@ -1559,6 +1580,11 @@ msgstr "Kaust"
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Ava Last.fm-is"
+
 msgid "Open on Jellyfin"
 msgstr "Ava Jellyfinis"
 
@@ -1570,6 +1596,16 @@ msgstr "Ava MusicBrainzis"
 
 msgid "Open on Navidrome"
 msgstr "Ava Navidrome'is"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Kaust"
+
+#, fuzzy
+#| msgid "No server"
+msgid "Open on server"
+msgstr "Serverit pole"
 
 msgid "Open release notes"
 msgstr "Vaata versiooniteavet"
@@ -1594,9 +1630,6 @@ msgstr "Muud versioonid"
 
 msgid "Overview"
 msgstr "Ülevaade"
-
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
 
 msgid "Password"
 msgstr "Salasõna"
@@ -2320,6 +2353,11 @@ msgstr "Järjesta pealkirja alusel"
 msgid "Sort"
 msgstr "Järjestus"
 
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Külgriba teekond asukoha alusel"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Allikas kaanepiltide ning lugude ja esitajate linkide jaoks"
 
@@ -2383,6 +2421,9 @@ msgstr "Kujundus"
 
 msgid "This device"
 msgstr "See seade"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "See pole saadaval"
@@ -2672,6 +2713,79 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Vali olemasolev kohalik kaust"
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Salvestatud, vastenduse eelvaateks sünkrooni"
@@ -3121,9 +3235,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "No queue items match the search"
 #~ msgstr "Otsingule ei vasta ükski esitusjärjekorra kirje"
-
-#~ msgid "No server"
-#~ msgstr "Serverit pole"
 
 #~ msgid "Not set"
 #~ msgstr "Määratlemata"

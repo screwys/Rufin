@@ -112,6 +112,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -686,6 +691,9 @@ msgstr "Obnovit výchozí"
 msgid "Delete Playlist"
 msgstr "Smazat playlist"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Smazat"
 
@@ -810,6 +818,9 @@ msgstr "Upravit"
 #| msgid "Genre tracks"
 msgid "Embed in track"
 msgstr "Skladby žánru"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
@@ -1447,6 +1458,11 @@ msgstr "Další zvukové zařízení"
 msgid "Next page"
 msgstr "Další strana"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Žádný zdroj"
+
 msgid "Next"
 msgstr "Další"
 
@@ -1489,6 +1505,11 @@ msgstr "Nebyly nakonfigurovány žádné místní složky"
 
 msgid "No lyrics"
 msgstr "Žádné texty skladeb"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Žádné odpovídající skladby"
 
 msgid "No matching tracks"
 msgstr "Žádné odpovídající skladby"
@@ -1596,6 +1617,11 @@ msgstr "Složka"
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Otevřít na Last.fm"
+
 msgid "Open on Jellyfin"
 msgstr "Otevřít v Jellyfin"
 
@@ -1606,6 +1632,16 @@ msgid "Open on MusicBrainz"
 msgstr "Otevřít na MusicBrainz"
 
 msgid "Open on Navidrome"
+msgstr "Otevřít v Navidrome"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Složka"
+
+#, fuzzy
+#| msgid "Open on Navidrome"
+msgid "Open on server"
 msgstr "Otevřít v Navidrome"
 
 msgid "Open release notes"
@@ -1633,9 +1669,6 @@ msgstr "Otevřít poznámky k verzi"
 
 msgid "Overview"
 msgstr "Přehled"
-
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
 
 msgid "Password"
 msgstr "Heslo"
@@ -2376,6 +2409,11 @@ msgstr "Seřadit podle názvu"
 msgid "Sort"
 msgstr "Seřadit"
 
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Rozložení postranního panelu podle pozice"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Zdroj pro získání obálky a odkazů na skladbu/interpreta"
 
@@ -2442,6 +2480,9 @@ msgstr "Téma"
 
 msgid "This device"
 msgstr "Toto zařízení"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "Toto není dostupné"
@@ -2739,6 +2780,79 @@ msgid_plural "{count} years ago"
 msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Vyberte existující lokální složku"
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Uloženo, synchronizuje se s náhledem pro nalezení shod"

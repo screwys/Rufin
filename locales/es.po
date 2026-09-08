@@ -111,6 +111,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -646,6 +651,9 @@ msgstr ""
 msgid "Delete Playlist"
 msgstr ""
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr ""
 
@@ -759,6 +767,9 @@ msgid "Edit"
 msgstr ""
 
 msgid "Embed in track"
+msgstr ""
+
+msgid "Emby"
 msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
@@ -1362,6 +1373,9 @@ msgstr ""
 msgid "Next page"
 msgstr ""
 
+msgid "Next source"
+msgstr ""
+
 msgid "Next"
 msgstr ""
 
@@ -1399,6 +1413,9 @@ msgid "No local folders configured"
 msgstr ""
 
 msgid "No lyrics"
+msgstr ""
+
+msgid "No matching tracks found"
 msgstr ""
 
 msgid "No matching tracks"
@@ -1500,6 +1517,9 @@ msgstr ""
 msgid "Open fullscreen player"
 msgstr ""
 
+msgid "Open on Emby"
+msgstr ""
+
 msgid "Open on Jellyfin"
 msgstr ""
 
@@ -1510,6 +1530,12 @@ msgid "Open on MusicBrainz"
 msgstr ""
 
 msgid "Open on Navidrome"
+msgstr ""
+
+msgid "Open on Plex"
+msgstr ""
+
+msgid "Open on server"
 msgstr ""
 
 msgid "Open release notes"
@@ -1534,9 +1560,6 @@ msgid "Other releases"
 msgstr ""
 
 msgid "Overview"
-msgstr ""
-
-msgid "Ownership of this item belongs to {source}"
 msgstr ""
 
 msgid "Password"
@@ -2243,6 +2266,9 @@ msgstr ""
 msgid "Sort"
 msgstr ""
 
+msgid "Source by position"
+msgstr ""
+
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
@@ -2304,6 +2330,9 @@ msgid "Theme"
 msgstr ""
 
 msgid "This device"
+msgstr ""
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
 
 msgid "This isn't available"
@@ -2590,6 +2619,77 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr ""
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
 
 #~ msgid "Add server"
 #~ msgstr "Agregar servidor"

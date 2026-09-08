@@ -117,6 +117,11 @@ msgstr ""
 "noapaļot tās šim avotam"
 
 msgid ""
+"This is owned by Rufin. It can include entries from all configured sources "
+"but it is not synced to remotes."
+msgstr ""
+
+msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
 "token for"
 msgstr ""
@@ -682,6 +687,9 @@ msgstr "Noklusējums"
 msgid "Delete Playlist"
 msgstr "Dzēst atskaņošanas sarakstu"
 
+msgid "Delete \"{name}\"?"
+msgstr ""
+
 msgid "Delete"
 msgstr "Dzēst"
 
@@ -796,6 +804,9 @@ msgstr "Rediģēt"
 
 msgid "Embed in track"
 msgstr "Iekļaut dziesmā"
+
+msgid "Emby"
+msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "Ieslēgt EBU R128 analīzi?"
@@ -1428,6 +1439,11 @@ msgstr "Nākamā skaņas ierīce"
 msgid "Next page"
 msgstr "Nākamā lapa"
 
+#, fuzzy
+#| msgid "No source"
+msgid "Next source"
+msgstr "Nav avota"
+
 msgid "Next"
 msgstr "Nākamais"
 
@@ -1466,6 +1482,11 @@ msgstr "Nav konfigurētas lokālās mapes"
 
 msgid "No lyrics"
 msgstr "Nav teksta"
+
+#, fuzzy
+#| msgid "No matching tracks"
+msgid "No matching tracks found"
+msgstr "Nav atrasts neviens atbilstošs celiņš"
 
 msgid "No matching tracks"
 msgstr "Nav atrasts neviens atbilstošs celiņš"
@@ -1572,6 +1593,11 @@ msgstr "Mape"
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
 
+#, fuzzy
+#| msgid "Open on Last.fm"
+msgid "Open on Emby"
+msgstr "Atvērt vietnē Last.fm"
+
 msgid "Open on Jellyfin"
 msgstr "Atvērt vietnē Jellyfin"
 
@@ -1583,6 +1609,16 @@ msgstr "Atvērt vietnē MusicBrainz"
 
 msgid "Open on Navidrome"
 msgstr "Atvērt Navidrome"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open on Plex"
+msgstr "Mape"
+
+#, fuzzy
+#| msgid "No server"
+msgid "Open on server"
+msgstr "Nav servera"
 
 msgid "Open release notes"
 msgstr "Atvērt izdevuma piezīmes"
@@ -1607,9 +1643,6 @@ msgstr "Citi izdevumi"
 
 msgid "Overview"
 msgstr "Pārskats"
-
-msgid "Ownership of this item belongs to {source}"
-msgstr ""
 
 msgid "Password"
 msgstr "Parole"
@@ -2336,6 +2369,11 @@ msgstr "Kārto pēc nosaukuma"
 msgid "Sort"
 msgstr "Kārtot"
 
+#, fuzzy
+#| msgid "Sidebar route by position"
+msgid "Source by position"
+msgstr "Sānjoslas maršruts pēc pozīcijas"
+
 msgid "Source to use for cover images and song/artist links"
 msgstr "Avots, ko izmantot vāku attēliem un dziesmu/izpildītāju saitēm"
 
@@ -2398,6 +2436,9 @@ msgstr "Tēma"
 
 msgid "This device"
 msgstr "Šī ierīce"
+
+msgid "This is owned by {source}. Regular playlists are synced to your remote."
+msgstr ""
 
 msgid "This isn't available"
 msgstr "Šis nav pieejams"
@@ -2693,6 +2734,79 @@ msgid_plural "{count} years ago"
 msgstr[0] "pirms {count} gadiem"
 msgstr[1] "pirms {count} gada"
 msgstr[2] "pirms {count} gadiem"
+
+#. Windows installer: FinishText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin has been installed on your computer.\n"
+"\n"
+"Click Finish to finalize Setup."
+msgstr ""
+
+#. Windows installer: WelcomeText.
+msgctxt "Windows installer"
+msgid ""
+"Rufin is native music player for Jellyfin, Navidrome/OpenSubsonic, Plex, and "
+"Emby servers;  local folders,  WebDAV including a direct Nextcloud browser "
+"login path, Samba and NAS shares.\n"
+"\n"
+"This setup will install Rufin in your computer.\n"
+"\n"
+"Click Next to continue."
+msgstr ""
+
+#. Windows installer: CleanupFailed.
+msgctxt "Windows installer"
+msgid ""
+"Setup could not remove the existing Rufin files. Close Rufin and try again."
+msgstr ""
+
+#. Windows installer: DirectoryConflict.
+#, fuzzy
+#| msgid "Choose an existing local folder"
+msgctxt "Windows installer"
+msgid "Choose a separate installation folder."
+msgstr "Izvēlieties esošu lokālu mapi"
+
+#. Windows installer: CloseToInstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the installation again."
+msgstr ""
+
+#. Windows installer: CloseToUninstall. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Close {app_name} and try the uninstall again."
+msgstr ""
+
+#. Windows installer: FinishTitle.
+msgctxt "Windows installer"
+msgid "Completing Rufin Setup"
+msgstr ""
+
+#. Windows installer: DesktopShortcut.
+msgctxt "Windows installer"
+msgid "Create desktop shortcut"
+msgstr ""
+
+#. Windows installer: RemoveCache. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "Remove {app_name}'s cache"
+msgstr ""
+
+#. Windows installer: InstallWriteFailed.
+msgctxt "Windows installer"
+msgid "Setup could not complete the installation. Please try again."
+msgstr ""
+
+#. Windows installer: InvalidUpdate. {app_name} is the application display name.
+msgctxt "Windows installer"
+msgid "The {app_name} automatic update option is invalid."
+msgstr ""
+
+#. Windows installer: WelcomeTitle.
+msgctxt "Windows installer"
+msgid "Welcome to Rufin Setup"
+msgstr ""
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Saglabāts, sinhronizē ar priekšskatījumu, lai atrastu atbilstības"
@@ -3157,9 +3271,6 @@ msgstr[2] "pirms {count} gadiem"
 
 #~ msgid "No queue items match the search"
 #~ msgstr "Neviena rindas vieta neatbilst meklējumam"
-
-#~ msgid "No server"
-#~ msgstr "Nav servera"
 
 #~ msgid "Not set"
 #~ msgstr "Nav iestatīts"
