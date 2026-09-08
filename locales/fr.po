@@ -117,11 +117,6 @@ msgstr ""
 "mises en cache, l'instantané de la file d'attente et le token enregistré pour"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -273,6 +268,9 @@ msgid "Application name"
 msgstr ""
 
 msgid "Apply Template"
+msgstr ""
+
+msgid "Approve sign-in in your browser"
 msgstr ""
 
 msgid "Artist / Album"
@@ -511,6 +509,9 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
+msgid "Connect manually"
+msgstr ""
+
 msgid "Connect"
 msgstr ""
 
@@ -737,6 +738,9 @@ msgid "Edit"
 msgstr ""
 
 msgid "Embed in track"
+msgstr ""
+
+msgid "Emby Connect"
 msgstr ""
 
 msgid "Emby"
@@ -1368,6 +1372,9 @@ msgstr ""
 msgid "No limit"
 msgstr ""
 
+msgid "No linked servers found"
+msgstr ""
+
 msgid "No local file mapping"
 msgstr ""
 
@@ -1474,6 +1481,9 @@ msgid "Only unplayed tracks"
 msgstr ""
 
 msgid "Open Folder"
+msgstr ""
+
+msgid "Open approval page"
 msgstr ""
 
 msgid "Open fullscreen player"
@@ -1723,6 +1733,9 @@ msgid "Queue"
 msgstr ""
 
 msgid "Queued"
+msgstr ""
+
+msgid "Quick Connect"
 msgstr ""
 
 msgid "Quit Rufin"
@@ -2177,6 +2190,12 @@ msgstr ""
 msgid "Sign in with Nextcloud"
 msgstr ""
 
+msgid "Sign in with a code"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -2378,7 +2397,7 @@ msgstr ""
 msgid "Use API key"
 msgstr ""
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
@@ -2405,6 +2424,9 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr ""
 
@@ -2412,6 +2434,9 @@ msgid "User"
 msgstr ""
 
 msgid "Username and password"
+msgstr ""
+
+msgid "Username or email"
 msgstr ""
 
 msgid "Username"

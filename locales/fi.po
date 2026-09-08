@@ -120,11 +120,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -277,6 +272,11 @@ msgstr "Sovelluksen nimi"
 
 msgid "Apply Template"
 msgstr "Toteuta mallipohja"
+
+#, fuzzy
+#| msgid "Complete sign-in in your browser"
+msgid "Approve sign-in in your browser"
+msgstr "Viimeistele kirjautuminen selaimessa"
 
 msgid "Artist / Album"
 msgstr "Esittäjä / Albumi"
@@ -516,6 +516,11 @@ msgstr "Viimeistele kirjautuminen selaimessa"
 msgid "Confirm"
 msgstr "Vahvista"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connect manually"
+msgstr "Yhteys"
+
 msgid "Connect"
 msgstr "Yhdistä"
 
@@ -743,6 +748,11 @@ msgstr "Muokkaa"
 
 msgid "Embed in track"
 msgstr "Upota kappaleeseen"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "Yhdistä"
 
 msgid "Emby"
 msgstr ""
@@ -1375,6 +1385,11 @@ msgstr "Kansioita ei ole valittu"
 msgid "No limit"
 msgstr ""
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "Palvelimia ei löytynyt"
+
 msgid "No local file mapping"
 msgstr ""
 
@@ -1484,6 +1499,9 @@ msgstr ""
 
 msgid "Open Folder"
 msgstr "Avaa kansio"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr ""
@@ -1733,6 +1751,11 @@ msgstr "Jono"
 
 msgid "Queued"
 msgstr "Asetettu jonoon"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "Yhdistä"
 
 msgid "Quit Rufin"
 msgstr "Lopeta Rufin"
@@ -2186,6 +2209,14 @@ msgstr "Kirjaudu sisään salasanalla"
 msgid "Sign in with Nextcloud"
 msgstr "Kirjaudu sisään Nextcloudilla"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in with a code"
+msgstr "Kirjaudu sisään Nextcloudilla"
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -2387,7 +2418,7 @@ msgstr ""
 msgid "Use API key"
 msgstr ""
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
@@ -2414,6 +2445,9 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr ""
 
@@ -2422,6 +2456,11 @@ msgstr "Käyttäjä"
 
 msgid "Username and password"
 msgstr "Käyttäjätunnus ja salana"
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "Käyttäjätunnus"
 
 msgid "Username"
 msgstr "Käyttäjätunnus"

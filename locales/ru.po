@@ -150,13 +150,6 @@ msgstr ""
 "сохраненный токен для"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-"Для работы функции радио используется API Jellyfin, что необходимо для "
-"работы плагинов рекомендаций"
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -319,6 +312,11 @@ msgstr "Название приложения"
 
 msgid "Apply Template"
 msgstr "Применить шаблон"
+
+#, fuzzy
+#| msgid "Complete sign-in in your browser"
+msgid "Approve sign-in in your browser"
+msgstr "Завершите вход в систему в вашем браузере"
 
 msgid "Artist / Album"
 msgstr "Исполнитель / Альбом"
@@ -563,6 +561,11 @@ msgstr "Завершите вход в систему в вашем браузе
 msgid "Confirm"
 msgstr "Подтвердить"
 
+#, fuzzy
+#| msgid "Connected as"
+msgid "Connect manually"
+msgstr "Подключено как"
+
 msgid "Connect"
 msgstr "Подключить"
 
@@ -790,6 +793,11 @@ msgstr "Редактировать"
 
 msgid "Embed in track"
 msgstr "Встроить в трек"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "Подключить"
 
 msgid "Emby"
 msgstr ""
@@ -1443,6 +1451,11 @@ msgstr "Папки не выбраны"
 msgid "No limit"
 msgstr "Без ограничений"
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "Серверы не найдены"
+
 msgid "No local file mapping"
 msgstr "Нет сопоставлений для локального файла"
 
@@ -1554,6 +1567,9 @@ msgstr "Только непрослушанные треки"
 
 msgid "Open Folder"
 msgstr "Открыть папку"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Открыть полноэкранный плеер"
@@ -1815,6 +1831,11 @@ msgstr "Очередь"
 
 msgid "Queued"
 msgstr "В очереди"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "Подключить"
 
 msgid "Quit Rufin"
 msgstr "Закрыть Rufin"
@@ -2282,6 +2303,14 @@ msgstr "Войти с помощью Nextcloud"
 msgid "Sign in with Nextcloud"
 msgstr "Войти с помощью Nextcloud"
 
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign in with a code"
+msgstr "Войти с помощью Nextcloud"
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -2487,7 +2516,9 @@ msgstr "Обновить"
 msgid "Use API key"
 msgstr "Использовать ключ API"
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+#, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr "Использовать Мгновенный Микс Jellyfin для рекомендаций"
 
 msgid "Use Rufin data folder"
@@ -2520,6 +2551,9 @@ msgstr ""
 "Использовать локальные файлы для воспроизведения, текстов песен и "
 "редактирования поддерживаемых метаданных"
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr "Токен пользователя"
 
@@ -2528,6 +2562,11 @@ msgstr "Пользователь"
 
 msgid "Username and password"
 msgstr "Имя пользователя и пароль"
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "Имя пользователя"
 
 msgid "Username"
 msgstr "Имя пользователя"
@@ -2772,6 +2811,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This uses Jellyfin API for play radio, necessary if you want "
+#~ "recommendation plugins to work"
+#~ msgstr ""
+#~ "Для работы функции радио используется API Jellyfin, что необходимо для "
+#~ "работы плагинов рекомендаций"
 
 #~ msgid "Ownership of this item belongs to {source}"
 #~ msgstr "Права на этот элемент принадлежат {source}"
@@ -3036,9 +3082,6 @@ msgstr ""
 #~ msgstr ""
 #~ "Настройте сохраненные музыкальные серверы и параметры локального "
 #~ "воспроизведения."
-
-#~ msgid "Connected as"
-#~ msgstr "Подключено как"
 
 #~ msgid "Current server"
 #~ msgstr "Текущий сервер"
