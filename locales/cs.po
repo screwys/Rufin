@@ -431,6 +431,11 @@ msgstr "Přenos"
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Profile"
+msgstr "Uložené zdroje"
+
 msgid "Change Secret Storage"
 msgstr "Změnit tajné úložiště"
 
@@ -454,6 +459,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Locate Folder"
 msgid "Choose Folder"
+msgstr "Vyhledat složku"
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose Server"
 msgstr "Vyhledat složku"
 
 msgid "Choose a local music folder"
@@ -1040,6 +1050,9 @@ msgstr "Podržte a přetáhněte pro změnu velikosti"
 msgid "Home Blocks"
 msgstr "Bloky domovské stránky"
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "Domovská stránka"
 
@@ -1216,6 +1229,11 @@ msgstr "Místní hudební složka je nedostupná"
 
 msgid "Local music folder"
 msgstr "Místní hudební složka"
+
+#, fuzzy
+#| msgid "Playback speed"
+msgid "Local playback saved"
+msgstr "Rychlost přehrávání"
 
 msgid "Local"
 msgstr "Místní"
@@ -1739,6 +1757,14 @@ msgstr "Playlisty"
 msgid "Plays"
 msgstr "Přehrává"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Plex Account"
+msgstr "Počet přehrání"
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr "Pop"
 
@@ -1797,6 +1823,9 @@ msgstr "Soukromý režim je zapnutý"
 
 msgid "Private mode"
 msgstr "Soukromý režim"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr "Výslovnost"
@@ -1968,6 +1997,9 @@ msgstr "Obnovit výchozí nastavení"
 msgid "Reset"
 msgstr "Obnovit"
 
+msgid "Resource not found"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -2035,6 +2067,11 @@ msgstr "Uložit"
 
 #, fuzzy
 #| msgid "Saved to"
+msgid "Saved Plex Login"
+msgstr "Uložit do"
+
+#, fuzzy
+#| msgid "Saved to"
 msgid "Saved logins"
 msgstr "Uložit do"
 
@@ -2049,9 +2086,6 @@ msgstr "Uložit do"
 
 msgid "Saved"
 msgstr "Uloženo"
-
-msgid "Saved, sync to preview matches"
-msgstr "Uloženo, synchronizuje se s náhledem pro nalezení shod"
 
 msgid "Saves lyrics to your source"
 msgstr ""
@@ -2107,11 +2141,13 @@ msgstr "Hledat"
 msgid "Searching Local Network"
 msgstr "Prohledávání místní sítě"
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr "Vyhledávání serverů Jellyfin v místní síti..."
-
 msgid "Searching for devices..."
 msgstr "Hledání zařízení..."
+
+#, fuzzy
+#| msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Vyhledávání serverů Jellyfin v místní síti..."
 
 msgid "Searching will start automatically"
 msgstr "Vyhledávání se spustí automaticky"
@@ -2167,6 +2203,9 @@ msgstr ""
 
 msgid "Server Actions"
 msgstr "Akce serveru"
+
+msgid "Server Address Override (optional)"
+msgstr ""
 
 msgid "Server Address"
 msgstr "Adresa serveru"
@@ -2282,6 +2321,12 @@ msgstr "Položka postranního panelu {position}"
 
 msgid "Sidebar route by position"
 msgstr "Rozložení postranního panelu podle pozice"
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
+msgstr ""
 
 msgid "Sign in with Nextcloud"
 msgstr ""
@@ -2490,6 +2535,11 @@ msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 msgid "Use Rufin data folder"
 msgstr "Použít datovou složku aplikace Rufin"
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Use Saved Login"
+msgstr "Uložit do"
+
 msgid "Use This Source"
 msgstr ""
 
@@ -2523,6 +2573,9 @@ msgid "Username"
 msgstr "Uživatelské jméno"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr ""
+
+msgid "Verification Code (optional)"
 msgstr ""
 
 msgid "Verify server certificate"
@@ -2686,6 +2739,9 @@ msgid_plural "{count} years ago"
 msgstr[0] "Před {count} rokem"
 msgstr[1] "Před {count} roky"
 msgstr[2] "Před {count} roky"
+
+#~ msgid "Saved, sync to preview matches"
+#~ msgstr "Uloženo, synchronizuje se s náhledem pro nalezení shod"
 
 #~ msgid "Add server"
 #~ msgstr "Přidat server"

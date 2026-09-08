@@ -21,7 +21,6 @@ msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
 msgstr ""
 
-#, rust-format
 msgid ""
 "Backup restored with {entries} skipped playlist entries and {listens} "
 "skipped listens."
@@ -42,8 +41,7 @@ msgid ""
 "to review the logs before sharing them"
 msgstr ""
 
-msgid ""
-"No results \302\257\\_(\302\260\342\225\255\342\225\256\302\260)_/\302\257"
+msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr ""
 
 msgid ""
@@ -56,7 +54,6 @@ msgid ""
 "deleted."
 msgstr ""
 
-#, rust-format
 msgid ""
 "Replace the selected contents and remove these configured sources?\n"
 "{sources}\n"
@@ -341,11 +338,9 @@ msgstr ""
 msgid "Backup exported"
 msgstr ""
 
-#, rust-format
 msgid "Backup failed: {error}"
 msgstr ""
 
-#, rust-format
 msgid "Backup restored with warnings: {warnings}"
 msgstr ""
 
@@ -388,6 +383,9 @@ msgstr ""
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+msgid "Change Profile"
+msgstr ""
+
 msgid "Change Secret Storage"
 msgstr ""
 
@@ -397,7 +395,6 @@ msgstr ""
 msgid "Change"
 msgstr ""
 
-#, rust-format
 msgid "Changes apply to {count} track"
 msgid_plural "Changes apply to {count} tracks"
 msgstr[0] ""
@@ -407,6 +404,11 @@ msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
 msgid "Choose Folder"
+msgstr "Valitse kansio"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose Server"
 msgstr "Valitse kansio"
 
 msgid "Choose a local music folder"
@@ -502,7 +504,6 @@ msgstr ""
 msgid "Connect"
 msgstr ""
 
-#, rust-format
 msgid "Connected as {username}"
 msgstr "Yhdistetty käyttäjänä {username}"
 
@@ -512,7 +513,6 @@ msgstr ""
 msgid "Connecting to music server..."
 msgstr ""
 
-#, rust-format
 msgid "Connecting to {device}..."
 msgstr ""
 
@@ -540,7 +540,6 @@ msgstr ""
 msgid "Copy"
 msgstr ""
 
-#, rust-format
 msgid "Could not open folder: {error}"
 msgstr ""
 
@@ -550,7 +549,6 @@ msgstr ""
 msgid "Could not update favorites"
 msgstr ""
 
-#, rust-format
 msgid "Couldn't connect to {service}"
 msgstr ""
 
@@ -560,7 +558,7 @@ msgstr ""
 msgid "Couldn't search for lyrics"
 msgstr ""
 
-msgid "Couldn\342\200\231t download Japanese dictionary"
+msgid "Couldn’t download Japanese dictionary"
 msgstr ""
 
 msgid "Create"
@@ -953,6 +951,9 @@ msgstr ""
 msgid "Home Blocks"
 msgstr ""
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "Koti"
 
@@ -1100,7 +1101,6 @@ msgstr ""
 msgid "Local file mapping is no longer available"
 msgstr ""
 
-#, rust-format
 msgid "Local file mapping: {matched} of {total} server path matches"
 msgid_plural "Local file mapping: {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1117,6 +1117,11 @@ msgstr ""
 
 msgid "Local music folder"
 msgstr "Paikallinen musiikkikansio"
+
+#, fuzzy
+#| msgid "Playback speed"
+msgid "Local playback saved"
+msgstr "Toistonopeus"
 
 msgid "Local"
 msgstr "Paikallinen"
@@ -1490,7 +1495,6 @@ msgstr ""
 msgid "Overview"
 msgstr ""
 
-#, rust-format
 msgid "Ownership of this item belongs to {source}"
 msgstr ""
 
@@ -1581,7 +1585,6 @@ msgstr "Toistettu"
 msgid "Playing on this device"
 msgstr "Toistetaan tällä laitteella"
 
-#, rust-format
 msgid "Playing on {device}"
 msgstr "Toistetaan laitteella {device}"
 
@@ -1607,6 +1610,12 @@ msgid "Playlists"
 msgstr "Soittolistat"
 
 msgid "Plays"
+msgstr ""
+
+msgid "Plex Account"
+msgstr ""
+
+msgid "Plex"
 msgstr ""
 
 msgid "Pop"
@@ -1665,6 +1674,9 @@ msgstr "Yksityinen tila on päällä"
 
 msgid "Private mode"
 msgstr "Yksityinen tila"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr ""
@@ -1828,6 +1840,9 @@ msgstr ""
 msgid "Reset"
 msgstr ""
 
+msgid "Resource not found"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -1891,10 +1906,12 @@ msgstr ""
 msgid "Save"
 msgstr ""
 
+msgid "Saved Plex Login"
+msgstr ""
+
 msgid "Saved logins"
 msgstr ""
 
-#, rust-format
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
 msgstr[0] ""
@@ -1904,9 +1921,6 @@ msgid "Saved to"
 msgstr ""
 
 msgid "Saved"
-msgstr ""
-
-msgid "Saved, sync to preview matches"
 msgstr ""
 
 msgid "Saves lyrics to your source"
@@ -1957,11 +1971,13 @@ msgstr ""
 msgid "Searching Local Network"
 msgstr ""
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr "Haetaan Jellyfin-palvelimia paikallisverkosta..."
-
 msgid "Searching for devices..."
 msgstr ""
+
+#, fuzzy
+#| msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Haetaan Jellyfin-palvelimia paikallisverkosta..."
 
 msgid "Searching will start automatically"
 msgstr ""
@@ -2014,6 +2030,9 @@ msgstr ""
 msgid "Server Actions"
 msgstr ""
 
+msgid "Server Address Override (optional)"
+msgstr ""
+
 msgid "Server Address"
 msgstr ""
 
@@ -2029,7 +2048,6 @@ msgstr ""
 msgid "Server Settings"
 msgstr "Palvelimen asetukset"
 
-#, rust-format
 msgid "Server discovery failed: {error}"
 msgstr ""
 
@@ -2120,11 +2138,16 @@ msgstr ""
 msgid "Sidebar Items"
 msgstr ""
 
-#, rust-format
 msgid "Sidebar item {position}"
 msgstr ""
 
 msgid "Sidebar route by position"
+msgstr ""
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
 msgstr ""
 
 msgid "Sign in with Nextcloud"
@@ -2328,6 +2351,9 @@ msgstr ""
 msgid "Use Rufin data folder"
 msgstr ""
 
+msgid "Use Saved Login"
+msgstr ""
+
 msgid "Use This Source"
 msgstr ""
 
@@ -2359,6 +2385,9 @@ msgid "Username"
 msgstr "Käyttäjätunnus"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr ""
+
+msgid "Verification Code (optional)"
 msgstr ""
 
 msgid "Verify server certificate"
@@ -2475,49 +2504,41 @@ msgstr ""
 msgid "yesterday"
 msgstr ""
 
-#, rust-format
 msgid "{count} album"
 msgid_plural "{count} albums"
 msgstr[0] "{count} albumi"
 msgstr[1] "{count} albumia"
 
-#, rust-format
 msgid "{count} day ago"
 msgid_plural "{count} days ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} folder selected"
 msgid_plural "{count} folders selected"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} month ago"
 msgid_plural "{count} months ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} result"
 msgid_plural "{count} results"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} track"
 msgid_plural "{count} tracks"
 msgstr[0] "{count} kappale"
 msgstr[1] "{count} kappaletta"
 
-#, rust-format
 msgid "{count} week ago"
 msgid_plural "{count} weeks ago"
 msgstr[0] ""
 msgstr[1] ""
 
-#, rust-format
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""

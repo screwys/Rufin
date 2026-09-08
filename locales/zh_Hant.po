@@ -403,6 +403,11 @@ msgstr ""
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Change Profile"
+msgstr "變更敏感存儲空間"
+
 msgid "Change Secret Storage"
 msgstr "變更敏感存儲空間"
 
@@ -424,6 +429,11 @@ msgstr ""
 #, fuzzy
 #| msgid "Locate Folder"
 msgid "Choose Folder"
+msgstr "定位資料夾"
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose Server"
 msgstr "定位資料夾"
 
 msgid "Choose a local music folder"
@@ -1002,6 +1012,9 @@ msgstr "按住並拖曳以縮放"
 msgid "Home Blocks"
 msgstr ""
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "首頁"
 
@@ -1168,6 +1181,11 @@ msgstr ""
 
 msgid "Local music folder"
 msgstr "本地音樂資料夾"
+
+#, fuzzy
+#| msgid "Playback speed"
+msgid "Local playback saved"
+msgstr "播放速度"
 
 msgid "Local"
 msgstr "本地"
@@ -1686,6 +1704,14 @@ msgstr "播放清單"
 msgid "Plays"
 msgstr ""
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Plex Account"
+msgstr "播放次數"
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr "流行"
 
@@ -1742,6 +1768,9 @@ msgstr "無痕模式已開啟"
 
 msgid "Private mode"
 msgstr "無痕模式"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr ""
@@ -1913,6 +1942,9 @@ msgstr "重置回預設值"
 msgid "Reset"
 msgstr "重置"
 
+msgid "Resource not found"
+msgstr ""
+
 msgid "Restore User State"
 msgstr ""
 
@@ -1978,6 +2010,11 @@ msgstr "儲存"
 
 #, fuzzy
 #| msgid "Saved to"
+msgid "Saved Plex Login"
+msgstr "儲存至"
+
+#, fuzzy
+#| msgid "Saved to"
 msgid "Saved logins"
 msgstr "儲存至"
 
@@ -1990,9 +2027,6 @@ msgstr "儲存至"
 
 msgid "Saved"
 msgstr "已儲存"
-
-msgid "Saved, sync to preview matches"
-msgstr ""
 
 msgid "Saves lyrics to your source"
 msgstr ""
@@ -2046,11 +2080,11 @@ msgstr "搜尋"
 msgid "Searching Local Network"
 msgstr ""
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr ""
-
 msgid "Searching for devices..."
 msgstr "正在尋找裝置..."
+
+msgid "Searching for {provider} servers on the local network..."
+msgstr ""
 
 msgid "Searching will start automatically"
 msgstr ""
@@ -2105,6 +2139,9 @@ msgid "Separate .lrc file"
 msgstr ""
 
 msgid "Server Actions"
+msgstr ""
+
+msgid "Server Address Override (optional)"
 msgstr ""
 
 msgid "Server Address"
@@ -2221,6 +2258,12 @@ msgstr "側邊欄項目 {position}"
 
 msgid "Sidebar route by position"
 msgstr "按位置瀏覽側邊欄"
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
+msgstr ""
 
 msgid "Sign in with Nextcloud"
 msgstr ""
@@ -2425,6 +2468,11 @@ msgstr ""
 msgid "Use Rufin data folder"
 msgstr "使用 Rufin 資料資料夾"
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Use Saved Login"
+msgstr "儲存至"
+
 msgid "Use This Source"
 msgstr ""
 
@@ -2456,6 +2504,9 @@ msgid "Username"
 msgstr "使用者名稱"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
+msgstr ""
+
+msgid "Verification Code (optional)"
 msgstr ""
 
 msgid "Verify server certificate"

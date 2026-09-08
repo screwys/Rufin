@@ -430,6 +430,11 @@ msgstr "Meediumilevi"
 msgid "Certificate authority (PEM)"
 msgstr ""
 
+#, fuzzy
+#| msgid "Saved Sources"
+msgid "Change Profile"
+msgstr "Salvestatud allikad"
+
 msgid "Change Secret Storage"
 msgstr "Muuda turvalist andmeruumi"
 
@@ -450,6 +455,11 @@ msgid "Changes take effect after restarting Rufin"
 msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
 msgid "Choose Folder"
+msgstr "Vali kaust"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose Server"
 msgstr "Vali kaust"
 
 msgid "Choose a local music folder"
@@ -1020,6 +1030,9 @@ msgstr "Suuruse muutmiseks hoia all ja lohista"
 msgid "Home Blocks"
 msgstr "Avalehe plokid"
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "Avaleht"
 
@@ -1194,6 +1207,11 @@ msgstr "Kohalik muusikakaust pole saadaval"
 
 msgid "Local music folder"
 msgstr "Kohalik muusikakaust"
+
+#, fuzzy
+#| msgid "Local Playback Mapping"
+msgid "Local playback saved"
+msgstr "Kohaliku taasesituse vastendused"
 
 msgid "Local"
 msgstr "Kohalik andmekogu"
@@ -1700,6 +1718,14 @@ msgstr "Esitusloendid"
 msgid "Plays"
 msgstr "Esitamisi"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Plex Account"
+msgstr "Esituskordi"
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr "Poppmuusika"
 
@@ -1756,6 +1782,9 @@ msgstr "Privaatne režiim on lülitatud sisse"
 
 msgid "Private mode"
 msgstr "Privaatne režiim"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr "Hääldus"
@@ -1922,6 +1951,11 @@ msgid "Reset"
 msgstr "Lähtesta"
 
 #, fuzzy
+#| msgid "Mapped local file not found"
+msgid "Resource not found"
+msgstr "Vastendatud kohalikku faili ei leidu"
+
+#, fuzzy
 #| msgid "Restore Default"
 msgid "Restore User State"
 msgstr "Taasta vaikimisi väärtus"
@@ -1988,6 +2022,11 @@ msgstr "Salvesta"
 
 #, fuzzy
 #| msgid "Saved to"
+msgid "Saved Plex Login"
+msgstr "Salvestatud asukohta"
+
+#, fuzzy
+#| msgid "Saved to"
 msgid "Saved logins"
 msgstr "Salvestatud asukohta"
 
@@ -2001,9 +2040,6 @@ msgstr "Salvestatud asukohta"
 
 msgid "Saved"
 msgstr "Salvestatud"
-
-msgid "Saved, sync to preview matches"
-msgstr "Salvestatud, vastenduse eelvaateks sünkrooni"
 
 msgid "Saves lyrics to your source"
 msgstr "Salvestab laulusõnad sinu andmeallikasse"
@@ -2053,11 +2089,13 @@ msgstr "Otsi"
 msgid "Searching Local Network"
 msgstr "Otsin kohtvõrgust"
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr "Otsin kohalikust võrgust Jellyfini servereid…"
-
 msgid "Searching for devices..."
 msgstr "Otsin seadmeid…"
+
+#, fuzzy
+#| msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Otsin kohalikust võrgust Jellyfini servereid…"
 
 msgid "Searching will start automatically"
 msgstr "Otsing algab automaatselt"
@@ -2111,6 +2149,9 @@ msgstr "Eraldi .lrc fail"
 
 msgid "Server Actions"
 msgstr "Serveri tegevused"
+
+msgid "Server Address Override (optional)"
+msgstr ""
 
 msgid "Server Address"
 msgstr "Serveri aadress"
@@ -2224,6 +2265,12 @@ msgstr "Külgriba objekt {position}"
 
 msgid "Sidebar route by position"
 msgstr "Külgriba teekond asukoha alusel"
+
+msgid "Sign In in Browser"
+msgstr ""
+
+msgid "Sign In with Password"
+msgstr ""
 
 msgid "Sign in with Nextcloud"
 msgstr ""
@@ -2427,6 +2474,11 @@ msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
 msgid "Use Rufin data folder"
 msgstr "Kasuta Rufini andmekausta"
 
+#, fuzzy
+#| msgid "Saved to"
+msgid "Use Saved Login"
+msgstr "Salvestatud asukohta"
+
 msgid "Use This Source"
 msgstr "Kasuta seda allikat"
 
@@ -2463,6 +2515,9 @@ msgstr "Kasutajanimi"
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr ""
 "Kasutab saadavolevaid laulusõnu karaoke jaoks või laadib nad internetist"
+
+msgid "Verification Code (optional)"
+msgstr ""
 
 msgid "Verify server certificate"
 msgstr "Kontrolli serveri sertifikaati"
@@ -2617,6 +2672,9 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} aasta tagasi"
 msgstr[1] "{count} aastat tagasi"
+
+#~ msgid "Saved, sync to preview matches"
+#~ msgstr "Salvestatud, vastenduse eelvaateks sünkrooni"
 
 #~ msgid "Add server"
 #~ msgstr "Lisa server"
@@ -2830,9 +2888,6 @@ msgstr[1] "{count} aastat tagasi"
 
 #~ msgid "Loaded in lyrics panel."
 #~ msgstr "Laaditud laulusõnade plokis."
-
-#~ msgid "Local Playback Mapping"
-#~ msgstr "Kohaliku taasesituse vastendused"
 
 #~ msgid "Local library folder is saved."
 #~ msgstr "Kohaliku muusikakogu kaust on salvestatud."

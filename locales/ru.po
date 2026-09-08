@@ -435,6 +435,11 @@ msgstr "Трансляция"
 msgid "Certificate authority (PEM)"
 msgstr "Центр сертификации (PEM)"
 
+#, fuzzy
+#| msgid "Change Source"
+msgid "Change Profile"
+msgstr "Изменить источник"
+
 msgid "Change Secret Storage"
 msgstr "Изменить секретное хранилище"
 
@@ -454,6 +459,11 @@ msgid "Changes take effect after restarting Rufin"
 msgstr "Изменения применяются после перезагрузки Rufin"
 
 msgid "Choose Folder"
+msgstr "Выбрать Папку"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose Server"
 msgstr "Выбрать Папку"
 
 msgid "Choose a local music folder"
@@ -1004,6 +1014,9 @@ msgstr "Удерживайте и перетаскивайте для измен
 msgid "Home Blocks"
 msgstr "Основные блоки"
 
+msgid "Home Profile"
+msgstr ""
+
 msgid "Home"
 msgstr "Главная"
 
@@ -1178,6 +1191,11 @@ msgstr "Локальная папка с музыкой недоступна"
 
 msgid "Local music folder"
 msgstr "Локальная папка с музыкой"
+
+#, fuzzy
+#| msgid "Local Playback Mapping"
+msgid "Local playback saved"
+msgstr "Сопоставление Локального Воспроизведения"
 
 msgid "Local"
 msgstr "Локальный источник"
@@ -1674,6 +1692,14 @@ msgstr "Плейлисты"
 msgid "Plays"
 msgstr "Прослушано раз"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Plex Account"
+msgstr "Количество воспроизведений"
+
+msgid "Plex"
+msgstr ""
+
 msgid "Pop"
 msgstr "Поп"
 
@@ -1732,6 +1758,9 @@ msgstr "Приватный режим включен"
 
 msgid "Private mode"
 msgstr "Приватный режим"
+
+msgid "Profile PIN"
+msgstr ""
 
 msgid "Pronunciation"
 msgstr "Произношение"
@@ -1895,6 +1924,11 @@ msgstr "Восстановить настройки по умолчанию"
 msgid "Reset"
 msgstr "Сбросить"
 
+#, fuzzy
+#| msgid "Mapped local file not found"
+msgid "Resource not found"
+msgstr "Сопоставленный локальный файл не найден"
+
 msgid "Restore User State"
 msgstr "Восстановить состояние пользователя"
 
@@ -1959,6 +1993,11 @@ msgstr "Сохранить для повторного сканирования"
 msgid "Save"
 msgstr "Сохранить"
 
+#, fuzzy
+#| msgid "Saved logins"
+msgid "Saved Plex Login"
+msgstr "Сохранённые учётные записи"
+
 msgid "Saved logins"
 msgstr "Сохранённые учётные записи"
 
@@ -1976,9 +2015,6 @@ msgstr "Сохранено в"
 
 msgid "Saved"
 msgstr "Сохранено"
-
-msgid "Saved, sync to preview matches"
-msgstr "Сохранено, синхронизируйте для предварительного просмотра соответствий"
 
 msgid "Saves lyrics to your source"
 msgstr "Сохраняет текст песни в источнике"
@@ -2028,11 +2064,13 @@ msgstr "Поиск"
 msgid "Searching Local Network"
 msgstr "Поиск в локальной сети"
 
-msgid "Searching for Jellyfin servers on the local network..."
-msgstr "Поиск серверов Jellyfin в локальной сети…"
-
 msgid "Searching for devices..."
 msgstr "Выполняется поиск устройств..."
+
+#, fuzzy
+#| msgid "Searching for Jellyfin servers on the local network..."
+msgid "Searching for {provider} servers on the local network..."
+msgstr "Поиск серверов Jellyfin в локальной сети…"
 
 msgid "Searching will start automatically"
 msgstr "Поиск начнётся автоматически"
@@ -2084,6 +2122,9 @@ msgstr "Отдельный файл .lrc"
 
 msgid "Server Actions"
 msgstr "Действия на сервере"
+
+msgid "Server Address Override (optional)"
+msgstr ""
 
 msgid "Server Address"
 msgstr "Адрес сервера"
@@ -2196,6 +2237,14 @@ msgstr "Элемент боковой панели {position}"
 
 msgid "Sidebar route by position"
 msgstr "Маршрут в боковой панели по расположению"
+
+msgid "Sign In in Browser"
+msgstr ""
+
+#, fuzzy
+#| msgid "Sign in with Nextcloud"
+msgid "Sign In with Password"
+msgstr "Войти с помощью Nextcloud"
 
 msgid "Sign in with Nextcloud"
 msgstr "Войти с помощью Nextcloud"
@@ -2400,6 +2449,11 @@ msgstr "Использовать Мгновенный Микс Jellyfin для �
 msgid "Use Rufin data folder"
 msgstr "Использовать папку данных Rufin"
 
+#, fuzzy
+#| msgid "Saved logins"
+msgid "Use Saved Login"
+msgstr "Сохранённые учётные записи"
+
 msgid "Use This Source"
 msgstr "Использовать Этот Источник"
 
@@ -2436,6 +2490,9 @@ msgstr "Имя пользователя"
 
 msgid "Uses available karaoke lyrics or fetches them from the internet"
 msgstr "Использует доступные тексты караоке или загружает их из интернета"
+
+msgid "Verification Code (optional)"
+msgstr ""
 
 msgid "Verify server certificate"
 msgstr "Проверить сертификат сервера"
@@ -2598,6 +2655,10 @@ msgid_plural "{count} years ago"
 msgstr[0] "{count} год назад"
 msgstr[1] "{count} года назад"
 msgstr[2] "{count} лет назад"
+
+#~ msgid "Saved, sync to preview matches"
+#~ msgstr ""
+#~ "Сохранено, синхронизируйте для предварительного просмотра соответствий"
 
 #~ msgid "Add server"
 #~ msgstr "Добавить сервер"
@@ -2922,9 +2983,6 @@ msgstr[2] "{count} лет назад"
 
 #~ msgid "Loaded in lyrics panel."
 #~ msgstr "Загружено в панель с текстами песен."
-
-#~ msgid "Local Playback Mapping"
-#~ msgstr "Сопоставление Локального Воспроизведения"
 
 #~ msgid "Local library folder is saved."
 #~ msgstr "Папка локальной библиотеки сохранена."
