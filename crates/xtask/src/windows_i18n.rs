@@ -70,7 +70,7 @@ fn nsis_languages(compiler: &str) -> Result<BTreeMap<u32, String>> {
     let info = command_stdout(compiler, [flag])?;
     let directory = info
         .split_once("NSISDIR=")
-        .and_then(|(_, value)| value.split(',').next())
+        .and_then(|(_, value)| value.split([',', '\r', '\n']).next())
         .ok_or("makensis did not report NSISDIR")?;
     let mut languages = BTreeMap::new();
     for entry in fs::read_dir(Path::new(directory).join("Contrib/Language files"))? {
