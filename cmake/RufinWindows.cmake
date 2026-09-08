@@ -59,32 +59,6 @@ if(RUFIN_CARGO_FROZEN)
 else()
   set(RUFIN_WINDOWS_CARGO_LOCK_FLAG --locked)
 endif()
-set(RUFIN_WINDOWS_UPDATER_PROFILE_ARGUMENTS)
-if(RUFIN_RESOLVED_CARGO_PROFILE STREQUAL "release")
-  list(APPEND RUFIN_WINDOWS_UPDATER_PROFILE_ARGUMENTS --release)
-elseif(NOT RUFIN_RESOLVED_CARGO_PROFILE STREQUAL "debug")
-  list(APPEND RUFIN_WINDOWS_UPDATER_PROFILE_ARGUMENTS
-    --profile "${RUFIN_RESOLVED_CARGO_PROFILE}")
-endif()
-set(RUFIN_WINDOWS_UPDATER
-  "${RUFIN_CARGO_TARGET_DIR}/${RUFIN_RESOLVED_CARGO_PROFILE}/rufin-update-helper.exe")
-if(RUFIN_BUILD_IDENTITY STREQUAL "stable")
-  add_custom_target(rufin-update-helper
-    COMMAND "${CMAKE_COMMAND}" -E env
-      "CARGO_TARGET_DIR=${RUFIN_CARGO_TARGET_DIR}"
-      "CMAKE_GENERATOR=${CMAKE_GENERATOR}"
-      "${RUFIN_CARGO}" build
-      "${RUFIN_WINDOWS_CARGO_LOCK_FLAG}"
-      --package windows-updater
-      --bin rufin-update-helper
-      ${RUFIN_WINDOWS_UPDATER_PROFILE_ARGUMENTS}
-    BYPRODUCTS "${RUFIN_WINDOWS_UPDATER}"
-    WORKING_DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}"
-    USES_TERMINAL
-    COMMAND_EXPAND_LISTS
-    VERBATIM
-  )
-endif()
 
 install(FILES LICENSE packaging/windows/assets/rufin.ico DESTINATION .)
 install(FILES ${RUFIN_WINDOWS_GSPAWN_HELPERS} DESTINATION bin)
@@ -123,15 +97,6 @@ file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/windows-settings.ini"
 install(FILES "${CMAKE_CURRENT_BINARY_DIR}/windows-settings.ini"
   DESTINATION etc/gtk-4.0 RENAME settings.ini)
 
-if(RUFIN_BUILD_IDENTITY STREQUAL "stable")
-  file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/rufin-update-helper.complete"
-    CONTENT "rufin-update-helper:${RUFIN_VERSION}\n")
-  install(PROGRAMS "${RUFIN_WINDOWS_UPDATER}"
-    DESTINATION "updater/${RUFIN_VERSION}")
-  install(FILES "${CMAKE_CURRENT_BINARY_DIR}/rufin-update-helper.complete"
-    DESTINATION "updater/${RUFIN_VERSION}")
-endif()
-
 set(RUFIN_WINDOWS_RUNTIME_DIRS
   "${RUFIN_WINDOWS_GLIB_PREFIX}/bin"
   "${RUFIN_WINDOWS_GTK_PREFIX}/bin"
@@ -159,10 +124,6 @@ add_custom_target(rufin-stage
   USES_TERMINAL
   VERBATIM
 )
-if(TARGET rufin-update-helper)
-  add_dependencies(rufin-stage rufin-update-helper)
-endif()
-
 string(REGEX MATCH "^([0-9]+)\\.([0-9]+)\\.([0-9]+)" _ "${RUFIN_VERSION}")
 set(RUFIN_WINDOWS_VERSION_QUAD
   "${CMAKE_MATCH_1}.${CMAKE_MATCH_2}.${CMAKE_MATCH_3}.0")

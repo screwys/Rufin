@@ -60,9 +60,10 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
+          cache-on-failure: true
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          shared-key: macos-${{ matrix.architecture }}
+          save-if: ${{ github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main' }}
+          shared-key: macos-package-${{ matrix.architecture }}
           workspaces: ". -> .local/target"
 
       - name: Verify signed release tag

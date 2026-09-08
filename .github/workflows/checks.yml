@@ -135,8 +135,14 @@ jobs:
 
               case "$path" in
                 Cargo.lock|Cargo.toml|*/Cargo.toml)
-                  add_jobs "${workspace_jobs[@]}" cargo-deny
-                  add_jobs "${release_build_jobs[@]}"
+                  add_jobs "${workspace_jobs[@]}" cargo-deny nix
+                  if [[ "$path" == Cargo.toml ]]; then
+                    base_version="$(git show "${merge_base}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')"
+                    head_version="$(git show "${HEAD_SHA}:Cargo.toml" | python3 -c 'import sys, tomllib; print(tomllib.loads(sys.stdin.read())["workspace"]["package"]["version"])')"
+                    if [[ "$base_version" != "$head_version" ]]; then
+                      add_jobs "${release_build_jobs[@]}"
+                    fi
+                  fi
                   ;;
               esac
 
@@ -212,7 +218,7 @@ jobs:
                   use_current_nix=true
                   ;;
                 scripts/rust-cache-command)
-                  add_jobs workspace workspace_windows
+                  add_jobs workspace workspace_windows windows
                   ;;
                 deny.toml)
                   add_jobs cargo-deny

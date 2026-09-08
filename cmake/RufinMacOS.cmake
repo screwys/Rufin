@@ -214,10 +214,12 @@ add_custom_target(rufin-dmg
     "${RUFIN_DMG_ROOT}/${RUFIN_BUNDLE_NAME}.app"
   COMMAND "${CMAKE_COMMAND}" -E create_symlink /Applications
     "${RUFIN_DMG_ROOT}/Applications"
-  COMMAND "${RUFIN_HDIUTIL}" create
-    -volname "${RUFIN_BUNDLE_NAME}"
-    -srcfolder "${RUFIN_DMG_ROOT}"
-    -ov -format UDZO "${RUFIN_DMG_ARTIFACT}"
+  COMMAND "${CMAKE_COMMAND}"
+    "-DRUFIN_HDIUTIL=${RUFIN_HDIUTIL}"
+    "-DRUFIN_BUNDLE_NAME=${RUFIN_BUNDLE_NAME}"
+    "-DRUFIN_DMG_ROOT=${RUFIN_DMG_ROOT}"
+    "-DRUFIN_DMG_ARTIFACT=${RUFIN_DMG_ARTIFACT}"
+    -P "${CMAKE_CURRENT_LIST_DIR}/RufinMacOSDmg.cmake"
   DEPENDS rufin-bundle
   BYPRODUCTS "${RUFIN_DMG_ARTIFACT}"
   USES_TERMINAL
