@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-07 19:57+0000\n"
+"PO-Revision-Date: 2026-09-08 14:11+0000\n"
 "Last-Translator: Jiri Grönroos <jiri.gronroos@iki.fi>\n"
 "Language-Team: Finnish <https://hosted.weblate.org/projects/rufin/app/fi/>\n"
 "Language: fi\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1.dev0\n"
+"X-Generator: Weblate 2026.9.1\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
@@ -42,7 +42,7 @@ msgid ""
 msgstr ""
 
 msgid "No results ¯\\_(°╭╮°)_/¯"
-msgstr ""
+msgstr "Ei tuloksia ¯\\_(°╭╮°)_/¯"
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -1633,13 +1633,13 @@ msgid "Prefer distinct track covers"
 msgstr ""
 
 msgid "Prefer server lyrics"
-msgstr ""
+msgstr "Suosi palvelimen sanoituksia"
 
 msgid "Prefer server playlist covers"
-msgstr ""
+msgstr "Suosi palvelimen soittolistan kansikuvia"
 
 msgid "Prefer translations"
-msgstr ""
+msgstr "Suosi käännöksiä"
 
 msgid "Preferences"
 msgstr "Asetukset"
@@ -1657,19 +1657,19 @@ msgid "Prevent automatic metadata refreshes from replacing these values"
 msgstr ""
 
 msgid "Previous Track"
-msgstr ""
+msgstr "Edellinen kappale"
 
 msgid "Previous audio device"
-msgstr ""
+msgstr "Edellinen äänilaite"
 
 msgid "Previous page"
-msgstr ""
+msgstr "Edellinen sivu"
 
 msgid "Previous"
-msgstr ""
+msgstr "Edellinen"
 
 msgid "Privacy and Security"
-msgstr ""
+msgstr "Tietosuoja ja turvallisuus"
 
 msgid "Private mode is off"
 msgstr "Yksityinen tila on pois päältä"
@@ -1696,7 +1696,7 @@ msgid "Queue a track to begin"
 msgstr "Aseta kappale jonoon aloittaaksesi"
 
 msgid "Queue and transitions"
-msgstr ""
+msgstr "Jono ja siirtymät"
 
 msgid "Queue"
 msgstr ""
@@ -1705,37 +1705,37 @@ msgid "Queued"
 msgstr ""
 
 msgid "Quit Rufin"
-msgstr ""
+msgstr "Lopeta Rufin"
 
 msgid "Quit"
-msgstr ""
+msgstr "Lopeta"
 
 msgid "Range selection"
 msgstr ""
 
 msgid "Rating"
-msgstr ""
+msgstr "Arvio"
 
 msgid "Ready"
-msgstr ""
+msgstr "Valmis"
 
 msgid "Recently played"
 msgstr "Äskettäin toistettu"
 
 msgid "Recently released"
-msgstr ""
+msgstr "Äskettäin julkaistu"
 
 msgid "Recommended when your server provides one"
 msgstr ""
 
 msgid "Reconnect"
-msgstr ""
+msgstr "Yhdistä uudelleen"
 
 msgid "Red"
-msgstr ""
+msgstr "Punainen"
 
 msgid "Redo"
-msgstr ""
+msgstr "Tee uudelleen"
 
 msgid "Refresh section"
 msgstr ""
@@ -1744,7 +1744,7 @@ msgid "Refresh"
 msgstr ""
 
 msgid "Release date"
-msgstr ""
+msgstr "Julkaisupäivä"
 
 msgid "Release notifications"
 msgstr ""
@@ -1753,34 +1753,34 @@ msgid "Release"
 msgstr ""
 
 msgid "Remote lyrics"
-msgstr ""
+msgstr "Etäsanoitukset"
 
 msgid "Remote"
 msgstr ""
 
 msgid "Remove All Downloads"
-msgstr ""
+msgstr "Poista kaikki lataukset"
 
 msgid "Remove Download"
-msgstr ""
+msgstr "Poista lataus"
 
 msgid "Remove Downloads"
-msgstr ""
+msgstr "Poista lataukset"
 
 msgid "Remove Local Folder"
-msgstr ""
+msgstr "Poista paikallinen kansio"
 
 msgid "Remove Rule and Delete Downloads"
-msgstr ""
+msgstr "Poista sääntö ja poista lataukset"
 
 msgid "Remove Rule and Downloads"
-msgstr ""
+msgstr "Poista sääntö ja lataukset"
 
 msgid "Remove Rule, Keep Downloads"
-msgstr ""
+msgstr "Poista sääntö, säilytä lataukset"
 
 msgid "Remove all downloads"
-msgstr ""
+msgstr "Poista kaikki lataukset"
 
 msgid "Remove and Delete"
 msgstr ""
@@ -1816,19 +1816,19 @@ msgid "Rename Playlist"
 msgstr "Nimeä soittolista uudelleen"
 
 msgid "Rename"
-msgstr ""
+msgstr "Nimeä uudelleen"
 
 msgid "Repeat all"
-msgstr ""
+msgstr "Kertaa kaikki"
 
 msgid "Repeat off"
-msgstr ""
+msgstr "Ei kertausta"
 
 msgid "Repeat one"
-msgstr ""
+msgstr "Kertaa yksi"
 
 msgid "Repeat"
-msgstr ""
+msgstr "Kertaa"
 
 msgid "Replace saved custom headers"
 msgstr ""
@@ -1837,16 +1837,16 @@ msgid "ReplayGain"
 msgstr "ReplayGain"
 
 msgid "Require SMB encryption"
-msgstr ""
+msgstr "Vaadi SMB-salaus"
 
 msgid "Reset to defaults"
-msgstr ""
+msgstr "Palauta oletusarvot"
 
 msgid "Reset"
 msgstr ""
 
 msgid "Resource not found"
-msgstr ""
+msgstr "Resurssia ei löytynyt"
 
 msgid "Restore User State"
 msgstr ""
@@ -1861,7 +1861,7 @@ msgid "Resync Library"
 msgstr "Synkronoi kirjasto uudelleen"
 
 msgid "Retry"
-msgstr ""
+msgstr "Yritä uudelleen"
 
 msgid "Rock"
 msgstr ""
@@ -1873,25 +1873,25 @@ msgid "Rows"
 msgstr ""
 
 msgid "Rufin data folder"
-msgstr ""
+msgstr "Rufin-datakansio"
 
 msgid "Rule actions"
 msgstr ""
 
 msgid "SMB / Samba"
-msgstr ""
+msgstr "SMB / Samba"
 
 msgid "SMB Domain"
-msgstr ""
+msgstr "SMB-toimialue"
 
 msgid "Saturday"
-msgstr ""
+msgstr "Lauantai"
 
 msgid "Save Diagnostic Log"
-msgstr ""
+msgstr "Tallenna diagnostiikkaloki"
 
 msgid "Save Lyrics"
-msgstr ""
+msgstr "Tallenna sanoitukset"
 
 msgid "Save Mapping"
 msgstr ""
@@ -1903,19 +1903,19 @@ msgid "Save action saves the lyrics directly to your source"
 msgstr ""
 
 msgid "Save lyrics automatically"
-msgstr ""
+msgstr "Tallenna sanoitukset automaattisesti"
 
 msgid "Save to rescan"
 msgstr ""
 
 msgid "Save"
-msgstr ""
+msgstr "Tallenna"
 
 msgid "Saved Plex Login"
 msgstr ""
 
 msgid "Saved logins"
-msgstr ""
+msgstr "Tallennetut kirjautumistiedot"
 
 msgid "Saved mapping. {matched} of {total} server path matches"
 msgid_plural "Saved mapping. {matched} of {total} server paths match"
@@ -1926,13 +1926,13 @@ msgid "Saved to"
 msgstr ""
 
 msgid "Saved"
-msgstr ""
+msgstr "Tallennettu"
 
 msgid "Saves lyrics to your source"
 msgstr ""
 
 msgid "Saving..."
-msgstr ""
+msgstr "Tallennetaan..."
 
 msgid "Schedule"
 msgstr ""
@@ -1947,22 +1947,22 @@ msgid "Scheduled backup password saved"
 msgstr ""
 
 msgid "Search Again"
-msgstr ""
+msgstr "Hae uudelleen"
 
 msgid "Search Lyrics"
-msgstr ""
+msgstr "Hae sanoituksia"
 
 msgid "Search current folder"
-msgstr ""
+msgstr "Hae nykyisestä kansiosta"
 
 msgid "Search in page"
-msgstr ""
+msgstr "Hae sivulta"
 
 msgid "Search is unavailable"
-msgstr ""
+msgstr "Haku ei ole saatavilla"
 
 msgid "Search lyrics"
-msgstr ""
+msgstr "Hae sanoituksia"
 
 msgid "Search preferences"
 msgstr ""
@@ -1971,24 +1971,22 @@ msgid "Search queue"
 msgstr ""
 
 msgid "Search"
-msgstr ""
+msgstr "Hae"
 
 msgid "Searching Local Network"
-msgstr ""
+msgstr "Haetaan paikallisverkkoa"
 
 msgid "Searching for devices..."
-msgstr ""
+msgstr "Haetaan laitteita..."
 
-#, fuzzy
-#| msgid "Searching for Jellyfin servers on the local network..."
 msgid "Searching for {provider} servers on the local network..."
-msgstr "Haetaan Jellyfin-palvelimia paikallisverkosta..."
+msgstr "Haetaan {provider}-palvelimia paikallisverkosta..."
 
 msgid "Searching will start automatically"
-msgstr ""
+msgstr "Haku käynnistyy automaattisesti"
 
 msgid "Searching..."
-msgstr ""
+msgstr "Haetaan..."
 
 msgid "Secret storage"
 msgstr ""
@@ -2009,19 +2007,19 @@ msgid "Seekbar"
 msgstr ""
 
 msgid "Select All"
-msgstr ""
+msgstr "Valitse kaikki"
 
 msgid "Select Download Folder"
-msgstr ""
+msgstr "Valitse latauskansio"
 
 msgid "Select Music Folder"
-msgstr ""
+msgstr "Valitse musiikkikansio"
 
 msgid "Select Source"
-msgstr ""
+msgstr "Valitse lähde"
 
 msgid "Select all"
-msgstr ""
+msgstr "Valitse kaikki"
 
 msgid "Selected folders"
 msgstr ""
@@ -2030,7 +2028,7 @@ msgid "Selection"
 msgstr ""
 
 msgid "Separate .lrc file"
-msgstr ""
+msgstr "Erillinen .lrc-tiedosto"
 
 msgid "Server Actions"
 msgstr ""
@@ -2039,13 +2037,13 @@ msgid "Server Address Override (optional)"
 msgstr ""
 
 msgid "Server Address"
-msgstr ""
+msgstr "Palvelimen osoite"
 
 msgid "Server Library"
 msgstr "Palvelinkirjasto"
 
 msgid "Server Prefix"
-msgstr ""
+msgstr "Palvelimen etuliite"
 
 msgid "Server Sample"
 msgstr ""
@@ -2066,7 +2064,7 @@ msgid "Server prefix doesn't match"
 msgstr ""
 
 msgid "Server"
-msgstr ""
+msgstr "Palvelin"
 
 msgid "Servers"
 msgstr "Palvelimet"
@@ -2084,7 +2082,7 @@ msgid "Shared secret"
 msgstr ""
 
 msgid "Show Rufin"
-msgstr ""
+msgstr "Näytä Rufin"
 
 msgid "Show downloaded badge"
 msgstr ""
@@ -2093,37 +2091,37 @@ msgid "Show external service icons on album and artist pages"
 msgstr ""
 
 msgid "Show external site links"
-msgstr ""
+msgstr "Näytä ulkoisten sivujen linkit"
 
 msgid "Show lyrics in the right panel"
-msgstr ""
+msgstr "Näytä sanoitukset oikeassa paneelissa"
 
 msgid "Show lyrics"
-msgstr ""
+msgstr "Näytä sanoitukset"
 
 msgid "Show paused status"
 msgstr ""
 
 msgid "Show ratings in the bottom bar"
-msgstr ""
+msgstr "Näytä arviot alapalkissa"
 
 msgid "Show sidebar"
 msgstr "Näytä sivupalkki"
 
 msgid "Show tray icon"
-msgstr ""
+msgstr "Näytä ilmoitusalueen kuvake"
 
 msgid "Show visualizer and lyrics in the right panel"
-msgstr ""
+msgstr "Näytä visualisointi ja sanoitukset oikeassa paneelissa"
 
 msgid "Show visualizer in the right panel"
-msgstr ""
+msgstr "Näytä visualisointi oikeassa paneelissa"
 
 msgid "Show visualizer"
-msgstr ""
+msgstr "Näytä visualisointi"
 
 msgid "Show/hide lyrics"
-msgstr ""
+msgstr "Näytä/piilota sanoitukset"
 
 msgid "Show/hide right sidebar"
 msgstr "Näytä/piilota oikea sivupalkki"
@@ -2132,10 +2130,10 @@ msgid "Showcase"
 msgstr ""
 
 msgid "Shuffle off"
-msgstr ""
+msgstr "Satunnaistoisto pois"
 
 msgid "Shuffle on"
-msgstr ""
+msgstr "Satunnaistoisto päällä"
 
 msgid "Shuffle"
 msgstr ""
