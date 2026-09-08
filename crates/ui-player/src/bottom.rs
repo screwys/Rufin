@@ -77,7 +77,6 @@ pub const BOTTOM_PLAYER_COMPACT_MIN_WIDTH: i32 =
     };
 pub const BOTTOM_PLAYER_TINY_WIDTH: i32 = BOTTOM_PLAYER_COMPACT_MIN_WIDTH;
 pub const BOTTOM_PLAYER_FULL_PROGRESS_WIDTH: i32 = 864;
-pub const SEEK_PREVIEW_COMMIT_DELAY: Duration = Duration::from_millis(100);
 pub const SEEK_PREVIEW_TOLERANCE_MILLIS: u64 = 1_500;
 pub const VOLUME_PERSIST_DELAY: Duration = Duration::from_millis(250);
 
@@ -279,10 +278,6 @@ impl WaveformSeekBar {
             click_area.grab_focus();
             click_seek(waveform_fraction_for_x(&click_area, x));
         });
-        let click_commit = Rc::clone(&commit);
-        click.connect_released(move |_, _, _, _| {
-            click_commit();
-        });
         self.area.add_controller(click);
 
         let drag = gtk::GestureDrag::new();
@@ -302,10 +297,6 @@ impl WaveformSeekBar {
             };
             gesture.set_state(gtk::EventSequenceState::Claimed);
             drag_seek(waveform_fraction_for_x(&drag_area, start_x + x_offset));
-        });
-        let drag_commit = Rc::clone(&commit);
-        drag.connect_drag_end(move |_, _, _| {
-            drag_commit();
         });
         self.area.add_controller(drag);
 
@@ -1222,12 +1213,14 @@ impl crate::PlayerUi {
             track_changed,
             player.transport.current.is_some(),
             player.transport.can_seek,
+            self.controls.seek_pointer_active.get(),
         ) {
             self.clear_player_seek_preview();
         }
     }
 
     fn clear_player_seek_preview(&self) {
+        self.controls.seek_pointer_active.set(false);
         self.set_seek_preview_seconds(None);
     }
 }
@@ -1245,11 +1238,12 @@ fn should_clear_seek_preview(
     track_changed: bool,
     has_current: bool,
     can_seek: bool,
+    pointer_active: bool,
 ) -> bool {
     track_changed
         || !has_current
         || !can_seek
-        || seek_preview_matches_position(target_seconds, position_millis)
+        || (!pointer_active && seek_preview_matches_position(target_seconds, position_millis))
 }
 
 fn playback_state_label(state: TransportStatus) -> String {
@@ -1710,23 +1704,7 @@ pub fn preview_player_seek_fraction(shell: &Rc<crate::PlayerUi>, position: f64) 
     preview_player_seek(shell, seconds);
 }
 
-pub fn queue_player_seek_preview_commit(shell: &Rc<crate::PlayerUi>) {
-    let generation = shell.controls.next_seek_generation();
-
-    let shell = Rc::clone(shell);
-    glib::timeout_add_local_once(SEEK_PREVIEW_COMMIT_DELAY, move || {
-        if shell.controls.seek_generation() == generation {
-            commit_player_seek_preview(&shell);
-        }
-    });
-}
-
 pub fn commit_player_seek_preview_now(shell: &Rc<crate::PlayerUi>) {
-    shell.controls.next_seek_generation();
-    commit_player_seek_preview(shell);
-}
-
-pub fn commit_player_seek_preview(shell: &Rc<crate::PlayerUi>) {
     let Some(seconds) = shell.seek_preview_seconds() else {
         return;
     };
@@ -2029,19 +2007,32 @@ mod tests {
     #[test]
     fn seek_preview_waits_for_backend_acknowledgement() {
         assert!(!super::should_clear_seek_preview(
-            19, 5_000, false, true, true
+            19, 5_000, false, true, true, false
         ));
         assert!(super::should_clear_seek_preview(
-            19, 19_000, false, true, true
+            19, 19_000, false, true, true, false
         ));
         assert!(super::should_clear_seek_preview(
-            19, 5_000, true, true, true
+            19, 5_000, true, true, true, false
         ));
         assert!(super::should_clear_seek_preview(
-            19, 5_000, false, false, true
+            19, 5_000, false, false, true, false
         ));
         assert!(super::should_clear_seek_preview(
-            19, 5_000, false, true, false
+            19, 5_000, false, true, false, false
+        ));
+    }
+
+    #[test]
+    fn seek_preview_stays_under_the_pointer_until_release() {
+        assert!(!super::should_clear_seek_preview(
+            19, 19_000, false, true, true, true
+        ));
+        assert!(super::should_clear_seek_preview(
+            19, 19_000, false, true, true, false
+        ));
+        assert!(super::should_clear_seek_preview(
+            19, 5_000, true, true, true, true
         ));
     }
 }
@@ -2169,12 +2160,15 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
         .player_controls
         .output_button
         .connect_clicked(move |button| present_output_popover(button, &output_shell));
-    let seek_shell = Rc::clone(shell);
+    let seek_shell = Rc::downgrade(shell);
     shell
         .views
         .player_controls
         .progress
-        .connect_change_value(move |scale, scroll, value| {
+        .connect_change_value(move |scale, _, value| {
+            let Some(seek_shell) = seek_shell.upgrade() else {
+                return glib::Propagation::Stop;
+            };
             if seek_shell.controls.updating_controls.get() {
                 return glib::Propagation::Proceed;
             }
@@ -2197,30 +2191,65 @@ pub fn connect_player_controls(shell: &Rc<crate::PlayerUi>) {
             let seconds = seekbar_target_seconds(value, duration_seconds);
             preview_player_seek(&seek_shell, seconds);
             scale.set_value(f64::from(seconds));
-            if scroll != gtk::ScrollType::Jump {
+            if !seek_shell.controls.seek_pointer_active.get() {
                 commit_player_seek_preview_now(&seek_shell);
-            } else {
-                queue_player_seek_preview_commit(&seek_shell);
             }
             glib::Propagation::Stop
         });
 
-    let seek_shell = Rc::clone(shell);
-    let seek_click = gtk::GestureClick::new();
-    seek_click.connect_released(move |_, _, _, _| {
-        commit_player_seek_preview_now(&seek_shell);
-    });
-    shell
-        .views
-        .player_controls
-        .progress
-        .add_controller(seek_click);
+    for widget in [
+        shell
+            .views
+            .player_controls
+            .progress
+            .upcast_ref::<gtk::Widget>(),
+        shell
+            .views
+            .player_controls
+            .waveform
+            .widget()
+            .upcast_ref::<gtk::Widget>(),
+    ] {
+        // Observe release even after the scale's own gesture claims the drag.
+        let events = gtk::EventControllerLegacy::new();
+        events.set_propagation_phase(gtk::PropagationPhase::Capture);
+        let seek_shell = Rc::downgrade(shell);
+        events.connect_event(move |_, event| {
+            let Some(shell) = seek_shell.upgrade() else {
+                return glib::Propagation::Proceed;
+            };
+            match event.event_type() {
+                gtk::gdk::EventType::ButtonPress | gtk::gdk::EventType::TouchBegin => {
+                    shell.controls.seek_pointer_active.set(true);
+                }
+                gtk::gdk::EventType::ButtonRelease | gtk::gdk::EventType::TouchEnd => {
+                    if shell.controls.seek_pointer_active.replace(false) {
+                        commit_player_seek_preview_now(&shell);
+                    }
+                }
+                gtk::gdk::EventType::TouchCancel | gtk::gdk::EventType::GrabBroken => {
+                    shell.clear_player_seek_preview();
+                }
+                _ => {}
+            }
+            glib::Propagation::Proceed
+        });
+        widget.add_controller(events);
+    }
 
-    let seek_shell = Rc::clone(shell);
-    let commit_shell = Rc::clone(shell);
+    let seek_shell = Rc::downgrade(shell);
+    let commit_shell = Rc::downgrade(shell);
     shell.views.player_controls.waveform.connect_seek(
-        move |position| preview_player_seek_fraction(&seek_shell, position),
-        move || commit_player_seek_preview_now(&commit_shell),
+        move |position| {
+            if let Some(shell) = seek_shell.upgrade() {
+                preview_player_seek_fraction(&shell, position);
+            }
+        },
+        move || {
+            if let Some(shell) = commit_shell.upgrade() {
+                commit_player_seek_preview_now(&shell);
+            }
+        },
     );
 
     let volume_shell = Rc::clone(shell);

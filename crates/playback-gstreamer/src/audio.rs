@@ -350,7 +350,8 @@ fn configure_test_output(output: &gst::Element) {
         .factory()
         .is_some_and(|factory| factory.name() == "fakesink")
     {
-        output.set_property("async", false);
+        // Keep normal sink preroll: ASYNC_DONE must mean decoded audio is ready,
+        // including when a paused session is restored at a nonzero position.
         output.set_property("sync", false);
         return;
     }

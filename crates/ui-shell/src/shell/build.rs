@@ -107,7 +107,7 @@ pub fn build(
     };
     let playback_state = PlaybackState {
         updating_controls: Cell::new(false),
-        seek_generation: Cell::new(0),
+        seek_pointer_active: Cell::new(false),
         volume_persist_source: RefCell::new(None),
         audio_output_options: RefCell::new(default_audio_output_options()),
         audio_output_refresh_running: Cell::new(false),

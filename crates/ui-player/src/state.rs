@@ -12,25 +12,13 @@ use ui_shared::detail_links::DetailLinks;
 #[derive(Default)]
 pub struct PlaybackState {
     pub updating_controls: Cell<bool>,
-    pub seek_generation: Cell<u64>,
+    pub seek_pointer_active: Cell<bool>,
     pub volume_persist_source: RefCell<Option<glib::SourceId>>,
     pub audio_output_options: RefCell<Vec<(Option<String>, String)>>,
     pub audio_output_refresh_running: Cell<bool>,
     pub audio_output_refresh_generation: Cell<u64>,
     pub audio_output_refreshed_at: Cell<Option<Instant>>,
     pub remote_output_options: RefCell<Vec<RemoteOutput>>,
-}
-
-impl PlaybackState {
-    pub fn next_seek_generation(&self) -> u64 {
-        let generation = self.seek_generation.get().saturating_add(1);
-        self.seek_generation.set(generation);
-        generation
-    }
-
-    pub fn seek_generation(&self) -> u64 {
-        self.seek_generation.get()
-    }
 }
 
 pub struct NowPlayingPresentation {
@@ -136,21 +124,6 @@ pub fn current_playback_media_id(player: Option<&PlaybackView>) -> Option<Curren
         .current
         .as_ref()
         .map(|current| current.id.clone())
-}
-
-#[cfg(test)]
-mod tests {
-    use super::PlaybackState;
-
-    #[test]
-    fn seek_commit_generations_do_not_repeat_across_source_sessions() {
-        let playback = PlaybackState::default();
-        let old_session_timer = playback.next_seek_generation();
-        let new_session_timer = playback.next_seek_generation();
-
-        assert_ne!(old_session_timer, new_session_timer);
-        assert_eq!(playback.seek_generation(), new_session_timer);
-    }
 }
 
 pub fn playback_window_title(title: Option<&str>, artist: Option<&str>) -> String {
