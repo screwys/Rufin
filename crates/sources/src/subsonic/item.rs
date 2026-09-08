@@ -17,7 +17,11 @@ pub(super) async fn stage_album(
         &album.title,
         &album.title.to_lowercase(),
         &album.artist,
-        &album.title.to_lowercase(),
+        &album
+            .sort_name
+            .as_deref()
+            .unwrap_or(&album.title)
+            .to_lowercase(),
         Some(i64::from(album.year)).filter(|year| *year > 0),
         album.release_date.as_deref(),
         album.date_added.as_deref(),
@@ -99,7 +103,11 @@ pub(super) async fn stage_track(
             &normalized,
             &track.album,
             &track.artist,
-            &track.title.to_lowercase(),
+            &track
+                .sort_name
+                .as_deref()
+                .unwrap_or(&track.title)
+                .to_lowercase(),
             i64::from(track.duration_seconds) * 1000,
             i64::from(track.disc_number),
             i64::from(track.track_number),
@@ -203,7 +211,13 @@ pub(super) async fn stage_artist(
         &artist.id,
         &artist.name,
         &artist.name.to_lowercase(),
-        &artist.name.to_lowercase(),
+        Some(
+            &artist
+                .sort_name
+                .as_deref()
+                .unwrap_or(&artist.name)
+                .to_lowercase(),
+        ),
         artist.musicbrainz_artist_id.as_deref(),
         artwork.as_deref(),
         Some(artist.favorite),
@@ -237,7 +251,11 @@ async fn stage_artist_credit(
         &artist.id,
         &artist.name,
         &artist.name.to_lowercase(),
-        &artist.name.to_lowercase(),
+        artist
+            .sort_name
+            .as_ref()
+            .map(|name| name.to_lowercase())
+            .as_deref(),
         artist.musicbrainz_artist_id.as_deref(),
         None,
         None,
@@ -310,6 +328,7 @@ fn artist_credits_from_item(source: &SubsonicSource, artists: &Value) -> Vec<Art
             Some(ArtistCredit {
                 id: String::from(source.id("artist", &json::id(&artist["id"])?)),
                 name: json::field(artist, "name").unwrap_or_default(),
+                sort_name: clean_optional(json::field(artist, "sortName")),
                 musicbrainz_artist_id: None,
             })
         })
@@ -321,6 +340,7 @@ fn scalar_artist_credit(source: &SubsonicSource, item: &Value, name: &str) -> Ve
         .map(|id| ArtistCredit {
             id: String::from(source.id("artist", &id)),
             name: name.to_string(),
+            sort_name: None,
             musicbrainz_artist_id: None,
         })
         .into_iter()
@@ -378,6 +398,7 @@ pub(super) fn album_from_json(source: &SubsonicSource, album: &Value) -> Option<
         }
     };
     Some(Album {
+        sort_name: clean_optional(json::field(album, "sortName")),
         id: String::from(source.id("album", &raw_id)),
         title: json::field(album, "title")
             .or_else(|| json::field(album, "name"))
@@ -428,6 +449,7 @@ pub(super) fn track_from_json(source: &SubsonicSource, song: &Value) -> Option<T
         source_format_from_song(suffix.as_deref(), content_type.as_deref(), path.as_deref());
     let replay_gain = &song["replayGain"];
     Some(Track {
+        sort_name: clean_optional(json::field(song, "sortName")),
         id: String::from(source.id("track", &raw_id)),
         album_id: json::id(&song["albumId"]).map(|id| String::from(source.id("album", &id))),
         title: json::field(song, "title").unwrap_or_else(|| "Untitled Track".to_string()),
@@ -507,6 +529,7 @@ pub(super) fn source_format_from_song(
 pub(super) fn artist_from_json(source: &SubsonicSource, artist: &Value) -> Option<Artist> {
     let raw_id = json::id(&artist["id"])?;
     Some(Artist {
+        sort_name: clean_optional(json::field(artist, "sortName")),
         id: String::from(source.id("artist", &raw_id)),
         name: json::field(artist, "name").unwrap_or_else(|| "Unknown Artist".to_string()),
         favorite: favorite(&json::field(artist, "starred")),

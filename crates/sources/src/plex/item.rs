@@ -13,7 +13,11 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
     let kind = item["type"].as_str().unwrap_or_default();
     let object = plex_id(kind, &raw);
     let title = item["title"].as_str().unwrap_or("Untitled");
-    let sort = item["titleSort"].as_str().unwrap_or(title).to_lowercase();
+    let sort = item["titleSort"]
+        .as_str()
+        .filter(|sort| !sort.trim().is_empty())
+        .unwrap_or(title)
+        .to_lowercase();
     let artwork = ["thumb", "parentThumb", "grandparentThumb"]
         .iter()
         .find_map(|key| item[*key].as_str())
@@ -44,7 +48,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 &object,
                 title,
                 &title.to_lowercase(),
-                &sort,
+                Some(&sort),
                 mbid,
                 artwork.as_deref(),
                 Some(false),
@@ -78,7 +82,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                     &artist_id,
                     artist,
                     &artist.to_lowercase(),
-                    &artist.to_lowercase(),
+                    None,
                     None,
                     None,
                     None,
@@ -183,7 +187,7 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                     &artist_id,
                     album_artist,
                     &album_artist.to_lowercase(),
-                    &album_artist.to_lowercase(),
+                    None,
                     None,
                     None,
                     None,
@@ -278,4 +282,66 @@ fn epoch_date(seconds: i64) -> String {
     let month = month + if month < 10 { 3 } else { -9 };
     let year = year + era * 400 + i64::from(month <= 2);
     format!("{year:04}-{month:02}-{date:02}")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[tokio::test]
+    async fn artist_title_sort_survives_full_import_and_album_track_refresh() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let artists = [
+            json!({"ratingKey":"608","type":"artist","title":"The Cure","titleSort":"Cure, The"}),
+            json!({"ratingKey":"609","type":"artist","title":"Duran Duran"}),
+        ];
+        let albums = [
+            json!({"ratingKey":"album-608","type":"album","title":"Wish","parentRatingKey":"608","parentTitle":"The Cure"}),
+            json!({"ratingKey":"album-609","type":"album","title":"Rio","parentRatingKey":"609","parentTitle":"Duran Duran"}),
+        ];
+        let tracks = [
+            json!({"ratingKey":"track-608","type":"track","title":"Friday I'm in Love","parentRatingKey":"album-608","parentTitle":"Wish","grandparentRatingKey":"608","grandparentTitle":"The Cure"}),
+            json!({"ratingKey":"track-609","type":"track","title":"Rio","parentRatingKey":"album-609","parentTitle":"Rio","grandparentRatingKey":"609","grandparentTitle":"Duran Duran"}),
+        ];
+        let mut scan = Scan::begin(&database, "plex", "Plex", "plex", None)
+            .await
+            .unwrap();
+        for item in artists.iter().chain(&albums).chain(&tracks) {
+            stage_item(&mut scan, item).await.unwrap();
+        }
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial import")
+        };
+        for refresh in [false, true] {
+            if refresh {
+                let mut scan = Scan::begin_items(&database, "plex").await.unwrap();
+                for item in albums.iter().chain(&tracks) {
+                    stage_item(&mut scan, item).await.unwrap();
+                }
+                scan.finish().await.unwrap();
+            }
+            let (_, _, rows) = database
+                .artist_route_page(
+                    publication.source,
+                    None,
+                    false,
+                    false,
+                    "",
+                    library::ArtistSort::Title,
+                    false,
+                    library::RouteSeedWindow::top(),
+                    &library::ReadCancellation::new(),
+                )
+                .await
+                .unwrap();
+            assert_eq!(
+                rows.iter().map(|row| row.name.as_str()).collect::<Vec<_>>(),
+                ["The Cure", "Duran Duran"]
+            );
+        }
+    }
 }

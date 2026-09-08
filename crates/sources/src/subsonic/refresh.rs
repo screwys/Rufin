@@ -9,7 +9,7 @@ use serde_json::Value;
 
 const ALBUM_REQUEST_SIZE: usize = 500;
 const TRACK_REQUEST_SIZE: usize = 500;
-const FRESHNESS_VERSION: u32 = 2;
+const FRESHNESS_VERSION: u32 = 3;
 const METADATA_SCAN_POLL_INTERVAL: Duration = Duration::from_secs(1);
 const METADATA_SCAN_MAX_POLLS: usize = 120;
 

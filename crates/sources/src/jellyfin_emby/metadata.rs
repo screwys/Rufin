@@ -995,6 +995,7 @@ mod tests {
     fn test_source(server: &MockServer) -> JellyfinEmbySource {
         JellyfinEmbySource::open(
             super::super::JellyfinEmbySourceConfig {
+                emby_connect: false,
                 kind: crate::ServerKind::Jellyfin,
                 base_url: server.uri(),
                 server_id: None,

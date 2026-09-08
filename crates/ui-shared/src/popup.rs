@@ -2,7 +2,7 @@ use adw::prelude::*;
 
 const LIGHT_DISMISS_CLASS: &str = "light-dismiss-dialog";
 
-pub fn present_light_dismiss_dialog<D>(dialog: &D, parent: &gtk::ApplicationWindow)
+pub fn present_light_dismiss_dialog<D>(dialog: &D, parent: &impl IsA<gtk::Widget>)
 where
     D: IsA<adw::Dialog> + Clone + 'static,
 {

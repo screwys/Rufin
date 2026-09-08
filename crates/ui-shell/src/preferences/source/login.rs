@@ -1,4 +1,5 @@
 mod files;
+mod jellyfin_emby;
 mod plex;
 
 use std::cell::{Cell, RefCell};
@@ -37,13 +38,13 @@ struct SourcePresentation {
 
 static JELLYFIN: SourcePresentation = SourcePresentation {
     kind: JELLYFIN_SOURCE_KIND,
-    setup_flow: jellyfin_emby_setup_flow,
-    settings_group: Some(jellyfin_emby_settings_group),
+    setup_flow: jellyfin_emby::setup_flow,
+    settings_group: Some(jellyfin_emby::settings_group),
 };
 static EMBY: SourcePresentation = SourcePresentation {
     kind: "emby",
-    setup_flow: jellyfin_emby_setup_flow,
-    settings_group: Some(jellyfin_emby_settings_group),
+    setup_flow: jellyfin_emby::setup_flow,
+    settings_group: Some(jellyfin_emby::settings_group),
 };
 static NAVIDROME: SourcePresentation = SourcePresentation {
     kind: "navidrome",
@@ -175,13 +176,6 @@ struct CredentialSetupFlow {
     authentication: Rc<Cell<OpenSubsonicAuthentication>>,
     offer_authentication: bool,
     submit: Rc<dyn Fn(&SourceHandle, CredentialInput, OpenSubsonicAuthentication)>,
-}
-
-struct JellyfinEmbySetupFlow {
-    presentation: &'static SourcePresentation,
-    draft: Rc<RefCell<CredentialHostDraft>>,
-    use_instant_mix: Rc<Cell<bool>>,
-    submit: Rc<dyn Fn(&SourceHandle, CredentialInput, bool)>,
 }
 
 struct SourceChoiceFlow;
@@ -474,28 +468,6 @@ fn local_setup_flow(
     })
 }
 
-fn jellyfin_emby_setup_flow(
-    _shell: &Rc<Shell>,
-    presentation: &'static SourcePresentation,
-) -> Rc<dyn SourceSetupFlow> {
-    Rc::new(JellyfinEmbySetupFlow {
-        presentation,
-        draft: Rc::new(RefCell::new(credential_draft(None))),
-        use_instant_mix: Rc::new(Cell::new(false)),
-        submit: Rc::new(move |source, credentials, use_instant_mix| {
-            source.configure_source(SourceSetup::JellyfinEmby {
-                kind: if presentation.kind == "emby" {
-                    sources::ServerKind::Emby
-                } else {
-                    sources::ServerKind::Jellyfin
-                },
-                credentials,
-                use_instant_mix,
-            });
-        }),
-    })
-}
-
 fn subsonic_setup_flow_for(
     _shell: &Rc<Shell>,
     presentation: &'static SourcePresentation,
@@ -531,37 +503,6 @@ fn subsonic_setup_flow(
     presentation: &'static SourcePresentation,
 ) -> Rc<dyn SourceSetupFlow> {
     subsonic_setup_flow_for(shell, presentation, OpenSubsonicKind::OpenSubsonic)
-}
-
-fn jellyfin_emby_settings_group(
-    shell: &Rc<Shell>,
-    saved: &EditableSource,
-    presentation: &'static SourcePresentation,
-) -> Result<gtk::Widget, String> {
-    let instant_mix = (presentation.kind == JELLYFIN_SOURCE_KIND).then(|| adw::SwitchRow::builder()
-        .title(tr("Use Jellyfin Instant Mix for recommendations"))
-        .subtitle(tr("This uses Jellyfin API for play radio, necessary if you want recommendation plugins to work"))
-        .active(saved.jellyfin_use_instant_mix.unwrap_or(false))
-        .build());
-    let instant_mix_for_submit = instant_mix.clone();
-    let source_id = saved.source.id.clone();
-    Ok(credential_source_settings_group(
-        shell,
-        saved.credentials.clone(),
-        ui_shared::source_labels::source_kind_title(presentation.kind)
-            .expect("registered source presentation"),
-        None,
-        instant_mix,
-        move |source, credentials, _| {
-            source.update_source(SourceSettingsChange::JellyfinEmby {
-                source_id: source_id.clone(),
-                credentials,
-                use_instant_mix: instant_mix_for_submit
-                    .as_ref()
-                    .is_some_and(|row| row.is_active()),
-            });
-        },
-    ))
 }
 
 fn subsonic_settings_group_for(
@@ -688,52 +629,6 @@ impl SourceSetupFlow for CredentialSetupFlow {
             host,
             move |source, input| {
                 submit(source, input, authentication.get());
-            },
-        );
-        scroller.upcast()
-    }
-}
-
-impl SourceSetupFlow for JellyfinEmbySetupFlow {
-    fn view(&self, shell: &Rc<Shell>, context: &SetupViewContext) -> gtk::Widget {
-        shell.select_discovery_provider(if self.presentation.kind == "emby" {
-            sources::DiscoveryProvider::Emby
-        } else {
-            sources::DiscoveryProvider::Jellyfin
-        });
-        shell.start_server_discovery_once();
-        let (scroller, content, actions, status) =
-            setup_scaffold(shell, context, self.presentation);
-        let host = credential_host(&self.draft, true, None);
-        content.append(&host.widget);
-
-        if self.presentation.kind == JELLYFIN_SOURCE_KIND {
-            let instant_mix = adw::SwitchRow::builder()
-            .title(tr("Use Jellyfin Instant Mix for recommendations"))
-            .subtitle(tr("This uses Jellyfin API for play radio, necessary if you want recommendation plugins to work"))
-            .active(self.use_instant_mix.get())
-            .build();
-            let instant_group = adw::PreferencesGroup::new();
-            instant_group.add(&instant_mix);
-            content.append(&instant_group);
-            let use_instant_mix = Rc::clone(&self.use_instant_mix);
-            instant_mix.connect_active_notify(move |row| use_instant_mix.set(row.is_active()));
-        }
-
-        let discovery = discovered_servers_view(&host, self.presentation.kind);
-        content.append(&discovery.group);
-        *context.discovery.borrow_mut() = Some(discovery);
-        let use_instant_mix = Rc::clone(&self.use_instant_mix);
-        let submit = Rc::clone(&self.submit);
-        append_credential_connect(
-            shell,
-            context,
-            &content,
-            &actions,
-            status,
-            host,
-            move |source, credentials| {
-                submit(source, credentials, use_instant_mix.get());
             },
         );
         scroller.upcast()

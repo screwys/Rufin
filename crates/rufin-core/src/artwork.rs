@@ -103,7 +103,7 @@ mod tests {
             "artist",
             "Artist",
             "artist",
-            "artist",
+            Some("artist"),
             None,
             Some(&binding),
             None,

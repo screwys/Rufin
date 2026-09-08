@@ -20,8 +20,10 @@ pub(crate) struct ScannedTrack {
     pub(crate) id: String,
     pub(crate) album_id: String,
     pub(crate) title: String,
+    pub(crate) sort_title: Option<String>,
     pub(crate) artist: String,
     pub(crate) album: String,
+    pub(crate) sort_album: Option<String>,
     pub(crate) year: u16,
     pub(crate) duration_seconds: u32,
     pub(crate) disc_number: u16,
@@ -60,6 +62,7 @@ pub(crate) struct ScannedTrack {
 pub(crate) struct ArtistCredit {
     pub(crate) id: String,
     pub(crate) name: String,
+    pub(crate) sort_name: Option<String>,
     pub(crate) musicbrainz_artist_id: Option<String>,
 }
 
@@ -88,11 +91,14 @@ pub(crate) struct BasicAudioMetadata {
 
 struct MetadataArtist {
     name: String,
+    sort_name: Option<String>,
     musicbrainz_id: Option<String>,
 }
 
 struct AudioMetadata {
     basic: BasicAudioMetadata,
+    sort_title: Option<String>,
+    sort_album: Option<String>,
     album_artist: String,
     artists: Vec<MetadataArtist>,
     album_artists: Vec<MetadataArtist>,
@@ -205,24 +211,38 @@ fn audio_metadata_from_lofty(
         .map(ToString::to_string)
         .unwrap_or_else(|| artist.clone());
     let artist_names = artist_names(tag, artist);
-    let artist_mbids = aligned_mbids(&artist_names, tag_mbids(tag, ItemKey::MusicBrainzArtistId));
+    let artist_mbids = aligned_values(&artist_names, tag_mbids(tag, ItemKey::MusicBrainzArtistId));
+    let artist_sorts = aligned_values(&artist_names, tag_names(tag, ItemKey::TrackArtistSortOrder));
     let artists = artist_names
         .into_iter()
         .zip(artist_mbids)
-        .map(|(name, musicbrainz_id)| MetadataArtist {
+        .zip(artist_sorts)
+        .map(|((name, musicbrainz_id), sort_name)| MetadataArtist {
             name,
+            sort_name,
             musicbrainz_id,
         })
-        .collect();
+        .collect::<Vec<_>>();
     let album_artist_names = split_names(&album_artist);
-    let album_artist_mbids = aligned_mbids(
+    let album_artist_mbids = aligned_values(
         &album_artist_names,
         tag_mbids(tag, ItemKey::MusicBrainzReleaseArtistId),
     );
     let album_artists = album_artist_names
-        .into_iter()
+        .iter()
+        .cloned()
         .zip(album_artist_mbids)
-        .map(|(name, musicbrainz_id)| MetadataArtist {
+        .zip(aligned_values(
+            &album_artist_names,
+            tag_names(tag, ItemKey::AlbumArtistSortOrder),
+        ))
+        .map(|((name, musicbrainz_id), sort_name)| MetadataArtist {
+            sort_name: sort_name.or_else(|| {
+                artists
+                    .iter()
+                    .find(|artist| artist.name == name)
+                    .and_then(|artist| artist.sort_name.clone())
+            }),
             name,
             musicbrainz_id,
         })
@@ -240,6 +260,14 @@ fn audio_metadata_from_lofty(
     let release_types = album_release_types(tag);
     let is_compilation = album_compilation(tag, &release_types);
     AudioMetadata {
+        sort_title: tag_string(tag, |tag| {
+            tag.get_string(ItemKey::TrackTitleSortOrder)
+                .map(str::to_owned)
+        }),
+        sort_album: tag_string(tag, |tag| {
+            tag.get_string(ItemKey::AlbumTitleSortOrder)
+                .map(str::to_owned)
+        }),
         basic,
         album_artist,
         artists,
@@ -332,7 +360,7 @@ fn audio_metadata_from_discoverer(
         .and_then(|metadata| metadata.album_artist.clone())
         .unwrap_or_else(|| artist.clone());
     let artist_names = split_names(artist);
-    let artist_mbids = aligned_mbids(
+    let artist_mbids = aligned_values(
         &artist_names,
         metadata
             .map(|metadata| metadata.artist_mbids.clone())
@@ -342,15 +370,23 @@ fn audio_metadata_from_discoverer(
             .collect(),
     );
     let artists = artist_names
-        .into_iter()
+        .iter()
+        .cloned()
         .zip(artist_mbids)
-        .map(|(name, musicbrainz_id)| MetadataArtist {
+        .zip(aligned_values(
+            &artist_names,
+            metadata
+                .map(|metadata| metadata.artist_sort.clone())
+                .unwrap_or_default(),
+        ))
+        .map(|((name, musicbrainz_id), sort_name)| MetadataArtist {
             name,
+            sort_name,
             musicbrainz_id,
         })
-        .collect();
+        .collect::<Vec<_>>();
     let album_artist_names = split_names(&album_artist);
-    let album_artist_mbids = aligned_mbids(
+    let album_artist_mbids = aligned_values(
         &album_artist_names,
         metadata
             .map(|metadata| metadata.album_artist_mbids.clone())
@@ -360,14 +396,29 @@ fn audio_metadata_from_discoverer(
             .collect(),
     );
     let album_artists = album_artist_names
-        .into_iter()
+        .iter()
+        .cloned()
         .zip(album_artist_mbids)
-        .map(|(name, musicbrainz_id)| MetadataArtist {
+        .zip(aligned_values(
+            &album_artist_names,
+            metadata
+                .map(|metadata| metadata.album_artist_sort.clone())
+                .unwrap_or_default(),
+        ))
+        .map(|((name, musicbrainz_id), sort_name)| MetadataArtist {
+            sort_name: sort_name.or_else(|| {
+                artists
+                    .iter()
+                    .find(|artist| artist.name == name)
+                    .and_then(|artist| artist.sort_name.clone())
+            }),
             name,
             musicbrainz_id,
         })
         .collect();
     AudioMetadata {
+        sort_title: metadata.and_then(|metadata| metadata.sort_title.clone()),
+        sort_album: metadata.and_then(|metadata| metadata.sort_album.clone()),
         basic,
         album_artist,
         artists,
@@ -424,6 +475,8 @@ fn audio_metadata_from_discoverer(
 fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
     let AudioMetadata {
         basic,
+        sort_title,
+        sort_album,
         album_artist,
         artists,
         album_artists,
@@ -458,11 +511,17 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
     } = basic;
     let artists = artists
         .into_iter()
-        .map(|artist| artist_credit(&artist.name, artist.musicbrainz_id.as_deref()))
+        .map(|artist| ArtistCredit {
+            sort_name: artist.sort_name,
+            ..artist_credit(&artist.name, artist.musicbrainz_id.as_deref())
+        })
         .collect();
     let album_artists = album_artists
         .into_iter()
-        .map(|artist| artist_credit(&artist.name, artist.musicbrainz_id.as_deref()))
+        .map(|artist| ArtistCredit {
+            sort_name: artist.sort_name,
+            ..artist_credit(&artist.name, artist.musicbrainz_id.as_deref())
+        })
         .collect::<Vec<_>>();
     let genres = genres
         .into_iter()
@@ -486,6 +545,8 @@ fn scanned_track(path: &Path, metadata: AudioMetadata) -> ScannedTrack {
         None,
     );
     ScannedTrack {
+        sort_title,
+        sort_album,
         id: track_id(path),
         album_id,
         title,
@@ -644,6 +705,7 @@ pub(crate) fn artist_credit(name: &str, musicbrainz_artist_id: Option<&str>) -> 
     ArtistCredit {
         id,
         name: name.to_string(),
+        sort_name: None,
         musicbrainz_artist_id,
     }
 }
@@ -704,6 +766,13 @@ fn tag_mbids(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
         .collect()
 }
 
+fn tag_names(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
+    tag_values_optional(tag, key)
+        .iter()
+        .flat_map(|value| split_names(value))
+        .collect()
+}
+
 fn tag_values_optional(tag: Option<&Tag>, key: ItemKey) -> Vec<String> {
     tag.map(|tag| tag_values(tag, key)).unwrap_or_default()
 }
@@ -758,9 +827,9 @@ fn album_compilation(tag: Option<&Tag>, release_types: &[String]) -> Option<bool
     }
 }
 
-fn aligned_mbids(names: &[String], mbids: Vec<String>) -> Vec<Option<String>> {
-    if names.len() == mbids.len() {
-        mbids.into_iter().map(Some).collect()
+fn aligned_values(names: &[String], values: Vec<String>) -> Vec<Option<String>> {
+    if names.len() == values.len() {
+        values.into_iter().map(Some).collect()
     } else {
         names.iter().map(|_| None).collect()
     }
@@ -827,6 +896,11 @@ mod tests {
             fs::write(&path, frame.repeat(40)).expect("MPEG silence");
             let mut tag = Tag::new(TagType::Id3v2);
             tag.set_title("Original".into());
+            tag.set_album("The Album".into());
+            tag.set_artist("The Cure".into());
+            tag.insert_text(ItemKey::TrackTitleSortOrder, "A Song".into());
+            tag.insert_text(ItemKey::AlbumTitleSortOrder, "Album, The".into());
+            tag.insert_text(ItemKey::TrackArtistSortOrder, "Cure, The".into());
             tag.set_comment("Retained comment".into());
             tag.save_to_path(&path, WriteOptions::new().preferred_padding(0))
                 .expect("audio tags");
@@ -840,6 +914,20 @@ mod tests {
                 panic!("audio content was rejected: {name}");
             };
             assert_eq!(track.title, "Original", "{name}");
+            assert_eq!(track.sort_title.as_deref(), Some("A Song"), "{name}");
+            assert_eq!(track.album, "The Album", "{name}");
+            assert_eq!(track.sort_album.as_deref(), Some("Album, The"), "{name}");
+            assert_eq!(track.artists[0].name, "The Cure", "{name}");
+            assert_eq!(
+                track.artists[0].sort_name.as_deref(),
+                Some("Cure, The"),
+                "{name}"
+            );
+            assert_eq!(
+                track.album_artists[0].sort_name.as_deref(),
+                Some("Cure, The"),
+                "{name}"
+            );
             assert_eq!(track.comment.as_deref(), Some("Retained comment"), "{name}");
             let mut metadata = crate::file::metadata::read_track_metadata(&path, Some("mp3"))
                 .expect("read audio metadata");
