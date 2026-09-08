@@ -112,11 +112,6 @@ msgid ""
 msgstr "這會移除伺服器，以及其音樂庫元資料快取、播放佇列快照、已儲存的登入憑證"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr "這會將您登出並清除所有機密資訊包含 API 金鑰。應用程式快取則不受影響。"
@@ -272,6 +267,9 @@ msgid "Application name"
 msgstr "應用程式名稱"
 
 msgid "Apply Template"
+msgstr ""
+
+msgid "Approve sign-in in your browser"
 msgstr ""
 
 msgid "Artist / Album"
@@ -537,6 +535,11 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connect manually"
+msgstr "連接"
+
 msgid "Connect"
 msgstr "連接"
 
@@ -784,6 +787,11 @@ msgstr "編輯"
 #| msgid "Genre tracks"
 msgid "Embed in track"
 msgstr "曲風曲目"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "連接"
 
 msgid "Emby"
 msgstr ""
@@ -1447,6 +1455,11 @@ msgstr "無資料夾被選擇"
 msgid "No limit"
 msgstr "無上限"
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "未找到伺服器"
+
 msgid "No local file mapping"
 msgstr ""
 
@@ -1562,6 +1575,9 @@ msgstr "僅未播放過的曲目"
 #| msgid "Folder"
 msgid "Open Folder"
 msgstr "資料夾"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "開啟全螢幕播放器"
@@ -1825,6 +1841,11 @@ msgstr "佇列"
 
 msgid "Queued"
 msgstr "已佇列"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "連接"
 
 msgid "Quit Rufin"
 msgstr "離開 Rufin"
@@ -2301,6 +2322,12 @@ msgstr ""
 msgid "Sign in with Nextcloud"
 msgstr ""
 
+msgid "Sign in with a code"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr ""
 
@@ -2506,7 +2533,7 @@ msgstr "更新"
 msgid "Use API key"
 msgstr "使用 API 金鑰"
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr ""
 
 msgid "Use Rufin data folder"
@@ -2535,6 +2562,9 @@ msgstr ""
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr ""
 
@@ -2543,6 +2573,11 @@ msgstr "使用者"
 
 msgid "Username and password"
 msgstr ""
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "使用者名稱"
 
 msgid "Username"
 msgstr "使用者名稱"

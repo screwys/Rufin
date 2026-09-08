@@ -128,13 +128,6 @@ msgstr ""
 "esitusjärjekorra hetkvaade ja salvestatud tunnusload teenusest"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-"Siinkohal on raadiorežiimi kontekstis kasutusel Jellyfini API ja see on "
-"nõutav, kui tahad, et soovituste lisamoodul toimiks"
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -298,6 +291,9 @@ msgstr "Rakenduse nimi"
 
 msgid "Apply Template"
 msgstr "Rakenda mall"
+
+msgid "Approve sign-in in your browser"
+msgstr ""
 
 msgid "Artist / Album"
 msgstr "Esitaja / Album"
@@ -559,6 +555,11 @@ msgstr ""
 msgid "Confirm"
 msgstr "Kinnita"
 
+#, fuzzy
+#| msgid "Connected as"
+msgid "Connect manually"
+msgstr "Ühendatud kui"
+
 msgid "Connect"
 msgstr "Ühenda"
 
@@ -796,6 +797,11 @@ msgstr "Muuda"
 
 msgid "Embed in track"
 msgstr "Lõimi loo sisse"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "Ühenda"
 
 msgid "Emby"
 msgstr ""
@@ -1461,6 +1467,11 @@ msgstr "Kaustad on valimata"
 msgid "No limit"
 msgstr "Piirang puudub"
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "Ühtegi serverit ei leidu"
+
 msgid "No local file mapping"
 msgstr "Kohalike failide vastendust pole"
 
@@ -1576,6 +1587,9 @@ msgstr "Vaid esitamata lood"
 #| msgid "Folder"
 msgid "Open Folder"
 msgstr "Kaust"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Ava muusikaesitaja täisekraanivaates"
@@ -1839,6 +1853,11 @@ msgstr "Esitusjärjekord"
 
 msgid "Queued"
 msgstr "Lisatud esitusjärjekorda"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "Ühenda"
 
 msgid "Quit Rufin"
 msgstr "Välju Rufinist"
@@ -2308,6 +2327,12 @@ msgstr ""
 msgid "Sign in with Nextcloud"
 msgstr ""
 
+msgid "Sign in with a code"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -2512,7 +2537,9 @@ msgstr "Uuenda"
 msgid "Use API key"
 msgstr "Kasuta API-võtit"
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+#, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr "Kasuta soovitusteks Jellyfini „Instant Mix“ liidestust"
 
 msgid "Use Rufin data folder"
@@ -2544,6 +2571,9 @@ msgstr ""
 "Kasuta kohalikke faile taasesituseks, laulusõnade jaoks ning toetatud "
 "metateabe muutmiseks"
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr "Kasutaja tunnusluba"
 
@@ -2552,6 +2582,11 @@ msgstr "Kasutaja"
 
 msgid "Username and password"
 msgstr ""
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "Kasutajanimi"
 
 msgid "Username"
 msgstr "Kasutajanimi"
@@ -2789,6 +2824,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This uses Jellyfin API for play radio, necessary if you want "
+#~ "recommendation plugins to work"
+#~ msgstr ""
+#~ "Siinkohal on raadiorežiimi kontekstis kasutusel Jellyfini API ja see on "
+#~ "nõutav, kui tahad, et soovituste lisamoodul toimiks"
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Salvestatud, vastenduse eelvaateks sünkrooni"
@@ -3190,9 +3232,6 @@ msgstr ""
 #~ msgid "Configure saved music servers and local playback mappings"
 #~ msgstr ""
 #~ "Seadista salvestatud muusikaservereid ja kohaliku taasesituse vastendusi"
-
-#~ msgid "Connected as"
-#~ msgstr "Ühendatud kui"
 
 #~ msgid "Current server"
 #~ msgstr "Praegune server"

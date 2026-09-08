@@ -124,13 +124,6 @@ msgstr ""
 "fronty a uložený token pro"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-"Toto používá Jellyfin API pro přehrávání rádia, což je nezbytné, pokud "
-"chcete, aby pluginy pro doporučení fungovaly"
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -295,6 +288,9 @@ msgstr "Název aplikace"
 #| msgid "Slate"
 msgid "Apply Template"
 msgstr "Šedá"
+
+msgid "Approve sign-in in your browser"
+msgstr ""
 
 msgid "Artist / Album"
 msgstr "Interpret / Album"
@@ -569,6 +565,11 @@ msgstr ""
 msgid "Confirm"
 msgstr ""
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connect manually"
+msgstr "Spojení"
+
 msgid "Connect"
 msgstr "Připojit"
 
@@ -818,6 +819,11 @@ msgstr "Upravit"
 #| msgid "Genre tracks"
 msgid "Embed in track"
 msgstr "Skladby žánru"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "Připojit"
 
 msgid "Emby"
 msgstr ""
@@ -1497,6 +1503,11 @@ msgstr "Nebyly vybrány žádné složky"
 msgid "No limit"
 msgstr "Bez omezení"
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "Nebyly nalezeny žádné servery"
+
 msgid "No local file mapping"
 msgstr "Žádné mapování místních souborů"
 
@@ -1613,6 +1624,9 @@ msgstr "Pouze nepřehrané skladby"
 #| msgid "Folder"
 msgid "Open Folder"
 msgstr "Složka"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Otevřít přehrávač na celou obrazovku"
@@ -1880,6 +1894,11 @@ msgstr "Fronta"
 
 msgid "Queued"
 msgstr "Ve frontě"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "Připojit"
 
 msgid "Quit Rufin"
 msgstr "Ukončit Rufin"
@@ -2364,6 +2383,12 @@ msgstr ""
 msgid "Sign in with Nextcloud"
 msgstr ""
 
+msgid "Sign in with a code"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -2573,7 +2598,9 @@ msgstr "Aktualizovat"
 msgid "Use API key"
 msgstr "Použít API klíč"
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+#, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr "Pro doporučení použijte Jellyfin Instant Mix"
 
 msgid "Use Rufin data folder"
@@ -2604,6 +2631,9 @@ msgstr ""
 "Používat místní soubory pro přehrávání, texty skladeb a úpravy podporovaných "
 "metadat"
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr "Uživatelský token"
 
@@ -2612,6 +2642,11 @@ msgstr "Uživatel"
 
 msgid "Username and password"
 msgstr ""
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "Uživatelské jméno"
 
 msgid "Username"
 msgstr "Uživatelské jméno"
@@ -2856,6 +2891,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This uses Jellyfin API for play radio, necessary if you want "
+#~ "recommendation plugins to work"
+#~ msgstr ""
+#~ "Toto používá Jellyfin API pro přehrávání rádia, což je nezbytné, pokud "
+#~ "chcete, aby pluginy pro doporučení fungovaly"
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Uloženo, synchronizuje se s náhledem pro nalezení shod"

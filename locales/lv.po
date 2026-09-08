@@ -129,13 +129,6 @@ msgstr ""
 "saglabāto žetonu priekš"
 
 msgid ""
-"This uses Jellyfin API for play radio, necessary if you want recommendation "
-"plugins to work"
-msgstr ""
-"Šī funkcija izmanto Jellyfin API, lai atskaņotu radio — tas ir nepieciešams, "
-"ja vēlaties, lai darbotos ieteikumu papildinājumi"
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -301,6 +294,9 @@ msgstr "Lietotnes nosaukums"
 
 msgid "Apply Template"
 msgstr "Lietot veidni"
+
+msgid "Approve sign-in in your browser"
+msgstr ""
 
 msgid "Artist / Album"
 msgstr "Izpildītājs / Albums"
@@ -567,6 +563,11 @@ msgstr ""
 msgid "Confirm"
 msgstr "Apstiprināt"
 
+#, fuzzy
+#| msgid "Connected as"
+msgid "Connect manually"
+msgstr "Savienots kā"
+
 msgid "Connect"
 msgstr "Savienot"
 
@@ -804,6 +805,11 @@ msgstr "Rediģēt"
 
 msgid "Embed in track"
 msgstr "Iekļaut dziesmā"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Emby Connect"
+msgstr "Savienot"
 
 msgid "Emby"
 msgstr ""
@@ -1474,6 +1480,11 @@ msgstr "Nav izvēlētu mapu"
 msgid "No limit"
 msgstr "Nav ierobežojuma"
 
+#, fuzzy
+#| msgid "No Servers Found"
+msgid "No linked servers found"
+msgstr "Serveri nav atrasti"
+
 msgid "No local file mapping"
 msgstr "Nav lokālu failu sasaistījumu"
 
@@ -1589,6 +1600,9 @@ msgstr "Tikai neatskaņotās dziesmas"
 #| msgid "Folder"
 msgid "Open Folder"
 msgstr "Mape"
+
+msgid "Open approval page"
+msgstr ""
 
 msgid "Open fullscreen player"
 msgstr "Atvērt pilnekrāna atskaņotāju"
@@ -1852,6 +1866,11 @@ msgstr "Rinda"
 
 msgid "Queued"
 msgstr "Pievienots rindai"
+
+#, fuzzy
+#| msgid "Connect"
+msgid "Quick Connect"
+msgstr "Savienot"
 
 msgid "Quit Rufin"
 msgstr "Iziet no Rufin"
@@ -2324,6 +2343,12 @@ msgstr ""
 msgid "Sign in with Nextcloud"
 msgstr ""
 
+msgid "Sign in with a code"
+msgstr ""
+
+msgid "Sign in"
+msgstr ""
+
 msgid "SimpMusic"
 msgstr "SimpMusic"
 
@@ -2527,7 +2552,9 @@ msgstr "Atjaunināt"
 msgid "Use API key"
 msgstr "Izmantot API atslēgu"
 
-msgid "Use Jellyfin Instant Mix for recommendations"
+#, fuzzy
+#| msgid "Use Jellyfin Instant Mix for recommendations"
+msgid "Use Instant Mix for recommendations"
 msgstr "Izmantot Jellyfin Instant Mix ieteikumiem"
 
 msgid "Use Rufin data folder"
@@ -2558,6 +2585,9 @@ msgstr ""
 "Izmantot lokālos failus atskaņošanai, tekstu un atbalstīto metadatu "
 "rediģēšanai"
 
+msgid "Use the server's Instant Mix for Radio and Auto DJ."
+msgstr ""
+
 msgid "User token"
 msgstr "Lietotāja žetons"
 
@@ -2566,6 +2596,11 @@ msgstr "Lietotājs"
 
 msgid "Username and password"
 msgstr ""
+
+#, fuzzy
+#| msgid "Username"
+msgid "Username or email"
+msgstr "Lietotājvārds"
 
 msgid "Username"
 msgstr "Lietotājvārds"
@@ -2810,6 +2845,13 @@ msgstr ""
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr ""
+
+#~ msgid ""
+#~ "This uses Jellyfin API for play radio, necessary if you want "
+#~ "recommendation plugins to work"
+#~ msgstr ""
+#~ "Šī funkcija izmanto Jellyfin API, lai atskaņotu radio — tas ir "
+#~ "nepieciešams, ja vēlaties, lai darbotos ieteikumu papildinājumi"
 
 #~ msgid "Saved, sync to preview matches"
 #~ msgstr "Saglabāts, sinhronizē ar priekšskatījumu, lai atrastu atbilstības"
@@ -3226,9 +3268,6 @@ msgstr ""
 #~ msgid "Configure saved music servers and local playback mappings"
 #~ msgstr ""
 #~ "Konfigurēt saglabātos mūzikas serverus un lokālos atskaņošanas sarakstus"
-
-#~ msgid "Connected as"
-#~ msgstr "Savienots kā"
 
 #~ msgid "Current server"
 #~ msgstr "Pašreizējais serveris"
