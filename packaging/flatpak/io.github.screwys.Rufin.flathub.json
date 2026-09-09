@@ -23,6 +23,7 @@
     "--device=dri",
     "--talk-name=org.kde.StatusNotifierWatcher",
     "--talk-name=org.freedesktop.Notifications",
+    "--talk-name=org.freedesktop.secrets",
     "--filesystem=xdg-run/app/com.discordapp.Discord:create"
   ],
   "cleanup": [
