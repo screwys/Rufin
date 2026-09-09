@@ -83,7 +83,7 @@ pub async fn build(
         content_row: gtk::Box,
         left_resize_handle: gtk::Box,
         control_feedback_label: gtk::Label,
-        secret_storage_fallback_message: gtk::Label,
+        secret_storage_fallback_dialog: adw::AlertDialog,
         source_refresh_feedback: gtk::Box,
         source_refresh_feedback_label: gtk::Label,
         source_refresh_feedback_progress: gtk::ProgressBar,
@@ -139,7 +139,7 @@ pub async fn build(
     let loaded_at = std::time::Instant::now();
     let RuntimeInputs {
         temporary_store,
-        secret_storage_fallback,
+        secret_storage_fallbacks,
         diagnostics,
         products,
         settings: settings_handle,
@@ -201,6 +201,7 @@ pub async fn build(
         dictionary_toast: RefCell::new(None),
     };
     let preferences = PreferencesState {
+        secret_storage_row: gtk::glib::WeakRef::new(),
         dialog: gtk::glib::WeakRef::new(),
         release_history: RefCell::new(release_history),
         release_history_view: RefCell::new(None),
@@ -555,6 +556,43 @@ pub async fn build(
     apply_sidebar_media_visibility(Rc::clone(&shell.player_ui));
     shell.player_ui.request_initial_lyrics_if_needed();
     install_product_event_receivers(&shell, receivers);
+    let weak_shell = Rc::downgrade(&shell);
+    gtk::glib::spawn_future_local(async move {
+        while let Ok(storage) = secret_storage_fallbacks.recv().await {
+            let Some(shell) = weak_shell.upgrade() else {
+                break;
+            };
+            if secret_storage_fallback_dialog
+                .clone()
+                .choose_future(Some(&shell.chrome.window))
+                .await
+                != "save"
+            {
+                continue;
+            }
+            if let Err(error) = shell
+                .products
+                .scrobbling
+                .save_credentials_to_file(storage)
+                .recv()
+                .await
+                .map_err(|error| error.to_string())
+                .and_then(|result| result)
+            {
+                tracing::warn!(%error, "could not save credentials to file");
+                shell.control_feedback.show_feedback_toast(error);
+                continue;
+            }
+            let mode = shell.settings.persistence.load().secret_storage_mode;
+            shell.settings.current.borrow_mut().secret_storage_mode = mode;
+            if let Some(row) = shell.preferences.secret_storage_row.upgrade() {
+                row.set_selected(match mode {
+                    secrets::SecretStorageMode::ConfigFile => 0,
+                    secrets::SecretStorageMode::SystemKeyring => 1,
+                });
+            }
+        }
+    });
 
     check_for_release_update(&shell);
     if let Some(presented) = presented {
@@ -581,21 +619,6 @@ pub async fn build(
                 }
                 if let Some(shell) = weak.upgrade() {
                     shell.present_onboarding();
-                }
-            });
-        }
-    }
-    if secret_storage_fallback {
-        if shell.chrome.window.is_mapped() {
-            shell
-                .control_feedback
-                .show_feedback_toast(secret_storage_fallback_message.text().to_string());
-        } else {
-            let message = RefCell::new(Some(secret_storage_fallback_message.text().to_string()));
-            let feedback = Rc::clone(&shell.control_feedback);
-            shell.chrome.window.connect_map(move |_| {
-                if let Some(message) = message.borrow_mut().take() {
-                    feedback.show_feedback_toast(message);
                 }
             });
         }

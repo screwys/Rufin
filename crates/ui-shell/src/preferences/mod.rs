@@ -40,6 +40,7 @@ const LISTENBRAINZ_TOKEN_URL: &str = "https://listenbrainz.org/settings/";
 const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 
 pub(crate) struct PreferencesState {
+    pub(crate) secret_storage_row: gtk::glib::WeakRef<adw::ComboRow>,
     pub(crate) dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub(crate) release_history: RefCell<rufin_core::runtime::ReleaseHistory>,
     pub(crate) release_history_view: RefCell<Option<dialogs::release_notes::ReleaseHistoryView>>,
@@ -1271,6 +1272,10 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
         .map(String::as_str)
         .collect::<Vec<_>>();
     secret_storage_row.set_model(Some(&gtk::StringList::new(&secret_storage_refs)));
+    shell
+        .preferences
+        .secret_storage_row
+        .set(Some(&secret_storage_row));
     secret_storage_row.set_selected(secret_storage_mode_index(settings.secret_storage_mode));
     let secret_storage_shell = Rc::clone(shell);
     let secret_storage_guard = Rc::new(Cell::new(false));

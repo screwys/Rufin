@@ -23,7 +23,7 @@ use downloads::Downloads;
 use library::{
     Database, FavoriteTarget, FolderKey, FolderRow, ReadCancellation, ScanOutcome, SourceKey,
 };
-use secrets::{SecretStorageMode, SecretStore, SwitchableSecretStore};
+use secrets::{SecretStorageMode, SwitchableSecretStore};
 use sources::{
     CredentialHostInput, CredentialSettingsInput, JellyfinEmbySettingsInput,
     JellyfinEmbySetupInput, LiveFolderPage, LocalFolderHostInput, SelectedFeed, Source,
@@ -34,9 +34,9 @@ use tracing::{info, warn};
 
 use crate::playback::PlaybackOwner;
 use crate::settings::{
-    ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, all_secret_keys,
-    delete_provider_secret, fresh_credential_ref, fresh_source_id, load_provider_secret,
-    platform_secret_store, save_provider_secret,
+    ConfiguredSource, SavedLocalAccess, SettingsFile, StoredSettings, delete_provider_secret,
+    fresh_credential_ref, fresh_source_id, load_provider_secret, platform_secret_store,
+    save_provider_secret,
 };
 
 const SOURCE_CHECK_INTERVAL: Duration = Duration::from_secs(5 * 60);
@@ -599,7 +599,11 @@ impl SourceOwner {
                 .lock()
                 .unwrap_or_else(|poisoned| poisoned.into_inner());
             logins.remove(reference.as_str());
-            let _ = delete_provider_secret(&self.shared.secrets, &reference);
+            drop(logins);
+            let secrets = Arc::clone(&self.shared.secrets);
+            self.shared.runtime.spawn_blocking(move || {
+                let _ = delete_provider_secret(&secrets, &reference);
+            });
         }
     }
 
@@ -1849,60 +1853,68 @@ impl SourceOwner {
 
     pub fn change_secret_storage(&self, mode: SecretStorageMode) -> Receiver<Result<(), String>> {
         let (sender, receiver) = async_channel::bounded(1);
-        self.spawn_serialized(move |owner| async move {
+        let owner = self.clone();
+        self.shared.cancel_acquisition();
+        self.shared.runtime.spawn(async move {
             let previous = owner.shared.settings.load();
+            let changing = previous.ui.secret_storage_mode != mode;
             let result = if previous.ui.secret_storage_mode == mode {
                 Ok(())
             } else {
                 let settings = owner.shared.settings.clone();
                 let secrets = Arc::clone(&owner.shared.secrets);
                 tokio::task::spawn_blocking(move || {
-                    let mut destination = previous.clone();
-                    destination.ui.secret_storage_mode = mode;
-                    let store = platform_secret_store(&destination, settings.config_dir());
-                    for key in all_secret_keys(&previous) {
-                        match secrets.load_secret(&key).map_err(string_error)? {
-                            Some(value) => store.save_secret(&key, &value).map_err(string_error)?,
-                            None => store.delete_secret(&key).map_err(string_error)?,
+                    for name in ["secrets.json", "backup-password.json"] {
+                        if let Err(error) = std::fs::remove_file(settings.config_dir().join(name))
+                            && error.kind() != std::io::ErrorKind::NotFound
+                        {
+                            warn!(%error, "could not remove old credential file");
                         }
                     }
-                    for descriptor in scrobbling::secret_descriptors() {
-                        let value = descriptor.value(&previous.scrobbling);
-                        if !value.is_empty() {
-                            store
-                                .save_secret(
-                                    &crate::settings::scrobbling_secret_key(*descriptor),
-                                    value,
-                                )
-                                .map_err(string_error)?;
-                        }
-                    }
-                    let password = crate::settings::backup_password_key();
-                    let destination_password =
-                        crate::settings::backup_password_store(&destination, settings.config_dir());
-                    match crate::settings::backup_password_store(&previous, settings.config_dir())
-                        .load_secret(&password)
-                        .map_err(string_error)?
-                    {
-                        Some(value) => destination_password
-                            .save_secret(&password, &value)
-                            .map_err(string_error)?,
-                        None => destination_password
-                            .delete_secret(&password)
-                            .map_err(string_error)?,
-                    }
+                    let scope = fresh_credential_ref()?.as_str().to_string();
                     settings.update(|stored| {
                         stored.ui.secret_storage_mode = mode;
+                        // Reset as confirmed in Preferences; never unlock the old keyring.
+                        stored.secret_scope_id = scope;
+                        stored.ui.lastfm_api_key.clear();
+                        stored.scrobbling.lastfm.username.clear();
+                        stored.scrobbling.librefm.username.clear();
+                        for descriptor in scrobbling::secret_descriptors() {
+                            descriptor.value_mut(&mut stored.scrobbling).clear();
+                        }
+                        stored.scrobbling_secrets_present = false;
+                        for source in &mut stored.sources.configured {
+                            source.credential_ref = None;
+                        }
                         Ok(())
                     })?;
-                    secrets.replace(store);
+                    secrets.replace(platform_secret_store(&settings));
                     Ok(())
                 })
                 .await
                 .map_err(string_error)
                 .and_then(|result| result)
             };
+            let changed = result.is_ok() && changing;
             let _ = sender.send(result).await;
+            if changed {
+                owner
+                    .shared
+                    .plex_logins
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clear();
+                owner.release_selected(true).await;
+                if let Some(selected) = owner.shared.settings.load().sources.selected_source_id {
+                    owner.select_source(selected);
+                }
+                owner
+                    .shared
+                    .send(SourceEvent::Configured(
+                        owner.shared.configured_sources(None),
+                    ))
+                    .await;
+            }
         });
         receiver
     }
@@ -3313,6 +3325,7 @@ fn unix_seconds() -> i64 {
 #[cfg(test)]
 mod artwork_preparation_tests {
     use super::*;
+    use secrets::SecretStore;
 
     #[tokio::test]
     async fn plex_sources_share_login_until_last_removal_and_cannot_resurrect_secrets() {
@@ -3410,11 +3423,16 @@ mod artwork_preparation_tests {
                 Some(reference.clone()),
             )
             .await;
-        assert!(
-            load_provider_secret(&secrets, &reference)
+        tokio::time::timeout(Duration::from_secs(2), async {
+            while load_provider_secret(&secrets, &reference)
                 .unwrap()
-                .is_none()
-        );
+                .is_some()
+            {
+                tokio::task::yield_now().await;
+            }
+        })
+        .await
+        .expect("removed credentials are cleaned up in the background");
         assert!(matches!(
             detached.lock().await.merge_authorization(&snapshot),
             Err(SourceError::Cancelled)

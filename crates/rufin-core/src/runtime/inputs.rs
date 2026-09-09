@@ -84,7 +84,7 @@ pub enum SourceNoticeKind {
 
 pub struct RuntimeInputs {
     pub temporary_store: bool,
-    pub secret_storage_fallback: bool,
+    pub secret_storage_fallbacks: async_channel::Receiver<crate::settings::KeyringSecretStore>,
     pub diagnostics: DiagnosticsHandle,
     pub products: ProductHandles,
     pub settings: SettingsHandle,

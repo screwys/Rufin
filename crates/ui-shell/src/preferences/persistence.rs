@@ -54,7 +54,8 @@ impl Shell {
             .await
         {
             Ok(Ok(())) => {
-                self.settings.current.borrow_mut().secret_storage_mode = mode;
+                *self.settings.current.borrow_mut() = self.settings.persistence.load();
+                self.products.scrobbling.storage_reset();
                 true
             }
             Ok(Err(error)) => {
@@ -157,22 +158,39 @@ impl Shell {
         self: &Rc<Self>,
         warning_action: &'static str,
         update: impl FnOnce(&mut ScrobblingPreferences) -> bool,
-    ) -> Option<ScrobblingPreferences> {
+    ) {
         let mut preferences = self.products.scrobbling.preferences();
         if !update(&mut preferences) {
-            return None;
+            return;
         }
-        match self.products.scrobbling.save(&preferences) {
-            Ok(committed) => {
-                self.settings.current.borrow_mut().lastfm_api_key =
-                    committed.lastfm.api_key.clone();
-                Some(committed)
-            }
-            Err(error) => {
-                warn!(%error, action = warning_action, "failed to save scrobbling settings");
-                None
-            }
+        if let Err(error) = self.products.scrobbling.save(&preferences) {
+            warn!(%error, action = warning_action, "failed to save scrobbling settings");
         }
+    }
+
+    pub(super) fn save_scrobbling_credential(
+        self: &Rc<Self>,
+        warning_action: &'static str,
+        update: impl FnOnce(&mut ScrobblingPreferences) + Send + 'static,
+    ) {
+        let previous = self.products.scrobbling.preferences();
+        let saved = self.products.scrobbling.save_credential(update);
+        let shell = Rc::clone(self);
+        gtk::glib::spawn_future_local(async move {
+            match saved.recv().await {
+                Ok(Ok(committed)) => {
+                    shell.settings.current.borrow_mut().lastfm_api_key =
+                        committed.lastfm.api_key.clone();
+                    if previous.lastfm.api_key != committed.lastfm.api_key {
+                        shell.retry_external_artwork(warning_action);
+                    }
+                }
+                Ok(Err(error)) => {
+                    warn!(%error, action = warning_action, "failed to save scrobbling settings")
+                }
+                Err(_) => {}
+            }
+        });
     }
 
     pub(super) fn set_home_blocks(self: &Rc<Self>, blocks: Vec<HomeBlockKind>) {

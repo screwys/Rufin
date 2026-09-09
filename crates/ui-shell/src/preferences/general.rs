@@ -81,18 +81,9 @@ pub(crate) fn scrobbling_page(
     let lastfm_api_shell = Rc::clone(shell);
     lastfm_api_key.connect_apply(move |row| {
         let api_key = row.text().trim().to_string();
-        if lastfm_api_shell
-            .update_scrobbling_settings("Last.fm API key setting", |settings| {
-                if settings.lastfm.api_key == api_key {
-                    return false;
-                }
-                settings.lastfm.api_key = api_key.clone();
-                true
-            })
-            .is_some()
-        {
-            lastfm_api_shell.retry_external_artwork("Last.fm API key setting");
-        }
+        lastfm_api_shell.save_scrobbling_credential("Last.fm API key setting", move |settings| {
+            settings.lastfm.api_key = api_key;
+        });
     });
     lastfm_api_secret.set_text(&drafts.borrow().lastfm.api_secret);
     let secret_drafts = drafts.clone();
@@ -102,14 +93,10 @@ pub(crate) fn scrobbling_page(
     let lastfm_secret_shell = Rc::clone(shell);
     lastfm_api_secret.connect_apply(move |row| {
         let api_secret = row.text().trim().to_string();
-        lastfm_secret_shell.update_scrobbling_settings(
+        lastfm_secret_shell.save_scrobbling_credential(
             "Last.fm shared secret setting",
-            |settings| {
-                if settings.lastfm.api_secret == api_secret {
-                    return false;
-                }
+            move |settings| {
                 settings.lastfm.api_secret = api_secret;
-                true
             },
         );
     });
@@ -260,14 +247,10 @@ pub(crate) fn scrobbling_page(
     let listenbrainz_token_shell = Rc::clone(shell);
     listenbrainz_token.connect_apply(move |row| {
         let token = row.text().trim().to_string();
-        listenbrainz_token_shell.update_scrobbling_settings(
+        listenbrainz_token_shell.save_scrobbling_credential(
             "ListenBrainz token setting",
-            |settings| {
-                if settings.listenbrainz.user_token == token {
-                    return false;
-                }
+            move |settings| {
                 settings.listenbrainz.user_token = token;
-                true
             },
         );
     });
@@ -280,6 +263,55 @@ pub(crate) fn scrobbling_page(
             replace_if_changed(&mut settings.listenbrainz.now_playing_enabled, active)
         },
     );
+    let loaded = shell.products.scrobbling.load_preferences();
+    let initial_key = lastfm_api_key.text();
+    let initial_secret = lastfm_api_secret.text();
+    let initial_token = listenbrainz_token.text();
+    let weak_page = page.downgrade();
+    gtk::glib::spawn_future_local(async move {
+        let Ok(loaded) = loaded.recv().await else {
+            return;
+        };
+        if weak_page.upgrade().is_none() {
+            return;
+        }
+        for (row, initial, value) in [
+            (lastfm_api_key, initial_key, loaded.lastfm.api_key),
+            (lastfm_api_secret, initial_secret, loaded.lastfm.api_secret),
+            (
+                listenbrainz_token,
+                initial_token,
+                loaded.listenbrainz.user_token,
+            ),
+        ] {
+            if row.text() == initial {
+                row.set_text(&value);
+            }
+        }
+        for (button, row, connected, username) in [
+            (
+                lastfm_connect,
+                lastfm_connection,
+                loaded.lastfm.connected,
+                loaded.lastfm.username,
+            ),
+            (
+                librefm_connect,
+                librefm_connection,
+                loaded.librefm.connected,
+                loaded.librefm.username,
+            ),
+        ] {
+            if button.is_sensitive() {
+                row.set_subtitle(&audioscrobbler_connection_subtitle(connected, &username));
+                button.set_label(&if connected {
+                    tr("Reconnect")
+                } else {
+                    tr("Connect")
+                });
+            }
+        }
+    });
     page
 }
 

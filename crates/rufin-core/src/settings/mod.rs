@@ -1,6 +1,8 @@
 pub mod app;
 pub mod context_menu;
 pub mod layout;
+mod secret_storage;
+pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;
 
 pub use app::{
@@ -292,6 +294,10 @@ pub struct SettingsFile {
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
+    pub(crate) secret_storage_fallbacks: (
+        async_channel::Sender<KeyringSecretStore>,
+        async_channel::Receiver<KeyringSecretStore>,
+    ),
 }
 
 impl SettingsFile {
@@ -318,6 +324,7 @@ impl SettingsFile {
                 .to_path_buf(),
             path: Some(path),
             value: Arc::new(Mutex::new(value)),
+            secret_storage_fallbacks: async_channel::unbounded(),
         };
         if changed {
             let current = file.load();
@@ -341,6 +348,7 @@ impl SettingsFile {
             path: None,
             config_dir,
             value: Arc::new(Mutex::new(value)),
+            secret_storage_fallbacks: async_channel::unbounded(),
         }
     }
 
@@ -426,7 +434,12 @@ impl SettingsOwner {
     fn save_ui(&self, settings: &UiSettings) -> Result<UiSettings, String> {
         let previous = self.file.load();
         self.file.update(|stored| {
+            let secret_storage_mode = stored.ui.secret_storage_mode;
+            let lastfm_api_key = stored.ui.lastfm_api_key.clone();
             stored.ui = settings.clone();
+            // These settings are committed together with their credentials.
+            stored.ui.secret_storage_mode = secret_storage_mode;
+            stored.ui.lastfm_api_key = lastfm_api_key;
             Ok(())
         })?;
         let current = self.file.load();
@@ -456,10 +469,9 @@ impl SettingsOwner {
     }
 }
 
-pub(crate) fn platform_secret_store(
-    settings: &StoredSettings,
-    config_dir: &Path,
-) -> Arc<dyn SecretStore> {
+pub(crate) fn platform_secret_store(file: &SettingsFile) -> Arc<dyn SecretStore> {
+    let settings = file.load();
+    let config_dir = file.config_dir();
     match settings.ui.secret_storage_mode {
         SecretStorageMode::ConfigFile => Arc::new(CachedSecretStore::new(Arc::new(
             ConfigSecretStore::with_scope(
@@ -467,35 +479,21 @@ pub(crate) fn platform_secret_store(
                 settings.secret_scope_id.clone(),
             ),
         ))),
-        SecretStorageMode::SystemKeyring => system_keyring_secret_store(&settings.secret_scope_id),
+        SecretStorageMode::SystemKeyring => {
+            Arc::new(secret_storage::KeyringSecretStore::new(file.clone()))
+        }
     }
 }
 
 fn system_keyring_secret_store(scope_id: &str) -> Arc<dyn SecretStore> {
     match secrets::SystemKeyringStore::new(scope_id.to_string()) {
-        Ok(store) => Arc::new(CachedSecretStore::new(Arc::new(store))),
+        Ok(store) => Arc::new(store),
         Err(error) => Arc::new(secrets::UnavailableSecretStore::new(error.to_string())),
     }
 }
 
 pub(crate) fn provider_secret_key(reference: &CredentialRef) -> SecretKey {
     SecretKey::provider_token(reference.as_str())
-}
-
-pub(crate) fn all_secret_keys(settings: &StoredSettings) -> Vec<SecretKey> {
-    let mut keys = settings
-        .sources
-        .configured
-        .iter()
-        .filter_map(|source| source.credential_ref.as_ref())
-        .map(provider_secret_key)
-        .collect::<Vec<_>>();
-    keys.extend(
-        scrobbling::secret_descriptors()
-            .iter()
-            .map(|descriptor| scrobbling_secret_key(*descriptor)),
-    );
-    keys
 }
 
 pub(crate) fn backup_password_key() -> SecretKey {
@@ -519,10 +517,15 @@ pub(crate) fn persist_scrobbling_settings(
     file: &SettingsFile,
     secrets: &Arc<SwitchableSecretStore>,
     input: &ScrobblingSettings,
+    scope: &str,
 ) -> Result<ScrobblingSettings, String> {
     let mut input = input.clone();
     input.sanitize();
     let stored = file.load();
+    if stored.secret_scope_id != scope {
+        return Err("credential storage was reset".into());
+    }
+    let secrets = &secrets.current().map_err(|error| error.to_string())?;
     let mut current = stored.scrobbling_runtime_settings();
     if stored.scrobbling_secrets_present {
         for descriptor in scrobbling::secret_descriptors() {
@@ -564,26 +567,50 @@ pub(crate) fn persist_scrobbling_settings(
         }
     }
 
-    let mut persisted = input.clone();
-    for descriptor in scrobbling::secret_descriptors() {
-        descriptor.value_mut(&mut persisted).clear();
-    }
-    persisted.lastfm.api_key.clear();
-    file.update(|stored| {
-        stored.ui.lastfm_api_key = input.lastfm.api_key.clone();
-        stored.scrobbling = persisted;
-        stored.scrobbling_secrets_present = scrobbling_secrets_present(&input);
-        Ok(())
-    })?;
-
-    // Descriptor order keeps each session after the credentials that make it
-    // usable. A partial write therefore still cannot connect the wrong account.
+    // Write credentials before recording the account they belong to. A session-only
+    // login must not pair a new username with the old keyring token after restart.
     for (_, key, value) in changed_secrets {
         if !value.is_empty() {
             save_secret(Arc::clone(secrets), key.clone(), value)
                 .map_err(|error| format!("failed to save scrobbling secret {key:?}: {error}"))?;
         }
     }
+    let mut persisted = input.clone();
+    for descriptor in scrobbling::secret_descriptors() {
+        descriptor.value_mut(&mut persisted).clear();
+    }
+    persisted.lastfm.api_key.clear();
+    let persistent = secrets.is_persistent();
+    file.update(|stored| {
+        if stored.secret_scope_id != scope {
+            return Err("credential storage was reset".into());
+        }
+        if !persistent {
+            return Ok(());
+        }
+        persisted.lastfm.enabled = stored.scrobbling.lastfm.enabled;
+        persisted.lastfm.now_playing_enabled = stored.scrobbling.lastfm.now_playing_enabled;
+        persisted.librefm.enabled = stored.scrobbling.librefm.enabled;
+        persisted.librefm.now_playing_enabled = stored.scrobbling.librefm.now_playing_enabled;
+        persisted.listenbrainz.enabled = stored.scrobbling.listenbrainz.enabled;
+        persisted.listenbrainz.now_playing_enabled =
+            stored.scrobbling.listenbrainz.now_playing_enabled;
+        stored.ui.lastfm_api_key = input.lastfm.api_key.clone();
+        stored.scrobbling = persisted;
+        stored.scrobbling_secrets_present = scrobbling_secrets_present(&input);
+        Ok(())
+    })?;
+
+    let current = file.load();
+    if current.secret_scope_id != scope {
+        return Err("credential storage was reset".into());
+    }
+    input.lastfm.enabled = current.scrobbling.lastfm.enabled;
+    input.lastfm.now_playing_enabled = current.scrobbling.lastfm.now_playing_enabled;
+    input.librefm.enabled = current.scrobbling.librefm.enabled;
+    input.librefm.now_playing_enabled = current.scrobbling.librefm.now_playing_enabled;
+    input.listenbrainz.enabled = current.scrobbling.listenbrainz.enabled;
+    input.listenbrainz.now_playing_enabled = current.scrobbling.listenbrainz.now_playing_enabled;
     Ok(input)
 }
 
@@ -613,11 +640,17 @@ pub(crate) fn load_scrobbling_settings(
         }
     }
     settings.sanitize();
-    if loaded {
+    let current = file.load();
+    if current.secret_scope_id != stored.secret_scope_id {
+        return current.scrobbling_runtime_settings();
+    }
+    if loaded && secrets.is_persistent() {
         let present = scrobbling_secrets_present(&settings);
         if stored.scrobbling_secrets_present != present
-            && let Err(error) = file.update(|stored| {
-                stored.scrobbling_secrets_present = present;
+            && let Err(error) = file.update(|current| {
+                if current.secret_scope_id == stored.secret_scope_id {
+                    current.scrobbling_secrets_present = present;
+                }
                 Ok(())
             })
         {
@@ -667,6 +700,9 @@ pub(crate) fn startup_scrobbling_settings(
                 value.to_owned(),
             )
             .and_then(|()| {
+                if !secrets.is_persistent() {
+                    return Ok(());
+                }
                 file.update(|current| {
                     if descriptor.value(&current.scrobbling) == value {
                         descriptor.value_mut(&mut current.scrobbling).clear();
@@ -718,33 +754,23 @@ fn load_secret<S>(store: Arc<S>, key: SecretKey) -> Result<Option<String>, Strin
 where
     S: SecretStore + ?Sized + 'static,
 {
-    blocking_secret(move || store.load_secret(&key))
+    store.load_secret(&key).map_err(|error| error.to_string())
 }
 
 fn save_secret<S>(store: Arc<S>, key: SecretKey, value: String) -> Result<(), String>
 where
     S: SecretStore + ?Sized + 'static,
 {
-    blocking_secret(move || store.save_secret(&key, &value))
+    store
+        .save_secret(&key, &value)
+        .map_err(|error| error.to_string())
 }
 
 fn delete_secret<S>(store: Arc<S>, key: SecretKey) -> Result<(), String>
 where
     S: SecretStore + ?Sized + 'static,
 {
-    blocking_secret(move || store.delete_secret(&key))
-}
-
-fn blocking_secret<T: Send + 'static>(
-    operation: impl FnOnce() -> secrets::SecretResult<T> + Send + 'static,
-) -> Result<T, String> {
-    std::thread::Builder::new()
-        .name("rufin-secrets".to_string())
-        .spawn(operation)
-        .map_err(|error| error.to_string())?
-        .join()
-        .map_err(|_| "the secrets operation panicked".to_string())?
-        .map_err(|error| error.to_string())
+    store.delete_secret(&key).map_err(|error| error.to_string())
 }
 
 fn random_identity(prefix: &str) -> Result<String, String> {
@@ -901,6 +927,7 @@ mod tests {
             path: Some(path.clone()),
             config_dir: directory.path().to_path_buf(),
             value: Arc::new(Mutex::new(StoredSettings::default())),
+            secret_storage_fallbacks: async_channel::unbounded(),
         };
         assert!(!file.load().ui.backup.enabled);
         file.update(|stored| {
@@ -961,19 +988,17 @@ mod tests {
     }
 
     #[test]
-    fn fresh_scrobbling_preferences_and_toggles_do_not_open_secret_storage() {
+    fn fresh_scrobbling_settings_do_not_open_secret_storage() {
         let file = SettingsFile::memory();
         let (store, secrets) = counting_secrets();
 
-        let mut settings = load_scrobbling_settings(&file, &secrets);
-        settings.lastfm.enabled = true;
-        persist_scrobbling_settings(&file, &secrets, &settings)
+        let settings = load_scrobbling_settings(&file, &secrets);
+        persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
             .expect("persist non-secret scrobbling setting");
 
         assert_eq!(store.loads.load(Ordering::Relaxed), 0);
         assert_eq!(store.saves.load(Ordering::Relaxed), 0);
         assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
-        assert!(file.load().scrobbling.lastfm.enabled);
         assert!(!file.load().scrobbling_secrets_present);
     }
 
@@ -984,8 +1009,9 @@ mod tests {
         let mut settings = load_scrobbling_settings(&file, &secrets);
         settings.listenbrainz.user_token = "token".to_string();
 
-        let committed = persist_scrobbling_settings(&file, &secrets, &settings)
-            .expect("persist first scrobbling secret");
+        let committed =
+            persist_scrobbling_settings(&file, &secrets, &settings, &file.load().secret_scope_id)
+                .expect("persist first scrobbling secret");
 
         assert_eq!(store.loads.load(Ordering::Relaxed), 0);
         assert_eq!(store.deletes.load(Ordering::Relaxed), 0);
