@@ -53,16 +53,89 @@ use super::startup::StartupState;
 use super::window_state::initial_window_size;
 use ui_shared::artwork::ArtworkState;
 
-pub fn build(
+pub async fn build(
     app: &adw::Application,
-    inputs: RuntimeInputs,
+    settings: rufin_core::settings::Settings,
+    bootstrap: impl std::future::Future<Output = Result<RuntimeInputs, String>>,
     quitting: Rc<Cell<bool>>,
     force_initial_presentation: bool,
     presented: Option<Box<dyn FnOnce()>>,
     window_bar_preview: Option<crate::application::WindowBarPreview>,
-) {
+) -> Result<(), String> {
     let appearance = crate::application::style::ApplicationAppearance::install();
 
+    appearance.apply(&settings);
+    let (window_width, window_height) =
+        initial_window_size(settings.window_width, settings.window_height);
+    let window_bar_platform = crate::application::platform_window_bar(window_bar_preview);
+    let window_controls = WindowControlLayout::new(window_bar_platform.is_some());
+
+    let shell_root_resource = crate::ui_resource::SHELL_ROOT_RESOURCE;
+    let shell_root_builder = ui_shared::ui_resource::builder(shell_root_resource);
+    ui_shared::objects!(shell_root_builder, shell_root_resource, {
+        root_stack: gtk::Stack,
+        app_root_overlay: gtk::Overlay,
+        app_root: gtk::Box,
+        temporary_storage_banner: adw::Banner,
+        app_content_overlay: gtk::Overlay,
+        app_content_stack: gtk::Stack,
+        split_view: adw::OverlaySplitView,
+        content_row: gtk::Box,
+        left_resize_handle: gtk::Box,
+        control_feedback_label: gtk::Label,
+        secret_storage_fallback_message: gtk::Label,
+        source_refresh_feedback: gtk::Box,
+        source_refresh_feedback_label: gtk::Label,
+        source_refresh_feedback_progress: gtk::ProgressBar,
+        operation_feedback: gtk::Box,
+        operation_feedback_artwork: gtk::Box,
+        operation_feedback_title: gtk::Label,
+        operation_feedback_subtitle: gtk::Label,
+        operation_feedback_action: gtk::Button,
+        startup_loading_host: gtk::Box,
+        startup_loading_status: gtk::Label,
+    });
+    root_stack.set_width_request(MIN_APP_WINDOW_WIDTH);
+    root_stack.set_height_request(MIN_APP_WINDOW_HEIGHT);
+    left_resize_handle.set_cursor_from_name(Some("col-resize"));
+
+    let layout_state = ShellLayoutState::new(&root_stack);
+    let toast_overlay = adw::ToastOverlay::new();
+    toast_overlay.add_css_class("app-toast-overlay");
+    let window_content = window_controls.wrap_content(&layout_state.owner);
+    toast_overlay.set_child(Some(&window_content));
+    let window = crate::application::application_window(
+        app,
+        DISPLAY_NAME,
+        window_width,
+        window_height,
+        &toast_overlay,
+        window_bar_preview,
+    );
+    window_controls.bind_window(&window);
+
+    startup_loading_host.set_visible(true);
+    let closing_app = app.clone();
+    let closing = window.connect_close_request(move |_| {
+        closing_app.quit();
+        gtk::glib::Propagation::Proceed
+    });
+    if cfg!(target_os = "macos")
+        || force_initial_presentation
+        || !settings.tray_enabled
+        || !settings.start_minimized
+    {
+        crate::application::present_window(&window);
+    }
+    let inputs = match bootstrap.await {
+        Ok(inputs) => inputs,
+        Err(error) => {
+            window.disconnect(closing);
+            window.destroy();
+            return Err(error);
+        }
+    };
+    window.disconnect(closing);
     let loaded_at = std::time::Instant::now();
     let RuntimeInputs {
         temporary_store,
@@ -75,6 +148,13 @@ pub fn build(
         source_operation,
         release_history,
     } = inputs;
+    temporary_storage_banner.set_revealed(temporary_store);
+    let fresh_start_banner: adw::Banner = ui_shared::ui_resource::object(
+        &shell_root_builder,
+        shell_root_resource,
+        "fresh_start_banner",
+    );
+    fresh_start_banner.set_revealed(products.library.fresh_start());
     let settings = settings_handle.load();
     appearance.apply(&settings);
     info!(
@@ -130,47 +210,6 @@ pub fn build(
     let downloads = ui_shared::downloads::DownloadsState::new(Rc::clone(&settings_state));
 
     let desktop = DesktopState::new(app, products.playback.transport.clone());
-
-    let (window_width, window_height) =
-        initial_window_size(settings.window_width, settings.window_height);
-    let window_bar_platform = crate::application::platform_window_bar(window_bar_preview);
-    let window_controls = WindowControlLayout::new(window_bar_platform.is_some());
-
-    let shell_root_resource = crate::ui_resource::SHELL_ROOT_RESOURCE;
-    let shell_root_builder = ui_shared::ui_resource::builder(shell_root_resource);
-    ui_shared::objects!(shell_root_builder, shell_root_resource, {
-        root_stack: gtk::Stack,
-        app_root_overlay: gtk::Overlay,
-        app_root: gtk::Box,
-        temporary_storage_banner: adw::Banner,
-        app_content_overlay: gtk::Overlay,
-        app_content_stack: gtk::Stack,
-        split_view: adw::OverlaySplitView,
-        content_row: gtk::Box,
-        left_resize_handle: gtk::Box,
-        control_feedback_label: gtk::Label,
-        secret_storage_fallback_message: gtk::Label,
-        source_refresh_feedback: gtk::Box,
-        source_refresh_feedback_label: gtk::Label,
-        source_refresh_feedback_progress: gtk::ProgressBar,
-        operation_feedback: gtk::Box,
-        operation_feedback_artwork: gtk::Box,
-        operation_feedback_title: gtk::Label,
-        operation_feedback_subtitle: gtk::Label,
-        operation_feedback_action: gtk::Button,
-        startup_loading_host: gtk::Box,
-        startup_loading_status: gtk::Label,
-    });
-    temporary_storage_banner.set_revealed(temporary_store);
-    let fresh_start_banner: adw::Banner = ui_shared::ui_resource::object(
-        &shell_root_builder,
-        shell_root_resource,
-        "fresh_start_banner",
-    );
-    fresh_start_banner.set_revealed(products.library.fresh_start());
-    root_stack.set_width_request(MIN_APP_WINDOW_WIDTH);
-    root_stack.set_height_request(MIN_APP_WINDOW_HEIGHT);
-    left_resize_handle.set_cursor_from_name(Some("col-resize"));
 
     let navigation_resource = crate::ui_resource::NAVIGATION_RESOURCE;
     let navigation_builder = ui_shared::ui_resource::builder(navigation_resource);
@@ -256,20 +295,6 @@ pub fn build(
 
     source_refresh_feedback.set_margin_bottom(BOTTOM_PLAYER_HEIGHT + 2);
     operation_feedback.set_margin_bottom(BOTTOM_PLAYER_HEIGHT);
-    let layout_state = ShellLayoutState::new(&root_stack);
-    let toast_overlay = adw::ToastOverlay::new();
-    toast_overlay.add_css_class("app-toast-overlay");
-    let window_content = window_controls.wrap_content(&layout_state.owner);
-    toast_overlay.set_child(Some(&window_content));
-    let window = crate::application::application_window(
-        app,
-        DISPLAY_NAME,
-        window_width,
-        window_height,
-        &toast_overlay,
-        window_bar_preview,
-    );
-    window_controls.bind_window(&window);
 
     let chrome = WindowChrome {
         application: app.clone(),
@@ -527,39 +552,56 @@ pub fn build(
 
     check_for_release_update(&shell);
     if let Some(presented) = presented {
-        let presented = Rc::new(RefCell::new(Some(presented)));
-        shell.chrome.window.connect_map(move |_| {
-            if let Some(presented) = presented.borrow_mut().take() {
-                presented();
-            }
-        });
+        if shell.chrome.window.is_mapped() {
+            presented();
+        } else {
+            let presented = Rc::new(RefCell::new(Some(presented)));
+            shell.chrome.window.connect_map(move |_| {
+                if let Some(presented) = presented.borrow_mut().take() {
+                    presented();
+                }
+            });
+        }
     }
     if shell.source.configured.borrow().sources.is_empty() {
-        let pending = Cell::new(true);
-        let weak = Rc::downgrade(&shell);
-        shell.chrome.window.connect_map(move |_| {
-            if !pending.replace(false) {
-                return;
-            }
-            if let Some(shell) = weak.upgrade() {
-                shell.present_onboarding();
-            }
-        });
+        if shell.chrome.window.is_mapped() {
+            shell.present_onboarding();
+        } else {
+            let pending = Cell::new(true);
+            let weak = Rc::downgrade(&shell);
+            shell.chrome.window.connect_map(move |_| {
+                if !pending.replace(false) {
+                    return;
+                }
+                if let Some(shell) = weak.upgrade() {
+                    shell.present_onboarding();
+                }
+            });
+        }
     }
     if secret_storage_fallback {
-        let message = RefCell::new(Some(secret_storage_fallback_message.text().to_string()));
-        let feedback = Rc::clone(&shell.control_feedback);
-        shell.chrome.window.connect_map(move |_| {
-            if let Some(message) = message.borrow_mut().take() {
-                feedback.show_feedback_toast(message);
-            }
-        });
+        if shell.chrome.window.is_mapped() {
+            shell
+                .control_feedback
+                .show_feedback_toast(secret_storage_fallback_message.text().to_string());
+        } else {
+            let message = RefCell::new(Some(secret_storage_fallback_message.text().to_string()));
+            let feedback = Rc::clone(&shell.control_feedback);
+            shell.chrome.window.connect_map(move |_| {
+                if let Some(message) = message.borrow_mut().take() {
+                    feedback.show_feedback_toast(message);
+                }
+            });
+        }
     }
-    present_initial_window(&shell, force_initial_presentation);
+    if !shell.chrome.window.is_visible() {
+        present_initial_window(&shell, force_initial_presentation);
+    }
     schedule_periodic_release_checks(&shell);
     if defer_initial_route && !shell.source.operation.borrow().blocks_library() {
         shell.schedule_startup_route_reveal();
     }
+    Ok(())
 }
 
 pub(crate) fn connect_transient_entry_focus_dismissal(shell: &Shell) {

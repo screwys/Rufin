@@ -17,7 +17,7 @@ use crate::settings::{SettingsFile, SettingsOwner, platform_secret_store};
 use crate::source::{SourceBootstrap, SourceOutputs, SourceOwner};
 use crate::waveform::WaveformOwner;
 
-pub fn runtime_inputs<StartBackend>(
+pub async fn runtime_inputs<StartBackend>(
     diagnostics: DiagnosticsHandle,
     take_previous_update_result: bool,
     settings: SettingsFile,
@@ -35,8 +35,7 @@ where
     let runtime = tokio::runtime::Handle::current();
     let mut secret_storage_fallback = false;
     if settings.load().ui.secret_storage_mode == SecretStorageMode::SystemKeyring
-        && let Err(error) =
-            tokio::task::block_in_place(|| runtime.block_on(secrets::check_system_keyring()))
+        && let Err(error) = secrets::check_system_keyring().await
     {
         settings.update(|stored| {
             stored.ui.secret_storage_mode = SecretStorageMode::ConfigFile;
@@ -57,23 +56,21 @@ where
         .map(|source| source.configuration.source_id.clone())
         .collect::<Vec<_>>();
     let store_path = paths.store_file();
-    let (database, temporary_store) = tokio::task::block_in_place(|| {
-        match runtime.block_on(library::Database::open_installation(
+    let (database, temporary_store) = match library::Database::open_installation(
             &store_path, &paths.legacy_store_file(), &paths.catalog_file(),
             &configured_source_ids, stored.sources.selected_source_id.as_ref(),
-        )) {
+        ).await {
             Ok(database) => Ok((database, false)),
             Err(error) if error.is_store_path_io() => {
                 warn!(%error, path=%store_path.display(), "could not use the durable Store path; startup will continue with temporary storage");
-                let directory = tempfile::Builder::new().prefix("rufin-store-").tempdir().map_err(library::LibraryError::Io)?.keep();
-                runtime.block_on(library::Database::open_with_catalog(
+                let directory = tempfile::Builder::new().prefix("rufin-store-").tempdir().map_err(string_error)?.keep();
+                library::Database::open_with_catalog(
                     directory.join("store.sqlite"), paths.catalog_file(),
                     &configured_source_ids,stored.sources.selected_source_id.as_ref(),
-                )).map(|database|(database,true))
+                ).await.map(|database|(database,true))
             }
             Err(error) => Err(error),
-        }
-    }).map_err(string_error)?;
+    }.map_err(string_error)?;
     if database.fresh_start() {
         warn!(
             "opened fresh user state; sources and saved logins are unchanged; user data can be restored from the backup hub"
@@ -82,15 +79,14 @@ where
     let library = Arc::new(database);
     library.set_distinct_track_covers(stored.ui.prefer_distinct_track_covers);
     for configured in &stored.sources.configured {
-        if let Err(error) = tokio::task::block_in_place(|| {
-            runtime.block_on(library.reconcile_source(&configured.configuration.source_id))
-        }) {
+        if let Err(error) = library
+            .reconcile_source(&configured.configuration.source_id)
+            .await
+        {
             warn!(%error, source_id=%configured.configuration.source_id, "could not reconcile configured source mapping");
         }
     }
-    if let Err(error) =
-        tokio::task::block_in_place(|| runtime.block_on(library.ensure_default_smart_playlists()))
-    {
+    if let Err(error) = library.ensure_default_smart_playlists().await {
         warn!(%error, "could not initialize default Smart playlists; startup will continue");
     }
     let scrobbler = Arc::new(Scrobbler::new(
@@ -191,7 +187,7 @@ where
         });
     settings_committed(&stored.ui);
     playback.install_source_owner(&source);
-    tokio::task::block_in_place(|| runtime.block_on(playback.start()))?;
+    playback.start().await?;
     let scrobbling = ScrobblingOwner::new(
         settings.clone(),
         Arc::clone(&secrets),

@@ -2601,6 +2601,7 @@ fn download_source_failure(error: SourceError) -> DownloadFailure {
         | SourceError::Server { .. }
         | SourceError::Cancelled => DownloadFailure::Retry(error.to_string()),
         SourceError::Auth(_)
+        | SourceError::IncompleteScan { .. }
         | SourceError::Library(_)
         | SourceError::Json(_)
         | SourceError::InvalidRequest(_)

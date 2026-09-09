@@ -943,15 +943,20 @@ impl Source {
                     .await
             }
         };
-        if let Err(error) = staged {
+        if let Err(error) = &staged {
             if matches!(error, SourceError::Cancelled) {
-                return Err(error);
+                return Err(SourceError::Cancelled);
             }
             tracing::warn!(%error, "source collection was incomplete; publishing accepted staged facts without removals");
             scan.incomplete();
         }
         let outcome = scan.finish().await?;
-        Ok(outcome)
+        staged
+            .map(|_| outcome)
+            .map_err(|error| SourceError::IncompleteScan {
+                outcome,
+                error: Box::new(error),
+            })
     }
 
     pub async fn catch_up_local(

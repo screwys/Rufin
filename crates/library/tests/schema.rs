@@ -633,7 +633,9 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
           (1,1,'native-a:0',1,'track-a',0),
           (2,2,'local-a:0',1,'track-a',0),
           (3,3,'native-b:0',2,'track-b',0),
-          (4,4,'local-b:0',2,'track-b',0);
+          (4,4,'local-b:0',2,'track-b',0),
+          (5,1,'native-a:missing',NULL,'missing-track',1);
+        INSERT INTO home_entries VALUES(1,'playlists',0,'playlist',1,'Native A','',NULL);
         INSERT INTO smart_playlists VALUES
           (1,1,'builtin:most-played','Most Played','most played','{"match_all":[],"match_any":[],"sort_field":"Title","descending":false}',0),
           (2,2,'builtin:most-played','Most Played','most played','{"match_all":[],"match_any":[],"sort_field":"Title","descending":false}',0),
@@ -725,7 +727,25 @@ async fn schema_43_fixture_relocates_and_migrates_every_core_durable_family_and_
         .fetch_all(&mut reader)
         .await
         .expect("read source observations"),
-        Vec::<(i64, String, i64)>::new()
+        [(1, "Alpha".into(), 3), (2, "Beta".into(), 4)]
+    );
+    assert_eq!(sqlx::query_as::<_, (String, Option<String>, i64)>(
+        "SELECT media_uri,title,position FROM catalog.native_playlist_entries WHERE object_id='native-a:missing'"
+    ).fetch_one(&mut reader).await.unwrap(),
+        (library::source_entity_uri(&configured[0], "track", "missing-track"), None, 1));
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT entity_key FROM home_entries WHERE section_id='playlists'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .unwrap(),
+        sqlx::query_scalar::<_, i64>(
+            "SELECT playlist_key FROM playlists WHERE object_id='native-a'"
+        )
+        .fetch_one(&mut reader)
+        .await
+        .unwrap()
     );
     let expected_user_media = [
         (
@@ -872,6 +892,12 @@ async fn schema_41_and_42_preserve_playlist_order_and_authored_entries() {
         .execute(&mut raw)
         .await
         .unwrap();
+        if version == 41 {
+            sqlx::query("DROP TABLE replay_gain_measurements")
+                .execute(&mut raw)
+                .await
+                .unwrap();
+        }
         sqlx::query(sqlx::AssertSqlSafe(format!(
             "PRAGMA user_version={version}"
         )))
@@ -2022,7 +2048,11 @@ async fn released_cue_segments_keep_distinct_user_facts_and_backing_file() {
     sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(1,'local:server:library','Local','local',zeroblob(32),zeroblob(32));
       INSERT INTO tracks(source_key,object_id,title,normalized_search,display_album,display_artist,sort_text,duration_millis,media_uri,source_path,cue_path,cue_start_millis,cue_end_millis,user_favorite)
       VALUES(1,'file:///music/disc.cue#1','First','first','Album','Artist','first',1000,'file:///music/disc.flac','/music/disc.flac','/music/disc.cue',0,1000,1),
-            (1,'file:///music/disc.cue#2','Second','second','Album','Artist','second',1000,'file:///music/disc.flac','/music/disc.flac','/music/disc.cue',1000,2000,1);")
+            (1,'file:///music/disc.cue#2','Second','second','Album','Artist','second',1000,'file:///music/disc.flac','/music/disc.flac','/music/disc.cue',1000,2000,1);
+      INSERT INTO local_access_files(source_key,track_object_id,origin,path,root,relative_path,size_bytes,mtime_ns,parser_version,
+        title,normalized_title,album,normalized_album,artist,normalized_artist,disc_number,track_number,duration_millis,media_uri)
+      VALUES(1,'file:///music/disc.cue#1','local','/music/disc.flac','/music','disc.flac',12,10,1,
+        'First','first','Album','album','Artist','artist',1,1,1000,'file:///music/disc.flac');")
       .execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let database = Database::open(&path).await.unwrap();
@@ -2043,6 +2073,20 @@ async fn released_cue_segments_keep_distinct_user_facts_and_backing_file() {
     assert_eq!(parts[1].0, "file:///music/disc.cue#2");
     assert_eq!((parts[0].2, parts[0].3), (0, 1000));
     assert_eq!((parts[1].2, parts[1].3), (1000, 2000));
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT media_uri FROM tracks ORDER BY media_uri")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap(),
+        uris
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>("SELECT media_uri,access_uri FROM local_locators")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        (uris[0].clone(), "file:///music/disc.flac".into())
+    );
     raw.close().await.unwrap();
     database.close().await.unwrap();
 }

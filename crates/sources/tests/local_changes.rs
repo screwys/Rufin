@@ -11,6 +11,37 @@ use lofty::tag::{Tag, TagType};
 use sources::{LocalFolderHostInput, LocalLiveChange, Source, SourceId, SourceSetupInput};
 
 #[tokio::test]
+async fn unavailable_local_root_preserves_catalog_and_can_retry() {
+    let directory = tempfile::tempdir().unwrap();
+    let root = directory.path().join("music");
+    let offline = directory.path().join("offline");
+    fs::create_dir(&root).unwrap();
+    let track = root.join("track.wav");
+    write_silent_wav(&track, 1).unwrap();
+    let database = Database::open(directory.path().join("library.sqlite")).await.unwrap();
+    let (configuration, source, _) = Source::connect(
+        SourceId::new("test-source"),
+        SourceSetupInput::Local(LocalFolderHostInput { roots: vec![root.clone()] }),
+    ).await.unwrap().into_parts();
+    let cancelled = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    fs::rename(&root, &offline).unwrap();
+    assert!(matches!(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await,
+        Err(sources::SourceError::IncompleteScan { outcome: ScanOutcome::Failed, .. })));
+    fs::rename(&offline, &root).unwrap();
+    let initial = publication(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await.unwrap());
+    assert_eq!(initial.catalog_revision, 1);
+    fs::rename(&root, &offline).unwrap();
+    assert!(source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled.clone()).await.is_err());
+    assert!(source.catch_up_local(&database, initial.source, &|_| {}, cancelled.clone()).await.is_err());
+    assert!(source.apply_local_change(&database, initial.source,
+        LocalLiveChange::Paths { paths: vec![track], rename: None }).await.is_err());
+    assert_eq!(track_count(&database, initial).await, 1);
+    fs::rename(&offline, &root).unwrap();
+    source.manual_refresh(&database, &configuration.name, &|_| {}, cancelled).await.unwrap();
+    assert_eq!(track_count(&database, initial).await, 1);
+}
+
+#[tokio::test]
 async fn one_local_path_republishes_only_its_component() {
     let root = tempfile::tempdir().expect("music root");
     let first = root.path().join("first.wav");

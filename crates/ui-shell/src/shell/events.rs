@@ -536,6 +536,13 @@ fn apply_source_refresh_feedback(
         } if matches!(previous, SourceOperation::Refreshing { .. }) => {
             finish_source_refresh_feedback(shell, Some(message), Duration::from_secs(5));
         }
+        SourceOperation::Failed {
+            message,
+            add_form: false,
+            ..
+        } => {
+            shell.control_feedback.show_feedback_toast(message.clone());
+        }
         SourceOperation::Adding { .. } | SourceOperation::Switching { .. }
             if matches!(previous, SourceOperation::Refreshing { .. }) =>
         {

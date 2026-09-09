@@ -941,20 +941,16 @@ impl SourceOwner {
             return;
         };
         let progress = |_: SourceReadProgress| {};
-        match source
+        let result = source
             .catch_up_local(
                 &selected.database,
                 selected.source_key,
                 &progress,
-                cancelled,
+                Arc::clone(&cancelled),
             )
-            .await
-        {
-            Ok(outcome) => {
-                self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
-                    .await
-            }
-            Err(error) => warn!(%error, "Local startup catch-up failed"),
+            .await;
+        if !cancelled.load(Ordering::Relaxed) {
+            self.finish_refresh(selected.source_id(), result).await;
         }
     }
 
@@ -989,17 +985,29 @@ impl SourceOwner {
                 Arc::clone(&acquisition),
             )
             .await;
-        match outcome {
-            Ok(outcome) => {
-                self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
-                    .await
-            }
-            Err(SourceError::Cancelled) => {}
-            Err(error) => self.shared.warn_nonfatal(&error.to_string()),
-        }
         if self.shared.acquisition_is_current(&acquisition) {
-            self.publish_operation(SourceOperation::Idle).await;
+            self.finish_refresh(selected.source_id(), outcome).await;
         }
+    }
+
+    async fn finish_refresh(
+        &self,
+        source_id: &SourceId,
+        result: sources::SourceResult<ScanOutcome>,
+    ) {
+        if let Ok(outcome) | Err(SourceError::IncompleteScan { outcome, .. }) = &result {
+            self.accept_scan(source_id, *outcome, CatalogChange::Acquired)
+                .await;
+        }
+        let operation = match result {
+            Ok(_) | Err(SourceError::Cancelled) => SourceOperation::Idle,
+            Err(error) => SourceOperation::Failed {
+                source_id: Some(source_id.clone()),
+                message: error.to_string(),
+                add_form: false,
+            },
+        };
+        self.publish_operation(operation).await;
     }
 
     async fn install_connected_edit(
@@ -1065,8 +1073,16 @@ impl SourceOwner {
                             &|_| {},
                             Arc::clone(&cancelled),
                         )
-                        .await
-                        .map_err(string_error)?;
+                        .await;
+                    if let Err(SourceError::IncompleteScan { outcome, .. }) = &outcome {
+                        self.accept_scan(
+                            &replacement.configuration.source_id,
+                            *outcome,
+                            CatalogChange::Broad,
+                        )
+                        .await;
+                    }
+                    let outcome = outcome.map_err(string_error)?;
                     self.accept_scan(
                         &replacement.configuration.source_id,
                         outcome,
@@ -1264,20 +1280,23 @@ impl SourceOwner {
             progress_started.store(true, Ordering::Release);
             publish(value);
         };
-        if let Ok(Some(outcome)) = source
+        let result = source
             .refresh_if_needed(
                 &selected.database,
                 &selected.configuration.name,
                 &progress,
                 Arc::clone(&acquisition),
             )
-            .await
-        {
-            self.accept_scan(selected.source_id(), outcome, CatalogChange::Acquired)
-                .await;
-        }
-        if progressed.load(Ordering::Acquire) {
-            self.publish_operation(SourceOperation::Idle).await;
+            .await;
+        if self.shared.acquisition_is_current(&acquisition) {
+            match result {
+                Ok(Some(outcome)) => self.finish_refresh(selected.source_id(), Ok(outcome)).await,
+                Err(error) => self.finish_refresh(selected.source_id(), Err(error)).await,
+                Ok(None) if progressed.load(Ordering::Acquire) => {
+                    self.publish_operation(SourceOperation::Idle).await
+                }
+                Ok(None) => {}
+            }
         }
     }
 
@@ -1695,8 +1714,14 @@ impl SourceOwner {
                         &progress,
                         Arc::clone(&cancelled),
                     )
-                    .await
-                    .map_err(string_error)?;
+                    .await;
+                let (outcome, scan_error) = match outcome {
+                    Ok(outcome) => (outcome, None),
+                    Err(SourceError::IncompleteScan { outcome, error }) => {
+                        (outcome, Some(error.to_string()))
+                    }
+                    Err(error) => return Err(error.to_string()),
+                };
                 if !owner.shared.acquisition_is_current(&cancelled) {
                     return Ok(());
                 }
@@ -1706,7 +1731,9 @@ impl SourceOwner {
                     | ScanOutcome::ArtworkChanged(publication)
                     | ScanOutcome::Identical(publication) => publication,
                     ScanOutcome::Stale | ScanOutcome::Failed => {
-                        return Err("The initial library scan did not complete".to_string());
+                        return Err(scan_error.unwrap_or_else(|| {
+                            "The initial library scan did not complete".to_string()
+                        }));
                     }
                 };
                 owner
@@ -1721,6 +1748,9 @@ impl SourceOwner {
                 owner
                     .accept_scan(&configuration.source_id, outcome, CatalogChange::Acquired)
                     .await;
+                if let Some(error) = scan_error {
+                    return Err(error);
+                }
                 Ok(())
             }
             .await;

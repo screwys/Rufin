@@ -150,9 +150,9 @@ impl Database {
         let path = path.as_ref();
         let catalog = catalog.as_ref();
         if path.exists() {
-            let migrated = Self::migrate_released(path, path, configured, selected).await;
+            let migrated = Self::migrate_released(path, path, catalog, configured, selected).await;
             if let Err(error) = migrated {
-                if !is_store_content_failure(&error) {
+                if !is_corrupt_store(&error) {
                     return Err(error);
                 }
                 tracing::warn!(%error, "could not migrate released Store; opening fresh state");
@@ -183,7 +183,12 @@ impl Database {
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<Self> {
         if !path.exists() && legacy.exists() {
-            if let Err(error) = Self::migrate_released(legacy, path, configured, selected).await {
+            if let Err(error) =
+                Self::migrate_released(legacy, path, catalog, configured, selected).await
+            {
+                if !is_corrupt_store(&error) {
+                    return Err(error);
+                }
                 tracing::warn!(%error, "could not migrate old Store; original retained");
                 let mut database = Self::open_final(path, catalog).await?;
                 database.fresh_start = true;
@@ -196,6 +201,7 @@ impl Database {
     async fn migrate_released(
         input: &Path,
         destination: &Path,
+        catalog: &Path,
         configured: &[crate::SourceId],
         selected: Option<&crate::SourceId>,
     ) -> LibraryResult<()> {
@@ -205,7 +211,8 @@ impl Database {
         reader.close().await?;
         let version = version?;
         if (1..=43).contains(&version) {
-            crate::migration::import_released(input, destination, configured, selected).await?;
+            crate::migration::import_released(input, destination, catalog, configured, selected)
+                .await?;
         } else if input != destination {
             Self::relocate(input, destination).await?;
         }
@@ -532,6 +539,12 @@ pub(crate) fn preserve_store(path: &Path) -> std::io::Result<()> {
         }
     }
     Ok(())
+}
+
+fn is_corrupt_store(error: &LibraryError) -> bool {
+    matches!(error, LibraryError::Sqlite(sqlx::Error::Database(error))
+        if error.code().and_then(|code| code.parse::<i32>().ok())
+            .is_some_and(|code| matches!(code & 0xff, 11 | 26)))
 }
 
 fn is_store_content_failure(error: &LibraryError) -> bool {
