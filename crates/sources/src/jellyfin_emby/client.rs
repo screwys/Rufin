@@ -1411,6 +1411,150 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn playback_userdata_updates_preserve_catalog_artwork_and_live_favorites() {
+        for kind in [crate::ServerKind::Jellyfin, crate::ServerKind::Emby] {
+            let server = MockServer::start().await;
+            let source = JellyfinEmbySource::open(
+                JellyfinEmbySourceConfig {
+                    emby_connect: false,
+                    kind,
+                    base_url: server.uri(),
+                    server_id: None,
+                    user_id: "user".into(),
+                    username: "listener".into(),
+                    trust_invalid_cert: false,
+                    use_instant_mix: false,
+                },
+                "token".into(),
+                "device".into(),
+            )
+            .unwrap();
+            let album = serde_json::json!({
+                "Id":"album", "Name":"Album", "Type":"MusicAlbum",
+                "AlbumArtists":[{"Id":"artist","Name":"Artist"}],
+                "GenreItems":[{"Id":"genre","Name":"Rock"}],
+                "ImageTags":{"Primary":"album-cover"}
+            });
+            let track = serde_json::json!({
+                "Id":"track", "Name":"Track", "Type":"Audio", "AlbumId":"album", "Album":"Album",
+                "ArtistItems":[{"Id":"artist","Name":"Artist"}],
+                "AlbumArtists":[{"Id":"artist","Name":"Artist"}],
+                "GenreItems":[{"Id":"genre","Name":"Rock"}],
+                "AlbumPrimaryImageTag":"album-cover", "UserData":{"PlayCount":2,"IsFavorite":false}
+            });
+            let root = tempfile::tempdir().unwrap();
+            let database = library::Database::open(root.path().join("library.sqlite"))
+                .await
+                .unwrap();
+            let mut scan = library::Scan::begin(&database, "source", "Server", "server", None)
+                .await
+                .unwrap();
+            stage_album(&mut scan, album_from_item(kind, album.clone()).unwrap())
+                .await
+                .unwrap();
+            stage_track(&mut scan, track_from_item(kind, track.clone()).unwrap())
+                .await
+                .unwrap();
+            super::stage_artist(&mut scan, super::artist_from_item(kind, serde_json::json!({
+                "Id":"artist","Name":"Artist","Type":"MusicArtist",
+                "ProviderIds":{"MusicBrainzArtist":"artist-mbid"},
+                "ImageTags":{"Primary":"artist-cover"},"UserData":{"IsFavorite":true,"Rating":8}
+            })).unwrap()).await.unwrap();
+            super::stage_genre(
+                &mut scan,
+                super::genre_from_item(
+                    kind,
+                    serde_json::json!({
+                        "Id":"genre","Name":"Rock","ImageTags":{"Primary":"genre-cover"}
+                    }),
+                )
+                .unwrap(),
+            )
+            .await
+            .unwrap();
+            let initial = scan.finish().await.unwrap();
+            let library::ScanOutcome::Changed(publication) = initial else {
+                panic!("initial catalog");
+            };
+            let uri = library::source_entity_uri(
+                &crate::SourceId::new("source"),
+                "track",
+                &kind.object_id("track", "track"),
+            );
+            let cancel = library::ReadCancellation::new();
+            let before = database
+                .track_row_by_uri(&uri, &cancel)
+                .await
+                .unwrap()
+                .unwrap();
+            for favorite in [false, true, true] {
+                server.reset().await;
+                let mut updated = track.clone();
+                updated["UserData"] = serde_json::json!({"PlayCount":3,"IsFavorite":favorite});
+                for (endpoint, body) in [
+                    (
+                        source.item_url("track").unwrap().path().to_string(),
+                        updated,
+                    ),
+                    (
+                        source.item_url("album").unwrap().path().to_string(),
+                        album.clone(),
+                    ),
+                    (
+                        super::endpoint(&source.base_url, "Items/track/Ancestors")
+                            .unwrap()
+                            .path()
+                            .to_string(),
+                        serde_json::json!([]),
+                    ),
+                ] {
+                    Mock::given(method("GET"))
+                        .and(path(endpoint))
+                        .respond_with(ResponseTemplate::new(200).set_body_json(body))
+                        .mount(&server)
+                        .await;
+                }
+                let prior = database
+                    .track_row_by_uri(&uri, &cancel)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                let outcome = source
+                    .apply_live_items(&database, "source", vec!["track".into()], vec![])
+                    .await
+                    .unwrap();
+                if prior.favorite == favorite {
+                    assert!(
+                        matches!(outcome, library::ScanOutcome::Identical(_)),
+                        "{kind:?}: {outcome:?}"
+                    );
+                } else {
+                    assert!(
+                        matches!(outcome, library::ScanOutcome::Changed(_)),
+                        "favorite must publish"
+                    );
+                }
+                let after = database
+                    .track_row_by_uri(&uri, &cancel)
+                    .await
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(after.favorite, favorite);
+                assert_eq!(after.artwork_binding, before.artwork_binding);
+                let artist_key = after.artists[0].artist_key;
+                let artist = database
+                    .artist_rows(publication.source, &[artist_key], false, None, &cancel)
+                    .await
+                    .unwrap()
+                    .pop()
+                    .unwrap();
+                assert!(artist.favorite);
+                assert_eq!(artist.musicbrainz_artist_id.as_deref(), Some("artist-mbid"));
+            }
+        }
+    }
+
+    #[tokio::test]
     async fn exact_track_change_closes_over_its_album_and_removal_fetches_nothing() {
         let server = MockServer::start().await;
         Mock::given(method("GET"))

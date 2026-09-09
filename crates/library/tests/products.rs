@@ -8,6 +8,204 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
+    let fixture = fixture().await;
+    let mut raw = connection(&fixture.path).await;
+    // The two albums have distinct artists and no shared genre.
+    for sql in ["DELETE FROM track_genres", "DELETE FROM album_genres"] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    let cancel = ReadCancellation::new();
+    for variation in [0, 2, 4, 99] {
+        for seed in [
+            RadioSeed::Album(fixture.albums[0]),
+            RadioSeed::Track(fixture.track_uris[0].clone()),
+        ] {
+            let mut candidates = fixture
+                .database
+                .radio_candidates(
+                    fixture.source,
+                    seed.clone(),
+                    &[],
+                    20,
+                    false,
+                    variation,
+                    &cancel,
+                )
+                .await
+                .unwrap();
+            if matches!(seed, RadioSeed::Track(_)) {
+                assert_eq!(candidates.first(), Some(&fixture.track_uris[1]));
+            }
+            candidates.sort();
+            let mut expected = fixture.track_uris[if matches!(seed, RadioSeed::Album(_)) {
+                2
+            } else {
+                1
+            }..]
+                .to_vec();
+            expected.sort();
+            assert_eq!(candidates, expected, "{seed:?}, variation {variation}");
+        }
+    }
+    sqlx::query("INSERT INTO queue_occurrences(object_id,media_uri,position,traversal_position,provenance_kind,title,artist,album,duration_millis) VALUES ('queued',?1,0,0,'manual','Beta','Artist A','Album A',1000)")
+        .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
+    for seed in [
+        RadioSeed::Album(fixture.albums[0]),
+        RadioSeed::Track(fixture.track_uris[0].clone()),
+    ] {
+        assert_eq!(
+            fixture
+                .database
+                .radio_candidates(
+                    fixture.source,
+                    seed,
+                    &[fixture.track_uris[2].clone()],
+                    20,
+                    false,
+                    3,
+                    &cancel,
+                )
+                .await
+                .unwrap(),
+            vec![fixture.track_uris[3].clone()]
+        );
+    }
+}
+
+#[tokio::test]
+async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('other','Other','other',zeroblob(32),zeroblob(32))")
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis) SELECT source_key,'track-2','test:other','Other','other','','','other',1000 FROM sources WHERE object_id='other'")
+        .execute(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,writable) VALUES(?1,'native','Native','native','native',0)")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    sqlx::query("INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,position) SELECT playlist_key,'entry',?1,0 FROM catalog.native_playlists WHERE object_id='native'")
+        .bind(&fixture.track_uris[0]).execute(&mut raw).await.unwrap();
+    let native = fixture
+        .database
+        .playlist_key_by_object(fixture.source, "native", &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    let local = fixture
+        .database
+        .create_playlist(
+            None,
+            "Mixed",
+            &[fixture.track_uris[0].clone(), "test:other".into()],
+        )
+        .await
+        .unwrap()
+        .unwrap()
+        .0;
+    sqlx::query("INSERT INTO queue_occurrences(object_id,media_uri,position,traversal_position,provenance_kind,title,artist,album,duration_millis) VALUES ('queued',?1,0,0,'manual','Beta','Artist A','Album A',1000)")
+        .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
+    for seed in [
+        RadioSeed::Playlist(native),
+        RadioSeed::Playlist(local),
+        RadioSeed::Track(fixture.track_uris[0].clone()),
+        RadioSeed::Album(fixture.albums[0]),
+        RadioSeed::Artist(fixture.artists[0]),
+        RadioSeed::AlbumArtist(fixture.artists[0]),
+        RadioSeed::Genre(fixture.genre),
+    ] {
+        assert_eq!(
+            fixture.database.radio_source(&seed, &cancel).await.unwrap(),
+            Some((fixture.source, library::SourceId::new("source")))
+        );
+        let ids = ["track-2", "track-1", "track-2", "missing", "track-3"].map(String::from);
+        assert_eq!(
+            fixture
+                .database
+                .admit_radio_candidates(fixture.source, &seed, &ids, &cancel)
+                .await
+                .unwrap(),
+            fixture.track_uris[2..]
+        );
+    }
+    for seed in [
+        RadioSeed::Playlist(native),
+        RadioSeed::Playlist(local),
+        RadioSeed::Track(fixture.track_uris[0].clone()),
+        RadioSeed::Album(fixture.albums[0]),
+    ] {
+        assert!(
+            fixture
+                .database
+                .admit_radio_candidates(fixture.source, &seed, &["track-0".into()], &cancel)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        let result = fixture
+            .database
+            .radio_candidates(fixture.source, seed, &[], 20, false, 0, &cancel)
+            .await
+            .unwrap();
+        assert_eq!(result, fixture.track_uris[2..]);
+    }
+}
+
+#[tokio::test]
+async fn radio_prefers_related_album_and_track_metadata_before_source_fill() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    // Candidate tracks retain only album genres; the seed retains only a track genre.
+    for sql in ["DELETE FROM track_artists", "DELETE FROM album_artists"] {
+        sqlx::query(sql).execute(&mut raw).await.unwrap();
+    }
+    sqlx::query("DELETE FROM album_genres WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("DELETE FROM track_genres WHERE track_key<>?1")
+        .bind(fixture.tracks[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    assert_eq!(
+        fixture
+            .database
+            .radio_candidates(
+                fixture.source,
+                RadioSeed::Track(fixture.track_uris[0].clone()),
+                &[],
+                1,
+                false,
+                0,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        vec![fixture.track_uris[2].clone()]
+    );
+    // Album radio also recognizes the candidate's direct track genre.
+    assert_eq!(
+        fixture
+            .database
+            .radio_candidates(
+                fixture.source,
+                RadioSeed::Album(fixture.albums[1]),
+                &[],
+                1,
+                false,
+                2,
+                &cancel
+            )
+            .await
+            .unwrap(),
+        vec![fixture.track_uris[0].clone()]
+    );
+}
+
+#[tokio::test]
 async fn smart_toolbar_sorts_and_filters_eleven_members_without_changing_definition_limits() {
     use library::TrackSort;
     let fixture = fixture().await;

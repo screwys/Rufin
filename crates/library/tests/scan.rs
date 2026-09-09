@@ -430,6 +430,77 @@ async fn artist_sort_names_survive_sparse_credits_and_reset_with_complete_record
     }
 }
 
+#[tokio::test]
+async fn sparse_artist_credits_preserve_metadata_and_complete_records_can_clear_it() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("library.sqlite");
+    let database = Database::open(&path).await.unwrap();
+    let mut scan = Scan::begin(&database, "source", "Source", "source", None)
+        .await
+        .unwrap();
+    scan.write_artist(
+        "artist",
+        "Artist",
+        "artist",
+        Some("artist"),
+        Some("mbid"),
+        None,
+        Some(false),
+        Some(8),
+    )
+    .await
+    .unwrap();
+    scan.finish().await.unwrap();
+    for point in [true, false] {
+        let mut scan = if point {
+            Scan::begin_items(&database, "source").await.unwrap()
+        } else {
+            Scan::begin(&database, "source", "Source", "source", None)
+                .await
+                .unwrap()
+        };
+        scan.write_artist("artist", "Artist", "artist", None, None, None, None, None)
+            .await
+            .unwrap();
+        if !point {
+            scan.write_artist(
+                "artist",
+                "Artist",
+                "artist",
+                Some("artist"),
+                None,
+                None,
+                Some(false),
+                None,
+            )
+            .await
+            .unwrap();
+            scan.write_artist("artist", "Artist", "artist", None, None, None, None, None)
+                .await
+                .unwrap();
+        }
+        let outcome = scan.finish().await.unwrap();
+        if point {
+            assert!(matches!(outcome, ScanOutcome::Identical(_)));
+        }
+        let mut reader = connection(&path).await;
+        let metadata = sqlx::query_as::<_, (Option<String>, Option<i64>)>(
+            "SELECT musicbrainz_artist_id,source_rating FROM artists WHERE object_id='artist'",
+        )
+        .fetch_one(&mut reader)
+        .await
+        .unwrap();
+        assert_eq!(
+            metadata,
+            if point {
+                (Some("mbid".into()), Some(80))
+            } else {
+                (None, None)
+            }
+        );
+    }
+}
+
 async fn write_small_catalog(
     database: &Database,
     freshness: &str,

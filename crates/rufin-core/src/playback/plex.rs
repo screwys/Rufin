@@ -947,7 +947,7 @@ impl PlaybackOwner {
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
-                let (source, context) = {
+                let (_, context) = {
                     let _guard = plex.commands.lock().await;
                     plex.current().await?;
                     plex.connection()
@@ -957,16 +957,9 @@ impl PlaybackOwner {
                 {
                     return Ok(());
                 }
-                let source_key = plex
-                    .database
-                    .source_identity_key(&context.source_id)
-                    .await
-                    .map_err(string_error)?
-                    .ok_or("Auto DJ source is unavailable")?;
                 let candidates = crate::radio::radio_candidates(
                     &plex.database,
-                    source_key,
-                    Some(&source),
+                    plex.source_owner.clone(),
                     library::RadioSeed::Track(request.seed_media_uri),
                     request.requested_count,
                 )
@@ -1003,20 +996,12 @@ impl PlaybackOwner {
         let Some(plex) = self.plex.lock().unwrap_or_else(|p| p.into_inner()).clone() else {
             return false;
         };
-        let Some(selected) = self
-            .source_owner()
-            .and_then(|owner| owner.current_session())
-            .and_then(|session| session.resolve())
-        else {
-            return true;
-        };
         let request = request.clone();
         self.runtime.spawn(async move {
             let result = async {
                 let candidates = crate::radio::radio_candidates(
-                    &selected.database,
-                    selected.source_key,
-                    selected.source.as_deref(),
+                    &plex.database,
+                    plex.source_owner.clone(),
                     request.seed,
                     20,
                 )
