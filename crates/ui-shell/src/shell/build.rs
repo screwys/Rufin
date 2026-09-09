@@ -234,6 +234,7 @@ pub async fn build(
     compact_nav_slot.set_width_request(COMPACT_RAIL_WIDTH);
     compact_nav_slot.set_min_content_width(COMPACT_RAIL_WIDTH);
     compact_nav_slot.set_max_content_width(COMPACT_RAIL_WIDTH);
+    let compact_nav_slot = ui_shared::controls::window_drag_handle(&compact_nav_slot);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
     normal_sidebar_title.set_label(DISPLAY_NAME);
     compact_main_menu_label.set_label(&crate::shell::navigation::compact_sidebar_label_text(

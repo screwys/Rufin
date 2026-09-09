@@ -1,6 +1,15 @@
 use crate::localization::{bind_widget_accessible_label, bind_widget_tooltip};
 use adw::prelude::*;
 use localization::tr;
+
+pub fn window_drag_handle(child: &impl IsA<gtk::Widget>) -> gtk::WindowHandle {
+    let handle = gtk::WindowHandle::new();
+    handle.set_hexpand(child.compute_expand(gtk::Orientation::Horizontal));
+    handle.set_vexpand(child.compute_expand(gtk::Orientation::Vertical));
+    handle.set_child(Some(child));
+    handle
+}
+
 pub const PLAY_ICON: &str = "rufin-media-playback-start-symbolic";
 pub const PLAY_NEXT_ICON: &str = "rufin-mail-forward-symbolic";
 pub const PLAY_LATER_ICON: &str = "rufin-go-last-symbolic";

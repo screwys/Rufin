@@ -255,6 +255,7 @@ impl CatalogUi {
             first_detail_rows,
             settings.layout,
         );
+        let models = Rc::new(RefCell::new(models));
 
         let search = gtk::SearchEntry::new();
         bind_search_placeholder(&search, "Search");
@@ -262,7 +263,7 @@ impl CatalogUi {
         let content = album_collection_projection(self, models.clone(), key);
         let mut page = self.library_page_shell(LibraryPageShellOptions {
             key,
-            empty: models.is_empty(),
+            empty: models.borrow().is_empty(),
             empty_body: if favorites_only {
                 msgid("No favorite albums yet")
             } else {
@@ -271,18 +272,19 @@ impl CatalogUi {
             search: search.clone(),
             has_visible_results: {
                 let models = models.clone();
-                Rc::new(move || !models.is_empty())
+                Rc::new(move || !models.borrow().is_empty())
             },
             content: content.scrolling_widget(),
         });
         let apply = {
             let shell = Rc::downgrade(self);
+            let selected = selected.clone();
             let models = models.clone();
             let content = content.clone();
             let page = page.clone();
             let applied_settings = Rc::clone(&applied_settings);
             Rc::new(
-                move |request: CollectionReadRequest,
+                move |_request: CollectionReadRequest,
                       result: Result<
                     (AlbumCollectionOrder, usize, Vec<library::AlbumRow>),
                     String,
@@ -295,14 +297,35 @@ impl CatalogUi {
                     }
                     match result {
                         Ok((order, first_row_position, first_rows)) => {
-                            if !models.replace_prepared(order, first_row_position, first_rows) {
+                            let settings = shell.settings.current.borrow().library_list(key);
+                            let current_models = models.borrow().clone();
+                            let replace_model = current_models.rows.is_none()
+                                != (settings.layout == LibraryLayout::Detail);
+                            if replace_model {
+                                models.replace(AlbumCollectionModels::new(
+                                    &selected,
+                                    order,
+                                    first_row_position,
+                                    first_rows,
+                                    Vec::new(),
+                                    settings.layout,
+                                ));
+                            } else if !current_models.replace_prepared(
+                                order,
+                                first_row_position,
+                                first_rows,
+                            ) {
                                 warn!("rejected a mismatched prepared Albums page");
                                 return;
                             }
-                            content.apply_settings(&request.settings);
-                            page.apply_library_list_settings(key, &request.settings);
+                            content.apply_settings(&settings);
+                            page.apply_library_list_settings(key, &settings);
+                            let models = models.borrow().clone();
                             page.set_empty(models.is_empty());
-                            applied_settings.replace(request.settings);
+                            if replace_model {
+                                models.resume_initial_demand();
+                            }
+                            applied_settings.replace(settings);
                         }
                         Err(error) => warn!(%error, "failed to refresh Albums order"),
                     }
@@ -389,6 +412,7 @@ impl CatalogUi {
             let shell = Rc::downgrade(self);
             let query = Rc::clone(&query);
             let content = content.clone();
+            let models = models.clone();
             let page = page.clone();
             let applied_settings = Rc::clone(&applied_settings);
             let read = Rc::clone(&read);
@@ -398,13 +422,13 @@ impl CatalogUi {
                 };
                 let settings = shell.settings.current.borrow().library_list(key);
                 let previous = applied_settings.borrow().clone();
-                if previous.layout != settings.layout {
-                    (shell.refresh)();
-                    return;
+                if models.borrow().rows.is_none() == (settings.layout == LibraryLayout::Detail) {
+                    content.apply_settings(&settings);
                 }
-                content.apply_settings(&settings);
                 page.apply_library_list_settings(key, &settings);
-                if previous.sort_key != settings.sort_key
+                if (previous.layout == LibraryLayout::Detail)
+                    != (settings.layout == LibraryLayout::Detail)
+                    || previous.sort_key != settings.sort_key
                     || previous.descending != settings.descending
                 {
                     read.request_with(CollectionReadRequest {
@@ -417,12 +441,13 @@ impl CatalogUi {
         };
         let favorite_models = models.clone();
 
-        let download_rows = models.rows.clone();
+        let download_models = models.clone();
         let downloads = crate::collection_download_change(move |identity, downloaded| {
             let Some(uri) = identity.strip_prefix("album:") else {
                 return;
             };
-            if let Some(rows) = &download_rows {
+            let rows = download_models.borrow().album_rows();
+            if let Some(rows) = rows {
                 rows.update_matching(
                     |row| {
                         row.media_uri == uri
@@ -442,13 +467,17 @@ impl CatalogUi {
             .with_item_navigation(content.item_navigation())
             .with_initial_demand({
                 let models = models.clone();
-                Rc::new(move || models.resume_initial_demand())
+                Rc::new(move || {
+                    let models = models.borrow().clone();
+                    models.resume_initial_demand();
+                })
             })
             .with_favorite_settlement(Rc::new(move |settlement| {
                 let library::FavoriteTarget::Album(album) = settlement.target else {
                     return;
                 };
-                favorite_models.update_favorite(&album, settlement.effective);
+                let models = favorite_models.borrow().clone();
+                models.update_favorite(&album, settlement.effective);
                 let settings = applied_settings.borrow().clone();
                 if favorites_only || settings.sort_key == crate::LibraryField::Favorite {
                     favorite_read.request_with(CollectionReadRequest {

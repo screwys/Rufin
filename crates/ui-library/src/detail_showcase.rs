@@ -660,7 +660,7 @@ pub fn detail_showcase_frame_with_back(shell: &Rc<CatalogUi>, header: gtk::Widge
     }
     overlay.add_overlay(&back);
     overlay.set_measure_overlay(&back, false);
-    overlay.upcast()
+    ui_shared::controls::window_drag_handle(&overlay).upcast()
 }
 
 fn update_tiny_detail_showcase(widget: &impl IsA<gtk::Widget>, width: i32) {

@@ -13,7 +13,7 @@
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>
     <property name="child">
-      <object class="GtkBox">
+      <object class="GtkBox" id="queue_layout">
         <property name="orientation">vertical</property>
         <property name="vexpand">true</property>
         <child>

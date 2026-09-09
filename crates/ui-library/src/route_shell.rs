@@ -465,7 +465,7 @@ impl CatalogUi {
                 sort_dropdown_for_width.set_width_request(sort_width);
             }
         });
-        let widget = owner.upcast();
+        let widget = ui_shared::controls::window_drag_handle(&owner).upcast();
         let projection = LibraryToolbarProjection {
             state: toolbar_state,
             widget,
