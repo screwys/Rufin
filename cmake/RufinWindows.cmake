@@ -75,10 +75,6 @@ install(DIRECTORY "${RUFIN_WINDOWS_GLIB_PREFIX}/share/glib-2.0/schemas/"
 install(DIRECTORY "${RUFIN_WINDOWS_GSTREAMER_PREFIX}/share/gstreamer-1.0/"
   DESTINATION share/gstreamer-1.0)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/gtk-4.0/" DESTINATION share/gtk-4.0)
-install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/Adwaita/"
-  DESTINATION share/icons/Adwaita)
-install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/AdwaitaLegacy/"
-  DESTINATION share/icons/AdwaitaLegacy)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/hicolor/"
   DESTINATION share/icons/hicolor)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/"

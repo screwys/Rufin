@@ -156,6 +156,15 @@ fn application() -> (adw::Application, Rc<RefCell<ApplicationOptions>>) {
         .application_id(APP_ID)
         .flags(gio::ApplicationFlags::empty())
         .build();
+    #[cfg(target_os = "windows")]
+    app.add_main_option(
+        "updated-restart",
+        0u8.into(),
+        gtk::glib::OptionFlags::HIDDEN,
+        gtk::glib::OptionArg::String,
+        "Resume after the update handshake handled by the launcher",
+        Some("VERSION"),
+    );
     app.add_main_option(
         GTK_DECORATION_LAYOUT_OPTION,
         0u8.into(),

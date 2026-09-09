@@ -13,6 +13,8 @@ use std::sync::Arc;
 use std::{fs, path::Path};
 use tracing::info;
 
+const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
+
 fn main() -> ExitCode {
     #[cfg(target_os = "macos")]
     if let Some(result) = restart_in_macos_bundle() {
@@ -34,14 +36,14 @@ fn main() -> ExitCode {
         None => false,
     };
     let settings = app::startup_settings(&paths::roots());
-    if let Some(result) = restart_with_language(&settings.load().ui.language) {
+    if let Some(result) = restart_with_language(&settings.load().ui.language, updated_restart) {
         return result;
     }
     if let Err(error) = localization::initialize() {
         let _ = writeln!(io::stderr().lock(), "Could not initialize gettext: {error}");
     }
-    let _desktop_platform = desktop_integration::Platform::initialize();
     let diagnostics = diagnostics::Diagnostics::install(paths::state_dir());
+    let _desktop_platform = desktop_integration::Platform::initialize();
     info!("starting Rufin native shell");
 
     let initial_settings = settings.load().ui.clone();
@@ -80,7 +82,7 @@ fn main() -> ExitCode {
     }
 }
 
-fn restart_with_language(saved_language: &str) -> Option<ExitCode> {
+fn restart_with_language(saved_language: &str, updated_restart: bool) -> Option<ExitCode> {
     let language = localization::process_language(saved_language)?;
     if env::var("LANGUAGE").ok().as_deref() == Some(language.as_str()) {
         return None;
@@ -90,6 +92,10 @@ fn restart_with_language(saved_language: &str) -> Option<ExitCode> {
     command
         .args(env::args_os().skip(1))
         .env("LANGUAGE", language);
+    if updated_restart {
+        // The helper has already acknowledged this version before the language relaunch.
+        command.env(UPDATED_RESTART_VERSION_ENV, env!("CARGO_PKG_VERSION"));
+    }
 
     #[cfg(unix)]
     {
@@ -105,7 +111,16 @@ fn restart_with_language(saved_language: &str) -> Option<ExitCode> {
     #[cfg(not(unix))]
     {
         match command.spawn() {
-            Ok(_) => Some(ExitCode::SUCCESS),
+            Ok(child) => {
+                #[cfg(target_os = "windows")]
+                if updated_restart
+                    && let Err(error) =
+                        desktop_integration::Platform::allow_foreground_activation(child.id())
+                {
+                    let _ = writeln!(io::stderr().lock(), "{error}");
+                }
+                Some(ExitCode::SUCCESS)
+            }
             Err(error) => {
                 let _ = writeln!(
                     io::stderr().lock(),
@@ -286,7 +301,11 @@ fn updated_restart_argument() -> Option<Result<(), String>> {
                 "The reopened Rufin version does not match the installed update.".to_string(),
             );
         }
-        windows_updater::wait_for_updated_restart()
+        if env::var_os(UPDATED_RESTART_VERSION_ENV).as_deref() == Some(version.as_os_str()) {
+            Ok(())
+        } else {
+            windows_updater::wait_for_updated_restart()
+        }
     })())
 }
 

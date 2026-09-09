@@ -66,7 +66,15 @@ impl CoverHoverControls {
         let transport_for_enter = self.transport.clone();
         let favorite_for_enter = self.favorite.clone();
         let menu_for_enter = self.menu.clone();
-        motion.connect_enter(move |_, _, _| {
+        let show_controls = move |motion: &gtk::EventControllerMotion, x: f64, y: f64| {
+            // GTK grab restoration can emit enter at (-1, -1) for an unrelated
+            // cover. Only reveal controls for a position inside this cover.
+            if !motion
+                .widget()
+                .is_some_and(|overlay| overlay.contains(x, y))
+            {
+                return;
+            }
             shade_for_enter.set_visible(true);
             transport_for_enter.set_visible(true);
             if let Some(favorite) = favorite_for_enter.as_ref() {
@@ -75,7 +83,11 @@ impl CoverHoverControls {
             if let Some(menu) = menu_for_enter.as_ref() {
                 menu.set_visible(true);
             }
-        });
+        };
+        // A rejected synthetic enter can still leave GTK's pointer state set;
+        // real motion must reveal controls even if GTK emits no second enter.
+        motion.connect_motion(show_controls.clone());
+        motion.connect_enter(show_controls);
         let shade_for_leave = self.shade.clone();
         let transport_for_leave = self.transport.clone();
         let favorite_for_leave = self.favorite.clone();

@@ -156,8 +156,6 @@ foreach(RUFIN_MACOS_RUNTIME_DIRECTORY
   "share/glib-2.0/schemas"
   "share/gstreamer-1.0"
   "share/gtk-4.0"
-  "share/icons/Adwaita"
-  "share/icons/AdwaitaLegacy"
   "share/icons/hicolor"
   "share/mime")
   rufin_macos_install_directory(

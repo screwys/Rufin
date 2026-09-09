@@ -23,6 +23,7 @@ pub struct FullscreenPlayerParts {
     pub root: gtk::Overlay,
     pub visible: Cell<bool>,
     pub animation_tick: RefCell<Option<gtk::TickCallbackId>>,
+    pub slide_offset: Rc<Cell<i32>>,
     pub close_button: gtk::Button,
     pub inline_close_button: gtk::Button,
     pub hero: gtk::Box,
@@ -45,6 +46,16 @@ pub struct FullscreenPlayerParts {
     pub queue_panel: gtk::Box,
     pub queue_loading: adw::Spinner,
     pub equalizer: EqualizerSurface,
+}
+
+impl FullscreenPlayerParts {
+    pub fn set_slide_offset(&self, offset: i32) {
+        if self.slide_offset.replace(offset) != offset
+            && let Some(parent) = self.root.parent()
+        {
+            parent.queue_allocate();
+        }
+    }
 }
 
 pub fn build_fullscreen_player(
@@ -149,6 +160,7 @@ pub fn build_fullscreen_player(
         root,
         visible: Cell::new(false),
         animation_tick: RefCell::new(None),
+        slide_offset: Rc::new(Cell::new(0)),
         close_button,
         inline_close_button,
         hero,
@@ -650,7 +662,9 @@ impl crate::PlayerUi {
         root.set_opacity(1.0);
         root.set_can_target(opening);
         root.set_sensitive(opening);
-        root.set_margin_top(if opening { height } else { 0 });
+        self.views
+            .fullscreen_player
+            .set_slide_offset(if opening { height } else { 0 });
 
         let tick_shell = Rc::clone(self);
         let tick_started_at = Rc::clone(&started_at);
@@ -668,16 +682,19 @@ impl crate::PlayerUi {
             } else {
                 eased * f64::from(height)
             };
-            root.set_margin_top(offset.round() as i32);
+            tick_shell
+                .views
+                .fullscreen_player
+                .set_slide_offset(offset.round() as i32);
 
             if progress >= 1.0 {
                 root.set_can_target(opening);
                 root.set_sensitive(opening);
                 if opening {
-                    root.set_margin_top(0);
+                    tick_shell.views.fullscreen_player.set_slide_offset(0);
                     root.set_opacity(1.0);
                 } else {
-                    root.set_margin_top(0);
+                    tick_shell.views.fullscreen_player.set_slide_offset(0);
                     root.set_opacity(0.0);
                 }
                 root.set_visible(opening);

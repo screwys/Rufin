@@ -127,11 +127,11 @@ impl AudioGraph {
             elements.push(scaletempo);
         }
 
-        let visualizer_pad = split.static_pad("src");
+        // Sample after playbin's queue so visualization follows audible output.
+        let visualizer_pad = output.static_pad("sink");
         elements.push(convert_out.clone());
         elements.push(split);
-        elements.push(resample);
-        elements.push(output.clone());
+        elements.push(resample.clone());
         for element in &elements {
             bin.add(element).map_err(|error| error.to_string())?;
         }
@@ -148,6 +148,14 @@ impl AudioGraph {
             .map_err(|error| error.to_string())?;
         bin.add_pad(&ghost_sink)
             .map_err(|error| error.to_string())?;
+        let src_pad = resample
+            .static_pad("src")
+            .ok_or_else(|| "audio chain is missing an output pad".to_string())?;
+        let ghost_src = gst::GhostPad::with_target(&src_pad).map_err(|error| error.to_string())?;
+        ghost_src
+            .set_active(true)
+            .map_err(|error| error.to_string())?;
+        bin.add_pad(&ghost_src).map_err(|error| error.to_string())?;
 
         Ok(Self {
             root: bin.upcast(),
@@ -160,6 +168,10 @@ impl AudioGraph {
 
     pub(super) fn root(&self) -> &gst::Element {
         &self.root
+    }
+
+    pub(super) fn output(&self) -> &gst::Element {
+        &self.output
     }
 
     pub(super) fn reconfigure(
@@ -665,9 +677,10 @@ mod tests {
             .build();
         let pipeline = gst::Pipeline::new();
         pipeline
-            .add_many([source.upcast_ref(), graph.root()])
+            .add_many([source.upcast_ref(), graph.root(), graph.output()])
             .unwrap();
         source.link(graph.root()).unwrap();
+        graph.root().link(graph.output()).unwrap();
         let expected = (0..4_017)
             .flat_map(|index| ((index as f32 - 2_000.0) / 8_000.0).to_le_bytes())
             .collect::<Vec<_>>();
@@ -1072,11 +1085,12 @@ mod tests {
             .expect("test audio source");
         let pipeline = gst::Pipeline::new();
         pipeline
-            .add_many([&source, graph.root()])
+            .add_many([&source, graph.root(), graph.output()])
             .expect("test normalization pipeline");
         source
             .link(graph.root())
             .expect("test normalization pipeline link");
+        graph.root().link(graph.output()).unwrap();
         let bin = graph.root.downcast_ref::<gst::Bin>().expect("audio bin");
         let volume = bin
             .by_name("rufin-loudness-normalization")
@@ -1183,12 +1197,15 @@ mod tests {
                 gst::PadProbeReturn::Ok
             });
         let pipeline = gst::Pipeline::new();
-        pipeline.add_many([&source, graph.root()]).unwrap();
+        pipeline
+            .add_many([&source, graph.root(), graph.output()])
+            .unwrap();
         let caps = gst::Caps::builder("audio/x-raw")
             .field("rate", 8000_i32)
             .field("channels", 1_i32)
             .build();
         source.link_filtered(graph.root(), &caps).unwrap();
+        graph.root().link(graph.output()).unwrap();
         let sink = graph.output.clone().downcast::<gst_app::AppSink>().unwrap();
         pipeline.set_state(gst::State::Playing).unwrap();
         let mut samples = Vec::new();

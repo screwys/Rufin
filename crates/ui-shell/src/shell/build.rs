@@ -279,7 +279,9 @@ pub async fn build(
     split_view.set_sidebar(Some(&normal_nav_panel));
     app_content_overlay.add_overlay(&fullscreen_player.root);
     app_content_overlay.set_measure_overlay(&fullscreen_player.root, false);
+    app_content_overlay.set_clip_overlay(&fullscreen_player.root, true);
     let fullscreen_overlay = fullscreen_player.root.clone();
+    let fullscreen_slide_offset = Rc::clone(&fullscreen_player.slide_offset);
     app_content_overlay.connect_get_child_position(move |overlay, child| {
         if child != &fullscreen_overlay {
             return None;
@@ -288,7 +290,8 @@ pub async fn build(
         // still describe the preceding startup pass.
         let content = overlay.child()?;
         let (width, height) = (content.width(), content.height());
-        (width > 0 && height > 0).then(|| gtk::gdk::Rectangle::new(0, 0, width, height))
+        (width > 0 && height > 0)
+            .then(|| gtk::gdk::Rectangle::new(0, fullscreen_slide_offset.get(), width, height))
     });
 
     app_root.append(&player_controls.root);

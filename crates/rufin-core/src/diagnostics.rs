@@ -75,11 +75,15 @@ impl Diagnostics {
         let writer = DiagnosticWriterFactory {
             output: Arc::clone(&output),
         };
-        let terminal = tracing_fmt::layer()
-            .compact()
-            .with_ansi(std::io::stderr().is_terminal())
-            .fmt_fields(PrivacyFields)
-            .with_writer(std::io::stderr);
+        // Windows GUI launchers can leave an inherited stderr pipe without a reader.
+        // Writing to that pipe can block the UI thread; keep diagnostics in our log.
+        let terminal = (!cfg!(windows) || std::io::stderr().is_terminal()).then(|| {
+            tracing_fmt::layer()
+                .compact()
+                .with_ansi(std::io::stderr().is_terminal())
+                .fmt_fields(PrivacyFields)
+                .with_writer(std::io::stderr)
+        });
         let stored = tracing_fmt::layer()
             .compact()
             .with_ansi(false)
@@ -93,6 +97,7 @@ impl Diagnostics {
             .expect("install Rufin diagnostics subscriber");
 
         install_panic_hook(log_dir);
+        install_glib_log_capture();
         Arc::new(Self {
             output,
             filter: filter_handle,
@@ -127,6 +132,51 @@ impl Diagnostics {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .revision
+    }
+}
+
+fn install_glib_log_capture() {
+    use glib::translate::IntoGlib as _;
+
+    // Older supported GLib versions expose the fatal mask only through this setter.
+    let fatal = glib::log_set_always_fatal(glib::LogLevels::LEVEL_ERROR);
+    glib::log_set_always_fatal(fatal);
+    glib::log_set_default_handler(record_glib_log);
+    glib::log_set_writer_func(move |level, fields| {
+        let field = |key| {
+            fields
+                .iter()
+                .find(|field| field.key() == key)
+                .and_then(glib::LogField::value_str)
+        };
+        record_glib_log(
+            field("GLIB_DOMAIN"),
+            level,
+            field("MESSAGE").unwrap_or_default(),
+        );
+        if fatal.bits() & level.into_glib() != 0 {
+            std::process::abort();
+        }
+        glib::LogWriterOutput::Handled
+    });
+}
+
+fn record_glib_log(domain: Option<&str>, level: glib::LogLevel, message: &str) {
+    let domain = domain.unwrap_or("GLib");
+    match level {
+        glib::LogLevel::Error | glib::LogLevel::Critical => {
+            tracing::error!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Warning => tracing::warn!(target: "rufin::native", domain, "{message}"),
+        glib::LogLevel::Message | glib::LogLevel::Info => {
+            tracing::info!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Debug
+            if domain == "Gtk" && message.starts_with("snapshot symbolic icon ") =>
+        {
+            tracing::trace!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Debug => tracing::debug!(target: "rufin::native", domain, "{message}"),
     }
 }
 
