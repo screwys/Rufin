@@ -623,6 +623,11 @@ msgstr "Ordner konnte nicht geöffnet werden: {error}"
 msgid "Could not save diagnostic log"
 msgstr "Diagnoseprotokoll konnte nicht gespeichert werden"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Favoriten konnten nicht aktualisiert werden"
+
 msgid "Could not update favorites"
 msgstr "Favoriten konnten nicht aktualisiert werden"
 
@@ -2506,6 +2511,15 @@ msgstr "Stummschaltung aufgehoben"
 
 msgid "Update"
 msgstr "Update"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "API-Schlüssel verwenden"

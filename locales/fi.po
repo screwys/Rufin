@@ -584,6 +584,11 @@ msgstr "Kansiota ei voitu avata: {error}"
 msgid "Could not save diagnostic log"
 msgstr "Diagnostiikkalokia ei voitu tallentaa"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Suosikkeja ei voitu päivittää"
+
 msgid "Could not update favorites"
 msgstr "Suosikkeja ei voitu päivittää"
 
@@ -2435,6 +2440,15 @@ msgid "Unmuted"
 msgstr "Ääni palautettu"
 
 msgid "Update"
+msgstr ""
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
 msgstr ""
 
 msgid "Use API key"

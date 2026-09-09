@@ -575,6 +575,9 @@ msgstr ""
 msgid "Could not save diagnostic log"
 msgstr ""
 
+msgid "Could not update Rufin to {version}"
+msgstr ""
+
 msgid "Could not update favorites"
 msgstr ""
 
@@ -2414,6 +2417,15 @@ msgid "Unmuted"
 msgstr ""
 
 msgid "Update"
+msgstr ""
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
 msgstr ""
 
 msgid "Use API key"

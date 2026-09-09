@@ -637,6 +637,11 @@ msgstr "Nevarēja atjaunināt izlasi"
 msgid "Could not save diagnostic log"
 msgstr "Nevarēja saglabāt diagnostikas žurnālu"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Nevarēja atjaunināt izlasi"
+
 msgid "Could not update favorites"
 msgstr "Nevarēja atjaunināt izlasi"
 
@@ -2570,6 +2575,15 @@ msgstr "Skaņa atjaunota"
 
 msgid "Update"
 msgstr "Atjaunināt"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "Izmantot API atslēgu"

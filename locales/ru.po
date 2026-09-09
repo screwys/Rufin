@@ -623,6 +623,11 @@ msgstr "Не удалось открыть папку: {error}"
 msgid "Could not save diagnostic log"
 msgstr "Не удалось сохранить диагностический журнал"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Не удалось обновить список избранных"
+
 msgid "Could not update favorites"
 msgstr "Не удалось обновить список избранных"
 
@@ -2500,6 +2505,15 @@ msgstr "Звук включен"
 
 msgid "Update"
 msgstr "Обновить"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "Использовать ключ API"

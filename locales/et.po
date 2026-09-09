@@ -629,6 +629,11 @@ msgstr "Lemmikute uuendamine ei õnnestunud"
 msgid "Could not save diagnostic log"
 msgstr "Diagnostikalogi salvestamine ei õnnestunud"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Lemmikute uuendamine ei õnnestunud"
+
 msgid "Could not update favorites"
 msgstr "Lemmikute uuendamine ei õnnestunud"
 
@@ -2555,6 +2560,15 @@ msgstr "Summutamine on lõpetatud"
 
 msgid "Update"
 msgstr "Uuenda"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "Kasuta API-võtit"

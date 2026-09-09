@@ -609,6 +609,11 @@ msgstr "無法更新最愛"
 msgid "Could not save diagnostic log"
 msgstr "無法儲存診斷記錄"
 
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "無法更新最愛"
+
 msgid "Could not update favorites"
 msgstr "無法更新最愛"
 
@@ -2551,6 +2556,15 @@ msgstr ""
 
 msgid "Update"
 msgstr "更新"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "使用 API 金鑰"
