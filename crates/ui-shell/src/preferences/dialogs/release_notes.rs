@@ -1,3 +1,4 @@
+use std::cell::RefCell;
 use std::rc::Rc;
 use std::time::Duration;
 
@@ -15,7 +16,6 @@ use ui_shared::popup::present_light_dismiss_dialog;
 const RELEASE_NOTES_POPUP_WIDTH: i32 = 700;
 const RELEASE_NOTES_POPUP_HEIGHT: i32 = 640;
 const RELEASE_TOAST_TITLE: &str = "✨ New release is available!";
-const RELEASE_CHECK_POLL_INTERVAL: Duration = Duration::from_secs(6 * 60 * 60);
 
 ui_shared::composite_box!(
     pub(crate) ReleaseNoteRowView,
@@ -43,11 +43,20 @@ pub(crate) fn check_for_release_update(shell: &Rc<Shell>) {
 }
 
 pub(crate) fn schedule_periodic_release_checks(shell: &Rc<Shell>) {
-    let release_updates = shell.products.release_updates.clone();
-    glib::timeout_add_local(RELEASE_CHECK_POLL_INTERVAL, move || {
-        release_updates.check();
-        glib::ControlFlow::Continue
-    });
+    if let Some(source) = shell.preferences.release_check_source.borrow_mut().take() {
+        source.remove();
+    }
+    let hours = shell.settings.current.borrow().release_check_interval_hours;
+    let weak_shell = Rc::downgrade(shell);
+    let source =
+        glib::timeout_add_local(Duration::from_secs(u64::from(hours) * 60 * 60), move || {
+            let Some(shell) = weak_shell.upgrade() else {
+                return glib::ControlFlow::Break;
+            };
+            shell.products.release_updates.check();
+            glib::ControlFlow::Continue
+        });
+    shell.preferences.release_check_source.replace(Some(source));
 }
 
 fn current_civil_date() -> Option<CivilDate> {
@@ -493,17 +502,54 @@ fn release_note_row(
     row.upcast()
 }
 
+pub(crate) struct ReleaseHistoryView {
+    selector: glib::WeakRef<gtk::DropDown>,
+    release: glib::WeakRef<gtk::Box>,
+    selection_handler: RefCell<Option<glib::SignalHandlerId>>,
+}
+
 fn present_release_notes_dialog(
     window: &gtk::ApplicationWindow,
     history: &ReleaseHistory,
     updating_version: Option<&str>,
     release_updates: &ReleaseUpdateHandle,
-) -> gtk::glib::WeakRef<gtk::Box> {
+) -> ReleaseHistoryView {
     let resource = crate::ui_resource::RELEASE_NOTES_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
         dialog: adw::Dialog,
-        view: gtk::Box,
+        selector: gtk::DropDown,
+        release_host: gtk::Box,
+        check_updates: gtk::Button,
+        check_feedback: gtk::Stack,
+    });
+    let view = ReleaseHistoryView {
+        selector: selector.downgrade(),
+        release: release_host.downgrade(),
+        selection_handler: RefCell::new(None),
+    };
+    let release_check = release_updates.clone();
+    let feedback = check_feedback.downgrade();
+    check_updates.connect_clicked(move |button| {
+        let Some(feedback) = feedback.upgrade() else {
+            return;
+        };
+        if feedback.visible_child_name().as_deref() == Some("checking") {
+            return;
+        }
+        button.update_state(&[gtk::accessible::State::Busy(true)]);
+        feedback.set_visible_child_name("checking");
+        let result = release_check.check_now();
+        let button = button.downgrade();
+        let feedback = feedback.downgrade();
+        glib::spawn_future_local(async move {
+            let success = result.recv().await.unwrap_or(false);
+            let (Some(button), Some(feedback)) = (button.upgrade(), feedback.upgrade()) else {
+                return;
+            };
+            feedback.set_visible_child_name(if success { "success" } else { "error" });
+            button.update_state(&[gtk::accessible::State::Busy(false)]);
+        });
     });
     populate_release_notes_view(window, &view, history, updating_version, release_updates);
 
@@ -512,17 +558,13 @@ fn present_release_notes_dialog(
         window.height(),
         RELEASE_NOTES_POPUP_HEIGHT,
     ));
-    let view = view.downgrade();
     present_light_dismiss_dialog(&dialog, window);
     view
 }
 
-fn selected_release_version(view: &gtk::Box) -> Option<String> {
-    view.first_child()
-        .and_then(|child| child.downcast::<gtk::Box>().ok())
-        .and_then(|selector| selector.last_child())
-        .and_then(|child| child.downcast::<gtk::DropDown>().ok())
-        .and_then(|dropdown| dropdown.selected_item())
+fn selected_release_version(selector: &gtk::DropDown) -> Option<String> {
+    selector
+        .selected_item()
         .and_then(|item| item.downcast::<gtk::StringObject>().ok())
         .and_then(|item| {
             item.string()
@@ -534,12 +576,15 @@ fn selected_release_version(view: &gtk::Box) -> Option<String> {
 
 fn populate_release_notes_view(
     window: &gtk::ApplicationWindow,
-    view: &gtk::Box,
+    view: &ReleaseHistoryView,
     history: &ReleaseHistory,
     updating_version: Option<&str>,
     release_updates: &ReleaseUpdateHandle,
 ) {
-    let selected_version = selected_release_version(view);
+    let (Some(selector), Some(release)) = (view.selector.upgrade(), view.release.upgrade()) else {
+        return;
+    };
+    let selected_version = selected_release_version(&selector);
     let selected = selected_version
         .and_then(|version| {
             history
@@ -548,12 +593,8 @@ fn populate_release_notes_view(
                 .position(|note| note.version == version)
         })
         .unwrap_or_default() as u32;
-    let selector_row = view
-        .first_child()
-        .and_then(|child| child.downcast::<gtk::Box>().ok())
-        .expect("Release History selector host");
-    while let Some(child) = selector_row.first_child() {
-        selector_row.remove(&child);
+    if let Some(handler) = view.selection_handler.borrow_mut().take() {
+        selector.disconnect(handler);
     }
     let titles = history
         .notes
@@ -567,20 +608,9 @@ fn populate_release_notes_view(
         })
         .collect::<Vec<_>>();
     let title_refs = titles.iter().map(String::as_str).collect::<Vec<_>>();
-    let selector = gtk::DropDown::from_strings(&title_refs);
-    selector.set_hexpand(true);
+    selector.set_model(Some(&gtk::StringList::new(&title_refs)));
     selector.set_sensitive(!history.notes.is_empty());
     selector.set_selected(selected);
-    selector_row.append(&selector);
-
-    let release = view
-        .last_child()
-        .and_then(|child| child.downcast::<gtk::ScrolledWindow>().ok())
-        .and_then(|scroller| scroller.child())
-        .and_then(|child| child.downcast::<gtk::Viewport>().ok())
-        .and_then(|viewport| viewport.child())
-        .and_then(|child| child.downcast::<gtk::Box>().ok())
-        .expect("Release History content host");
     while let Some(child) = release.first_child() {
         release.remove(&child);
     }
@@ -594,11 +624,14 @@ fn populate_release_notes_view(
         ));
     }
 
-    let window = window.clone();
+    let window = window.downgrade();
     let history = history.clone();
     let updating_version = updating_version.map(str::to_string);
     let release_updates = release_updates.clone();
-    selector.connect_selected_notify(move |selector| {
+    let handler = selector.connect_selected_notify(move |selector| {
+        let Some(window) = window.upgrade() else {
+            return;
+        };
         while let Some(child) = release.first_child() {
             release.remove(&child);
         }
@@ -612,23 +645,19 @@ fn populate_release_notes_view(
             ));
         }
     });
+    view.selection_handler.replace(Some(handler));
 }
 
 fn refresh_open_release_notes(shell: &Shell) {
-    let Some(view) = shell
-        .preferences
-        .release_history_view
-        .borrow()
-        .as_ref()
-        .and_then(gtk::glib::WeakRef::upgrade)
-    else {
+    let view = shell.preferences.release_history_view.borrow();
+    let Some(view) = view.as_ref() else {
         return;
     };
     let history = shell.preferences.release_history.borrow().clone();
     let updating_version = shell.preferences.release_updating.borrow().clone();
     populate_release_notes_view(
         &shell.chrome.window,
-        &view,
+        view,
         &history,
         updating_version.as_deref(),
         &shell.products.release_updates,

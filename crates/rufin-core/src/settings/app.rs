@@ -116,6 +116,8 @@ pub struct Settings {
     pub release_notification_seen_version: Option<String>,
     #[serde(default)]
     pub automatic_updates_enabled: bool,
+    #[serde(default = "default_release_check_interval_hours")]
+    pub release_check_interval_hours: u32,
     #[serde(default = "legacy_secret_storage_mode")]
     pub secret_storage_mode: SecretStorageMode,
     #[serde(flatten)]
@@ -197,6 +199,7 @@ impl Default for Settings {
             release_notifications_enabled: true,
             release_notification_seen_version: None,
             automatic_updates_enabled: false,
+            release_check_interval_hours: default_release_check_interval_hours(),
             secret_storage_mode: SecretStorageMode::default(),
             lyrics: LyricsSettings::default(),
             external_metadata_enabled: true,
@@ -247,6 +250,9 @@ impl Settings {
     }
 
     pub fn sanitize(&mut self) {
+        if ![1, 6, 12, 24].contains(&self.release_check_interval_hours) {
+            self.release_check_interval_hours = default_release_check_interval_hours();
+        }
         self.rich_presence.sanitize();
         self.playback.sanitize();
         self.random_play.sanitize();
@@ -369,6 +375,10 @@ fn legacy_secret_storage_mode() -> SecretStorageMode {
     SecretStorageMode::ConfigFile
 }
 
+fn default_release_check_interval_hours() -> u32 {
+    6
+}
+
 fn default_true() -> bool {
     true
 }
@@ -433,4 +443,31 @@ fn sanitize_downloads(downloads: &mut Vec<SourceDownloadSettings>) {
     downloads.retain(|entry| !entry.is_default());
     downloads.sort_by(|left, right| left.source_id.cmp(&right.source_id));
     downloads.dedup_by(|left, right| left.source_id == right.source_id);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::Settings;
+
+    #[test]
+    fn release_check_interval_defaults_for_existing_settings_and_round_trips_choices() {
+        let mut saved = serde_json::to_value(Settings::default()).unwrap();
+        saved
+            .as_object_mut()
+            .unwrap()
+            .remove("release_check_interval_hours");
+        let previous: Settings = serde_json::from_value(saved).unwrap();
+        assert_eq!(previous.release_check_interval_hours, 6);
+
+        for hours in [1, 6, 12, 24] {
+            let mut settings = Settings {
+                release_check_interval_hours: hours,
+                ..Settings::default()
+            };
+            settings.sanitize();
+            let saved = serde_json::to_vec(&settings).unwrap();
+            let restored: Settings = serde_json::from_slice(&saved).unwrap();
+            assert_eq!(restored.release_check_interval_hours, hours);
+        }
+    }
 }

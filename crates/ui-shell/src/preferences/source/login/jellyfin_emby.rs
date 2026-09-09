@@ -609,10 +609,15 @@ fn present_code_dialog(
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, { dialog: adw::Dialog, code_row: gtk::Box, code: gtk::Label, copy: gtk::Button, copy_icon: gtk::Image, approval: gtk::LinkButton, refresh: gtk::Button, status: gtk::Label });
     status.connect_label_notify(|label| label.set_visible(!label.text().is_empty()));
+    let copy_reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
+    let code_copy_reset = Rc::clone(&copy_reset);
     let copy_button = copy.downgrade();
     let code_row = code_row.downgrade();
     let reset_icon = copy_icon.downgrade();
     code.connect_label_notify(move |label| {
+        if let Some(source) = code_copy_reset.borrow_mut().take() {
+            source.remove();
+        }
         if let Some(row) = code_row.upgrade() {
             row.set_visible(!label.text().is_empty());
         }
@@ -625,11 +630,27 @@ fn present_code_dialog(
     });
     let copy_code = code.downgrade();
     let copied_icon = copy_icon.downgrade();
+    let clicked_copy_reset = Rc::clone(&copy_reset);
     copy.connect_clicked(move |button| {
         if let Some(label) = copy_code.upgrade() {
             button.display().clipboard().set_text(&label.text());
             if let Some(icon) = copied_icon.upgrade() {
+                if let Some(source) = clicked_copy_reset.borrow_mut().take() {
+                    source.remove();
+                }
                 icon.set_icon_name(Some("rufin-object-select-symbolic"));
+                let icon = icon.downgrade();
+                let pending = Rc::clone(&clicked_copy_reset);
+                let source = gtk::glib::timeout_add_local_once(
+                    std::time::Duration::from_millis(1500),
+                    move || {
+                        pending.borrow_mut().take();
+                        if let Some(icon) = icon.upgrade() {
+                            icon.set_icon_name(Some("rufin-edit-copy-symbolic"));
+                        }
+                    },
+                );
+                clicked_copy_reset.replace(Some(source));
             }
         }
     });
@@ -659,6 +680,9 @@ fn present_code_dialog(
     restart();
     refresh.connect_clicked(move |_| restart());
     dialog.connect_closed(move |_| {
+        if let Some(source) = copy_reset.borrow_mut().take() {
+            source.remove();
+        }
         if let Some(task) = task.borrow_mut().take() {
             task.abort();
         }

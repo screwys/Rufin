@@ -437,14 +437,31 @@ row:focus {
 }
 
 .platform-window-bar {
-  min-height: 30px;
+  min-height: 24px;
   padding: 0;
   background: var(--window-bg-color);
   border-bottom: 1px solid color-mix(in srgb, var(--window-fg-color) 14%, transparent);
 }
 
+.platform-window-bar > windowhandle > box {
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.platform-window-bar windowcontrols > button {
+  min-height: 24px;
+  padding-top: 0;
+  padding-bottom: 0;
+}
+
+.platform-window-bar windowcontrols > button > image {
+  padding: 3px;
+}
+
 .platform-window-bar-title {
   margin: 0 8px;
+  /* Keep Japanese and Latin in one UI font instead of legacy CJK fallback. */
+  font-family: "Yu Gothic UI", "Hiragino Sans", sans-serif;
   font-size: 12px;
   font-weight: 600;
 }
@@ -474,7 +491,7 @@ row:focus {
 
 .windows-window-bar-preview-control {
   min-width: 46px;
-  min-height: 30px;
+  min-height: 24px;
   font-size: 16px;
 }
 

@@ -27,6 +27,46 @@
                 <property name="margin-start">18</property>
                 <property name="margin-end">18</property>
                 <style><class name="release-note-selector"/></style>
+                <child>
+                  <object class="GtkDropDown" id="selector">
+                    <property name="hexpand">true</property>
+                  </object>
+                </child>
+                <child>
+                  <object class="GtkButton" id="check_updates">
+                    <property name="tooltip-text" translatable="yes">Check for updates</property>
+                    <property name="valign">center</property>
+                    <style><class name="flat"/></style>
+                    <property name="child">
+                      <object class="GtkStack" id="check_feedback">
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">idle</property>
+                            <property name="child"><object class="GtkImage"><property name="icon-name">rufin-view-refresh-symbolic</property></object></property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">checking</property>
+                            <property name="child"><object class="AdwSpinner"><property name="width-request">16</property><property name="height-request">16</property></object></property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">success</property>
+                            <property name="child"><object class="GtkImage"><property name="icon-name">rufin-object-select-symbolic</property></object></property>
+                          </object>
+                        </child>
+                        <child>
+                          <object class="GtkStackPage">
+                            <property name="name">error</property>
+                            <property name="child"><object class="GtkImage"><property name="icon-name">rufin-window-close-symbolic</property></object></property>
+                          </object>
+                        </child>
+                      </object>
+                    </property>
+                  </object>
+                </child>
               </object>
             </child>
             <child>

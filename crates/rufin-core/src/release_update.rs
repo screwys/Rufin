@@ -1,7 +1,7 @@
 //! Cached release history and platform-owned updates.
 //!
 //! GitHub Releases is the single release-history source. Rufin caches the complete
-//! presentation, refreshes it at most every six hours, and keeps one-time
+//! presentation, refreshes it on request, and keeps one-time
 //! notification receipts separate from persistent update availability.
 
 mod install;
@@ -13,7 +13,7 @@ use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate};
-use async_channel::Sender;
+use async_channel::{Receiver, Sender};
 use serde::{Deserialize, Serialize};
 use tracing::debug;
 
@@ -33,6 +33,11 @@ struct ReleaseCache {
     notes: Vec<ReleaseNote>,
 }
 
+struct ReleaseCheckRequest {
+    automatically_update: bool,
+    feedback: Vec<Sender<bool>>,
+}
+
 pub struct ReleaseUpdateOwner {
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
@@ -42,8 +47,7 @@ pub struct ReleaseUpdateOwner {
     effective_installed_version: Arc<Mutex<String>>,
     installer: Option<ReleaseInstaller>,
     automatic_update_blocked_version: Option<String>,
-    automatic_update_requested: Arc<AtomicBool>,
-    refresh_in_flight: Arc<AtomicBool>,
+    refresh: Arc<Mutex<Option<ReleaseCheckRequest>>>,
     update_in_flight: Arc<AtomicBool>,
     previous_update_result: Mutex<Option<install::PreviousUpdateResult>>,
 }
@@ -85,8 +89,7 @@ impl ReleaseUpdateOwner {
             effective_installed_version: Arc::new(Mutex::new(installed_version)),
             installer,
             automatic_update_blocked_version,
-            automatic_update_requested: Arc::new(AtomicBool::new(false)),
-            refresh_in_flight: Arc::new(AtomicBool::new(false)),
+            refresh: Arc::new(Mutex::new(None)),
             update_in_flight: Arc::new(AtomicBool::new(false)),
             previous_update_result: Mutex::new(previous_update_result),
         })
@@ -120,18 +123,29 @@ impl ReleaseUpdateOwner {
         }
     }
 
-    fn check_with_automatic_update(&self, automatically_update: bool) {
+    fn check_with_automatic_update(
+        &self,
+        automatically_update: bool,
+        feedback: Option<Sender<bool>>,
+    ) {
         self.publish_previous_update_result();
         if !release_check_allowed(&self.settings.load().ui) {
+            if let Some(feedback) = feedback {
+                let _ = feedback.try_send(false);
+            }
             return;
         }
-        if automatically_update {
-            self.automatic_update_requested
-                .store(true, Ordering::Release);
-        }
-
-        if self.refresh_in_flight.swap(true, Ordering::AcqRel) {
-            return;
+        {
+            let mut refresh = mutex_lock(&self.refresh);
+            if let Some(request) = refresh.as_mut() {
+                request.automatically_update |= automatically_update;
+                request.feedback.extend(feedback);
+                return;
+            }
+            *refresh = Some(ReleaseCheckRequest {
+                automatically_update,
+                feedback: feedback.into_iter().collect(),
+            });
         }
 
         let settings = self.settings.clone();
@@ -139,9 +153,8 @@ impl ReleaseUpdateOwner {
         let cache_path = self.cache_path.clone();
         let cache = Arc::clone(&self.cache);
         let effective_installed_version = Arc::clone(&self.effective_installed_version);
-        let refresh_in_flight = Arc::clone(&self.refresh_in_flight);
+        let refresh = Arc::clone(&self.refresh);
         let update_in_flight = Arc::clone(&self.update_in_flight);
-        let automatic_update_requested = Arc::clone(&self.automatic_update_requested);
         let installer = self.installer.clone();
         let updates_supported = installer.is_some();
         let automatic_updates_supported = installer
@@ -161,6 +174,7 @@ impl ReleaseUpdateOwner {
                     None
                 }
             };
+            let success = fetched.is_some();
             let refreshed = {
                 let previous = mutex_lock(&cache).clone();
                 release_cache_after_check(previous, fetched)
@@ -172,8 +186,9 @@ impl ReleaseUpdateOwner {
 
             let current_settings = settings.load();
             let installed_version = mutex_lock(&effective_installed_version).clone();
-            let automatically_update = automatic_update_requested.swap(false, Ordering::AcqRel);
-            let automatic_update = automatically_update
+            let request = mutex_lock(&refresh).take().expect("active release check");
+            let automatic_update = request
+                .automatically_update
                 .then(|| {
                     reserve_automatic_update(
                         &refreshed,
@@ -185,7 +200,7 @@ impl ReleaseUpdateOwner {
                     )
                 })
                 .flatten();
-            let notification_version = release_notification_version(
+            let mut notification_version = release_notification_version(
                 &refreshed,
                 &current_settings.ui,
                 &installed_version,
@@ -197,13 +212,18 @@ impl ReleaseUpdateOwner {
                 automatic_updates_supported,
                 &installed_version,
             );
+            if !request.feedback.is_empty() {
+                notification_version = None;
+            }
             let _ = events
                 .send(ReleaseUpdate::Refreshed {
                     history,
                     notification_version,
                 })
                 .await;
-            refresh_in_flight.store(false, Ordering::Release);
+            for feedback in request.feedback {
+                let _ = feedback.try_send(success);
+            }
             if let Some((installer, version)) = automatic_update {
                 run_update(
                     settings,
@@ -221,11 +241,17 @@ impl ReleaseUpdateOwner {
 
 impl ReleaseUpdateOwner {
     pub fn check(&self) {
-        self.check_with_automatic_update(false);
+        self.check_with_automatic_update(false, None);
+    }
+
+    pub fn check_now(&self) -> Receiver<bool> {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.check_with_automatic_update(false, Some(sender));
+        receiver
     }
 
     pub fn check_and_update(&self) {
-        self.check_with_automatic_update(true);
+        self.check_with_automatic_update(true, None);
     }
 
     pub fn update(&self, version: String) {

@@ -204,6 +204,9 @@ pub async fn build(
         dialog: gtk::glib::WeakRef::new(),
         release_history: RefCell::new(release_history),
         release_history_view: RefCell::new(None),
+        release_check_source: RefCell::new(None),
+        preview_windows_updates: window_bar_preview
+            == Some(crate::application::WindowBarPreview::Windows),
         release_notification_toast: RefCell::new(None),
         release_updating: RefCell::new(None),
     };

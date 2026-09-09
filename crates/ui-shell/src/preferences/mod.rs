@@ -42,9 +42,19 @@ const INTEGRATIONS_ICON_NAME: &str = "rufin-network-workgroup-symbolic";
 pub(crate) struct PreferencesState {
     pub(crate) dialog: gtk::glib::WeakRef<adw::Dialog>,
     pub(crate) release_history: RefCell<rufin_core::runtime::ReleaseHistory>,
-    pub(crate) release_history_view: RefCell<Option<gtk::glib::WeakRef<gtk::Box>>>,
+    pub(crate) release_history_view: RefCell<Option<dialogs::release_notes::ReleaseHistoryView>>,
+    pub(crate) release_check_source: RefCell<Option<gtk::glib::SourceId>>,
+    pub(crate) preview_windows_updates: bool,
     pub(crate) release_notification_toast: RefCell<Option<adw::Toast>>,
     pub(crate) release_updating: RefCell<Option<String>>,
+}
+
+impl Drop for PreferencesState {
+    fn drop(&mut self) {
+        if let Some(source) = self.release_check_source.get_mut().take() {
+            source.remove();
+        }
+    }
 }
 
 impl PreferencesState {
@@ -882,6 +892,7 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
         start_minimized_row: adw::SwitchRow,
         type_to_search_row: adw::SwitchRow,
         automatic_updates_row: adw::SwitchRow,
+        release_check_interval_row: adw::ComboRow,
         control_notifications_row: adw::SwitchRow,
         notifications_row: adw::SwitchRow,
         release_notifications_row: adw::SwitchRow,
@@ -988,6 +999,7 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
             .release_history
             .borrow()
             .automatic_updates_supported
+            || shell.preferences.preview_windows_updates
         {
             automatic_updates_row.set_active(settings.automatic_updates_enabled);
             let automatic_updates_shell = Rc::clone(shell);
@@ -1002,6 +1014,32 @@ fn general_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw::PreferencesPage
             window_group.remove(&automatic_updates_row);
         }
     }
+
+    let intervals = [1, 6, 12, 24];
+    release_check_interval_row.set_selected(
+        intervals
+            .iter()
+            .position(|hours| *hours == settings.release_check_interval_hours)
+            .unwrap_or(1) as u32,
+    );
+    let interval_shell = Rc::downgrade(shell);
+    release_check_interval_row.connect_selected_notify(move |row| {
+        let Some(shell) = interval_shell.upgrade() else {
+            return;
+        };
+        let Some(&hours) = intervals.get(row.selected() as usize) else {
+            return;
+        };
+        if shell
+            .settings
+            .set_app_setting("release check interval", hours, |settings| {
+                &mut settings.release_check_interval_hours
+            })
+            .is_some()
+        {
+            dialogs::release_notes::schedule_periodic_release_checks(&shell);
+        }
+    });
 
     control_notifications_row.set_active(settings.control_notifications_enabled);
     let control_notifications_shell = Rc::clone(shell);

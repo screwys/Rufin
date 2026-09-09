@@ -178,7 +178,7 @@ fn application() -> (adw::Application, Rc<RefCell<ApplicationOptions>>) {
         0u8.into(),
         gtk::glib::OptionFlags::NONE,
         gtk::glib::OptionArg::String,
-        "Render a 30px platform window bar for alignment inspection",
+        "Preview a 25px platform window bar and Windows update preferences",
         Some("macos|windows"),
     );
     let options = Rc::new(RefCell::new(ApplicationOptions::default()));
@@ -305,7 +305,6 @@ fn install_platform_window_bar(
 ) {
     let titlebar = gtk::HeaderBar::new();
     titlebar.add_css_class("platform-window-bar");
-    titlebar.set_height_request(30);
     titlebar.set_show_title_buttons(!preview);
     titlebar.set_use_native_controls(platform == WindowBarPreview::Macos && !preview);
     titlebar.set_title_widget(Some(&bound_window_title(
