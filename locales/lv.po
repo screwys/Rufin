@@ -1508,6 +1508,10 @@ msgstr "Šim izpildītājam vēl nav pieejama neviena mūzika"
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
 
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials."
+msgstr ""
+
 msgid "No servers found, add one manually or try again"
 msgstr "Serveri nav atrasti, pievienojiet vienu manuāli vai mēģiniet vēlreiz"
 

@@ -1396,6 +1396,10 @@ msgstr ""
 msgid "No network devices found"
 msgstr ""
 
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials."
+msgstr ""
+
 msgid "No servers found, add one manually or try again"
 msgstr ""
 

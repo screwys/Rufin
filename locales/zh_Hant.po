@@ -1483,6 +1483,10 @@ msgstr "暫無此藝人的音樂"
 msgid "No network devices found"
 msgstr "找不到網路裝置"
 
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials."
+msgstr ""
+
 msgid "No servers found, add one manually or try again"
 msgstr ""
 

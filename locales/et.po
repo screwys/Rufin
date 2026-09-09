@@ -1495,6 +1495,10 @@ msgstr "Sellelt esitajalt pole veel muusikat"
 msgid "No network devices found"
 msgstr "Ühtegi võrguseadet ei leidu"
 
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials."
+msgstr ""
+
 msgid "No servers found, add one manually or try again"
 msgstr "Ühtegi serverit ei leidu. Sisesta aadress käsitsi või otsi uuesti"
 
