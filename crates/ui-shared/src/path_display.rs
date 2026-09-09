@@ -5,8 +5,8 @@ pub fn display_path(path: &Path) -> String {
     let text = path.to_string_lossy();
     match path.components().next() {
         Some(Component::Prefix(prefix)) => match prefix.kind() {
-            Prefix::VerbatimDisk(_) => text[4..].to_owned(),
-            Prefix::VerbatimUNC(_, _) => format!(r"\\{}", &text[8..]),
+            Prefix::VerbatimDisk(_) => text.replacen(r"\\?\", "", 1),
+            Prefix::VerbatimUNC(_, _) => text.replacen(r"\\?\UNC\", r"\\", 1),
             _ => text.into_owned(),
         },
         _ => text.into_owned(),
