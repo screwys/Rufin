@@ -49,6 +49,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Žádné výsledky ¯\\_(°╭╮°)_/¯"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -1553,10 +1558,6 @@ msgstr "Tento interpret zatím nemá žádnou hudbu"
 
 msgid "No network devices found"
 msgstr "Nebyly nalezeny žádné sítové zařízení"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr ""

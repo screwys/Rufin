@@ -50,6 +50,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Rezultāti netika atrasti ¯\\_(°╭╮°)_/¯"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -1530,10 +1535,6 @@ msgstr "Šim izpildītājam vēl nav pieejama neviena mūzika"
 
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr "Serveri nav atrasti, pievienojiet vienu manuāli vai mēģiniet vēlreiz"

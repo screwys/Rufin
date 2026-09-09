@@ -47,6 +47,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "沒有結果 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
@@ -1505,10 +1510,6 @@ msgstr "暫無此藝人的音樂"
 
 msgid "No network devices found"
 msgstr "找不到網路裝置"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr ""

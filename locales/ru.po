@@ -55,6 +55,16 @@ msgstr ""
 msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Результатов не найдено ¯\\_(°╭╮°)_/¯"
 
+#, fuzzy
+#| msgid ""
+#| "No secret service found. Rufin will use a file to store its credentials."
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+"Не найдена служба хранения секретных данных. Rufin будет использовать файл "
+"для хранения учетных данных."
+
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
@@ -1483,12 +1493,6 @@ msgstr "Пока нет музыки от этого исполнителя"
 
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
-"Не найдена служба хранения секретных данных. Rufin будет использовать файл "
-"для хранения учетных данных."
 
 msgid "No servers found, add one manually or try again"
 msgstr "Не найдено серверов, добавьте вручную или попробуйте еще раз"
