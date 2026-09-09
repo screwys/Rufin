@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-09 10:11+0000\n"
+"PO-Revision-Date: 2026-09-09 12:12+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -180,10 +180,10 @@ msgstr ""
 "приложения"
 
 msgid "1 hour"
-msgstr ""
+msgstr "1 час"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 часов"
 
 msgid "128 kbps"
 msgstr "128 кбит/с"
@@ -192,7 +192,7 @@ msgid "192 kbps"
 msgstr "192 кбит/с"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 часа"
 
 msgid "256 kbps"
 msgstr "256 кбит/с"
@@ -204,7 +204,7 @@ msgid "5 Latest Albums"
 msgstr "5 последних альбомов"
 
 msgid "6 hours"
-msgstr ""
+msgstr "6 часов"
 
 msgid "API key"
 msgstr "Ключ API"
@@ -472,10 +472,10 @@ msgid "Changes take effect after restarting Rufin"
 msgstr "Изменения применяются после перезагрузки Rufin"
 
 msgid "Check for updates every"
-msgstr ""
+msgstr "Проверять обновления каждые"
 
 msgid "Check for updates"
-msgstr ""
+msgstr "Проверить обновления"
 
 msgid "Choose Folder"
 msgstr "Выбрать Папку"
