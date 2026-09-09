@@ -1,6 +1,6 @@
-//! Commands, updates, and startup data exchanged between the UI and Rufin.
+//! Commands, updates, and startup data exchanged between application clients and Rufin.
 //!
-//! `rufin` constructs these handles; the crates behind them implement the behavior.
+//! `app` constructs these handles; the crates behind them implement the behavior.
 
 use std::sync::Arc;
 

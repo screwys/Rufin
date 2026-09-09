@@ -17,10 +17,14 @@ use tracing::{debug, error, info, instrument, warn};
 mod audio;
 mod engine;
 mod pipeline;
+#[cfg(unix)]
+mod process;
 mod visualizer;
 
 pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
+#[cfg(unix)]
+pub use process::restart_with_http1;
 pub fn verify_audio_file(path: &Path) -> Result<(), String> {
     ensure_gstreamer_initialized()?;
     if gst::ElementFactory::find("souphttpsrc").is_none() {

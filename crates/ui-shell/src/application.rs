@@ -4,7 +4,6 @@ use std::ops::ControlFlow;
 use std::process::ExitCode;
 use std::rc::Rc;
 use std::sync::OnceLock;
-use std::time::Duration;
 
 use adw::prelude::*;
 use app_identity::{APP_ID, DISPLAY_NAME, STABLE_APP_ID};
@@ -17,7 +16,6 @@ pub(crate) mod style;
 
 const ICON_RESOURCE_ROOT: &str = "/io/github/screwys/Rufin/icons/hicolor";
 const GTK_DECORATION_LAYOUT_OPTION: &str = "gtk-decoration-layout";
-const RUNTIME_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(1);
 const WINDOW_BAR_PREVIEW_OPTION: &str = "window-bar-preview";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -74,19 +72,6 @@ where
     F: FnOnce() -> Fut + 'static,
     Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
 {
-    let runtime = tokio::runtime::Builder::new_multi_thread()
-        .enable_all()
-        .thread_name("rufin-async")
-        .build();
-    let runtime = match runtime {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            error!(%error, "failed to create async runtime");
-            return run_startup_error_application(error.to_string());
-        }
-    };
-    let runtime_guard = runtime.enter();
-
     let (app, options) = application();
     connect_startup_configuration(&app, Rc::clone(&options));
     let bootstrap = Rc::new(RefCell::new(Some(bootstrap)));
@@ -131,14 +116,10 @@ where
         });
     });
 
-    let exit_code: ExitCode = app.run().into();
-    drop(app);
-    drop(runtime_guard);
-    runtime.shutdown_timeout(RUNTIME_SHUTDOWN_TIMEOUT);
-    exit_code
+    app.run().into()
 }
 
-fn run_startup_error_application(error: String) -> ExitCode {
+pub fn run_startup_error_application(error: String) -> ExitCode {
     let (app, options) = application();
     connect_startup_configuration(&app, Rc::clone(&options));
     app.connect_activate(move |app| {

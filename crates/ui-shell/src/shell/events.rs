@@ -143,10 +143,7 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
                 &[("source", &source_name)],
             ));
         }
-        SourceEvent::ReleaseSelected { acknowledged } => {
-            release_selected_source(shell);
-            let _ = acknowledged.try_send(());
-        }
+        SourceEvent::ReleaseSelected => release_selected_source(shell),
     }
 }
 

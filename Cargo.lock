@@ -5523,6 +5523,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "rufin-headless"
+version = "0.15.2"
+dependencies = [
+ "playback",
+ "playback-gstreamer",
+ "rufin-core",
+ "tokio",
+]
+
+[[package]]
 name = "rust-embed"
 version = "8.11.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"

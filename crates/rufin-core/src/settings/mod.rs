@@ -32,7 +32,6 @@ use std::ffi::OsString;
 use std::fs;
 use std::io::{ErrorKind, Write as _};
 use std::path::{Path, PathBuf};
-use std::rc::Rc;
 use std::sync::{Arc, Mutex};
 
 use app::Settings as UiSettings;
@@ -424,8 +423,8 @@ impl SettingsOwner {
     pub(crate) fn new(
         file: SettingsFile,
         on_change: impl Fn(&StoredSettings, &StoredSettings, bool) + Send + Sync + 'static,
-    ) -> Rc<Self> {
-        Rc::new(Self {
+    ) -> Arc<Self> {
+        Arc::new(Self {
             file,
             on_change: Arc::new(on_change),
         })

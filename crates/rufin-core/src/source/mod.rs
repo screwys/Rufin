@@ -859,11 +859,7 @@ impl SourceOwner {
             .take();
         if let Some(slot) = slot {
             slot.retire();
-            let (acknowledged, receiver) = async_channel::bounded(1);
-            self.shared
-                .send(SourceEvent::ReleaseSelected { acknowledged })
-                .await;
-            let _ = receiver.recv().await;
+            self.shared.send(SourceEvent::ReleaseSelected).await;
         }
     }
 
@@ -3798,9 +3794,6 @@ mod artwork_preparation_tests {
                 let replacement = tokio::time::timeout(Duration::from_secs(2), async {
                     loop {
                         match receiver.recv().await.unwrap() {
-                            SourceEvent::ReleaseSelected { acknowledged } => {
-                                acknowledged.send(()).await.unwrap()
-                            }
                             SourceEvent::Selected { selected, .. } => break selected,
                             _ => {}
                         }
@@ -3868,6 +3861,124 @@ mod artwork_preparation_tests {
                     .catalog_revision as u64,
                 updated_publication.catalog_revision
             );
+        }
+    }
+
+    #[tokio::test]
+    async fn source_switch_and_removal_complete_without_an_event_consumer() {
+        for keep_receiver in [true, false] {
+            let directory = tempfile::tempdir().unwrap();
+            let database = Arc::new(
+                Database::open(directory.path().join("library.sqlite"))
+                    .await
+                    .unwrap(),
+            );
+            let settings = SettingsFile::memory();
+            let first = SourceId::new("first");
+            let second = SourceId::new("second");
+            for id in [&first, &second] {
+                settings
+                    .update(|stored| {
+                        stored.sources.configured.push(ConfiguredSource {
+                            configuration: SourceConfiguration::local(
+                                id.clone(),
+                                id.as_str(),
+                                Vec::new(),
+                            )
+                            .unwrap(),
+                            credential_ref: None,
+                            music_folder_id: None,
+                            local_access: None,
+                            enable_half_stars: false,
+                        });
+                        Ok(())
+                    })
+                    .unwrap();
+                library::Scan::begin(&database, id.as_str(), id.as_str(), "local", None)
+                    .await
+                    .unwrap()
+                    .finish()
+                    .await
+                    .unwrap();
+            }
+            let runtime = tokio::runtime::Handle::current();
+            let (events, receiver) = async_channel::unbounded();
+            let receiver = keep_receiver.then_some(receiver);
+            let owner = SourceOwner::open_dormant(
+                Artwork::new(directory.path().join("artwork"), runtime.clone()).unwrap(),
+                Arc::clone(&database),
+                Downloads::new(
+                    directory.path().join("downloads"),
+                    database.as_ref().clone(),
+                    runtime.clone(),
+                    async_channel::unbounded().0,
+                    Vec::new(),
+                ),
+                settings.clone(),
+                Arc::new(SwitchableSecretStore::new(Arc::new(
+                    secrets::MemorySecretStore::new(),
+                ))),
+                runtime,
+                SourceOutputs {
+                    events,
+                    discovery: async_channel::unbounded().0,
+                },
+            )
+            .owner;
+            let mut previous = None;
+            for id in [&first, &second] {
+                owner.select_source(id.clone());
+                tokio::time::timeout(Duration::from_secs(5), async {
+                    while settings.load().sources.selected_source_id.as_ref() != Some(id) {
+                        tokio::task::yield_now().await;
+                    }
+                })
+                .await
+                .expect("selection completes without consuming events");
+                if let Some(previous) = previous.take() {
+                    let previous: Arc<ActiveSource> = previous;
+                    assert!(previous.resolve().is_none());
+                }
+                previous = owner.shared.selected_session();
+            }
+            owner.forget_source(second.clone());
+            tokio::time::timeout(Duration::from_secs(5), async {
+                while settings
+                    .load()
+                    .sources
+                    .configured
+                    .iter()
+                    .any(|item| item.configuration.source_id == second)
+                {
+                    tokio::task::yield_now().await;
+                }
+            })
+            .await
+            .expect("removal completes without consuming events");
+            assert!(previous.unwrap().resolve().is_none());
+            assert!(owner.shared.selected().is_none());
+            assert!(
+                database
+                    .source_identity_key(&second)
+                    .await
+                    .unwrap()
+                    .is_none()
+            );
+            if let Some(receiver) = receiver {
+                let mut assignments = Vec::new();
+                while let Ok(event) = receiver.try_recv() {
+                    match event {
+                        SourceEvent::Selected { selected, .. } => {
+                            assignments.push(Some(selected.source_id))
+                        }
+                        SourceEvent::ReleaseSelected => assignments.push(None),
+                        _ => {}
+                    }
+                }
+                assert_eq!(assignments, vec![Some(first), None, Some(second), None]);
+            }
+            owner.shared.cancel_observer();
+            owner.shared.cancel_acquisition();
         }
     }
 

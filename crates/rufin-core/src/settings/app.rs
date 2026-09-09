@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use desktop_integration::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
@@ -357,7 +357,7 @@ impl Settings {
     }
 }
 
-pub type SettingsHandle = Rc<super::SettingsOwner>;
+pub type SettingsHandle = Arc<super::SettingsOwner>;
 
 pub fn default_home_blocks() -> Vec<HomeBlockKind> {
     vec![
