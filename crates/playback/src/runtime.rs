@@ -825,6 +825,77 @@ mod persistence_tests {
         }
     }
 
+    #[tokio::test]
+    async fn stream_and_backend_failures_publish_notices_and_keep_diagnostics() {
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("queue.sqlite3"))
+            .await
+            .unwrap();
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 0,
+            local_period: "1970-01".into(),
+        };
+        for backend_failure in [false, true] {
+            let page = database
+                .read_queue(library::QueueReadRequest::Capture {
+                    input: Box::new(library::QueueInput::Items(vec![(
+                        QueueItem::direct(
+                            "https://example.test/track",
+                            "Track",
+                            "Artist",
+                            "Album",
+                            180_000,
+                        ),
+                        crate::Provenance::Manual,
+                    )])),
+                    anchor_index: 0,
+                    random_start: None,
+                })
+                .await
+                .unwrap();
+            let mut sequence = Sequence::new();
+            sequence.add_page(page, library::QueueReorderTarget::End, true, None);
+            let mut runtime = PlaybackRuntime::new(
+                sequence,
+                "failure-feedback",
+                PlaybackSettings::default(),
+                false,
+                1,
+                SelectedPlaybackOutput::Local,
+                Box::new(IdleBackend),
+            );
+            runtime.command(SessionCommand::Play, &sample).unwrap();
+            let run = runtime.session.current_run().unwrap();
+            let message = if backend_failure {
+                "Resource not found."
+            } else {
+                "the configured source no longer exists"
+            };
+            let update = if backend_failure {
+                let update = runtime.session.handle_backend(
+                    BackendEvent::Error {
+                        run,
+                        error: BackendFailure::new(message),
+                    },
+                    &sample,
+                );
+                runtime.finish(update, &sample).unwrap()
+            } else {
+                runtime
+                    .resolve_stream(run, Err(message.into()), &sample)
+                    .unwrap()
+            };
+            assert_eq!(
+                update.projection.unwrap().notices,
+                [PlaybackNotice::OperationFailed(message.into())]
+            );
+            assert!(update.effects.iter().any(
+                |effect| matches!(effect, SessionEffect::FatalError(error) if error == message)
+            ));
+        }
+    }
+
     async fn published_queue_snapshot(
         playback: &Playback,
         updates: &Receiver<PlaybackUpdate>,
@@ -1272,6 +1343,10 @@ impl PlaybackRuntime {
                 SessionEffect::NonfatalError(error) => {
                     notices.push(PlaybackNotice::OperationFailed(error.clone()));
                     effects.push(SessionEffect::NonfatalError(error));
+                }
+                SessionEffect::FatalError(error) => {
+                    notices.push(PlaybackNotice::OperationFailed(error.clone()));
+                    effects.push(SessionEffect::FatalError(error));
                 }
                 SessionEffect::Visualizer { run, levels } => {
                     visualizer = Some((run, levels));

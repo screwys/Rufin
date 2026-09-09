@@ -30,6 +30,21 @@
             <property name="subtitle" translatable="yes">Install available updates when Rufin starts</property>
           </object>
         </child>
+        <child>
+          <object class="AdwComboRow" id="release_check_interval_row">
+            <property name="title" translatable="yes">Check for updates every</property>
+            <property name="model">
+              <object class="GtkStringList">
+                <items>
+                  <item translatable="yes">1 hour</item>
+                  <item translatable="yes">6 hours</item>
+                  <item translatable="yes">12 hours</item>
+                  <item translatable="yes">24 hours</item>
+                </items>
+              </object>
+            </property>
+          </object>
+        </child>
       </object>
     </child>
     <child>

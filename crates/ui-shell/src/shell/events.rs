@@ -984,9 +984,11 @@ fn playback_error_toast(error: &str) -> String {
         .and_then(|(_, message)| message.split_once("; debug="))
         .map_or(error, |(message, _)| message);
     match message {
-        "Not Found" | "File not found" | "Resource not found" | "Resource not found." => {
-            tr("Resource not found")
-        }
+        "Not Found"
+        | "File not found"
+        | "Resource not found"
+        | "Resource not found."
+        | "the configured source no longer exists" => tr("Resource not found"),
         _ => message.to_owned(),
     }
 }
@@ -1009,6 +1011,10 @@ mod tests {
 
     #[test]
     fn playback_toasts_omit_backend_diagnostics() {
+        assert_eq!(
+            super::playback_error_toast("the configured source no longer exists"),
+            localization::tr("Resource not found")
+        );
         let diagnostic = "GStreamer prepared playback failed; element=/GstPlayBin/player/GstSoupHTTPSrc/source; audio_sink=autoaudiosink; error=Not Found; debug=Not Found (404), URL: http://server/Audio/track/stream";
         assert_eq!(
             super::playback_error_toast(diagnostic),
