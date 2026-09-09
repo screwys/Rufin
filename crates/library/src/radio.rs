@@ -50,6 +50,96 @@ pub struct RandomCriteria {
 }
 
 impl Database {
+    /// Resolve the seed's catalog owner independently of the selected browse source.
+    pub async fn radio_source(
+        &self,
+        seed: &RadioSeed,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Option<(SourceKey, crate::SourceId)>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT source_key,object_id FROM sources WHERE source_key=(",
+        );
+        match seed {
+            RadioSeed::Track(uri) => {
+                query
+                    .push("SELECT source_key FROM tracks WHERE media_uri=")
+                    .push_bind(uri);
+            }
+            RadioSeed::Album(key) => {
+                query
+                    .push("SELECT source_key FROM albums WHERE album_key=")
+                    .push_bind(key);
+            }
+            RadioSeed::Artist(key) | RadioSeed::AlbumArtist(key) => {
+                query
+                    .push("SELECT source_key FROM artists WHERE artist_key=")
+                    .push_bind(key);
+            }
+            RadioSeed::Genre(key) => {
+                query
+                    .push("SELECT source_key FROM genres WHERE genre_key=")
+                    .push_bind(key);
+            }
+            RadioSeed::Playlist(key) => {
+                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM playlist_entries entry JOIN tracks track USING(media_uri) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
+            }
+        }
+        query.push(")");
+        let result = query
+            .build_query_as::<(SourceKey, String)>()
+            .persistent(false)
+            .fetch_optional(&mut *connection)
+            .await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result.map(|(key, id)| (key, crate::SourceId::new(id))))
+    }
+
+    /// Admit provider recommendations in order, using the same queue and seed exclusions.
+    pub async fn admit_radio_candidates(
+        &self,
+        source: SourceKey,
+        seed: &RadioSeed,
+        object_ids: &[String],
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<String>> {
+        if object_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        require_radio_bounds(0, object_ids.len())?;
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("WITH requested(object_id,position) AS (");
+        query.push_values(object_ids.iter().enumerate(), |mut row, (position, id)| {
+            row.push_bind(id).push_bind(position as i64);
+        });
+        query.push(") SELECT track.media_uri FROM requested JOIN tracks track ON track.object_id=requested.object_id WHERE track.source_key=").push_bind(source)
+            .push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.media_uri=track.media_uri)");
+        match seed {
+            RadioSeed::Track(uri) => {
+                query.push(" AND track.media_uri<>").push_bind(uri);
+            }
+            RadioSeed::Album(key) => {
+                query
+                    .push(" AND (track.album_key IS NULL OR track.album_key<>")
+                    .push_bind(key)
+                    .push(")");
+            }
+            RadioSeed::Playlist(key) => {
+                query.push(" AND track.media_uri IS NOT (SELECT entry.media_uri FROM playlist_entries entry JOIN tracks seed ON seed.media_uri=entry.media_uri WHERE entry.playlist_key=").push_bind(key)
+                    .push(" AND seed.source_key=").push_bind(source).push(" ORDER BY entry.position LIMIT 1)");
+            }
+            _ => {}
+        }
+        query.push(" GROUP BY track.media_uri ORDER BY min(requested.position)");
+        let result = query
+            .build_query_scalar()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(result)
+    }
+
     pub async fn radio_candidates(
         &self,
         source: SourceKey,
@@ -107,66 +197,71 @@ impl Database {
         let mut result = Vec::with_capacity(requested);
         let mut after = pivot - 1;
         let mut wrapped = false;
+        let mut related = true;
         loop {
-            let mut query = QueryBuilder::<Sqlite>::new(
+            let mut query = QueryBuilder::<Sqlite>::new("");
+            if related {
+                query
+                    .push("WITH seed(kind,id) AS (VALUES (")
+                    .push_bind(seed_kind)
+                    .push(",")
+                    .push_bind(seed_raw)
+                    .push(
+                        ")), seed_albums AS (
+                        SELECT album_key FROM tracks,seed WHERE kind=0 AND track_key=id
+                        UNION SELECT id FROM seed WHERE kind=1
+                    ), seed_artists AS (
+                        SELECT artist_key FROM track_artists,seed WHERE kind=0 AND track_key=id
+                        UNION SELECT artist_key FROM album_artists WHERE album_key IN seed_albums
+                        UNION SELECT id FROM seed WHERE kind IN (2,5)
+                    ), seed_genres AS (
+                        SELECT genre_key FROM track_genres,seed WHERE kind=0 AND track_key=id
+                        UNION SELECT genre_key FROM album_genres WHERE album_key IN seed_albums
+                        UNION SELECT id FROM seed WHERE kind=3
+                    ) ",
+                    );
+            }
+            query.push(
                 "SELECT track.track_key,track.media_uri FROM tracks AS track
              WHERE track.source_key=",
             );
             query
-            .push_bind(source)
-            .push(" AND track.track_key>").push_bind(after)
-            .push(" AND (").push_bind(seed_kind).push("<>0 OR track.track_key<>").push_bind(seed_raw).push(")")
-            .push(" AND (").push_bind(!wrapped).push(" OR track.track_key<").push_bind(pivot).push(") AND (")
-            .push_bind(!require_media)
-            .push(" OR track.media_uri IS NOT NULL) AND (")
-            .push_bind(seed_kind)
-            .push(
-                "=0 AND (
-                 EXISTS (
-                   SELECT 1 FROM track_artists AS candidate
-                   JOIN track_artists AS seeded ON seeded.artist_key=candidate.artist_key
-                   WHERE candidate.track_key=track.track_key AND seeded.track_key=",
-            )
-            .push_bind(seed_raw)
-            .push(
-                ") OR EXISTS (
-                   SELECT 1 FROM track_genres AS candidate
-                   JOIN track_genres AS seeded ON seeded.genre_key=candidate.genre_key
-                   WHERE candidate.track_key=track.track_key AND seeded.track_key=",
-            )
-            .push_bind(seed_raw)
-            .push(")) OR (")
-            .push_bind(seed_kind)
-            .push(
-                "=5 AND EXISTS (
-                 SELECT 1 FROM album_artists
-                 WHERE album_key=track.album_key AND artist_key=",
-            )
-            .push_bind(seed_raw)
-            .push(")) OR (")
-            .push_bind(seed_kind)
-            .push("=1 AND track.album_key<>").push_bind(seed_raw).push(" AND (EXISTS (SELECT 1 FROM tracks candidate JOIN album_genres candidate_genre USING(album_key) JOIN album_genres seeded_genre ON seeded_genre.genre_key=candidate_genre.genre_key WHERE candidate.track_key=track.track_key AND seeded_genre.album_key=").push_bind(seed_raw).push(") OR EXISTS (SELECT 1 FROM tracks candidate JOIN album_artists candidate_artist USING(album_key) JOIN album_artists seeded_artist ON seeded_artist.artist_key=candidate_artist.artist_key WHERE candidate.track_key=track.track_key AND seeded_artist.album_key=").push_bind(seed_raw).push("))) OR (")
-            .push_bind(seed_kind)
-            .push(
-                "=2 AND EXISTS (
-                 SELECT 1 FROM track_artists
-                 WHERE track_key=track.track_key AND artist_key=",
-            )
-            .push_bind(seed_raw)
-            .push(")) OR (")
-            .push_bind(seed_kind)
-            .push(
-                "=3 AND EXISTS (
-                 SELECT 1 FROM track_genres
-                 WHERE track_key=track.track_key AND genre_key=",
-            )
-            .push_bind(seed_raw)
-            .push(")))");
+                .push_bind(source)
+                .push(" AND track.track_key>")
+                .push_bind(after)
+                .push(" AND (")
+                .push_bind(seed_kind)
+                .push("<>0 OR track.track_key<>")
+                .push_bind(seed_raw)
+                .push(")")
+                .push(" AND (")
+                .push_bind(seed_kind)
+                .push("<>1 OR track.album_key IS NULL OR track.album_key<>")
+                .push_bind(seed_raw)
+                .push(")")
+                .push(" AND (")
+                .push_bind(!wrapped)
+                .push(" OR track.track_key<")
+                .push_bind(pivot)
+                .push(") AND (")
+                .push_bind(!require_media)
+                .push(" OR track.media_uri IS NOT NULL)");
+            if related {
+                query.push(" AND ((").push_bind(seed_kind).push("<>5 AND EXISTS (
+                    SELECT 1 FROM track_artists WHERE track_key=track.track_key AND artist_key IN seed_artists
+                )) OR EXISTS (
+                    SELECT 1 FROM album_artists WHERE album_key=track.album_key AND artist_key IN seed_artists
+                ) OR EXISTS (
+                    SELECT 1 FROM track_genres WHERE track_key=track.track_key AND genre_key IN seed_genres
+                ) OR EXISTS (
+                    SELECT 1 FROM album_genres WHERE album_key=track.album_key AND genre_key IN seed_genres
+                ))");
+            }
             query.push(" AND NOT EXISTS (SELECT 1 FROM queue_occurrences queued WHERE queued.media_uri=track.media_uri)");
-            if !extra_excluded.is_empty() {
+            if !extra_excluded.is_empty() || !result.is_empty() {
                 query.push(" AND track.media_uri NOT IN (");
                 let mut separated = query.separated(",");
-                for media_uri in extra_excluded {
+                for media_uri in extra_excluded.iter().chain(&result) {
                     separated.push_bind(media_uri);
                 }
                 separated.push_unseparated(")");
@@ -179,7 +274,13 @@ impl Database {
                 .await?;
             if page.is_empty() {
                 if wrapped {
-                    break;
+                    if !related {
+                        break;
+                    }
+                    related = false;
+                    wrapped = false;
+                    after = pivot - 1;
+                    continue;
                 }
                 wrapped = true;
                 after = -1;

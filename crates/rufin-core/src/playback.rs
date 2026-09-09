@@ -920,14 +920,14 @@ impl RadioCommandPort for PlaybackOwner {
         if self.radio_plex(&request) {
             return;
         }
-        if let (Some(active), Some(selected)) = (
-            self.active(),
-            self.source_owner()
-                .and_then(|source| source.current_session()),
-        ) {
+        if let Some(active) = self.active() {
             let _ = crate::radio::play_radio(
                 self.runtime.clone(),
-                selected.downgrade(),
+                self.database.clone(),
+                self.source
+                    .lock()
+                    .unwrap_or_else(|p| p.into_inner())
+                    .clone(),
                 active.playback,
                 request,
             );

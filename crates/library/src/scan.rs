@@ -1394,7 +1394,7 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
         ])?;
         self.stage(
-            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, ?3, ?4, COALESCE(?5,(SELECT sort_text FROM artists WHERE source_key=?10 AND object_id=?1),?4), ?6, ?7, ?8, ?9) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=COALESCE(?5,scan_artists.sort_text),musicbrainz_artist_id=COALESCE(excluded.musicbrainz_artist_id,scan_artists.musicbrainz_artist_id),artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=COALESCE(excluded.rating,scan_artists.rating)")
+            sqlx::query("INSERT INTO temp.scan_artists VALUES (?1, ?2, ?3, ?4, COALESCE(?5,(SELECT sort_text FROM artists WHERE source_key=?10 AND object_id=?1),?4), COALESCE(?6,(SELECT musicbrainz_artist_id FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1)), ?7, ?8, COALESCE(?9,(SELECT source_rating FROM artists WHERE ?5 IS NULL AND source_key=?10 AND object_id=?1))) ON CONFLICT(object_id) DO UPDATE SET name=excluded.name,normalized_name=excluded.normalized_name,sort_text=COALESCE(?5,scan_artists.sort_text),musicbrainz_artist_id=CASE WHEN ?5 IS NOT NULL THEN ?6 ELSE COALESCE(?6,scan_artists.musicbrainz_artist_id) END,artwork_binding=COALESCE(excluded.artwork_binding,scan_artists.artwork_binding),favorite=COALESCE(excluded.favorite,scan_artists.favorite),rating=CASE WHEN ?5 IS NOT NULL THEN ?9 ELSE COALESCE(?9,scan_artists.rating) END")
                 .bind(object_id)
                 .bind(media_uri)
                 .bind(name)
@@ -2199,6 +2199,8 @@ async fn normalize_staged_artwork(
         ).bind(source).bind(distinct_track_covers).execute(&mut *connection).await?;
         if !local {
             sqlx::query("UPDATE temp.scan_artists AS artist SET artwork_binding=(SELECT artwork_binding FROM artists WHERE source_key=?1 AND object_id=artist.object_id) WHERE artwork_binding IS NULL")
+                .bind(source).execute(&mut *connection).await?;
+            sqlx::query("UPDATE temp.scan_genres AS genre SET artwork_binding=(SELECT artwork_binding FROM genres WHERE source_key=?1 AND object_id=genre.object_id) WHERE artwork_binding IS NULL")
                 .bind(source).execute(&mut *connection).await?;
         }
     }

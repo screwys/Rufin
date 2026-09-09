@@ -22,40 +22,9 @@ pub(crate) fn request_auto_dj(
     request: AutoDjRequest,
 ) {
     runtime.spawn(async move {
-        let seed_source = match library::source_entity_parts(&request.seed_media_uri) {
-            Some((source_id, kind, _)) if kind == "track" => database
-                .source_identity_key(&source_id)
-                .await
-                .ok()
-                .flatten()
-                .map(|key| (key, Some(source_id))),
-            Some(_) => None,
-            None => database
-                .track_row_by_uri(&request.seed_media_uri, &ReadCancellation::new())
-                .await
-                .ok()
-                .flatten()
-                .map(|track| (track.source_key, None)),
-        };
-        let Some((source_key, source_id)) = seed_source else {
-            let _ = playback.auto_dj_unavailable(
-                request.seed_occurrence,
-                Some("Auto DJ seed is unavailable".to_string()),
-            );
-            return;
-        };
-        let source = if let Some(source_id) = source_id {
-            tokio::task::spawn_blocking(move || source_owner.upgrade()?.client(&source_id).ok())
-                .await
-                .ok()
-                .flatten()
-        } else {
-            None
-        };
         let candidates = radio_candidates(
             &database,
-            source_key,
-            source.as_deref(),
+            source_owner,
             RadioSeed::Track(request.seed_media_uri),
             request.requested_count,
         )
@@ -82,22 +51,16 @@ pub(crate) fn request_auto_dj(
 
 pub(crate) fn play_radio(
     runtime: tokio::runtime::Handle,
-    selected: WeakActiveSource,
+    database: Arc<Database>,
+    source_owner: Weak<SourceOwner>,
     playback: Playback,
     request: RadioPlayRequest,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let placement = request.placement;
-    let current = selected.upgrade()?.resolve()?;
     let reservation = playback.reserve_materialization(placement).ok()?;
     Some(runtime.spawn(async move {
-        let candidates = radio_candidates(
-            &current.database,
-            current.source_key,
-            current.source.as_deref(),
-            request.seed,
-            MANUAL_RADIO_COUNT,
-        )
-        .await;
+        let candidates =
+            radio_candidates(&database, source_owner, request.seed, MANUAL_RADIO_COUNT).await;
         complete_materialization(
             playback,
             reservation,
@@ -149,20 +112,29 @@ pub(crate) fn play_random(
 
 pub(crate) async fn radio_candidates(
     database: &Database,
-    source_key: SourceKey,
-    source: Option<&Source>,
+    source_owner: Weak<SourceOwner>,
     seed: RadioSeed,
     requested: usize,
 ) -> Result<Vec<String>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
+    let (source_key, source_id) = database
+        .radio_source(&seed, &ReadCancellation::new())
+        .await
+        .map_err(|error| error.to_string())?
+        .ok_or("Radio seed is unavailable")?;
+    let source =
+        tokio::task::spawn_blocking(move || source_owner.upgrade()?.client(&source_id).ok())
+            .await
+            .map_err(|error| error.to_string())?;
+    let source = source.as_deref();
     let native_seed = source_seed(database, source_key, source, &seed).await?;
-    let mut native = if let (Some(source), Some(seed)) = (source, native_seed) {
+    let mut native = if let (Some(source), Some(native_seed)) = (source, native_seed) {
         match source
-            .generated_track_object_ids(&seed, requested.min(256))
+            .generated_track_object_ids(&native_seed, requested.min(256))
             .await
         {
             Ok(ids) => database
-                .track_media_uris_by_objects(source_key, &ids, &ReadCancellation::new())
+                .admit_radio_candidates(source_key, &seed, &ids, &ReadCancellation::new())
                 .await
                 .map_err(|error| error.to_string())?,
             Err(_) => Vec::new(),
@@ -236,6 +208,7 @@ async fn source_seed(
             .await
             .map_err(|e| e.to_string())?
             .pop()
+            .filter(|row| row.source_key == Some(source_key))
             .map(|row| SourceRadioSeed::Playlist(row.object_id)),
     })
 }
