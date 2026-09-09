@@ -11,15 +11,19 @@ body:
           required: true
 
   - type: dropdown
-    id: server
+    id: source
     attributes:
-      label: Server
+      label: Source
       options:
+        - Local
         - Jellyfin
         - Navidrome
         - OpenSubsonic
-        - Local
-        - Irrelevant
+        - Emby
+        - Plex
+        - WebDAV
+        - Samba
+        - Unrelated
     validations:
       required: true
 
