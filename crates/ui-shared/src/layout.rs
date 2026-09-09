@@ -105,12 +105,11 @@ gtk::glib::wrapper! {
 }
 
 impl AllocationOwner {
-    pub fn set_width_callback(&self, on_width: impl Fn(i32) + 'static) {
+    pub fn set_width_callback(&self, on_width: Option<std::rc::Rc<dyn Fn(i32)>>) {
         use gtk::subclass::prelude::ObjectSubclassIsExt;
 
-        self.imp()
-            .on_width
-            .replace(Some(std::rc::Rc::new(on_width)));
+        self.imp().on_width.replace(on_width);
+        self.queue_resize();
     }
 
     pub fn set_size_callback(&self, on_size: impl Fn(i32, i32) + 'static) {
@@ -128,7 +127,7 @@ pub fn width_allocation_owner(
     on_width: impl Fn(i32) + 'static,
 ) -> AllocationOwner {
     let owner = allocation_owner_for_child(child);
-    owner.set_width_callback(on_width);
+    owner.set_width_callback(Some(std::rc::Rc::new(on_width)));
     owner
 }
 

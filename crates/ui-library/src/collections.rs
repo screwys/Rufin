@@ -15,7 +15,7 @@ use gtk::{gio, glib};
 
 use crate::CatalogUi;
 use crate::{LibraryField, LibraryLayout, LibraryListKey};
-use ui_shared::layout::{allocation_owner, width_allocation_owner};
+use ui_shared::layout::{AllocationOwner, allocation_owner};
 use ui_shared::mounted_route::{MountedRouteItemNavigation, item_navigation_entry_position};
 use ui_shared::smart_playlist::SmartPlaylistChange;
 
@@ -175,7 +175,7 @@ enum LibraryCollectionHost {
         scroller: gtk::ScrolledWindow,
         margin_start: i32,
         margin_end: i32,
-        width_owner: gtk::Widget,
+        width_owner: AllocationOwner,
     },
 }
 
@@ -221,7 +221,7 @@ impl LibraryCollectionProjection {
         let LibraryCollectionHost::Scrolled { width_owner, .. } = &*self.host.borrow() else {
             unreachable!("scrolling_scroller installs the scrolled collection host");
         };
-        width_owner.clone()
+        width_owner.clone().upcast()
     }
 
     pub fn item_navigation(&self) -> MountedRouteItemNavigation {
@@ -254,34 +254,43 @@ impl LibraryCollectionProjection {
         active.set_margin_end(if row { 0 } else { margin_end });
         scroller.set_child(Some(&active));
         self.presentation.borrow().attach_scroller(scroller);
-        let allocation_only = matches!(
-            &*self.presentation.borrow(),
-            LibraryPresentationProjection::AlbumDetail(_)
-        );
         let presentation = Rc::clone(&self.presentation);
         let resize_scroller = scroller.clone();
-        let width_owner = if allocation_only {
-            allocation_owner(scroller, move |width, _| {
+        let width_owner = allocation_owner(scroller, move |width, _| {
+            if matches!(
+                &*presentation.borrow(),
+                LibraryPresentationProjection::AlbumDetail(_)
+            ) {
                 presentation
                     .borrow()
                     .fit_scroller_allocation(&resize_scroller, width);
-            })
-            .upcast::<gtk::Widget>()
-        } else {
-            width_allocation_owner(scroller, move |width| {
-                presentation
-                    .borrow()
-                    .fit_scroller_allocation(&resize_scroller, width);
-            })
-            .upcast::<gtk::Widget>()
-        };
+            }
+        });
+        self.configure_width_owner(&width_owner, scroller);
         self.host.replace(LibraryCollectionHost::Scrolled {
             scroller: scroller.clone(),
             margin_start,
             margin_end,
             width_owner: width_owner.clone(),
         });
-        width_owner
+        width_owner.upcast()
+    }
+
+    fn configure_width_owner(&self, owner: &AllocationOwner, scroller: &gtk::ScrolledWindow) {
+        if matches!(
+            &*self.presentation.borrow(),
+            LibraryPresentationProjection::AlbumDetail(_)
+        ) {
+            owner.set_width_callback(None);
+        } else {
+            let presentation = Rc::clone(&self.presentation);
+            let scroller = scroller.clone();
+            owner.set_width_callback(Some(Rc::new(move |width| {
+                presentation
+                    .borrow()
+                    .fit_scroller_allocation(&scroller, width);
+            })));
+        }
     }
 
     pub fn apply_settings(&self, settings: &crate::LibraryListSettings) {
@@ -331,6 +340,15 @@ impl LibraryCollectionProjection {
                 }
             }
             self.presentation.replace(presentation);
+            let host = self.host.borrow().clone();
+            if let LibraryCollectionHost::Scrolled {
+                scroller,
+                width_owner,
+                ..
+            } = host
+            {
+                self.configure_width_owner(&width_owner, &scroller);
+            }
         } else {
             self.presentation.borrow().apply_fields(settings);
         }
@@ -441,26 +459,32 @@ pub fn library_route_inset(child: gtk::Widget) -> gtk::Widget {
 }
 pub fn album_collection_projection(
     shell: &Rc<CatalogUi>,
-    models: AlbumCollectionModels,
+    models: Rc<RefCell<AlbumCollectionModels>>,
     key: LibraryListKey,
 ) -> LibraryCollectionProjection {
     let settings = shell.settings.current.borrow().library_list(key);
     let shell = Rc::clone(shell);
     LibraryCollectionProjection::new(
         settings,
-        Rc::new(move |layout| match layout {
-            LibraryLayout::Row => {
-                LibraryPresentationProjection::Row(album_table(&shell, models.albums(), key, None))
-            }
-            LibraryLayout::Detail if key.supports_layout(LibraryLayout::Detail) => {
-                LibraryPresentationProjection::AlbumDetail(album_detail_list(
+        Rc::new(move |layout| {
+            let models = models.borrow().clone();
+            match layout {
+                LibraryLayout::Row => LibraryPresentationProjection::Row(album_table(
                     &shell,
-                    models.detail(),
+                    models.albums(),
                     key,
-                ))
-            }
-            LibraryLayout::Grid | LibraryLayout::Detail => {
-                LibraryPresentationProjection::Grid(album_grid(&shell, &models, key))
+                    None,
+                )),
+                LibraryLayout::Detail if key.supports_layout(LibraryLayout::Detail) => {
+                    LibraryPresentationProjection::AlbumDetail(album_detail_list(
+                        &shell,
+                        models.detail(),
+                        key,
+                    ))
+                }
+                LibraryLayout::Grid | LibraryLayout::Detail => {
+                    LibraryPresentationProjection::Grid(album_grid(&shell, &models, key))
+                }
             }
         }),
     )

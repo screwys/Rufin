@@ -34,6 +34,7 @@ pub fn build_right_panel(
         queue_loading: adw::Spinner,
         root: gtk::Box,
         queue_lyrics_overlay: gtk::Overlay,
+        queue_layout: gtk::Box,
         queue_fixed_top: gtk::Box,
         queue_header_host: gtk::Box,
         queue_panel: gtk::Box,
@@ -45,6 +46,9 @@ pub fn build_right_panel(
         media_overlay: gtk::Overlay,
         lyrics_host: gtk::Box,
     });
+    queue_layout.remove(&queue_fixed_top);
+    let queue_header = ui_shared::controls::window_drag_handle(&queue_fixed_top);
+    queue_header.set_valign(gtk::Align::Start);
     window_controls_host.append(end_window_controls);
     media_overlay.add_overlay(visualizer_area);
     media_overlay.set_measure_overlay(visualizer_area, false);
@@ -54,6 +58,8 @@ pub fn build_right_panel(
     queue_lyrics_overlay.add_overlay(&queue_panel);
     queue_lyrics_overlay.set_measure_overlay(&queue_panel, false);
     queue_lyrics_overlay.set_measure_overlay(&queue_lyrics_split, false);
+    queue_lyrics_overlay.add_overlay(&queue_header);
+    queue_lyrics_overlay.set_measure_overlay(&queue_header, true);
     let positioned_queue = queue_panel.clone();
     let positioned_top = queue_fixed_top.clone();
     let positioned_split = queue_lyrics_split.clone();

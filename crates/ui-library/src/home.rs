@@ -734,14 +734,15 @@ impl CatalogUi {
         let track_count = album.track_count.max(0) as u64;
         showcase_view.bind_summary_text_with(1, move || track_count_text(track_count));
 
-        media_showcase(MediaShowcase {
+        let showcase = media_showcase(MediaShowcase {
             view: showcase_view,
             initial_width: width,
             cover,
             cover_controls: controls,
             context_menu: Some(context_menu),
             actions_min_cover_size: Some(HOME_SHOWCASE_ACTION_MIN_COVER_SIZE),
-        })
+        });
+        ui_shared::controls::window_drag_handle(&showcase).upcast()
     }
 
     fn home_genres(self: &Rc<Self>, genres: &[HomeGenreRow]) -> Option<gtk::Widget> {

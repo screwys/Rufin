@@ -450,13 +450,12 @@ pub(crate) fn window_drag_handle_with_child(
     css_class: &str,
     child: &impl IsA<gtk::Widget>,
 ) -> gtk::WindowHandle {
-    let handle = gtk::WindowHandle::new();
+    let handle = ui_shared::controls::window_drag_handle(child);
     handle.add_css_class(css_class);
     handle.set_halign(gtk::Align::Fill);
     handle.set_valign(gtk::Align::Start);
     handle.set_hexpand(true);
     handle.set_vexpand(false);
-    handle.set_child(Some(child));
     handle
 }
 

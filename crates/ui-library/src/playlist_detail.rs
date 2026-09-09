@@ -441,6 +441,27 @@ impl CatalogUi {
         );
         match &owner {
             PlaylistDetailOwner::Saved { key, summary } if summary.writable => {
+                let drop = gtk::DropTarget::new(
+                    glib::BoxedAnyObject::static_type(),
+                    gtk::gdk::DragAction::COPY,
+                );
+                let drop_owner = Rc::clone(&owner_state);
+                let drop_menus = Rc::downgrade(&self.media_menus);
+                drop.connect_drop(move |_, value, _, _| {
+                    let Some(menus) = drop_menus.upgrade() else {
+                        return false;
+                    };
+                    let Some(source) = ui_shared::media_drag::media_drag_source(value) else {
+                        return false;
+                    };
+                    let PlaylistDetailOwner::Saved { summary, .. } = drop_owner.borrow().clone()
+                    else {
+                        return false;
+                    };
+                    ui_shared::media_menus::add_drag_to_playlist(&menus, summary, source)
+                });
+                wrapper.add_controller(drop);
+
                 let rename = detail_action_button(EDIT_ICON, "Rename");
                 let rename_shell = Rc::clone(self);
                 let playlist = *key;

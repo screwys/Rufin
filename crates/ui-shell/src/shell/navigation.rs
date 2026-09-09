@@ -6,7 +6,7 @@ use std::{
     time::{SystemTime, UNIX_EPOCH},
 };
 use ui_shared::format_duration_units;
-use ui_shared::media_drag::media_drag_source;
+use ui_shared::media_drag::{MediaDragSource, media_drag_content_provider, media_drag_source};
 
 use crate::preferences::source::selector::source_submenu;
 use rufin_core::playback::PlaybackTarget;
@@ -90,7 +90,7 @@ pub(crate) struct NavigationWidgets {
     pub(super) split_view: adw::OverlaySplitView,
     pub(super) left_resize_handle: gtk::Box,
     pub(super) normal_nav_panel: gtk::Box,
-    pub(super) compact_nav_slot: gtk::ScrolledWindow,
+    pub(super) compact_nav_slot: gtk::WindowHandle,
     pub(super) tiny_nav_button: gtk::Button,
     pub(super) normal_nav_routes: adw::Sidebar,
     pub(super) normal_nav_pins: gtk::Box,
@@ -1527,7 +1527,7 @@ fn sidebar_pin_row(
     });
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
-    install_sidebar_pin_reorder(&row, shell, &pin);
+    install_sidebar_pin_drag(&row, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
 
     let controls = gtk::Box::new(gtk::Orientation::Horizontal, 1);
@@ -1630,7 +1630,7 @@ fn compact_sidebar_pin(
     });
     install_sidebar_pin_double_click(&activate, shell, pin.playback_target());
     row.set_child(Some(&activate));
-    install_sidebar_pin_reorder(&row, shell, &pin);
+    install_sidebar_pin_drag(&row, shell, &pin);
     install_playlist_pin_drop(&row, shell, &pin);
 
     let (controls, play) = cover_play_only_hover_controls(COMPACT_SIDEBAR_PIN_COVER_SIZE, "Play");
@@ -1664,18 +1664,27 @@ fn compact_sidebar_pin(
     row
 }
 
-fn install_sidebar_pin_reorder(
+fn install_sidebar_pin_drag(
     target: &impl IsA<gtk::Widget>,
     shell: &Rc<Shell>,
     pin: &SidebarPinItem,
 ) {
+    let playback = pin.playback_target();
     let pin = pin.stored_pin();
     let payload = sidebar_pin_drag_variant(&pin);
     let drag = gtk::DragSource::builder()
-        .actions(gtk::gdk::DragAction::MOVE)
+        .actions(gtk::gdk::DragAction::COPY | gtk::gdk::DragAction::MOVE)
         .build();
+    drag.set_propagation_phase(gtk::PropagationPhase::Capture);
+    let drag_shell = Rc::downgrade(shell);
     drag.connect_prepare(move |_, _, _| {
-        Some(gtk::gdk::ContentProvider::for_value(&payload.to_value()))
+        let shell = drag_shell.upgrade()?;
+        let source =
+            MediaDragSource::capture_target(shell.selected_library().as_deref(), playback.clone());
+        Some(gtk::gdk::ContentProvider::new_union(&[
+            gtk::gdk::ContentProvider::for_value(&payload.to_value()),
+            media_drag_content_provider(source),
+        ]))
     });
     let drag_target = target.as_ref().downgrade();
     drag.connect_drag_begin(move |source, _| {
@@ -1792,6 +1801,12 @@ fn install_playlist_pin_drop(
         glib::BoxedAnyObject::static_type(),
         gtk::gdk::DragAction::COPY,
     );
+    drop_target.connect_accept(|_, drop| {
+        let formats = drop.formats();
+        // A pin dropped onto another pin reorders it, including playlist pins.
+        formats.contains_type(glib::BoxedAnyObject::static_type())
+            && !formats.contains_type(glib::Variant::static_type())
+    });
     let enter_target = weak_target.clone();
     drop_target.connect_enter(move |_, _, _| {
         if let Some(target) = enter_target.upgrade() {
