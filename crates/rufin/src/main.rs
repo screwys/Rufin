@@ -42,7 +42,7 @@ fn main() -> ExitCode {
     if let Err(error) = localization::initialize() {
         let _ = writeln!(io::stderr().lock(), "Could not initialize gettext: {error}");
     }
-    let diagnostics = diagnostics::Diagnostics::install(paths::state_dir());
+    let (diagnostics, _stderr_guard) = diagnostics::Diagnostics::install(paths::state_dir());
     let _desktop_platform = desktop_integration::Platform::initialize();
     info!("starting Rufin native shell");
 
