@@ -64,6 +64,27 @@ pub enum SecretError {
 
 pub type SecretResult<T> = Result<T, SecretError>;
 
+/// Check the host integration without reading credentials or unlocking a keyring.
+pub async fn check_system_keyring() -> SecretResult<()> {
+    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+    {
+        if oo7::ashpd::is_sandboxed() {
+            let portal = oo7::ashpd::desktop::secret::Secret::new()
+                .await
+                .map_err(|error| SecretError::Backend(error.to_string()))?;
+            portal
+                .get_property::<u32>("version")
+                .await
+                .map_err(|error| SecretError::Backend(error.to_string()))?;
+        } else {
+            oo7::dbus::Service::new()
+                .await
+                .map_err(|error| SecretError::Backend(error.to_string()))?;
+        }
+    }
+    Ok(())
+}
+
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SecretKey {
     config_key: String,

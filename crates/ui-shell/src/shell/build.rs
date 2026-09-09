@@ -66,6 +66,7 @@ pub fn build(
     let loaded_at = std::time::Instant::now();
     let RuntimeInputs {
         temporary_store,
+        secret_storage_fallback,
         diagnostics,
         products,
         settings: settings_handle,
@@ -148,6 +149,7 @@ pub fn build(
         content_row: gtk::Box,
         left_resize_handle: gtk::Box,
         control_feedback_label: gtk::Label,
+        secret_storage_fallback_message: gtk::Label,
         source_refresh_feedback: gtk::Box,
         source_refresh_feedback_label: gtk::Label,
         source_refresh_feedback_progress: gtk::ProgressBar,
@@ -541,6 +543,15 @@ pub fn build(
             }
             if let Some(shell) = weak.upgrade() {
                 shell.present_onboarding();
+            }
+        });
+    }
+    if secret_storage_fallback {
+        let message = RefCell::new(Some(secret_storage_fallback_message.text().to_string()));
+        let feedback = Rc::clone(&shell.control_feedback);
+        shell.chrome.window.connect_map(move |_| {
+            if let Some(message) = message.borrow_mut().take() {
+                feedback.show_feedback_toast(message);
             }
         });
     }
