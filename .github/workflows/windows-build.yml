@@ -86,10 +86,11 @@ jobs:
         uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
         with:
           cache-bin: "false"
+          cache-on-failure: true
           cmd-format: msys2 -c "bash scripts/rust-cache-command direct {0}"
           prefix-key: v1-rust
-          save-if: ${{ github.event_name == 'push' && github.ref == 'refs/heads/main' }}
-          shared-key: windows-ucrt64
+          save-if: ${{ github.event_name == 'pull_request' || (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
+          shared-key: windows-package-ucrt64
           workspaces: ". -> .local/target"
 
       - name: Verify signed release tag
@@ -108,15 +109,9 @@ jobs:
 
       - name: Build Windows installer
         shell: msys2 {0}
-        env:
-          RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           set -euo pipefail
-          build_identity=development
-          if [[ -n "$RELEASE_TAG" ]]; then
-            build_identity=stable
-          fi
-          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package "$build_identity"
+          RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package stable
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
