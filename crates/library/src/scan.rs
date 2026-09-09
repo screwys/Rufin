@@ -1743,6 +1743,15 @@ impl Scan {
         if !self.database.scan_is_current(self.token) {
             return Ok(ScanOutcome::Failed);
         }
+        if !self.authoritative && self.expected_revision.is_none()
+            && !sqlx::query_scalar::<_, bool>("SELECT EXISTS(
+                SELECT 1 FROM temp.scan_tracks UNION ALL SELECT 1 FROM temp.scan_albums
+                UNION ALL SELECT 1 FROM temp.scan_artists UNION ALL SELECT 1 FROM temp.scan_genres
+                UNION ALL SELECT 1 FROM temp.scan_moods UNION ALL SELECT 1 FROM temp.scan_folders
+                UNION ALL SELECT 1 FROM temp.scan_playlists UNION ALL SELECT 1 FROM temp.scan_home_entries)")
+                .fetch_one(&mut *connection).await? {
+            return Ok(ScanOutcome::Failed);
+        }
         let mut transaction = connection.begin().await?;
         let current = sqlx::query_as::<_, AcceptedSource>(
             "SELECT source_key,catalog_digest,artwork_digest,catalog_revision

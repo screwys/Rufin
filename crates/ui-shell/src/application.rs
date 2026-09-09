@@ -44,27 +44,35 @@ struct ApplicationOptions {
     window_bar_preview: Option<WindowBarPreview>,
 }
 
-pub fn run_application<F>(bootstrap: F) -> ExitCode
+pub fn run_application<F, Fut>(settings: rufin_core::settings::Settings, bootstrap: F) -> ExitCode
 where
-    F: FnOnce() -> Result<RuntimeInputs, String> + 'static,
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
 {
-    run_application_with_presentation(bootstrap, false, None)
+    run_application_with_presentation(settings, bootstrap, false, None)
 }
 
-pub fn run_application_after_update<F>(bootstrap: F, presented: impl FnOnce() + 'static) -> ExitCode
+pub fn run_application_after_update<F, Fut>(
+    settings: rufin_core::settings::Settings,
+    bootstrap: F,
+    presented: impl FnOnce() + 'static,
+) -> ExitCode
 where
-    F: FnOnce() -> Result<RuntimeInputs, String> + 'static,
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
 {
-    run_application_with_presentation(bootstrap, true, Some(Box::new(presented)))
+    run_application_with_presentation(settings, bootstrap, true, Some(Box::new(presented)))
 }
 
-fn run_application_with_presentation<F>(
+fn run_application_with_presentation<F, Fut>(
+    settings: rufin_core::settings::Settings,
     bootstrap: F,
     force_initial_presentation: bool,
     presented: Option<Box<dyn FnOnce()>>,
 ) -> ExitCode
 where
-    F: FnOnce() -> Result<RuntimeInputs, String> + 'static,
+    F: FnOnce() -> Fut + 'static,
+    Fut: std::future::Future<Output = Result<RuntimeInputs, String>> + 'static,
 {
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -98,23 +106,29 @@ where
         let Some(bootstrap) = bootstrap.borrow_mut().take() else {
             return;
         };
-        match bootstrap() {
-            Ok(inputs) => {
-                let window_bar_preview = options.borrow().window_bar_preview;
-                crate::shell::build::build(
-                    app,
-                    inputs,
-                    Rc::clone(&quitting),
-                    force_initial_presentation,
-                    presented.borrow_mut().take(),
-                    window_bar_preview,
-                )
-            }
-            Err(error) => {
+        let app = app.clone();
+        let hold = app.hold();
+        let settings = settings.clone();
+        let quitting = Rc::clone(&quitting);
+        let presented = presented.borrow_mut().take();
+        let window_bar_preview = options.borrow().window_bar_preview;
+        gtk::glib::spawn_future_local(async move {
+            let _hold = hold;
+            if let Err(error) = crate::shell::build::build(
+                &app,
+                settings,
+                bootstrap(),
+                quitting,
+                force_initial_presentation,
+                presented,
+                window_bar_preview,
+            )
+            .await
+            {
                 error!(%error, "failed to start Rufin");
-                present_startup_error(app, &error, options.borrow().window_bar_preview);
+                present_startup_error(&app, &error, window_bar_preview);
             }
-        }
+        });
     });
 
     let exit_code: ExitCode = app.run().into();

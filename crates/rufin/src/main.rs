@@ -44,7 +44,8 @@ fn main() -> ExitCode {
     let diagnostics = diagnostics::Diagnostics::install(paths::state_dir());
     info!("starting Rufin native shell");
 
-    let bootstrap = move || {
+    let initial_settings = settings.load().ui.clone();
+    let bootstrap = move || async move {
         let discord = Arc::new(desktop_integration::Discord::new());
         let presence = Arc::clone(&discord);
         app::runtime_inputs(
@@ -70,11 +71,12 @@ fn main() -> ExitCode {
                 )
             }),
         )
+        .await
     };
     if updated_restart {
-        ui_shell::run_application_after_update(bootstrap, || {})
+        ui_shell::run_application_after_update(initial_settings, bootstrap, || {})
     } else {
-        ui_shell::run_application(bootstrap)
+        ui_shell::run_application(initial_settings, bootstrap)
     }
 }
 

@@ -220,6 +220,7 @@
                     <child><object class="AdwSpinner"/></child>
                     <child>
                       <object class="GtkLabel" id="startup_loading_status">
+                        <property name="label" translatable="yes">Preparing library...</property>
                         <property name="wrap">true</property>
                         <style>
                           <class name="dim-label"/>

@@ -90,28 +90,28 @@ pub(super) async fn import(
         let target = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
         let result = playlists(source, lookup, target).await;
         if let Err(error) = result {
-            imported::<()>(Err(error), "legacy playlists");
+            imported::<()>(Err(error), "legacy playlists")?;
         }
         let result = user_state(source, lookup, target).await;
         if let Err(error) = result {
-            imported::<()>(Err(error), "legacy favorites and ratings");
+            imported::<()>(Err(error), "legacy favorites and ratings")?;
         }
         let result = smart(source, target).await;
         if let Err(error) = result {
-            imported::<()>(Err(error), "legacy Smart playlists");
+            imported::<()>(Err(error), "legacy Smart playlists")?;
         }
         let result = listens(source, lookup, target).await;
         if let Err(error) = result {
-            imported::<()>(Err(error), "legacy Activity");
+            imported::<()>(Err(error), "legacy Activity")?;
         }
         let result = locators(source, lookup, target).await;
         if let Err(error) = result {
-            imported::<()>(Err(error), "legacy Local locators");
+            imported::<()>(Err(error), "legacy Local locators")?;
         }
     }
     let result = queue(source, lookup, database, selected).await;
     if let Err(error) = result {
-        imported::<()>(Err(error), "legacy Queue");
+        imported::<()>(Err(error), "legacy Queue")?;
     }
     Ok(())
 }
@@ -152,7 +152,7 @@ async fn playlists(
             Ok(())
         }
         .await;
-        if imported(result, "legacy playlist").is_some() {
+        if imported(result, "legacy playlist")?.is_some() {
             position += 1;
         }
     }
@@ -170,7 +170,7 @@ async fn playlists(
             let track=track(lookup,&source_id,&track_id).await?;let item=item(uri(&source_id,"track",&track_id,track.as_ref())?,track.as_ref());
             crate::playlists::write_playlist_entry(target,key,&crate::playlists::PlaylistEntryWrite{object_id:required(&row,"occurrence_id")?,media_uri:item.media_uri,title:Some(item.title),artist:Some(item.artist),album:Some(item.album),album_display_artist:item.album_display_artist,snapshot_at:0,duration_millis:Some(item.duration_millis),disc_number:item.disc_number,track_number:item.track_number,year:item.year,release_date:item.release_date,source_format:item.source_format,musicbrainz_recording_id:item.musicbrainz_recording_id,musicbrainz_release_track_id:item.musicbrainz_release_track_id,position:integer(&row,"position").ok_or_else(||LibraryError::InvalidStore("missing playlist order".into()))?}).await
         }.await;
-        imported(result, "legacy playlist occurrence");
+        imported(result, "legacy playlist occurrence")?;
     }
     Ok(())
 }
@@ -201,7 +201,7 @@ async fn user_state(
                 if table=="pending_favorites" {sqlx::query("INSERT INTO favorite_outbox(media_uri,favorite,previous_favorite,attempts,next_attempt_at) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(media_uri) DO UPDATE SET favorite=excluded.favorite,previous_favorite=excluded.previous_favorite,attempts=excluded.attempts,next_attempt_at=excluded.next_attempt_at").bind(media_uri).bind(integer(&row,"favorite")).bind(integer(&row,"previous_favorite")).bind(integer(&row,"attempts").unwrap_or(0)).bind(integer(&row,"next_attempt_at").unwrap_or(0)).execute(&mut *target).await?;}
                 Ok(())
             }.await;
-            imported(result, table);
+            imported(result, table)?;
         }
     }
     Ok(())
@@ -258,7 +258,7 @@ async fn smart(source: &mut SqliteConnection, target: &mut SqliteConnection) -> 
             .await
         }
         .await;
-        if imported(result, "legacy Smart playlist").is_some() {
+        if imported(result, "legacy Smart playlist")?.is_some() {
             position += 1;
         }
     }
@@ -301,7 +301,7 @@ async fn listens(
                 }
                 Ok(())
             }.await;
-            imported(result, table);
+            imported(result, table)?;
         }
     }
     if has_table(source, "listening_aggregates").await? {
@@ -324,7 +324,7 @@ async fn listens(
                 Ok(())
             }
             .await;
-            imported(result, "legacy Activity totals");
+            imported(result, "legacy Activity totals")?;
         }
     }
     Ok(())
@@ -424,7 +424,7 @@ async fn locators(
                 .await
             }
             .await;
-            imported(result, table);
+            imported(result, table)?;
         }
     }
     Ok(())
@@ -539,7 +539,7 @@ async fn queue(
             let track = match track(source, selected, &track_id).await {
                 Ok(track) => track,
                 Err(error) => {
-                    imported::<()>(Err(error), "legacy Queue metadata");
+                    imported::<()>(Err(error), "legacy Queue metadata")?;
                     None
                 }
             };
@@ -599,7 +599,7 @@ async fn queue(
             Ok(())
         }
         .await;
-        imported(result, "legacy Queue occurrence");
+        imported(result, "legacy Queue occurrence")?;
     }
     stream.rewind()?;
     database

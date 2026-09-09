@@ -71,6 +71,11 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum SourceError {
+    #[error("{error}")]
+    IncompleteScan {
+        outcome: library::ScanOutcome,
+        error: Box<SourceError>,
+    },
     #[error(transparent)]
     Library(#[from] library::LibraryError),
     #[error(transparent)]

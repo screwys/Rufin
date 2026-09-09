@@ -79,6 +79,10 @@ pub(crate) async fn catch_up(
     progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
     cancelled: &(dyn Fn() -> bool + Send + Sync),
 ) -> SourceResult<library::ScanOutcome> {
+    for root in roots {
+        fs::read_dir(root)
+            .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
+    }
     let mut scan = Scan::begin_items(database, source_id).await?;
     let mut after = None;
     let mut completed = 0_usize;
@@ -165,6 +169,13 @@ pub(crate) async fn publish_paths(
         .collect::<Vec<_>>();
     let rename =
         rename.map(|(old, new)| (normalize_observed_path(old), normalize_observed_path(new)));
+    for root in roots
+        .iter()
+        .filter(|root| paths.iter().any(|path| path.starts_with(root)))
+    {
+        fs::read_dir(root)
+            .map_err(|error| SourceError::Other(format!("{}: {error}", root.display())))?;
+    }
     let seeds = paths
         .iter()
         .filter(|path| roots.iter().any(|root| path.starts_with(root)))
