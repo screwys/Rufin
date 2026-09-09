@@ -47,6 +47,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Ei tuloksia ¯\\_(°╭╮°)_/¯"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -138,11 +143,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -152,6 +166,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 uusinta albumia"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "API-avain"
@@ -418,6 +435,12 @@ msgstr[1] ""
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
 
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
 msgid "Choose Folder"
 msgstr "Valitse kansio"
 
@@ -565,6 +588,11 @@ msgstr "Kansiota ei voitu avata: {error}"
 
 msgid "Could not save diagnostic log"
 msgstr "Diagnostiikkalokia ei voitu tallentaa"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Suosikkeja ei voitu päivittää"
 
 msgid "Could not update favorites"
 msgstr "Suosikkeja ei voitu päivittää"
@@ -1412,10 +1440,6 @@ msgstr ""
 
 msgid "No network devices found"
 msgstr "Verkkolaitteita ei löytynyt"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr "Palvelimia ei löytynyt, lisää manuaalisesti tai yritä uudelleen"
@@ -2417,6 +2441,15 @@ msgid "Unmuted"
 msgstr "Ääni palautettu"
 
 msgid "Update"
+msgstr ""
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
 msgstr ""
 
 msgid "Use API key"

@@ -47,6 +47,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "沒有結果 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr "只有根據規則下載的內容會被刪除。共享與手動的下載會保留"
@@ -130,11 +135,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -144,6 +158,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "最新的 5 張專輯"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "API 金鑰"
@@ -429,6 +446,12 @@ msgstr[0] "套用變更到 {count} 個曲目"
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
 #, fuzzy
 #| msgid "Locate Folder"
 msgid "Choose Folder"
@@ -590,6 +613,11 @@ msgstr "無法更新最愛"
 
 msgid "Could not save diagnostic log"
 msgstr "無法儲存診斷記錄"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "無法更新最愛"
 
 msgid "Could not update favorites"
 msgstr "無法更新最愛"
@@ -1482,10 +1510,6 @@ msgstr "暫無此藝人的音樂"
 
 msgid "No network devices found"
 msgstr "找不到網路裝置"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr ""
@@ -2533,6 +2557,15 @@ msgstr ""
 
 msgid "Update"
 msgstr "更新"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "使用 API 金鑰"

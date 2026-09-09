@@ -50,6 +50,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Rezultāti netika atrasti ¯\\_(°╭╮°)_/¯"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -154,11 +159,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Jums jāaizpilda tikai e-pasta un lietojumprogrammas nosaukuma daļas"
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -168,6 +182,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 jaunākie albumi"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "API atslēga"
@@ -459,6 +476,12 @@ msgstr[2] "Izmaiņas attiecas uz {count} celiņiem"
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
 msgid "Choose Folder"
 msgstr "Izvēlēties mapi"
 
@@ -618,6 +641,11 @@ msgstr "Nevarēja atjaunināt izlasi"
 
 msgid "Could not save diagnostic log"
 msgstr "Nevarēja saglabāt diagnostikas žurnālu"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Nevarēja atjaunināt izlasi"
 
 msgid "Could not update favorites"
 msgstr "Nevarēja atjaunināt izlasi"
@@ -1507,10 +1535,6 @@ msgstr "Šim izpildītājam vēl nav pieejama neviena mūzika"
 
 msgid "No network devices found"
 msgstr "Tīkla ierīces nav atrastas"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr "Serveri nav atrasti, pievienojiet vienu manuāli vai mēģiniet vēlreiz"
@@ -2552,6 +2576,15 @@ msgstr "Skaņa atjaunota"
 
 msgid "Update"
 msgstr "Atjaunināt"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "Izmantot API atslēgu"

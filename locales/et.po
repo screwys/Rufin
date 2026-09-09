@@ -49,6 +49,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Tulemusi pole ¯\\_(°╭╮°)_/¯"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -153,11 +158,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ". Sa pead vaid sisestama e-posti aadressi ja rakenduse nime"
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -167,6 +181,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 viimast albumit"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "API võti"
@@ -455,6 +472,12 @@ msgstr[1] "Muudatused rakenduvad {count}-le loole"
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muudatused jõustuvad Rufini uuesti käivitamisel"
 
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
 msgid "Choose Folder"
 msgstr "Vali kaust"
 
@@ -610,6 +633,11 @@ msgstr "Lemmikute uuendamine ei õnnestunud"
 
 msgid "Could not save diagnostic log"
 msgstr "Diagnostikalogi salvestamine ei õnnestunud"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not update Rufin to {version}"
+msgstr "Lemmikute uuendamine ei õnnestunud"
 
 msgid "Could not update favorites"
 msgstr "Lemmikute uuendamine ei õnnestunud"
@@ -1494,10 +1522,6 @@ msgstr "Sellelt esitajalt pole veel muusikat"
 
 msgid "No network devices found"
 msgstr "Ühtegi võrguseadet ei leidu"
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
-msgstr ""
 
 msgid "No servers found, add one manually or try again"
 msgstr "Ühtegi serverit ei leidu. Sisesta aadress käsitsi või otsi uuesti"
@@ -2537,6 +2561,15 @@ msgstr "Summutamine on lõpetatud"
 
 msgid "Update"
 msgstr "Uuenda"
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
+msgstr ""
 
 msgid "Use API key"
 msgstr "Kasuta API-võtit"

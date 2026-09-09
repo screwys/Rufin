@@ -50,6 +50,11 @@ msgid "No results ¯\\_(°╭╮°)_/¯"
 msgstr "Ningún resultado 302257\\_(302260342225255342225256302260)_/302257"
 
 msgid ""
+"No secret service found. Rufin will use a file to store its credentials. "
+"Cancelling will not save credentials at all."
+msgstr ""
+
+msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
 "stay"
 msgstr ""
@@ -145,11 +150,20 @@ msgstr ""
 ". Sólo necesita llenar el correo electrónico y las partes de nombre de "
 "aplicación"
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -159,6 +173,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 Últimos álbumes"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "Clave de API"
@@ -433,6 +450,12 @@ msgstr[1] ""
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
 
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
+
 msgid "Choose Folder"
 msgstr ""
 
@@ -579,6 +602,9 @@ msgid "Could not open folder: {error}"
 msgstr ""
 
 msgid "Could not save diagnostic log"
+msgstr ""
+
+msgid "Could not update Rufin to {version}"
 msgstr ""
 
 msgid "Could not update favorites"
@@ -1430,10 +1456,6 @@ msgid "No music from this artist yet"
 msgstr ""
 
 msgid "No network devices found"
-msgstr ""
-
-msgid ""
-"No secret service found. Rufin will use a file to store its credentials."
 msgstr ""
 
 msgid "No servers found, add one manually or try again"
@@ -2438,6 +2460,15 @@ msgid "Unmuted"
 msgstr ""
 
 msgid "Update"
+msgstr ""
+
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+msgid "Updating Rufin to {version}..."
 msgstr ""
 
 #, fuzzy
