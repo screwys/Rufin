@@ -156,12 +156,12 @@ impl PlayerPipeline {
     }
 
     #[cfg(test)]
-    pub(super) fn audio_graph_root(&self) -> Option<gst::Element> {
+    pub(super) fn audio_output(&self) -> Option<gst::Element> {
         self.session
             .as_ref()?
             .audio_graph
             .as_ref()
-            .map(|graph| graph.root().clone())
+            .map(|graph| graph.output().clone())
     }
 
     #[cfg(test)]
@@ -503,7 +503,10 @@ impl PipelineSession {
                 }
                 gst::PadProbeReturn::Ok
             });
-        self.pipeline.set_property("audio-sink", graph.root());
+        // Keep normalization out of the sink: playbin searches it for a volume
+        // control and would otherwise let track gain overwrite the user's volume.
+        self.pipeline.set_property("audio-filter", graph.root());
+        self.pipeline.set_property("audio-sink", graph.output());
         self.audio_graph = Some(graph);
         Ok(())
     }

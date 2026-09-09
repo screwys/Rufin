@@ -558,9 +558,7 @@ impl Shell {
             if let Some(tick) = fullscreen.animation_tick.borrow_mut().take() {
                 tick.remove();
             }
-            if fullscreen.root.margin_top() != 0 {
-                fullscreen.root.set_margin_top(0);
-            }
+            fullscreen.set_slide_offset(0);
             if fullscreen.root.opacity() != 0.0 {
                 fullscreen.root.set_opacity(0.0);
             }
@@ -578,9 +576,7 @@ impl Shell {
             return;
         }
         let visible = fullscreen.visible.get();
-        if fullscreen.root.margin_top() != 0 {
-            fullscreen.root.set_margin_top(0);
-        }
+        fullscreen.set_slide_offset(0);
         let opacity = if visible { 1.0 } else { 0.0 };
         if fullscreen.root.opacity() != opacity {
             fullscreen.root.set_opacity(opacity);

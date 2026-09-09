@@ -18,6 +18,9 @@ use tracing_subscriber::reload;
 use tracing_subscriber::util::SubscriberInitExt;
 use tracing_subscriber::{EnvFilter, Registry, fmt as tracing_fmt};
 
+mod stderr;
+pub use stderr::Guard as StderrGuard;
+
 const BUFFER_MAX_BYTES: usize = 2 * 1024 * 1024;
 const LOG_SEGMENT_MAX_BYTES: u64 = 2 * 1024 * 1024;
 const LOG_SEGMENTS: usize = 3;
@@ -66,7 +69,7 @@ pub struct Diagnostics {
 }
 
 impl Diagnostics {
-    pub fn install(state_dir: PathBuf) -> Arc<Self> {
+    pub fn install(state_dir: PathBuf) -> (Arc<Self>, StderrGuard) {
         let log_dir = state_dir.join("logs");
         let output = Arc::new(Mutex::new(DiagnosticOutput::new(&log_dir)));
         let debug_enabled = startup_debug_enabled();
@@ -75,11 +78,12 @@ impl Diagnostics {
         let writer = DiagnosticWriterFactory {
             output: Arc::clone(&output),
         };
+        let (stderr, stderr_guard) = stderr::Writer::new(std::io::stderr());
         let terminal = tracing_fmt::layer()
             .compact()
             .with_ansi(std::io::stderr().is_terminal())
             .fmt_fields(PrivacyFields)
-            .with_writer(std::io::stderr);
+            .with_writer(stderr.clone());
         let stored = tracing_fmt::layer()
             .compact()
             .with_ansi(false)
@@ -92,12 +96,16 @@ impl Diagnostics {
             .try_init()
             .expect("install Rufin diagnostics subscriber");
 
-        install_panic_hook(log_dir);
-        Arc::new(Self {
-            output,
-            filter: filter_handle,
-            debug_enabled: AtomicBool::new(debug_enabled),
-        })
+        install_panic_hook(log_dir, stderr);
+        install_glib_log_capture();
+        (
+            Arc::new(Self {
+                output,
+                filter: filter_handle,
+                debug_enabled: AtomicBool::new(debug_enabled),
+            }),
+            stderr_guard,
+        )
     }
 }
 
@@ -127,6 +135,51 @@ impl Diagnostics {
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner())
             .revision
+    }
+}
+
+fn install_glib_log_capture() {
+    use glib::translate::IntoGlib as _;
+
+    // Older supported GLib versions expose the fatal mask only through this setter.
+    let fatal = glib::log_set_always_fatal(glib::LogLevels::LEVEL_ERROR);
+    glib::log_set_always_fatal(fatal);
+    glib::log_set_default_handler(record_glib_log);
+    glib::log_set_writer_func(move |level, fields| {
+        let field = |key| {
+            fields
+                .iter()
+                .find(|field| field.key() == key)
+                .and_then(glib::LogField::value_str)
+        };
+        record_glib_log(
+            field("GLIB_DOMAIN"),
+            level,
+            field("MESSAGE").unwrap_or_default(),
+        );
+        if fatal.bits() & level.into_glib() != 0 {
+            std::process::abort();
+        }
+        glib::LogWriterOutput::Handled
+    });
+}
+
+fn record_glib_log(domain: Option<&str>, level: glib::LogLevel, message: &str) {
+    let domain = domain.unwrap_or("GLib");
+    match level {
+        glib::LogLevel::Error | glib::LogLevel::Critical => {
+            tracing::error!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Warning => tracing::warn!(target: "rufin::native", domain, "{message}"),
+        glib::LogLevel::Message | glib::LogLevel::Info => {
+            tracing::info!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Debug
+            if domain == "Gtk" && message.starts_with("snapshot symbolic icon ") =>
+        {
+            tracing::trace!(target: "rufin::native", domain, "{message}")
+        }
+        glib::LogLevel::Debug => tracing::debug!(target: "rufin::native", domain, "{message}"),
     }
 }
 
@@ -668,27 +721,21 @@ fn replace_ranges(value: &str, mut ranges: Vec<(usize, usize)>, replacement: &st
     output
 }
 
-fn install_panic_hook(log_dir: PathBuf) {
-    let previous = std::panic::take_hook();
+fn install_panic_hook(log_dir: PathBuf, stderr: stderr::Writer) {
     let write_lock = Arc::new(Mutex::new(()));
     std::panic::set_hook(Box::new(move |panic| {
         let _guard = write_lock
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner());
-        let _ = write_panic_report(&log_dir, panic);
-        previous(panic);
+        let report = panic_report(panic);
+        let _ = write_panic_report(&log_dir, &report);
+        // The default hook writes synchronously to stderr and can block on the
+        // same stalled destination as ordinary logging. The file above is primary.
+        stderr.enqueue(report.into_bytes());
     }));
 }
 
-#[expect(
-    clippy::string_slice,
-    reason = "the report limit is selected from UTF-8 character indices"
-)]
-fn write_panic_report(log_dir: &Path, panic: &std::panic::PanicHookInfo<'_>) -> io::Result<()> {
-    use std::io::Write as _;
-
-    fs::create_dir_all(log_dir)?;
-    rotate_files(log_dir, PANIC_FILE)?;
+fn panic_report(panic: &std::panic::PanicHookInfo<'_>) -> String {
     let thread = std::thread::current();
     let thread_name = thread.name().unwrap_or("unnamed");
     let location = panic
@@ -708,21 +755,20 @@ fn write_panic_report(log_dir: &Path, panic: &std::panic::PanicHookInfo<'_>) -> 
         .copied()
         .or_else(|| panic.payload().downcast_ref::<String>().map(String::as_str))
         .unwrap_or("non-string panic payload");
-    let report = sanitize_free_text(&format!(
+    let mut report = sanitize_free_text(&format!(
         "Rufin {}\nthread: {thread_name}\nlocation: {location}\nmessage: {message}\n\n{:?}\n",
         env!("CARGO_PKG_VERSION"),
         Backtrace::force_capture()
     ));
-    let report = if report.len() > BUFFER_MAX_BYTES {
-        &report[..report
-            .char_indices()
-            .map(|(index, _)| index)
-            .take_while(|index| *index <= BUFFER_MAX_BYTES)
-            .last()
-            .unwrap_or_default()]
-    } else {
-        &report
-    };
+    report.truncate(report.floor_char_boundary(BUFFER_MAX_BYTES));
+    report
+}
+
+fn write_panic_report(log_dir: &Path, report: &str) -> io::Result<()> {
+    use std::io::Write as _;
+
+    fs::create_dir_all(log_dir)?;
+    rotate_files(log_dir, PANIC_FILE)?;
     OpenOptions::new()
         .create(true)
         .truncate(true)
@@ -734,6 +780,73 @@ fn write_panic_report(log_dir: &Path, panic: &std::panic::PanicHookInfo<'_>) -> 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn redirected_diagnostics_drain_to_file_on_shutdown() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let (writer, guard) = stderr::Writer::new(file.reopen().unwrap());
+        let subscriber = Registry::default().with(
+            tracing_fmt::layer()
+                .without_time()
+                .with_ansi(false)
+                .with_writer(writer),
+        );
+        tracing::subscriber::with_default(subscriber, || {
+            tracing::warn!("redirected warning");
+            tracing::error!("redirected error");
+        });
+        drop(guard);
+        let contents = fs::read_to_string(file.path()).unwrap();
+        assert!(contents.contains("redirected warning"));
+        assert!(contents.contains("redirected error"));
+        assert_eq!(contents.lines().count(), 2);
+    }
+
+    #[test]
+    fn stalled_stderr_does_not_block_local_logs_or_shutdown() {
+        use std::sync::mpsc;
+        use std::time::Duration;
+
+        let directory = tempfile::tempdir().unwrap();
+        let output = Arc::new(Mutex::new(DiagnosticOutput::new(directory.path())));
+        let (reader, pipe) = io::pipe().unwrap();
+        let (writer, guard) = stderr::Writer::new(pipe);
+        let subscriber = Registry::default()
+            .with(tracing_fmt::layer().with_writer(writer))
+            .with(tracing_fmt::layer().with_writer(DiagnosticWriterFactory {
+                output: Arc::clone(&output),
+            }));
+        let (finished, completion) = mpsc::channel();
+        let producer = std::thread::spawn(move || {
+            tracing::subscriber::with_default(subscriber, || {
+                // Exceed the real pipe and stderr queue capacities without a reader.
+                let message = "x".repeat(64 * 1024);
+                for _ in 0..256 {
+                    tracing::warn!("{message}");
+                }
+                tracing::error!("local log still available");
+            });
+            drop(guard);
+            finished.send(()).unwrap();
+        });
+        let result = completion.recv_timeout(Duration::from_secs(5));
+        // Release the worker even if the assertion fails; don't leak a blocked writer.
+        drop(reader);
+        producer.join().unwrap();
+        result.expect("stderr blocked the logging caller or shutdown");
+        assert!(
+            output
+                .lock()
+                .unwrap()
+                .snapshot()
+                .contains("local log still available")
+        );
+        assert!(
+            fs::read_to_string(directory.path().join(LOG_FILE))
+                .unwrap()
+                .contains("local log still available")
+        );
+    }
 
     #[test]
     fn curated_debug_keeps_public_requests_private_and_suppresses_http2_frames() {

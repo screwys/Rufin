@@ -3951,14 +3951,9 @@ mod tests {
                 start_position_millis: 0,
                 playback_rate: 1.0,
             });
-            let root = engine
+            let sink = engine
                 .active_pipeline()
-                .audio_graph_root()
-                .unwrap()
-                .downcast::<gst::Bin>()
-                .unwrap();
-            let sink = root
-                .by_name("rufin-audio-output")
+                .audio_output()
                 .unwrap()
                 .downcast::<gstreamer_app::AppSink>()
                 .unwrap();
