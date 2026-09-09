@@ -135,10 +135,19 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr ""
 
 msgid "192 kbps"
+msgstr ""
+
+msgid "24 hours"
 msgstr ""
 
 msgid "256 kbps"
@@ -148,6 +157,9 @@ msgid "320 kbps"
 msgstr ""
 
 msgid "5 Latest Albums"
+msgstr ""
+
+msgid "6 hours"
 msgstr ""
 
 msgid "API key"
@@ -411,6 +423,12 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
 msgstr ""
 
 msgid "Choose Folder"

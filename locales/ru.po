@@ -179,11 +179,20 @@ msgstr ""
 ". Вам нужно заполнить только поля с адресом электронной почты и названием "
 "приложения"
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 кбит/с"
 
 msgid "192 kbps"
 msgstr "192 кбит/с"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 кбит/с"
@@ -193,6 +202,9 @@ msgstr "320 кбит/с"
 
 msgid "5 Latest Albums"
 msgstr "5 последних альбомов"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "Ключ API"
@@ -458,6 +470,12 @@ msgstr[2] "Изменения применяются к {count} трекам"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Изменения применяются после перезагрузки Rufin"
+
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
 
 msgid "Choose Folder"
 msgstr "Выбрать Папку"
@@ -2727,8 +2745,8 @@ msgid ""
 msgstr ""
 "Rufin — это нативный музыкальный проигрыватель для серверов Jellyfin, "
 "Navidrome/OpenSubsonic, Plex и Emby, а также для локальных папок, WebDAV "
-"(включая прямой вход через браузер Nextcloud), Samba и сетевых хранилищ (NAS)"
-".\n"
+"(включая прямой вход через браузер Nextcloud), Samba и сетевых хранилищ "
+"(NAS).\n"
 "\n"
 "Эта установка установит Rufin на ваш компьютер.\n"
 "\n"

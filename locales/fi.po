@@ -138,11 +138,20 @@ msgstr ""
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
+msgid "1 hour"
+msgstr ""
+
+msgid "12 hours"
+msgstr ""
+
 msgid "128 kbps"
 msgstr "128 kbps"
 
 msgid "192 kbps"
 msgstr "192 kbps"
+
+msgid "24 hours"
+msgstr ""
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -152,6 +161,9 @@ msgstr "320 kbps"
 
 msgid "5 Latest Albums"
 msgstr "5 uusinta albumia"
+
+msgid "6 hours"
+msgstr ""
 
 msgid "API key"
 msgstr "API-avain"
@@ -417,6 +429,12 @@ msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
+
+msgid "Check for updates every"
+msgstr ""
+
+msgid "Check for updates"
+msgstr ""
 
 msgid "Choose Folder"
 msgstr "Valitse kansio"
