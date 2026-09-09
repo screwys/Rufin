@@ -9,6 +9,7 @@ find_program(RUFIN_MAKENSIS makensis REQUIRED)
 find_program(RUFIN_GLIB_COMPILE_SCHEMAS glib-compile-schemas REQUIRED)
 find_program(RUFIN_GTK_UPDATE_ICON_CACHE gtk4-update-icon-cache REQUIRED)
 find_program(RUFIN_OBJDUMP NAMES llvm-objdump objdump REQUIRED)
+find_program(RUFIN_WINDOWS_STRIP strip REQUIRED)
 pkg_get_variable(RUFIN_WINDOWS_GLIB_PREFIX glib-2.0 prefix)
 pkg_get_variable(RUFIN_WINDOWS_GTK_PREFIX gtk4 prefix)
 pkg_get_variable(RUFIN_WINDOWS_GSTREAMER_PREFIX gstreamer-1.0 prefix)
@@ -69,12 +70,18 @@ install(DIRECTORY
   PATTERN "*.dll.a" EXCLUDE)
 install(DIRECTORY "${RUFIN_WINDOWS_GIO_MODULE_DIR}/" DESTINATION lib/gio/modules)
 install(DIRECTORY "${RUFIN_WINDOWS_GSTREAMER_PREFIX}/libexec/gstreamer-1.0/"
-  DESTINATION libexec/gstreamer-1.0)
+  DESTINATION libexec/gstreamer-1.0
+  PATTERN "gst-completion-helper.exe" EXCLUDE
+  PATTERN "gst-hotdoc-plugins-scanner.exe" EXCLUDE)
 install(DIRECTORY "${RUFIN_WINDOWS_GLIB_PREFIX}/share/glib-2.0/schemas/"
   DESTINATION share/glib-2.0/schemas)
 install(DIRECTORY "${RUFIN_WINDOWS_GSTREAMER_PREFIX}/share/gstreamer-1.0/"
-  DESTINATION share/gstreamer-1.0)
-install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/gtk-4.0/" DESTINATION share/gtk-4.0)
+  DESTINATION share/gstreamer-1.0
+  PATTERN "gdb" EXCLUDE
+  PATTERN "validate" EXCLUDE)
+install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/gtk-4.0/" DESTINATION share/gtk-4.0
+  PATTERN "valgrind" EXCLUDE
+  PATTERN "gtk4builder.rng" EXCLUDE)
 install(DIRECTORY "${RUFIN_WINDOWS_GTK_PREFIX}/share/icons/hicolor/"
   DESTINATION share/icons/hicolor)
 install(DIRECTORY "${CMAKE_CURRENT_SOURCE_DIR}/data/icons/hicolor/"
@@ -85,7 +92,14 @@ foreach(RUFIN_PO_FILE IN LISTS RUFIN_PO_FILES)
   get_filename_component(RUFIN_LOCALE "${RUFIN_PO_FILE}" NAME_WE)
   if(EXISTS "${RUFIN_WINDOWS_GLIB_PREFIX}/share/locale/${RUFIN_LOCALE}")
     install(DIRECTORY "${RUFIN_WINDOWS_GLIB_PREFIX}/share/locale/${RUFIN_LOCALE}/"
-      DESTINATION "share/locale/${RUFIN_LOCALE}")
+      DESTINATION "share/locale/${RUFIN_LOCALE}"
+      PATTERN "gas.mo" EXCLUDE
+      PATTERN "binutils.mo" EXCLUDE
+      PATTERN "bfd.mo" EXCLUDE
+      PATTERN "gettext-tools.mo" EXCLUDE
+      PATTERN "ld.mo" EXCLUDE
+      PATTERN "opcodes.mo" EXCLUDE
+      PATTERN "gprof.mo" EXCLUDE)
   endif()
 endforeach()
 file(GENERATE OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/windows-settings.ini"

@@ -581,6 +581,10 @@ msgstr ""
 msgid "Could not save diagnostic log"
 msgstr ""
 
+#, rust-format
+msgid "Could not update Rufin to {version}"
+msgstr ""
+
 msgid "Could not update favorites"
 msgstr ""
 
@@ -2425,6 +2429,18 @@ msgid "Unmuted"
 msgstr ""
 
 msgid "Update"
+msgstr ""
+
+#, rust-format
+msgid "Updated Rufin to {version}"
+msgstr ""
+
+#, rust-format
+msgid "Updated Rufin to {version}. Restart to apply."
+msgstr ""
+
+#, rust-format
+msgid "Updating Rufin to {version}..."
 msgstr ""
 
 msgid "Use API key"

@@ -8,6 +8,7 @@ find_program(RUFIN_HDIUTIL hdiutil REQUIRED)
 find_program(RUFIN_ICONUTIL iconutil REQUIRED)
 find_program(RUFIN_INSTALL_NAME_TOOL install_name_tool REQUIRED)
 find_program(RUFIN_LIPO lipo REQUIRED)
+find_program(RUFIN_MACOS_STRIP strip REQUIRED)
 find_program(RUFIN_RSVG_CONVERT rsvg-convert REQUIRED)
 
 function(rufin_macos_install_file source destination)

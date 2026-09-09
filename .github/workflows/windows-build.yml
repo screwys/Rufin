@@ -113,6 +113,41 @@ jobs:
           set -euo pipefail
           RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package stable
 
+      - name: Verify packaged executable startup
+        shell: pwsh
+        run: |
+          $stage = Join-Path $env:GITHUB_WORKSPACE '.local/build/cmake/release-package/Rufin'
+          foreach ($name in @('bcrypt.dll', 'kernel32.dll', 'ntdll.dll')) {
+            if (Test-Path (Join-Path $stage "bin/$name")) {
+              throw "Windows system DLL was bundled: $name"
+            }
+          }
+          # Use the shipped DLLs, without MSYS2 filling gaps in the bundle.
+          $env:PATH = "$env:SystemRoot\System32;$env:SystemRoot"
+          $stdout = Join-Path $env:RUNNER_TEMP 'rufin-package-stdout.txt'
+          $stderr = Join-Path $env:RUNNER_TEMP 'rufin-package-stderr.txt'
+          $process = Start-Process -FilePath (Join-Path $stage 'bin/rufin.exe') `
+            -ArgumentList '--help' -WorkingDirectory $stage -PassThru `
+            -RedirectStandardOutput $stdout -RedirectStandardError $stderr
+          if (-not $process.WaitForExit(30000)) {
+            $process.Kill()
+            throw 'Packaged Rufin did not exit within 30 seconds'
+          }
+          Get-Content $stdout, $stderr
+          if ($process.ExitCode -ne 0) {
+            throw "Packaged Rufin exited with code $($process.ExitCode)"
+          }
+
+      - name: Retain executable symbols
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Rufin-windows-unstripped
+          path: .local/target/release/rufin.exe
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: ${{ inputs.release_tag != '' && 90 || 7 }}
+
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
