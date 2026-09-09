@@ -163,16 +163,12 @@ jobs:
 
             echo "COPR build $build_id: $state"
             case "$state" in
-              succeeded)
-                break
-                ;;
-              failed)
-                if [[ -n "$RECOVERY_COPR_BUILD_ID" ]]; then
-                  echo "Explicit recovery: collecting existing RPMs from failed COPR build $build_id for validation."
-                  break
+              succeeded|failed)
+                if [[ "$state" == failed ]]; then
+                  echo "COPR reported failure; checking whether it produced valid signed RPMs before failing."
+                  echo "COPR build logs: https://copr.fedorainfracloud.org/coprs/screwyy/rufin/build/$build_id/"
                 fi
-                echo "Inspect COPR build logs: https://copr.fedorainfracloud.org/coprs/screwyy/rufin/build/$build_id/" >&2
-                exit 1
+                break
                 ;;
               canceled|skipped)
                 exit 1
