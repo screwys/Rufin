@@ -6,7 +6,7 @@ use crate::runtime::{DiagnosticsHandle, ProductHandles, ProductReceivers, Runtim
 use ::scrobbling::Scrobbler;
 use async_channel::{bounded, unbounded};
 use playback::{PlaybackBackend, PlaybackHandles};
-use secrets::SwitchableSecretStore;
+use secrets::{SecretStorageMode, SwitchableSecretStore};
 use tracing::warn;
 
 use crate::paths::Paths;
@@ -33,6 +33,18 @@ where
     StartBackend: Fn() -> Result<Box<dyn PlaybackBackend>, String> + Send + Sync + 'static,
 {
     let runtime = tokio::runtime::Handle::current();
+    let mut secret_storage_fallback = false;
+    if settings.load().ui.secret_storage_mode == SecretStorageMode::SystemKeyring
+        && let Err(error) =
+            tokio::task::block_in_place(|| runtime.block_on(secrets::check_system_keyring()))
+    {
+        settings.update(|stored| {
+            stored.ui.secret_storage_mode = SecretStorageMode::ConfigFile;
+            Ok(())
+        })?;
+        warn!(%error, "secret service unavailable; using config-file credential storage");
+        secret_storage_fallback = true;
+    }
     let stored = settings.load();
     let secrets = Arc::new(SwitchableSecretStore::new(platform_secret_store(
         &stored,
@@ -265,6 +277,7 @@ where
 
     Ok(RuntimeInputs {
         temporary_store,
+        secret_storage_fallback,
         diagnostics,
         products: ProductHandles {
             backup,

@@ -3,6 +3,10 @@
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
 
+  <object class="GtkLabel" id="secret_storage_fallback_message">
+    <property name="label" translatable="yes">No secret service found. Rufin will use a file to store its credentials.</property>
+  </object>
+
   <object class="GtkStack" id="root_stack">
     <property name="hhomogeneous">false</property>
     <property name="vhomogeneous">false</property>
