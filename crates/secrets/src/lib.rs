@@ -68,21 +68,24 @@ pub type SecretResult<T> = Result<T, SecretError>;
 pub async fn check_system_keyring() -> SecretResult<()> {
     #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
     {
-        if oo7::ashpd::is_sandboxed() {
-            let portal = oo7::ashpd::desktop::secret::Secret::new()
-                .await
-                .map_err(|error| SecretError::Backend(error.to_string()))?;
-            portal
-                .get_property::<u32>("version")
-                .await
-                .map_err(|error| SecretError::Backend(error.to_string()))?;
-        } else {
+        if !secret_portal_available().await {
             oo7::dbus::Service::new()
                 .await
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
         }
     }
     Ok(())
+}
+
+#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
+async fn secret_portal_available() -> bool {
+    if !oo7::ashpd::is_sandboxed() {
+        return false;
+    }
+    let Ok(portal) = oo7::ashpd::desktop::secret::Secret::new().await else {
+        return false;
+    };
+    portal.get_property::<u32>("version").await.is_ok()
 }
 
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
@@ -510,7 +513,14 @@ impl SystemKeyringBackend {
                 .build()
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
             let keyring = runtime
-                .block_on(oo7::Keyring::new())
+                .block_on(async {
+                    if secret_portal_available().await {
+                        oo7::Keyring::new().await
+                    } else {
+                        let service = oo7::dbus::Service::new().await?;
+                        Ok(oo7::Keyring::DBus(service.default_collection().await?))
+                    }
+                })
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
             *service = Some((runtime, Arc::new(keyring)));
         }
