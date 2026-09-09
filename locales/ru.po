@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-09 12:12+0000\n"
+"PO-Revision-Date: 2026-09-09 13:12+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -623,10 +623,8 @@ msgstr "Не удалось открыть папку: {error}"
 msgid "Could not save diagnostic log"
 msgstr "Не удалось сохранить диагностический журнал"
 
-#, fuzzy
-#| msgid "Could not update favorites"
 msgid "Could not update Rufin to {version}"
-msgstr "Не удалось обновить список избранных"
+msgstr "Не удалось обновить Rufin на {version}"
 
 msgid "Could not update favorites"
 msgstr "Не удалось обновить список избранных"
@@ -1892,7 +1890,7 @@ msgid "Remote lyrics"
 msgstr "Удалённые тексты песен"
 
 msgid "Remote"
-msgstr "Удалённое управление"
+msgstr "Удалённые источники"
 
 msgid "Remove All Downloads"
 msgstr "Удалить Все загрузки"
@@ -2507,13 +2505,13 @@ msgid "Update"
 msgstr "Обновить"
 
 msgid "Updated Rufin to {version}"
-msgstr ""
+msgstr "Rufin обновлён на {version}"
 
 msgid "Updated Rufin to {version}. Restart to apply."
-msgstr ""
+msgstr "Rufin обновлён на {version}. Перезапустите, чтобы применить."
 
 msgid "Updating Rufin to {version}..."
-msgstr ""
+msgstr "Обновляю Rufin на {version}..."
 
 msgid "Use API key"
 msgstr "Использовать ключ API"
@@ -2580,7 +2578,7 @@ msgid "Version History"
 msgstr "История версий"
 
 msgid "View"
-msgstr "Вид"
+msgstr "Показать"
 
 msgid "Visible"
 msgstr "Видимый"
