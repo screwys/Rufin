@@ -282,6 +282,7 @@ where
     let source_handle: crate::runtime::SourceHandle = source.clone();
     let transport: playback::TransportHandle = playback.clone();
     let queue: playback::QueueHandle = playback.clone();
+    let playback_state = playback.state.subscribe();
     let radio: playback::RadioHandle = playback;
 
     Ok(RuntimeInputs {
@@ -295,6 +296,7 @@ where
             source: source_handle,
             downloads,
             playback: PlaybackHandles {
+                state: playback_state,
                 transport,
                 queue,
                 radio,

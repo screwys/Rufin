@@ -610,17 +610,25 @@ impl PipelineSession {
         flags: gst::SeekFlags,
         starts_stream: bool,
     ) -> Result<(), String> {
+        let start = gst::ClockTime::try_from(Duration::from_millis(
+            end.map_or(millis, |end| millis.min(end)),
+        ))
+        .map_err(|_| "Seek position exceeds the GStreamer clock range".to_string())?;
+        let end = end
+            .map(|millis| gst::ClockTime::try_from(Duration::from_millis(millis)))
+            .transpose()
+            .map_err(|_| "Segment end exceeds the GStreamer clock range".to_string())?;
         let event = gst::event::Seek::new(
             self.playback_rate,
             flags,
             gst::SeekType::Set,
-            gst::ClockTime::from_mseconds(end.map_or(millis, |end| millis.min(end))),
+            start,
             if end.is_some() {
                 gst::SeekType::Set
             } else {
                 gst::SeekType::None
             },
-            end.map(gst::ClockTime::from_mseconds),
+            end,
         );
         *self.segment.lock().unwrap_or_else(|p| p.into_inner()) = SegmentPlayback {
             seek: Some(event.seqnum()),

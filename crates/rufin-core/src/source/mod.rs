@@ -1599,6 +1599,63 @@ impl SourceOwner {
             .transpose()
     }
 
+    pub fn list_sources(&self) -> ConfiguredSources {
+        self.shared
+            .configured_sources(self.shared.selected().as_deref())
+    }
+
+    pub fn selected_library(&self) -> Option<SelectedLibrary> {
+        let session = self.shared.selected_session()?;
+        Some(ui_selected(session.resolve()?, session))
+    }
+
+    /// Browsing uses the requested source and folder without changing desktop selection.
+    #[allow(clippy::too_many_arguments)]
+    pub fn tracks(
+        &self,
+        source_id: SourceId,
+        folder: Option<String>,
+        filter: String,
+        favorites_only: bool,
+        sort: library::TrackSort,
+        descending: bool,
+        offset: usize,
+        limit: usize,
+    ) -> Receiver<Result<Vec<library::TrackRow>, String>> {
+        self.reply(move |_, database| async move {
+            let cancellation = ReadCancellation::new();
+            let source = database
+                .source_identity_key(&source_id)
+                .await
+                .map_err(string_error)?
+                .ok_or_else(|| "Source not found".to_string())?;
+            let folder = match folder {
+                Some(folder) => Some(
+                    database
+                        .folder_key_by_object(source, &folder, &cancellation)
+                        .await
+                        .map_err(string_error)?
+                        .ok_or_else(|| "Folder not found".to_string())?,
+                ),
+                None => None,
+            };
+            database
+                .track_page(
+                    source,
+                    folder,
+                    favorites_only,
+                    &filter,
+                    sort,
+                    descending,
+                    offset,
+                    limit,
+                    &cancellation,
+                )
+                .await
+                .map_err(string_error)
+        })
+    }
+
     pub fn collection_folder_uri(
         &self,
         media_uri: String,
@@ -1652,11 +1709,16 @@ impl SourceOwner {
         });
     }
 
-    pub fn configure_source(&self, input: SourceSetup) {
+    pub fn configure_source(
+        &self,
+        input: SourceSetup,
+    ) -> Receiver<Result<SelectedLibrary, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         self.shared.cancel_observer();
         self.spawn_serialized(move |owner| async move {
             if cancelled.load(Ordering::Acquire) {
+                let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
                 return;
             }
             owner
@@ -1755,9 +1817,11 @@ impl SourceOwner {
                 Ok(())
             }
             .await;
-            if let Err(error) = result
-                && owner.shared.acquisition_is_current(&cancelled)
-            {
+            if !owner.shared.acquisition_is_current(&cancelled) {
+                let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
+                return;
+            }
+            if let Err(error) = &result {
                 if let Some(session) = owner.shared.selected_session()
                     && let Some(selected) = session.resolve()
                 {
@@ -1766,12 +1830,18 @@ impl SourceOwner {
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: persisted_source_id,
-                        message: error,
+                        message: error.clone(),
                         add_form: true,
                     })
                     .await;
             }
+            let _ = sender.try_send(result.and_then(|()| {
+                owner
+                    .selected_library()
+                    .ok_or_else(|| SourceError::Cancelled.to_string())
+            }));
         });
+        receiver
     }
 
     pub fn update_source(&self, input: SourceSettingsChange) {
@@ -1814,11 +1884,15 @@ impl SourceOwner {
         });
     }
 
-    pub fn select_source(&self, source_id: SourceId) {
+    /// Completes when the source's stored catalog is selected. Connection and refresh
+    /// continue in the background, including while credentials are being unlocked.
+    pub fn select_source(&self, source_id: SourceId) -> Receiver<Result<SelectedLibrary, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         self.shared.cancel_observer();
         self.spawn_serialized(move |owner| async move {
             if cancelled.load(Ordering::Acquire) {
+                let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
                 return;
             }
             owner
@@ -1827,11 +1901,14 @@ impl SourceOwner {
                     progress: initial_progress(),
                 })
                 .await;
-            if let Err(error) = owner
+            let result = owner
                 .select_now(source_id.clone(), Arc::clone(&cancelled))
-                .await
-                && !cancelled.load(Ordering::Acquire)
-            {
+                .await;
+            if cancelled.load(Ordering::Acquire) {
+                let _ = sender.try_send(Err(SourceError::Cancelled.to_string()));
+                return;
+            }
+            if let Err(error) = &result {
                 if let Some(session) = owner.shared.selected_session()
                     && let Some(selected) = session.resolve()
                 {
@@ -1840,12 +1917,18 @@ impl SourceOwner {
                 owner
                     .publish_operation(SourceOperation::Failed {
                         source_id: Some(source_id),
-                        message: error,
+                        message: error.clone(),
                         add_form: false,
                     })
                     .await;
             }
+            let _ = sender.try_send(result.and_then(|()| {
+                owner
+                    .selected_library()
+                    .ok_or_else(|| SourceError::Cancelled.to_string())
+            }));
         });
+        receiver
     }
 
     pub fn change_secret_storage(&self, mode: SecretStorageMode) -> Receiver<Result<(), String>> {
@@ -2110,7 +2193,8 @@ impl SourceOwner {
         });
     }
 
-    pub fn forget_source(&self, source_id: SourceId) {
+    pub fn forget_source(&self, source_id: SourceId) -> Receiver<Result<(), String>> {
+        let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
             let stored = owner.shared.settings.load();
             let configured = stored
@@ -2138,12 +2222,20 @@ impl SourceOwner {
                 if let Some(playback) = playback.as_ref() {
                     if let Err(error) = playback.forget_source(source_key).await {
                         owner.shared.warn_nonfatal(&error);
+                        let _ = sender.try_send(Err(error));
                         return;
                     }
                 }
             }
-            if let Err(error) = owner.shared.database.remove_source(&source_id).await {
-                owner.shared.warn_nonfatal(&error.to_string());
+            let removed = owner
+                .shared
+                .database
+                .remove_source(&source_id)
+                .await
+                .map(|_| ())
+                .map_err(string_error);
+            if let Err(error) = &removed {
+                owner.shared.warn_nonfatal(error);
             }
             if let Err(error) = owner.shared.settings.update(|stored| {
                 stored
@@ -2156,6 +2248,7 @@ impl SourceOwner {
                 Ok(())
             }) {
                 owner.shared.warn_nonfatal(&error);
+                let _ = sender.try_send(Err(error));
                 return;
             }
             owner
@@ -2170,7 +2263,9 @@ impl SourceOwner {
                     owner.shared.configured_sources(None),
                 ))
                 .await;
+            let _ = sender.try_send(removed);
         });
+        receiver
     }
 
     pub fn download_media(&self, subject: downloads::DownloadSubject, media_uris: Vec<String>) {
@@ -3612,7 +3707,14 @@ mod artwork_preparation_tests {
                 owner.shared.configured_sources(None).local_access[0].album_count,
                 1
             );
-            owner.select_source(source_id.clone());
+            let completion = owner.select_source(source_id.clone());
+            let selected = tokio::time::timeout(Duration::from_secs(2), completion.recv())
+                .await
+                .expect("selection result must not wait for credentials")
+                .unwrap()
+                .unwrap();
+            assert_eq!(selected.source_id, source_id);
+            drop(selected);
             let published = tokio::time::timeout(Duration::from_secs(2), async {
                 loop {
                     if let SourceEvent::Selected {
@@ -3873,7 +3975,8 @@ mod artwork_preparation_tests {
                     .await
                     .unwrap(),
             );
-            let settings = SettingsFile::memory();
+            let settings_path = directory.path().join("settings.json");
+            let settings = SettingsFile::open(settings_path.clone()).unwrap();
             let first = SourceId::new("first");
             let second = SourceId::new("second");
             for id in [&first, &second] {
@@ -3925,36 +4028,60 @@ mod artwork_preparation_tests {
                 },
             )
             .owner;
-            let mut previous = None;
-            for id in [&first, &second] {
-                owner.select_source(id.clone());
-                tokio::time::timeout(Duration::from_secs(5), async {
-                    while settings.load().sources.selected_source_id.as_ref() != Some(id) {
-                        tokio::task::yield_now().await;
-                    }
-                })
+            assert_eq!(owner.list_sources().sources.len(), 2);
+            assert!(owner.selected_library().is_none());
+            let missing = owner.select_source(SourceId::new("missing"));
+            let error = tokio::time::timeout(Duration::from_secs(5), missing.recv())
                 .await
-                .expect("selection completes without consuming events");
+                .unwrap()
+                .unwrap()
+                .err()
+                .expect("unknown source returns an error to its caller");
+            assert!(!error.is_empty());
+            assert!(owner.selected_library().is_none());
+
+            // Hold the operation lane so replacement happens before either request starts.
+            let lane = owner.shared.lane.lock().await;
+            let superseded = owner.select_source(second.clone());
+            let initial = owner.select_source(first.clone());
+            drop(lane);
+            assert_eq!(
+                tokio::time::timeout(Duration::from_secs(5), superseded.recv())
+                    .await
+                    .unwrap()
+                    .unwrap()
+                    .err(),
+                Some(SourceError::Cancelled.to_string()),
+            );
+            let mut previous: Option<Arc<ActiveSource>> = None;
+            for id in [&first, &second] {
+                let selection = if id == &first {
+                    initial.clone()
+                } else {
+                    owner.select_source(id.clone())
+                };
+                let selected = tokio::time::timeout(Duration::from_secs(5), selection.recv())
+                    .await
+                    .expect("selection completes without consuming events")
+                    .unwrap()
+                    .unwrap();
+                assert_eq!(&selected.source_id, id);
+                assert_eq!(owner.list_sources().selected_source_id.as_ref(), Some(id));
+                assert_eq!(owner.selected_library().unwrap().source_id, *id);
                 if let Some(previous) = previous.take() {
-                    let previous: Arc<ActiveSource> = previous;
                     assert!(previous.resolve().is_none());
                 }
-                previous = owner.shared.selected_session();
+                previous = Some(selected.operations);
             }
-            owner.forget_source(second.clone());
-            tokio::time::timeout(Duration::from_secs(5), async {
-                while settings
-                    .load()
-                    .sources
-                    .configured
-                    .iter()
-                    .any(|item| item.configuration.source_id == second)
-                {
-                    tokio::task::yield_now().await;
-                }
-            })
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                owner.forget_source(second.clone()).recv(),
+            )
             .await
-            .expect("removal completes without consuming events");
+            .expect("removal completes without consuming events")
+            .unwrap()
+            .unwrap();
+            assert_eq!(owner.list_sources().sources.len(), 1);
             assert!(previous.unwrap().resolve().is_none());
             assert!(owner.shared.selected().is_none());
             assert!(
@@ -3975,10 +4102,37 @@ mod artwork_preparation_tests {
                         _ => {}
                     }
                 }
-                assert_eq!(assignments, vec![Some(first), None, Some(second), None]);
+                assert_eq!(
+                    assignments,
+                    vec![Some(first.clone()), None, Some(second.clone()), None]
+                );
             }
             owner.shared.cancel_observer();
             owner.shared.cancel_acquisition();
+
+            owner
+                .forget_source(second.clone())
+                .recv()
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(
+                owner.list_sources().sources.len(),
+                1,
+                "removal can be repeated"
+            );
+            std::fs::remove_file(&settings_path).unwrap();
+            std::fs::create_dir(&settings_path).unwrap();
+            let error = tokio::time::timeout(
+                Duration::from_secs(5),
+                owner.forget_source(first.clone()).recv(),
+            )
+            .await
+            .unwrap()
+            .unwrap()
+            .unwrap_err();
+            assert!(!error.is_empty(), "failed settings writes reach the caller");
+            assert_eq!(owner.list_sources().sources[0].id, first);
         }
     }
 

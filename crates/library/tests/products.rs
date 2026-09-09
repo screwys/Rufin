@@ -8,6 +8,133 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn track_pages_preserve_sort_filter_and_source_scope() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    for sort in [
+        library::TrackSort::Title,
+        library::TrackSort::TrackNumber,
+        library::TrackSort::Artist,
+        library::TrackSort::AlbumArtist,
+        library::TrackSort::Album,
+        library::TrackSort::Year,
+        library::TrackSort::ReleaseDate,
+        library::TrackSort::DateAdded,
+        library::TrackSort::LastPlayed,
+        library::TrackSort::PlayCount,
+        library::TrackSort::UserRating,
+        library::TrackSort::Genre,
+        library::TrackSort::Bpm,
+        library::TrackSort::Duration,
+        library::TrackSort::Favorite,
+    ] {
+        for descending in [false, true] {
+            for folder in [None, Some(fixture.folder)] {
+                let order = fixture
+                    .database
+                    .track_order(fixture.source, folder, false, sort, descending, &cancel)
+                    .await
+                    .unwrap();
+                let mut pages = Vec::new();
+                for offset in (0..order.len()).step_by(2) {
+                    let page = fixture
+                        .database
+                        .track_page(
+                            fixture.source,
+                            folder,
+                            false,
+                            "",
+                            sort,
+                            descending,
+                            offset,
+                            2,
+                            &cancel,
+                        )
+                        .await
+                        .unwrap();
+                    assert!(page.len() <= 2);
+                    pages.extend(page.into_iter().map(|row| row.media_uri));
+                }
+                assert_eq!(pages, order);
+            }
+        }
+    }
+    let rows = fixture
+        .database
+        .track_page(
+            fixture.source,
+            None,
+            false,
+            "beta",
+            library::TrackSort::Title,
+            false,
+            0,
+            10,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].title, "Beta");
+    assert!(
+        fixture
+            .database
+            .track_page(
+                fixture.source,
+                None,
+                false,
+                "",
+                library::TrackSort::Title,
+                false,
+                usize::MAX,
+                10,
+                &cancel
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+    assert!(
+        fixture
+            .database
+            .track_page(
+                fixture.source,
+                None,
+                false,
+                "",
+                library::TrackSort::Title,
+                false,
+                0,
+                0,
+                &cancel
+            )
+            .await
+            .unwrap()
+            .is_empty()
+    );
+
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<300) INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis) SELECT ?1,'extra-'||x,'test:extra-'||x,'Extra '||x,'extra','','','extra-'||x,1000 FROM n")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    let rows = fixture
+        .database
+        .track_page(
+            fixture.source,
+            None,
+            false,
+            "",
+            library::TrackSort::Title,
+            false,
+            0,
+            usize::MAX,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(rows.len(), 256);
+}
+
+#[tokio::test]
 async fn radio_fills_short_album_and_track_seeds_from_the_selected_source() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;

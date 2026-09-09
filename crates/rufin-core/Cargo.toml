@@ -17,6 +17,11 @@ audio-processing.workspace = true
 app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 artwork.workspace = true
 desktop-integration.workspace = true
 downloads.workspace = true
@@ -36,7 +41,7 @@ lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt-multi-thread", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 url.workspace = true

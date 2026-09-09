@@ -44,6 +44,7 @@ pub(crate) struct PlaybackOwner {
     runtime: tokio::runtime::Handle,
     events: EventSender<PlaybackProjection>,
     event_drain: Receiver<PlaybackProjection>,
+    pub(crate) state: tokio::sync::watch::Sender<Option<Arc<playback::PlaybackView>>>,
     visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
@@ -151,6 +152,7 @@ impl PlaybackOwner {
         let ui = settings.load().ui;
         let (update_sender, update_receiver) = async_channel::bounded(64);
         let (store_sender, store_receiver) = async_channel::unbounded();
+        let (state, _) = tokio::sync::watch::channel(None);
         let artwork_settings = settings.clone();
         let cast_artwork = artwork.clone();
         let cast_artwork_path = move |stream: &playback::PreparedStream| {
@@ -166,6 +168,7 @@ impl PlaybackOwner {
             runtime: runtime.clone(),
             events,
             event_drain,
+            state,
             visualizer_events,
             visualizer_drain,
             waveform,
@@ -318,6 +321,7 @@ impl PlaybackOwner {
         }
         self.publish_current_media(None);
         (self.observe_playback)(None, false);
+        self.state.send_replace(None);
         active
     }
 
@@ -378,6 +382,8 @@ impl PlaybackOwner {
     }
 
     fn publish_projection(&self, publication: PlaybackProjection) {
+        self.state
+            .send_replace(Some(Arc::new(publication.view.clone())));
         let Err(TrySendError::Full(mut publication)) = self.events.try_send(publication) else {
             return;
         };

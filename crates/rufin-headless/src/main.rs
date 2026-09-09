@@ -1,4 +1,5 @@
 use std::io::{self, Write};
+use std::net::SocketAddr;
 use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
@@ -20,15 +21,40 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
+    const USAGE: &str = "Usage: rufin-headless PROFILE_DIRECTORY [--listen ADDRESS:PORT]\nSet RUFIN_API_TOKEN to enable authenticated HTTP access. GET /api lists the routes.";
     let mut arguments = std::env::args_os().skip(1);
-    let root = PathBuf::from(
-        arguments
-            .next()
-            .ok_or("Usage: rufin-headless PROFILE_DIRECTORY")?,
-    );
-    if arguments.next().is_some() {
-        return Err("Usage: rufin-headless PROFILE_DIRECTORY".to_string());
+    let root = arguments.next().ok_or(USAGE)?;
+    if root == "--help" {
+        let _ = writeln!(io::stdout().lock(), "{USAGE}");
+        return Ok(());
     }
+    let root = PathBuf::from(root);
+    let address: Option<SocketAddr> = match arguments.next() {
+        Some(option) if option == "--listen" => Some(
+            arguments
+                .next()
+                .ok_or(USAGE)?
+                .to_str()
+                .ok_or(USAGE)?
+                .parse()
+                .map_err(|error| format!("Invalid listen address: {error}"))?,
+        ),
+        Some(_) => return Err(USAGE.into()),
+        None => None,
+    };
+    if arguments.next().is_some() {
+        return Err(USAGE.to_string());
+    }
+    let token = if address.is_some() {
+        Some(
+            std::env::var("RUFIN_API_TOKEN")
+                .ok()
+                .filter(|token| !token.is_empty())
+                .ok_or("Set RUFIN_API_TOKEN before enabling HTTP access")?,
+        )
+    } else {
+        None
+    };
     let paths = Paths {
         config: root.join("config"),
         cache: root.join("cache"),
@@ -56,11 +82,19 @@ fn run() -> Result<(), String> {
         inputs.receivers.playback.close();
         inputs.receivers.visualizer.close();
         drop(inputs.receivers);
-        let _ = writeln!(
-            io::stdout().lock(),
-            "Rufin is running without a UI. Press Ctrl+C to stop."
-        );
-        let result = runtime.block_on(wait_for_shutdown());
+        let result = runtime.block_on(async {
+            if let Some(address) = address {
+                let listener = tokio::net::TcpListener::bind(address).await?;
+                let _ = writeln!(io::stdout().lock(), "Rufin API listening on http://{}", listener.local_addr()?);
+                tokio::select! {
+                    result = rufin_core::api::serve(listener, inputs.products.clone(), token.unwrap()) => result,
+                    result = wait_for_shutdown() => result,
+                }
+            } else {
+                let _ = writeln!(io::stdout().lock(), "Rufin is running without a UI. Press Ctrl+C to stop.");
+                wait_for_shutdown().await
+            }
+        });
         inputs.products.playback.transport.shutdown();
         result.map_err(|error| error.to_string())
     })

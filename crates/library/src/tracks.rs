@@ -307,6 +307,44 @@ pub struct TrackMetadataWrite {
 }
 
 impl Database {
+    /// Reads one page without materializing the source's full track order.
+    #[allow(clippy::too_many_arguments)]
+    pub async fn track_page(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        favorites_only: bool,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let query = track_query(
+            source,
+            sort,
+            descending,
+            favorites_only,
+            folder,
+            filter,
+            false,
+        );
+        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select("track.track_key"));
+        let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(sql))
+            .bind(limit.min(TRACK_ROW_LIMIT) as i64)
+            .bind(offset.min(i64::MAX as usize) as i64)
+            .persistent(false)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = load_track_rows(&mut transaction, &keys).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
     pub async fn track_rows_for_source(
         &self,
         source: SourceKey,
