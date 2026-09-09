@@ -164,21 +164,17 @@ jobs:
             echo "COPR build $build_id: $state"
             case "$state" in
               succeeded)
-                if ! jq -e \
-                  --arg version "$expected_version" \
-                  '.ownername == "screwyy"
-                    and .projectname == "rufin"
-                    and .source_package.name == "rufin"
-                    and .source_package.version == $version' \
-                  <<<"$response" >/dev/null; then
-                  echo "COPR build $build_id does not match screwyy/rufin package rufin $expected_version:" >&2
-                  jq '{ownername, projectname, source_package: (.source_package | {name, version})}' \
-                    <<<"$response" >&2
-                  exit 1
-                fi
                 break
                 ;;
-              failed|canceled|skipped)
+              failed)
+                if [[ -n "$RECOVERY_COPR_BUILD_ID" ]]; then
+                  echo "Explicit recovery: collecting existing RPMs from failed COPR build $build_id for validation."
+                  break
+                fi
+                echo "Inspect COPR build logs: https://copr.fedorainfracloud.org/coprs/screwyy/rufin/build/$build_id/" >&2
+                exit 1
+                ;;
+              canceled|skipped)
                 exit 1
                 ;;
               pending|starting|running|importing|waiting|forked)
@@ -190,6 +186,19 @@ jobs:
                 ;;
             esac
           done
+
+          if ! jq -e \
+            --arg version "$expected_version" \
+            '.ownername == "screwyy"
+              and .projectname == "rufin"
+              and .source_package.name == "rufin"
+              and .source_package.version == $version' \
+            <<<"$response" >/dev/null; then
+            echo "COPR build $build_id does not match screwyy/rufin package rufin $expected_version:" >&2
+            jq '{ownername, projectname, source_package: (.source_package | {name, version})}' \
+              <<<"$response" >&2
+            exit 1
+          fi
 
       - name: Collect Fedora 44 packages
         run: |
