@@ -1479,6 +1479,10 @@ msgstr "Пока нет музыки от этого исполнителя"
 msgid "No network devices found"
 msgstr "Устройства в сети не найдены"
 
+msgid ""
+"No secret service found. Rufin will use a file to store its credentials."
+msgstr ""
+
 msgid "No servers found, add one manually or try again"
 msgstr "Не найдено серверов, добавьте вручную или попробуйте еще раз"
 
