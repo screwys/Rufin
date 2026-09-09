@@ -1,5 +1,7 @@
 pub(crate) const BASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/style.css";
 pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application/about.ui";
+pub(crate) const WINDOWS_TITLE_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/application/windows_title.ui";
 pub(crate) const RANDOM_PLAY_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/random_play.ui";
 
 pub(crate) const APPEARANCE_PREFERENCES_RESOURCE: &str =
@@ -58,6 +60,7 @@ pub(crate) const NAVIGATION_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/
 pub(crate) const SHELL_ROOT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/root.ui";
 pub(crate) const SHORTCUTS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/shortcuts.ui";
 pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    WINDOWS_TITLE_RESOURCE,
     BASE_CSS_RESOURCE,
     ABOUT_RESOURCE,
     APPEARANCE_PREFERENCES_RESOURCE,

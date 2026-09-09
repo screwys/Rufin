@@ -131,7 +131,7 @@ fn manage_server_content(
     folder_row.set_subtitle(
         &access
             .as_ref()
-            .map(|access| access.root_path.display().to_string())
+            .map(|access| ui_shared::path_display::display_path(&access.root_path))
             .unwrap_or_else(|| tr("No folder selected")),
     );
     folder_row.set_activatable_widget(Some(&folder_button));

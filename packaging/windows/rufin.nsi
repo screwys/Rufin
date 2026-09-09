@@ -143,10 +143,69 @@ ${LABEL}_not_running:
 
 !macro RemoveInstalledFilesFunction PREFIX
 Function ${PREFIX}RemoveInstalledFiles
+    ; 0.15.0/0.15.1 shipped these Windows runtime files by mistake.
+    ; Remove them independently of the inventory: an extracted upgrade can
+    ; replace that inventory without removing files absent from the new bundle.
+    ClearErrors
+    Delete "$CleanupDir\bin\advapi32.dll"
+    Delete "$CleanupDir\bin\bcrypt.dll"
+    Delete "$CleanupDir\bin\bcryptprimitives.dll"
+    Delete "$CleanupDir\bin\cfgmgr32.dll"
+    Delete "$CleanupDir\bin\combase.dll"
+    Delete "$CleanupDir\bin\comctl32.dll"
+    Delete "$CleanupDir\bin\comdlg32.dll"
+    Delete "$CleanupDir\bin\crypt32.dll"
+    Delete "$CleanupDir\bin\d3d11.dll"
+    Delete "$CleanupDir\bin\d3d12.dll"
+    Delete "$CleanupDir\bin\dcomp.dll"
+    Delete "$CleanupDir\bin\dnsapi.dll"
+    Delete "$CleanupDir\bin\dsound.dll"
+    Delete "$CleanupDir\bin\dwmapi.dll"
+    Delete "$CleanupDir\bin\dwrite.dll"
+    Delete "$CleanupDir\bin\dxgi.dll"
+    Delete "$CleanupDir\bin\gdi32.dll"
+    Delete "$CleanupDir\bin\gdiplus.dll"
+    Delete "$CleanupDir\bin\glu32.dll"
+    Delete "$CleanupDir\bin\hid.dll"
+    Delete "$CleanupDir\bin\imm32.dll"
+    Delete "$CleanupDir\bin\iphlpapi.dll"
+    Delete "$CleanupDir\bin\kernel32.dll"
+    Delete "$CleanupDir\bin\kernelbase.dll"
+    Delete "$CleanupDir\bin\ktmw32.dll"
+    Delete "$CleanupDir\bin\microsoft.internal.warppal.dll"
+    Delete "$CleanupDir\bin\msdmo.dll"
+    Delete "$CleanupDir\bin\msimg32.dll"
+    Delete "$CleanupDir\bin\msvcp_win.dll"
+    Delete "$CleanupDir\bin\msvcrt.dll"
+    Delete "$CleanupDir\bin\ncrypt.dll"
+    Delete "$CleanupDir\bin\ntdll.dll"
+    Delete "$CleanupDir\bin\ole32.dll"
+    Delete "$CleanupDir\bin\oleaut32.dll"
+    Delete "$CleanupDir\bin\opengl32.dll"
+    Delete "$CleanupDir\bin\propsys.dll"
+    Delete "$CleanupDir\bin\resampledmo.dll"
+    Delete "$CleanupDir\bin\rpcrt4.dll"
+    Delete "$CleanupDir\bin\sechost.dll"
+    Delete "$CleanupDir\bin\secur32.dll"
+    Delete "$CleanupDir\bin\setupapi.dll"
+    Delete "$CleanupDir\bin\shcore.dll"
+    Delete "$CleanupDir\bin\shell32.dll"
+    Delete "$CleanupDir\bin\shlwapi.dll"
+    Delete "$CleanupDir\bin\user32.dll"
+    Delete "$CleanupDir\bin\userenv.dll"
+    Delete "$CleanupDir\bin\usp10.dll"
+    Delete "$CleanupDir\bin\version.dll"
+    Delete "$CleanupDir\bin\win32u.dll"
+    Delete "$CleanupDir\bin\winmm.dll"
+    Delete "$CleanupDir\bin\wldap32.dll"
+    Delete "$CleanupDir\bin\ws2_32.dll"
+    Delete "$CleanupDir\bin\wsock32.dll"
+    IfErrors inventory_failed
+
     StrCpy $0 "$CleanupDir\install-files.txt"
     IfFileExists "$0" inventory_ready
-    ; Older releases did not record their files. Only remove filenames known
-    ; to this package; unlisted files must be left alone.
+    ; Older releases did not record their files. Apart from the retired files
+    ; above, only remove filenames present in this package.
     InitPluginsDir
     File /oname=$PLUGINSDIR\install-files.txt "${RUFIN_FILES_FILE}"
     StrCpy $0 "$PLUGINSDIR\install-files.txt"
