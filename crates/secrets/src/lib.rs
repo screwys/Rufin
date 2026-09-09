@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 const CONFIG_SECRET_FORMAT: &str = "config-base64";
+const KEYRING_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 static SECRET_SERVICE: Mutex<Option<(tokio::runtime::Runtime, Arc<oo7::Keyring>)>> =
     Mutex::new(None);
@@ -63,19 +64,6 @@ pub enum SecretError {
 }
 
 pub type SecretResult<T> = Result<T, SecretError>;
-
-/// Check the host integration without reading credentials or unlocking a keyring.
-pub async fn check_system_keyring() -> SecretResult<()> {
-    #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-    {
-        if !secret_portal_available().await {
-            oo7::dbus::Service::new()
-                .await
-                .map_err(|error| SecretError::Backend(error.to_string()))?;
-        }
-    }
-    Ok(())
-}
 
 #[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
 async fn secret_portal_available() -> bool {
@@ -144,6 +132,11 @@ pub trait SecretStore: Send + Sync {
     fn load_secret(&self, key: &SecretKey) -> SecretResult<Option<String>>;
     fn delete_secret(&self, key: &SecretKey) -> SecretResult<()>;
 
+    /// Whether successful writes survive the end of this process.
+    fn is_persistent(&self) -> bool {
+        true
+    }
+
     fn save_token(&self, source_namespace: &str, token: &str) -> SecretResult<()> {
         self.save_secret(&SecretKey::provider_token(source_namespace), token)
     }
@@ -173,6 +166,10 @@ impl CachedSecretStore {
 }
 
 impl SecretStore for CachedSecretStore {
+    fn is_persistent(&self) -> bool {
+        self.inner.is_persistent()
+    }
+
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {
         self.inner.save_secret(key, secret)?;
         let mut secrets = self.secrets.lock().map_err(|_| SecretError::Locked)?;
@@ -218,12 +215,16 @@ impl SwitchableSecretStore {
         std::mem::replace(&mut *current, inner)
     }
 
-    fn current(&self) -> SecretResult<Arc<dyn SecretStore>> {
+    pub fn current(&self) -> SecretResult<Arc<dyn SecretStore>> {
         Ok(self.inner.lock().map_err(|_| SecretError::Locked)?.clone())
     }
 }
 
 impl SecretStore for SwitchableSecretStore {
+    fn is_persistent(&self) -> bool {
+        self.current().is_ok_and(|store| store.is_persistent())
+    }
+
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {
         self.current()?.save_secret(key, secret)
     }
@@ -382,6 +383,10 @@ impl MemorySecretStore {
 }
 
 impl SecretStore for MemorySecretStore {
+    fn is_persistent(&self) -> bool {
+        false
+    }
+
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {
         let mut secrets = self.secrets.lock().map_err(|_| SecretError::Locked)?;
         secrets.insert(key.clone(), secret.to_string());
@@ -438,19 +443,40 @@ impl SystemKeyringStore {
             backend: SystemKeyringBackend::new(scope_id.into())?,
         })
     }
+
+    fn run<T: Send + 'static>(
+        &self,
+        operation: impl FnOnce(SystemKeyringBackend) -> SecretResult<T> + Send + 'static,
+    ) -> SecretResult<T> {
+        let backend = self.backend.clone();
+        let (sender, receiver) = std::sync::mpsc::sync_channel(1);
+        std::thread::Builder::new()
+            .name("rufin-keyring".into())
+            .spawn(move || {
+                let _ = sender.send(operation(backend));
+            })
+            .map_err(|error| SecretError::Backend(error.to_string()))?;
+        receiver.recv_timeout(KEYRING_TIMEOUT).map_err(|error| {
+            SecretError::Backend(format!("secret service did not complete: {error}"))
+        })?
+    }
 }
 
 impl SecretStore for SystemKeyringStore {
     fn save_secret(&self, key: &SecretKey, secret: &str) -> SecretResult<()> {
-        self.backend.save_secret(key, secret)
+        let key = key.clone();
+        let secret = secret.to_string();
+        self.run(move |backend| backend.save_secret(&key, &secret))
     }
 
     fn load_secret(&self, key: &SecretKey) -> SecretResult<Option<String>> {
-        self.backend.load_secret(key)
+        let key = key.clone();
+        self.run(move |backend| backend.load_secret(&key))
     }
 
     fn delete_secret(&self, key: &SecretKey) -> SecretResult<()> {
-        self.backend.delete_secret(key)
+        let key = key.clone();
+        self.run(move |backend| backend.delete_secret(&key))
     }
 }
 
@@ -514,25 +540,47 @@ impl SystemKeyringBackend {
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
             let keyring = runtime
                 .block_on(async {
-                    if secret_portal_available().await {
-                        oo7::Keyring::new().await
-                    } else {
-                        let service = oo7::dbus::Service::new().await?;
-                        Ok(oo7::Keyring::DBus(service.default_collection().await?))
-                    }
+                    tokio::time::timeout(KEYRING_TIMEOUT, async {
+                        if secret_portal_available().await {
+                            oo7::Keyring::new().await
+                        } else {
+                            let service = oo7::dbus::Service::new().await?;
+                            Ok(oo7::Keyring::DBus(service.default_collection().await?))
+                        }
+                    })
+                    .await
                 })
-                .map_err(|error| SecretError::Backend(error.to_string()))?;
+                .map_err(|_| SecretError::Backend("secret service timed out".into()))
+                .and_then(|result| result.map_err(|error| SecretError::Backend(error.to_string())));
+            let keyring = match keyring {
+                Ok(keyring) => keyring,
+                Err(error) => {
+                    runtime.shutdown_background();
+                    return Err(error);
+                }
+            };
             *service = Some((runtime, Arc::new(keyring)));
         }
         let (runtime, keyring) = service.as_ref().expect("initialized secret service");
-        runtime
-            .block_on(async {
+        let result = runtime.block_on(async {
+            tokio::time::timeout(KEYRING_TIMEOUT, async {
                 if keyring.is_locked().await? {
                     keyring.unlock().await?;
                 }
                 operation(Arc::clone(keyring)).await
             })
-            .map_err(|error| SecretError::Backend(error.to_string()))
+            .await
+        });
+        match result {
+            Ok(result) => result.map_err(|error| SecretError::Backend(error.to_string())),
+            Err(_) => {
+                // Drop the connection and its pending prompt with the timed-out operation.
+                if let Some((runtime, _)) = service.take() {
+                    runtime.shutdown_background();
+                }
+                Err(SecretError::Backend("secret service timed out".into()))
+            }
+        }
     }
 }
 

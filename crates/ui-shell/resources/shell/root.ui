@@ -3,8 +3,15 @@
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
 
-  <object class="GtkLabel" id="secret_storage_fallback_message">
-    <property name="label" translatable="yes">No secret service found. Rufin will use a file to store its credentials.</property>
+  <object class="AdwAlertDialog" id="secret_storage_fallback_dialog">
+    <property name="heading" translatable="yes">Secret storage</property>
+    <property name="body" translatable="yes">No secret service found. Rufin will use a file to store its credentials. Cancelling will not save credentials at all.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="save" translatable="yes" appearance="suggested">Save</response>
+    </responses>
   </object>
 
   <object class="GtkStack" id="root_stack">

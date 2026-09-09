@@ -4,7 +4,7 @@
 //! joins those operations to Rufin's settings and secret storage while the UI
 //! sees only editable preferences and connection progress.
 
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 
 use crate::runtime::{
@@ -13,7 +13,7 @@ use crate::runtime::{
 };
 use async_channel::{Receiver, bounded};
 use scrobbling::{AudioscrobblerAuthorization, AudioscrobblerSession, Scrobbler};
-use secrets::SwitchableSecretStore;
+use secrets::{SecretStore, SwitchableSecretStore};
 use tracing::warn;
 
 use crate::settings::{SettingsFile, load_scrobbling_settings, persist_scrobbling_settings};
@@ -45,6 +45,7 @@ pub struct ScrobblingOwner {
     runtime: tokio::runtime::Handle,
     scrobbler: Arc<Scrobbler>,
     settings_committed: Arc<dyn Fn(&crate::settings::Settings) + Send + Sync>,
+    credential_work: Arc<Mutex<()>>,
 }
 
 impl ScrobblingOwner {
@@ -61,6 +62,7 @@ impl ScrobblingOwner {
             runtime,
             scrobbler,
             settings_committed,
+            credential_work: Arc::new(Mutex::new(())),
         })
     }
 
@@ -73,16 +75,17 @@ impl ScrobblingOwner {
             warn!(%error, "could not update external scrobbling settings");
         }
         if credentials_changed {
-            let settings = load_scrobbling_settings(&self.settings, &self.secrets);
-            if let Err(error) = self.scrobbler.update_credentials(settings) {
-                warn!(%error, "could not update external scrobbling credentials");
-            }
+            self.load_preferences();
         }
     }
 
     pub(crate) fn start(self: &Arc<Self>) {
         let owner = Arc::clone(self);
         self.runtime.spawn_blocking(move || {
+            let _work = owner
+                .credential_work
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
             if let Err(error) = owner.scrobbler.load_credentials(|| {
                 crate::settings::startup_scrobbling_settings(&owner.settings, &owner.secrets)
             }) {
@@ -91,36 +94,14 @@ impl ScrobblingOwner {
         });
     }
 
-    fn save_preferences(
+    fn commit(
         &self,
-        preferences: &ScrobblingPreferences,
+        settings: scrobbling::Settings,
+        scope: &str,
     ) -> Result<ScrobblingPreferences, String> {
-        let mut settings = load_scrobbling_settings(&self.settings, &self.secrets);
-        let api_key = preferences.lastfm.api_key.trim().to_string();
-        let api_secret = preferences.lastfm.api_secret.trim().to_string();
-        if settings.lastfm.api_key != api_key || settings.lastfm.api_secret != api_secret {
-            settings.lastfm.username.clear();
-            settings.lastfm.session_key.clear();
-        }
-        settings.lastfm.enabled = preferences.lastfm.enabled;
-        settings.lastfm.api_key = api_key;
-        settings.lastfm.api_secret = api_secret;
-        settings.lastfm.now_playing_enabled = preferences.lastfm.now_playing_enabled;
-        settings.librefm.enabled = preferences.librefm.enabled;
-        settings.librefm.now_playing_enabled = preferences.librefm.now_playing_enabled;
-        settings.listenbrainz.enabled = preferences.listenbrainz.enabled;
-        settings.listenbrainz.user_token = preferences.listenbrainz.user_token.trim().to_string();
-        settings.listenbrainz.now_playing_enabled = preferences.listenbrainz.now_playing_enabled;
-        self.commit(settings)
-    }
-
-    fn commit(&self, settings: scrobbling::Settings) -> Result<ScrobblingPreferences, String> {
-        let committed = persist_scrobbling_settings(&self.settings, &self.secrets, &settings)?;
-        let private_mode = self.settings.load().ui.private_mode;
-        if let Err(error) = self
-            .scrobbler
-            .update_settings(committed.clone(), private_mode)
-        {
+        let committed =
+            persist_scrobbling_settings(&self.settings, &self.secrets, &settings, scope)?;
+        if let Err(error) = self.scrobbler.update_credentials(committed.clone()) {
             warn!(%error, "could not update external scrobbling settings");
         }
         (self.settings_committed)(&self.settings.load().ui);
@@ -133,6 +114,7 @@ impl ScrobblingOwner {
     ) -> Receiver<ScrobblingConnectionEvent> {
         let (events, receiver) = bounded(2);
         let owner = self.clone();
+        let scope = self.settings.load().secret_scope_id;
         self.runtime.spawn(async move {
             let authorization = match request {
                 ScrobblingConnection::LastFm {
@@ -185,7 +167,12 @@ impl ScrobblingOwner {
 
             let session = wait_for_authorization(authorization).await;
             match session {
-                Ok(Some(session)) => match owner.save_session(&request, session) {
+                Ok(Some(session)) => match tokio::task::spawn_blocking(move || {
+                    owner.save_session(&request, session, &scope)
+                })
+                .await
+                .unwrap_or_else(|error| Err(error.to_string()))
+                {
                     Ok(username) => {
                         let _ = events
                             .send(ScrobblingConnectionEvent::Connected { username })
@@ -210,8 +197,13 @@ impl ScrobblingOwner {
         &self,
         request: &ScrobblingConnection,
         session: AudioscrobblerSession,
+        scope: &str,
     ) -> Result<String, String> {
-        let mut settings = load_scrobbling_settings(&self.settings, &self.secrets);
+        let _work = self
+            .credential_work
+            .lock()
+            .unwrap_or_else(|p| p.into_inner());
+        let mut settings = self.loaded_settings();
         match request {
             ScrobblingConnection::LastFm {
                 api_key,
@@ -227,21 +219,120 @@ impl ScrobblingOwner {
                 settings.librefm.session_key = session.session_key;
             }
         }
-        self.commit(settings)?;
+        self.commit(settings, scope)?;
         Ok(session.username)
     }
 }
 
 impl ScrobblingOwner {
+    fn loaded_settings(&self) -> scrobbling::Settings {
+        if self.secrets.is_persistent() {
+            load_scrobbling_settings(&self.settings, &self.secrets)
+        } else {
+            self.scrobbler.settings()
+        }
+    }
+
+    pub fn save_credentials_to_file(
+        &self,
+        storage: crate::settings::KeyringSecretStore,
+    ) -> Receiver<Result<(), String>> {
+        let (sender, receiver) = bounded(1);
+        let owner = self.clone();
+        let scope = self.settings.load().secret_scope_id;
+        self.runtime.spawn_blocking(move || {
+            let _work = owner
+                .credential_work
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let result = storage
+                .save_to_file()
+                .map_err(|error| error.to_string())
+                .and_then(|()| owner.commit(owner.scrobbler.settings(), &scope).map(|_| ()));
+            let _ = sender.send_blocking(result);
+        });
+        receiver
+    }
+
     pub fn preferences(&self) -> ScrobblingPreferences {
-        preferences(&load_scrobbling_settings(&self.settings, &self.secrets))
+        preferences(&self.scrobbler.settings())
     }
 
     pub fn save(
         &self,
         preferences: &ScrobblingPreferences,
     ) -> Result<ScrobblingPreferences, String> {
-        self.save_preferences(preferences)
+        self.settings.update(|stored| {
+            stored.scrobbling.lastfm.enabled = preferences.lastfm.enabled;
+            stored.scrobbling.lastfm.now_playing_enabled = preferences.lastfm.now_playing_enabled;
+            stored.scrobbling.librefm.enabled = preferences.librefm.enabled;
+            stored.scrobbling.librefm.now_playing_enabled = preferences.librefm.now_playing_enabled;
+            stored.scrobbling.listenbrainz.enabled = preferences.listenbrainz.enabled;
+            stored.scrobbling.listenbrainz.now_playing_enabled =
+                preferences.listenbrainz.now_playing_enabled;
+            Ok(())
+        })?;
+        let loaded = self.scrobbler.settings();
+        let needs_credentials = self.settings.load().scrobbling_secrets_present
+            && ((preferences.lastfm.enabled && loaded.lastfm.session_key.is_empty())
+                || (preferences.librefm.enabled && loaded.librefm.session_key.is_empty())
+                || (preferences.listenbrainz.enabled && loaded.listenbrainz.user_token.is_empty()));
+        self.settings_changed(needs_credentials);
+        Ok(self.preferences())
+    }
+
+    pub fn save_credential(
+        &self,
+        update: impl FnOnce(&mut ScrobblingPreferences) + Send + 'static,
+    ) -> Receiver<Result<ScrobblingPreferences, String>> {
+        let (sender, receiver) = bounded(1);
+        let owner = self.clone();
+        let scope = self.settings.load().secret_scope_id;
+        self.runtime.spawn_blocking(move || {
+            let _work = owner
+                .credential_work
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            let mut settings = owner.loaded_settings();
+            let mut preferences = preferences(&settings);
+            update(&mut preferences);
+            if settings.lastfm.api_key != preferences.lastfm.api_key
+                || settings.lastfm.api_secret != preferences.lastfm.api_secret
+            {
+                settings.lastfm.username.clear();
+                settings.lastfm.session_key.clear();
+            }
+            settings.lastfm.api_key = preferences.lastfm.api_key.trim().into();
+            settings.lastfm.api_secret = preferences.lastfm.api_secret.trim().into();
+            settings.listenbrainz.user_token = preferences.listenbrainz.user_token.trim().into();
+            let _ = sender.send_blocking(owner.commit(settings, &scope));
+        });
+        receiver
+    }
+
+    pub fn load_preferences(&self) -> Receiver<ScrobblingPreferences> {
+        let (sender, receiver) = bounded(1);
+        let owner = self.clone();
+        self.runtime.spawn_blocking(move || {
+            let _work = owner
+                .credential_work
+                .lock()
+                .unwrap_or_else(|p| p.into_inner());
+            if let Err(error) = owner.scrobbler.load_credentials(|| owner.loaded_settings()) {
+                warn!(%error, "could not load scrobbling credentials");
+            }
+            let _ = sender.send_blocking(owner.preferences());
+        });
+        receiver
+    }
+
+    pub fn storage_reset(&self) {
+        if let Err(error) = self
+            .scrobbler
+            .update_credentials(self.settings.load().scrobbling_runtime_settings())
+        {
+            warn!(%error, "could not reset scrobbling credentials");
+        }
     }
 
     pub fn connect(&self, request: ScrobblingConnection) -> Receiver<ScrobblingConnectionEvent> {

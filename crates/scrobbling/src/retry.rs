@@ -257,6 +257,14 @@ impl Scrobbler {
         })
     }
 
+    pub fn settings(&self) -> Settings {
+        self.state
+            .lock()
+            .unwrap_or_else(|poisoned| poisoned.into_inner())
+            .settings
+            .clone()
+    }
+
     /// Apply preferences immediately using the already loaded account credentials.
     pub fn update_preferences(
         &self,

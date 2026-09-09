@@ -73,6 +73,10 @@ set(RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS
   wavpack
   wavparse
 )
+if(APPLE)
+  # Homebrew no longer ships FDK-AAC; libav already provides the preferred AAC decoder.
+  list(REMOVE_ITEM RUFIN_GSTREAMER_COMMON_PLUGIN_STEMS fdkaac)
+endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -150,6 +154,9 @@ if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
     scaletempo
     souphttpsrc
   )
+  if(APPLE)
+    list(APPEND RUFIN_REQUIRED_GSTREAMER_ELEMENTS avdec_aac)
+  endif()
   foreach(RUFIN_GSTREAMER_ELEMENT IN LISTS RUFIN_REQUIRED_GSTREAMER_ELEMENTS)
     execute_process(
       COMMAND "${RUFIN_GST_INSPECT}" --exists "${RUFIN_GSTREAMER_ELEMENT}"
