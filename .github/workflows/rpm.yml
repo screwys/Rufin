@@ -238,7 +238,7 @@ jobs:
             )
             test "${#rpm_paths[@]}" -eq 1
             rpm_path="${rpm_paths[0]}"
-            rpm -K "$rpm_path"
+            rpm --define '_pkgverify_level all' -K "$rpm_path"
             install_root="$(mktemp -d)"
             rpm2cpio "$rpm_path" | cpio -idm --quiet -D "$install_root"
             cargo run --locked -p xtask -- verify package-layout "$install_root" /usr
