@@ -240,7 +240,7 @@ fn library_sources_page(
             &download_settings
                 .directory
                 .as_deref()
-                .map(|path| path.display().to_string())
+                .map(ui_shared::path_display::display_path)
                 .unwrap_or_else(|| tr(DEFAULT_DOWNLOAD_DIRECTORY_SUBTITLE)),
         );
         reset_folder.set_visible(download_settings.directory.is_some());
@@ -294,7 +294,7 @@ fn library_sources_page(
                     .is_some()
                 {
                     if let Some(row) = row.upgrade() {
-                        row.set_subtitle(&path.display().to_string());
+                        row.set_subtitle(&ui_shared::path_display::display_path(&path));
                     }
                     if let Some(reset) = reset.upgrade() {
                         reset.set_visible(true);
@@ -423,7 +423,9 @@ pub(crate) fn local_sources_page(shell: &Rc<Shell>, dialog: &adw::Dialog) -> adw
         for folder in configured.local_folders.iter() {
             let row = adw::ActionRow::builder()
                 .title(local_folder_title(&folder.path))
-                .subtitle(folder.path.clone())
+                .subtitle(ui_shared::path_display::display_path(Path::new(
+                    &folder.path,
+                )))
                 .build();
             row.add_prefix(&gtk::Image::from_icon_name("rufin-folders-symbolic"));
             let remove = gtk::Button::from_icon_name("rufin-window-close-symbolic");
@@ -1146,7 +1148,7 @@ fn local_folder_title(path: &str) -> String {
         .and_then(|name| name.to_str())
         .filter(|name| !name.trim().is_empty())
         .map(ToString::to_string)
-        .unwrap_or_else(|| path.to_string())
+        .unwrap_or_else(|| ui_shared::path_display::display_path(Path::new(path)))
 }
 
 fn download_quality_choices(limit_kbps: Option<u32>) -> Vec<StreamQuality> {

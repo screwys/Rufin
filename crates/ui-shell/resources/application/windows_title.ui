@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<interface domain="rufin">
+  <requires lib="gtk" version="4.20"/>
+  <object class="GtkBox" id="title_placeholder">
+    <property name="visible">false</property>
+  </object>
+  <object class="GtkBox" id="title_content">
+    <property name="spacing">8</property>
+    <property name="margin-start">16</property>
+    <property name="hexpand">true</property>
+    <child>
+      <object class="GtkImage">
+        <property name="icon-name">io.github.screwys.Rufin</property>
+        <property name="pixel-size">16</property>
+        <property name="valign">center</property>
+      </object>
+    </child>
+    <child>
+      <object class="GtkLabel" id="title">
+        <property name="hexpand">true</property>
+        <property name="xalign">0</property>
+        <property name="ellipsize">end</property>
+        <property name="single-line-mode">true</property>
+        <style><class name="heading"/><class name="platform-window-bar-title"/></style>
+      </object>
+    </child>
+  </object>
+</interface>

@@ -100,7 +100,7 @@ impl LocalAccessEditor {
         let row_for_tooltip = row.downgrade();
         connect_folder_button(window, button, row, Rc::clone(&self.folder), move |path| {
             if path_tooltip && let Some(row) = row_for_tooltip.upgrade() {
-                row.set_tooltip_text(Some(&path.display().to_string()));
+                row.set_tooltip_text(Some(&crate::path_display::display_path(&path)));
             }
             editor.begin_editing();
             editor.match_sample();
@@ -236,11 +236,11 @@ pub fn mount_metadata_local_access_mapping(
     folder_row.set_subtitle(
         &folder
             .as_deref()
-            .map(|path| path.display().to_string())
+            .map(crate::path_display::display_path)
             .unwrap_or_else(|| tr("No folder selected")),
     );
     if let Some(path) = folder.as_deref() {
-        folder_row.set_tooltip_text(Some(&path.display().to_string()));
+        folder_row.set_tooltip_text(Some(&crate::path_display::display_path(path)));
     }
     folder_row.set_activatable_widget(Some(&folder_button));
     preview_row.set_subtitle(&preview_local_path_text(
@@ -761,7 +761,7 @@ pub fn connect_folder_button(
             let (Some(row), Some(on_changed)) = (row.upgrade(), on_changed.upgrade()) else {
                 return;
             };
-            row.set_subtitle(&path.display().to_string());
+            row.set_subtitle(&crate::path_display::display_path(&path));
             *target.borrow_mut() = Some(path.clone());
             on_changed(path);
         });

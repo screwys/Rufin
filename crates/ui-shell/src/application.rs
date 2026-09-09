@@ -305,22 +305,35 @@ fn install_platform_window_bar(
 ) {
     let titlebar = gtk::HeaderBar::new();
     titlebar.add_css_class("platform-window-bar");
-    titlebar.set_show_title_buttons(!preview);
+    titlebar.set_show_title_buttons(!preview || platform == WindowBarPreview::Windows);
     titlebar.set_use_native_controls(platform == WindowBarPreview::Macos && !preview);
-    titlebar.set_title_widget(Some(&bound_window_title(
-        window,
-        "platform-window-bar-title",
-    )));
-
     match platform {
         WindowBarPreview::Macos => {
+            titlebar.set_title_widget(Some(&bound_window_title(
+                window,
+                "platform-window-bar-title",
+            )));
             if preview {
                 titlebar.pack_start(&macos_preview_controls());
             }
         }
         WindowBarPreview::Windows => {
+            titlebar.add_css_class("windows-window-bar");
+            let resource = crate::ui_resource::WINDOWS_TITLE_RESOURCE;
+            let builder = ui_shared::ui_resource::builder(resource);
+            ui_shared::objects!(builder, resource, {
+                title_placeholder: gtk::Box,
+                title_content: gtk::Box,
+                title: gtk::Label,
+            });
+            titlebar.set_title_widget(Some(&title_placeholder));
+            titlebar.pack_start(&title_content);
+            window
+                .bind_property("title", &title, "label")
+                .sync_create()
+                .build();
             if preview {
-                titlebar.pack_end(&windows_preview_controls());
+                titlebar.set_decoration_layout(Some(":minimize,maximize,close"));
             }
         }
     }
@@ -352,18 +365,6 @@ fn macos_preview_controls() -> gtk::Box {
         control.set_size_request(12, 12);
         control.set_halign(gtk::Align::Center);
         control.set_valign(gtk::Align::Center);
-        controls.append(&control);
-    }
-    controls
-}
-
-fn windows_preview_controls() -> gtk::Box {
-    let controls = gtk::Box::new(gtk::Orientation::Horizontal, 0);
-    controls.add_css_class("windows-window-bar-preview-controls");
-    for (label, class) in [("−", "minimize"), ("□", "maximize"), ("×", "close")] {
-        let control = gtk::Label::new(Some(label));
-        control.add_css_class("windows-window-bar-preview-control");
-        control.add_css_class(class);
         controls.append(&control);
     }
     controls

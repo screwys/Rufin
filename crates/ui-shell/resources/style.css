@@ -489,14 +489,46 @@ row:focus {
   background: #28c840;
 }
 
-.windows-window-bar-preview-control {
-  min-width: 46px;
-  min-height: 24px;
-  font-size: 16px;
+.platform-window-bar.windows-window-bar > windowhandle > box {
+  padding: 0;
 }
 
-.windows-window-bar-preview-control.close {
-  font-size: 20px;
+.windows-window-bar windowcontrols {
+  border-spacing: 0;
+}
+
+.windows-window-bar .platform-window-bar-title {
+  margin: 0;
+}
+
+.windows-window-bar windowcontrols > button {
+  min-width: 46px;
+  min-height: 24px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.windows-window-bar windowcontrols > button:hover {
+  background: rgb(125 125 125 / 30%);
+}
+
+.windows-window-bar windowcontrols > button.close:hover {
+  background: #e81123;
+  color: white;
+}
+
+.windows-window-bar windowcontrols > button > image {
+  -gtk-icon-size: 16px;
+  padding: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.windows-window-bar windowcontrols > button.maximize > image {
+  -gtk-icon-size: 12px;
 }
 
 .left-opening-primary-menu arrow.right {
