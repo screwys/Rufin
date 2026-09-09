@@ -212,6 +212,14 @@ jobs:
             RUFIN_DMG_ARTIFACT="$PWD/dist/Rufin-macos-${{ matrix.architecture }}.dmg" \
             just _build-native-package stable
 
+      - name: Verify packaged executable startup
+        timeout-minutes: 1
+        run: |
+          env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH \
+            PATH=/usr/bin:/bin:/usr/sbin:/sbin \
+            "$PWD/.local/build/cmake/release-package/stage/Rufin.app/Contents/MacOS/rufin" \
+            --help
+
       - name: Remove code-signing keychain
         if: always()
         run: |
@@ -219,6 +227,16 @@ jobs:
           if [[ -e "$keychain_path" ]]; then
             security delete-keychain "$keychain_path"
           fi
+
+      - name: Retain executable symbols
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        with:
+          name: Rufin-macos-${{ matrix.architecture }}-unstripped
+          path: .local/target/release/rufin
+          include-hidden-files: true
+          if-no-files-found: error
+          compression-level: 1
+          retention-days: ${{ inputs.release_tag != '' && 90 || 7 }}
 
       - name: Upload workflow artifact
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7

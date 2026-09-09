@@ -6,7 +6,7 @@ use crate::shell::Shell;
 use adw::prelude::*;
 use gtk::glib;
 use gtk::subclass::prelude::ObjectSubclassIsExt;
-use localization::{tr, trn_with};
+use localization::{tr, tr_with, trn_with};
 use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 use rufin_core::runtime::{ReleaseHistory, ReleaseNote, ReleaseUpdate, ReleaseUpdateHandle};
 use tracing::warn;
@@ -702,10 +702,17 @@ pub(crate) fn apply_release_update(shell: &Rc<Shell>, update: ReleaseUpdate) {
         }
         ReleaseUpdate::Updating { version } => {
             dismiss_release_notification(shell);
+            shell.control_feedback.show_feedback_toast(tr_with(
+                "Updating Rufin to {version}...",
+                &[("version", version.as_str())],
+            ));
             *shell.preferences.release_updating.borrow_mut() = Some(version);
             refresh_open_release_notes(shell);
         }
-        ReleaseUpdate::Updated { version, .. } => {
+        ReleaseUpdate::Updated {
+            version,
+            restart_required,
+        } => {
             dismiss_release_notification(shell);
             clear_updating_version(shell, &version);
             {
@@ -714,11 +721,28 @@ pub(crate) fn apply_release_update(shell: &Rc<Shell>, update: ReleaseUpdate) {
                 history.available_version = None;
             }
             refresh_open_release_notes(shell);
+            shell
+                .control_feedback
+                .show_feedback_toast(if restart_required {
+                    tr_with(
+                        "Updated Rufin to {version}. Restart to apply.",
+                        &[("version", version.as_str())],
+                    )
+                } else {
+                    tr_with(
+                        "Updated Rufin to {version}",
+                        &[("version", version.as_str())],
+                    )
+                });
         }
         ReleaseUpdate::Failed { version, error } => {
             clear_updating_version(shell, &version);
             refresh_open_release_notes(shell);
             warn!(%version, %error, "Rufin update failed");
+            shell.control_feedback.show_feedback_toast(tr_with(
+                "Could not update Rufin to {version}",
+                &[("version", version.as_str())],
+            ));
         }
         ReleaseUpdate::Restarting { version } => {
             dismiss_release_notification(shell);

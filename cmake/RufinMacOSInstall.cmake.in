@@ -4,6 +4,26 @@ set(RUFIN_APP "${CMAKE_INSTALL_PREFIX}/@RUFIN_BUNDLE_NAME@.app")
 set(RUFIN_CONTENTS "${RUFIN_APP}/Contents")
 set(RUFIN_MAIN_EXECUTABLE "${RUFIN_CONTENTS}/MacOS/rufin")
 
+# Prefix-wide copies include catalogs for tools that are not part of Rufin.
+file(GLOB RUFIN_TOOL_CATALOGS
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/git.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/gnupg2.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/wget.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/wget-gnulib.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/aria2.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/gtk30.mo"
+  "${RUFIN_CONTENTS}/Resources/share/locale/*/LC_MESSAGES/gtk30-properties.mo"
+)
+if(RUFIN_TOOL_CATALOGS)
+  file(REMOVE ${RUFIN_TOOL_CATALOGS})
+endif()
+file(REMOVE_RECURSE
+  "${RUFIN_CONTENTS}/Resources/share/gstreamer-1.0/gdb"
+  "${RUFIN_CONTENTS}/Resources/share/gstreamer-1.0/validate"
+  "${RUFIN_CONTENTS}/Resources/share/gtk-4.0/valgrind"
+  "${RUFIN_CONTENTS}/Resources/share/gtk-4.0/gtk4builder.rng"
+)
+
 execute_process(
   COMMAND "@RUFIN_MACOS_GLIB_COMPILE_SCHEMAS@"
     "${RUFIN_CONTENTS}/Resources/share/glib-2.0/schemas"
@@ -90,6 +110,13 @@ foreach(RUFIN_BUNDLE_FILE IN LISTS RUFIN_BUNDLE_FILES)
     execute_process(COMMAND ${RUFIN_SIGN_COMMAND} COMMAND_ERROR_IS_FATAL ANY)
   endif()
 endforeach()
+
+if("@RUFIN_RESOLVED_CARGO_PROFILE@" STREQUAL "release")
+  execute_process(
+    COMMAND "@RUFIN_MACOS_STRIP@" -S -x "${RUFIN_MAIN_EXECUTABLE}"
+    COMMAND_ERROR_IS_FATAL ANY
+  )
+endif()
 
 set(RUFIN_APP_SIGN_COMMAND
   "@RUFIN_MACOS_CODESIGN@" --force --sign "@RUFIN_MACOS_SIGN_IDENTITY@")
