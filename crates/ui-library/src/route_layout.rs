@@ -3,8 +3,6 @@ use gtk::subclass::prelude::ObjectSubclassIsExt;
 
 use ui_shared::layout::configure_fill_width_clip;
 
-use ui_shared::library_fields::COLLECTION_GRID_CARD_MARGIN;
-
 const ROUTE_SCROLL_OWNER_CLASS: &str = "route-scroll-owner";
 const DETAIL_SHOWCASE_MIN_COVER_SIZE: i32 = 150;
 pub const DETAIL_SHOWCASE_METADATA_MIN_WIDTH: i32 = 430;
@@ -52,7 +50,7 @@ pub fn detail_showcase_cover_only(width: i32) -> bool {
 }
 
 pub fn home_album_content_width_for(width: i32) -> i32 {
-    (width.max(1) - COLLECTION_GRID_CARD_MARGIN - PRIMARY_ROUTE_MARGIN_END).max(1)
+    (width.max(1) - PRIMARY_ROUTE_HORIZONTAL_INSET).max(1)
 }
 
 pub fn mark_route_scroll_owner(scroller: &gtk::ScrolledWindow) {
