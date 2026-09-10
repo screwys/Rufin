@@ -14,7 +14,6 @@ use tokio::sync::{Mutex, Notify, OwnedSemaphorePermit, Semaphore};
 use crate::{LibraryError, LibraryResult, schema};
 
 const PAGE_SIZE_BYTES: u32 = 4 * 1024;
-const PAGE_CACHE_KIB: i32 = 1024;
 const WRITER_STATEMENTS: usize = 64;
 const READER_STATEMENTS: usize = 32;
 const COMMAND_BUFFER: usize = 1;
@@ -239,6 +238,9 @@ impl Database {
         }
         let (catalog, temporary_catalog) = prepare_catalog(catalog).await?;
         schema::attach_catalog(&mut writer, &catalog).await?;
+        sqlx::query("PRAGMA catalog.synchronous=NORMAL")
+            .execute(&mut writer)
+            .await?;
         schema::initialize_local_activity(&mut writer).await?;
         sqlx::raw_sql("PRAGMA optimize=0x10002")
             .execute(&mut writer)
@@ -419,7 +421,7 @@ pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> 
     // Own the handle before configuring it so failures can await its release before replacement.
     let result = sqlx::raw_sql(sqlx::AssertSqlSafe(format!(
         "PRAGMA page_size={PAGE_SIZE_BYTES}; PRAGMA journal_mode=WAL;
-         PRAGMA synchronous=NORMAL; PRAGMA cache_size=-{PAGE_CACHE_KIB};
+         PRAGMA synchronous=NORMAL;
          PRAGMA temp_store=FILE; PRAGMA mmap_size=0;"
     )))
     .execute(&mut connection)
@@ -433,7 +435,6 @@ pub(crate) async fn open_writer(path: &Path) -> LibraryResult<SqliteConnection> 
 
 fn reader_options(path: &Path) -> SqliteConnectOptions {
     base_options(path)
-        .pragma("cache_size", (-PAGE_CACHE_KIB).to_string())
         .pragma("temp_store", "FILE")
         .pragma("mmap_size", "0")
         .with_regexp()
@@ -603,7 +604,6 @@ mod tests {
             "SELECT
                  (SELECT journal_mode FROM pragma_journal_mode),
                  (SELECT query_only FROM pragma_query_only),
-                 (SELECT cache_size FROM pragma_cache_size),
                  (SELECT temp_store FROM pragma_temp_store),
                  (SELECT page_size FROM pragma_page_size)",
         )
@@ -612,9 +612,8 @@ mod tests {
         .expect("read fixed reader options");
         assert_eq!(row.get::<String, _>(0), "wal");
         assert_eq!(row.get::<i64, _>(1), 1);
-        assert_eq!(row.get::<i64, _>(2), i64::from(-PAGE_CACHE_KIB));
-        assert_eq!(row.get::<i64, _>(3), 1);
-        assert_eq!(row.get::<i64, _>(4), i64::from(PAGE_SIZE_BYTES));
+        assert_eq!(row.get::<i64, _>(2), 1);
+        assert_eq!(row.get::<i64, _>(3), i64::from(PAGE_SIZE_BYTES));
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA mmap_size")
                 .fetch_one(&mut *reader)
@@ -635,16 +634,23 @@ mod tests {
 
         let mut writer = database.writer().await.expect("acquire fixed writer");
         let writer = writer.as_mut().expect("writer remains available");
-        let writer_options = sqlx::query_as::<_, (String, i64, i64)>(
+        let writer_options = sqlx::query_as::<_, (String, i64)>(
             "SELECT
                  (SELECT journal_mode FROM pragma_journal_mode),
-                 (SELECT cache_size FROM pragma_cache_size),
                  (SELECT temp_store FROM pragma_temp_store)",
         )
         .fetch_one(&mut *writer)
         .await
         .expect("read fixed writer options");
-        assert_eq!(writer_options, ("wal".to_string(), -1024, 1));
+        assert_eq!(writer_options, ("wal".to_string(), 1));
+        let sync_modes = sqlx::query_as::<_, (i64, i64)>(
+            "SELECT (SELECT synchronous FROM pragma_synchronous('main')),
+                    (SELECT synchronous FROM pragma_synchronous('catalog'))",
+        )
+        .fetch_one(&mut *writer)
+        .await
+        .expect("read both writer synchronous modes");
+        assert_eq!(sync_modes, (1, 1));
         assert_eq!(
             sqlx::query_scalar::<_, i64>("PRAGMA mmap_size")
                 .fetch_one(&mut *writer)

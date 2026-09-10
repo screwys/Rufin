@@ -88,8 +88,36 @@ impl Database {
         let limit = limit.clamp(1, ARTWORK_PAGE_LIMIT) as i64;
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let bindings = sqlx::query_scalar::<_, Vec<u8>>("SELECT binding FROM (SELECT artwork_binding binding FROM tracks WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2) UNION SELECT artwork_binding FROM albums WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2) UNION SELECT artwork_binding FROM artists WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2) UNION SELECT artwork_binding FROM genres WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2) UNION SELECT artwork_binding FROM folders WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2) UNION SELECT artwork_binding FROM playlists WHERE source_key=?1 AND artwork_binding IS NOT NULL AND (?2 IS NULL OR artwork_binding>?2)) ORDER BY binding LIMIT ?3")
-            .bind(source).bind(after_binding).bind(limit).fetch_all(&mut *transaction).await?;
+        let mut query = QueryBuilder::<Sqlite>::new("");
+        for (index, table) in [
+            "tracks",
+            "albums",
+            "artists",
+            "genres",
+            "folders",
+            "playlists",
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            if index > 0 {
+                query.push(" UNION ");
+            }
+            query
+                .push("SELECT artwork_binding binding FROM ")
+                .push(table)
+                .push(" WHERE source_key=")
+                .push_bind(source)
+                .push(" AND artwork_binding IS NOT NULL");
+            if let Some(after) = after_binding {
+                query.push(" AND artwork_binding>").push_bind(after);
+            }
+        }
+        query.push(" ORDER BY binding LIMIT ").push_bind(limit);
+        let bindings = query
+            .build_query_scalar()
+            .fetch_all(&mut *transaction)
+            .await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(bindings)
