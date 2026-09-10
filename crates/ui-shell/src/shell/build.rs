@@ -221,7 +221,7 @@ pub async fn build(
         normal_nav_panel: gtk::Box,
         normal_nav_routes: adw::Sidebar,
         normal_nav_pins: gtk::Box,
-        compact_nav_slot: gtk::Overlay,
+        compact_nav_slot: gtk::Box,
         compact_nav_scroller: gtk::ScrolledWindow,
         compact_nav: gtk::Box,
         normal_window_controls_host: gtk::Box,

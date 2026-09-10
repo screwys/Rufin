@@ -69,12 +69,25 @@
     </child>
   </object>
 
-  <object class="GtkOverlay" id="compact_nav_slot">
+  <object class="GtkBox" id="compact_nav_slot">
+    <property name="orientation">vertical</property>
     <property name="vexpand">true</property>
-    <property name="child"><object class="GtkScrolledWindow" id="compact_nav_scroller">
+    <style><class name="sidebar-pane"/><class name="compact-rail-slot"/></style>
+    <child>
+      <object class="GtkWindowHandle">
+        <style><class name="sidebar-drag-handle"/></style>
+        <property name="child">
+          <object class="GtkBox" id="compact_window_controls_host">
+            <property name="margin-top">14</property>
+            <property name="margin-bottom">8</property>
+          </object>
+        </property>
+      </object>
+    </child>
+    <child><object class="GtkScrolledWindow" id="compact_nav_scroller">
     <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
     <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
-    <style><class name="sidebar-pane"/><class name="compact-rail-slot"/><class name="sidebar-scroller"/></style>
+    <style><class name="sidebar-scroller"/></style>
     <property name="child">
       <object class="GtkViewport">
         <property name="vscroll-policy">natural</property>
@@ -82,14 +95,6 @@
           <object class="GtkBox" id="compact_nav">
             <property name="orientation">vertical</property><property name="spacing">8</property><property name="hexpand">false</property><property name="vexpand">true</property>
             <style><class name="compact-rail"/></style>
-            <child>
-              <object class="GtkWindowHandle">
-                <property name="halign">fill</property><property name="valign">start</property>
-                <property name="hexpand">true</property><property name="vexpand">false</property>
-                <style><class name="sidebar-drag-handle"/></style>
-                <property name="child"><object class="GtkBox" id="compact_window_controls_host"/></property>
-              </object>
-            </child>
             <child>
               <object class="GtkButton" id="compact_main_menu">
                 <property name="tooltip-text" translatable="yes">Menu</property>
@@ -123,13 +128,6 @@
         </property>
       </object>
     </property>
-    </object></property>
-    <child type="overlay">
-      <object class="GtkWindowHandle">
-        <property name="valign">start</property>
-        <property name="height-request">14</property>
-        <style><class name="sidebar-drag-handle"/></style>
-      </object>
-    </child>
+    </object></child>
   </object>
 </interface>
