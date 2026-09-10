@@ -221,7 +221,8 @@ pub async fn build(
         normal_nav_panel: gtk::Box,
         normal_nav_routes: adw::Sidebar,
         normal_nav_pins: gtk::Box,
-        compact_nav_slot: gtk::ScrolledWindow,
+        compact_nav_slot: gtk::Box,
+        compact_nav_scroller: gtk::ScrolledWindow,
         compact_nav: gtk::Box,
         normal_window_controls_host: gtk::Box,
         compact_window_controls_host: gtk::Box,
@@ -232,9 +233,8 @@ pub async fn build(
         compact_main_menu_label: gtk::Label,
     });
     compact_nav_slot.set_width_request(COMPACT_RAIL_WIDTH);
-    compact_nav_slot.set_min_content_width(COMPACT_RAIL_WIDTH);
-    compact_nav_slot.set_max_content_width(COMPACT_RAIL_WIDTH);
-    let compact_nav_slot = ui_shared::controls::window_drag_handle(&compact_nav_slot);
+    compact_nav_scroller.set_min_content_width(COMPACT_RAIL_WIDTH);
+    compact_nav_scroller.set_max_content_width(COMPACT_RAIL_WIDTH);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
     normal_sidebar_title.set_label(DISPLAY_NAME);
     compact_main_menu_label.set_label(&crate::shell::navigation::compact_sidebar_label_text(
