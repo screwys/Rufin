@@ -52,10 +52,13 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                 }))
                 .unwrap();
             inputs.products.playback.transport.set_muted(true);
+            let mut playback = inputs.products.playback.updates.subscribe();
             runtime.block_on(async {
                 tokio::time::timeout(Duration::from_secs(5), async {
                     loop {
-                        let projection = inputs.receivers.playback.recv().await.unwrap();
+                        let Some(projection) = playback.recv().await.unwrap() else {
+                            continue;
+                        };
                         if projection.view.controls.muted {
                             break;
                         }
@@ -67,7 +70,6 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
             if !reopening {
                 runtime.block_on(exercise_http_api(inputs.products.clone(), directory.path()));
             }
-            inputs.receivers.playback.close();
             inputs.receivers.visualizer.close();
             drop(inputs.receivers);
             inputs.products.playback.transport.shutdown();
@@ -91,6 +93,19 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .timeout(Duration::from_secs(5))
         .build()
         .unwrap();
+    let api = |method, route: &str, value: Value| {
+        let request = client
+            .request(method, format!("{base}/{route}"))
+            .bearer_auth(token)
+            .json(&value);
+        async move {
+            let response = request.send().await.unwrap();
+            let status = response.status();
+            let value: Value = response.json().await.unwrap();
+            assert!(status.is_success(), "{status}: {value}");
+            value
+        }
+    };
     assert_eq!(
         client.get(&base).send().await.unwrap().status(),
         reqwest::StatusCode::UNAUTHORIZED
@@ -130,8 +145,8 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .unwrap();
     assert_eq!(playback_event(&mut first).await["muted"], true);
     assert_eq!(playback_event(&mut second).await["muted"], true);
-    let mut native = products.playback.state.clone();
-    native.borrow_and_update();
+    let mut native = products.playback.updates.subscribe();
+    native.recv().await.unwrap();
     assert_eq!(
         client
             .post(format!("{base}/playback/mute"))
@@ -145,8 +160,24 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
     );
     assert_eq!(playback_event(&mut first).await["muted"], false);
     assert_eq!(playback_event(&mut second).await["muted"], false);
-    native.changed().await.unwrap();
-    assert!(!native.borrow().as_ref().unwrap().controls.muted);
+    assert!(!native.recv().await.unwrap().unwrap().view.controls.muted);
+    let error = playback::PlaybackNotice::OperationFailed("Media unavailable".into());
+    products
+        .playback
+        .updates
+        .publish(playback::PlaybackProjection {
+            view: (*products.playback.updates.current().unwrap()).clone(),
+            notices: vec![error.clone()],
+        });
+    assert_eq!(native.recv().await.unwrap().unwrap().notices, [error]);
+    for subscriber in [&mut first, &mut second] {
+        assert_eq!(
+            playback_event(subscriber).await["notices"],
+            json!([
+                {"type":"operation_failed","error":"Media unavailable"}
+            ])
+        );
+    }
     drop(first);
     drop(second);
     let late: Value = client
@@ -201,6 +232,31 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
     }
     let selected = products.source.selected_library().unwrap().source_id;
     assert_eq!(selected.as_str(), sources[1]);
+    let invalid = client
+        .post(format!("{base}/sources/refresh"))
+        .bearer_auth(token)
+        .json(&json!({"id":"missing"}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(invalid.status(), reqwest::StatusCode::BAD_REQUEST);
+    assert_eq!(
+        api(reqwest::Method::GET, "sources/progress", Value::Null).await["state"],
+        "failed"
+    );
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "sources/refresh",
+            json!({"id":sources[0]})
+        )
+        .await["refreshed"],
+        true
+    );
+    assert_eq!(
+        api(reqwest::Method::GET, "sources/progress", Value::Null).await["state"],
+        "idle"
+    );
     let response: Value = client
         .get(format!("{base}/tracks"))
         .bearer_auth(token)
@@ -234,14 +290,9 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
     );
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
-            if native
-                .borrow_and_update()
-                .as_ref()
-                .is_some_and(|state| state.queue.total == 2)
-            {
+            if native.recv().await.unwrap().unwrap().view.queue.total == 2 {
                 break;
             }
-            native.changed().await.unwrap();
         }
     })
     .await
@@ -256,6 +307,112 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .await
         .unwrap();
     assert_eq!(queue["total"], 2);
+    let playlist = api(
+        reqwest::Method::POST,
+        "playlists",
+        json!({"name":"HTTP playlist","uris":items}),
+    )
+    .await["id"]
+        .clone();
+    assert!(playlist.is_i64());
+    assert_eq!(
+        api(
+            reqwest::Method::PATCH,
+            "playlists",
+            json!({"id":playlist,"name":"Renamed"})
+        )
+        .await["changed"],
+        true
+    );
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "playlists/entries",
+            json!({"id":playlist,"uris":[items[0]]})
+        )
+        .await["added"],
+        1
+    );
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "playlists/entries",
+            json!({"id":playlist,"uris":[items[0]],"skip_duplicates":true})
+        )
+        .await["added"],
+        0
+    );
+    let entries = api(
+        reqwest::Method::GET,
+        &format!("playlists/entries?id={playlist}"),
+        Value::Null,
+    )
+    .await["entries"]
+        .as_array()
+        .unwrap()
+        .clone();
+    assert_eq!(entries.len(), 3);
+    assert_ne!(entries[0]["id"], entries[2]["id"]);
+    assert_eq!(
+        api(
+            reqwest::Method::PATCH,
+            "playlists/entries",
+            json!({"id":playlist,"entry":entries[1]["id"],"position":0})
+        )
+        .await["changed"],
+        true
+    );
+    let reordered = api(
+        reqwest::Method::GET,
+        &format!("playlists/entries?id={playlist}&limit=1"),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(reordered["entries"][0]["uri"], items[1]);
+    assert_eq!(
+        api(
+            reqwest::Method::DELETE,
+            "playlists/entries",
+            json!({"id":playlist,"entries":[entries[2]["id"]]})
+        )
+        .await["changed"],
+        true
+    );
+    assert_eq!(
+        api(
+            reqwest::Method::GET,
+            "playlists/entries?id=-9223372036854775808",
+            Value::Null
+        )
+        .await["entries"],
+        json!([])
+    );
+    api(
+        reqwest::Method::POST,
+        "queue/playlist",
+        json!({"id":playlist,"mode":"replace"}),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
+            if queue["window"][0]["track"]["uri"] == items[1] && queue["total"] == 2 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        api(
+            reqwest::Method::DELETE,
+            &format!("playlists?id={playlist}"),
+            Value::Null
+        )
+        .await["changed"],
+        true
+    );
     for id in &sources {
         let response = client
             .delete(format!("{base}/sources"))
@@ -267,6 +424,31 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         assert_eq!(response.status(), reqwest::StatusCode::OK);
     }
     assert!(products.source.list_sources().sources.is_empty());
+    let mut stopped_native = products.playback.updates.subscribe();
+    stopped_native.recv().await.unwrap();
+    let mut stopped_http = client
+        .get(format!("{base}/playback/events"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    assert!(!playback_event(&mut stopped_http).await.is_null());
+    let transport = products.playback.transport.clone();
+    tokio::task::spawn_blocking(move || transport.shutdown())
+        .await
+        .unwrap();
+    while stopped_native.recv().await.unwrap().is_some() {}
+    while !playback_event(&mut stopped_http).await.is_null() {}
+    let stopped: Value = client
+        .get(format!("{base}/playback"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert!(stopped.is_null());
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
     assert!(tokio::net::TcpStream::connect(address).await.is_err());

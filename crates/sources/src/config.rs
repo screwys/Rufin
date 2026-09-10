@@ -64,7 +64,7 @@ pub struct JellyfinEmbySettingsInput {
     pub use_instant_mix: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub struct PlexSetupInput {
     pub name: String,
     pub login: crate::plex::PlexLogin,
@@ -74,7 +74,7 @@ pub struct PlexSetupInput {
     pub trust_invalid_cert: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub struct PlexSettingsInput {
     pub name: String,
     pub address_override: Option<String>,

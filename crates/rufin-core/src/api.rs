@@ -1,5 +1,9 @@
 //! Optional HTTP access to the same product owners used by native clients.
 
+mod catalog;
+mod playlists;
+mod source;
+
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::path::PathBuf;
@@ -89,108 +93,43 @@ async fn handle(
     match (request.method(), path.as_str()) {
         (&Method::GET, "/api") => Ok(json_response(
             StatusCode::OK,
-            json!({
-                "routes": {
-                    "GET /api/playback": "Current playback state",
-                    "GET /api/playback/events": "Live playback state as server-sent events",
-                    "POST /api/playback/play": {}, "POST /api/playback/pause": {},
-                    "POST /api/playback/stop": {}, "POST /api/playback/next": {}, "POST /api/playback/previous": {},
-                    "POST /api/playback/seek": {"position_ms": 30000},
-                    "POST /api/playback/volume": {"volume": 0.5},
-                    "POST /api/playback/mute": {"muted": true},
-                    "POST /api/playback/shuffle": {"enabled": true},
-                    "POST /api/playback/repeat": {"mode": "off | one | all"},
-                    "GET /api/sources": "Configured sources",
-                    "POST /api/sources/local": {"paths": ["/path/to/music"]},
-                    "POST /api/sources/select": {"id": "source ID"},
-                    "DELETE /api/sources?id=...": "Remove a configured source",
-                    "GET /api/tracks?source=...&offset=0&limit=100&q=...": "Browse a source independently; pages contain at most 256 tracks. Optional folder, sort, descending and favorites parameters.",
-                    "GET /api/queue": "Current queue window and total size",
-                    "POST /api/queue": {"uris": ["media URI"], "mode": "replace | append | next"},
-                    "DELETE /api/queue": "Clear the queue",
-                    "POST /api/queue/activate": {"id": "queue occurrence ID"},
-                    "DELETE /api/queue/item?id=...": "Remove a queue occurrence"
-                },
-                "commands": "Playback and queue commands return 202 when accepted; observe playback state for the resulting state or error."
-            }),
+            serde_json::from_str(include_str!("api/help.json")).expect("bundled API help"),
         )),
         (&Method::GET, "/api/playback") => Ok(json_response(
             StatusCode::OK,
-            playback_json(products.playback.state.borrow().as_deref()),
+            playback_json(products.playback.updates.current().as_deref()),
         )),
         (&Method::GET, "/api/playback/events") => {
-            let state = products.playback.state.clone();
-            let stream =
-                futures_util::stream::unfold((state, true), |(mut state, first)| async move {
-                    if !first && state.changed().await.is_err() {
-                        return None;
+            let subscription = products.playback.updates.subscribe();
+            let stream = futures_util::stream::unfold(
+                subscription,
+                |mut subscription| async move {
+                    let publication = subscription.recv().await.ok()?;
+                    let mut value = playback_json(publication.as_ref().map(|p| &p.view));
+                    if let Some(publication) = publication {
+                        value["notices"] = publication.notices.iter().map(|notice| match notice {
+                        playback::PlaybackNotice::RunStarted(run) => json!({"type":"run_started","run":run.get()}),
+                        playback::PlaybackNotice::PositionDiscontinuity(position) => json!({"type":"position_discontinuity","run":position.run.get(),"position_ms":position.position_millis}),
+                        playback::PlaybackNotice::OperationFailed(error) => json!({"type":"operation_failed","error":error}),
+                        }).collect::<Vec<_>>().into();
                     }
-                    let value = playback_json(state.borrow_and_update().as_deref());
                     let frame =
                         Frame::data(Bytes::from(format!("event: playback\ndata: {value}\n\n")));
-                    Some((Ok::<_, Infallible>(frame), (state, false)))
-                });
-            Ok(Response::builder()
-                .header("content-type", "text/event-stream")
-                .header("cache-control", "no-cache")
-                .body(BodyExt::boxed(StreamBody::new(stream)))
-                .expect("static response headers"))
+                    Some((Ok::<_, Infallible>(frame), subscription))
+                },
+            );
+            Ok(event_response(BodyExt::boxed(StreamBody::new(stream))))
         }
-        (&Method::GET, "/api/sources") => {
-            let configured = products.source.list_sources();
-            Ok(json_response(
-                StatusCode::OK,
-                json!({
-                    "selected": configured.selected_source_id,
-                    "sources": configured.sources.iter().map(|source| json!({"id":source.id,"name":source.name,"kind":source.kind})).collect::<Vec<_>>()
-                }),
-            ))
+        (_, path) if path == "/api/sources" || path.starts_with("/api/sources/") => {
+            source::handle(request, products, &parameters).await
         }
-        (&Method::POST, "/api/sources/local") => {
-            #[derive(Deserialize)]
-            struct Input {
-                paths: Vec<PathBuf>,
-            }
-            let input: Input = body(request).await?;
-            let selected = products
-                .source
-                .configure_source(crate::runtime::source::SourceSetup::Local { roots: input.paths })
-                .recv()
-                .await
-                .map_err(internal)?
-                .map_err(internal)?;
-            Ok(json_response(
-                StatusCode::OK,
-                json!({"id":selected.source_id}),
-            ))
+        (_, path) if path == "/api/playlists" || path.starts_with("/api/playlists/") => {
+            playlists::handle(request, products, &parameters).await
         }
-        (&Method::POST, "/api/sources/select") => {
-            let input: Identifier = body(request).await?;
-            if input.id.is_empty() {
-                return Err(bad_request("id is required"));
-            }
-            let selected = products
-                .source
-                .select_source(sources::SourceId::new(input.id))
-                .recv()
-                .await
-                .map_err(internal)?
-                .map_err(bad_request)?;
-            Ok(json_response(
-                StatusCode::OK,
-                json!({"id":selected.source_id}),
-            ))
-        }
-        (&Method::DELETE, "/api/sources") => {
-            products
-                .source
-                .forget_source(sources::SourceId::new(required(&parameters, "id")?))
-                .recv()
-                .await
-                .map_err(internal)?
-                .map_err(internal)?;
-            Ok(json_response(StatusCode::OK, json!({"removed":true})))
-        }
+        (
+            &Method::GET,
+            "/api/albums" | "/api/albums/tracks" | "/api/folders" | "/api/folders/live",
+        ) => catalog::handle(request, products, &parameters).await,
         (&Method::GET, "/api/tracks") => {
             let offset = number(&parameters, "offset", 0)?;
             let limit = number(&parameters, "limit", 100)?.min(256);
@@ -215,29 +154,29 @@ async fn handle(
                 .await
                 .map_err(internal)?
                 .map_err(bad_request)?;
-            let rows = rows.iter().map(|row| json!({
-                "uri": row.media_uri, "title":row.title, "artist":row.artist, "album":row.album,
-                "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
-                "year":row.year,"favorite":row.favorite,"rating":row.rating
-            })).collect::<Vec<_>>();
+            let rows = rows.iter().map(track_row_json).collect::<Vec<_>>();
             Ok(json_response(
                 StatusCode::OK,
                 json!({"offset":offset,"limit":limit,"tracks":rows}),
             ))
         }
         (&Method::GET, "/api/queue") => {
-            let state = products.playback.state.borrow();
+            let state = products.playback.updates.current();
             let value = state.as_ref().map(|state| json!({
                 "total":state.queue.total,"current_index":state.queue.current_index,
                 "window":state.queue_window.iter().map(|row| json!({"id":row.occurrence,"track":track_json(&row.item)})).collect::<Vec<_>>()
             })).unwrap_or(json!({"total":0,"current_index":null,"window":[]}));
             Ok(json_response(StatusCode::OK, value))
         }
-        (&Method::POST, "/api/queue") => {
+        (
+            &Method::POST,
+            "/api/queue" | "/api/queue/album" | "/api/queue/playlist" | "/api/queue/source",
+        ) => {
             #[derive(Deserialize)]
             struct Input {
-                uris: Vec<String>,
                 mode: String,
+                #[serde(flatten)]
+                selection: Value,
             }
             let input: Input = body(request).await?;
             let placement = match input.mode.as_str() {
@@ -246,16 +185,83 @@ async fn handle(
                 "next" => playback::QueuePlacement::AfterCurrent,
                 _ => return Err(bad_request("Queue mode must be replace, append or next")),
             };
-            let queue = products.playback.queue.clone();
-            tokio::task::spawn_blocking(move || {
-                queue.play(playback::PlayRequest::ordered(
+            let selection = match path.as_str() {
+                "/api/queue" => {
+                    #[derive(Deserialize)]
+                    struct Uris {
+                        uris: Vec<String>,
+                    }
+                    let input: Uris =
+                        serde_json::from_value(input.selection).map_err(bad_request)?;
                     library::QueueInput::MediaUris {
                         order: input.uris.into(),
                         provenance: playback::Provenance::Manual,
-                    },
+                    }
+                }
+                "/api/queue/album" | "/api/queue/playlist" => {
+                    let id = input
+                        .selection
+                        .get("id")
+                        .cloned()
+                        .ok_or_else(|| bad_request("id is required"))?;
+                    let collection = if path.ends_with("/album") {
+                        library::QueueCollection::AlbumKey(
+                            serde_json::from_value(id).map_err(bad_request)?,
+                        )
+                    } else {
+                        library::QueueCollection::Playlist(
+                            serde_json::from_value(id).map_err(bad_request)?,
+                        )
+                    };
+                    library::QueueInput::Collection {
+                        collection,
+                        folder: None,
+                        context_id: "api".into(),
+                    }
+                }
+                _ => {
+                    #[derive(Deserialize)]
+                    struct Source {
+                        source: String,
+                        folder: Option<String>,
+                        #[serde(default)]
+                        q: String,
+                        sort: Option<String>,
+                        #[serde(default)]
+                        descending: bool,
+                        #[serde(default)]
+                        favorites: bool,
+                    }
+                    let input: Source =
+                        serde_json::from_value(input.selection).map_err(bad_request)?;
+                    let mut scope = HashMap::from([("source".into(), input.source)]);
+                    if let Some(folder) = input.folder {
+                        scope.insert("folder".into(), folder);
+                    }
+                    let (source, folder) = catalog::scope(products, &scope).await?;
+                    library::QueueInput::Query {
+                        query: library::QueueQuery::Tracks {
+                            source,
+                            favorites_only: input.favorites,
+                            recursive: true,
+                        },
+                        folder,
+                        filter: input.q,
+                        sort: track_sort(input.sort.as_deref().unwrap_or("title"))?,
+                        descending: input.descending,
+                        context_id: "api".into(),
+                        anchor_uri: None,
+                    }
+                }
+            };
+            let queue = products.playback.queue.clone();
+            let shuffled_start = path != "/api/queue";
+            tokio::task::spawn_blocking(move || {
+                queue.play(playback::PlayRequest::ordered(
+                    selection,
                     0,
                     placement,
-                    false,
+                    shuffled_start,
                 ))
             })
             .await
@@ -417,6 +423,11 @@ fn track_sort(value: &str) -> Result<library::TrackSort, Error> {
 fn track_json(track: &playback::QueueItem) -> Value {
     json!({"uri":track.media_uri,"title":track.title,"artist":track.artist,"album":track.album,"duration_ms":track.duration_millis})
 }
+fn track_row_json(row: &library::TrackRow) -> Value {
+    json!({"uri":row.media_uri,"object_id":row.object_id,"title":row.title,"artist":row.artist,"album":row.album,
+        "duration_ms":row.duration_millis,"track_number":row.track_number,"disc_number":row.disc_number,
+        "year":row.year,"favorite":row.favorite,"rating":row.rating})
+}
 
 fn playback_json(state: Option<&playback::PlaybackView>) -> Value {
     let Some(state) = state else {
@@ -442,6 +453,26 @@ fn playback_json(state: Option<&playback::PlaybackView>) -> Value {
 fn accepted() -> Response<Body> {
     json_response(StatusCode::ACCEPTED, json!({"accepted":true}))
 }
+async fn completion<T>(receiver: async_channel::Receiver<Result<T, String>>) -> Result<T, Error> {
+    receiver
+        .recv()
+        .await
+        .map_err(internal)?
+        .map_err(bad_request)
+}
+fn key<T: serde::de::DeserializeOwned>(
+    parameters: &HashMap<String, String>,
+    name: &str,
+) -> Result<T, Error> {
+    serde_json::from_str(required(parameters, name)?).map_err(bad_request)
+}
+fn event_response(body: Body) -> Response<Body> {
+    Response::builder()
+        .header("content-type", "text/event-stream")
+        .header("cache-control", "no-store")
+        .body(body)
+        .expect("static response headers")
+}
 fn bad_request(error: impl std::fmt::Display) -> Error {
     (StatusCode::BAD_REQUEST, error.to_string())
 }
@@ -452,6 +483,7 @@ fn json_response(status: StatusCode, value: Value) -> Response<Body> {
     Response::builder()
         .status(status)
         .header("content-type", "application/json; charset=utf-8")
+        .header("cache-control", "no-store")
         .body(Full::new(Bytes::from(value.to_string())).boxed())
         .expect("static response headers")
 }

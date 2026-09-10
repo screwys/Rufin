@@ -1,5 +1,5 @@
 [package]
-name = "rufin-headless"
+name = "rufin-controller"
 version.workspace = true
 authors.workspace = true
 edition.workspace = true

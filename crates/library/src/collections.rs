@@ -797,197 +797,55 @@ impl Database {
     ) -> LibraryResult<(Vec<AlbumKey>, usize, Vec<AlbumRow>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        if !filter.is_empty() {
-            let order = sqlx::query_scalar::<_, AlbumKey>(
-                "SELECT album.album_key FROM albums album
-                 WHERE album.source_key=?1 AND (instr(album.normalized_title || ' ' || lower(album.display_artist), ?2)>0 OR CAST(album.year AS TEXT)=?2 OR EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,?2)>0) OR EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,?2)>0))
-                   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?3))
-                   AND (?4=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1)
-                 ORDER BY sort_text, album_key",
-            )
-            .bind(source)
-            .bind(filter)
-            .bind(folder)
-            .bind(favorites_only)
-            .fetch_all(&mut *transaction)
-            .await?;
-            let seed = window.range(order.len());
-            let first_row_position = seed.start;
-            let first_rows =
-                load_album_rows(&mut transaction, source, &order[seed], folder).await?;
-            transaction.commit().await?;
-            Database::clear_progress(&mut connection).await?;
-            return Ok((order, first_row_position, first_rows));
-        }
-        if sort == AlbumSort::Title {
-            let result = sqlx::query_scalar::<_, AlbumKey>(if descending {
-                "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text DESC,album.album_key"
-            } else {
-                "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text,album.album_key"
-            }).bind(source).bind(folder).bind(favorites_only).fetch_all(&mut *transaction).await?;
-            let seed = window.range(result.len());
-            let first_row_position = seed.start;
-            let first_rows =
-                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
-            transaction.commit().await?;
-            Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_row_position, first_rows));
-        }
-        if matches!(
+        let order = load_album_order(
+            &mut transaction,
+            source,
+            folder,
+            favorites_only,
+            filter,
             sort,
-            AlbumSort::AlbumArtist
-                | AlbumSort::Year
-                | AlbumSort::ReleaseDate
-                | AlbumSort::DateAdded
-                | AlbumSort::Rating
-                | AlbumSort::Favorite
-        ) {
-            let order = match (sort, descending) {
-                (AlbumSort::AlbumArtist, false) => {
-                    "(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) ASC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::AlbumArtist, true) => {
-                    "(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) DESC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Year, false) => {
-                    "album.year ASC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Year, true) => {
-                    "album.year DESC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::ReleaseDate, false) => {
-                    "album.release_date ASC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::ReleaseDate, true) => {
-                    "album.release_date DESC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::DateAdded, false) => {
-                    "album.date_added ASC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::DateAdded, true) => {
-                    "album.date_added DESC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Rating, false) => {
-                    "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) ASC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Rating, true) => {
-                    "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) DESC NULLS LAST,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Favorite, false) => {
-                    "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) ASC,album.sort_text,album.album_key"
-                }
-                (AlbumSort::Favorite, true) => {
-                    "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) DESC,album.sort_text,album.album_key"
-                }
-                _ => unreachable!(),
-            };
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT album.album_key FROM albums album WHERE album.source_key=",
-            );
-            query.push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=").push_bind(folder).push(")) AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY ").push(order);
-            let result = query
-                .build_query_scalar::<AlbumKey>()
-                .persistent(false)
-                .fetch_all(&mut *transaction)
-                .await?;
-            let seed = window.range(result.len());
-            let first_row_position = seed.start;
-            let first_rows =
-                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
-            transaction.commit().await?;
-            Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_row_position, first_rows));
-        }
-        if matches!(sort, AlbumSort::TrackCount | AlbumSort::Duration) {
-            let mut query = QueryBuilder::<Sqlite>::new(
-                "SELECT album.album_key FROM albums album LEFT JOIN tracks track ON track.album_key=album.album_key AND (",
-            );
-            query.push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE album.source_key=").push_bind(source).push(" AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) GROUP BY album.album_key ORDER BY ");
-            query
-                .push(match (sort, descending) {
-                    (AlbumSort::TrackCount, false) => "count(track.track_key) ASC",
-                    (AlbumSort::TrackCount, true) => "count(track.track_key) DESC",
-                    (AlbumSort::Duration, false) => "COALESCE(sum(track.duration_millis),0) ASC",
-                    (AlbumSort::Duration, true) => "COALESCE(sum(track.duration_millis),0) DESC",
-                    _ => unreachable!(),
-                })
-                .push(",album.sort_text,album.album_key");
-            let result = query
-                .build_query_scalar::<AlbumKey>()
-                .persistent(false)
-                .fetch_all(&mut *transaction)
-                .await?;
-            let seed = window.range(result.len());
-            let first_row_position = seed.start;
-            let first_rows =
-                load_album_rows(&mut transaction, source, &result[seed], folder).await?;
-            transaction.commit().await?;
-            Database::clear_progress(&mut connection).await?;
-            return Ok((result, first_row_position, first_rows));
-        }
-        let result = sqlx::query_scalar::<_, AlbumKey>(
-            "WITH listens_by_track AS (
-               SELECT media_uri,count(*) plays,max(started_at) last_played
-               FROM listens WHERE source_id=(SELECT object_id FROM sources WHERE source_key=?1) GROUP BY media_uri
-             ), rows AS (
-               SELECT album.album_key,album.sort_text,album.display_artist,album.year,
-                      album.release_date,album.date_added,
-                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) rating,
-                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) favorite,
-                      count(track.track_key) track_count,
-                      COALESCE(sum(track.duration_millis),0) duration,
-                      COALESCE(sum(COALESCE(base.play_count,0)+COALESCE(listen.plays,0)),0) plays,
-                      max(CASE WHEN base.last_played_at IS NULL THEN listen.last_played
-                               WHEN listen.last_played IS NULL THEN base.last_played_at
-                               ELSE max(base.last_played_at,listen.last_played) END) last_played
-               FROM albums album LEFT JOIN tracks track USING(album_key)
-               LEFT JOIN activity_baseline base ON base.source_key=album.source_key
-                    AND base.track_object_id=track.object_id
-                    AND base.period='lifetime' AND base.item_kind='track'
-               LEFT JOIN listens_by_track listen ON listen.media_uri=track.media_uri
-               WHERE album.source_key=?1
-                 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4))
-                 AND (?5=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1)
-               GROUP BY album.album_key
-             ) SELECT album_key FROM rows ORDER BY
-               CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
-               CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,
-               CASE WHEN ?2=1 AND ?3=0 THEN display_artist END ASC,
-               CASE WHEN ?2=1 AND ?3=1 THEN display_artist END DESC,
-               CASE WHEN ?2=2 AND ?3=0 THEN year END ASC NULLS LAST,
-               CASE WHEN ?2=2 AND ?3=1 THEN year END DESC NULLS LAST,
-               CASE WHEN ?2=3 AND ?3=0 THEN release_date END ASC NULLS LAST,
-               CASE WHEN ?2=3 AND ?3=1 THEN release_date END DESC NULLS LAST,
-               CASE WHEN ?2=4 AND ?3=0 THEN date_added END ASC NULLS LAST,
-               CASE WHEN ?2=4 AND ?3=1 THEN date_added END DESC NULLS LAST,
-               CASE WHEN ?2=5 AND ?3=0 THEN last_played END ASC NULLS LAST,
-               CASE WHEN ?2=5 AND ?3=1 THEN last_played END DESC NULLS LAST,
-               CASE WHEN ?2=6 AND ?3=0 THEN plays END ASC,
-               CASE WHEN ?2=6 AND ?3=1 THEN plays END DESC,
-               CASE WHEN ?2=7 AND ?3=0 THEN rating END ASC NULLS LAST,
-               CASE WHEN ?2=7 AND ?3=1 THEN rating END DESC NULLS LAST,
-               CASE WHEN ?2=8 AND ?3=0 THEN track_count END ASC,
-               CASE WHEN ?2=8 AND ?3=1 THEN track_count END DESC,
-               CASE WHEN ?2=9 AND ?3=0 THEN duration END ASC,
-               CASE WHEN ?2=9 AND ?3=1 THEN duration END DESC,
-               CASE WHEN ?2=10 AND ?3=0 THEN favorite END ASC,
-               CASE WHEN ?2=10 AND ?3=1 THEN favorite END DESC,
-               sort_text,album_key",
+            descending,
+            None,
         )
-        .bind(source)
-        .bind(sort.code())
-        .bind(descending)
-        .bind(folder)
-        .bind(favorites_only)
-        .fetch_all(&mut *transaction)
         .await?;
-        let seed = window.range(result.len());
-        let first_row_position = seed.start;
-        let first_rows = load_album_rows(&mut transaction, source, &result[seed], folder).await?;
+        let range = window.range(order.len());
+        let position = range.start;
+        let rows = load_album_rows(&mut transaction, source, &order[range], folder).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok((result, first_row_position, first_rows))
+        Ok((order, position, rows))
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn album_page(
+        &self,
+        source: SourceKey,
+        folder: Option<FolderKey>,
+        favorites_only: bool,
+        filter: &str,
+        sort: AlbumSort,
+        descending: bool,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<AlbumRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let order = load_album_order(
+            &mut transaction,
+            source,
+            folder,
+            favorites_only,
+            filter,
+            sort,
+            descending,
+            Some((offset, limit)),
+        )
+        .await?;
+        let rows = load_album_rows(&mut transaction, source, &order, folder).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
     }
 
     pub async fn album_detail_route_order(
@@ -1764,35 +1622,65 @@ impl Database {
         cancellation: &ReadCancellation,
     ) -> LibraryResult<Vec<FolderKey>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
-        let result = if let Some(parent) = parent {
-            sqlx::query_scalar::<_, FolderKey>(
-                "SELECT DISTINCT child.folder_key
-                 FROM track_folders parent_link
-                 JOIN tracks track ON track.track_key=parent_link.track_key
-                 JOIN track_folders child_link ON child_link.track_key=track.track_key
-                    AND child_link.position=parent_link.position+1
-                 JOIN folders child ON child.folder_key=child_link.folder_key
-                 WHERE track.source_key=?1 AND parent_link.folder_key=?2
-                 ORDER BY child.sort_text,child.folder_key",
-            )
-            .bind(source)
-            .bind(parent)
-            .fetch_all(&mut *connection)
-            .await
-        } else {
-            sqlx::query_scalar::<_, FolderKey>(
-                "SELECT DISTINCT folder.folder_key
-                 FROM track_folders relation JOIN tracks track USING(track_key)
-                 JOIN folders folder USING(folder_key)
-                 WHERE track.source_key=?1 AND relation.position=0
-                 ORDER BY folder.sort_text,folder.folder_key",
-            )
-            .bind(source)
-            .fetch_all(&mut *connection)
-            .await
-        };
+        let result = load_folder_children(&mut connection, source, parent, None).await;
         Database::clear_progress(&mut connection).await?;
-        Ok(result?)
+        result
+    }
+
+    pub async fn folder_page(
+        &self,
+        source: SourceKey,
+        parent: Option<FolderKey>,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<FolderRow>> {
+        let keys = {
+            let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+            let keys = load_folder_children(&mut connection, source, parent, Some((offset, limit)))
+                .await?;
+            Database::clear_progress(&mut connection).await?;
+            keys
+        };
+        self.folder_rows(source, &keys, cancellation).await
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn album_tracks_page(
+        &self,
+        album: AlbumKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        sort: TrackSort,
+        descending: bool,
+        favorites_only: bool,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<TrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let query = playback_query(
+            &mut transaction,
+            &crate::QueueCollection::AlbumKey(album),
+            folder,
+            filter,
+            sort,
+            descending,
+            favorites_only,
+        )
+        .await?;
+        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select("track.track_key"));
+        let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(sql))
+            .bind(limit.min(256) as i64)
+            .bind(offset.min(i64::MAX as usize) as i64)
+            .persistent(false)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = load_track_rows(&mut transaction, &keys).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
     }
 
     pub async fn album_detail(
@@ -2633,5 +2521,238 @@ async fn collection_key_by_object(
         .fetch_optional(&mut *connection)
         .await;
     Database::clear_progress(&mut connection).await?;
+    Ok(result?)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn load_album_order(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    folder: Option<FolderKey>,
+    favorites_only: bool,
+    filter: &str,
+    sort: AlbumSort,
+    descending: bool,
+    page: Option<(usize, usize)>,
+) -> LibraryResult<Vec<AlbumKey>> {
+    let suffix = page
+        .map(|(offset, limit)| {
+            format!(
+                " LIMIT {} OFFSET {}",
+                limit.min(COLLECTION_ROW_LIMIT),
+                offset.min(i64::MAX as usize)
+            )
+        })
+        .unwrap_or_default();
+    let album_keys = |sql: &str| {
+        sqlx::query_scalar::<_, AlbumKey>(sqlx::AssertSqlSafe(format!("{sql}{suffix}")))
+    };
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    if !filter.is_empty() {
+        let order = album_keys(
+                "SELECT album.album_key FROM albums album
+                 WHERE album.source_key=?1 AND (instr(album.normalized_title || ' ' || lower(album.display_artist), ?2)>0 OR CAST(album.year AS TEXT)=?2 OR EXISTS (SELECT 1 FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key AND instr(artist.normalized_name,?2)>0) OR EXISTS (SELECT 1 FROM album_genres credit JOIN genres genre USING(genre_key) WHERE credit.album_key=album.album_key AND instr(genre.normalized_name,?2)>0))
+                   AND (?3 IS NULL OR EXISTS (SELECT 1 FROM tracks item JOIN track_folders scope USING(track_key) WHERE item.album_key=album.album_key AND scope.folder_key=?3))
+                   AND (?4=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1)
+                 ORDER BY sort_text, album_key",
+            )
+            .bind(source)
+            .bind(filter)
+            .bind(folder)
+            .bind(favorites_only)
+            .fetch_all(&mut *connection)
+            .await?;
+        return Ok(order);
+    }
+    if sort == AlbumSort::Title {
+        let result = album_keys(if descending {
+                "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text DESC,album.album_key"
+            } else {
+                "SELECT album.album_key FROM albums album WHERE album.source_key=?1 AND (?2 IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=?2)) AND (?3=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY album.sort_text,album.album_key"
+            }).bind(source).bind(folder).bind(favorites_only).fetch_all(&mut *connection).await?;
+        return Ok(result);
+    }
+    if matches!(
+        sort,
+        AlbumSort::AlbumArtist
+            | AlbumSort::Year
+            | AlbumSort::ReleaseDate
+            | AlbumSort::DateAdded
+            | AlbumSort::Rating
+            | AlbumSort::Favorite
+    ) {
+        let order = match (sort, descending) {
+            (AlbumSort::AlbumArtist, false) => {
+                "(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) ASC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::AlbumArtist, true) => {
+                "(SELECT artist.sort_text FROM album_artists credit JOIN artists artist USING(artist_key) WHERE credit.album_key=album.album_key ORDER BY credit.position LIMIT 1) DESC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::Year, false) => "album.year ASC NULLS LAST,album.sort_text,album.album_key",
+            (AlbumSort::Year, true) => "album.year DESC NULLS LAST,album.sort_text,album.album_key",
+            (AlbumSort::ReleaseDate, false) => {
+                "album.release_date ASC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::ReleaseDate, true) => {
+                "album.release_date DESC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::DateAdded, false) => {
+                "album.date_added ASC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::DateAdded, true) => {
+                "album.date_added DESC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::Rating, false) => {
+                "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) ASC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::Rating, true) => {
+                "COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) DESC NULLS LAST,album.sort_text,album.album_key"
+            }
+            (AlbumSort::Favorite, false) => {
+                "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) ASC,album.sort_text,album.album_key"
+            }
+            (AlbumSort::Favorite, true) => {
+                "COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) DESC,album.sort_text,album.album_key"
+            }
+            _ => unreachable!(),
+        };
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT album.album_key FROM albums album WHERE album.source_key=",
+        );
+        query.push_bind(source).push(" AND (").push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM tracks track JOIN track_folders scope USING(track_key) WHERE track.album_key=album.album_key AND scope.folder_key=").push_bind(folder).push(")) AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) ORDER BY ").push(order);
+        let result = query
+            .push(&suffix)
+            .build_query_scalar::<AlbumKey>()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await?;
+        return Ok(result);
+    }
+    if matches!(sort, AlbumSort::TrackCount | AlbumSort::Duration) {
+        let mut query = QueryBuilder::<Sqlite>::new(
+            "SELECT album.album_key FROM albums album LEFT JOIN tracks track ON track.album_key=album.album_key AND (",
+        );
+        query.push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=").push_bind(folder).push(")) WHERE album.source_key=").push_bind(source).push(" AND (").push_bind(!favorites_only).push(" OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1) GROUP BY album.album_key ORDER BY ");
+        query
+            .push(match (sort, descending) {
+                (AlbumSort::TrackCount, false) => "count(track.track_key) ASC",
+                (AlbumSort::TrackCount, true) => "count(track.track_key) DESC",
+                (AlbumSort::Duration, false) => "COALESCE(sum(track.duration_millis),0) ASC",
+                (AlbumSort::Duration, true) => "COALESCE(sum(track.duration_millis),0) DESC",
+                _ => unreachable!(),
+            })
+            .push(",album.sort_text,album.album_key");
+        let result = query
+            .push(&suffix)
+            .build_query_scalar::<AlbumKey>()
+            .persistent(false)
+            .fetch_all(&mut *connection)
+            .await?;
+        return Ok(result);
+    }
+    let result = album_keys(
+            "WITH listens_by_track AS (
+               SELECT media_uri,count(*) plays,max(started_at) last_played
+               FROM listens WHERE source_id=(SELECT object_id FROM sources WHERE source_key=?1) GROUP BY media_uri
+             ), rows AS (
+               SELECT album.album_key,album.sort_text,album.display_artist,album.year,
+                      album.release_date,album.date_added,
+                      COALESCE((SELECT state.rating FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_rating) rating,
+                      COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite) favorite,
+                      count(track.track_key) track_count,
+                      COALESCE(sum(track.duration_millis),0) duration,
+                      COALESCE(sum(COALESCE(base.play_count,0)+COALESCE(listen.plays,0)),0) plays,
+                      max(CASE WHEN base.last_played_at IS NULL THEN listen.last_played
+                               WHEN listen.last_played IS NULL THEN base.last_played_at
+                               ELSE max(base.last_played_at,listen.last_played) END) last_played
+               FROM albums album LEFT JOIN tracks track USING(album_key)
+               LEFT JOIN activity_baseline base ON base.source_key=album.source_key
+                    AND base.track_object_id=track.object_id
+                    AND base.period='lifetime' AND base.item_kind='track'
+               LEFT JOIN listens_by_track listen ON listen.media_uri=track.media_uri
+               WHERE album.source_key=?1
+                 AND (?4 IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=?4))
+                 AND (?5=0 OR COALESCE((SELECT state.favorite FROM user_media_state state WHERE state.media_uri=album.media_uri),album.source_favorite)=1)
+               GROUP BY album.album_key
+             ) SELECT album_key FROM rows ORDER BY
+               CASE WHEN ?2=0 AND ?3=0 THEN sort_text END ASC,
+               CASE WHEN ?2=0 AND ?3=1 THEN sort_text END DESC,
+               CASE WHEN ?2=1 AND ?3=0 THEN display_artist END ASC,
+               CASE WHEN ?2=1 AND ?3=1 THEN display_artist END DESC,
+               CASE WHEN ?2=2 AND ?3=0 THEN year END ASC NULLS LAST,
+               CASE WHEN ?2=2 AND ?3=1 THEN year END DESC NULLS LAST,
+               CASE WHEN ?2=3 AND ?3=0 THEN release_date END ASC NULLS LAST,
+               CASE WHEN ?2=3 AND ?3=1 THEN release_date END DESC NULLS LAST,
+               CASE WHEN ?2=4 AND ?3=0 THEN date_added END ASC NULLS LAST,
+               CASE WHEN ?2=4 AND ?3=1 THEN date_added END DESC NULLS LAST,
+               CASE WHEN ?2=5 AND ?3=0 THEN last_played END ASC NULLS LAST,
+               CASE WHEN ?2=5 AND ?3=1 THEN last_played END DESC NULLS LAST,
+               CASE WHEN ?2=6 AND ?3=0 THEN plays END ASC,
+               CASE WHEN ?2=6 AND ?3=1 THEN plays END DESC,
+               CASE WHEN ?2=7 AND ?3=0 THEN rating END ASC NULLS LAST,
+               CASE WHEN ?2=7 AND ?3=1 THEN rating END DESC NULLS LAST,
+               CASE WHEN ?2=8 AND ?3=0 THEN track_count END ASC,
+               CASE WHEN ?2=8 AND ?3=1 THEN track_count END DESC,
+               CASE WHEN ?2=9 AND ?3=0 THEN duration END ASC,
+               CASE WHEN ?2=9 AND ?3=1 THEN duration END DESC,
+               CASE WHEN ?2=10 AND ?3=0 THEN favorite END ASC,
+               CASE WHEN ?2=10 AND ?3=1 THEN favorite END DESC,
+               sort_text,album_key",
+        )
+        .bind(source)
+        .bind(sort.code())
+        .bind(descending)
+        .bind(folder)
+        .bind(favorites_only)
+        .fetch_all(&mut *connection)
+        .await?;
+    Ok(result)
+}
+
+async fn load_folder_children(
+    connection: &mut SqliteConnection,
+    source: SourceKey,
+    parent: Option<FolderKey>,
+    page: Option<(usize, usize)>,
+) -> LibraryResult<Vec<FolderKey>> {
+    let suffix = page
+        .map(|(offset, limit)| {
+            format!(
+                " LIMIT {} OFFSET {}",
+                limit.min(COLLECTION_ROW_LIMIT),
+                offset.min(i64::MAX as usize)
+            )
+        })
+        .unwrap_or_default();
+    let folder_keys = |sql: &str| {
+        sqlx::query_scalar::<_, FolderKey>(sqlx::AssertSqlSafe(format!("{sql}{suffix}")))
+    };
+    let result = if let Some(parent) = parent {
+        folder_keys(
+            "SELECT DISTINCT child.folder_key
+                 FROM track_folders parent_link
+                 JOIN tracks track ON track.track_key=parent_link.track_key
+                 JOIN track_folders child_link ON child_link.track_key=track.track_key
+                    AND child_link.position=parent_link.position+1
+                 JOIN folders child ON child.folder_key=child_link.folder_key
+                 WHERE track.source_key=?1 AND parent_link.folder_key=?2
+                 ORDER BY child.sort_text,child.folder_key",
+        )
+        .bind(source)
+        .bind(parent)
+        .fetch_all(&mut *connection)
+        .await
+    } else {
+        folder_keys(
+            "SELECT DISTINCT folder.folder_key
+                 FROM track_folders relation JOIN tracks track USING(track_key)
+                 JOIN folders folder USING(folder_key)
+                 WHERE track.source_key=?1 AND relation.position=0
+                 ORDER BY folder.sort_text,folder.folder_key",
+        )
+        .bind(source)
+        .fetch_all(&mut *connection)
+        .await
+    };
     Ok(result?)
 }

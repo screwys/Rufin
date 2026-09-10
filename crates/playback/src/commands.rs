@@ -304,8 +304,7 @@ pub type RadioHandle = Arc<dyn RadioCommandPort>;
 
 #[derive(Clone)]
 pub struct PlaybackHandles {
-    /// Each clone observes the latest playback state independently.
-    pub state: tokio::sync::watch::Receiver<Option<Arc<crate::PlaybackView>>>,
+    pub updates: crate::PlaybackUpdates,
     pub transport: TransportHandle,
     pub queue: QueueHandle,
     pub radio: RadioHandle,

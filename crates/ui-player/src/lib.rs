@@ -117,6 +117,9 @@ impl PlayerUi {
             controls.rating.set_rating(None, false);
         }
     }
+    pub fn clear_player(&self) {
+        self.playback.borrow_mut().take();
+    }
     pub fn waveform(&self) -> Option<WaveformProjection> {
         self.playback
             .borrow()

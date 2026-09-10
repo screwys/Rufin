@@ -33,7 +33,6 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
         source,
         source_discovery,
         downloads,
-        playback,
         visualizer,
         waveform,
         lyrics,
@@ -62,9 +61,26 @@ pub(crate) fn install_product_event_receivers(shell: &Rc<Shell>, receivers: Prod
     });
 
     let event_shell = Rc::clone(shell);
+    let mut playback = shell.products.playback.updates.subscribe();
     glib::spawn_future_local(async move {
         while let Ok(publication) = playback.recv().await {
-            apply_playback_publication(&event_shell, publication);
+            if let Some(publication) = publication {
+                apply_playback_projection(&event_shell, publication);
+            } else {
+                event_shell.player_ui.clear_player();
+                event_shell.player_ui.refresh_queue_window();
+                event_shell.player_ui.update_bottom_player();
+                event_shell
+                    .player_ui
+                    .update_fullscreen_player_with(&NowPlayingPresentation::new(None));
+                event_shell.player_ui.sync_visualizer_state();
+                event_shell.player_ui.cancel_scheduled_lyrics_highlight();
+                event_shell.player_ui.render_lyrics_panel();
+                event_shell.refresh_current_route_now_playing_selections();
+                update_sidebar_pin_playback(&event_shell);
+                event_shell.withdraw_now_playing_notification();
+                event_shell.update_media_controls_after(None);
+            }
         }
     });
 
@@ -145,10 +161,6 @@ fn apply_source_event(shell: &Rc<Shell>, event: SourceEvent) {
         }
         SourceEvent::ReleaseSelected => release_selected_source(shell),
     }
-}
-
-fn apply_playback_publication(shell: &Rc<Shell>, publication: playback::PlaybackProjection) {
-    apply_playback_projection(shell, publication);
 }
 
 fn release_selected_source(shell: &Rc<Shell>) {

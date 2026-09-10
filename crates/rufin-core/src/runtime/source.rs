@@ -56,7 +56,8 @@ pub struct ConfiguredSources {
     pub local_access: Arc<[SourceLocalAccessSummary]>,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum OpenSubsonicKind {
     Navidrome,
     OpenSubsonic,
@@ -64,7 +65,7 @@ pub enum OpenSubsonicKind {
 
 pub use sources::SubsonicAuthentication as OpenSubsonicAuthentication;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 pub struct CredentialInput {
     pub source_name: Option<String>,
     pub server_url: String,
@@ -73,7 +74,8 @@ pub struct CredentialInput {
     pub trust_invalid_cert: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum SourceSetup {
     EmbyConnect {
         server: sources::EmbyConnectServer,
@@ -130,7 +132,8 @@ pub struct EditableSource {
     pub emby_connect: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum SourceSettingsChange {
     EmbyConnect {
         source_id: SourceId,
@@ -168,7 +171,8 @@ pub enum SourceSettingsChange {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(rename_all = "snake_case")]
 pub enum SourceProgressStage {
     Connecting,
     Albums,
@@ -182,14 +186,15 @@ pub enum SourceProgressStage {
     Finalizing,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SourceProgress {
     pub stage: SourceProgressStage,
     pub completed: usize,
     pub total: Option<usize>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
+#[serde(tag = "state", rename_all = "snake_case")]
 pub enum SourceOperation {
     Idle,
     Adding {
@@ -240,6 +245,8 @@ pub struct DiscoveryUpdate {
     pub status: DiscoveryStatus,
 }
 
+#[derive(serde::Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum NextcloudLoginEvent {
     OpenBrowser(String),
     Authorized {
@@ -248,21 +255,29 @@ pub enum NextcloudLoginEvent {
     },
 }
 
+#[derive(serde::Deserialize)]
+#[serde(tag = "method", content = "data", rename_all = "snake_case")]
 pub enum EmbyConnectLoginMethod {
     Password { username: String, password: String },
     Pin,
 }
 
+#[derive(serde::Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum EmbyConnectLoginEvent {
     Code { code: String, url: String },
     Servers(Vec<sources::EmbyConnectServer>),
 }
 
+#[derive(serde::Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum JellyfinQuickConnectEvent {
     Code { code: String, url: String },
     Authorized(sources::JellyfinQuickConnectLogin),
 }
 
+#[derive(serde::Deserialize)]
+#[serde(tag = "method", content = "data", rename_all = "snake_case")]
 pub enum PlexLoginMethod {
     Browser,
     Password {
@@ -272,6 +287,8 @@ pub enum PlexLoginMethod {
     },
 }
 
+#[derive(serde::Serialize)]
+#[serde(tag = "event", content = "data", rename_all = "snake_case")]
 pub enum PlexLoginEvent {
     OpenBrowser(String),
     Authorized(Box<sources::PlexLogin>),

@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 const CONNECT_URL: &str = "https://connect.emby.media/service/";
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct EmbyConnectServer {
     pub id: String,
     pub name: String,
@@ -434,21 +434,17 @@ mod tests {
             .expect(1)
             .mount(&server)
             .await;
-        let connected = connect_server(
-            SourceId::new("source"),
-            EmbyConnectServer {
-                id: "server".into(),
-                name: "Home music".into(),
-                addresses: vec![server.uri()],
-                connect_user_id: "cloud-user".into(),
-                access_key: "exchange-key".into(),
-            },
-            None,
-            true,
-            "device".into(),
-        )
-        .await
-        .unwrap();
+        let login = EmbyConnectServer {
+            id: "server".into(),
+            name: "Home music".into(),
+            addresses: vec![server.uri()],
+            connect_user_id: "cloud-user".into(),
+            access_key: "exchange-key".into(),
+        };
+        let login = serde_json::from_value(serde_json::to_value(&login).unwrap()).unwrap();
+        let connected = connect_server(SourceId::new("source"), login, None, true, "device".into())
+            .await
+            .unwrap();
         let (configuration, _, credential) = connected.into_parts();
         assert_eq!(configuration.name, "Home music");
         assert!(!configuration.provider_payload.contains("exchange-key"));

@@ -1,8 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod paths;
-
-use rufin_core::{app, diagnostics};
+use rufin_core::{app, diagnostics, paths};
 use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};

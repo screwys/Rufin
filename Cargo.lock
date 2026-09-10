@@ -5474,7 +5474,6 @@ version = "0.15.3"
 dependencies = [
  "app-identity",
  "desktop-integration",
- "directories",
  "localization",
  "playback",
  "playback-gstreamer",
@@ -5483,6 +5482,16 @@ dependencies = [
  "tracing",
  "ui-shell",
  "windows-updater",
+]
+
+[[package]]
+name = "rufin-controller"
+version = "0.15.2"
+dependencies = [
+ "playback",
+ "playback-gstreamer",
+ "rufin-core",
+ "tokio",
 ]
 
 [[package]]
@@ -5496,6 +5505,7 @@ dependencies = [
  "backup",
  "bytes",
  "desktop-integration",
+ "directories",
  "downloads",
  "futures-util",
  "getrandom 0.4.3",
@@ -5525,16 +5535,6 @@ dependencies = [
  "tracing-subscriber",
  "url",
  "windows-updater",
-]
-
-[[package]]
-name = "rufin-headless"
-version = "0.15.2"
-dependencies = [
- "playback",
- "playback-gstreamer",
- "rufin-core",
- "tokio",
 ]
 
 [[package]]
@@ -7307,6 +7307,7 @@ dependencies = [
  "idna",
  "percent-encoding",
  "serde",
+ "serde_derive",
 ]
 
 [[package]]

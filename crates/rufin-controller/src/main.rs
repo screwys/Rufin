@@ -1,10 +1,9 @@
 use std::io::{self, Write};
 use std::net::SocketAddr;
-use std::path::PathBuf;
 use std::process::ExitCode;
 use std::sync::Arc;
 
-use rufin_core::{app, diagnostics::Diagnostics, paths::Paths};
+use rufin_core::{app, diagnostics::Diagnostics, paths};
 
 fn main() -> ExitCode {
     #[cfg(unix)]
@@ -21,15 +20,13 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    const USAGE: &str = "Usage: rufin-headless PROFILE_DIRECTORY [--listen ADDRESS:PORT]\nSet RUFIN_API_TOKEN to enable authenticated HTTP access. GET /api lists the routes.";
+    const USAGE: &str = "Usage: rufin-controller [--listen ADDRESS:PORT]\nTo enable the API, pass --listen and set RUFIN_API_TOKEN. GET /api lists the available commands.";
     let mut arguments = std::env::args_os().skip(1);
-    let root = arguments.next().ok_or(USAGE)?;
-    if root == "--help" {
-        let _ = writeln!(io::stdout().lock(), "{USAGE}");
-        return Ok(());
-    }
-    let root = PathBuf::from(root);
     let address: Option<SocketAddr> = match arguments.next() {
+        Some(option) if option == "--help" => {
+            let _ = writeln!(io::stdout().lock(), "{USAGE}");
+            return Ok(());
+        }
         Some(option) if option == "--listen" => Some(
             arguments
                 .next()
@@ -55,12 +52,7 @@ fn run() -> Result<(), String> {
     } else {
         None
     };
-    let paths = Paths {
-        config: root.join("config"),
-        cache: root.join("cache"),
-        data: root.join("data"),
-        state: root.join("state"),
-    };
+    let paths = paths::roots();
     let settings = app::startup_settings(&paths);
     let (diagnostics, _stderr) = Diagnostics::install(paths.state_dir());
     app::with_runtime(|runtime| {
@@ -79,7 +71,6 @@ fn run() -> Result<(), String> {
             Arc::new(|_, _| {}),
         ))?;
         // An unattached presentation has no event backlog to retain.
-        inputs.receivers.playback.close();
         inputs.receivers.visualizer.close();
         drop(inputs.receivers);
         let result = runtime.block_on(async {

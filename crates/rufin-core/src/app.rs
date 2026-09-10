@@ -110,7 +110,6 @@ where
     );
 
     let (source_events, source_receiver) = unbounded();
-    let (playback_events, playback_receiver) = bounded(1);
     let (visualizer_events, visualizer_receiver) = bounded(1);
     let (download_events, download_receiver) = unbounded();
     let (discovery_events, discovery_receiver) = unbounded();
@@ -181,8 +180,6 @@ where
         library.clone(),
         settings.clone(),
         runtime.clone(),
-        playback_events,
-        playback_receiver.clone(),
         visualizer_events,
         visualizer_receiver.clone(),
         artwork.clone(),
@@ -282,7 +279,7 @@ where
     let source_handle: crate::runtime::SourceHandle = source.clone();
     let transport: playback::TransportHandle = playback.clone();
     let queue: playback::QueueHandle = playback.clone();
-    let playback_state = playback.state.subscribe();
+    let playback_updates = playback.updates.clone();
     let radio: playback::RadioHandle = playback;
 
     Ok(RuntimeInputs {
@@ -296,7 +293,7 @@ where
             source: source_handle,
             downloads,
             playback: PlaybackHandles {
-                state: playback_state,
+                updates: playback_updates,
                 transport,
                 queue,
                 radio,
@@ -311,7 +308,6 @@ where
             source: source_receiver,
             source_discovery: discovery_receiver,
             downloads: download_receiver,
-            playback: playback_receiver,
             visualizer: visualizer_receiver,
             waveform: waveform_receiver,
             lyrics: lyrics_receiver,

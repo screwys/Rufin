@@ -5,6 +5,7 @@ mod runtime;
 mod sequence;
 mod session;
 mod settings;
+mod updates;
 mod view;
 
 pub use backend::*;
@@ -18,4 +19,5 @@ pub use runtime::*;
 pub use sequence::*;
 pub use session::*;
 pub use settings::*;
+pub use updates::*;
 pub use view::*;

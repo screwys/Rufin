@@ -298,6 +298,7 @@ pub(crate) struct Shared {
     plex_logins: Mutex<HashMap<String, Arc<tokio::sync::Mutex<sources::PlexLogin>>>>,
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
+    operation: tokio::sync::watch::Sender<SourceOperation>,
     selected: Mutex<Option<Arc<ActiveSource>>>,
     catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
@@ -368,6 +369,14 @@ impl Shared {
 
     pub(crate) async fn send(&self, event: SourceEvent) {
         let _ = self.outputs.events.send(event).await;
+    }
+
+    fn publish_operation(&self, operation: SourceOperation) {
+        self.operation.send_replace(operation.clone());
+        let _ = self
+            .outputs
+            .events
+            .try_send(SourceEvent::Operation(operation));
     }
 
     pub(crate) fn warn_nonfatal(&self, message: &str) {
@@ -470,6 +479,7 @@ impl SourceOwner {
             plex_logins: Mutex::new(HashMap::new()),
             runtime,
             outputs,
+            operation: tokio::sync::watch::channel(operation.clone()).0,
             selected: Mutex::new(None),
             catalog_counts: Mutex::new(HashMap::new()),
             observer: Mutex::new(None),
@@ -621,7 +631,7 @@ impl SourceOwner {
     }
 
     async fn publish_operation(&self, operation: SourceOperation) {
-        self.shared.send(SourceEvent::Operation(operation)).await;
+        self.shared.publish_operation(operation);
     }
 
     async fn select_now(
@@ -968,26 +978,46 @@ impl SourceOwner {
             self.shared.warn_nonfatal(&source_access_unavailable());
             return;
         };
+        let _ = self
+            .refresh_now(
+                selected.source_id(),
+                source,
+                &selected.configuration.name,
+                acquisition,
+            )
+            .await;
+    }
+
+    async fn refresh_now(
+        &self,
+        source_id: &SourceId,
+        source: &Source,
+        name: &str,
+        acquisition: Arc<AtomicBool>,
+    ) -> Result<(), String> {
+        if !self.shared.acquisition_is_current(&acquisition) {
+            return Err(SourceError::Cancelled.to_string());
+        }
         self.publish_operation(SourceOperation::Refreshing {
-            source_id: selected.source_id().clone(),
+            source_id: source_id.clone(),
             progress: initial_progress(),
         })
         .await;
-        let progress = refreshing_progress(
-            self.shared.outputs.events.clone(),
-            selected.source_id().clone(),
-        );
+        let progress = refreshing_progress(Arc::clone(&self.shared), source_id.clone());
         let outcome = source
             .manual_refresh(
-                &selected.database,
-                &selected.configuration.name,
+                &self.shared.database,
+                name,
                 &progress,
                 Arc::clone(&acquisition),
             )
             .await;
-        if self.shared.acquisition_is_current(&acquisition) {
-            self.finish_refresh(selected.source_id(), outcome).await;
+        let result = outcome.as_ref().map(|_| ()).map_err(string_error);
+        if !self.shared.acquisition_is_current(&acquisition) {
+            return Err(SourceError::Cancelled.to_string());
         }
+        self.finish_refresh(source_id, outcome).await;
+        result
     }
 
     async fn finish_refresh(
@@ -1273,10 +1303,7 @@ impl SourceOwner {
         };
         let progressed = Arc::new(AtomicBool::new(false));
         let progress_started = Arc::clone(&progressed);
-        let publish = refreshing_progress(
-            self.shared.outputs.events.clone(),
-            selected.source_id().clone(),
-        );
+        let publish = refreshing_progress(Arc::clone(&self.shared), selected.source_id().clone());
         let progress = move |value: SourceReadProgress| {
             progress_started.store(true, Ordering::Release);
             publish(value);
@@ -1604,6 +1631,10 @@ impl SourceOwner {
             .configured_sources(self.shared.selected().as_deref())
     }
 
+    pub fn operation(&self) -> tokio::sync::watch::Receiver<SourceOperation> {
+        self.shared.operation.subscribe()
+    }
+
     pub fn selected_library(&self) -> Option<SelectedLibrary> {
         let session = self.shared.selected_session()?;
         Some(ui_selected(session.resolve()?, session))
@@ -1764,11 +1795,11 @@ impl SourceOwner {
                             .configured_sources(owner.shared.selected().as_deref()),
                     ))
                     .await;
-                let events = owner.shared.outputs.events.clone();
+                let shared = Arc::clone(&owner.shared);
                 let progress = move |value| {
-                    let _ = events.try_send(SourceEvent::Operation(SourceOperation::Adding {
+                    shared.publish_operation(SourceOperation::Adding {
                         progress: source_progress(value),
-                    }));
+                    });
                 };
                 let outcome = source
                     .manual_refresh(
@@ -1844,18 +1875,21 @@ impl SourceOwner {
         receiver
     }
 
-    pub fn update_source(&self, input: SourceSettingsChange) {
+    pub fn update_source(&self, input: SourceSettingsChange) -> Receiver<Result<(), String>> {
+        let (sender, receiver) = async_channel::bounded(1);
         let cancelled = self.shared.begin_acquisition();
         let source_id = source_settings_id(&input).clone();
         let input = source_settings_input(input);
         self.spawn_serialized(move |owner| async move {
-            if let Err(error) = owner
+            let result = owner
                 .edit_configured_source(source_id, input, cancelled)
-                .await
-            {
+                .await;
+            if let Err(error) = &result {
                 owner.shared.warn_nonfatal(&error);
             }
+            let _ = sender.try_send(result);
         });
+        receiver
     }
 
     pub fn set_half_stars(&self, source_id: SourceId, enabled: bool) {
@@ -2022,23 +2056,47 @@ impl SourceOwner {
         });
     }
 
-    pub fn refresh_source(&self, source_id: SourceId) {
+    pub fn refresh_source(&self, source_id: SourceId) -> Receiver<Result<(), String>> {
         let acquisition = self.shared.begin_acquisition();
-        let owner = self.clone();
-        self.spawn_serialized(move |_| async move {
-            if acquisition.load(Ordering::Acquire) {
-                return;
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_serialized(move |owner| async move {
+            let result = async {
+                if !owner.shared.acquisition_is_current(&acquisition) {
+                    return Err(SourceError::Cancelled.to_string());
+                }
+                let client_owner = owner.clone();
+                let client_id = source_id.clone();
+                let source = tokio::task::spawn_blocking(move || client_owner.client(&client_id))
+                    .await
+                    .map_err(string_error)??;
+                let configuration = owner
+                    .configuration(&source_id)
+                    .ok_or_else(source_access_unavailable)?;
+                Ok((source, configuration))
             }
-            if let Some(selected) = owner
-                .shared
-                .selected()
-                .filter(|selected| selected.source_id() == &source_id)
-            {
-                owner
-                    .manual_refresh_selected(&selected, "source-preferences", acquisition)
-                    .await;
-            }
+            .await;
+            let result = match result {
+                Ok((source, configuration)) => {
+                    owner
+                        .refresh_now(&source_id, &source, &configuration.name, acquisition)
+                        .await
+                }
+                Err(message) => {
+                    if owner.shared.acquisition_is_current(&acquisition) {
+                        owner
+                            .publish_operation(SourceOperation::Failed {
+                                source_id: Some(source_id),
+                                message: message.clone(),
+                                add_form: false,
+                            })
+                            .await;
+                    }
+                    Err(message)
+                }
+            };
+            let _ = sender.try_send(result);
         });
+        receiver
     }
 
     pub fn save_local_access(
@@ -3355,14 +3413,14 @@ fn source_progress(progress: SourceReadProgress) -> SourceProgress {
 }
 
 fn refreshing_progress(
-    events: Sender<SourceEvent>,
+    shared: Arc<Shared>,
     source_id: SourceId,
 ) -> impl Fn(SourceReadProgress) + Send + Sync {
     move |value| {
-        let _ = events.try_send(SourceEvent::Operation(SourceOperation::Refreshing {
+        shared.publish_operation(SourceOperation::Refreshing {
             source_id: source_id.clone(),
             progress: source_progress(value),
-        }));
+        });
     }
 }
 

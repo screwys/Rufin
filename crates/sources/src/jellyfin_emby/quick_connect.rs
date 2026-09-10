@@ -1,6 +1,6 @@
 use super::*;
 
-#[derive(Clone, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct JellyfinQuickConnectLogin {
     config: JellyfinEmbyClientConfig,
     response: Value,
@@ -166,6 +166,8 @@ mod tests {
             .await;
         let login = quick.poll().await.unwrap().unwrap();
         assert!(!format!("{login:?}").contains("local-token"));
+        let login: JellyfinQuickConnectLogin =
+            serde_json::from_value(serde_json::to_value(&login).unwrap()).unwrap();
         let connected = connect_quick(SourceId::new("source"), login, None, false)
             .await
             .unwrap();

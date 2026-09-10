@@ -1,0 +1,278 @@
+{
+  "routes": {
+    "GET /api/playback": "Playback status and the current track",
+    "GET /api/playback/events": "Follow playback changes",
+    "POST /api/playback/play": {},
+    "POST /api/playback/pause": {},
+    "POST /api/playback/stop": {},
+    "POST /api/playback/next": {},
+    "POST /api/playback/previous": {},
+    "POST /api/playback/seek": {
+      "position_ms": 30000
+    },
+    "POST /api/playback/volume": {
+      "volume": 0.5
+    },
+    "POST /api/playback/mute": {
+      "muted": true
+    },
+    "POST /api/playback/shuffle": {
+      "enabled": true
+    },
+    "POST /api/playback/repeat": {
+      "mode": "off | one | all"
+    },
+    "GET /api/sources": "Your sources and the source currently in use",
+    "POST /api/sources": "Add a source and scan its music. See source_setup for examples. Returns the source ID when finished.",
+    "PATCH /api/sources": "Change source settings. See source_update for examples.",
+    "POST /api/sources/local": {
+      "paths": [
+        "/path/to/music"
+      ]
+    },
+    "POST /api/sources/select": {
+      "id": "source ID"
+    },
+    "POST /api/sources/refresh": {
+      "id": "source ID"
+    },
+    "GET /api/sources/progress": "Check progress while adding, switching or refreshing a source.",
+    "GET /api/sources/events": "Follow source progress, starting with the current status.",
+    "POST /api/sources/login/plex": {
+      "method": "browser"
+    },
+    "POST /api/sources/login/emby": {
+      "method": "pin"
+    },
+    "POST /api/sources/login/jellyfin": {
+      "server_url": "https://your-server",
+      "trust_invalid_cert": false
+    },
+    "POST /api/sources/login/nextcloud": "Sign in through your browser. Send {settings: file_settings, credentials: {secret,headers}}. Returns a login link, then the login details to use when adding the source.",
+    "GET /api/sources/plex/logins": "Saved Plex accounts. Reuse one to add another server or profile.",
+    "POST /api/sources/plex/profiles": "List Plex profiles. Send {login} from a completed login. Returns {login,profiles}.",
+    "POST /api/sources/plex/servers": "List Plex servers. Send {login,profile,pin:null,lan:[]}. Returns {login,servers} to use when adding the source.",
+    "POST /api/sources/smb/shares": "List network shares. Send {settings: file_settings, credentials: {secret,headers}}.",
+    "DELETE /api/sources?id=...": "Forget a source",
+    "GET /api/tracks?source=...&offset=0&limit=100&q=...": "Browse tracks from a source, up to 256 at a time. You can also set folder, sort, descending and favorites.",
+    "GET /api/albums?source=...&offset=0&limit=100": "Browse albums, up to 128 at a time. You can also set folder, q, sort, descending and favorites.",
+    "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too.",
+    "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
+    "GET /api/folders/live?source=...": "Browse folders directly on the server. You can set parent and folder. Returned track_ids match object_id in track results.",
+    "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",
+    "POST /api/playlists": {
+      "name": "Evening",
+      "source": null,
+      "uris": [
+        "track URI"
+      ]
+    },
+    "PATCH /api/playlists": {
+      "id": 1,
+      "name": "New name"
+    },
+    "DELETE /api/playlists?id=...": "Delete a playlist",
+    "GET /api/playlists/entries?id=...": "Browse tracks in a playlist, up to 256 at a time. You can set offset, limit, q, sort and descending. To filter by folder, include source too.",
+    "POST /api/playlists/entries": {
+      "id": 1,
+      "uris": [
+        "track URI"
+      ],
+      "skip_duplicates": false
+    },
+    "PATCH /api/playlists/entries": {
+      "id": 1,
+      "entry": 2,
+      "position": 0
+    },
+    "DELETE /api/playlists/entries": {
+      "id": 1,
+      "entries": [
+        2
+      ]
+    },
+    "GET /api/queue": "Tracks around the current queue position, and the total number of queued tracks",
+    "POST /api/queue": {
+      "uris": [
+        "track URI"
+      ],
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/album": {
+      "id": 1,
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/playlist": {
+      "id": 1,
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/source": {
+      "source": "source ID",
+      "folder": null,
+      "q": "",
+      "sort": "title",
+      "descending": false,
+      "favorites": false,
+      "mode": "replace | append | next"
+    },
+    "DELETE /api/queue": "Clear the queue",
+    "POST /api/queue/activate": {
+      "id": "queue track ID"
+    },
+    "DELETE /api/queue/item?id=...": "Remove a track from the queue"
+  },
+  "commands": "Playback and queue commands return 202 when received. Check playback status or follow playback updates to see the result or any error. Source and playlist changes return when finished. Use IDs exactly as returned, including negative numbers. Positions and offsets start at zero. Each copy of a track in a playlist or queue has its own ID.",
+  "login": "Keep the login connection open until sign-in finishes. Closing it cancels sign-in. Updates use event: login with JSON {event,data}, or {error}. Plex also accepts {method: password, data: {username,password,verification_code:null}}; Emby accepts {method: password, data: {username,password}}. Use the returned login details unchanged when adding the source.",
+  "source_setup": {
+    "local": {
+      "type": "local",
+      "data": {
+        "roots": [
+          "/path/to/music"
+        ]
+      }
+    },
+    "jellyfin_emby": {
+      "type": "jellyfin_emby",
+      "data": {
+        "kind": "jellyfin",
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password",
+          "trust_invalid_cert": false
+        },
+        "use_instant_mix": false
+      }
+    },
+    "open_subsonic": {
+      "type": "open_subsonic",
+      "data": {
+        "kind": "navidrome",
+        "authentication": "password",
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password or API key",
+          "trust_invalid_cert": false
+        }
+      }
+    },
+    "web_dav_smb": "{type: web_dav or smb, data: {name, settings: file_settings below, credentials: {secret,headers:[]}}}",
+    "plex": "{type: plex, data: {name,login,profile_id,server,address_override:null,trust_invalid_cert:false}}",
+    "emby_connect": "{type: emby_connect, data: {server: a server from the login result,source_name:null,use_instant_mix:false}}",
+    "jellyfin_quick_connect": "{type: jellyfin_quick_connect, data: {login: the completed login result,source_name:null,use_instant_mix:false}}"
+  },
+  "source_update": {
+    "files": "{type: files, data: {source_id,name,settings: file_settings,credentials:{secret:null,headers:null}}}. Use null to keep the saved password and headers.",
+    "plex": {
+      "type": "plex",
+      "data": {
+        "source_id": "source ID",
+        "settings": {
+          "name": "Plex music",
+          "address_override": null,
+          "trust_invalid_cert": false
+        }
+      }
+    },
+    "jellyfin_emby": {
+      "type": "jellyfin_emby",
+      "data": {
+        "source_id": "source ID",
+        "connect_manually": true,
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password",
+          "trust_invalid_cert": false
+        },
+        "use_instant_mix": false
+      }
+    },
+    "other_types": "For open_subsonic, emby_connect and jellyfin_quick_connect, add source_id to the corresponding source_setup data."
+  },
+  "file_settings": {
+    "url": "https://your-server/music/",
+    "alternate_urls": [],
+    "folders": [],
+    "username": "",
+    "domain": "",
+    "authentication": "anonymous",
+    "trust_invalid_certificate": false,
+    "certificate_pem": null,
+    "require_smb_encryption": false
+  },
+  "choices": {
+    "file_authentication": [
+      "anonymous",
+      "password",
+      "bearer"
+    ],
+    "server_kind": [
+      "jellyfin",
+      "emby"
+    ],
+    "subsonic_kind": [
+      "navidrome",
+      "open_subsonic"
+    ],
+    "subsonic_authentication": [
+      "password",
+      "legacy_password",
+      "api_key"
+    ],
+    "track_sort": [
+      "title",
+      "track_number",
+      "artist",
+      "album_artist",
+      "album",
+      "year",
+      "release_date",
+      "date_added",
+      "last_played",
+      "play_count",
+      "rating",
+      "genre",
+      "bpm",
+      "duration",
+      "favorite"
+    ],
+    "album_sort": [
+      "title",
+      "album_artist",
+      "year",
+      "release_date",
+      "date_added",
+      "last_played",
+      "play_count",
+      "rating",
+      "track_count",
+      "duration",
+      "favorite"
+    ],
+    "playlist_sort": [
+      "position",
+      "title",
+      "track_count",
+      "duration"
+    ],
+    "playlist_entry_sort": [
+      "position",
+      "title",
+      "artist",
+      "album"
+    ]
+  },
+  "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. Browsing or refreshing a source does not switch the source currently in use.",
+  "events": "Update routes use server-sent events (SSE). Each data line contains JSON.",
+  "queue_modes": {
+    "replace": "Play now and replace the queue",
+    "append": "Add to the end of the queue",
+    "next": "Play next"
+  }
+}

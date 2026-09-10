@@ -24,6 +24,7 @@ hyper.workspace = true
 hyper-util.workspace = true
 artwork.workspace = true
 desktop-integration.workspace = true
+directories.workspace = true
 downloads.workspace = true
 getrandom.workspace = true
 glib.workspace = true

@@ -198,7 +198,11 @@ pub fn create_playlist(
     receiver
 }
 
-pub fn rename_playlist(owner: &SourceOwner, playlist: PlaylistKey, name: String) {
+pub fn rename_playlist(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+    name: String,
+) -> Receiver<Result<bool, String>> {
     playlist_change(&owner, playlist, move |target, database| async move {
         match target {
             PlaylistOwner::Local(source_key) => database
@@ -211,10 +215,13 @@ pub fn rename_playlist(owner: &SourceOwner, playlist: PlaylistKey, name: String)
                 .await
                 .map_err(string_error),
         }
-    });
+    })
 }
 
-pub fn delete_playlist(owner: &SourceOwner, playlist: PlaylistKey) {
+pub fn delete_playlist(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+) -> Receiver<Result<bool, String>> {
     let operation_owner = owner.clone();
     playlist_change(&owner, playlist, move |target, database| async move {
         let result = match target {
@@ -232,7 +239,7 @@ pub fn delete_playlist(owner: &SourceOwner, playlist: PlaylistKey) {
             prune_imported_playlist_files(&operation_owner).await;
         }
         result
-    });
+    })
 }
 
 pub fn add_playlist_tracks(
@@ -301,7 +308,7 @@ pub fn remove_playlist_entries(
     owner: &SourceOwner,
     playlist: PlaylistKey,
     entries: Vec<PlaylistEntryKey>,
-) {
+) -> Receiver<Result<bool, String>> {
     let operation_owner = owner.clone();
     playlist_change(&owner, playlist, move |target, database| async move {
         let result = match target {
@@ -319,7 +326,7 @@ pub fn remove_playlist_entries(
             prune_imported_playlist_files(&operation_owner).await;
         }
         result
-    });
+    })
 }
 
 pub fn move_playlist_entry(
@@ -327,7 +334,7 @@ pub fn move_playlist_entry(
     playlist: PlaylistKey,
     entry: PlaylistEntryKey,
     position: usize,
-) {
+) -> Receiver<Result<bool, String>> {
     playlist_change(&owner, playlist, move |target, database| async move {
         match target {
             PlaylistOwner::Local(source_key) => database
@@ -340,7 +347,7 @@ pub fn move_playlist_entry(
                 .await
                 .map_err(string_error),
         }
-    });
+    })
 }
 
 enum PlaylistOwner {
@@ -357,11 +364,16 @@ impl PlaylistOwner {
     }
 }
 
-fn playlist_change<F, Work>(owner: &SourceOwner, playlist: PlaylistKey, change: F)
+fn playlist_change<F, Work>(
+    owner: &SourceOwner,
+    playlist: PlaylistKey,
+    change: F,
+) -> Receiver<Result<bool, String>>
 where
     F: FnOnce(PlaylistOwner, Arc<Database>) -> Work + Send + 'static,
     Work: Future<Output = Result<(bool, Option<ScanOutcome>), String>> + Send + 'static,
 {
+    let (sender, receiver) = async_channel::bounded(1);
     owner.spawn_serialized(move |owner| async move {
         let target = playlist_source(&owner, playlist).await;
         let source_key = target.as_ref().ok().and_then(PlaylistOwner::source_key);
@@ -369,8 +381,14 @@ where
             Ok(target) => change(target, Arc::clone(&owner.shared.database)).await,
             Err(error) => Err(error),
         };
+        let reply = result
+            .as_ref()
+            .map(|(changed, _)| *changed)
+            .map_err(Clone::clone);
         accept_playlist_result(&owner, source_key, Some(playlist), result).await;
+        let _ = sender.try_send(reply);
     });
+    receiver
 }
 
 async fn playlist_source(
