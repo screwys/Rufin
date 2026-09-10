@@ -226,14 +226,21 @@ async fn analyze_selected(
             warn!(%error, "could not write stored EBU R128 tags");
         }
     }
+    let mut album_after = None;
+    let mut track_after = None;
+    let mut albums_done = scope != LoudnessNormalizationScope::Album;
     loop {
         let Some(state) = current(&selected, &cancelled) else {
             return false;
         };
-        if scope == LoudnessNormalizationScope::Album {
+        if !albums_done {
             match state
                 .database
-                .next_missing_album_loudness(state.source_key, &ReadCancellation::new())
+                .next_missing_album_loudness(
+                    state.source_key,
+                    album_after,
+                    &ReadCancellation::new(),
+                )
                 .await
             {
                 Ok(Some(work)) => {
@@ -311,9 +318,10 @@ async fn analyze_selected(
                             Err(error) => warn!(%error, "could not combine Album loudness"),
                         }
                     }
+                    album_after = Some(work.album_key);
                     continue;
                 }
-                Ok(None) => {}
+                Ok(None) => albums_done = true,
                 Err(error) => {
                     warn!(%error, "could not select Album loudness work");
                     return true;
@@ -322,7 +330,7 @@ async fn analyze_selected(
         }
         match state
             .database
-            .next_missing_track_loudness(state.source_key, &ReadCancellation::new())
+            .next_missing_track_loudness(state.source_key, track_after, &ReadCancellation::new())
             .await
         {
             Ok(Some(work)) => match analyze_track(&state, &work, &cancelled).await {
@@ -352,13 +360,23 @@ async fn analyze_selected(
                             warn!(%error, "could not write EBU R128 tags");
                         }
                     }
+                    track_after = Some(work.track_key);
                 }
                 Err(error) => {
                     warn!(%error, track_key=%work.track_key, "could not analyze Track loudness");
                     return true;
                 }
             },
-            Ok(None) => return false,
+            Ok(None) => {
+                if album_after.is_none() && track_after.is_none() {
+                    return false;
+                }
+                // Access and metadata changes can invalidate already visited keys.
+                // Recheck from the beginning once both forward passes are exhausted.
+                album_after = None;
+                track_after = None;
+                albums_done = scope != LoudnessNormalizationScope::Album;
+            }
             Err(error) => {
                 warn!(%error, "could not select Track loudness work");
                 return true;

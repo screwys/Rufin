@@ -7,12 +7,145 @@ use library::{
 use super::support::{connection, fixture, persist_queue};
 
 #[tokio::test]
+async fn loudness_forward_passes_revisit_invalidated_earlier_keys() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut measurement = LoudnessMeasurement {
+        analysis_key: [0; 32],
+        integrated_lufs: Some(-14.0),
+        true_peak: Some(0.8),
+        replay_gain_db: None,
+        replay_gain_peak: None,
+    };
+    let mut after = None;
+    for expected in &fixture.tracks {
+        let work = fixture
+            .database
+            .next_missing_track_loudness(fixture.source, after, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(work.track_key, *expected);
+        measurement.analysis_key = work.expected_analysis_key;
+        assert!(
+            fixture
+                .database
+                .write_track_analyzed_loudness(fixture.source, work.track_key, &measurement,)
+                .await
+                .unwrap()
+        );
+        after = Some(work.track_key);
+    }
+    let mut connection = connection(&fixture.path).await;
+    // A mapping or file change can invalidate a key behind the active cursor.
+    sqlx::query("UPDATE tracks SET loudness_analysis_key=?2 WHERE track_key=?1")
+        .bind(fixture.tracks[0])
+        .bind([99u8; 32].as_slice())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .database
+            .next_missing_track_loudness(fixture.source, after, &cancel)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let changed = fixture
+        .database
+        .next_missing_track_loudness(fixture.source, None, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(changed.track_key, fixture.tracks[0]);
+    assert_eq!(changed.expected_analysis_key, [99; 32]);
+    measurement.analysis_key = changed.expected_analysis_key;
+    assert!(
+        fixture
+            .database
+            .write_track_analyzed_loudness(fixture.source, changed.track_key, &measurement,)
+            .await
+            .unwrap()
+    );
+    assert!(
+        fixture
+            .database
+            .next_missing_track_loudness(fixture.source, None, &cancel)
+            .await
+            .unwrap()
+            .is_none()
+    );
+
+    let mut after = None;
+    let mut album_tracks = Vec::new();
+    for expected in &fixture.albums {
+        let work = fixture
+            .database
+            .next_missing_album_loudness(fixture.source, after, &cancel)
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(work.album_key, *expected);
+        album_tracks.extend(work.tracks.iter().map(|track| track.track_key));
+        measurement.analysis_key = work.expected_analysis_key;
+        assert!(
+            fixture
+                .database
+                .write_album_analyzed_loudness(fixture.source, work.album_key, &measurement,)
+                .await
+                .unwrap()
+        );
+        after = Some(work.album_key);
+    }
+    assert_eq!(album_tracks, fixture.tracks);
+    sqlx::query("UPDATE albums SET loudness_analysis_key=?2 WHERE album_key=?1")
+        .bind(fixture.albums[0])
+        .bind([98u8; 32].as_slice())
+        .execute(&mut connection)
+        .await
+        .unwrap();
+    assert!(
+        fixture
+            .database
+            .next_missing_album_loudness(fixture.source, after, &cancel)
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let changed = fixture
+        .database
+        .next_missing_album_loudness(fixture.source, None, &cancel)
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(changed.album_key, fixture.albums[0]);
+    assert_eq!(changed.expected_analysis_key, [98; 32]);
+    measurement.analysis_key = changed.expected_analysis_key;
+    assert!(
+        fixture
+            .database
+            .write_album_analyzed_loudness(fixture.source, changed.album_key, &measurement,)
+            .await
+            .unwrap()
+    );
+    assert!(
+        fixture
+            .database
+            .next_missing_album_loudness(fixture.source, None, &cancel)
+            .await
+            .unwrap()
+            .is_none()
+    );
+}
+
+#[tokio::test]
 async fn loudness_selects_one_unit_and_source_facts_win() {
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let work = fixture
         .database
-        .next_missing_track_loudness(fixture.source, &cancel)
+        .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("missing Track loudness")
         .unwrap();
@@ -117,7 +250,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
         .expect("change Track CUE identity");
     let changed = fixture
         .database
-        .next_missing_track_loudness(fixture.source, &cancel)
+        .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("changed Track loudness work")
         .unwrap();
@@ -189,7 +322,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
 
     let album = fixture
         .database
-        .next_missing_album_loudness(fixture.source, &cancel)
+        .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("missing Album loudness")
         .unwrap();
@@ -362,7 +495,7 @@ async fn loudness_selects_one_unit_and_source_facts_win() {
     );
     let changed_album = fixture
         .database
-        .next_missing_album_loudness(fixture.source, &cancel)
+        .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("changed Album membership work")
         .unwrap();
@@ -401,7 +534,7 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
     let cancel = ReadCancellation::new();
     let track = fixture
         .database
-        .next_missing_track_loudness(fixture.source, &cancel)
+        .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("select provider-resolved Track loudness")
         .expect("provider Track loudness work");
@@ -410,7 +543,7 @@ async fn loudness_keeps_canonical_provider_uri_without_direct_access() {
 
     let album = fixture
         .database
-        .next_missing_album_loudness(fixture.source, &cancel)
+        .next_missing_album_loudness(fixture.source, None, &cancel)
         .await
         .expect("select provider-resolved Album loudness")
         .expect("provider Album loudness work");
@@ -460,6 +593,53 @@ async fn artwork_pages_distinct_opaque_bindings_by_digest() {
         .await
         .expect("resume artwork page");
     assert_eq!(second, [b"binding-b".to_vec()]);
+    sqlx::query("WITH RECURSIVE numbers(n) AS (VALUES(0) UNION ALL SELECT n+1 FROM numbers WHERE n<259)
+        INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,artwork_binding)
+        SELECT ?1,'artwork-'||n,'test:artwork-'||n,'','','','','',0,CAST(printf('binding-%04d',n) AS BLOB) FROM numbers")
+        .bind(fixture.source).execute(&mut raw).await.unwrap();
+    sqlx::query("UPDATE genres SET artwork_binding=X'' WHERE genre_key=?1")
+        .bind(fixture.genre)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("UPDATE folders SET artwork_binding=?2 WHERE folder_key=?1")
+        .bind(fixture.folder)
+        .bind(b"binding-folder".as_slice())
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,artwork_binding) VALUES(?1,'artwork','Artwork','artwork','artwork',?2)")
+        .bind(fixture.source).bind(b"binding-playlist".as_slice())
+        .execute(&mut raw).await.unwrap();
+    let mut expected = vec![Vec::new()];
+    expected.extend((0..260).map(|n| format!("binding-{n:04}").into_bytes()));
+    expected.extend([
+        b"binding-a".to_vec(),
+        b"binding-b".to_vec(),
+        b"binding-folder".to_vec(),
+        b"binding-playlist".to_vec(),
+    ]);
+    expected.sort();
+    let mut actual = Vec::<Vec<u8>>::new();
+    loop {
+        let page = fixture
+            .database
+            .artwork_preparation_page(
+                fixture.source,
+                actual.last().map(Vec::as_slice),
+                128,
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert!(page.len() <= 128);
+        if page.is_empty() {
+            break;
+        }
+        actual.extend(page);
+        assert!(actual.len() <= expected.len());
+    }
+    assert_eq!(actual, expected);
     let plan=sqlx::query_as::<_,(i64,i64,i64,String)>("EXPLAIN QUERY PLAN SELECT artwork_binding FROM tracks WHERE source_key=?1 AND artwork_binding IS NOT NULL AND artwork_binding>?2 ORDER BY artwork_binding LIMIT 128")
         .bind(fixture.source).bind(b"binding-a".as_slice()).fetch_all(&mut raw).await.expect("artwork preparation plan").into_iter().map(|row|row.3).collect::<Vec<_>>().join(" | ");
     assert!(plan.contains("tracks_artwork_idx"), "{plan}");
@@ -569,7 +749,7 @@ async fn local_rows_keep_dependencies_and_point_resolution_precedence() {
         .expect("write exact Local access");
     let local_loudness = fixture
         .database
-        .next_missing_track_loudness(fixture.source, &cancel)
+        .next_missing_track_loudness(fixture.source, None, &cancel)
         .await
         .expect("Local loudness identity")
         .unwrap();

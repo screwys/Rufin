@@ -55,44 +55,44 @@ impl Database {
         &self,
         seed: &RadioSeed,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Option<(SourceKey, crate::SourceId)>> {
+    ) -> LibraryResult<Option<(SourceKey, crate::SourceId, Option<String>)>> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut query = QueryBuilder::<Sqlite>::new(
-            "SELECT source_key,object_id FROM sources WHERE source_key=(",
+            "SELECT sources.source_key,sources.object_id,seed.object_id FROM (",
         );
         match seed {
             RadioSeed::Track(uri) => {
                 query
-                    .push("SELECT source_key FROM tracks WHERE media_uri=")
+                    .push("SELECT source_key,NULL object_id FROM tracks WHERE media_uri=")
                     .push_bind(uri);
             }
             RadioSeed::Album(key) => {
                 query
-                    .push("SELECT source_key FROM albums WHERE album_key=")
+                    .push("SELECT source_key,object_id FROM albums WHERE album_key=")
                     .push_bind(key);
             }
             RadioSeed::Artist(key) | RadioSeed::AlbumArtist(key) => {
                 query
-                    .push("SELECT source_key FROM artists WHERE artist_key=")
+                    .push("SELECT source_key,object_id FROM artists WHERE artist_key=")
                     .push_bind(key);
             }
             RadioSeed::Genre(key) => {
                 query
-                    .push("SELECT source_key FROM genres WHERE genre_key=")
+                    .push("SELECT source_key,object_id FROM genres WHERE genre_key=")
                     .push_bind(key);
             }
             RadioSeed::Playlist(key) => {
-                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM playlist_entries entry JOIN tracks track USING(media_uri) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
+                query.push("SELECT COALESCE(playlist.source_key,(SELECT track.source_key FROM main.playlist_entries entry JOIN tracks track USING(media_uri) WHERE entry.playlist_key=playlist.playlist_key ORDER BY entry.position LIMIT 1)) source_key,CASE WHEN playlist.source_key IS NOT NULL THEN playlist.object_id END object_id FROM playlists playlist WHERE playlist.playlist_key=").push_bind(key);
             }
         }
-        query.push(")");
+        query.push(") seed JOIN sources ON sources.source_key=seed.source_key");
         let result = query
-            .build_query_as::<(SourceKey, String)>()
+            .build_query_as::<(SourceKey, String, Option<String>)>()
             .persistent(false)
             .fetch_optional(&mut *connection)
             .await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(result.map(|(key, id)| (key, crate::SourceId::new(id))))
+        Ok(result.map(|(key, id, object_id)| (key, crate::SourceId::new(id), object_id)))
     }
 
     /// Admit provider recommendations in order, using the same queue and seed exclusions.

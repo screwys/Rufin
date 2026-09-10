@@ -103,20 +103,31 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
         .unwrap()
         .unwrap()
         .0;
+    let (owned, owned_id) = fixture
+        .database
+        .create_playlist(Some(fixture.source), "Owned", &fixture.track_uris[..1])
+        .await
+        .unwrap()
+        .unwrap();
     sqlx::query("INSERT INTO queue_occurrences(object_id,media_uri,position,traversal_position,provenance_kind,title,artist,album,duration_millis) VALUES ('queued',?1,0,0,'manual','Beta','Artist A','Album A',1000)")
         .bind(&fixture.track_uris[1]).execute(&mut raw).await.unwrap();
-    for seed in [
-        RadioSeed::Playlist(native),
-        RadioSeed::Playlist(local),
-        RadioSeed::Track(fixture.track_uris[0].clone()),
-        RadioSeed::Album(fixture.albums[0]),
-        RadioSeed::Artist(fixture.artists[0]),
-        RadioSeed::AlbumArtist(fixture.artists[0]),
-        RadioSeed::Genre(fixture.genre),
+    for (seed, object_id) in [
+        (RadioSeed::Playlist(native), Some("native")),
+        (RadioSeed::Playlist(local), None),
+        (RadioSeed::Playlist(owned), Some(owned_id.as_str())),
+        (RadioSeed::Track(fixture.track_uris[0].clone()), None),
+        (RadioSeed::Album(fixture.albums[0]), Some("album-a")),
+        (RadioSeed::Artist(fixture.artists[0]), Some("artist-a")),
+        (RadioSeed::AlbumArtist(fixture.artists[0]), Some("artist-a")),
+        (RadioSeed::Genre(fixture.genre), Some("genre")),
     ] {
         assert_eq!(
             fixture.database.radio_source(&seed, &cancel).await.unwrap(),
-            Some((fixture.source, library::SourceId::new("source")))
+            Some((
+                fixture.source,
+                library::SourceId::new("source"),
+                object_id.map(String::from)
+            ))
         );
         let ids = ["track-2", "track-1", "track-2", "missing", "track-3"].map(String::from);
         assert_eq!(

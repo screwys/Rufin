@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Weak};
 
-use library::{Database, RadioSeed, ReadCancellation, SourceKey};
+use library::{Database, RadioSeed, ReadCancellation};
 use playback::{
     AutoDjRequest, Batch, Placement, Playback, Provenance, RadioPlayRequest, RandomPlayRequest,
 };
@@ -117,7 +117,7 @@ pub(crate) async fn radio_candidates(
     requested: usize,
 ) -> Result<Vec<String>, String> {
     let requested = requested.min(library::QUEUE_CONTEXT_LIMIT);
-    let (source_key, source_id) = database
+    let (source_key, source_id, object_id) = database
         .radio_source(&seed, &ReadCancellation::new())
         .await
         .map_err(|error| error.to_string())?
@@ -127,7 +127,7 @@ pub(crate) async fn radio_candidates(
             .await
             .map_err(|error| error.to_string())?;
     let source = source.as_deref();
-    let native_seed = source_seed(database, source_key, source, &seed).await?;
+    let native_seed = source_seed(source, &seed, object_id);
     let mut native = if let (Some(source), Some(native_seed)) = (source, native_seed) {
         match source
             .generated_track_object_ids(&native_seed, requested.min(256))
@@ -165,52 +165,23 @@ pub(crate) async fn radio_candidates(
     Ok(native)
 }
 
-async fn source_seed(
-    database: &Database,
-    source_key: SourceKey,
+fn source_seed(
     source: Option<&Source>,
     seed: &RadioSeed,
-) -> Result<Option<SourceRadioSeed>, String> {
-    let cancel = ReadCancellation::new();
-    Ok(match seed {
+    object_id: Option<String>,
+) -> Option<SourceRadioSeed> {
+    match seed {
         RadioSeed::Track(media_uri) => {
             library::source_entity_parts(media_uri).and_then(|(source_id, kind, object_id)| {
                 (kind == "track" && source.is_some_and(|source| source.source_id() == &source_id))
                     .then_some(SourceRadioSeed::Track(object_id))
             })
         }
-        RadioSeed::Album(key) => database
-            .album_rows(source_key, &[*key], None, &cancel)
-            .await
-            .map_err(|e| e.to_string())?
-            .pop()
-            .map(|row| SourceRadioSeed::Album(row.object_id)),
-        RadioSeed::Artist(key) => database
-            .artist_rows(source_key, &[*key], false, None, &cancel)
-            .await
-            .map_err(|e| e.to_string())?
-            .pop()
-            .map(|row| SourceRadioSeed::Artist(row.object_id)),
-        RadioSeed::AlbumArtist(key) => database
-            .artist_rows(source_key, &[*key], true, None, &cancel)
-            .await
-            .map_err(|e| e.to_string())?
-            .pop()
-            .map(|row| SourceRadioSeed::Artist(row.object_id)),
-        RadioSeed::Genre(key) => database
-            .genre_rows(source_key, &[*key], None, &cancel)
-            .await
-            .map_err(|e| e.to_string())?
-            .pop()
-            .map(|row| SourceRadioSeed::Genre(row.object_id)),
-        RadioSeed::Playlist(key) => database
-            .playlist_rows(&[*key], &cancel)
-            .await
-            .map_err(|e| e.to_string())?
-            .pop()
-            .filter(|row| row.source_key == Some(source_key))
-            .map(|row| SourceRadioSeed::Playlist(row.object_id)),
-    })
+        RadioSeed::Album(_) => object_id.map(SourceRadioSeed::Album),
+        RadioSeed::Artist(_) | RadioSeed::AlbumArtist(_) => object_id.map(SourceRadioSeed::Artist),
+        RadioSeed::Genre(_) => object_id.map(SourceRadioSeed::Genre),
+        RadioSeed::Playlist(_) => object_id.map(SourceRadioSeed::Playlist),
+    }
 }
 
 async fn complete_materialization(
