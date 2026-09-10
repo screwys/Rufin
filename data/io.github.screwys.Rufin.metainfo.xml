@@ -37,51 +37,51 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/albums.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/albums.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/album_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the appearance</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/appearance_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/appearance_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/customize_display.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/download_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/download_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>View keyboard shortcuts</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/keyboard_shortcuts.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/keyboard_shortcuts.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.2/data/screenshots/visualizer.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/visualizer.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -92,6 +92,29 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.15.3" date="2026-09-10">
+      <description>
+        <p>Since 0.15.2 did not reach Flathub, this release intends to be its replacement, plus some additions:</p>
+        <ul>
+          <li>A failed metadata read could crash the scanning process. This occurred with Creative prefix as well in Flatpak runtime, the newer version of GStreamer fixed this.</li>
+        </ul>
+        <ul>
+          <li>Made window drag handles larger and restored it for compact sidebar.</li>
+        </ul>
+        <ul>
+          <li>You can now drag pins to the queue, or to a playlist when you are in playlists route.</li>
+        </ul>
+        <ul>
+          <li>Removed extra left padding on home to match it for the detail routes.</li>
+        </ul>
+        <ul>
+          <li>Optimized some SQL queries.</li>
+        </ul>
+        <ul>
+          <li>Fixed an issue with track updates triggering Plex artwork refresh.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.15.2" date="2026-09-09">
       <description>
         <p>Another hotfix release since apparently not all Windows machines are equal.</p>
