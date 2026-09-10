@@ -174,6 +174,13 @@ impl SelectedFeed {
                 .map(Some),
             (
                 Implementation::JellyfinEmby(source),
+                SelectedFeedChange::JellyfinEmby(RemoteItemChange::UserData { upserts }),
+            ) => source
+                .apply_user_data(database, self.source.source_id.as_str(), upserts)
+                .await
+                .map(Some),
+            (
+                Implementation::JellyfinEmby(source),
                 SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items { upserts, removals }),
             ) => source
                 .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
@@ -350,6 +357,9 @@ pub(crate) fn optional_collection_error(error: SourceError) -> SourceResult<()> 
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) enum RemoteItemChange {
+    UserData {
+        upserts: Vec<String>,
+    },
     Items {
         upserts: Vec<String>,
         removals: Vec<String>,
@@ -361,6 +371,28 @@ impl RemoteItemChange {
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
             (Self::BoundaryLost, _) | (_, Self::BoundaryLost) => Self::BoundaryLost,
+            (
+                Self::UserData {
+                    upserts: mut current,
+                },
+                Self::UserData { upserts },
+            ) => {
+                current.extend(upserts);
+                current.sort();
+                current.dedup();
+                if current.len() > LIVE_CHANGE_LIMIT {
+                    Self::BoundaryLost
+                } else {
+                    Self::UserData { upserts: current }
+                }
+            }
+            (Self::UserData { upserts }, items @ Self::Items { .. })
+            | (items @ Self::Items { .. }, Self::UserData { upserts }) => {
+                items.merge(Self::Items {
+                    upserts,
+                    removals: Vec::new(),
+                })
+            }
             (
                 Self::Items {
                     upserts: mut current_upserts,

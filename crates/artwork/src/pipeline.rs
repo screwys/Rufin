@@ -127,7 +127,10 @@ struct DecodedAccess {
 }
 
 enum Resolution {
-    Ready { image: Arc<DecodedImage> },
+    Ready {
+        image: Arc<DecodedImage>,
+        cached: bool,
+    },
     Cached,
     Fetched,
     Missing,
@@ -895,6 +898,7 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 Ok(image) => {
                     return Resolution::Ready {
                         image: Arc::new(image),
+                        cached: true,
                     };
                 }
                 Err(error) => {
@@ -931,6 +935,7 @@ fn resolve_candidate(shared: &Shared, work: &Work) -> Resolution {
                 ) {
                     Ok(image) => Resolution::Ready {
                         image: Arc::new(image),
+                        cached: false,
                     },
                     Err(error) => {
                         shared.cache.remove_ready(&path);
@@ -1019,7 +1024,7 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         return;
     }
     if record.has_interest()
-        && let Resolution::Ready { image } = &resolution
+        && let Resolution::Ready { image, .. } = &resolution
     {
         state.decoded_index.insert(
             image.key().clone(),
@@ -1045,8 +1050,8 @@ fn finish(shared: &Shared, work: Work, resolution: Resolution) {
         completions.push((projection.completion, outcome));
     }
     let background_result = match &resolution {
-        Resolution::Ready { .. } | Resolution::Fetched => BackgroundResult::Ready,
-        Resolution::Cached => BackgroundResult::Cached,
+        Resolution::Ready { cached: true, .. } | Resolution::Cached => BackgroundResult::Cached,
+        Resolution::Ready { cached: false, .. } | Resolution::Fetched => BackgroundResult::Ready,
         Resolution::Missing => BackgroundResult::Missing,
         Resolution::Failed(_) => BackgroundResult::Failed,
     };
@@ -1104,6 +1109,78 @@ fn lock_cache_commit(shared: &Shared) -> MutexGuard<'_, ()> {
 mod tests {
     use super::*;
     use sources::NativeImageRef;
+
+    #[tokio::test]
+    async fn shared_foreground_and_preparation_disk_hit_counts_as_cached() {
+        let directory = tempfile::tempdir().unwrap();
+        let cache = FilesystemCache::new(directory.path().to_path_buf()).unwrap();
+        let request = CandidateRequest {
+            candidate: Candidate::Native(sources::NativeArtworkBinding {
+                source_id: SourceId::new("source"),
+                image: NativeImageRef::new("album", None),
+            }),
+            fetch_size: 256,
+            render_size: 144,
+            external: ExternalPolicy::default(),
+            allow_fetch: true,
+        };
+        let mut png = std::io::Cursor::new(Vec::new());
+        image::DynamicImage::ImageRgba8(image::RgbaImage::from_pixel(
+            16,
+            16,
+            image::Rgba([40, 80, 120, 255]),
+        ))
+        .write_to(&mut png, image::ImageFormat::Png)
+        .unwrap();
+        cache
+            .write_ready(&request.candidate, 256, png.get_ref())
+            .unwrap();
+        // Drive one shared job explicitly so worker scheduling cannot separate its subscribers.
+        let mut state = State::default();
+        let request_id = RequestId(1);
+        let key = enqueue_projection(
+            &mut state,
+            request.clone(),
+            request_id,
+            JobPriority::Foreground,
+        );
+        let (completion, foreground) = oneshot::channel();
+        state.projections.insert(
+            request_id,
+            ProjectionRecord {
+                request: request.clone(),
+                priority: JobPriority::Foreground,
+                job: key,
+                completion,
+            },
+        );
+        let (completion, background) = mpsc::channel();
+        enqueue_background_candidate(
+            &mut state,
+            request,
+            PreparationSubscriber { id: 1, completion },
+        );
+        assert_eq!(state.jobs.len(), 1);
+        let shared = Shared {
+            runtime: Handle::current(),
+            cache,
+            fetch: FetchContext::new(Arc::new(Mutex::new(None))),
+            cache_commit: Mutex::new(()),
+            state: Mutex::new(state),
+            wake: Condvar::new(),
+        };
+        let work = next_work(&shared, false);
+        let resolution = resolve(&shared, &work);
+        finish(&shared, work, resolution);
+        assert!(matches!(
+            foreground.await.unwrap(),
+            ArtworkOutcome::Ready(_)
+        ));
+        assert!(matches!(
+            background.try_recv().unwrap(),
+            BackgroundResult::Cached
+        ));
+    }
 
     #[test]
     fn durable_no_art_binding_completes_as_missing() {

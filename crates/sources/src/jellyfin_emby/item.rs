@@ -603,13 +603,13 @@ fn duration_seconds(ticks: Option<i64>) -> u32 {
         .unwrap_or(0)
 }
 
-fn favorite(data: &Value) -> bool {
+pub(super) fn favorite(data: &Value) -> bool {
     boolean(&data["IsFavorite"]).unwrap_or(false)
 }
 fn play_count(data: &Value) -> Option<u32> {
     field::<i32>(data, "PlayCount").map(|v| v.max(0) as u32)
 }
-fn user_rating(data: &Value) -> Option<u8> {
+pub(super) fn user_rating(data: &Value) -> Option<u8> {
     field::<f64>(data, "Rating")
         .filter(|v| v.is_finite() && (0.0..=10.0).contains(v))
         .map(|v| v.round() as u8)

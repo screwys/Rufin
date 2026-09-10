@@ -193,9 +193,8 @@ fn library_socket_message(text: &str, user_id: &str) -> SourceResult<JellyfinSoc
                     RemoteItemChange::BoundaryLost,
                 ))
             } else {
-                Ok(JellyfinSocketMessage::Change(RemoteItemChange::Items {
+                Ok(JellyfinSocketMessage::Change(RemoteItemChange::UserData {
                     upserts,
-                    removals: Vec::new(),
                 }))
             }
         }
@@ -267,9 +266,8 @@ mod tests {
         let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"album","IsFavorite":true},{"ItemId":42,"PlayCount":3},{"ItemId":"album"},{"ItemId":null}]}}"#;
         assert_eq!(
             library_socket_message(event, "user").unwrap(),
-            JellyfinSocketMessage::Change(RemoteItemChange::Items {
+            JellyfinSocketMessage::Change(RemoteItemChange::UserData {
                 upserts: vec!["42".into(), "album".into()],
-                removals: vec![],
             })
         );
         assert_eq!(
@@ -341,13 +339,13 @@ mod tests {
             scan.finish().await.unwrap();
             let event = r#"{"MessageType":"UserDataChanged","Data":{"UserId":"user","UserDataList":[{"ItemId":"3272","IsFavorite":true}]}}"#;
             for repeated in [false, true] {
-                let JellyfinSocketMessage::Change(RemoteItemChange::Items { upserts, removals }) =
+                let JellyfinSocketMessage::Change(RemoteItemChange::UserData { upserts }) =
                     library_socket_message(event, "user").unwrap()
                 else {
                     panic!("user data must retain the item boundary");
                 };
                 let outcome = source
-                    .apply_live_items(&database, "source", upserts, removals)
+                    .apply_user_data(&database, "source", upserts)
                     .await
                     .unwrap();
                 assert_eq!(

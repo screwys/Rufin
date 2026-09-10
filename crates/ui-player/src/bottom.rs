@@ -1148,10 +1148,8 @@ impl crate::PlayerUi {
             .album
             .set_sensitive(presentation.current && !presentation.album.is_empty());
         controls.favorite_button.set_sensitive(presentation.current);
-        set_favorite_button_active(&controls.favorite_button, false);
         let rating_visible =
             self.settings.current.borrow().show_bottom_bar_rating && presentation.current;
-        controls.rating.set_rating(None, false);
         controls.rating.widget().set_visible(rating_visible);
         controls.rating.widget().set_sensitive(rating_visible);
         controls.action_buttons.set_margin_top(if rating_visible {
