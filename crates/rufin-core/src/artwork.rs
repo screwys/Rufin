@@ -27,8 +27,13 @@ pub async fn prepare_database_source(
     if artwork.source_preparation_complete(source_id, accepted_revision)? {
         return Ok(None);
     }
+    tracing::debug!(
+        ?source_key,
+        revision = accepted_revision,
+        "preparing source artwork"
+    );
     let mut completed = 0_usize;
-    let mut visible_progress = false;
+    let mut fetched = 0_usize;
     let revision = accepted_revision;
     let manifest = artwork.begin_source_manifest(source_id.clone(), revision)?;
     let mut after_binding = None;
@@ -59,11 +64,20 @@ pub async fn prepare_database_source(
         .await
         .map_err(|error| ArtworkError::Decode(error.to_string()))??;
         completed = completed.saturating_add(summary.total);
-        if summary.total > summary.cached.saturating_add(summary.missing) {
-            visible_progress = true;
-        }
-        if visible_progress {
-            progress(revision, completed);
+        tracing::debug!(
+            ?source_key,
+            revision,
+            completed,
+            cached = summary.cached,
+            ready = summary.ready,
+            missing = summary.missing,
+            failed = summary.failed,
+            "prepared source artwork page"
+        );
+        let newly_fetched = summary.ready.saturating_sub(summary.cached);
+        if newly_fetched > 0 {
+            fetched = fetched.saturating_add(newly_fetched);
+            progress(revision, fetched);
         }
     }
     manifest.finish()?;
@@ -132,6 +146,49 @@ mod tests {
             .unwrap();
             assert_eq!(progress.load(Ordering::Relaxed), expected);
         }
+        let second_binding = serde_json::to_vec(&sources::LocalImageRef::File {
+            source_id: source.clone(),
+            path: image_path.to_string_lossy().into_owned(),
+            revision: "2".into(),
+        })
+        .unwrap();
+        let mut scan = library::Scan::begin_items(&database, source.as_str())
+            .await
+            .unwrap();
+        scan.write_artist(
+            "second",
+            "Second",
+            "second",
+            Some("second"),
+            None,
+            Some(&second_binding),
+            None,
+            None,
+        )
+        .await
+        .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("second artist must be published");
+        };
+        let progress = AtomicUsize::new(0);
+        prepare_database_source(
+            &artwork,
+            &database,
+            publication.source,
+            &source,
+            publication.artwork_digest,
+            &|_, fetched| {
+                progress.store(fetched, Ordering::Relaxed);
+            },
+            Arc::new(AtomicBool::new(false)),
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            progress.load(Ordering::Relaxed),
+            1,
+            "cached bindings are not fetch progress"
+        );
     }
 
     #[tokio::test]

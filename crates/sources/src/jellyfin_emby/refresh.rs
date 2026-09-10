@@ -8,6 +8,63 @@ use super::*;
 use crate::source::{SourceReadProgress, SourceReadStage};
 
 impl JellyfinEmbySource {
+    pub(crate) async fn apply_user_data(
+        &self,
+        database: &library::Database,
+        source_id: &str,
+        upserts: Vec<String>,
+    ) -> SourceResult<library::ScanOutcome> {
+        let source_id_value = crate::SourceId::new(source_id);
+        let source_key = database
+            .source_identity_key(&source_id_value)
+            .await?
+            .ok_or(SourceError::InvalidRequest(
+                "User data source is unavailable",
+            ))?;
+        let mut states = Vec::with_capacity(upserts.len());
+        for raw_id in &upserts {
+            let mut url = self.item_url(raw_id)?;
+            url.query_pairs_mut()
+                .append_pair("UserId", &self.user_id)
+                .append_pair("Fields", "UserData");
+            let item = self.get_json::<Value>(url).await?;
+            let kind = match item["Type"].as_str() {
+                Some("Audio") => "track",
+                Some("MusicAlbum") => "album",
+                Some("MusicArtist") => "artist",
+                _ => {
+                    return self
+                        .apply_live_items(database, source_id, upserts, Vec::new())
+                        .await;
+                }
+            };
+            let uri = library::source_entity_uri(
+                &source_id_value,
+                kind,
+                &self.kind.object_id(kind, raw_id),
+            );
+            let target = match kind {
+                "track" => library::FavoriteTarget::Track(uri),
+                "album" => library::FavoriteTarget::Album(uri),
+                _ => library::FavoriteTarget::Artist(uri),
+            };
+            states.push((
+                target,
+                item::favorite(&item["UserData"]),
+                item::user_rating(&item["UserData"]),
+            ));
+        }
+        if let Some(outcome) = database
+            .update_source_user_states(source_key, &states)
+            .await?
+        {
+            Ok(outcome)
+        } else {
+            self.apply_live_items(database, source_id, upserts, Vec::new())
+                .await
+        }
+    }
+
     pub(crate) async fn home_section(
         &self,
         section: crate::SourceHomeSection,

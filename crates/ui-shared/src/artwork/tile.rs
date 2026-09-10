@@ -9,7 +9,7 @@ pub struct ArtworkTile {
     pub area: gtk::Overlay,
     image: gtk::Picture,
     size: Rc<Cell<i32>>,
-    known_missing: Rc<Cell<bool>>,
+    request_complete: Rc<Cell<bool>>,
     request_key: Rc<RefCell<Option<artwork::ArtworkKey>>>,
     artwork_request: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
     generation: Rc<Cell<u64>>,
@@ -21,7 +21,7 @@ pub struct ArtworkTileWeak {
     area: glib::WeakRef<gtk::Overlay>,
     image: glib::WeakRef<gtk::Picture>,
     size: Rc<Cell<i32>>,
-    known_missing: Rc<Cell<bool>>,
+    request_complete: Rc<Cell<bool>>,
     request_key: Rc<RefCell<Option<artwork::ArtworkKey>>>,
     artwork_request: Rc<RefCell<Option<glib::JoinHandle<()>>>>,
     generation: Rc<Cell<u64>>,
@@ -33,7 +33,6 @@ pub struct ArtworkBindOutcome {
     pub generation: u64,
     pub request_needed: bool,
     pub request_changed: bool,
-    pub terminal_missing: bool,
 }
 
 impl ArtworkTile {
@@ -83,7 +82,7 @@ impl ArtworkTile {
         area.set_clip_overlay(&image, true);
 
         let size = Rc::new(Cell::new(size));
-        let known_missing = Rc::new(Cell::new(false));
+        let request_complete = Rc::new(Cell::new(false));
         let request_key = Rc::new(RefCell::new(None::<artwork::ArtworkKey>));
         let artwork_request = Rc::new(RefCell::new(None));
         let generation = Rc::new(Cell::new(0));
@@ -93,7 +92,7 @@ impl ArtworkTile {
             area,
             image,
             size,
-            known_missing,
+            request_complete,
             request_key,
             artwork_request,
             generation,
@@ -114,7 +113,7 @@ impl ArtworkTile {
             area: self.area.downgrade(),
             image: self.image.downgrade(),
             size: Rc::clone(&self.size),
-            known_missing: Rc::clone(&self.known_missing),
+            request_complete: Rc::clone(&self.request_complete),
             request_key: Rc::clone(&self.request_key),
             artwork_request: Rc::clone(&self.artwork_request),
             generation: Rc::clone(&self.generation),
@@ -139,30 +138,37 @@ impl ArtworkTile {
         self.generation.set(self.generation.get().saturating_add(1));
     }
 
-    pub fn bind_selected_cover(&self, request_key: artwork::ArtworkKey) -> ArtworkBindOutcome {
+    pub fn bind_selected_cover(
+        &self,
+        request_key: artwork::ArtworkKey,
+        keep_previous: bool,
+    ) -> ArtworkBindOutcome {
         let same_artwork = self
             .request_key
             .borrow()
             .as_ref()
             .is_some_and(|previous| previous.same_image(&request_key));
         let same_request = self.request_key.borrow().as_ref() == Some(&request_key);
-        let has_texture = self.image.paintable().is_some();
-        let terminal_missing =
-            same_artwork && same_request && !has_texture && self.known_missing.get();
+        if same_request && self.request_complete.get() {
+            return ArtworkBindOutcome {
+                generation: self.generation.get(),
+                request_needed: false,
+                request_changed: false,
+            };
+        }
 
         let request_changed = !same_artwork || !same_request;
         if request_changed {
             self.advance_generation();
             *self.request_key.borrow_mut() = Some(request_key);
+            self.request_complete.set(false);
         }
 
-        if !same_artwork {
+        if !same_artwork && !keep_previous {
             self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
         }
-        self.known_missing.set(terminal_missing);
-
         let has_texture = self.image.paintable().is_some();
-        if has_texture || terminal_missing || self.area.has_css_class("cover-fallback") {
+        if has_texture || self.area.has_css_class("cover-fallback") {
             self.sync_presentation(has_texture, true);
         } else {
             self.image.set_visible(false);
@@ -174,9 +180,8 @@ impl ArtworkTile {
 
         ArtworkBindOutcome {
             generation: self.generation.get(),
-            request_needed: request_changed || (!has_texture && !terminal_missing),
+            request_needed: !self.request_complete.get(),
             request_changed,
-            terminal_missing,
         }
     }
 
@@ -214,12 +219,12 @@ impl ArtworkTile {
         self.bind_image_state(None, true)
     }
 
-    fn bind_image_state(&self, texture: Option<gtk::gdk::Texture>, known_missing: bool) -> u64 {
+    fn bind_image_state(&self, texture: Option<gtk::gdk::Texture>, request_complete: bool) -> u64 {
         let generation = self.generation.get().saturating_add(1);
         self.generation.set(generation);
         let has_texture = texture.is_some();
         self.image.set_paintable(texture.as_ref());
-        self.known_missing.set(known_missing);
+        self.request_complete.set(request_complete);
         *self.request_key.borrow_mut() = None;
         self.sync_presentation(has_texture, true);
         generation
@@ -230,7 +235,7 @@ impl ArtworkTile {
             return false;
         }
         self.image.set_paintable(Some(&texture));
-        self.known_missing.set(false);
+        self.request_complete.set(true);
         self.sync_presentation(true, true);
         true
     }
@@ -238,7 +243,7 @@ impl ArtworkTile {
     pub fn clear_image(&self) {
         self.advance_generation();
         self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
-        self.known_missing.set(false);
+        self.request_complete.set(false);
         *self.request_key.borrow_mut() = None;
         self.sync_presentation(false, false);
     }
@@ -249,7 +254,7 @@ impl ArtworkTile {
         }
         self.generation.set(self.generation.get().saturating_add(1));
         self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
-        self.known_missing.set(false);
+        self.request_complete.set(false);
         *self.request_key.borrow_mut() = None;
         self.sync_presentation(false, true);
         true
@@ -261,7 +266,7 @@ impl ArtworkTile {
         }
         self.generation.set(self.generation.get().saturating_add(1));
         self.image.set_paintable(Option::<&gtk::gdk::Texture>::None);
-        self.known_missing.set(true);
+        self.request_complete.set(true);
         self.sync_presentation(false, true);
         true
     }
@@ -284,7 +289,7 @@ impl ArtworkTileWeak {
             area: self.area.upgrade()?,
             image: self.image.upgrade()?,
             size: Rc::clone(&self.size),
-            known_missing: Rc::clone(&self.known_missing),
+            request_complete: Rc::clone(&self.request_complete),
             request_key: Rc::clone(&self.request_key),
             artwork_request: Rc::clone(&self.artwork_request),
             generation: Rc::clone(&self.generation),

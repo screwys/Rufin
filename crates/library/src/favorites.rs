@@ -29,6 +29,56 @@ impl FavoriteTarget {
 }
 
 impl Database {
+    /// Apply native user preferences without republishing catalog metadata or artwork.
+    /// An uncached target needs normal item acquisition before its state can be applied.
+    pub async fn update_source_user_states(
+        &self,
+        source: crate::SourceKey,
+        states: &[(FavoriteTarget, bool, Option<u8>)],
+    ) -> LibraryResult<Option<crate::ScanOutcome>> {
+        let mut writer = self.writer().await?;
+        let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
+        let mut transaction = connection.begin().await?;
+        let mut changed = false;
+        for (target, favorite, rating) in states {
+            let table = match target {
+                FavoriteTarget::Track(_) => "tracks",
+                FavoriteTarget::Album(_) => "albums",
+                FavoriteTarget::Artist(_) => "artists",
+            };
+            let sql = format!(
+                "SELECT source_favorite,source_rating FROM {table} WHERE source_key=?1 AND media_uri=?2"
+            );
+            let current = sqlx::query_as::<_, (bool, Option<i64>)>(sqlx::AssertSqlSafe(sql))
+                .bind(source)
+                .bind(target.media_uri())
+                .fetch_optional(&mut *transaction)
+                .await?;
+            let Some(current) = current else {
+                transaction.rollback().await?;
+                return Ok(None);
+            };
+            let rating = rating.map(|value| i64::from(value) * 10);
+            if current == (*favorite, rating) {
+                continue;
+            }
+            let sql = format!(
+                "UPDATE {table} SET source_favorite=?3,source_rating=?4 WHERE source_key=?1 AND media_uri=?2"
+            );
+            sqlx::query(sqlx::AssertSqlSafe(sql))
+                .bind(source)
+                .bind(target.media_uri())
+                .bind(favorite)
+                .bind(rating)
+                .execute(&mut *transaction)
+                .await?;
+            changed = true;
+        }
+        let outcome = crate::scan::metadata_publication(&mut transaction, source, changed).await?;
+        transaction.commit().await?;
+        Ok(Some(outcome))
+    }
+
     pub async fn user_media_state(
         &self,
         media_uri: &str,

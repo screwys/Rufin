@@ -1185,6 +1185,7 @@ impl SourceOwner {
         outcome: ScanOutcome,
         change: CatalogChange,
     ) {
+        tracing::debug!(?outcome, ?change, "accepting source scan result");
         let refresh_counts = matches!(outcome, ScanOutcome::Changed(_));
         let refresh_summary = refresh_counts && change == CatalogChange::Acquired;
         let (publication, catalog_changed, change) = match outcome {

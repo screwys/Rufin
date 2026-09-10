@@ -90,6 +90,16 @@ impl PlayerUi {
     }
     pub fn replace_player(&self, player: PlaybackView) {
         let mut playback = self.playback.borrow_mut();
+        let previous_uri = playback
+            .as_ref()
+            .and_then(|playback| playback.player.transport.current.as_ref())
+            .map(|current| current.media_uri.as_str());
+        let next_uri = player
+            .transport
+            .current
+            .as_ref()
+            .map(|current| current.media_uri.as_str());
+        let track_changed = previous_uri != next_uri;
         match playback.as_mut() {
             Some(playback) => playback.player = player,
             None => {
@@ -99,6 +109,12 @@ impl PlayerUi {
                     seek_preview_seconds: None,
                 });
             }
+        }
+        drop(playback);
+        if track_changed {
+            let controls = &self.views.player_controls;
+            ui_shared::favorites::set_favorite_button_active(&controls.favorite_button, false);
+            controls.rating.set_rating(None, false);
         }
     }
     pub fn waveform(&self) -> Option<WaveformProjection> {

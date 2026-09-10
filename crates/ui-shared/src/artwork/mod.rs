@@ -57,15 +57,6 @@ fn cover_request_sizes(display_size: i32, fetch_size_cap: u32, scale: f64) -> (u
     (fetch_size.min(fetch_size_cap), render_size)
 }
 
-const fn artwork_binding_needs_work(
-    tile_needs_request: bool,
-    exact_ready: bool,
-    terminal_missing: bool,
-    request_active: bool,
-) -> bool {
-    tile_needs_request || (!exact_ready && !terminal_missing && !request_active)
-}
-
 pub struct ArtworkState {
     service: artwork::Artwork,
     settings: Rc<SettingsState>,
@@ -242,13 +233,8 @@ impl ArtworkState {
         } else {
             self.service.prepare(request)
         };
-        let outcome = tile.bind_selected_cover(prepared.key.clone());
-        if !artwork_binding_needs_work(
-            outcome.request_needed,
-            prepared.ready.is_some(),
-            outcome.terminal_missing,
-            tile.has_artwork_request(),
-        ) {
+        let outcome = tile.bind_selected_cover(prepared.key.clone(), refresh_desktop_on_ready);
+        if !outcome.request_needed {
             return;
         }
         if !outcome.request_changed && tile.has_artwork_request() {
@@ -554,8 +540,7 @@ fn cache_only_artwork_external_policy() -> artwork::ExternalPolicy {
 #[cfg(test)]
 mod tests {
     use super::{
-        ArtworkPrime, artwork_binding_needs_work, cache_only_artwork_external_policy,
-        cover_decode_size, cover_request_sizes,
+        ArtworkPrime, cache_only_artwork_external_policy, cover_decode_size, cover_request_sizes,
     };
 
     #[test]
@@ -585,14 +570,6 @@ mod tests {
         assert!(policy.allow_cached);
         assert!(!policy.allow_network);
         assert!(!policy.allow_musicbrainz);
-    }
-
-    #[test]
-    fn cancelled_exact_request_restarts_without_a_visible_preview() {
-        assert!(artwork_binding_needs_work(false, false, false, false));
-        assert!(!artwork_binding_needs_work(false, false, false, true));
-        assert!(!artwork_binding_needs_work(false, true, false, false));
-        assert!(!artwork_binding_needs_work(false, false, true, false));
     }
 
     #[test]
