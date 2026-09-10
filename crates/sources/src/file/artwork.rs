@@ -56,6 +56,8 @@ pub(crate) fn inspect_embedded_input(
     }
     discoverer
         .read_input(file, uri)
+        .ok()
+        .flatten()
         .and_then(|metadata| metadata.artwork_index)
 }
 

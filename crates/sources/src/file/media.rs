@@ -126,7 +126,7 @@ struct AudioMetadata {
 
 #[derive(Default)]
 pub(crate) struct Worker {
-    discovery: discovery::Reader,
+    pub(crate) discovery: discovery::Reader,
 }
 
 impl Worker {
@@ -135,6 +135,23 @@ impl Worker {
             discovery: discovery::Reader::network(),
         }
     }
+}
+
+pub(crate) fn excluded_from_audio_scan(path: &Path) -> bool {
+    path.extension()
+        .and_then(|extension| extension.to_str())
+        .is_some_and(|extension| {
+            [
+                "tmp", "tar", "gz", "bz2", "xz", "tbz", "tgz", "z", "zip", "rar", "wvc", "zst",
+                "lrc",
+            ]
+            .iter()
+            .any(|excluded| extension.eq_ignore_ascii_case(excluded))
+        })
+        || path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .is_some_and(|name| name.split('.').next() == Some("qt_temp"))
 }
 
 pub(crate) fn read_media_input(
@@ -146,31 +163,27 @@ pub(crate) fn read_media_input(
 ) -> MediaRead {
     // Recognize a frame sync at the start or immediately after ID3 metadata;
     // searching binary interiors can mistake executable bytes for MPEG audio.
-    let tagged_file = read_lofty_file(
+    let mut tagged_file = read_lofty_file(
         &mut *file,
         ParseOptions::new().read_cover_art(false).max_junk_bytes(2),
     )
     .ok()
-    .flatten();
-    let topology_admitted = tagged_file
-        .as_ref()
-        .filter(|file| requires_topology_admission(file.file_type()))
-        .map(|_| worker.discovery.read_input(file, uri));
-    let mut tagged_file = tagged_file.filter(|file| {
-        if requires_topology_admission(file.file_type()) {
-            topology_admitted.as_ref().is_some_and(Option::is_some)
-        } else {
-            lofty_supplies_required_audio(file)
-        }
+    .flatten()
+    .filter(|file| {
+        requires_topology_admission(file.file_type()) || lofty_supplies_required_audio(file)
     });
-    let discovered = if tagged_file.is_none() {
-        if topology_admitted.is_some_and(|admitted| admitted.is_none()) {
-            return MediaRead::Rejected;
+    let discovered = if tagged_file
+        .as_ref()
+        .is_none_or(|file| requires_topology_admission(file.file_type()))
+    {
+        match worker.discovery.read_input(file, uri) {
+            Ok(Some(metadata)) => Some(metadata),
+            Ok(None) => return MediaRead::Rejected,
+            Err(error) => {
+                tracing::warn!(?path, %error, "Media discovery failed");
+                return MediaRead::Unreadable;
+            }
         }
-        let Some(discovered) = worker.discovery.read_input(file, uri) else {
-            return MediaRead::Rejected;
-        };
-        Some(discovered)
     } else {
         None
     };
@@ -887,6 +900,8 @@ mod tests {
         let directory = tempfile::tempdir().expect("audio directory");
         for (name, prefixed) in [
             ("track.mp3", false),
+            ("track.txt", false),
+            ("track", false),
             ("track.bin", false),
             ("prefixed.bin", true),
         ] {

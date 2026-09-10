@@ -112,7 +112,7 @@ async fn dav_scan_attempts_remaining_files_after_an_unreadable_file() {
             .unwrap();
         assert_eq!(rows.len(), 2);
         let requests = server.received_requests().await.unwrap();
-        for name in ["/a.wav", "/b.wav", "/c.wav", "/c.lrc"] {
+        for name in ["/a.wav", "/b.wav", "/c.wav"] {
             assert!(
                 requests[before..]
                     .iter()
