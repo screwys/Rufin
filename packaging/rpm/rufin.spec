@@ -1,5 +1,5 @@
 Name:           rufin
-Version:        0.15.2
+Version:        0.15.3
 Release:        1%{?dist}
 Summary:        Native GTK4/libadwaita music player written in Rust
 
