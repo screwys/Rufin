@@ -65,17 +65,6 @@ pub enum SecretError {
 
 pub type SecretResult<T> = Result<T, SecretError>;
 
-#[cfg(all(unix, not(any(target_os = "android", target_vendor = "apple"))))]
-async fn secret_portal_available() -> bool {
-    if !oo7::ashpd::is_sandboxed() {
-        return false;
-    }
-    let Ok(portal) = oo7::ashpd::desktop::secret::Secret::new().await else {
-        return false;
-    };
-    portal.get_property::<u32>("version").await.is_ok()
-}
-
 #[derive(Clone, Debug, Eq, Hash, PartialEq)]
 pub struct SecretKey {
     config_key: String,
@@ -540,15 +529,7 @@ impl SystemKeyringBackend {
                 .map_err(|error| SecretError::Backend(error.to_string()))?;
             let keyring = runtime
                 .block_on(async {
-                    tokio::time::timeout(KEYRING_TIMEOUT, async {
-                        if secret_portal_available().await {
-                            oo7::Keyring::new().await
-                        } else {
-                            let service = oo7::dbus::Service::new().await?;
-                            Ok(oo7::Keyring::DBus(service.default_collection().await?))
-                        }
-                    })
-                    .await
+                    tokio::time::timeout(KEYRING_TIMEOUT, oo7::Keyring::new()).await
                 })
                 .map_err(|_| SecretError::Backend("secret service timed out".into()))
                 .and_then(|result| result.map_err(|error| SecretError::Backend(error.to_string())));
