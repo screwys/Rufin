@@ -12,6 +12,9 @@ use gstreamer_pbutils::{Discoverer, DiscovererInfo, DiscovererResult};
 
 use crate::{ImageBytes, SourceError, SourceResult};
 
+mod process;
+pub use process::run_worker;
+
 const DISCOVERER_TIMEOUT_SECONDS: u64 = 1;
 const MAX_ATTACHMENT_COUNT: usize = 256;
 const MAX_ATTACHMENT_BYTES: u64 = 32 * 1024 * 1024;
@@ -45,7 +48,7 @@ const ASF_AUDIO_MEDIA_GUID: [u8; 16] = [
 ];
 const WAVE_FORMAT_WMA_PRO: u16 = 0x0162;
 
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Debug, Default, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub(crate) struct Metadata {
     pub(crate) title: Option<String>,
     pub(crate) album: Option<String>,
@@ -77,74 +80,52 @@ pub(crate) struct Metadata {
 
 #[derive(Default)]
 pub(crate) struct Reader {
-    discoverer: DiscovererState,
+    process: Option<process::Client>,
     timeout_seconds: Option<u64>,
-}
-
-enum DiscovererState {
-    New,
-    Ready(Discoverer),
-    Unavailable,
-}
-
-impl Default for DiscovererState {
-    fn default() -> Self {
-        Self::New
-    }
 }
 
 impl Reader {
     pub(crate) fn network() -> Self {
         Self {
-            discoverer: DiscovererState::New,
+            process: None,
             timeout_seconds: Some(30),
         }
     }
     pub(crate) fn read(&mut self, path: &Path) -> Option<Metadata> {
-        let info = self.discover(path)?;
-        metadata_from_info(&info)
+        let mut file = fs::File::open(path).ok()?;
+        let uri = url::Url::from_file_path(path).ok()?;
+        self.read_input(&mut file, uri.as_str()).ok().flatten()
     }
 
     pub(crate) fn read_input(
         &mut self,
         file: &mut (impl Read + Seek),
         uri: &str,
-    ) -> Option<Metadata> {
-        let info = self.discover_input(file, uri)?;
-        metadata_from_info(&info)
+    ) -> std::io::Result<Option<Metadata>> {
+        if preflight_known_container(file).is_err() {
+            return Ok(None);
+        }
+        match self.request(uri, None)? {
+            process::Reply::Metadata(metadata) => Ok(metadata.map(|metadata| *metadata)),
+            _ => Err(std::io::Error::other("Unexpected discovery response")),
+        }
     }
 
-    fn discover(&mut self, path: &Path) -> Option<DiscovererInfo> {
-        let mut file = fs::File::open(path).ok()?;
-        let uri = url::Url::from_file_path(path).ok()?;
-        self.discover_input(&mut file, uri.as_str())
-    }
-
-    fn discover_input(
+    fn request(
         &mut self,
-        file: &mut (impl Read + Seek),
         uri: &str,
-    ) -> Option<DiscovererInfo> {
-        preflight_known_container(file).ok()?;
-        let info = self.discoverer()?.discover_uri(uri).ok()?;
-        admitted_audio_stream(&info).map(|_| info)
-    }
-
-    fn discoverer(&mut self) -> Option<&Discoverer> {
-        if matches!(self.discoverer, DiscovererState::New) {
-            self.discoverer = ensure_gstreamer_initialized()
-                .and_then(|()| {
-                    Discoverer::new(gst::ClockTime::from_seconds(
-                        self.timeout_seconds.unwrap_or(DISCOVERER_TIMEOUT_SECONDS),
-                    ))
-                    .map_err(|error| error.to_string())
-                })
-                .map_or(DiscovererState::Unavailable, DiscovererState::Ready);
+        picture_index: Option<u32>,
+    ) -> std::io::Result<process::Reply> {
+        if self.process.is_none() {
+            self.process = Some(process::Client::start(
+                self.timeout_seconds.unwrap_or(DISCOVERER_TIMEOUT_SECONDS),
+            )?);
         }
-        match &self.discoverer {
-            DiscovererState::Ready(discoverer) => Some(discoverer),
-            DiscovererState::New | DiscovererState::Unavailable => None,
+        let result = self.process.as_mut().unwrap().request(uri, picture_index);
+        if result.is_err() {
+            self.process = None;
         }
+        result
     }
 }
 
@@ -154,10 +135,26 @@ pub(crate) fn read_image_input(
     uri: &str,
     picture_index: u32,
 ) -> SourceResult<ImageBytes> {
-    let info = reader
-        .discover_input(file, uri)
-        .ok_or(SourceError::NotFound)?;
-    let audio = admitted_audio_stream(&info).ok_or(SourceError::NotFound)?;
+    preflight_known_container(file).map_err(|_| SourceError::NotFound)?;
+    match reader
+        .request(uri, Some(picture_index))
+        .map_err(|error| SourceError::Other(error.to_string()))?
+    {
+        process::Reply::Image {
+            bytes,
+            content_type,
+            ..
+        } => Ok(ImageBytes {
+            bytes,
+            content_type,
+        }),
+        process::Reply::Error(error) => Err(SourceError::Other(error)),
+        _ => Err(SourceError::NotFound),
+    }
+}
+
+fn image_from_info(info: &DiscovererInfo, picture_index: u32) -> SourceResult<ImageBytes> {
+    let audio = admitted_audio_stream(info).ok_or(SourceError::NotFound)?;
     let tags = ScopedTags::new(container_tags(&info), audio.tags());
     let sample = tags
         .images()

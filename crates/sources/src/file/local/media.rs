@@ -11,6 +11,9 @@ pub(crate) fn read_media(
     path: PathBuf,
     sidecar: Option<LocalImageRef>,
 ) -> MediaRead {
+    if crate::file::media::excluded_from_audio_scan(&path) {
+        return MediaRead::Rejected;
+    }
     let mut file = match fs::File::open(&path) {
         Ok(file) => file,
         Err(_) => return MediaRead::Unreadable,

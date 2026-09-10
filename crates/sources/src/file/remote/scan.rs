@@ -70,15 +70,16 @@ impl RemoteSource {
         let uri = url::Url::from_file_path(&copy.file).map_err(|_| SourceError::NotFound)?;
         let relative = copy.relative.clone();
         let parsed = tokio::task::spawn_blocking(move || {
+            let mut worker = media::Worker::network();
             let parsed = media::read_media_input(
-                &mut media::Worker::network(),
+                &mut worker,
                 relative.into(),
                 &mut file,
                 uri.as_str(),
                 None,
             );
             let picture = crate::file::artwork::inspect_embedded_input(
-                &mut crate::file::discovery::Reader::network(),
+                &mut worker.discovery,
                 &mut file,
                 uri.as_str(),
             );
@@ -461,8 +462,11 @@ impl RemoteSource {
         file: &LocalFileWrite,
         worker: Arc<Mutex<media::Worker>>,
     ) -> SourceResult<media::MediaRead> {
-        let input = self.input().await?;
         let relative = self.relative(&file.path)?;
+        if media::excluded_from_audio_scan(std::path::Path::new(&relative)) {
+            return Ok(media::MediaRead::Rejected);
+        }
+        let input = self.input().await?;
         let path = self.input_path(input.input(), &relative)?;
         let stream = input
             .playback_stream(
@@ -477,8 +481,9 @@ impl RemoteSource {
         let artwork_path = file.path.clone();
         let revision = file.revision.clone().unwrap_or_default();
         tokio::task::spawn_blocking(move || {
+            let mut worker = worker.lock().unwrap_or_else(|p| p.into_inner());
             let mut parsed = media::read_media_input(
-                &mut worker.lock().unwrap_or_else(|p| p.into_inner()),
+                &mut worker,
                 relative.clone().into(),
                 &mut reader,
                 &uri,
@@ -486,7 +491,7 @@ impl RemoteSource {
             );
             if let media::MediaRead::Accepted(track) = &mut parsed {
                 track.local_artwork = crate::file::artwork::inspect_embedded_input(
-                    &mut crate::file::discovery::Reader::network(),
+                    &mut worker.discovery,
                     &mut reader,
                     &uri,
                 )
