@@ -69,7 +69,9 @@
     </child>
   </object>
 
-  <object class="GtkScrolledWindow" id="compact_nav_slot">
+  <object class="GtkOverlay" id="compact_nav_slot">
+    <property name="vexpand">true</property>
+    <property name="child"><object class="GtkScrolledWindow" id="compact_nav_scroller">
     <property name="hscrollbar-policy">never</property><property name="vscrollbar-policy">automatic</property>
     <property name="propagate-natural-width">false</property><property name="propagate-natural-height">false</property><property name="hexpand">false</property><property name="vexpand">true</property>
     <style><class name="sidebar-pane"/><class name="compact-rail-slot"/><class name="sidebar-scroller"/></style>
@@ -121,5 +123,13 @@
         </property>
       </object>
     </property>
+    </object></property>
+    <child type="overlay">
+      <object class="GtkWindowHandle">
+        <property name="valign">start</property>
+        <property name="height-request">14</property>
+        <style><class name="sidebar-drag-handle"/></style>
+      </object>
+    </child>
   </object>
 </interface>

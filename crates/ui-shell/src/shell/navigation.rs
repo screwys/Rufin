@@ -90,7 +90,7 @@ pub(crate) struct NavigationWidgets {
     pub(super) split_view: adw::OverlaySplitView,
     pub(super) left_resize_handle: gtk::Box,
     pub(super) normal_nav_panel: gtk::Box,
-    pub(super) compact_nav_slot: gtk::WindowHandle,
+    pub(super) compact_nav_slot: gtk::Overlay,
     pub(super) tiny_nav_button: gtk::Button,
     pub(super) normal_nav_routes: adw::Sidebar,
     pub(super) normal_nav_pins: gtk::Box,
