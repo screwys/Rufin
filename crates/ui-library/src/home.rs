@@ -445,7 +445,6 @@ impl CatalogUi {
         let empty = crate::route_layout::route_empty_view(msgid("Nothing here yet"));
         content.append(&empty);
         let inset_content = library_route_inset(content.clone().upcast());
-        inset_content.set_margin_start(COLLECTION_GRID_CARD_MARGIN);
         scroller.set_child(Some(&inset_content));
 
         let projection = HomeRouteProjection {
