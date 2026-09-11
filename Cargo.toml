@@ -122,7 +122,7 @@ wana_kana = { version = "=5.0.0", default-features = false }
 windows-native-keyring-store = { version = "1.1.0", default-features = false }
 windows-updater = { path = "crates/windows-updater" }
 windows = "0.62.2"
-windows-registry = "0.6.1"
+windows-registry = "0.100.0"
 winsafe = { version = "0.0.28", features = ["kernel", "ole", "shell", "user"] }
 wiremock = "0.6.5"
 
