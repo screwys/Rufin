@@ -425,7 +425,7 @@ fn automatic_local_address_for(target: SocketAddr) -> Result<IpAddr, String> {
         .map_err(|error| error.to_string())
 }
 
-fn local_interface_addresses() -> Result<Vec<(String, IpAddr)>, String> {
+pub(crate) fn local_interface_addresses() -> Result<Vec<(String, IpAddr)>, String> {
     let mut interfaces = if_addrs::get_if_addrs()
         .map_err(|error| error.to_string())?
         .into_iter()

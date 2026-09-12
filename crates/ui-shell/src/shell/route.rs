@@ -323,8 +323,7 @@ impl Shell {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let showcase_variation = self.home_showcase_variation.get();
-        let explore_variation = self.home_explore_variation.get();
+        let (showcase_variation, explore_variation) = self.products.source.home_variations();
         let blocks = self.settings.current.borrow().home_blocks.clone();
         self.queue_prepared_route(
             selected,
@@ -357,8 +356,7 @@ impl Shell {
         let database = Arc::clone(&selected.database);
         let source = selected.source_key;
         let folder = selected.music_folder_key;
-        let showcase_variation = self.home_showcase_variation.get();
-        let explore_variation = self.home_explore_variation.get();
+        let (showcase_variation, explore_variation) = self.products.source.home_variations();
         let blocks = self.settings.current.borrow().home_blocks.clone();
         let (generation, cancellation) = self.begin_root_order_read();
         let task = selected.runtime.spawn(async move {

@@ -23,7 +23,6 @@ path = "src/main.rs"
 [dependencies]
 rufin-core.workspace = true
 app-identity.workspace = true
-directories.workspace = true
 desktop-integration.workspace = true
 localization.workspace = true
 playback.workspace = true

@@ -10,7 +10,9 @@ mod ratings;
 mod shell;
 mod ui_resource;
 
-pub use application::{run_application, run_application_after_update};
+pub use application::{
+    run_application, run_application_after_update, run_startup_error_application,
+};
 
 pub fn verify_interface_resources() -> Result<(), String> {
     application::verify_interface_resources()

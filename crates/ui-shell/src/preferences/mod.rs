@@ -25,6 +25,7 @@ mod layout;
 mod library;
 pub(crate) mod persistence;
 pub(crate) mod source;
+mod web_controller;
 
 use general::{ScrobblingCredentialDrafts, appearance_page, playback_page, scrobbling_page};
 

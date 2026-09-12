@@ -1,3 +1,4 @@
+use lyrics::pronunciation_line_for;
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
@@ -1112,17 +1113,6 @@ fn ruby_line(segments: &[JapaneseReadingSegment]) -> WrappingLine {
         line.append(&ruby_segment(segment, surface.upcast_ref()).0);
     }
     line
-}
-
-fn pronunciation_line_for<'a>(
-    line: &LyricsLine,
-    pronunciation: Option<&'a LyricsDocument>,
-) -> Option<&'a LyricsLine> {
-    let start_millis = line.start_millis?;
-    pronunciation?
-        .lines
-        .iter()
-        .find(|candidate| candidate.start_millis == Some(start_millis))
 }
 
 fn register_karaoke_text(

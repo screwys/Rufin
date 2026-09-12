@@ -12,6 +12,9 @@ use syn::{Expr, ExprCall, ExprLit, Lit, Token};
 use crate::Result;
 use crate::process::{collect_files_with_extension, read_to_string};
 
+#[path = "../../../web/gettext.rs"]
+mod web_gettext;
+
 const TEMPLATE_HEADER: &str = "# Rufin translation template.\n\
 # Copyright (C) 2026 Rufin contributors\n\
 # This file is distributed under the same license as the Rufin package.\n\
@@ -36,6 +39,7 @@ const SINGULAR_KEYWORDS: &[(&str, usize)] = &[
     ("msgid", 0),
     ("text_button", 1),
     ("icon_button", 1),
+    ("configure_library_toolbar_icon_button", 1),
     ("icon_button_without_tooltip", 1),
     ("detail_action_button", 1),
     ("detail_link_button", 1),
@@ -96,6 +100,19 @@ pub(crate) fn template(root: &Path) -> Result<String> {
     let mut catalog = Catalog::default();
     extract_rust(root, &mut catalog)?;
     extract_builder(root, &mut catalog)?;
+    let mut web_files = Vec::new();
+    for extension in ["js", "html"] {
+        collect_files_with_extension(root, &root.join("web"), extension, &mut web_files)?;
+    }
+    for file in web_files {
+        if file.components().any(|part| part.as_os_str() == "vendor") {
+            continue;
+        }
+        for message in web_gettext::messages(&read_to_string(&file)?) {
+            let formatted = rust_format(&message);
+            catalog.insert(None, message, None, None, formatted)?;
+        }
+    }
     for (id, message) in crate::windows_i18n::source_strings(root)? {
         let mut comment = format!("Windows installer: {id}.");
         if message.contains("{app_name}") {
@@ -412,6 +429,29 @@ fn wrap(value: &str) -> Vec<&str> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn web_messages_preserve_gettext_keys_and_placeholders() {
+        let messages = web_gettext::messages(
+            r#"
+            button(tr("Change sort order"));
+            {{ localization::tr("Delete \"{name}\"?") }}
+            tr('Delete "{name}"?');
+            tr(
+              "日本語"
+            );
+            tr(dynamic_title);
+        "#,
+        );
+        assert_eq!(
+            messages,
+            BTreeSet::from([
+                "Change sort order".into(),
+                "Delete \"{name}\"?".into(),
+                "日本語".into(),
+            ])
+        );
+    }
 
     #[test]
     fn gettext_output_escapes_and_wraps_like_the_template() {

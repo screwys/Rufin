@@ -35,6 +35,11 @@ pub struct CastManager {
     artwork_resolver: ArtworkResolver,
 }
 
+pub fn network_addresses() -> Result<Vec<std::net::IpAddr>, String> {
+    relay::local_interface_addresses()
+        .map(|interfaces| interfaces.into_iter().map(|(_, address)| address).collect())
+}
+
 impl Default for CastManager {
     fn default() -> Self {
         Self::new(false, None, |_| None)

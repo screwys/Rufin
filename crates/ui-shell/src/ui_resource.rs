@@ -1,4 +1,5 @@
 pub(crate) const BASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/style.css";
+pub(crate) const SHOWCASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/showcase.css";
 pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application/about.ui";
 pub(crate) const WINDOWS_TITLE_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/application/windows_title.ui";
@@ -62,6 +63,7 @@ pub(crate) const SHORTCUTS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/s
 pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     WINDOWS_TITLE_RESOURCE,
     BASE_CSS_RESOURCE,
+    SHOWCASE_CSS_RESOURCE,
     ABOUT_RESOURCE,
     APPEARANCE_PREFERENCES_RESOURCE,
     PREFERENCES_DIALOG_RESOURCE,

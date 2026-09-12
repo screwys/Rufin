@@ -1,0 +1,91 @@
+#track-menu {
+  position: fixed;
+  inset: auto;
+  margin: 0;
+  padding: 5px;
+  min-width: 185px;
+  background: var(--sidebar);
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  box-shadow: 0 8px 30px #0004;
+}
+
+.menu-item {
+  display: block;
+  background: transparent;
+  width: 100%;
+  text-align: left;
+  padding: 9px 13px;
+}
+
+.menu-item:hover,
+.menu-item:focus-visible {
+  background: var(--hover);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 8px;
+  min-height: 32px;
+  padding: 7px 12px;
+  font-size: 13px;
+}
+
+.menu-item .icon {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 16px;
+}
+
+#context-submenu {
+  position: fixed;
+  margin: 0;
+  width: 230px;
+  max-width: calc(100vw - 16px);
+  max-height: calc(100dvh - 16px);
+  overflow: auto;
+  padding: 6px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: var(--popover, var(--sidebar));
+  color: var(--text);
+  box-shadow: 0 8px 30px #0005;
+}
+
+#context-submenu .menu-item {
+  width: 100%;
+}
+
+.menu-item .icon[data-icon="forward"] {
+  margin-left: auto;
+}
+
+#track-menu hr,
+#context-submenu hr {
+  border: 0;
+  border-top: 1px solid var(--line);
+  margin: 6px 0;
+}
+
+#context-submenu input {
+  width: 100%;
+}
+
+.playlist-menu-scroll {
+  max-height: min(320px, 60dvh);
+  overflow: auto;
+  overflow-anchor: none;
+}
+
+.playlist-menu-scroll .menu-item {
+  height: 32px;
+  padding-block: 5px;
+  white-space: nowrap;
+}
+
+#track-menu {
+  background: var(--popover, var(--sidebar));
+}

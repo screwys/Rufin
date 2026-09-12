@@ -45,7 +45,8 @@ const COLLECTION_PAGE_SIZE: usize = 500;
 pub const JELLYFIN_SOURCE_ID: &str = "jellyfin";
 pub const EMBY_SOURCE_ID: &str = "emby";
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum ServerKind {
     Jellyfin,
     Emby,
@@ -279,7 +280,7 @@ pub(crate) async fn edit(
     )))
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct JellyfinEmbyClientConfig {
     pub kind: ServerKind,
     pub base_url: String,

@@ -17,6 +17,21 @@ use crate::settings::{SettingsFile, SettingsOwner, platform_secret_store};
 use crate::source::{SourceBootstrap, SourceOutputs, SourceOwner};
 use crate::waveform::WaveformOwner;
 
+/// Runs an application host with Rufin's worker runtime available on its calling thread.
+/// The host shuts down playback before returning; workers are stopped afterwards.
+pub fn with_runtime<T>(host: impl FnOnce(&tokio::runtime::Runtime) -> T) -> std::io::Result<T> {
+    let runtime = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .thread_name("rufin-async")
+        .build()?;
+    let result = {
+        let _guard = runtime.enter();
+        host(&runtime)
+    };
+    runtime.shutdown_timeout(std::time::Duration::from_secs(1));
+    Ok(result)
+}
+
 pub async fn runtime_inputs<StartBackend>(
     diagnostics: DiagnosticsHandle,
     take_previous_update_result: bool,
@@ -76,15 +91,25 @@ where
     if let Err(error) = library.ensure_default_smart_playlists().await {
         warn!(%error, "could not initialize default Smart playlists; startup will continue");
     }
-    let scrobbler = Arc::new(Scrobbler::new(
-        library.as_ref().clone(),
-        runtime.clone(),
-        stored.scrobbling_runtime_settings(),
-        stored.ui.private_mode,
-    )?);
+    let scrobbling_library = library.as_ref().clone();
+    let scrobbling_runtime = runtime.clone();
+    let scrobbling_settings = stored.scrobbling_runtime_settings();
+    let private_mode = stored.ui.private_mode;
+    let scrobbler = Arc::new(
+        runtime
+            .spawn_blocking(move || {
+                Scrobbler::new(
+                    scrobbling_library,
+                    scrobbling_runtime,
+                    scrobbling_settings,
+                    private_mode,
+                )
+            })
+            .await
+            .map_err(string_error)??,
+    );
 
     let (source_events, source_receiver) = unbounded();
-    let (playback_events, playback_receiver) = bounded(1);
     let (visualizer_events, visualizer_receiver) = bounded(1);
     let (download_events, download_receiver) = unbounded();
     let (discovery_events, discovery_receiver) = unbounded();
@@ -155,8 +180,6 @@ where
         library.clone(),
         settings.clone(),
         runtime.clone(),
-        playback_events,
-        playback_receiver.clone(),
         visualizer_events,
         visualizer_receiver.clone(),
         artwork.clone(),
@@ -256,6 +279,7 @@ where
     let source_handle: crate::runtime::SourceHandle = source.clone();
     let transport: playback::TransportHandle = playback.clone();
     let queue: playback::QueueHandle = playback.clone();
+    let playback_updates = playback.updates.clone();
     let radio: playback::RadioHandle = playback;
 
     Ok(RuntimeInputs {
@@ -263,12 +287,14 @@ where
         secret_storage_fallbacks,
         diagnostics,
         products: ProductHandles {
+            appearance: tokio::sync::watch::channel(std::collections::BTreeMap::new()).0,
             backup,
             library,
             runtime,
             source: source_handle,
             downloads,
             playback: PlaybackHandles {
+                updates: playback_updates,
                 transport,
                 queue,
                 radio,
@@ -283,7 +309,6 @@ where
             source: source_receiver,
             source_discovery: discovery_receiver,
             downloads: download_receiver,
-            playback: playback_receiver,
             visualizer: visualizer_receiver,
             waveform: waveform_receiver,
             lyrics: lyrics_receiver,

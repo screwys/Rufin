@@ -2,7 +2,7 @@
 
 use std::sync::{Arc, Weak};
 
-use library::{Database, RadioSeed, ReadCancellation};
+use library::{Database, RadioSeed, ReadCancellation, SourceKey};
 use playback::{
     AutoDjRequest, Batch, Placement, Playback, Provenance, RadioPlayRequest, RandomPlayRequest,
 };
@@ -13,6 +13,40 @@ use crate::playback::random_u64;
 use crate::source::{SourceOwner, WeakActiveSource};
 
 const MANUAL_RADIO_COUNT: usize = 20;
+
+pub async fn queue_random(
+    database: &Database,
+    source: SourceKey,
+    folder: Option<library::FolderKey>,
+    request: RandomPlayRequest,
+    queue: &playback::QueueHandle,
+) -> Result<bool, String> {
+    let cancellation = ReadCancellation::new();
+    let order = database
+        .random_candidates(
+            source,
+            folder,
+            &request.criteria,
+            &[],
+            request.requested,
+            &cancellation,
+        )
+        .await
+        .map_err(|error| error.to_string())?;
+    if order.is_empty() {
+        return Ok(true);
+    }
+    queue.play(playback::PlayRequest::ordered(
+        library::QueueInput::MediaUris {
+            order: order.into(),
+            provenance: Provenance::Random,
+        },
+        0,
+        request.placement,
+        false,
+    ));
+    Ok(false)
+}
 
 pub(crate) fn request_auto_dj(
     runtime: tokio::runtime::Handle,

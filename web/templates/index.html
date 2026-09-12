@@ -1,0 +1,440 @@
+{% import "macros.html" as m %}
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="color-scheme" content="dark light" />
+    <title>Rufin</title>
+    <link rel="stylesheet" href="/app.css" />
+    <link rel="icon" href="/icons/favicon.svg" type="image/svg+xml" />
+    <script src="/htmx.min.js" defer></script>
+    <script type="module" src="/app.js"></script>
+  </head>
+  <body>
+    <dialog id="login-dialog" aria-labelledby="login-title">
+      <form id="login-form">
+        <img class="rufin-icon" src="/icons/rufin.svg" alt="" />
+        <h1 id="login-title">{{ localization::tr("Connect to Rufin") }}</h1>
+        <p>{{ localization::tr("Enter your Rufin access token.") }}</p>
+        <label for="token">{{ localization::tr("Access token") }}</label>
+        <input
+          id="token"
+          name="token"
+          type="password"
+          autocomplete="off"
+          required
+          autofocus
+        />
+        <p id="login-error" class="error" role="alert"></p>
+        <button class="primary" type="submit">{{ localization::tr("Connect") }}</button>
+      </form>
+    </dialog>
+
+    <div id="app" inert>
+      <aside id="navigation" aria-label="{{ localization::tr("Navigation") }}">
+        <div class="app-title">
+          <img class="rufin-icon" src="/icons/rufin.svg" alt="" /><strong
+            >Rufin</strong
+          >
+          <button
+            id="source-menu-button"
+            class="icon-button"
+            aria-label="{{ localization::tr("Sources") }}"
+            aria-haspopup="menu"
+          >
+            <span class="icon" data-icon="menu"></span>
+          </button>
+          <button
+            class="icon-button mobile"
+            id="close-navigation"
+            aria-label="{{ localization::tr("Collapse sidebar") }}"
+          >
+            <span class="icon" data-icon="collapse-left"></span>
+          </button>
+        </div>
+        <div
+          id="source-menu"
+          popover="auto"
+          role="menu"
+          aria-label="{{ localization::tr("Sources") }}"
+        ></div>
+        <nav aria-label="{{ localization::tr("Library") }}">
+          <button data-route="home" aria-current="page">
+            <span class="icon" data-icon="home"></span>{{ localization::tr("Home") }}</button>
+          <button data-route="favorites">
+            <span class="icon" data-icon="favorite"></span>{{ localization::tr("Favorites") }}</button>
+          <button data-route="albums">
+            <span class="icon" data-icon="albums"></span>{{ localization::tr("Albums") }}</button>
+          <button data-route="artists">
+            <span class="icon" data-icon="artists"></span>{{ localization::tr("Artists") }}</button>
+          <button data-route="tracks">
+            <span class="icon" data-icon="tracks"></span>{{ localization::tr("Tracks") }}</button>
+          <button data-route="playlists">
+            <span class="icon" data-icon="playlists"></span>{{ localization::tr("Playlists") }}</button>
+          <button data-route="smart-playlists">
+            <span class="icon" data-icon="smart-playlists"></span>{{ localization::tr("Smart Playlists") }}</button>
+        </nav>
+        <div class="nav-bottom">
+          <span class="version">Rufin {{ version }}</span>
+          <button
+            id="disconnect"
+            class="icon-button"
+            aria-label="{{ localization::tr("Disconnect") }}"
+            title="{{ localization::tr("Disconnect") }}"
+          >
+            <span class="icon" data-icon="disconnect"></span>
+          </button>
+        </div>
+      </aside>
+
+      <main id="main">
+        <header class="content-header">
+          <button
+            class="icon-button mobile"
+            id="open-navigation"
+            aria-label="{{ localization::tr("Expand sidebar") }}"
+          >
+            <span class="icon" data-icon="sidebar"></span>
+          </button>
+          <button class="icon-button" id="back" aria-label="{{ localization::tr("Back") }}" hidden>
+            <span class="icon" data-icon="back"></span>
+          </button>
+          <div class="heading">
+            <span id="source-name" class="eyebrow">{{ localization::tr("Library") }}</span>
+            <h1 id="title">{{ localization::tr("Tracks") }}</h1>
+          </div>
+          <button
+            class="icon-button"
+            id="refresh"
+            title="{{ localization::tr("Refresh source") }}"
+            aria-label="{{ localization::tr("Refresh source") }}"
+          >
+            <span class="icon" data-icon="refresh"></span>
+          </button>
+        </header>
+        <div class="toolbar" id="library-toolbar">
+          <input
+            type="search"
+            id="search"
+            placeholder="{{ localization::tr("Search tracks") }}"
+            aria-label="{{ localization::tr("Search library") }}"
+          />
+          <select id="sort" aria-label="{{ localization::tr("Sort by") }}">
+            <option value="title">{{ localization::tr("Title") }}</option>
+          </select>
+          <button
+            class="icon-button"
+            id="descending"
+            title="{{ localization::tr("Change sort order") }}"
+            aria-label="{{ localization::tr("Change sort order") }}"
+            aria-pressed="false"
+          >
+            <span class="icon" data-icon="sort-ascending"></span>
+          </button>
+          <button class="primary" id="play-collection">
+            <span class="icon" data-icon="play"></span>{{ localization::tr("Play") }}</button>
+          <button id="new-playlist" hidden>
+            <span class="icon" data-icon="add"></span>{{ localization::tr("New Playlist") }}</button>
+        </div>
+        <div id="source-progress" role="status" hidden></div>
+        <div id="content" tabindex="-1" aria-busy="false" hx-sync="this:replace"></div>
+      </main>
+
+      <aside id="right-panel" aria-label="{{ localization::tr("Queue") }}">
+        <div class="panel-header">
+          <h2><span class="icon" data-icon="queue" aria-hidden="true"></span>{{ localization::tr("Queue") }} <span class="queue-total"><span id="queue-count" class="count">0</span><span id="queue-loading" class="queue-loading" role="status" aria-label="{{ localization::tr("Loading...") }}" hidden></span></span></h2>
+          <label class="queue-limit" for="queue-limit"
+            >{{ localization::tr("Show") }}<select id="queue-limit" aria-label="{{ localization::tr("Queue tracks to show") }}">
+              <option selected>5</option>
+              <option>10</option>
+              <option>25</option>
+              <option>50</option>
+              <option>100</option>
+            </select></label
+          >
+          <button id="clear-queue" class="icon-button" title="{{ localization::tr("Clear queue") }}" aria-label="{{ localization::tr("Clear queue") }}"><span class="icon" data-icon="clear" aria-hidden="true"></span></button>
+          <button
+            id="close-right"
+            class="icon-button mobile"
+            aria-label="{{ localization::tr("Collapse sidebar") }}"
+          >
+            <span class="icon" data-icon="collapse-right"></span>
+          </button>
+        </div>
+        <ol id="queue" aria-label="{{ localization::tr("Queue") }}"></ol>
+        <div id="queue-lyrics-divider" role="separator" tabindex="0" aria-orientation="horizontal" aria-label="{{ localization::tr("Queue") }}" aria-valuemin="10" aria-valuemax="90" aria-valuenow="50"></div>
+        <section id="lyrics-panel">
+          <div id="lyrics" aria-label="{{ localization::tr("Lyrics") }}">
+            <p class="empty-note">{{ localization::tr("Lyrics will appear here.") }}</p>
+          </div>
+        </section>
+      </aside>
+
+      <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
+        <div class="player-track">
+          <div class="cover mini" id="mini-cover">
+            <span class="icon" data-icon="cover-fallback"></span>
+          </div>
+          <div>
+            <strong id="player-title">{{ localization::tr("Nothing playing") }}</strong
+            ><button class="metadata-link" id="player-artist"></button
+            ><button class="metadata-link" id="player-album"></button>
+          </div>
+        </div>
+        <div class="transport">
+          <div class="transport-buttons">
+            <button
+              id="auto-dj"
+              class="icon-button"
+              aria-label="{{ localization::tr("Auto DJ") }}"
+              aria-pressed="false"
+              title="{{ localization::tr("Auto DJ") }}"
+            >
+              <span class="icon" data-icon="auto-dj"></span>
+            </button>
+            <button
+              id="shuffle"
+              class="icon-button"
+              aria-label="{{ localization::tr("Shuffle") }}"
+              aria-pressed="false"
+              title="{{ localization::tr("Shuffle") }}"
+            >
+              <span class="icon" data-icon="shuffle"></span>
+            </button>
+            <button
+              id="previous"
+              class="icon-button"
+              aria-label="{{ localization::tr("Previous") }}"
+            >
+              <span class="icon" data-icon="previous"></span>
+            </button>
+            <button id="play-pause" class="play-button" aria-label="{{ localization::tr("Play") }}">
+              <span class="icon" data-icon="play"></span>
+            </button>
+            <button id="next" class="icon-button" aria-label="{{ localization::tr("Next") }}">
+              <span class="icon" data-icon="next"></span>
+            </button>
+            <button
+              id="repeat"
+              class="icon-button"
+              aria-label="{{ localization::tr("Repeat off") }}"
+              aria-pressed="false"
+              title="{{ localization::tr("Repeat off") }}"
+            >
+              <span class="icon" data-icon="repeat"></span>
+            </button>
+            <div class="random-buttons">
+              <button
+                id="random"
+                class="icon-button"
+                aria-label="{{ localization::tr("Play random") }}"
+                title="{{ localization::tr("Play random") }}"
+                aria-haspopup="dialog"
+              >
+                <span class="icon" data-icon="random"></span>
+              </button>
+            </div>
+          </div>
+          <div class="seek-row">
+            <time id="position">0:00</time
+            ><input
+              id="seek"
+              type="range"
+              min="0"
+              max="1"
+              step="1000"
+              value="0"
+              aria-label="{{ localization::tr("Playback position") }}"
+            /><time id="duration">0:00</time>
+          </div>
+        </div>
+        <div class="volume">
+          <button
+            id="current-favorite"
+            class="icon-button"
+            aria-label="{{ localization::tr("Favorite current track") }}"
+            aria-pressed="false"
+            disabled
+          >
+            <span class="icon" data-icon="favorite"></span>
+          </button>
+          <button
+            class="icon-button"
+            id="toggle-right"
+            aria-label="{{ localization::tr("Collapse/expand sidebar") }}"
+            aria-expanded="true"
+          >
+            <span class="icon" data-icon="collapse-right"></span>
+          </button>
+          <button
+            id="mute"
+            class="icon-button"
+            aria-label="{{ localization::tr("Mute") }}"
+            aria-pressed="false"
+          >
+            <span class="icon" data-icon="volume"></span></button
+          ><input
+            id="volume"
+            type="range"
+            min="0"
+            max="1"
+            step="0.01"
+            value="1"
+            aria-label="{{ localization::tr("Volume") }}"
+          />
+        </div>
+      </footer>
+      <div id="toast" role="status" hidden></div>
+    </div>
+
+    <div
+      id="random-dialog"
+      popover="auto"
+      role="dialog"
+      aria-labelledby="random-title"
+    >
+      <button id="random-close" class="icon-button" type="button" data-close="random-dialog" aria-label="{{ localization::tr("Close") }}"><span class="icon" data-icon="close"></span></button>
+      <form id="random-form">
+        <h2 id="random-title">{{ localization::tr("Play random") }}</h2>
+        <div class="random-row">
+          <label id="random-count-label" for="random-count">{{ localization::tr("Number of songs") }}</label
+          >{% call m::spin("random-count", 1, 500, 100, false) %}{% endcall %}
+        </div>
+        <div class="random-row">
+          <label id="random-min-year-label" for="random-min-year">{{ localization::tr("Minimum year") }}</label>
+          <div class="year-value">
+            <input
+              id="use-min-year"
+              type="checkbox"
+              aria-label="{{ localization::tr("Use minimum year") }}"
+            />{% call m::spin("random-min-year", 1850, 2050, 1850, true) %}{% endcall %}
+          </div>
+        </div>
+        <div class="random-row">
+          <label id="random-max-year-label" for="random-max-year">{{ localization::tr("Maximum year") }}</label>
+          <div class="year-value">
+            <input
+              id="use-max-year"
+              type="checkbox"
+              aria-label="{{ localization::tr("Use maximum year") }}"
+            />{% call m::spin("random-max-year", 1850, 2050, 2050, true) %}{% endcall %}
+          </div>
+        </div>
+        <div class="random-row">
+          <label for="random-genre">{{ localization::tr("Genre") }}</label
+          ><button
+            id="random-genre"
+            type="button"
+            aria-haspopup="listbox"
+            aria-expanded="false"
+          >{{ localization::tr("Any genre") }}</button>
+        </div>
+        <div id="genre-menu" popover="auto">
+          <input
+            id="genre-search"
+            type="search"
+            aria-label="{{ localization::tr("Search genres") }}"
+            placeholder="{{ localization::tr("Search...") }}"
+          />
+          <button id="any-genre" type="button" role="option">{{ localization::tr("Any genre") }}</button>
+          <div id="genre-options" role="listbox" aria-label="{{ localization::tr("Genres") }}">
+            <div id="genre-window"></div>
+          </div>
+        </div>
+        <div class="random-row">
+          <label for="random-played">{{ localization::tr("Play filter") }}</label
+          ><select id="random-played">
+            <option value="All">{{ localization::tr("All tracks") }}</option>
+            <option value="Unplayed">{{ localization::tr("Only unplayed tracks") }}</option>
+            <option value="Played">{{ localization::tr("Only played tracks") }}</option>
+          </select>
+        </div>
+        <div class="dialog-actions">
+          <button type="submit" value="next">
+            <span class="icon" data-icon="play-next"></span>{{ localization::tr("Play Next") }}</button>
+          <button type="submit" value="replace" class="primary">
+            <span class="icon" data-icon="play"></span>{{ localization::tr("Play") }}</button>
+          <button type="submit" value="append">
+            <span class="icon" data-icon="play-last"></span>{{ localization::tr("Play Later") }}</button>
+        </div>
+      </form>
+    </div>
+    <dialog id="source-dialog" aria-labelledby="source-title">
+      <form id="source-form" hx-post="/api/sources" hx-ext="source-form" hx-swap="none" hx-disabled-elt="find button[type='submit']" hx-sync="this:drop">
+        <h2 id="source-title">{{ localization::tr("Add Source") }}</h2>
+        <label for="source-kind">{{ localization::tr("Source type") }}</label
+        ><select id="source-kind">
+          <option value="local">{{ localization::tr("Local Folders") }}</option>
+          <option value="jellyfin">Jellyfin</option>
+          <option value="emby">Emby</option>
+          <option value="navidrome">Navidrome</option>
+          <option value="open_subsonic">OpenSubsonic</option>
+          <option value="web_dav">{{ localization::tr("WebDAV") }}</option>
+          <option value="smb">{{ localization::tr("SMB / Samba") }}</option>
+        </select>
+        <label for="source-label">{{ localization::tr("Name") }}</label
+        ><input id="source-label" placeholder="{{ localization::tr("My music") }}" />
+        <div id="local-fields">
+          <label for="source-paths">{{ localization::tr("Music folders on the Rufin machine") }}</label
+          ><textarea
+            id="source-paths"
+            rows="3"
+            placeholder="{{ localization::tr("One path per line") }}"
+          ></textarea>
+        </div>
+        <div id="remote-fields" hidden>
+          <label for="server-url">{{ localization::tr("Server Address") }}</label
+          ><input
+            id="server-url"
+            placeholder="https://music.example.com"
+          /><label for="username">{{ localization::tr("Username") }}</label
+          ><input id="username" autocomplete="username" /><label for="password"
+            >{{ localization::tr("Password or token") }}</label
+          ><input
+            id="password"
+            type="password"
+            autocomplete="current-password"
+          /><label for="authentication">{{ localization::tr("Authentication") }}</label
+          ><select id="authentication">
+            <option value="password">{{ localization::tr("Password") }}</option>
+            <option value="legacy_password">{{ localization::tr("Legacy password (Subsonic)") }}</option>
+            <option value="api_key">{{ localization::tr("API key (Subsonic)") }}</option>
+            <option value="anonymous">{{ localization::tr("Anonymous (WebDAV / SMB)") }}</option>
+            <option value="bearer">{{ localization::tr("Bearer token (WebDAV)") }}</option></select
+          ><label class="checkbox"
+            ><input id="trust-certificate" type="checkbox" />{{ localization::tr("Trust self-signed certificate") }}</label
+          >
+        </div>
+        <p id="source-error" class="error" role="alert"></p>
+        <div class="dialog-actions">
+          <button type="button" data-close="source-dialog">{{ localization::tr("Cancel") }}</button
+          ><button id="source-submit" type="submit" class="primary">{{ localization::tr("Add Source") }}</button>
+        </div>
+      </form>
+    </dialog>
+    <dialog id="name-dialog" aria-labelledby="name-title">
+      <form id="name-form">
+        <h2 id="name-title">{{ localization::tr("New Playlist") }}</h2>
+        <label for="playlist-name">{{ localization::tr("Name") }}</label
+        ><input id="playlist-name" required />
+        <div class="dialog-actions">
+          <button type="button" data-close="name-dialog">{{ localization::tr("Cancel") }}</button
+          ><button class="primary">{{ localization::tr("Save") }}</button>
+        </div>
+      </form>
+    </dialog>
+    <div
+      id="track-menu"
+      popover="manual"
+      role="menu"
+      aria-label="{{ localization::tr("More actions") }}"
+    ></div>
+    <div
+      id="context-submenu"
+      popover="manual"
+      role="menu"
+      aria-label="{{ localization::tr("More actions") }}"
+    ></div>
+  </body>
+</html>

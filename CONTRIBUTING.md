@@ -62,7 +62,8 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `playback-cast` | UPnP, Chromecast and AirPlay casting integration |
 | `playback-gstreamer` | the GStreamer playback backend |
 | `rufin` | executable startup, desktop paths, backend construction and native observers |
-| `rufin-core` | application operations, saved settings, source ownership and current lyrics |
+| `rufin-core` | shared application runtime, operations, settings, sources and HTTP API |
+| `rufin-controller` | headless executable with optional HTTP access |
 | `scrobbling` | scrobbling services|
 | `secrets` | storage for credentials and service keys |
 | `sources` | source-specific operations |
@@ -73,18 +74,27 @@ Rufin's crates try to follow a product ownership model. The goal is to separate 
 | `windows-updater` | automatic windows updates from .exe |
 | `xtask` | development and packaging commands |
 
+The `web/` directory contains the browser interface: Askama templates,
+HTMX, JavaScript and CSS. Assets are bundled into the executable.
+The HTTP command reference is in `crates/rufin-core/src/api/help.json` and served by `GET /api`.
+
 ## Development commands
 
 ```bash
 just build # builds the native binary, macOS disk image, or Windows installer
+just build headless # builds the headless development executable
 just build arch # builds the Arch package
 just build flatpak # builds the Flatpak
 just build rpm # builds Fedora RPMs for x86_64
 just build rpm arm # builds Fedora RPMs for AArch64
 just clean # clears Rufin build state while keeping finished artifacts
 just debug # runs the development app on the host
+just debug headless # runs the headless development executable on the host
+just debug headless --listen # also enables browser and HTTP API access; requires RUFIN_API_TOKEN
 just fmt # formats Rust code
 just test # runs the test suite
+just i18n # regenerates the shared desktop and web translation template
+just i18n --check # checks the translation template without changing it
 ```
 
 To run the broader testing suite:
@@ -160,4 +170,4 @@ I have no interest in hypothetical hardening suggestions or bugs found by LLMs. 
 
 It is usually obvious to spot LLM generated code if the diff is large. If you use an LLM for contribution, then you are fully responsible of the code it generates, and you must make sure it fits these guidelines. LLMs should not edit any human facing part on its on own, absolutely not the translations. 
 
-You should definitely not do any LLM advertisement, neither in conversations or commits. LLMs can not be held accountable, hence they must not sign anything off. 
+You should definitely not do any LLM advertisement, neither in conversations or commits. LLMs can not be held accountable, hence they must not sign anything off.

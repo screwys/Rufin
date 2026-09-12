@@ -11,14 +11,23 @@ readme.workspace = true
 publish.workspace = true
 
 [dependencies]
+axum.workspace = true
+askama.workspace = true
+image.workspace = true
 thiserror.workspace = true
 backup.workspace = true
 audio-processing.workspace = true
 app-identity.workspace = true
 metadata-lookup.workspace = true
 async-channel.workspace = true
+bytes.workspace = true
+futures-util.workspace = true
+http-body-util.workspace = true
+hyper.workspace = true
+hyper-util.workspace = true
 artwork.workspace = true
 desktop-integration.workspace = true
+directories.workspace = true
 downloads.workspace = true
 getrandom.workspace = true
 glib.workspace = true
@@ -36,7 +45,7 @@ lyrics.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 tempfile.workspace = true
-tokio = { workspace = true, features = ["macros", "rt", "time"] }
+tokio = { workspace = true, features = ["macros", "net", "rt-multi-thread", "time"] }
 tracing.workspace = true
 tracing-subscriber = { workspace = true, features = ["env-filter", "fmt"] }
 url.workspace = true

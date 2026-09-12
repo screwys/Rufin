@@ -40,7 +40,9 @@
                 ./data/icons/hicolor
                 ./data/io.github.screwys.Rufin.desktop
                 ./data/io.github.screwys.Rufin.metainfo.xml
+                ./data/showcase.css
                 ./locales
+                ./web
               ];
             };
 

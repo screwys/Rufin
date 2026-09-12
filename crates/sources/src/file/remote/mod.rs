@@ -46,7 +46,7 @@ impl std::fmt::Debug for FileCredentials {
     }
 }
 
-#[derive(Clone, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq, serde::Deserialize)]
 pub struct FileCredentialsEdit {
     pub secret: Option<String>,
     pub headers: Option<Vec<(String, String)>>,

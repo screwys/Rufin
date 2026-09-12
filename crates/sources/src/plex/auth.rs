@@ -417,7 +417,7 @@ impl PartialEq for PlexLogin {
 }
 impl Eq for PlexLogin {}
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlexProfile {
     pub id: String,
     pub uuid: Option<String>,
@@ -425,14 +425,14 @@ pub struct PlexProfile {
     pub pin_required: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlexConnection {
     pub address: reqwest::Url,
     pub local: bool,
     pub relay: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct PlexServer {
     pub id: String,
     pub name: String,
@@ -635,6 +635,8 @@ mod tests {
             address: "http://192.0.2.20:32400".into(),
         };
         server.merge_lan(&[lan.clone(), lan]);
+        let mut server: PlexServer =
+            serde_json::from_value(serde_json::to_value(&server).unwrap()).unwrap();
         assert_eq!(server.connections.len(), 4);
         server.merge_lan(&[crate::DiscoveredServer {
             id: Some("different-server".into()),

@@ -137,6 +137,7 @@
         <property name="vexpand">true</property><style><class name="queue-scroller"/></style>
       </object></property>
       <child type="overlay"><object class="AdwSpinner" id="queue_loading">
+        <property name="can-target">false</property>
         <property name="visible">false</property>
         <property name="halign">center</property><property name="valign">center</property>
         <property name="width-request">32</property><property name="height-request">32</property>

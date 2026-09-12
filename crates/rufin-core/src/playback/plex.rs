@@ -510,7 +510,7 @@ impl PlexPlayback {
             SessionCommand::Next => self.control(|client| client.next()).await?,
             SessionCommand::Previous => self.control(|client| client.previous()).await?,
             SessionCommand::Seek(offset) => self.control(move |client| client.seek(offset)).await?,
-            SessionCommand::SetVolume(value) => {
+            SessionCommand::SetVolume(value) | SessionCommand::PersistVolume(value) => {
                 *self.prior_volume.lock().unwrap_or_else(|p| p.into_inner()) = None;
                 self.control(move |client| {
                     client.volume((value.clamp(0.0, 1.0) * 100.0).round() as u8)
@@ -1536,7 +1536,6 @@ impl PlaybackOwner {
                 | SessionCommand::SetVisualizerEnabled(_)
                 | SessionCommand::ArtworkRefreshed(_)
                 | SessionCommand::CatalogChanged
-                | SessionCommand::PersistOutputState
         ) {
             return Some(command);
         }

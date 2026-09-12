@@ -1,0 +1,32 @@
+{% import "macros.html" as m %}
+{% for section in sections %}
+{% if section.block == "Showcase" %}
+  {% for row in section.items %}
+  <section class="home-section home-showcase seeded-gradient-showcase seeded-gradient-palette-{{ row.palette() }}">
+    <div class="showcase-cover"><div class="album-grid">{% call m::card(row, "album") %}{% endcall %}</div></div>
+    <div class="showcase-content" data-row="{{ row.data }}" data-kind="album">
+      <div class="showcase-heading"><span class="eyebrow">{{ localization::tr("Showcase") }}</span>{% call m::action(localization::tr("Album radio"), "radio", "radio", "icon-button") %}{% endcall %}</div>
+      <h2 class="showcase-title">{{ row.title() }}</h2>
+      <button type="button" class="metadata-link" data-action="artists">{{ row.text("artist") }}</button>
+      <div class="showcase-summary">
+        {% if row.number("year") > 0 %}<span>{% call m::icon("calendar") %}{% endcall %}{{ row.number("year") }}</span>{% endif %}
+        <span>{% call m::icon("tracks") %}{% endcall %}{{ row.track_count() }}</span>
+        <span>{% call m::icon("duration") %}{% endcall %}{{ row.long_duration() }}</span>
+      </div>
+    </div>
+  </section>
+  {% endfor %}
+{% else %}
+  <section class="home-section" data-block="{{ section.block }}">
+    <div class="home-heading"><h2>{{ localization::tr(section.title) }}</h2>
+      {% if section.block != "" && section.block != "Genres" %}{% call m::action(localization::tr("Refresh"), "refresh", "refresh-home", "icon-button") %}{% endcall %}{% endif %}
+      {% if section.block != "Genres" %}<div class="home-paging">{% call m::action(localization::tr("Previous"), "back", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "forward", "next-home", "icon-button") %}{% endcall %}</div>{% endif %}
+    </div>
+    {% if section.block == "Genres" %}
+      <div class="home-genres">{% for row in section.items %}<button type="button" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title() }}</button>{% endfor %}</div>
+    {% else %}
+      <div class="home-row" hx-sync="this:replace"><div class="album-grid">{% for row in section.items %}{% call m::card(row, row.text("kind")) %}{% endcall %}{% endfor %}</div></div>
+    {% endif %}
+  </section>
+{% endif %}
+{% endfor %}

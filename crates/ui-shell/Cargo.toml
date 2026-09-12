@@ -34,7 +34,7 @@ secrets.workspace = true
 serde.workspace = true
 sources.workspace = true
 tracing.workspace = true
-tokio = { workspace = true, features = ["rt-multi-thread"] }
+tokio.workspace = true
 
 [target.'cfg(target_os = "linux")'.dependencies]
 ashpd.workspace = true

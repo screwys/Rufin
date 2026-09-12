@@ -1,6 +1,6 @@
-//! Commands, updates, and startup data exchanged between the UI and Rufin.
+//! Commands, updates, and startup data exchanged between application clients and Rufin.
 //!
-//! `rufin` constructs these handles; the crates behind them implement the behavior.
+//! `app` constructs these handles; the crates behind them implement the behavior.
 
 use std::sync::Arc;
 
@@ -35,6 +35,7 @@ pub use waveform::WaveformProjection;
 
 #[derive(Clone)]
 pub struct ProductHandles {
+    pub appearance: tokio::sync::watch::Sender<std::collections::BTreeMap<String, String>>,
     pub backup: BackupHandle,
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,

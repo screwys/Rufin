@@ -130,6 +130,17 @@ impl Default for Settings {
     }
 }
 
+pub fn pronunciation_line_for<'a>(
+    line: &LyricsLine,
+    pronunciation: Option<&'a LyricsDocument>,
+) -> Option<&'a LyricsLine> {
+    let start_millis = line.start_millis?;
+    pronunciation?
+        .lines
+        .iter()
+        .find(|candidate| candidate.start_millis == Some(start_millis))
+}
+
 impl Settings {
     pub fn sanitize(&mut self) {
         if !self.save_lyrics_to_source {

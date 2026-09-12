@@ -1,0 +1,27 @@
+{% macro icon(name) %}<span class="icon" data-icon="{{ name }}" aria-hidden="true"></span>{% endmacro %}
+{% macro action(label, name, action, class) %}<button type="button" class="{{ class }}" data-action="{{ action }}" title="{{ label }}" aria-label="{{ label }}"{% if action == "menu" %} aria-haspopup="menu"{% endif %}>{% call icon(name) %}{% endcall %}</button>{% endmacro %}
+{% macro favorite(row, class) %}<button type="button" class="{{ class }}" data-action="favorite" data-favorite-uri="{{ row.text("uri") }}" title="{{ localization::tr("Favorite") }}" aria-label="{{ localization::tr("Favorite") }}" aria-pressed="{{ row.favorite() }}">{% if row.favorite() %}{% call icon("favorite-filled") %}{% endcall %}{% else %}{% call icon("favorite") %}{% endcall %}{% endif %}</button>{% endmacro %}
+{% macro card(row, kind) %}
+<article class="album-card" data-row="{{ row.data }}" data-kind="{{ kind }}">
+  <div class="cover-wrap">
+    <button type="button" class="cover-open" data-action="open" aria-label="{{ row.title() }}"><div class="cover">{% call icon("cover-fallback") %}{% endcall %}</div></button>
+    <div class="cover-controls">
+      {% call action(localization::tr("Play Next"), "play-next", "next", "cover-next") %}{% endcall %}
+      {% call action(localization::tr("Play"), "play", "replace", "cover-play") %}{% endcall %}
+      {% call action(localization::tr("Play Later"), "play-last", "append", "cover-last") %}{% endcall %}
+      {% if kind == "track" || kind == "album" || kind == "artist" %}{% call favorite(row, "icon-button cover-favorite") %}{% endcall %}{% endif %}
+      {% call action(localization::tr("More actions"), "more", "menu", "cover-menu") %}{% endcall %}
+    </div>
+  </div>
+  <button type="button" class="collection-title" data-action="open">{{ row.title() }}</button>
+  {% if row.text("artist") != "" %}<button type="button" class="metadata-link" data-action="artists">{{ row.text("artist") }}</button>{% else %}<p>{{ row.track_count() }}</p>{% endif %}
+  {% if kind == "track" %}<button type="button" class="metadata-link" data-action="albums">{{ row.text("album") }}</button>{% endif %}
+</article>
+{% endmacro %}
+{% macro spin(id, min, max, value, disabled) %}
+<div class="spin" role="group" aria-labelledby="{{ id }}-label">
+  <input id="{{ id }}" type="number" min="{{ min }}" max="{{ max }}" value="{{ value }}" required{% if disabled %} disabled{% endif %}>
+  <button type="button" data-step="-1" aria-label="{{ localization::tr("Decrease") }}"{% if disabled %} disabled{% endif %}>{% call icon("remove") %}{% endcall %}</button>
+  <button type="button" data-step="1" aria-label="{{ localization::tr("Increase") }}"{% if disabled %} disabled{% endif %}>{% call icon("add") %}{% endcall %}</button>
+</div>
+{% endmacro %}

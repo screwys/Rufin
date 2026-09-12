@@ -42,8 +42,7 @@ pub(crate) struct PlaybackOwner {
     database: Arc<Database>,
     settings: SettingsFile,
     runtime: tokio::runtime::Handle,
-    events: EventSender<PlaybackProjection>,
-    event_drain: Receiver<PlaybackProjection>,
+    pub(crate) updates: playback::PlaybackUpdates,
     visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
     visualizer_drain: Receiver<VisualizerPublication>,
     waveform: Arc<WaveformOwner>,
@@ -133,8 +132,6 @@ impl PlaybackOwner {
         database: Arc<Database>,
         settings: SettingsFile,
         runtime: tokio::runtime::Handle,
-        events: EventSender<PlaybackProjection>,
-        event_drain: Receiver<PlaybackProjection>,
         visualizer_events: EventSender<crate::runtime::VisualizerPublication>,
         visualizer_drain: Receiver<VisualizerPublication>,
         artwork: artwork::Artwork,
@@ -164,8 +161,7 @@ impl PlaybackOwner {
             database,
             settings,
             runtime: runtime.clone(),
-            events,
-            event_drain,
+            updates: playback::PlaybackUpdates::default(),
             visualizer_events,
             visualizer_drain,
             waveform,
@@ -318,6 +314,7 @@ impl PlaybackOwner {
         }
         self.publish_current_media(None);
         (self.observe_playback)(None, false);
+        self.updates.clear();
         active
     }
 
@@ -378,13 +375,7 @@ impl PlaybackOwner {
     }
 
     fn publish_projection(&self, publication: PlaybackProjection) {
-        let Err(TrySendError::Full(mut publication)) = self.events.try_send(publication) else {
-            return;
-        };
-        if let Ok(previous) = self.event_drain.try_recv() {
-            prepend_playback_notices(&mut publication.notices, previous.notices);
-        }
-        let _ = self.events.try_send(publication);
+        self.updates.publish(publication);
     }
 
     async fn consume_store(&self, work: PlaybackStoreWork) {
@@ -841,14 +832,6 @@ impl PlaybackOwner {
     }
 }
 
-fn prepend_playback_notices(
-    current: &mut Vec<playback::PlaybackNotice>,
-    mut previous: Vec<playback::PlaybackNotice>,
-) {
-    previous.append(current);
-    *current = previous;
-}
-
 impl QueueCommandPort for PlaybackOwner {
     fn play(&self, mut request: PlayRequest) {
         if self.play_plex(&request) {
@@ -964,8 +947,7 @@ impl TransportCommandPort for PlaybackOwner {
         self.send(SessionCommand::SetVolume(volume))
     }
     fn persist_volume(&self, volume: f64) {
-        self.set_volume(volume);
-        self.send(SessionCommand::PersistOutputState)
+        self.send(SessionCommand::PersistVolume(volume))
     }
     fn set_muted(&self, muted: bool) {
         self.send(SessionCommand::SetMuted(muted))
@@ -1220,9 +1202,7 @@ fn string_error(error: impl std::fmt::Display) -> String {
 
 #[cfg(test)]
 mod tests {
-    use super::{
-        external_source_reporting_enabled, prepare_media_stream, prepend_playback_notices,
-    };
+    use super::{external_source_reporting_enabled, prepare_media_stream};
 
     fn test_media(source_format: &str) -> playback::QueueItem {
         playback::QueueItem {
@@ -1265,26 +1245,6 @@ mod tests {
     fn private_mode_gates_only_external_source_reporting() {
         assert!(external_source_reporting_enabled(false));
         assert!(!external_source_reporting_enabled(true));
-    }
-
-    #[test]
-    fn coalesced_playback_publication_keeps_structural_notices_in_order() {
-        let mut current = vec![playback::PlaybackNotice::RunStarted(playback::RunId::new(
-            2,
-        ))];
-        prepend_playback_notices(
-            &mut current,
-            vec![playback::PlaybackNotice::RunStarted(playback::RunId::new(
-                1,
-            ))],
-        );
-        assert_eq!(
-            current,
-            [
-                playback::PlaybackNotice::RunStarted(playback::RunId::new(1)),
-                playback::PlaybackNotice::RunStarted(playback::RunId::new(2)),
-            ]
-        );
     }
 
     #[test]

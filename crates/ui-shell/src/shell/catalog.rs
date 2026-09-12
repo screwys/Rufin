@@ -120,14 +120,7 @@ impl Shell {
                 })
             },
             refresh_home_section: {
-                let weak = Rc::downgrade(self);
                 Rc::new(move |kind| {
-                    let Some(shell) = weak.upgrade() else { return };
-                    if kind == rufin_core::settings::HomeSectionKind::Explore {
-                        shell
-                            .home_explore_variation
-                            .set(shell.home_explore_variation.get().wrapping_add(1));
-                    }
                     if let Some(operations) = &operations {
                         if kind == rufin_core::settings::HomeSectionKind::NewlyAdded {
                             operations.refresh_library(

@@ -48,7 +48,7 @@ tokio = { workspace = true, features = ["fs", "io-util", "macros", "net", "rt-mu
 tokio-tungstenite.workspace = true
 tokio-util.workspace = true
 tracing.workspace = true
-url.workspace = true
+url = { workspace = true, features = ["serde"] }
 walkdir.workspace = true
 
 [dev-dependencies]

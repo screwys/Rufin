@@ -1,5 +1,5 @@
 use std::path::PathBuf;
-use std::rc::Rc;
+use std::sync::Arc;
 
 use desktop_integration::Settings as RichPresenceSettings;
 use downloads::{DownloadRules, SourceDownloadSettings};
@@ -89,6 +89,8 @@ pub use library::{HomeBlockKind, HomeSectionKind};
 
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
+    #[serde(default)]
+    pub web_controller: crate::api::ControllerSettings,
     #[serde(default)]
     pub backup: crate::runtime::BackupSettings,
     #[serde(default)]
@@ -185,6 +187,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            web_controller: crate::api::ControllerSettings::default(),
             layout: LayoutSettings::default(),
             sidebar: SidebarSettings::default(),
             context_menu: ContextMenuSettings::default(),
@@ -357,7 +360,7 @@ impl Settings {
     }
 }
 
-pub type SettingsHandle = Rc<super::SettingsOwner>;
+pub type SettingsHandle = Arc<super::SettingsOwner>;
 
 pub fn default_home_blocks() -> Vec<HomeBlockKind> {
     vec![

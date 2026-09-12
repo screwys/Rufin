@@ -175,14 +175,11 @@ async fn external_server_change_uses_the_configured_profile_and_preserves_unavai
         )
         .unwrap()
     }));
-    let (events, drain) = async_channel::bounded(1);
     let (visualizer, visualizer_drain) = async_channel::bounded(1);
     let owner = PlaybackOwner::new(
         database,
         settings,
         runtime,
-        events,
-        drain,
         visualizer,
         visualizer_drain,
         artwork,

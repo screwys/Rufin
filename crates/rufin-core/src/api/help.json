@@ -1,0 +1,312 @@
+{
+  "routes": {
+    "GET /api/playback": "Playback status and the current track",
+    "GET /api/playback/events": "Follow playback changes",
+    "POST /api/playback/play": {},
+    "POST /api/playback/pause": {},
+    "POST /api/playback/stop": {},
+    "POST /api/playback/next": {},
+    "POST /api/playback/previous": {},
+    "POST /api/playback/seek": {
+      "position_ms": 30000
+    },
+    "POST /api/playback/volume": {
+      "volume": 0.5,
+      "persist": true
+    },
+    "POST /api/playback/mute": {
+      "muted": true
+    },
+    "POST /api/playback/shuffle": {
+      "enabled": true
+    },
+    "POST /api/playback/repeat": {
+      "mode": "off | one | all"
+    },
+    "GET /api/sources": "Your sources and the source currently in use",
+    "GET /api/sources/edit?id=...": "Saved source settings, without passwords or tokens.",
+    "POST /api/sources/library": {
+      "source": "source ID",
+      "library": "library ID, or null for All Music"
+    },
+    "GET /api/home?source=...": "Home entries in the app's configured order. You can set folder or block to read one section.",
+    "POST /api/home": {
+      "source": "source ID",
+      "block": "Explore | MostPlayed | NewlyAdded | RecentlyPlayed | RecentlyReleased"
+    },
+    "GET /api/appearance": "The app's theme and colors.",
+    "POST /api/sources": "Add a source and scan its music. See source_setup for examples. Returns the source ID when finished.",
+    "PATCH /api/sources": "Change source settings. See source_update for examples.",
+    "POST /api/sources/local": {
+      "paths": ["/path/to/music"]
+    },
+    "POST /api/sources/select": {
+      "id": "source ID"
+    },
+    "POST /api/sources/refresh": {
+      "id": "source ID"
+    },
+    "GET /api/sources/progress": "Check progress while adding, switching or refreshing a source.",
+    "GET /api/sources/events": "Follow source progress, starting with the current status.",
+    "POST /api/sources/login/plex": {
+      "method": "browser"
+    },
+    "POST /api/sources/login/emby": {
+      "method": "pin"
+    },
+    "POST /api/sources/login/jellyfin": {
+      "server_url": "https://your-server",
+      "trust_invalid_cert": false
+    },
+    "POST /api/sources/login/nextcloud": "Sign in through your browser. Send {settings: file_settings, credentials: {secret,headers}}. Returns a login link, then the login details to use when adding the source.",
+    "GET /api/sources/plex/logins": "Saved Plex accounts. Reuse one to add another server or profile.",
+    "POST /api/sources/plex/profiles": "List Plex profiles. Send {login} from a completed login. Returns {login,profiles}.",
+    "POST /api/sources/plex/servers": "List Plex servers. Send {login,profile,pin:null,lan:[]}. Returns {login,servers} to use when adding the source.",
+    "POST /api/sources/smb/shares": "List network shares. Send {settings: file_settings, credentials: {secret,headers}}.",
+    "DELETE /api/sources?id=...": "Forget a source",
+    "GET /api/tracks?source=...&offset=0&limit=100&q=...": "Browse tracks from a source, up to 256 at a time. You can also set folder, sort, descending and favorites.",
+    "GET /api/albums?source=...&offset=0&limit=100": "Browse albums, up to 128 at a time. You can also set folder, q, sort, descending and favorites.",
+    "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too.",
+    "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
+    "GET /api/folders/live?source=...": "Browse folders directly on the server. You can set parent and folder. Returned track_ids match object_id in track results.",
+    "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",
+    "POST /api/playlists": {
+      "name": "Evening",
+      "source": null,
+      "uris": ["track URI"]
+    },
+    "PATCH /api/playlists": {
+      "id": 1,
+      "name": "New name"
+    },
+    "DELETE /api/playlists?id=...": "Delete a playlist",
+    "GET /api/playlists/entries?id=...": "Browse tracks in a playlist, up to 256 at a time. You can set offset, limit, q, sort and descending. To filter by folder, include source too.",
+    "POST /api/playlists/entries": {
+      "id": 1,
+      "uris": ["track URI"],
+      "skip_duplicates": false
+    },
+    "PATCH /api/playlists/entries": {
+      "id": 1,
+      "entry": 2,
+      "position": 0
+    },
+    "DELETE /api/playlists/entries": {
+      "id": 1,
+      "entries": [2]
+    },
+    "GET /api/queue": "Tracks around the current queue position and the total count. Set limit to choose how many nearby tracks to return (up to 100).",
+    "POST /api/queue": {
+      "uris": ["track URI"],
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/album": {
+      "id": 1,
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/playlist": {
+      "id": 1,
+      "mode": "replace | append | next"
+    },
+    "POST /api/queue/source": {
+      "source": "source ID",
+      "folder": null,
+      "q": "",
+      "sort": "title",
+      "descending": false,
+      "favorites": false,
+      "mode": "replace | append | next"
+    },
+    "DELETE /api/queue": "Clear the queue using the app's setting for keeping the current song.",
+    "GET /api/media?uri=...": "Get a track's album, artists and favorite state. Album URIs return their artists.",
+    "POST /api/favorite": "Set favorite with {kind: track, album or artist, uri, favorite: true or false}. Returns the effective favorite state.",
+    "POST /api/queue/radio": "Play radio with {kind: track, uri} or {kind: album, artist, album_artist or playlist, id}.",
+    "POST /api/queue/activate": {
+      "id": "queue track ID"
+    },
+    "DELETE /api/queue/item?id=...": "Remove a track from the queue",
+    "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
+    "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
+    "GET /api/lyrics/events": "Follow lyrics updates. The id matches the current queue track ID.",
+    "GET /api/artwork?uri=...": "Cover image for a track or album. Returns PNG, or 404 when no cover is available.",
+    "POST /api/queue/reorder": {
+      "ids": ["queue track ID"],
+      "before": "queue track ID, or null for the end"
+    },
+    "POST /api/queue/next": {
+      "id": "queue track ID"
+    },
+    "GET /api/events": "Follow playback, source progress and lyrics together on one connection.",
+    "GET /api/artists?source=...": "Browse artists. Use offset, limit (up to 128), q, sort, descending, favorites and album_artists.",
+    "GET /api/artists/tracks?id=...": "Browse an artist’s tracks, up to 256 at a time. Use q, sort, descending and album_artists.",
+    "GET /api/genres/tracks?id=...": "Browse tracks in a genre. Use q, sort, descending, offset and limit. To filter by library folder, include source and folder.",
+    "POST /api/queue/genre": { "id": 1, "mode": "replace | next | append" },
+    "GET /api/smart-playlists?source=...": "Browse saved smart playlists, up to 64 at a time. Source is optional; use q, sort and descending.",
+    "GET /api/smart-playlists/tracks?id=...": "Browse tracks selected by the saved playlist rules and order. Use source, q, offset and limit (up to 256).",
+    "POST /api/queue/artist": {
+      "id": 1,
+      "mode": "replace"
+    },
+    "POST /api/queue/smart-playlist": {
+      "id": 1,
+      "source": null,
+      "mode": "replace"
+    },
+    "POST /api/playback/auto-dj": "Toggle Auto DJ using the app’s existing settings.",
+    "GET /api/random?source=...": "Saved random-play settings and genres. Use q and offset to browse genres, 64 at a time.",
+    "POST /api/queue/random": {
+      "source": "source ID",
+      "count": 100,
+      "min_year": null,
+      "max_year": null,
+      "genre": null,
+      "played": "All | Played | Unplayed",
+      "mode": "replace | next | append"
+    }
+  },
+  "commands": "Playback and queue commands return 202 when received. Check playback status or follow playback updates to see the result or any error. Source and playlist changes return when finished. Use IDs exactly as returned, including negative numbers. Positions and offsets start at zero. Each copy of a track in a playlist or queue has its own ID.",
+  "login": "Keep the login connection open until sign-in finishes. Closing it cancels sign-in. Updates use event: login with JSON {event,data}, or {error}. Plex also accepts {method: password, data: {username,password,verification_code:null}}; Emby accepts {method: password, data: {username,password}}. Use the returned login details unchanged when adding the source.",
+  "source_setup": {
+    "local": {
+      "type": "local",
+      "data": {
+        "roots": ["/path/to/music"]
+      }
+    },
+    "jellyfin_emby": {
+      "type": "jellyfin_emby",
+      "data": {
+        "kind": "jellyfin",
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password",
+          "trust_invalid_cert": false
+        },
+        "use_instant_mix": false
+      }
+    },
+    "open_subsonic": {
+      "type": "open_subsonic",
+      "data": {
+        "kind": "navidrome",
+        "authentication": "password",
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password or API key",
+          "trust_invalid_cert": false
+        }
+      }
+    },
+    "web_dav_smb": "{type: web_dav or smb, data: {name, settings: file_settings below, credentials: {secret,headers:[]}}}",
+    "plex": "{type: plex, data: {name,login,profile_id,server,address_override:null,trust_invalid_cert:false}}",
+    "emby_connect": "{type: emby_connect, data: {server: a server from the login result,source_name:null,use_instant_mix:false}}",
+    "jellyfin_quick_connect": "{type: jellyfin_quick_connect, data: {login: the completed login result,source_name:null,use_instant_mix:false}}"
+  },
+  "source_update": {
+    "local": {
+      "type": "local",
+      "data": { "source_id": "source ID", "roots": ["/path/to/music"] }
+    },
+    "files": "{type: files, data: {source_id,name,settings: file_settings,credentials:{secret:null,headers:null}}}. Use null to keep the saved password and headers.",
+    "plex": {
+      "type": "plex",
+      "data": {
+        "source_id": "source ID",
+        "settings": {
+          "name": "Plex music",
+          "address_override": null,
+          "trust_invalid_cert": false
+        }
+      }
+    },
+    "jellyfin_emby": {
+      "type": "jellyfin_emby",
+      "data": {
+        "source_id": "source ID",
+        "connect_manually": true,
+        "credentials": {
+          "source_name": null,
+          "server_url": "https://your-server",
+          "username": "user",
+          "secret": "password",
+          "trust_invalid_cert": false
+        },
+        "use_instant_mix": false
+      }
+    },
+    "other_types": "For open_subsonic, emby_connect and jellyfin_quick_connect, add source_id to the corresponding source_setup data."
+  },
+  "file_settings": {
+    "url": "https://your-server/music/",
+    "alternate_urls": [],
+    "folders": [],
+    "username": "",
+    "domain": "",
+    "authentication": "anonymous",
+    "trust_invalid_certificate": false,
+    "certificate_pem": null,
+    "require_smb_encryption": false
+  },
+  "choices": {
+    "file_authentication": ["anonymous", "password", "bearer"],
+    "server_kind": ["jellyfin", "emby"],
+    "subsonic_kind": ["navidrome", "open_subsonic"],
+    "subsonic_authentication": ["password", "legacy_password", "api_key"],
+    "track_sort": [
+      "title",
+      "track_number",
+      "artist",
+      "album_artist",
+      "album",
+      "year",
+      "release_date",
+      "date_added",
+      "last_played",
+      "play_count",
+      "rating",
+      "genre",
+      "bpm",
+      "duration",
+      "favorite"
+    ],
+    "album_sort": [
+      "title",
+      "album_artist",
+      "year",
+      "release_date",
+      "date_added",
+      "last_played",
+      "play_count",
+      "rating",
+      "track_count",
+      "duration",
+      "favorite"
+    ],
+    "playlist_sort": ["position", "title", "track_count", "duration"],
+    "playlist_entry_sort": ["position", "title", "artist", "album"],
+    "artist_sort": [
+      "title",
+      "album_count",
+      "track_count",
+      "last_played",
+      "play_count",
+      "rating",
+      "favorite"
+    ]
+  },
+  "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. Browsing or refreshing a source does not switch the source currently in use.",
+  "events": "Update routes use server-sent events (SSE). Each data line contains JSON. The combined events route also follows theme changes.",
+  "html": "Library browsing routes return HTML for the web page when HX-Request is true. Other callers receive JSON.",
+  "playlist_selection": "When creating a playlist or adding entries, selection can replace uris: {kind: album, artist, playlist or smart_playlist, id}. Source and folder select the library for the tracks.",
+  "queue_modes": {
+    "replace": "Play now and replace the queue",
+    "append": "Add to the end of the queue",
+    "next": "Play next"
+  },
+  "collection_playback": "For queue/source, queue/album, queue/artist and queue/playlist, q, sort and descending choose the tracks and order. Set anchor_uri to start at a particular track. For a playlist with repeated tracks, use anchor_entry to choose the playlist entry. Without an anchor, Play follows your shuffle setting. Smart playlists play in their saved order; q filters the tracks and anchor_uri chooses the starting track.",
+  "volume": "Volume is a slider position from 0 to 1. Rufin applies the perceptual or linear scale selected in the app. Set persist to false while dragging, then send the final value with persist true to save it."
+}

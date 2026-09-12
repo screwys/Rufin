@@ -1,8 +1,6 @@
 #![cfg_attr(all(windows, not(debug_assertions)), windows_subsystem = "windows")]
 
-mod paths;
-
-use rufin_core::{app, diagnostics};
+use rufin_core::{app, diagnostics, paths};
 use std::env;
 use std::ffi::OsStr;
 use std::io::{self, Write};
@@ -21,7 +19,7 @@ fn main() -> ExitCode {
         return result;
     }
     #[cfg(unix)]
-    if let Some(result) = restart_with_gstreamer_http1() {
+    if let Some(result) = playback_gstreamer::restart_with_http1() {
         return result;
     }
     if let Some(result) = discovery_worker_argument() {
@@ -78,10 +76,15 @@ fn main() -> ExitCode {
         )
         .await
     };
-    if updated_restart {
-        ui_shell::run_application_after_update(initial_settings, bootstrap, || {})
-    } else {
-        ui_shell::run_application(initial_settings, bootstrap)
+    match app::with_runtime(|_| {
+        if updated_restart {
+            ui_shell::run_application_after_update(initial_settings, bootstrap, || {})
+        } else {
+            ui_shell::run_application(initial_settings, bootstrap)
+        }
+    }) {
+        Ok(exit) => exit,
+        Err(error) => ui_shell::run_startup_error_application(error.to_string()),
     }
 }
 
@@ -133,28 +136,6 @@ fn restart_with_language(saved_language: &str, updated_restart: bool) -> Option<
             }
         }
     }
-}
-
-#[cfg(unix)]
-fn restart_with_gstreamer_http1() -> Option<ExitCode> {
-    if env::var_os("SOUP_FORCE_HTTP1").is_some() {
-        return None;
-    }
-    // Establish libsoup's process setting before GTK or GStreamer can create threads.
-    let executable = env::current_exe().ok()?;
-    let mut command = Command::new(executable);
-    command
-        .args(env::args_os().skip(1))
-        .env("SOUP_FORCE_HTTP1", "1");
-
-    use std::os::unix::process::CommandExt as _;
-
-    let error = command.exec();
-    let _ = writeln!(
-        io::stderr().lock(),
-        "Could not enable GStreamer HTTP/1; continuing with the system default: {error}"
-    );
-    None
 }
 
 #[cfg(target_os = "macos")]

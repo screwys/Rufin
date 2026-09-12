@@ -1,0 +1,206 @@
+.icon[data-icon="play"] {
+  mask-image: url("/icons/rufin-media-playback-start-symbolic.svg");
+}
+
+.icon[data-icon="pause"] {
+  mask-image: url("/icons/rufin-media-playback-pause-symbolic.svg");
+}
+
+.icon[data-icon="previous"] {
+  mask-image: url("/icons/rufin-media-skip-backward-symbolic.svg");
+}
+
+.icon[data-icon="next"] {
+  mask-image: url("/icons/rufin-media-skip-forward-symbolic.svg");
+}
+
+.icon[data-icon="volume"] {
+  mask-image: url("/icons/rufin-audio-volume-high-symbolic.svg");
+}
+
+.icon[data-icon="muted"] {
+  mask-image: url("/icons/rufin-audio-volume-muted-symbolic.svg");
+}
+
+.icon[data-icon="tracks"] {
+  mask-image: url("/icons/rufin-tracks-symbolic.svg");
+}
+
+.icon[data-icon="albums"] {
+  mask-image: url("/icons/rufin-albums-symbolic.svg");
+}
+
+.icon[data-icon="playlists"] {
+  mask-image: url("/icons/rufin-playlists-symbolic.svg");
+}
+
+.icon[data-icon="folders"] {
+  mask-image: url("/icons/rufin-folders-symbolic.svg");
+}
+
+.icon[data-icon="queue"] {
+  mask-image: url("/icons/rufin-music-queue-symbolic.svg");
+}
+
+.icon[data-icon="server"] {
+  mask-image: url("/icons/rufin-network-server-symbolic.svg");
+}
+
+.icon[data-icon="add"] {
+  mask-image: url("/icons/rufin-list-add-symbolic.svg");
+}
+
+.icon[data-icon="remove"] {
+  mask-image: url("/icons/rufin-list-remove-symbolic.svg");
+}
+
+.icon[data-icon="refresh"] {
+  mask-image: url("/icons/rufin-view-refresh-symbolic.svg");
+}
+
+.icon[data-icon="back"] {
+  mask-image: url("/icons/rufin-go-previous-symbolic.svg");
+}
+
+.icon[data-icon="forward"] {
+  mask-image: url("/icons/rufin-go-next-symbolic.svg");
+}
+
+.icon[data-icon="go-to"] {
+  mask-image: url("/icons/rufin-external-link-compact-symbolic.svg");
+}
+
+.icon[data-icon="clear"] {
+  mask-image: url("/icons/rufin-edit-clear-symbolic.svg");
+}
+.icon[data-icon="close"] {
+  mask-image: url("/icons/rufin-window-close-symbolic.svg");
+}
+
+.icon[data-icon="sidebar"] {
+  mask-image: url("/icons/rufin-sidebar-show-symbolic.svg");
+}
+
+.icon[data-icon="menu"] {
+  mask-image: url("/icons/rufin-open-menu-symbolic.svg");
+}
+
+.icon[data-icon="artists"] {
+  mask-image: url("/icons/rufin-artists-symbolic.svg");
+}
+
+.icon[data-icon="smart-playlists"] {
+  mask-image: url("/icons/rufin-smart-playlists-symbolic.svg");
+}
+
+.icon[data-icon="shuffle"] {
+  mask-image: url("/icons/rufin-shuffle-symbolic.svg");
+}
+
+.icon[data-icon="repeat"] {
+  mask-image: url("/icons/rufin-repeat-symbolic.svg");
+}
+
+.icon[data-icon="repeat-one"] {
+  mask-image: url("/icons/rufin-repeat-one-symbolic.svg");
+}
+
+.icon[data-icon="auto-dj"] {
+  mask-image: url("/icons/rufin-auto-dj-symbolic.svg");
+}
+
+.icon[data-icon="random"] {
+  mask-image: url("/icons/rufin-random-symbolic.svg");
+}
+
+.icon[data-icon="settings"] {
+  mask-image: url("/icons/rufin-preferences-system-symbolic.svg");
+}
+
+.icon[data-icon="collapse-left"] {
+  mask-image: url("/icons/rufin-sidebar-hide-symbolic.svg");
+}
+
+.icon[data-icon="collapse-right"] {
+  mask-image: url("/icons/rufin-sidebar-collapse-right-symbolic.svg");
+}
+
+.icon[data-icon="more"] {
+  mask-image: url("/icons/rufin-view-more-symbolic.svg");
+}
+
+.icon[data-icon="duration"] {
+  mask-image: url("/icons/rufin-preferences-system-time-symbolic.svg");
+}
+
+.icon[data-icon="favorite"] {
+  mask-image: url("/icons/rufin-heart-outline-symbolic.svg");
+}
+
+.icon[data-icon="favorite-filled"] {
+  mask-image: url("/icons/rufin-heart-filled-symbolic.svg");
+}
+
+.icon[data-icon="play-next"] {
+  mask-image: url("/icons/rufin-mail-forward-symbolic.svg");
+}
+
+.icon[data-icon="play-last"] {
+  mask-image: url("/icons/rufin-go-last-symbolic.svg");
+}
+
+.icon[data-icon="volume-low"] {
+  mask-image: url("/icons/rufin-audio-volume-low-symbolic.svg");
+}
+
+.icon[data-icon="volume-medium"] {
+  mask-image: url("/icons/rufin-audio-volume-medium-symbolic.svg");
+}
+
+.icon[data-icon="expand-right"] {
+  mask-image: url("/icons/rufin-sidebar-expand-right-symbolic.svg");
+}
+
+.icon[data-icon="home"] {
+  mask-image: url("/icons/rufin-home-symbolic.svg");
+}
+
+.icon[data-icon="sort-ascending"] {
+  mask-image: url("/icons/rufin-sort-name-symbolic.svg");
+}
+
+.icon[data-icon="sort-descending"] {
+  mask-image: url("/icons/rufin-sort-name-descending-symbolic.svg");
+}
+
+.icon[data-icon="cover-fallback"] {
+  mask-image: url("/icons/rufin-symbolic.svg");
+}
+
+.icon[data-icon="disconnect"] {
+  mask-image: url("/icons/rufin-application-exit-symbolic.svg");
+}
+
+.icon[data-icon="radio"] {
+  mask-image: url("/icons/rufin-audio-only-symbolic.svg");
+}
+
+.icon[data-icon="add-playlist"] {
+  mask-image: url("/icons/rufin-playlists-compact-symbolic.svg");
+}
+
+.icon[data-icon="edit"] {
+  mask-image: url("/icons/rufin-document-edit-symbolic.svg");
+}
+
+.icon[data-icon="delete"] {
+  mask-image: url("/icons/rufin-process-stop-symbolic.svg");
+}
+
+.icon[data-icon="check"] {
+  mask-image: url("/icons/rufin-object-select-symbolic.svg");
+}
+
+.icon[data-icon="calendar"] {
+  mask-image: url("/icons/rufin-x-office-calendar-symbolic.svg");
+}

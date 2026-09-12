@@ -29,6 +29,12 @@ impl FavoriteTarget {
 }
 
 impl Database {
+    pub async fn favorite(&self, target: &FavoriteTarget) -> LibraryResult<bool> {
+        let mut connection = self.acquire_reader().await?;
+        let mut transaction = connection.begin().await?;
+        effective_favorite(&mut transaction, target).await
+    }
+
     /// Apply native user preferences without republishing catalog metadata or artwork.
     /// An uncached target needs normal item acquisition before its state can be applied.
     pub async fn update_source_user_states(

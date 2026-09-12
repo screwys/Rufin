@@ -19,7 +19,7 @@ pub enum DiscoveryProvider {
     Plex,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]
 pub struct DiscoveredServer {
     pub id: Option<String>,
     pub name: String,

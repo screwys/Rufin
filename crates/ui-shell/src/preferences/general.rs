@@ -41,6 +41,7 @@ pub(crate) fn scrobbling_page(
     let page: adw::PreferencesPage =
         ui_shared::ui_resource::object(&builder, resource, "integrations_page");
     let settings = shell.products.scrobbling.preferences();
+    super::web_controller::bind(shell, &page, &builder, resource);
     ui_shared::objects!(builder, resource, {
         lastfm_enabled: adw::SwitchRow,
         lastfm_api_help: adw::ActionRow,
@@ -783,6 +784,7 @@ fn populate_theme_group(shell: &Rc<Shell>, group: &adw::PreferencesGroup) {
                 })
         {
             theme_shell.appearance.apply(&settings);
+            theme_shell.publish_controller_appearance();
         }
     });
     group.add(&row);
@@ -807,6 +809,7 @@ fn populate_theme_group(shell: &Rc<Shell>, group: &adw::PreferencesGroup) {
                 })
         {
             accent_shell.appearance.apply(&settings);
+            accent_shell.publish_controller_appearance();
         }
     });
     group.add(&accent_row);

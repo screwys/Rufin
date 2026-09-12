@@ -55,8 +55,13 @@ async fn source_members_on(
 ) -> LibraryResult<Vec<(String, Option<String>, bool)>> {
     let mut query = match &source.scope {
         QueueScope::Smart { reference, now } => {
-            let mut uris =
-                crate::smart_playlists::smart_members_ref(connection, reference, *now).await?;
+            let mut uris = crate::smart_playlists::smart_members_ref(
+                connection,
+                reference,
+                *now,
+                &source.filter,
+            )
+            .await?;
             if let Some(seed) = legacy_seed {
                 let anchor = source.anchor_uri.as_deref();
                 let known = if let Some(uri) = anchor {

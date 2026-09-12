@@ -249,44 +249,70 @@ impl Database {
         descending: bool,
         filter: &str,
     ) -> LibraryResult<Vec<PlaylistKey>> {
-        let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
-        let aggregate = matches!(sort, PlaylistSort::TrackCount | PlaylistSort::Duration);
-        let mut query =
-            QueryBuilder::<Sqlite>::new("SELECT playlist.playlist_key FROM playlists playlist");
-        if aggregate {
-            query.push(" LEFT JOIN playlist_entries entry USING(playlist_key) LEFT JOIN tracks track USING(media_uri)");
-        }
-        query.push(" WHERE (playlist.source_key=").push_bind(source)
-            .push(" OR playlist.source_key IS NULL) AND (playlist.source_key IS NULL OR ")
-            .push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM playlist_entries scoped_entry JOIN tracks scoped_track USING(media_uri) JOIN track_folders scope USING(track_key) WHERE scoped_entry.playlist_key=playlist.playlist_key AND scope.folder_key=").push_bind(folder).push("))");
-        if !filter.is_empty() {
-            query
-                .push(" AND instr(playlist.normalized_name,")
-                .push_bind(filter)
-                .push(")>0");
-        }
-        if aggregate {
-            query.push(" AND (playlist.source_key IS NULL OR ").push_bind(folder)
-                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
-                .push_bind(folder).push(")) GROUP BY playlist.playlist_key");
-        }
-        query.push(" ORDER BY ").push(match sort {
-            PlaylistSort::Position => "playlist.position",
-            PlaylistSort::Title => "playlist.sort_text",
-            PlaylistSort::TrackCount => "count(entry.playlist_entry_key)",
-            PlaylistSort::Duration => {
-                "COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0)"
-            }
-        });
-        if descending {
-            query.push(" DESC");
-        }
-        query.push(",playlist.sort_text,playlist.playlist_key");
-        Ok(query
-            .build_query_scalar()
+        Ok(
+            playlist_order_query(source, folder, sort, descending, filter)
+                .build_query_scalar()
+                .persistent(false)
+                .fetch_all(connection)
+                .await?,
+        )
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn playlist_page(
+        &self,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        sort: PlaylistSort,
+        descending: bool,
+        filter: &str,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let keys = playlist_order_query(source, folder, sort, descending, filter)
+            .push(" LIMIT ")
+            .push_bind(limit.min(PLAYLIST_ROW_LIMIT) as i64)
+            .push(" OFFSET ")
+            .push_bind(offset.min(i64::MAX as usize) as i64)
+            .build_query_scalar::<PlaylistKey>()
             .persistent(false)
-            .fetch_all(connection)
-            .await?)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = Self::load_playlist_rows(&mut transaction, &keys).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn playlist_entries_page(
+        &self,
+        playlist: PlaylistKey,
+        folder: Option<FolderKey>,
+        sort: PlaylistEntrySort,
+        descending: bool,
+        filter: &str,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<PlaylistEntryRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let query = playlist_query(playlist, folder, sort, descending, filter);
+        let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select(&query.entry_key));
+        let keys = sqlx::query_scalar::<_, PlaylistEntryKey>(sqlx::AssertSqlSafe(sql))
+            .bind(limit.min(PLAYLIST_ENTRY_ROW_LIMIT) as i64)
+            .bind(offset.min(i64::MAX as usize) as i64)
+            .persistent(false)
+            .fetch_all(&mut *transaction)
+            .await?;
+        let rows = load_playlist_entry_rows(&mut transaction, &keys).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
     }
 
     pub async fn playlist_destinations(
@@ -476,7 +502,7 @@ impl Database {
                  LEFT JOIN tracks track USING(media_uri)
                  WHERE playlist.playlist_key=?1 GROUP BY playlist.playlist_key"
             )))
-            .bind(key).bind(key.raw().abs()).fetch_optional(&mut *connection).await? else {
+            .bind(key).bind(key.raw().checked_abs()).fetch_optional(&mut *connection).await? else {
                 continue;
             };
             row.representative_artwork = sqlx::query_scalar(sqlx::AssertSqlSafe(format!(
@@ -485,7 +511,7 @@ impl Database {
                  WHERE entry.playlist_key=?1 AND track.artwork_binding IS NOT NULL
                  ORDER BY entry.position LIMIT 4"
             )))
-            .bind(key.raw().abs())
+            .bind(key.raw().checked_abs())
             .fetch_all(&mut *connection)
             .await?;
             row.genres =
@@ -497,7 +523,7 @@ impl Database {
                  WHERE entry.playlist_key=?1 GROUP BY genre.genre_key
                  ORDER BY count(*) DESC,genre.sort_text,genre.genre_key LIMIT 2"
                 )))
-                .bind(key.raw().abs())
+                .bind(key.raw().checked_abs())
                 .fetch_all(&mut *connection)
                 .await?
                 .into_iter()
@@ -1467,7 +1493,12 @@ pub(crate) fn playlist_query(
                 "main.playlists"
             }
         ),
-        predicate: format!("entry.playlist_key={}", key.raw().abs()),
+        predicate: format!(
+            "entry.playlist_key={}",
+            key.raw()
+                .checked_abs()
+                .map_or_else(|| "NULL".into(), |key| key.to_string())
+        ),
         uri: "entry.media_uri".into(),
         entry_key: if native {
             "-entry.playlist_entry_key"
@@ -1497,5 +1528,48 @@ pub(crate) fn playlist_query(
         let filter = crate::source_window::quote(&filter);
         query.predicate.push_str(&format!(" AND (instr(lower(entry.title||' '||entry.artist||' '||entry.album),{filter})>0 OR CAST(entry.year AS TEXT)={filter})"));
     }
+    query
+}
+
+fn playlist_order_query(
+    source: Option<SourceKey>,
+    folder: Option<FolderKey>,
+    sort: PlaylistSort,
+    descending: bool,
+    filter: &str,
+) -> QueryBuilder<Sqlite> {
+    let filter: String = filter.trim().to_lowercase().chars().take(256).collect();
+    let aggregate = matches!(sort, PlaylistSort::TrackCount | PlaylistSort::Duration);
+    let mut query =
+        QueryBuilder::<Sqlite>::new("SELECT playlist.playlist_key FROM playlists playlist");
+    if aggregate {
+        query.push(" LEFT JOIN playlist_entries entry USING(playlist_key) LEFT JOIN tracks track USING(media_uri)");
+    }
+    query.push(" WHERE (playlist.source_key=").push_bind(source)
+            .push(" OR playlist.source_key IS NULL) AND (playlist.source_key IS NULL OR ")
+            .push_bind(folder).push(" IS NULL OR EXISTS (SELECT 1 FROM playlist_entries scoped_entry JOIN tracks scoped_track USING(media_uri) JOIN track_folders scope USING(track_key) WHERE scoped_entry.playlist_key=playlist.playlist_key AND scope.folder_key=").push_bind(folder).push("))");
+    if !filter.is_empty() {
+        query
+            .push(" AND instr(playlist.normalized_name,")
+            .push_bind(filter)
+            .push(")>0");
+    }
+    if aggregate {
+        query.push(" AND (playlist.source_key IS NULL OR ").push_bind(folder)
+                .push(" IS NULL OR EXISTS (SELECT 1 FROM track_folders scope WHERE scope.track_key=track.track_key AND scope.folder_key=")
+                .push_bind(folder).push(")) GROUP BY playlist.playlist_key");
+    }
+    query.push(" ORDER BY ").push(match sort {
+        PlaylistSort::Position => "playlist.position",
+        PlaylistSort::Title => "playlist.sort_text",
+        PlaylistSort::TrackCount => "count(entry.playlist_entry_key)",
+        PlaylistSort::Duration => {
+            "COALESCE(sum(COALESCE(track.duration_millis,entry.duration_millis)),0)"
+        }
+    });
+    if descending {
+        query.push(" DESC");
+    }
+    query.push(",playlist.sort_text,playlist.playlist_key");
     query
 }

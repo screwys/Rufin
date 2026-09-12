@@ -189,15 +189,17 @@ pub(super) fn settings_group(
     form.save.connect_clicked(move |_| {
         let value = draft.borrow().clone();
         match value.input() {
-            Ok((settings, credentials)) => source.update_source(SourceSettingsChange::Files {
-                source_id: source_id.clone(),
-                name: value.name.trim().into(),
-                settings,
-                credentials: FileCredentialsEdit {
-                    secret: (!credentials.secret.is_empty()).then_some(credentials.secret),
-                    headers: value.replace_headers.then_some(credentials.headers),
-                },
-            }),
+            Ok((settings, credentials)) => {
+                source.update_source(SourceSettingsChange::Files {
+                    source_id: source_id.clone(),
+                    name: value.name.trim().into(),
+                    settings,
+                    credentials: FileCredentialsEdit {
+                        secret: (!credentials.secret.is_empty()).then_some(credentials.secret),
+                        headers: value.replace_headers.then_some(credentials.headers),
+                    },
+                });
+            }
             Err(error) => {
                 status.set_text(&error);
                 status.set_visible(true);

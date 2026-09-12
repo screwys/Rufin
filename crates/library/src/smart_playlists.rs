@@ -79,22 +79,12 @@ pub(crate) async fn smart_members_ref(
     connection: &mut SqliteConnection,
     reference: &SmartSourceReference,
     now: i64,
+    filter: &str,
 ) -> LibraryResult<Vec<String>> {
     let Some((key, source, folder)) = resolve_smart_reference(connection, reference).await? else {
         return Ok(Vec::new());
     };
-    let sql = format!(
-        "{}\nSELECT media_uri FROM selected ORDER BY {SMART_RESULT_ORDER}",
-        smart_policy_sql(connection, now, Some(std::slice::from_ref(&key)), false).await?
-    );
-    Ok(sqlx::query_scalar(AssertSqlSafe(sql))
-        .persistent(false)
-        .bind(source)
-        .bind(now)
-        .bind(folder)
-        .bind(serde_json::to_string(&[key.raw()])?)
-        .fetch_all(connection)
-        .await?)
+    smart_uri_page(connection, source, key, folder, filter, now, None).await
 }
 
 async fn resolve_smart_reference(
@@ -541,6 +531,16 @@ impl<'row> FromRow<'row, SqliteRow> for SmartPlaylistRow {
     }
 }
 
+fn smart_list_order(sort: SmartPlaylistListSort, descending: bool) -> Option<&'static str> {
+    match (sort, descending) {
+        (SmartPlaylistListSort::Position, false) => Some("position,smart_playlist_key"),
+        (SmartPlaylistListSort::Position, true) => Some("position DESC,smart_playlist_key"),
+        (SmartPlaylistListSort::Title, false) => Some("normalized_name,smart_playlist_key"),
+        (SmartPlaylistListSort::Title, true) => Some("normalized_name DESC,smart_playlist_key"),
+        _ => None,
+    }
+}
+
 async fn load_smart_playlist_page(
     connection: &mut SqliteConnection,
     source: Option<SourceKey>,
@@ -556,22 +556,11 @@ async fn load_smart_playlist_page(
             SmartPlaylistListSort::Position | SmartPlaylistListSort::Title
         )
     {
-        let sql = match (sort, descending) {
-            (SmartPlaylistListSort::Position, false) => {
-                "SELECT smart_playlist_key FROM smart_playlists ORDER BY position,smart_playlist_key"
-            }
-            (SmartPlaylistListSort::Position, true) => {
-                "SELECT smart_playlist_key FROM smart_playlists ORDER BY position DESC,smart_playlist_key"
-            }
-            (SmartPlaylistListSort::Title, false) => {
-                "SELECT smart_playlist_key FROM smart_playlists ORDER BY normalized_name,smart_playlist_key"
-            }
-            (SmartPlaylistListSort::Title, true) => {
-                "SELECT smart_playlist_key FROM smart_playlists ORDER BY normalized_name DESC,smart_playlist_key"
-            }
-            _ => unreachable!(),
-        };
-        let order = sqlx::query_scalar::<_, SmartPlaylistKey>(sql)
+        let sql = format!(
+            "SELECT smart_playlist_key FROM smart_playlists ORDER BY {}",
+            smart_list_order(sort, descending).unwrap()
+        );
+        let order = sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql))
             .fetch_all(&mut *connection)
             .await?;
         let seed = window.range(order.len());
@@ -582,7 +571,7 @@ async fn load_smart_playlist_page(
     let sql = format!(
         "{}\n{}",
         smart_policy_sql(connection, now, None, false).await?,
-        SMART_LIST_PAGE_SELECT.replace("{result_order}", SMART_RESULT_ORDER)
+        smart_list_page_select(true)
     );
     let mut records = sqlx::query(AssertSqlSafe(sql.as_str()))
         .persistent(false)
@@ -694,6 +683,109 @@ async fn load_smart_playlist_rows(
 }
 
 impl Database {
+    #[allow(clippy::too_many_arguments)]
+    pub async fn smart_playlist_page(
+        &self,
+        source: Option<SourceKey>,
+        folder: Option<FolderKey>,
+        sort: SmartPlaylistListSort,
+        descending: bool,
+        filter: &str,
+        now: i64,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<SmartPlaylistRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let limit = limit.min(SMART_PLAYLIST_ROW_LIMIT);
+        let filter = filter.trim();
+        let rows = if let Some(order) =
+            smart_list_order(sort, descending).filter(|_| folder.is_none())
+        {
+            let sql = format!(
+                "SELECT smart_playlist_key FROM smart_playlists WHERE instr(normalized_name,lower(?1))>0 ORDER BY {order} LIMIT ?2 OFFSET ?3"
+            );
+            let keys = sqlx::query_scalar::<_, SmartPlaylistKey>(AssertSqlSafe(sql))
+                .bind(filter)
+                .bind(limit as i64)
+                .bind(offset.min(i64::MAX as usize) as i64)
+                .fetch_all(&mut *transaction)
+                .await?;
+            load_smart_playlist_rows(&mut transaction, source, &keys, folder, now).await?
+        } else {
+            let sql = format!(
+                "{} {}",
+                smart_policy_sql(&mut transaction, now, None, false).await?,
+                smart_list_page_select(false)
+            );
+            let mut records = sqlx::query(AssertSqlSafe(sql))
+                .persistent(false)
+                .bind(source)
+                .bind(now)
+                .bind(folder)
+                .bind(Option::<SmartPlaylistKey>::None)
+                .bind(match sort {
+                    SmartPlaylistListSort::Position => 0_i64,
+                    SmartPlaylistListSort::Title => 1,
+                    SmartPlaylistListSort::TrackCount => 2,
+                    SmartPlaylistListSort::Duration => 3,
+                })
+                .bind(descending)
+                .bind(offset.min(i64::MAX as usize) as i64)
+                .bind(limit as i64)
+                .bind(filter)
+                .fetch(&mut *transaction);
+            let mut rows: Vec<SmartPlaylistRow> = Vec::new();
+            while let Some(record) = records.try_next().await? {
+                let key = record.try_get("definition_key")?;
+                if rows.last().is_none_or(|row| row.smart_playlist_key != key) {
+                    let mut row = SmartPlaylistRow::from_row(&record)?;
+                    normalize_definition(&mut row.definition)?;
+                    row.downloaded_count = record.try_get("downloaded_count")?;
+                    rows.push(row);
+                }
+                if let Some(binding) = record.try_get("artwork_binding")? {
+                    rows.last_mut().unwrap().artwork_bindings.push(binding);
+                }
+            }
+            rows
+        };
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    pub async fn smart_playlist_track_page(
+        &self,
+        source: Option<SourceKey>,
+        key: SmartPlaylistKey,
+        folder: Option<FolderKey>,
+        filter: &str,
+        now: i64,
+        offset: usize,
+        limit: usize,
+        cancellation: &ReadCancellation,
+    ) -> LibraryResult<Vec<SmartPlaylistTrackRow>> {
+        let (_permit, mut connection) = self.acquire_general(cancellation).await?;
+        let mut transaction = connection.begin().await?;
+        let uris = smart_uri_page(
+            &mut transaction,
+            source,
+            key,
+            folder,
+            filter,
+            now,
+            Some((offset, limit.min(256))),
+        )
+        .await?;
+        let rows = load_smart_track_rows(&mut transaction, &uris).await?;
+        transaction.commit().await?;
+        Database::clear_progress(&mut connection).await?;
+        Ok(rows)
+    }
+
     pub async fn ensure_default_smart_playlists(&self) -> LibraryResult<bool> {
         let mut writer = self.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
@@ -1144,12 +1236,7 @@ impl Database {
         // Keep Unicode lowercase substring semantics without retaining searchable rows.
         // SQLite's lower/NOCASE are ASCII-only; Unicode regex folding differs as well.
         while let Some(row) = rows.try_next().await? {
-            if filter.is_empty()
-                || ["title", "artist", "album"]
-                    .into_iter()
-                    .any(|field| row.get::<&str, _>(field).to_lowercase().contains(&filter))
-                || row.get::<i64, _>("year").to_string().contains(&filter)
-            {
+            if matches_smart_text(&row, &filter) {
                 order.push(row.try_get("media_uri")?);
             }
         }
@@ -1942,6 +2029,35 @@ const SMART_RESULT_ORDER: &str =
     CASE WHEN selected.descending=1 THEN selected.sort_value END DESC NULLS LAST,
     selected.sort_text,selected.media_uri";
 
+fn smart_list_page_select(relative: bool) -> String {
+    SMART_LIST_PAGE_SELECT
+        .replace("{result_order}", SMART_RESULT_ORDER)
+        .replace(
+            "{seed_start}",
+            if relative {
+                "CAST(round((total-1)*?7) AS INTEGER)/?8*?8"
+            } else {
+                "?7"
+            },
+        )
+        .replace(
+            "{filter}",
+            if relative {
+                "1"
+            } else {
+                "instr(normalized_name, lower(?9))>0"
+            },
+        )
+        .replace(
+            "{ordered_rows}",
+            if relative {
+                "ordered LEFT JOIN seed USING(definition_key)"
+            } else {
+                "seed ordered JOIN seed USING(definition_key)"
+            },
+        )
+}
+
 const SMART_LIST_PAGE_SELECT: &str = r#"
 , smart_stats AS (
     SELECT definition.definition_key,
@@ -1965,11 +2081,11 @@ SELECT *, count(*) OVER() total, row_number() OVER (ORDER BY
   CASE WHEN ?5=3 AND ?6=1 THEN duration_millis END DESC,
   position, definition_key)-1 row_position
 FROM smart_stats
-WHERE current_scope=0 OR ?3 IS NULL OR track_count>0
+WHERE (current_scope=0 OR ?3 IS NULL OR track_count>0) AND ({filter})
 ), seed AS (
   SELECT * FROM ordered
-  WHERE row_position>=CAST(round((total-1)*?7) AS INTEGER)/?8*?8
-    AND row_position<CAST(round((total-1)*?7) AS INTEGER)/?8*?8+?8
+  WHERE row_position>={seed_start}
+    AND row_position<{seed_start}+?8
 ), seed_downloads AS (
   SELECT definition_key,count(CASE WHEN EXISTS(
     SELECT 1 FROM local_access_files access
@@ -1981,7 +2097,7 @@ WHERE current_scope=0 OR ?3 IS NULL OR track_count>0
 SELECT ordered.definition_key,playlist.smart_playlist_key,playlist.object_id,playlist.name,
   playlist.definition_json,playlist.position,seed.track_count,seed.duration_millis,
   COALESCE(downloads.downloaded_count,0) downloaded_count,cover.artwork_binding
-FROM ordered LEFT JOIN seed USING(definition_key)
+FROM {ordered_rows}
 LEFT JOIN smart_playlists playlist ON playlist.smart_playlist_key=seed.definition_key
 LEFT JOIN seed_downloads downloads ON downloads.definition_key=seed.definition_key
 LEFT JOIN json_each((SELECT json_group_array(track_key) FROM (
@@ -2092,4 +2208,83 @@ impl Database {
         }
         Ok(count)
     }
+}
+
+fn matches_smart_text(row: &SqliteRow, filter: &str) -> bool {
+    filter.is_empty()
+        || ["title", "artist", "album"]
+            .into_iter()
+            .any(|field| row.get::<&str, _>(field).to_lowercase().contains(filter))
+        || row.get::<i64, _>("year").to_string().contains(filter)
+}
+
+#[allow(clippy::too_many_arguments)]
+async fn smart_uri_page(
+    connection: &mut SqliteConnection,
+    source: Option<SourceKey>,
+    key: SmartPlaylistKey,
+    folder: Option<FolderKey>,
+    filter: &str,
+    now: i64,
+    page: Option<(usize, usize)>,
+) -> LibraryResult<Vec<String>> {
+    if page.is_some_and(|(_, limit)| limit == 0) {
+        return Ok(Vec::new());
+    }
+    let filter = filter.trim().to_lowercase();
+    let policy = smart_policy_sql(
+        connection,
+        now,
+        Some(std::slice::from_ref(&key)),
+        !filter.is_empty(),
+    )
+    .await?
+    .replace(
+        ",selected AS MATERIALIZED (",
+        ",selected AS NOT MATERIALIZED (",
+    );
+    let columns = if filter.is_empty() {
+        "media_uri"
+    } else {
+        "media_uri,title,display_artist artist,display_album album,coalesce(year,0) year"
+    };
+    let suffix = if filter.is_empty() {
+        page.map(|(offset, limit)| {
+            format!(" LIMIT {limit} OFFSET {}", offset.min(i64::MAX as usize))
+        })
+        .unwrap_or_default()
+    } else {
+        String::new()
+    };
+    let sql =
+        format!("{policy} SELECT {columns} FROM selected ORDER BY {SMART_RESULT_ORDER}{suffix}");
+    let mut records = sqlx::query(AssertSqlSafe(sql))
+        .persistent(false)
+        .bind(source)
+        .bind(now)
+        .bind(folder)
+        .bind(serde_json::to_string(&[key.raw()])?)
+        .fetch(connection);
+    let mut uris = Vec::new();
+    let mut skipped = 0;
+    while let Some(row) = records.try_next().await? {
+        if !matches_smart_text(&row, &filter) {
+            continue;
+        }
+        if !filter.is_empty()
+            && let Some((offset, limit)) = page
+        {
+            if skipped < offset {
+                skipped += 1;
+                continue;
+            }
+            uris.push(row.try_get("media_uri")?);
+            if uris.len() == limit {
+                break;
+            }
+        } else {
+            uris.push(row.try_get("media_uri")?);
+        }
+    }
+    Ok(uris)
 }

@@ -11,6 +11,11 @@
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png</file>
     <file>hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png</file>
+    <file>hicolor/scalable/actions/rufin-shuffle-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-repeat-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-repeat-one-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-auto-dj-symbolic.svg</file>
+    <file>hicolor/scalable/actions/rufin-random-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-go-last-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-mail-forward-symbolic.svg</file>
     <file>hicolor/scalable/actions/rufin-media-skip-backward-symbolic.svg</file>

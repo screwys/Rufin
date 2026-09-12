@@ -741,12 +741,13 @@ impl crate::PlayerUi {
             self.refresh_queue_window();
             return;
         }
-        // The accepted window owns the row positions used for highlighting and reveal.
-        if queue.hydration.borrow().is_some()
-            || self
-                .selected_playback()
-                .is_some_and(|player| player.queue_loading)
-        {
+        let loading = self
+            .selected_playback()
+            .is_some_and(|player| player.queue_loading)
+            || (queue.hydration.borrow().is_some() && !self.queue_has_current());
+        self.set_queue_loading(false, loading);
+        self.set_queue_loading(true, loading);
+        if loading && queue.window.borrow().is_empty() {
             return;
         }
         if queue.update_current(current) {
@@ -783,12 +784,17 @@ impl crate::PlayerUi {
             return;
         };
         let generation = queue.begin();
-        self.set_queue_loading(false, true);
-        self.set_queue_loading(true, true);
+        let loading = self.selected_playback().is_some_and(|player| {
+            player.queue_loading || (player.queue.total > 0 && !self.queue_has_current())
+        });
+        self.set_queue_loading(false, loading);
+        self.set_queue_loading(true, loading);
         if self
             .selected_playback()
             .is_some_and(|player| player.queue_loading)
         {
+            drop(queue);
+            self.render_queue_panel();
             return;
         }
         let window = self
@@ -802,6 +808,7 @@ impl crate::PlayerUi {
             .spawn(async move { database.prepared_queue_page(&window).await });
         queue.hydration.replace(Some(task.abort_handle()));
         drop(queue);
+        self.render_queue_panel();
         let shell = Rc::downgrade(self);
         glib::spawn_future_local(async move {
             let rows = task.await.ok().and_then(Result::ok);
@@ -839,10 +846,22 @@ impl crate::PlayerUi {
             &self.right_panel.queue_panel
         };
         if let Some(scroller) = queue_panel_scroller(panel) {
-            // Keep the same mapped list allocating underneath the spinner.
-            scroller.set_opacity(if loading { 0.0 } else { 1.0 });
-            scroller.set_sensitive(!loading);
+            let replacing = loading && !self.queue_has_current();
+            scroller.set_opacity(if replacing { 0.0 } else { 1.0 });
+            scroller.set_sensitive(!replacing);
         }
+    }
+
+    fn queue_has_current(&self) -> bool {
+        let current = self
+            .selected_playback()
+            .and_then(|player| player.queue.current_occurrence.clone());
+        self.selected_queue().is_some_and(|queue| {
+            let rows = queue.window.borrow();
+            current.as_ref().map_or(!rows.is_empty(), |current| {
+                rows.iter().any(|row| &row.occurrence == current)
+            })
+        })
     }
 
     fn reveal_queue_current(&self, scroller: &gtk::ScrolledWindow, fullscreen: bool) {
@@ -850,15 +869,14 @@ impl crate::PlayerUi {
             return;
         };
         let pending = &queue.reveal_current[usize::from(fullscreen)];
-        if queue.hydration.borrow().is_some()
-            || self
-                .selected_playback()
-                .is_some_and(|player| player.queue_loading)
-        {
+        let loading = self
+            .selected_playback()
+            .is_some_and(|player| player.queue_loading);
+        if !self.queue_has_current() && (queue.hydration.borrow().is_some() || loading) {
             return;
         }
         if !pending.get() {
-            self.set_queue_loading(fullscreen, false);
+            self.set_queue_loading(fullscreen, loading);
             return;
         }
         let position = queue.current.borrow().as_ref().and_then(|current| {
@@ -870,12 +888,12 @@ impl crate::PlayerUi {
         });
         let Some(position) = position else {
             pending.set(false);
-            self.set_queue_loading(fullscreen, false);
+            self.set_queue_loading(fullscreen, loading);
             return;
         };
         if reveal_queue_current_row(scroller, position) {
             pending.set(false);
-            self.set_queue_loading(fullscreen, false);
+            self.set_queue_loading(fullscreen, loading);
         }
     }
 }
