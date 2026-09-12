@@ -72,7 +72,7 @@ localization = { path = "crates/localization" }
 lyrics = { path = "crates/lyrics" }
 lofty = "0.25.1"
 md5 = "0.8.0"
-md5_digest = { package = "md-5", version = "0.10" }
+md5_digest = { package = "md-5", version = "0.11" }
 mediaplayer = "0.4.3"
 mpris-server = "0.10.0"
 notify = "8.2.0"
