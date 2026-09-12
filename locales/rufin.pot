@@ -117,11 +117,6 @@ msgid ""
 msgstr ""
 
 msgid ""
-"This will disconnect connected browsers and scripts. They will need the new "
-"access token to reconnect."
-msgstr ""
-
-msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -135,6 +130,10 @@ msgstr ""
 msgid ""
 "Track evens out every song, while Album preserves the intended differences "
 "within each album"
+msgstr ""
+
+msgid ""
+"You will need to reconnect through the clients you use with the new API key."
 msgstr ""
 
 msgid ". You only need to fill email and an application name parts"

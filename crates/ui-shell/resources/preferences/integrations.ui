@@ -4,7 +4,7 @@
   <requires lib="libadwaita" version="1.9"/>
   <object class="AdwAlertDialog" id="controller_regenerate">
     <property name="heading" translatable="yes">Regenerate access token?</property>
-    <property name="body" translatable="yes">This will disconnect connected browsers and scripts. They will need the new access token to reconnect.</property>
+    <property name="body" translatable="yes">You will need to reconnect through the clients you use with the new API key.</property>
     <property name="default-response">cancel</property>
     <property name="close-response">cancel</property>
     <responses>
