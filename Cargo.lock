@@ -5594,6 +5594,7 @@ dependencies = [
  "localization",
  "playback",
  "playback-gstreamer",
+ "rufin-controller",
  "rufin-core",
  "sources",
  "tracing",

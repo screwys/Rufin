@@ -14,6 +14,11 @@ use tracing::info;
 const UPDATED_RESTART_VERSION_ENV: &str = "RUFIN_UPDATED_RESTART_VERSION";
 
 fn main() -> ExitCode {
+    let headless = env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless"));
+    #[cfg(target_os = "windows")]
+    if headless {
+        desktop_integration::Platform::attach_parent_console();
+    }
     #[cfg(target_os = "macos")]
     if let Some(result) = restart_in_macos_bundle() {
         return result;
@@ -39,6 +44,10 @@ fn main() -> ExitCode {
     let settings = app::startup_settings(&paths::roots());
     if let Some(result) = restart_with_language(&settings.load().ui.language, updated_restart) {
         return result;
+    }
+    if headless {
+        let _desktop_platform = desktop_integration::Platform::initialize();
+        return rufin_controller::run(env::args_os().skip(2));
     }
     if let Err(error) = localization::initialize() {
         let _ = writeln!(io::stderr().lock(), "Could not initialize gettext: {error}");
@@ -117,7 +126,17 @@ fn restart_with_language(saved_language: &str, updated_restart: bool) -> Option<
     #[cfg(not(unix))]
     {
         match command.spawn() {
-            Ok(child) => {
+            Ok(mut child) => {
+                if env::args_os().nth(1).as_deref() == Some(OsStr::new("--headless")) {
+                    return Some(match child.wait() {
+                        Ok(status) => ExitCode::from(status.code().unwrap_or(1) as u8),
+                        Err(error) => {
+                            let _ =
+                                writeln!(io::stderr().lock(), "Could not wait for Rufin: {error}");
+                            ExitCode::FAILURE
+                        }
+                    });
+                }
                 #[cfg(target_os = "windows")]
                 if updated_restart
                     && let Err(error) =

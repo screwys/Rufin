@@ -14,6 +14,7 @@ readme = "README.md"
 publish = false
 
 [workspace.dependencies]
+rufin-controller = { path = "crates/rufin-controller" }
 axum = "0.8.9"
 askama = "0.16.1"
 ui-library = { path = "crates/ui-library" }

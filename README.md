@@ -81,11 +81,11 @@
 
 ## 🖧 Headless mode and Controller
 
-- Run Rufin without the desktop interface with `cargo run -p rufin-controller`, using the same library and playback engine
+- Run release binaries without the desktop interface with `rufin --headless`; use `cargo run -p rufin-controller` for the separate GTK-free build
 - Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with: 
 ```bash
 export RUFIN_API_TOKEN="$(openssl rand -hex 32)"
-cargo run -p rufin-controller -- --listen
+rufin --headless --listen
 ```
 - Control playback, browse your library, manage sources and playlists, and view the queue & lyrics from a browser
 - Playback stays on the device running Rufin

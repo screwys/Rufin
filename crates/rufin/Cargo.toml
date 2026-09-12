@@ -21,6 +21,7 @@ name = "rufin"
 path = "src/main.rs"
 
 [dependencies]
+rufin-controller.workspace = true
 rufin-core.workspace = true
 app-identity.workspace = true
 desktop-integration.workspace = true
