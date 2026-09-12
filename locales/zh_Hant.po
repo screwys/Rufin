@@ -132,6 +132,10 @@ msgid ""
 "within each album"
 msgstr ""
 
+msgid ""
+"You will need to reconnect through the clients you use with the new API key."
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
@@ -162,6 +166,11 @@ msgstr "最新的 5 張專輯"
 msgid "6 hours"
 msgstr ""
 
+#, fuzzy
+#| msgid "API keys"
+msgid "API key (Subsonic)"
+msgstr "API 金鑰"
+
 msgid "API key"
 msgstr "API 金鑰"
 
@@ -173,6 +182,16 @@ msgstr "關於 Rufin"
 
 msgid "Accent color"
 msgstr "強調色"
+
+#, fuzzy
+#| msgid "Get token"
+msgid "Access token"
+msgstr "取得登入授權"
+
+#, fuzzy
+#| msgid "Collections"
+msgid "Actions"
+msgstr "收藏"
 
 msgid "Activity"
 msgstr ""
@@ -192,6 +211,9 @@ msgstr "新增匹配的伺服器前綴"
 #| msgid "Local music folder"
 msgid "Add a music folder"
 msgstr "本地音樂資料夾"
+
+msgid "Add a music source to start listening."
+msgstr ""
 
 msgid "Add a new source"
 msgstr "新增來源"
@@ -226,6 +248,11 @@ msgstr "已加入最愛"
 msgid "Added to"
 msgstr "已加入"
 
+#, fuzzy
+#| msgid "Add a new source"
+msgid "Adding source"
+msgstr "新增來源"
+
 msgid "Album Artists"
 msgstr "專輯藝人"
 
@@ -243,6 +270,11 @@ msgstr "專輯標題"
 
 msgid "Album tracks"
 msgstr "專輯曲目"
+
+#, fuzzy
+#| msgid "Album title"
+msgid "Album unavailable"
+msgstr "專輯標題"
 
 msgid "Album"
 msgstr "專輯"
@@ -262,7 +294,16 @@ msgstr "所有曲目"
 msgid "All"
 msgstr ""
 
+msgid "Allow remote connections"
+msgstr ""
+
 msgid "Alternate addresses"
+msgstr ""
+
+msgid "Anonymous (WebDAV / SMB)"
+msgstr ""
+
+msgid "Anonymous"
 msgstr ""
 
 msgid "Any genre"
@@ -304,11 +345,19 @@ msgstr "藝人電台"
 msgid "Artist tracks"
 msgstr "藝人曲目"
 
+#, fuzzy
+#| msgid "Artist name"
+msgid "Artist unavailable"
+msgstr "藝人名稱"
+
 msgid "Artist"
 msgstr "藝人"
 
 msgid "Artists"
 msgstr "藝人"
+
+msgid "Artwork"
+msgstr ""
 
 msgid "Audio fade on play/pause"
 msgstr "播放/暫停時淡入淡出"
@@ -390,6 +439,11 @@ msgstr "返回"
 
 #, fuzzy
 #| msgid "Get token"
+msgid "Bearer token (WebDAV)"
+msgstr "取得登入授權"
+
+#, fuzzy
+#| msgid "Get token"
 msgid "Bearer token"
 msgstr "取得登入授權"
 
@@ -436,6 +490,11 @@ msgstr "變更敏感存儲空間"
 msgid "Change Source"
 msgstr "變更敏感存儲空間"
 
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Change sort order"
+msgstr "變更敏感存儲空間"
+
 msgid "Change"
 msgstr "變更"
 
@@ -445,6 +504,11 @@ msgstr[0] "套用變更到 {count} 個曲目"
 
 msgid "Changes take effect after restarting Rufin"
 msgstr ""
+
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Changing source"
+msgstr "變更敏感存儲空間"
 
 msgid "Check for updates every"
 msgstr ""
@@ -464,6 +528,11 @@ msgstr "定位資料夾"
 
 msgid "Choose a local music folder"
 msgstr "選擇本地音樂資料夾"
+
+#, fuzzy
+#| msgid "Locate Folder"
+msgid "Choose an address"
+msgstr "定位資料夾"
 
 msgid "Choose an existing local folder"
 msgstr "選擇已存在的本地資料夾"
@@ -563,6 +632,16 @@ msgstr ""
 msgid "Connect manually"
 msgstr "連接"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connect to Rufin"
+msgstr "連接"
+
+#, fuzzy
+#| msgid "Connecting to music server..."
+msgid "Connect your music servers or local folders."
+msgstr "正在連接到音樂伺服器..."
+
 msgid "Connect"
 msgstr "連接"
 
@@ -578,8 +657,18 @@ msgstr "正在連接到音樂伺服器..."
 msgid "Connecting to {device}..."
 msgstr "正在連接到 {device}..."
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connecting"
+msgstr "連接"
+
 msgid "Connection failed"
 msgstr "連接失敗"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connection lost. Reconnecting..."
+msgstr "正在連接到 {device}..."
 
 #, fuzzy
 #| msgid "Connection"
@@ -603,12 +692,36 @@ msgstr "繼續"
 msgid "Control notifications"
 msgstr ""
 
+msgid "Controller status"
+msgstr ""
+
+msgid "Controller"
+msgstr ""
+
+msgid "Copy access token"
+msgstr ""
+
+#, fuzzy
+#| msgid "Copy"
+msgid "Copy link"
+msgstr "複製"
+
 msgid "Copy"
 msgstr "複製"
 
 #, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not load this page"
+msgstr "無法載入此資料夾"
+
+#, fuzzy
 #| msgid "Could not update favorites"
 msgid "Could not open folder: {error}"
+msgstr "無法更新最愛"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not receive live updates"
 msgstr "無法更新最愛"
 
 msgid "Could not save diagnostic log"
@@ -719,6 +832,9 @@ msgstr "時長"
 msgid "Disable private mode"
 msgstr "禁用無痕模式"
 
+msgid "Disabled"
+msgstr ""
+
 msgid "Disc number"
 msgstr "光碟編號"
 
@@ -727,6 +843,14 @@ msgstr "光碟"
 
 msgid "Discography"
 msgstr ""
+
+msgid "Disconnect from Rufin?"
+msgstr ""
+
+#, fuzzy
+#| msgid "Reconnect"
+msgid "Disconnect"
+msgstr "重新連接"
 
 msgid "Discord Rich Presence"
 msgstr ""
@@ -801,6 +925,11 @@ msgid "Edit Smart Playlist"
 msgstr "智慧播放清單"
 
 #, fuzzy
+#| msgid "Add a new source"
+msgid "Edit Source"
+msgstr "新增來源"
+
+#, fuzzy
 #| msgid "No lyrics"
 msgid "Edit lyrics"
 msgstr "無歌詞"
@@ -823,6 +952,11 @@ msgstr "連接"
 
 msgid "Emby"
 msgstr ""
+
+#, fuzzy
+#| msgid "Enable equalizer"
+msgid "Enable Controller"
+msgstr "啟用等化器"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr ""
@@ -855,6 +989,9 @@ msgid "Enter a server address, username, and password"
 msgstr "輸入伺服器位置、使用者名稱與密碼"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
+msgid "Enter your Rufin access token."
 msgstr ""
 
 msgid "Entire Library"
@@ -914,6 +1051,11 @@ msgstr "外部網站連結"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "當播放暫停或繼續時淡出或淡入"
 
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorite current track"
+msgstr "最愛的曲目"
+
 msgid "Favorite tracks"
 msgstr "最愛的曲目"
 
@@ -937,11 +1079,19 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr "檔案需要有 Mood/BPM 的標籤。不支援 Jellyfin"
 
+msgid "Files"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr "尋找您的 ListenBrainz 使用者憑證"
+
+#, fuzzy
+#| msgid "No lyrics"
+msgid "Finding lyrics..."
+msgstr "無歌詞"
 
 msgid "Fixed position"
 msgstr "固定位置"
@@ -968,6 +1118,9 @@ msgstr ""
 #| msgid "Forget Server"
 msgid "Forget Source"
 msgstr "遺忘伺服器"
+
+msgid "Forget \"{name}\"?"
+msgstr ""
 
 msgid "Forward"
 msgstr "前進"
@@ -1022,6 +1175,11 @@ msgstr "取得登入授權"
 
 msgid "Go to Album"
 msgstr "前往專輯"
+
+#, fuzzy
+#| msgid "Go to Artist"
+msgid "Go to {artist}"
+msgstr "前往藝人"
 
 msgid "Go to"
 msgstr "前往"
@@ -1168,6 +1326,14 @@ msgstr ""
 msgid "Legacy authorization"
 msgstr ""
 
+msgid "Legacy password (Subsonic)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Password"
+msgid "Legacy password"
+msgstr "密碼"
+
 msgid "Legacy"
 msgstr ""
 
@@ -1194,6 +1360,11 @@ msgstr ""
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Loading..."
+msgstr "正在儲存..."
 
 msgid "Local File Access"
 msgstr ""
@@ -1262,6 +1433,9 @@ msgstr "歌詞設定"
 #| msgid "Lyrics loaded"
 msgid "Lyrics storage"
 msgstr "歌詞已載入"
+
+msgid "Lyrics will appear here."
+msgstr ""
 
 msgid "Lyrics"
 msgstr "歌詞"
@@ -1360,6 +1534,9 @@ msgstr ""
 msgid "Music Folder"
 msgstr "音樂資料夾"
 
+msgid "Music folders on the Rufin machine"
+msgstr ""
+
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
@@ -1386,6 +1563,9 @@ msgstr "靜音"
 
 msgid "Muted"
 msgstr "已靜音"
+
+msgid "My music"
+msgstr ""
 
 msgid "Name"
 msgstr "名稱"
@@ -1494,6 +1674,11 @@ msgstr ""
 msgid "No local folders configured"
 msgstr ""
 
+#, fuzzy
+#| msgid "No lyrics"
+msgid "No lyrics available."
+msgstr "無歌詞"
+
 msgid "No lyrics"
 msgstr "無歌詞"
 
@@ -1508,8 +1693,19 @@ msgstr "無匹配的曲目"
 msgid "No music from this artist yet"
 msgstr "暫無此藝人的音樂"
 
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No network address available"
+msgstr "找不到網路裝置"
+
 msgid "No network devices found"
 msgstr "找不到網路裝置"
+
+#, fuzzy
+#| msgid "{count} result"
+#| msgid_plural "{count} results"
+msgid "No results"
+msgstr "{count} 個結果"
 
 msgid "No servers found, add one manually or try again"
 msgstr ""
@@ -1593,11 +1789,19 @@ msgstr ""
 msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
+msgid "One path per line"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "僅播放過的曲目"
 
 msgid "Only unplayed tracks"
 msgstr "僅未播放過的曲目"
+
+#, fuzzy
+#| msgid "Folder"
+msgid "Open Controller"
+msgstr "資料夾"
 
 #, fuzzy
 #| msgid "Folder"
@@ -1662,6 +1866,11 @@ msgstr "開啟更新記錄"
 
 msgid "Overview"
 msgstr "總覽"
+
+#, fuzzy
+#| msgid "Password"
+msgid "Password or token"
+msgstr "密碼"
 
 msgid "Password"
 msgstr "密碼"
@@ -1740,6 +1949,16 @@ msgstr "播放"
 msgid "Play/Pause"
 msgstr "播放/暫停"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Playback controls"
+msgstr "播放次數"
+
+#, fuzzy
+#| msgid "Playback speed"
+msgid "Playback position"
+msgstr "播放速度"
+
 msgid "Playback speed"
 msgstr "播放速度"
 
@@ -1791,6 +2010,9 @@ msgstr ""
 
 msgid "Pop"
 msgstr "流行"
+
+msgid "Port"
+msgstr ""
 
 msgid "Position"
 msgstr "位置"
@@ -1864,6 +2086,11 @@ msgstr "將曲目加入佇列的開頭"
 msgid "Queue and transitions"
 msgstr ""
 
+#, fuzzy
+#| msgid "Queue a track to begin"
+msgid "Queue tracks to show"
+msgstr "將曲目加入佇列的開頭"
+
 msgid "Queue"
 msgstr "佇列"
 
@@ -1913,8 +2140,24 @@ msgstr "重做"
 msgid "Refresh section"
 msgstr "重新整理區塊"
 
+#, fuzzy
+#| msgid "Refresh section"
+msgid "Refresh source"
+msgstr "重新整理區塊"
+
 msgid "Refresh"
 msgstr "重新整理"
+
+#, fuzzy
+#| msgid "Refresh"
+msgid "Refreshing"
+msgstr "重新整理"
+
+msgid "Regenerate access token"
+msgstr ""
+
+msgid "Regenerate access token?"
+msgstr ""
 
 msgid "Release date"
 msgstr "發行日期"
@@ -2013,6 +2256,9 @@ msgid "Replace saved custom headers"
 msgstr ""
 
 msgid "ReplayGain"
+msgstr ""
+
+msgid "Request failed ({status})"
 msgstr ""
 
 msgid "Require SMB encryption"
@@ -2141,14 +2387,29 @@ msgstr "搜尋偏好設定"
 
 #, fuzzy
 #| msgid "Search Again"
+msgid "Search genres"
+msgstr "重新搜尋"
+
+#, fuzzy
+#| msgid "Search Again"
 msgid "Search in page"
 msgstr "重新搜尋"
 
 msgid "Search is unavailable"
 msgstr ""
 
+#, fuzzy
+#| msgid "Caching Library"
+msgid "Search library"
+msgstr "快取庫"
+
 msgid "Search lyrics"
 msgstr "搜尋歌詞"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Search playlists"
+msgstr "智慧播放清單"
 
 msgid "Search preferences"
 msgstr "搜尋偏好設定"
@@ -2156,8 +2417,18 @@ msgstr "搜尋偏好設定"
 msgid "Search queue"
 msgstr "搜尋佇列"
 
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search tracks"
+msgstr "搜尋歌詞"
+
 msgid "Search"
 msgstr "搜尋"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Search..."
+msgstr "正在搜尋..."
 
 msgid "Searching Local Network"
 msgstr ""
@@ -2189,6 +2460,9 @@ msgstr ""
 msgid "Seek playback"
 msgstr ""
 
+msgid "Seek to {time}"
+msgstr ""
+
 msgid "Seekbar"
 msgstr ""
 
@@ -2207,6 +2481,11 @@ msgstr "選擇來源"
 #, fuzzy
 #| msgid "Select All"
 msgid "Select all"
+msgstr "全選"
+
+#, fuzzy
+#| msgid "Select All"
+msgid "Select {title}"
 msgstr "全選"
 
 #, fuzzy
@@ -2314,6 +2593,11 @@ msgstr "在右側邊欄顯示視覺效果"
 msgid "Show visualizer"
 msgstr "顯示視覺效果"
 
+#, fuzzy
+#| msgid "Showcase"
+msgid "Show"
+msgstr "展示櫃"
+
 msgid "Show/hide lyrics"
 msgstr "顯示/隱藏歌詞"
 
@@ -2395,6 +2679,11 @@ msgstr "曲名"
 msgid "Song"
 msgstr "歌曲"
 
+#, fuzzy
+#| msgid "Sort"
+msgid "Sort by"
+msgstr "排序"
+
 msgid "Sort title"
 msgstr ""
 
@@ -2411,6 +2700,11 @@ msgstr ""
 
 #, fuzzy
 #| msgid "No source"
+msgid "Source type"
+msgstr "無來源"
+
+#, fuzzy
+#| msgid "No source"
 msgid "Source"
 msgstr "無來源"
 
@@ -2419,6 +2713,11 @@ msgstr ""
 
 msgid "Start minimized"
 msgstr ""
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Starting..."
+msgstr "正在儲存..."
 
 msgid "Status display"
 msgstr ""
@@ -2463,6 +2762,9 @@ msgid "Template"
 msgstr ""
 
 msgid "Text"
+msgstr ""
+
+msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
 msgid "Theme"
@@ -2522,6 +2824,11 @@ msgstr "翻譯語言"
 msgid "Troubleshooting"
 msgstr ""
 
+#, fuzzy
+#| msgid "Verify server certificate"
+msgid "Trust self-signed certificate"
+msgstr "驗證伺服器的憑證"
+
 msgid "Tuesday"
 msgstr ""
 
@@ -2552,8 +2859,19 @@ msgstr ""
 msgid "Undo"
 msgstr ""
 
+msgid "Unknown artist"
+msgstr ""
+
+msgid "Unmute"
+msgstr ""
+
 msgid "Unmuted"
 msgstr ""
+
+#, fuzzy
+#| msgid "Song title"
+msgid "Untitled"
+msgstr "曲名"
 
 msgid "Update"
 msgstr "更新"
@@ -2598,6 +2916,16 @@ msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Use maximum year"
+msgstr "最大年份"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Use minimum year"
+msgstr "最小年份"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -2649,6 +2977,9 @@ msgstr ""
 msgid "Volume scale"
 msgstr ""
 
+msgid "Volume"
+msgstr ""
+
 msgid "Waiting for connection"
 msgstr "正在等候連線"
 
@@ -2681,6 +3012,12 @@ msgstr "黃色"
 
 msgid "Yes"
 msgstr "是"
+
+msgid "Your music belongs here"
+msgstr ""
+
+msgid "Your queue is empty."
+msgstr ""
 
 msgid "above"
 msgstr ""
@@ -2770,6 +3107,9 @@ msgstr[0] "{count} 週之前"
 msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} 年之前"
+
+msgid "{status} · {stage} {completed}{total}"
+msgstr ""
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"
@@ -2864,9 +3204,6 @@ msgstr ""
 
 #~ msgid "Reset equalizer"
 #~ msgstr "重置等化器"
-
-#~ msgid "Go to Artist"
-#~ msgstr "前往藝人"
 
 #~ msgid "Other"
 #~ msgstr "其他"

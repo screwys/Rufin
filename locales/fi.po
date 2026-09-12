@@ -140,6 +140,10 @@ msgid ""
 "within each album"
 msgstr ""
 
+msgid ""
+"You will need to reconnect through the clients you use with the new API key."
+msgstr ""
+
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
 
@@ -170,6 +174,11 @@ msgstr "5 uusinta albumia"
 msgid "6 hours"
 msgstr ""
 
+#, fuzzy
+#| msgid "API keys"
+msgid "API key (Subsonic)"
+msgstr "API-avaimet"
+
 msgid "API key"
 msgstr "API-avain"
 
@@ -181,6 +190,14 @@ msgstr "Tietoja - Rufin"
 
 msgid "Accent color"
 msgstr "Korostusväri"
+
+msgid "Access token"
+msgstr ""
+
+#, fuzzy
+#| msgid "Server Actions"
+msgid "Actions"
+msgstr "Palvelimen toiminnot"
 
 msgid "Activity"
 msgstr "Aktiviteetti"
@@ -196,6 +213,9 @@ msgstr "Lisää vastaava palvelimen etuliite"
 
 msgid "Add a music folder"
 msgstr "Lisää musiikkikansio"
+
+msgid "Add a music source to start listening."
+msgstr ""
 
 msgid "Add a new source"
 msgstr "Lisää uusi lähde"
@@ -230,6 +250,11 @@ msgstr "Lisätty suosikkeihin"
 msgid "Added to"
 msgstr ""
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Adding source"
+msgstr "Lisää lähde"
+
 msgid "Album Artists"
 msgstr "Albumiesittäjät"
 
@@ -247,6 +272,11 @@ msgstr ""
 
 msgid "Album tracks"
 msgstr ""
+
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Album unavailable"
+msgstr "Haku ei ole saatavilla"
 
 msgid "Album"
 msgstr "Albumi"
@@ -266,8 +296,17 @@ msgstr "Kaikki kappaleet"
 msgid "All"
 msgstr "Kaikki"
 
+msgid "Allow remote connections"
+msgstr ""
+
 msgid "Alternate addresses"
 msgstr "Vaihtoehtoiset osoitteet"
+
+msgid "Anonymous (WebDAV / SMB)"
+msgstr ""
+
+msgid "Anonymous"
+msgstr ""
 
 msgid "Any genre"
 msgstr "Mikä tahansa tyylilaji"
@@ -310,11 +349,19 @@ msgstr ""
 msgid "Artist tracks"
 msgstr ""
 
+#, fuzzy
+#| msgid "Search is unavailable"
+msgid "Artist unavailable"
+msgstr "Haku ei ole saatavilla"
+
 msgid "Artist"
 msgstr "Esittäjä"
 
 msgid "Artists"
 msgstr "Esittäjät"
+
+msgid "Artwork"
+msgstr ""
 
 msgid "Audio fade on play/pause"
 msgstr "Äänen häivennys toistossa/keskeytyksessä"
@@ -382,6 +429,9 @@ msgstr "Varmuuskopio palautettu"
 msgid "Backups"
 msgstr "Varmuuskopiot"
 
+msgid "Bearer token (WebDAV)"
+msgstr ""
+
 msgid "Bearer token"
 msgstr ""
 
@@ -424,6 +474,11 @@ msgstr "Vaihda salaisuuden tallennustilaa"
 msgid "Change Source"
 msgstr "Vaihda lähdettä"
 
+#, fuzzy
+#| msgid "Change Secret Storage"
+msgid "Change sort order"
+msgstr "Vaihda salaisuuden tallennustilaa"
+
 msgid "Change"
 msgstr "Vaihda"
 
@@ -434,6 +489,11 @@ msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
 msgstr "Muutokset tulevat voimaan, kun Rufin on käynnistetty uudelleen"
+
+#, fuzzy
+#| msgid "Change Source"
+msgid "Changing source"
+msgstr "Vaihda lähdettä"
 
 msgid "Check for updates every"
 msgstr ""
@@ -449,6 +509,11 @@ msgstr "Valitse palvelin"
 
 msgid "Choose a local music folder"
 msgstr "Valitse paikallinen musiikkikansio"
+
+#, fuzzy
+#| msgid "Choose Folder"
+msgid "Choose an address"
+msgstr "Valitse kansio"
 
 msgid "Choose an existing local folder"
 msgstr "Valitse olemassa oleva paikallinen kansio"
@@ -544,6 +609,16 @@ msgstr "Vahvista"
 msgid "Connect manually"
 msgstr "Yhteys"
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connect to Rufin"
+msgstr "Yhteys"
+
+#, fuzzy
+#| msgid "Connecting to music server..."
+msgid "Connect your music servers or local folders."
+msgstr "Yhdistetään musiikkipalvelimeen..."
+
 msgid "Connect"
 msgstr "Yhdistä"
 
@@ -559,8 +634,18 @@ msgstr "Yhdistetään musiikkipalvelimeen..."
 msgid "Connecting to {device}..."
 msgstr "Yhdistetään laitteeseen {device}..."
 
+#, fuzzy
+#| msgid "Connection"
+msgid "Connecting"
+msgstr "Yhteys"
+
 msgid "Connection failed"
 msgstr "Yhteys epäonnistui"
+
+#, fuzzy
+#| msgid "Connecting to {device}..."
+msgid "Connection lost. Reconnecting..."
+msgstr "Yhdistetään laitteeseen {device}..."
 
 msgid "Connection options"
 msgstr ""
@@ -580,11 +665,37 @@ msgstr "Jatka"
 msgid "Control notifications"
 msgstr "Säädinilmoitukset"
 
+#, fuzzy
+#| msgid "Control notifications"
+msgid "Controller status"
+msgstr "Säädinilmoitukset"
+
+msgid "Controller"
+msgstr ""
+
+msgid "Copy access token"
+msgstr ""
+
+#, fuzzy
+#| msgid "Copy"
+msgid "Copy link"
+msgstr "Kopioi"
+
 msgid "Copy"
 msgstr "Kopioi"
 
+#, fuzzy
+#| msgid "Couldn't load this folder"
+msgid "Could not load this page"
+msgstr "Tätä kansiota ei voitu ladata"
+
 msgid "Could not open folder: {error}"
 msgstr "Kansiota ei voitu avata: {error}"
+
+#, fuzzy
+#| msgid "Could not update favorites"
+msgid "Could not receive live updates"
+msgstr "Suosikkeja ei voitu päivittää"
 
 msgid "Could not save diagnostic log"
 msgstr "Diagnostiikkalokia ei voitu tallentaa"
@@ -690,6 +801,9 @@ msgstr "Suunta"
 msgid "Disable private mode"
 msgstr "Poista yksityinen tila käytöstä"
 
+msgid "Disabled"
+msgstr ""
+
 msgid "Disc number"
 msgstr "Levynumero"
 
@@ -698,6 +812,14 @@ msgstr "Levy"
 
 msgid "Discography"
 msgstr ""
+
+msgid "Disconnect from Rufin?"
+msgstr ""
+
+#, fuzzy
+#| msgid "Reconnect"
+msgid "Disconnect"
+msgstr "Yhdistä uudelleen"
 
 msgid "Discord Rich Presence"
 msgstr ""
@@ -765,6 +887,11 @@ msgstr "Muokkaa sanoituksia"
 msgid "Edit Smart Playlist"
 msgstr "Muokkaa älykästä soittolistaa"
 
+#, fuzzy
+#| msgid "Add Source"
+msgid "Edit Source"
+msgstr "Lisää lähde"
+
 msgid "Edit lyrics"
 msgstr "Muokkaa sanoituksia"
 
@@ -783,6 +910,9 @@ msgid "Emby Connect"
 msgstr "Yhdistä"
 
 msgid "Emby"
+msgstr ""
+
+msgid "Enable Controller"
 msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
@@ -817,6 +947,9 @@ msgstr "Syötä palvelimen osoite, käyttäjätunnus ja salasana"
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr "Kirjoita Nextcloud-palvelimesi osoite kirjautuaksesi selaimella"
+
+msgid "Enter your Rufin access token."
+msgstr ""
 
 msgid "Entire Library"
 msgstr "Koko kirjasto"
@@ -869,6 +1002,11 @@ msgstr "Ulkoisten sivujen linkit"
 msgid "Fade audio when playback is paused or resumed"
 msgstr "Häivytä ääni kun toisto keskeytetään tai palautetaan"
 
+#, fuzzy
+#| msgid "Favorite tracks"
+msgid "Favorite current track"
+msgstr "Suosikkikappaleet"
+
 msgid "Favorite tracks"
 msgstr "Suosikkikappaleet"
 
@@ -890,11 +1028,19 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
+msgid "Files"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
 msgstr ""
+
+#, fuzzy
+#| msgid "Edit lyrics"
+msgid "Finding lyrics..."
+msgstr "Muokkaa sanoituksia"
 
 msgid "Fixed position"
 msgstr ""
@@ -919,6 +1065,9 @@ msgstr ""
 
 msgid "Forget Source"
 msgstr "Unohda lähde"
+
+msgid "Forget \"{name}\"?"
+msgstr ""
 
 msgid "Forward"
 msgstr ""
@@ -973,6 +1122,9 @@ msgstr ""
 
 msgid "Go to Album"
 msgstr "Siirry albumiin"
+
+msgid "Go to {artist}"
+msgstr ""
 
 msgid "Go to"
 msgstr ""
@@ -1115,6 +1267,14 @@ msgstr ""
 msgid "Legacy authorization"
 msgstr ""
 
+msgid "Legacy password (Subsonic)"
+msgstr ""
+
+#, fuzzy
+#| msgid "Username and password"
+msgid "Legacy password"
+msgstr "Käyttäjätunnus ja salana"
+
 msgid "Legacy"
 msgstr ""
 
@@ -1141,6 +1301,11 @@ msgstr ""
 
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Loading..."
+msgstr "Tallennetaan..."
 
 msgid "Local File Access"
 msgstr ""
@@ -1208,6 +1373,9 @@ msgstr "Sanoitusten asetukset"
 
 msgid "Lyrics storage"
 msgstr "Sanoitusten tallennustila"
+
+msgid "Lyrics will appear here."
+msgstr ""
 
 msgid "Lyrics"
 msgstr "Sanoitukset"
@@ -1296,6 +1464,9 @@ msgstr "Useita arvoja"
 msgid "Music Folder"
 msgstr "Musiikkikansio"
 
+msgid "Music folders on the Rufin machine"
+msgstr ""
+
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
 
@@ -1322,6 +1493,9 @@ msgstr "Mykistä"
 
 msgid "Muted"
 msgstr "Mykistetty"
+
+msgid "My music"
+msgstr ""
 
 msgid "Name"
 msgstr "Nimi"
@@ -1424,6 +1598,11 @@ msgstr ""
 msgid "No local folders configured"
 msgstr ""
 
+#, fuzzy
+#| msgid "This isn't available"
+msgid "No lyrics available."
+msgstr "Tämä ei ole saatavilla"
+
 msgid "No lyrics"
 msgstr "Ei sanoituksia"
 
@@ -1438,8 +1617,19 @@ msgstr ""
 msgid "No music from this artist yet"
 msgstr ""
 
+#, fuzzy
+#| msgid "No network devices found"
+msgid "No network address available"
+msgstr "Verkkolaitteita ei löytynyt"
+
 msgid "No network devices found"
 msgstr "Verkkolaitteita ei löytynyt"
+
+#, fuzzy
+#| msgid "{count} result"
+#| msgid_plural "{count} results"
+msgid "No results"
+msgstr "{count} tulos"
 
 msgid "No servers found, add one manually or try again"
 msgstr "Palvelimia ei löytynyt, lisää manuaalisesti tai yritä uudelleen"
@@ -1519,11 +1709,19 @@ msgstr ""
 msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
+msgid "One path per line"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr "Vain toistetut kappaleet"
 
 msgid "Only unplayed tracks"
 msgstr ""
+
+#, fuzzy
+#| msgid "Open Folder"
+msgid "Open Controller"
+msgstr "Avaa kansio"
 
 msgid "Open Folder"
 msgstr "Avaa kansio"
@@ -1578,6 +1776,11 @@ msgstr "Muut julkaisut"
 
 msgid "Overview"
 msgstr ""
+
+#, fuzzy
+#| msgid "Password"
+msgid "Password or token"
+msgstr "Salasana"
 
 msgid "Password"
 msgstr "Salasana"
@@ -1654,6 +1857,16 @@ msgstr "Toista"
 msgid "Play/Pause"
 msgstr "Toista/keskeytä"
 
+#, fuzzy
+#| msgid "Play count"
+msgid "Playback controls"
+msgstr "Toistokerrat"
+
+#, fuzzy
+#| msgid "Playback speed"
+msgid "Playback position"
+msgstr "Toistonopeus"
+
 msgid "Playback speed"
 msgstr "Toistonopeus"
 
@@ -1701,6 +1914,9 @@ msgstr "Plex"
 
 msgid "Pop"
 msgstr "Pop"
+
+msgid "Port"
+msgstr ""
 
 msgid "Position"
 msgstr ""
@@ -1774,6 +1990,11 @@ msgstr "Aseta kappale jonoon aloittaaksesi"
 msgid "Queue and transitions"
 msgstr "Jono ja siirtymät"
 
+#, fuzzy
+#| msgid "Queue a track to begin"
+msgid "Queue tracks to show"
+msgstr "Aseta kappale jonoon aloittaaksesi"
+
 msgid "Queue"
 msgstr "Jono"
 
@@ -1821,7 +2042,21 @@ msgstr "Tee uudelleen"
 msgid "Refresh section"
 msgstr ""
 
+#, fuzzy
+#| msgid "Next source"
+msgid "Refresh source"
+msgstr "Seuraava lähde"
+
 msgid "Refresh"
+msgstr ""
+
+msgid "Refreshing"
+msgstr ""
+
+msgid "Regenerate access token"
+msgstr ""
+
+msgid "Regenerate access token?"
 msgstr ""
 
 msgid "Release date"
@@ -1916,6 +2151,9 @@ msgstr ""
 
 msgid "ReplayGain"
 msgstr "ReplayGain"
+
+msgid "Request failed ({status})"
+msgstr ""
 
 msgid "Require SMB encryption"
 msgstr "Vaadi SMB-salaus"
@@ -2036,14 +2274,29 @@ msgstr "Hae sanoituksia"
 msgid "Search current folder"
 msgstr "Hae nykyisestä kansiosta"
 
+#, fuzzy
+#| msgid "Search Again"
+msgid "Search genres"
+msgstr "Hae uudelleen"
+
 msgid "Search in page"
 msgstr "Hae sivulta"
 
 msgid "Search is unavailable"
 msgstr "Haku ei ole saatavilla"
 
+#, fuzzy
+#| msgid "Server Library"
+msgid "Search library"
+msgstr "Palvelinkirjasto"
+
 msgid "Search lyrics"
 msgstr "Hae sanoituksia"
+
+#, fuzzy
+#| msgid "Smart playlists"
+msgid "Search playlists"
+msgstr "Älykkäät soittolistat"
 
 msgid "Search preferences"
 msgstr ""
@@ -2051,8 +2304,18 @@ msgstr ""
 msgid "Search queue"
 msgstr ""
 
+#, fuzzy
+#| msgid "Search Lyrics"
+msgid "Search tracks"
+msgstr "Hae sanoituksia"
+
 msgid "Search"
 msgstr "Hae"
+
+#, fuzzy
+#| msgid "Searching..."
+msgid "Search..."
+msgstr "Haetaan..."
 
 msgid "Searching Local Network"
 msgstr "Haetaan paikallisverkkoa"
@@ -2084,6 +2347,9 @@ msgstr "Kelaa eteenpäin"
 msgid "Seek playback"
 msgstr "Kelaa toistoa"
 
+msgid "Seek to {time}"
+msgstr ""
+
 msgid "Seekbar"
 msgstr "Kelauspalkki"
 
@@ -2100,6 +2366,11 @@ msgid "Select Source"
 msgstr "Valitse lähde"
 
 msgid "Select all"
+msgstr "Valitse kaikki"
+
+#, fuzzy
+#| msgid "Select All"
+msgid "Select {title}"
 msgstr "Valitse kaikki"
 
 msgid "Selected folders"
@@ -2201,6 +2472,11 @@ msgstr "Näytä visualisointi oikeassa paneelissa"
 msgid "Show visualizer"
 msgstr "Näytä visualisointi"
 
+#, fuzzy
+#| msgid "Showcase"
+msgid "Show"
+msgstr "Esittelyssä"
+
 msgid "Show/hide lyrics"
 msgstr "Näytä/piilota sanoitukset"
 
@@ -2284,6 +2560,11 @@ msgstr ""
 msgid "Song"
 msgstr ""
 
+#, fuzzy
+#| msgid "Sort"
+msgid "Sort by"
+msgstr "Lajittelu"
+
 msgid "Sort title"
 msgstr ""
 
@@ -2296,6 +2577,11 @@ msgstr ""
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
+#, fuzzy
+#| msgid "Source"
+msgid "Source type"
+msgstr "Lähde"
+
 msgid "Source"
 msgstr "Lähde"
 
@@ -2304,6 +2590,11 @@ msgstr "Lähteet"
 
 msgid "Start minimized"
 msgstr "Käynnistä pienennettynä"
+
+#, fuzzy
+#| msgid "Saving..."
+msgid "Starting..."
+msgstr "Tallennetaan..."
 
 msgid "Status display"
 msgstr ""
@@ -2349,6 +2640,9 @@ msgstr "Mallipohja"
 
 msgid "Text"
 msgstr "Teksti"
+
+msgid "The API token was not accepted. Please connect again."
+msgstr ""
 
 msgid "Theme"
 msgstr "Teema"
@@ -2407,6 +2701,11 @@ msgstr "Käännöskieli"
 msgid "Troubleshooting"
 msgstr "Vianmääritys"
 
+#, fuzzy
+#| msgid "Verify server certificate"
+msgid "Trust self-signed certificate"
+msgstr "Vahvista palvelimen varmenne"
+
 msgid "Tuesday"
 msgstr "Tiistai"
 
@@ -2437,8 +2736,19 @@ msgstr ""
 msgid "Undo"
 msgstr "Kumoa"
 
+msgid "Unknown artist"
+msgstr ""
+
+#, fuzzy
+#| msgid "Unmuted"
+msgid "Unmute"
+msgstr "Ääni palautettu"
+
 msgid "Unmuted"
 msgstr "Ääni palautettu"
+
+msgid "Untitled"
+msgstr ""
 
 msgid "Update"
 msgstr ""
@@ -2481,6 +2791,16 @@ msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
 msgstr ""
+
+#, fuzzy
+#| msgid "Maximum year"
+msgid "Use maximum year"
+msgstr "Vuosi enintään"
+
+#, fuzzy
+#| msgid "Minimum year"
+msgid "Use minimum year"
+msgstr "Vuosi vähintään"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
 msgstr ""
@@ -2532,6 +2852,11 @@ msgstr ""
 msgid "Volume scale"
 msgstr ""
 
+#, fuzzy
+#| msgid "Columns"
+msgid "Volume"
+msgstr "Sarakkeet"
+
 msgid "Waiting for connection"
 msgstr "Odotetaan yhteyttä"
 
@@ -2564,6 +2889,12 @@ msgstr "Keltainen"
 
 msgid "Yes"
 msgstr "Kyllä"
+
+msgid "Your music belongs here"
+msgstr ""
+
+msgid "Your queue is empty."
+msgstr ""
 
 msgid "above"
 msgstr ""
@@ -2661,6 +2992,9 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] "{count} vuosi sitten"
 msgstr[1] "{count} vuotta sitten"
+
+msgid "{status} · {stage} {completed}{total}"
+msgstr ""
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"
