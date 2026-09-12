@@ -79,6 +79,7 @@ impl Shell {
             return;
         }
         info!(reason, "stopping Rufin");
+        self.web_controller.stop();
         self.save_window_state();
         self.chrome.window.set_visible(false);
         self.shutdown_tray();

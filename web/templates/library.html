@@ -1,0 +1,21 @@
+{% import "macros.html" as m %}
+<div data-page data-count="{{ rows.len() }}">
+{% if kind == "track" %}
+  <table class="track-list" role="presentation">
+    <thead role="rowgroup"><tr role="row"><th role="columnheader">#</th><th role="columnheader">{{ localization::tr("Title") }}</th><th role="columnheader">{{ localization::tr("Album") }}</th><th role="columnheader" class="duration" aria-label="{{ localization::tr("Duration") }}" title="{{ localization::tr("Duration") }}">{% call m::icon("duration") %}{% endcall %}</th><th role="columnheader" class="favorite" aria-label="{{ localization::tr("Favorite") }}" title="{{ localization::tr("Favorite") }}">{% call m::icon("favorite") %}{% endcall %}</th><th role="columnheader" class="actions" aria-label="{{ localization::tr("Actions") }}"></th></tr></thead>
+    <tbody role="rowgroup">{% for row in rows %}
+      <tr role="row" data-row="{{ row.data }}" data-uri="{{ row.text("uri") }}" tabindex="0" aria-selected="false">
+        <td role="gridcell" class="number">{{ offset + loop.index }}</td>
+        <td role="gridcell"><span class="track-title">{{ row.title() }}</span><button type="button" class="metadata-link track-artist" data-action="artists">{{ row.text("artist") }}</button></td>
+        <td role="gridcell"><button type="button" class="metadata-link" data-action="albums">{{ row.text("album") }}</button></td>
+        <td role="gridcell" class="duration">{{ row.duration() }}</td>
+        <td role="gridcell" class="favorite">{% call m::favorite(row, "icon-button") %}{% endcall %}</td>
+        <td role="gridcell" class="actions">{% call m::action(localization::tr("More actions"), "more", "menu", "icon-button") %}{% endcall %}</td>
+      </tr>
+    {% endfor %}</tbody>
+  </table>
+{% else %}
+  <div class="album-grid">{% for row in rows %}{% call m::card(row, kind) %}{% endcall %}{% endfor %}</div>
+{% endif %}
+{% if rows.is_empty() %}<p class="empty-note">{{ localization::tr("No results") }}</p>{% endif %}
+</div>

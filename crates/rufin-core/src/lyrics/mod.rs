@@ -157,6 +157,7 @@ pub struct LyricsService {
     source_owner: Arc<crate::source::SourceOwner>,
     runtime: tokio::runtime::Handle,
     events: Sender<LyricsEvent>,
+    current: tokio::sync::watch::Sender<CurrentLyrics>,
     state: Mutex<State>,
     next_request: AtomicU64,
     search_lane: Arc<Semaphore>,
@@ -185,6 +186,7 @@ impl LyricsService {
             source_owner,
             runtime,
             events,
+            current: tokio::sync::watch::channel(CurrentLyrics::Cleared).0,
             state: Mutex::new(State {
                 settings,
                 private_mode,
@@ -1399,11 +1401,32 @@ impl LyricsService {
     }
 
     fn publish(&self, event: LyricsEvent) {
+        if let LyricsEvent::Current(current) = &event {
+            self.current.send_replace(current.clone());
+        }
         let _ = self.events.try_send(event);
     }
 }
 
 impl LyricsHandle {
+    pub fn current(&self) -> tokio::sync::watch::Receiver<CurrentLyrics> {
+        self.service.current.subscribe()
+    }
+
+    pub fn load_current(&self) {
+        let media_id = self
+            .service
+            .state
+            .lock()
+            .unwrap_or_else(|p| p.into_inner())
+            .current
+            .as_ref()
+            .map(|current| current.context.media.id.clone());
+        if let Some(media_id) = media_id {
+            self.load(media_id);
+        }
+    }
+
     pub fn japanese_dictionary(&self, retry: bool) -> ::lyrics::JapaneseDictionaryStatus {
         use ::lyrics::JapaneseDictionaryStatus;
 

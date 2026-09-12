@@ -2,10 +2,79 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwAlertDialog" id="controller_addresses">
+    <property name="heading" translatable="yes">Copy link</property>
+    <property name="body" translatable="yes">Choose an address</property>
+    <property name="close-response">cancel</property>
+    <responses><response id="cancel" translatable="yes">Cancel</response></responses>
+  </object>
 
   <object class="AdwPreferencesPage" id="integrations_page">
     <property name="title" translatable="yes">Integrations</property>
     <property name="icon-name">rufin-network-workgroup-symbolic</property>
+    <child>
+      <object class="AdwPreferencesGroup">
+        <property name="title" translatable="yes">Controller</property>
+        <child>
+          <object class="AdwSwitchRow" id="web_enabled">
+            <property name="title" translatable="yes">Enable Controller</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSwitchRow" id="web_allow_remote">
+            <property name="title" translatable="yes">Allow remote connections</property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwSpinRow" id="web_port">
+            <property name="title" translatable="yes">Port</property>
+            <property name="adjustment"><object class="GtkAdjustment">
+              <property name="lower">1</property>
+              <property name="upper">65535</property>
+              <property name="step-increment">1</property>
+              <property name="page-increment">10</property>
+            </object></property>
+          </object>
+        </child>
+        <child>
+          <object class="AdwEntryRow" id="web_token">
+            <property name="title" translatable="yes">Access token</property>
+            <property name="editable">false</property>
+            <style><class name="controller-token"/></style>
+            <child type="prefix"><object class="GtkButton" id="web_regenerate">
+              <property name="icon-name">rufin-view-refresh-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Regenerate access token</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child type="suffix"><object class="GtkButton" id="web_copy_token">
+              <property name="icon-name">rufin-edit-copy-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Copy access token</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object>
+        </child>
+        <child>
+          <object class="AdwActionRow" id="web_status">
+            <property name="title" translatable="yes">Controller status</property>
+            <property name="use-markup">false</property>
+            <child type="suffix"><object class="GtkButton" id="web_open">
+              <property name="icon-name">rufin-external-link-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Open Controller</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+            <child type="suffix"><object class="GtkButton" id="web_copy_link">
+              <property name="icon-name">rufin-edit-copy-symbolic</property>
+              <property name="tooltip-text" translatable="yes">Copy link</property>
+              <property name="valign">center</property>
+              <style><class name="flat"/></style>
+            </object></child>
+          </object>
+        </child>
+      </object>
+    </child>
     <child>
       <object class="AdwPreferencesGroup" id="lastfm_group">
         <property name="title" translatable="yes">Last.fm</property>

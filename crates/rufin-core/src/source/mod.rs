@@ -190,6 +190,19 @@ impl ActiveSource {
             }
         });
     }
+
+    fn spawn_selected_reply<T, F, Work>(&self, work: F) -> Receiver<T>
+    where
+        T: Send + 'static,
+        F: FnOnce(SourceOwner, Arc<SelectedSourceState>) -> Work + Send + 'static,
+        Work: Future<Output = T> + Send + 'static,
+    {
+        let (sender, receiver) = async_channel::bounded(1);
+        self.spawn_selected(move |owner, selected| async move {
+            let _ = sender.try_send(work(owner, selected).await);
+        });
+        receiver
+    }
 }
 
 #[derive(Clone)]
@@ -290,11 +303,13 @@ impl ArtworkPreparationOwner {
 }
 
 pub(crate) struct Shared {
+    home_showcase_variation: i64,
+    home_explore_variation: std::sync::atomic::AtomicI64,
     artwork: Artwork,
     pub(crate) database: Arc<Database>,
     downloads: Downloads,
     pub(crate) settings: SettingsFile,
-    secrets: Arc<SwitchableSecretStore>,
+    pub(crate) secrets: Arc<SwitchableSecretStore>,
     plex_logins: Mutex<HashMap<String, Arc<tokio::sync::Mutex<sources::PlexLogin>>>>,
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
@@ -470,7 +485,12 @@ impl SourceOwner {
                     target,
                     progress: initial_progress(),
                 });
+        let home_variation = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let shared = Arc::new(Shared {
+            home_showcase_variation: home_variation,
+            home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
             artwork,
             database,
             downloads,
@@ -728,7 +748,7 @@ impl SourceOwner {
             }
             owner.start_observer(session, Arc::clone(&selected), cached_start);
             if !cached_start {
-                owner
+                let _ = owner
                     .manual_refresh_selected(&selected, "cold-select", cancelled)
                     .await;
             }
@@ -930,7 +950,8 @@ impl SourceOwner {
             }
             observer.cancel();
             let acquisition = self.shared.begin_acquisition();
-            self.manual_refresh_selected(&selected, "selected-feed-gap", Arc::clone(&acquisition))
+            let _ = self
+                .manual_refresh_selected(&selected, "selected-feed-gap", Arc::clone(&acquisition))
                 .await;
             if !self.shared.acquisition_is_current(&acquisition) {
                 return;
@@ -969,23 +990,22 @@ impl SourceOwner {
         selected: &SelectedSourceState,
         trigger: &'static str,
         acquisition: Arc<AtomicBool>,
-    ) {
+    ) -> Result<(), String> {
         if !self.shared.acquisition_is_current(&acquisition) {
-            return;
+            return Err(SourceError::Cancelled.to_string());
         }
         info!(trigger, source_key = %selected.source_key, "starting explicit source acquisition");
         let Some(source) = selected.source.as_ref() else {
             self.shared.warn_nonfatal(&source_access_unavailable());
-            return;
+            return Err(source_access_unavailable());
         };
-        let _ = self
-            .refresh_now(
-                selected.source_id(),
-                source,
-                &selected.configuration.name,
-                acquisition,
-            )
-            .await;
+        self.refresh_now(
+            selected.source_id(),
+            source,
+            &selected.configuration.name,
+            acquisition,
+        )
+        .await
     }
 
     async fn refresh_now(
@@ -1091,7 +1111,8 @@ impl SourceOwner {
                 )
                 .await?;
                 if let Some(selected) = self.shared.selected() {
-                    self.manual_refresh_selected(&selected, "source-edit", Arc::clone(&cancelled))
+                    let _ = self
+                        .manual_refresh_selected(&selected, "source-edit", Arc::clone(&cancelled))
                         .await;
                 }
             } else {
@@ -1380,6 +1401,12 @@ impl SourceOwner {
 }
 
 impl SourceOwner {
+    pub fn home_variations(&self) -> (i64, i64) {
+        (
+            self.shared.home_showcase_variation,
+            self.shared.home_explore_variation.load(Ordering::Relaxed),
+        )
+    }
     pub fn smb_shares(
         &self,
         settings: sources::FileSourceSettings,
@@ -2003,6 +2030,7 @@ impl SourceOwner {
                         Ok(())
                     })?;
                     secrets.replace(platform_secret_store(&settings));
+                    settings.web_controller_credentials_changed();
                     Ok(())
                 })
                 .await
@@ -2359,9 +2387,28 @@ impl SourceOwner {
     }
 
     pub fn set_favorite(&self, target: FavoriteTarget, favorite: bool) {
+        self.set_favorite_with_result(target, favorite);
+    }
+
+    pub fn set_favorite_with_result(
+        &self,
+        target: FavoriteTarget,
+        favorite: bool,
+    ) -> Receiver<Result<bool, String>> {
+        let (sender, receiver) = async_channel::bounded(1);
         self.spawn_serialized(move |owner| async move {
-            owner.apply_favorite(target, favorite).await;
+            let result = match owner.apply_favorite(target.clone(), favorite).await {
+                Ok(()) => owner
+                    .shared
+                    .database
+                    .favorite(&target)
+                    .await
+                    .map_err(string_error),
+                Err(error) => Err(error),
+            };
+            let _ = sender.try_send(result);
         });
+        receiver
     }
 
     pub fn set_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
@@ -2396,14 +2443,17 @@ impl ActiveSource {
         owner.start_artwork_preparation(session);
     }
 
-    pub fn refresh_library(&self, trigger: crate::runtime::LibraryRefreshTrigger) {
+    pub fn refresh_library(
+        &self,
+        trigger: crate::runtime::LibraryRefreshTrigger,
+    ) -> Receiver<Result<(), String>> {
         let Some(shared) = self.shared.upgrade() else {
-            return;
+            return async_channel::bounded(1).1;
         };
         let acquisition = shared.begin_acquisition();
-        self.spawn_selected(move |owner, selected| async move {
+        self.spawn_selected_reply(move |owner, selected| async move {
             if acquisition.load(Ordering::Acquire) {
-                return;
+                return Err(SourceError::Cancelled.to_string());
             }
             let label = match trigger {
                 crate::runtime::LibraryRefreshTrigger::GlobalAction => "global-action",
@@ -2411,18 +2461,27 @@ impl ActiveSource {
             };
             owner
                 .manual_refresh_selected(&selected, label, acquisition)
-                .await;
-        });
+                .await
+        })
     }
 
-    pub fn refresh_home(&self, kind: crate::settings::HomeSectionKind) {
+    pub fn refresh_home(
+        &self,
+        kind: crate::settings::HomeSectionKind,
+    ) -> Receiver<Result<(), String>> {
         if kind == crate::settings::HomeSectionKind::NewlyAdded {
-            self.refresh_library(crate::runtime::LibraryRefreshTrigger::NewlyAdded);
+            self.refresh_library(crate::runtime::LibraryRefreshTrigger::NewlyAdded)
         } else {
-            self.spawn_selected(move |owner, selected| async move {
+            self.spawn_selected_reply(move |owner, selected| async move {
+                if kind == crate::settings::HomeSectionKind::Explore {
+                    owner
+                        .shared
+                        .home_explore_variation
+                        .fetch_add(1, Ordering::Relaxed);
+                }
                 if kind != crate::settings::HomeSectionKind::Explore {
                     let Some(source) = selected.source.as_ref() else {
-                        return;
+                        return Ok(());
                     };
                     let section = match kind {
                         crate::settings::HomeSectionKind::MostPlayed => {
@@ -2435,7 +2494,7 @@ impl ActiveSource {
                             sources::SourceHomeSection::RecentlyReleased
                         }
                         crate::settings::HomeSectionKind::Explore
-                        | crate::settings::HomeSectionKind::NewlyAdded => return,
+                        | crate::settings::HomeSectionKind::NewlyAdded => return Ok(()),
                     };
                     match source.home_section(section).await {
                         Ok(entries) => {
@@ -2456,24 +2515,28 @@ impl ActiveSource {
                                 .await
                             {
                                 warn!(%error,"could not replace Home section");
-                                return;
+                                return Ok(());
                             }
                         }
                         Err(error) => {
                             warn!(%error,"could not refresh Home section");
-                            return;
+                            return Ok(());
                         }
                     }
                 }
                 owner
                     .publish_catalog(&selected, None, CatalogChange::Home)
                     .await;
-            });
+                Ok(())
+            })
         }
     }
 
-    pub fn set_music_folder(&self, folder_object_id: Option<String>) {
-        self.spawn_selected(move |owner, selected| async move {
+    pub fn set_music_folder(
+        &self,
+        folder_object_id: Option<String>,
+    ) -> Receiver<Result<(), String>> {
+        self.spawn_selected_reply(move |owner, selected| async move {
             let key = match folder_object_id.as_deref() {
                 Some(object_id) => selected
                     .database
@@ -2484,7 +2547,7 @@ impl ActiveSource {
                 None => None,
             };
             if folder_object_id.is_some() && key.is_none() {
-                return;
+                return Ok(());
             }
             let mut replacement = (*selected).clone();
             replacement.music_folder_key = key;
@@ -2523,7 +2586,8 @@ impl ActiveSource {
                     selected: ui_selected(replacement, session),
                 })
                 .await;
-        });
+            Ok(())
+        })
     }
 
     pub fn folder(
@@ -2621,7 +2685,7 @@ impl SourceOwner {
         Some((source_id, source_key, local))
     }
 
-    async fn apply_favorite(&self, target: FavoriteTarget, favorite: bool) {
+    async fn apply_favorite(&self, target: FavoriteTarget, favorite: bool) -> Result<(), String> {
         let source = self.favorite_source(&target).await;
         let changed = if source.as_ref().is_some_and(|(_, _, local)| !local) {
             self.shared
@@ -2631,9 +2695,9 @@ impl SourceOwner {
         } else {
             self.shared.database.set_favorite(&target, favorite).await
         }
-        .unwrap_or(false);
+        .map_err(string_error)?;
         if !changed {
-            return;
+            return Ok(());
         }
         self.publish_current_catalog(
             Some(FavoriteSettlement {
@@ -2648,6 +2712,7 @@ impl SourceOwner {
             self.deliver_favorite(source_id, source_key, target, favorite)
                 .await;
         }
+        Ok(())
     }
 
     async fn apply_rating(&self, target: FavoriteTarget, rating: Option<u8>) {
@@ -3296,6 +3361,7 @@ fn source_setup_input(input: SourceSetup, jellyfin_device_id: &str) -> SourceSet
 
 fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
     match input {
+        SourceSettingsChange::Local { roots, .. } => SourceSettingsInput::Local { roots },
         SourceSettingsChange::EmbyConnect {
             server,
             source_name,
@@ -3351,6 +3417,7 @@ fn source_settings_input(input: SourceSettingsChange) -> SourceSettingsInput {
 
 fn source_settings_id(input: &SourceSettingsChange) -> &SourceId {
     match input {
+        SourceSettingsChange::Local { source_id, .. } => source_id,
         SourceSettingsChange::EmbyConnect { source_id, .. }
         | SourceSettingsChange::JellyfinQuickConnect { source_id, .. }
         | SourceSettingsChange::Plex { source_id, .. }

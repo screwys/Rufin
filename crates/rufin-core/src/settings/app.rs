@@ -90,6 +90,8 @@ pub use library::{HomeBlockKind, HomeSectionKind};
 #[derive(Clone, Debug, Deserialize, PartialEq, Serialize)]
 pub struct Settings {
     #[serde(default)]
+    pub web_controller: crate::api::ControllerSettings,
+    #[serde(default)]
     pub backup: crate::runtime::BackupSettings,
     #[serde(default)]
     pub layout: LayoutSettings,
@@ -185,6 +187,7 @@ pub struct Settings {
 impl Default for Settings {
     fn default() -> Self {
         Self {
+            web_controller: crate::api::ControllerSettings::default(),
             layout: LayoutSettings::default(),
             sidebar: SidebarSettings::default(),
             context_menu: ContextMenuSettings::default(),

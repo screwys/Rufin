@@ -3,6 +3,7 @@
 <gresources>
 
   <gresource prefix="/io/github/screwys/Rufin/ui">
+    <file alias="showcase.css" compressed="true">../../../data/showcase.css</file>
     <file compressed="true">application/about.ui</file>
     <file compressed="true">application/windows_title.ui</file>
     <file compressed="true">player/random_play.ui</file>

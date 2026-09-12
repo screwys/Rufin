@@ -35,6 +35,7 @@ pub use waveform::WaveformProjection;
 
 #[derive(Clone)]
 pub struct ProductHandles {
+    pub appearance: tokio::sync::watch::Sender<std::collections::BTreeMap<String, String>>,
     pub backup: BackupHandle,
     pub library: Arc<library::Database>,
     pub runtime: tokio::runtime::Handle,

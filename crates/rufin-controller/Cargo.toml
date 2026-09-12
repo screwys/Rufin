@@ -10,7 +10,12 @@ repository.workspace = true
 readme.workspace = true
 publish.workspace = true
 
+[features]
+development = ["app-identity/development"]
+
 [dependencies]
+app-identity.workspace = true
+localization.workspace = true
 rufin-core.workspace = true
 playback.workspace = true
 playback-gstreamer.workspace = true

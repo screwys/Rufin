@@ -178,7 +178,7 @@ pub enum SessionCommand {
     Seek(u64),
     SetVolume(f64),
     SetMuted(bool),
-    PersistOutputState,
+    PersistVolume(f64),
     SetRepeat(RepeatMode),
     SetShuffle {
         enabled: bool,
@@ -203,7 +203,7 @@ pub struct SessionUpdate {
 }
 
 impl SessionUpdate {
-    fn changed() -> Self {
+    pub(crate) fn changed() -> Self {
         Self {
             view_changed: true,
             ..Self::default()
@@ -302,6 +302,7 @@ pub(crate) struct PlaybackSession {
     external_clock_millis: u64,
     sequence: Sequence,
     pending_queue: Option<(u64, QueueCompletion)>,
+    queue_loading: bool,
     next_queue_request: u64,
     queue_transport: Option<TransportStatus>,
     deferred_queue: VecDeque<SessionCommand>,
@@ -343,6 +344,7 @@ impl PlaybackSession {
             external_clock_millis: 0,
             sequence,
             pending_queue: None,
+            queue_loading: false,
             next_queue_request: 1,
             queue_transport: None,
             deferred_queue: VecDeque::new(),
@@ -442,6 +444,7 @@ impl PlaybackSession {
             }
             self.finish_current(RunEndReason::Stopped, sample, &mut update.effects);
             self.pending_queue = None;
+            self.queue_loading = false;
             self.deferred_queue.clear();
             self.pending_replacement = None;
             self.pending_additive.clear();
@@ -822,19 +825,17 @@ impl PlaybackSession {
             SessionCommand::Seek(position_millis) => Ok(self.seek(position_millis)),
             SessionCommand::SetVolume(volume) => Ok(self.set_volume(volume)),
             SessionCommand::SetMuted(muted) => Ok(self.set_muted(muted)),
-            SessionCommand::PersistOutputState => Ok(SessionUpdate {
-                effects: self
-                    .playback_output
-                    .is_local()
-                    .then(|| SessionEffect::PersistOutputState {
+            SessionCommand::PersistVolume(volume) => {
+                let mut update = self.set_volume(volume);
+                if self.playback_output.is_local() {
+                    update.effects.push(SessionEffect::PersistOutputState {
                         volume: self.settings.volume,
                         muted: self.settings.muted,
                         audio_output: self.settings.audio_output.clone(),
-                    })
-                    .into_iter()
-                    .collect(),
-                ..SessionUpdate::default()
-            }),
+                    });
+                }
+                Ok(update)
+            }
             SessionCommand::SetRepeat(repeat) => Ok(self.set_repeat(repeat)),
             SessionCommand::SetShuffle { enabled, seed } => Ok(self.set_shuffle(enabled, seed)),
             SessionCommand::SetAutoDj {
@@ -1059,7 +1060,7 @@ impl PlaybackSession {
             || self.sequence.occurrence(seed_occurrence).is_none()
             || self.sequence.remaining_after_selected() >= self.auto_dj_refill_threshold
         {
-            return Ok(None);
+            return Ok(Some(SessionUpdate::changed()));
         }
         let update = self.apply_batch(batch, Placement::End, sample)?;
         Ok(Some(update))
@@ -1106,7 +1107,7 @@ impl PlaybackSession {
                 .into_iter()
                 .map(SessionEffect::NonfatalError)
                 .collect(),
-            ..SessionUpdate::default()
+            ..SessionUpdate::changed()
         })
     }
 
@@ -1117,10 +1118,15 @@ impl PlaybackSession {
         _sample: &ClockSample,
     ) -> Result<SessionUpdate, SequenceError> {
         let replacing = matches!(placement, Placement::Replace { .. });
+        let loading_changed = !self.queue_loading;
+        self.queue_loading = true;
         if self.pending_queue.is_some() && !replacing {
             self.deferred_queue
                 .push_back(SessionCommand::ApplyBatch { batch, placement });
-            return Ok(SessionUpdate::default());
+            return Ok(SessionUpdate {
+                view_changed: loading_changed,
+                ..SessionUpdate::default()
+            });
         }
         if replacing {
             self.deferred_queue.clear();
@@ -1162,7 +1168,10 @@ impl PlaybackSession {
     }
 
     pub(crate) fn queue_loading(&self) -> bool {
-        self.pending_queue.is_some()
+        self.queue_loading
+            || self.auto_dj_in_flight.is_some()
+            || self.pending_replacement.is_some()
+            || !self.pending_additive.is_empty()
     }
 
     fn request_queue(
@@ -1172,6 +1181,7 @@ impl PlaybackSession {
     ) -> SessionUpdate {
         let id = self.next_queue_request;
         self.next_queue_request = id.wrapping_add(1);
+        self.queue_loading |= !matches!(completion, QueueCompletion::Hydrate);
         self.pending_queue = Some((id, completion));
         SessionUpdate {
             effects: vec![SessionEffect::Queue { id, request }],
@@ -1186,7 +1196,10 @@ impl PlaybackSession {
         if self.external.is_some() || self.pending_queue.is_some() {
             return None;
         }
-        let request = self.sequence.read_request()?;
+        let Some(request) = self.sequence.read_request() else {
+            self.queue_loading = false;
+            return None;
+        };
         self.request_queue(request, QueueCompletion::Hydrate)
             .effects
             .pop()
@@ -1262,10 +1275,13 @@ impl PlaybackSession {
         let (_, completion) = self.pending_queue.take().unwrap();
         let previous = self.sequence.selected_id().cloned();
         let mut update = match result {
-            Err(error) => SessionUpdate {
-                effects: vec![SessionEffect::NonfatalError(error)],
-                ..SessionUpdate::changed()
-            },
+            Err(error) => {
+                self.queue_loading = false;
+                SessionUpdate {
+                    effects: vec![SessionEffect::NonfatalError(error)],
+                    ..SessionUpdate::changed()
+                }
+            }
             Ok(page) => match completion {
                 QueueCompletion::Hydrate => {
                     self.sequence.hydrate(page);
@@ -1444,6 +1460,7 @@ impl PlaybackSession {
             Vec::new()
         };
         self.pending_queue = None;
+        self.queue_loading = false;
         self.deferred_queue.clear();
         self.sequence
             .clear(include_current || self.current_run.is_none());
@@ -2742,7 +2759,29 @@ mod orchestration_tests {
                 &sample,
             )
             .unwrap();
+        assert!(session.view().queue_loading);
+        let (id, request) = update
+            .effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                SessionEffect::Queue { id, request } => Some((id, request)),
+                _ => None,
+            })
+            .unwrap();
+        let page = database.read_queue(request).await.unwrap();
+        let update = session
+            .handle_command(
+                SessionCommand::QueueComplete {
+                    id,
+                    result: Box::new(Ok(page)),
+                },
+                &sample,
+            )
+            .unwrap();
+        assert!(session.view().queue_loading);
+        assert_eq!(session.view().queue_window.len(), 1);
         let update = finish_queue(&database, &mut session, update).await;
+        assert!(!session.view().queue_loading);
         assert!(
             update
                 .effects
@@ -2862,7 +2901,7 @@ mod orchestration_tests {
         let effect = session
             .hydrate_queue()
             .expect("replenish after retained history grows");
-        assert!(session.view().queue_loading);
+        assert!(!session.view().queue_loading);
         // Playback can move within the loaded window while the Store fills its tail.
         session
             .handle_command(SessionCommand::Next, &sample)
@@ -3030,6 +3069,35 @@ mod orchestration_tests {
                 SessionEffect::Backend(BackendCommand::Stop { .. })
             ))
         );
+    }
+
+    #[tokio::test]
+    async fn volume_commit_persists_the_requested_value_after_older_backend_feedback() {
+        let (_directory, _database, mut session) = active_two_track_session().await;
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 0,
+            local_period: "1970-01".into(),
+        };
+        session
+            .handle_command(SessionCommand::SetVolume(0.6), &sample)
+            .unwrap();
+        session
+            .handle_command(SessionCommand::SetVolume(0.3), &sample)
+            .unwrap();
+        session.handle_backend(
+            BackendEvent::AudioApplied {
+                volume: 0.6,
+                muted: false,
+                output: None,
+            },
+            &sample,
+        );
+        let update = session
+            .handle_command(SessionCommand::PersistVolume(0.3), &sample)
+            .unwrap();
+        assert_eq!(session.view().controls.volume, 0.3);
+        assert!(update.effects.iter().any(|effect| matches!(effect, SessionEffect::PersistOutputState {volume, ..} if *volume == 0.3)));
     }
 
     #[tokio::test]
@@ -3692,6 +3760,7 @@ mod orchestration_tests {
                 _ => None,
             })
             .expect("one Track requests AutoDJ");
+        assert!(session.view().queue_loading);
         session.set_playing(true);
         let ended = session.accept_ended(session.current_run().unwrap(), &sample);
         finish_queue(&_database, &mut session, ended).await;
@@ -3720,6 +3789,27 @@ mod orchestration_tests {
             "rufin://source/track/track-2"
         );
         assert!(session.current_run().is_some());
+    }
+
+    #[tokio::test]
+    async fn unavailable_auto_dj_publishes_the_end_of_loading() {
+        let (_directory, _database, mut session) = active_two_track_session().await;
+        let update = session.set_auto_dj(true, 3);
+        let request = update
+            .effects
+            .into_iter()
+            .find_map(|effect| match effect {
+                SessionEffect::RequestAutoDj(request) => Some(request),
+                _ => None,
+            })
+            .unwrap();
+        assert!(session.view().queue_loading);
+        let finished = session
+            .auto_dj_unavailable(&request.seed_occurrence, None)
+            .unwrap();
+        assert!(finished.view_changed);
+        assert!(!session.view().queue_loading);
+        assert_eq!(session.view().queue.total, 2);
     }
 
     #[tokio::test]

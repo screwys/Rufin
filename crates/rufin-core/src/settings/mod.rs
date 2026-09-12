@@ -290,6 +290,7 @@ fn default_home_sections() -> Vec<HomeSectionKind> {
 
 #[derive(Clone)]
 pub struct SettingsFile {
+    web_controller: tokio::sync::watch::Sender<crate::api::ControllerSettings>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
     value: Arc<Mutex<StoredSettings>>,
@@ -317,6 +318,7 @@ impl SettingsFile {
             }
         }
         let file = Self {
+            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir: path
                 .parent()
                 .unwrap_or_else(|| Path::new("."))
@@ -345,6 +347,7 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
+            web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
             value: Arc::new(Mutex::new(value)),
             secret_storage_fallbacks: async_channel::unbounded(),
@@ -398,6 +401,7 @@ impl SettingsFile {
             write_settings(path, &next)?;
         }
         *current = next;
+        self.publish_web_controller(&current);
         Ok(output)
     }
 
@@ -409,6 +413,7 @@ impl SettingsFile {
             .value
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = value.clone();
+        self.publish_web_controller(value);
         Ok(())
     }
 }
@@ -455,6 +460,30 @@ impl SettingsOwner {
         self.file.update(restore)?;
         (self.on_change)(&previous, &self.file.load(), credentials_changed);
         Ok(())
+    }
+}
+
+impl SettingsFile {
+    fn publish_web_controller(&self, stored: &StoredSettings) {
+        let next = stored.ui.web_controller.clone();
+        self.web_controller.send_if_modified(|current| {
+            if *current == next {
+                return false;
+            }
+            *current = next;
+            true
+        });
+    }
+
+    pub(crate) fn web_controller_changes(
+        &self,
+    ) -> tokio::sync::watch::Receiver<crate::api::ControllerSettings> {
+        self.web_controller.subscribe()
+    }
+
+    pub(crate) fn web_controller_credentials_changed(&self) {
+        self.web_controller
+            .send_replace(self.load().ui.web_controller);
     }
 }
 
@@ -924,9 +953,7 @@ mod tests {
         let path = directory.path().join("settings.json");
         let file = SettingsFile {
             path: Some(path.clone()),
-            config_dir: directory.path().to_path_buf(),
-            value: Arc::new(Mutex::new(StoredSettings::default())),
-            secret_storage_fallbacks: async_channel::unbounded(),
+            ..SettingsFile::memory_at(directory.path().to_path_buf())
         };
         assert!(!file.load().ui.backup.enabled);
         file.update(|stored| {

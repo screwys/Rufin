@@ -56,22 +56,6 @@ impl PlayRequest {
         request
     }
 
-    pub fn random(items: Arc<[QueueItem]>, placement: QueuePlacement) -> Option<Self> {
-        (!items.is_empty()).then(|| Self {
-            batch: Batch::new(
-                items
-                    .iter()
-                    .cloned()
-                    .map(|item| BatchItem::direct(item, Provenance::Random))
-                    .collect(),
-            ),
-            anchor_index: 0,
-            placement,
-            shuffled_start: false,
-            reactivate: false,
-        })
-    }
-
     pub fn activation_context(&self) -> Option<(String, String, usize)> {
         (self.reactivate && self.placement == QueuePlacement::Now && !self.shuffled_start)
             .then(|| self.batch.activation_context(self.anchor_index))
@@ -238,12 +222,29 @@ mod tests {
             panic!("selected media order")
         };
         assert_eq!(order.len(), 250);
-        let request = PlayRequest::random(items.into(), QueuePlacement::Last).unwrap();
-        let library::QueueInput::Items(captured) = &request.batch.input else {
-            panic!("explicit random items")
+        let request = PlayRequest::ordered(
+            library::QueueInput::MediaUris {
+                order: items
+                    .iter()
+                    .map(|item| item.media_uri.clone())
+                    .collect::<Vec<_>>()
+                    .into(),
+                provenance: Provenance::Random,
+            },
+            0,
+            QueuePlacement::Last,
+            false,
+        );
+        let library::QueueInput::MediaUris {
+            order: captured,
+            provenance,
+        } = &request.batch.input
+        else {
+            panic!("random media order")
         };
         assert_eq!(captured.len(), 250);
-        assert_eq!(captured[125].0.title, "125");
+        assert_eq!(captured[125], "https://example.test/125");
+        assert_eq!(*provenance, Provenance::Random);
     }
 
     #[tokio::test]

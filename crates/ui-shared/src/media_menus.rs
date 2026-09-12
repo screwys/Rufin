@@ -124,7 +124,7 @@ fn present_catalog_track_menu(
     surface.append_configurable_submenu(
         ContextMenuItem::PlayRadio,
         msgid("Track radio"),
-        &radio_context_submenu("track"),
+        &radio_context_submenu(action_group),
         RADIO_ICON,
     );
     append_context_menu_picker(
@@ -156,7 +156,7 @@ fn present_catalog_track_menu(
         surface.append_configurable_submenu(
             ContextMenuItem::GoTo,
             msgid("Go to"),
-            &go_to_context_submenu("track", &artist_names, track.album_media_uri.is_some()),
+            &go_to_context_submenu(action_group, &artist_names, track.album_media_uri.is_some()),
             GO_TO_ICON,
         );
     }

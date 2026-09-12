@@ -141,8 +141,8 @@ mod tests {
             notices: vec![started.clone()],
         });
         assert_eq!(
-            first.recv().await.unwrap().unwrap().notices,
-            [started.clone()]
+            first.recv().await.unwrap().unwrap().notices.as_slice(),
+            std::slice::from_ref(&started)
         );
         let failure = PlaybackNotice::OperationFailed("Unavailable".into());
         updates.publish(PlaybackProjection {
@@ -158,7 +158,7 @@ mod tests {
         }
         let fast = first.recv().await.unwrap().unwrap();
         assert_eq!(fast.view, view);
-        assert_eq!(fast.notices, [failure.clone()]);
+        assert_eq!(fast.notices.as_slice(), std::slice::from_ref(&failure));
         let delayed = slow.recv().await.unwrap().unwrap();
         assert_eq!(delayed.view, view);
         assert_eq!(delayed.notices, [started, failure]);

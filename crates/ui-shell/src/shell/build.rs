@@ -368,9 +368,6 @@ pub async fn build(
 
     let control_feedback =
         ControlFeedbackState::new(&chrome.control_feedback_label, Rc::clone(&settings_state));
-    let home_variation_seed = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_or(0, |elapsed| elapsed.as_nanos() as i64);
     let shell = Rc::new_cyclic(|weak: &std::rc::Weak<Shell>| {
         let artwork = ArtworkState::new(
             products.artwork.clone(),
@@ -415,10 +412,9 @@ pub async fn build(
         );
 
         Shell {
+            web_controller: rufin_core::api::Controller::new(products.clone()),
             media_menus: super::media_menus::build(weak, &products, Rc::clone(&settings_state)),
             quitting,
-            home_showcase_variation: Cell::new(home_variation_seed),
-            home_explore_variation: Cell::new(home_variation_seed),
             diagnostics,
             appearance,
             settings: Rc::clone(&settings_state),
@@ -508,6 +504,13 @@ pub async fn build(
     });
 
     shell.connect_operation_feedback();
+    shell.bind_controller_appearance();
+    let weak = Rc::downgrade(&shell);
+    app.connect_shutdown(move |_| {
+        if let Some(shell) = weak.upgrade() {
+            shell.web_controller.stop();
+        }
+    });
     let weak = Rc::downgrade(&shell);
     fresh_start_banner.connect_button_clicked(move |_| {
         if let Some(shell) = weak.upgrade() {

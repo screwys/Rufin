@@ -20,7 +20,8 @@ fn main() -> ExitCode {
 }
 
 fn run() -> Result<(), String> {
-    const USAGE: &str = "Usage: rufin-controller [--listen ADDRESS:PORT]\nTo enable the API, pass --listen and set RUFIN_API_TOKEN. GET /api lists the available commands.";
+    localization::initialize()?;
+    const USAGE: &str = "Usage: rufin-controller [--listen [ADDRESS:PORT]]\nTo enable web and API access, pass --listen and set RUFIN_API_TOKEN.\nDefault address: 127.0.0.1:1717. GET /api lists the available commands.";
     let mut arguments = std::env::args_os().skip(1);
     let address: Option<SocketAddr> = match arguments.next() {
         Some(option) if option == "--help" => {
@@ -30,7 +31,7 @@ fn run() -> Result<(), String> {
         Some(option) if option == "--listen" => Some(
             arguments
                 .next()
-                .ok_or(USAGE)?
+                .unwrap_or_else(|| "127.0.0.1:1717".into())
                 .to_str()
                 .ok_or(USAGE)?
                 .parse()

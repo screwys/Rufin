@@ -79,6 +79,7 @@
             <style><class name="queue-scroller"/><class name="right-panel-scroller"/></style>
             </object></property>
             <child type="overlay"><object class="AdwSpinner" id="queue_loading">
+              <property name="can-target">false</property>
               <property name="visible">false</property>
               <property name="halign">center</property><property name="valign">center</property>
               <property name="width-request">32</property><property name="height-request">32</property>

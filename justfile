@@ -9,6 +9,8 @@ build target="" architecture="":
             Darwin|CYGWIN*|MINGW*|MSYS*) just _build-native-package ;; \
             *) scripts/container run default none just _build ;; \
         esac; \
+    elif [[ "{{ target }}" == "headless" && -z "{{ architecture }}" ]]; then \
+        scripts/container run default none just _build rufin-controller; \
     elif [[ "{{ target }}" == "arch" && -z "{{ architecture }}" ]]; then \
         scripts/container run default none just _build-arch; \
     elif [[ "{{ target }}" == "rpm" ]]; then \
@@ -18,15 +20,15 @@ build target="" architecture="":
         scripts/container run packaging sandbox env FLATPAK_BWRAP=/usr/bin/bwrap \
             just _build-flatpak; \
     else \
-        echo "usage: just build [arch|flatpak|rpm [arm]]" >&2; \
+        echo "usage: just build [headless|arch|flatpak|rpm [arm]]" >&2; \
         exit 2; \
     fi
 
-_build:
+_build target="rufin":
     @preset=development; \
     if [[ "${RUFIN_CONTAINER:-0}" == "1" ]]; then preset=development-container; fi; \
     cmake --preset "$preset"; \
-    cmake --build --preset "$preset"
+    cmake --build --preset "$preset" --target {{ target }}
 
 _build-arch:
     #!/usr/bin/env bash
@@ -335,9 +337,14 @@ debug *args:
         shift; \
         flatpak run --env=RUST_LOG="${RUST_LOG:-debug}" io.github.screwys.Rufin "$@" 2>&1; \
     else \
+        executable_name=rufin; \
+        if [[ "${1:-}" == "headless" ]]; then \
+            shift; \
+            executable_name=rufin-controller; \
+        fi; \
         cmake --preset development; \
-        cmake --build --preset development; \
-        executable="$PWD/.local/build/cmake/development/bin/rufin"; \
+        cmake --build --preset development --target "$executable_name"; \
+        executable="$PWD/.local/build/cmake/development/bin/$executable_name"; \
         if [[ "$(rustc -vV | sed -n 's/^host: //p')" == *-windows-* ]]; then \
             executable="${executable}.exe"; \
         fi; \
@@ -346,6 +353,7 @@ debug *args:
             export GIO_MODULE_DIR="${brew_prefix}/lib/gio/modules"; \
             export GSETTINGS_SCHEMA_DIR="${brew_prefix}/share/glib-2.0/schemas"; \
             export XDG_DATA_DIRS="${brew_prefix}/share${XDG_DATA_DIRS:+:${XDG_DATA_DIRS}}"; \
+            export GST_PLUGIN_PATH="$PWD/.local/build/cmake/development/gst-plugins${GST_PLUGIN_PATH:+:${GST_PLUGIN_PATH}}"; \
             if [[ -z "${RUFIN_MACOS_SIGN_IDENTITY:-}" ]]; then \
                 just setup-macos-signing; \
             fi; \
@@ -360,7 +368,7 @@ debug *args:
                 --identifier io.github.screwys.Rufin.Devel \
                 "$executable"; \
             RUST_LOG="${RUST_LOG:-debug}" "$executable" "$@"; \
-        elif [[ "$(uname -s)" == Linux ]]; then \
+        elif [[ "$(uname -s)" == Linux && "$executable_name" == rufin ]]; then \
             data_home="${XDG_DATA_HOME:-${HOME:?}/.local/share}"; \
             mkdir -p "$data_home/applications"; \
             desktop-file-install \
@@ -382,6 +390,10 @@ debug *args:
 
 fmt:
     @scripts/container run default none cargo fmt --all
+
+# Regenerate the shared desktop and web translation template, or pass --check.
+i18n *args:
+    @scripts/container run default none cargo run --locked -p xtask -- generate i18n-template {{ args }}
 
 test *args:
     @scripts/container run default none just _test {{ args }}

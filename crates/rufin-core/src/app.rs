@@ -287,6 +287,7 @@ where
         secret_storage_fallbacks,
         diagnostics,
         products: ProductHandles {
+            appearance: tokio::sync::watch::channel(std::collections::BTreeMap::new()).0,
             backup,
             library,
             runtime,

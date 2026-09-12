@@ -74,7 +74,7 @@ pub struct PlexSetupInput {
     pub trust_invalid_cert: bool,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize, serde::Serialize)]
 pub struct PlexSettingsInput {
     pub name: String,
     pub address_override: Option<String>,

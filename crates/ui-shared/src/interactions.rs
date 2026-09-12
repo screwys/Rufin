@@ -478,7 +478,7 @@ pub fn go_to_context_submenu(group: &str, artist_names: &[String], has_album: bo
     for (index, artist_name) in artist_names.iter().enumerate() {
         append_menu_action(
             &menu,
-            &format!("{} {artist_name}", tr("Go to")),
+            &localization::tr_with("Go to {artist}", &[("artist", artist_name)]),
             &if artist_names.len() == 1 {
                 format!("{group}.go-artist")
             } else {

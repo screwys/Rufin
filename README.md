@@ -79,6 +79,18 @@
 - Secure storage for server credentials and API secrets by default
 - Casting support for UPnP and Chromecast, plus Plex Companion queue control and playback handoff in both directions
 
+## 🖧 Headless mode and Controller
+
+- Run Rufin without the desktop interface with `cargo run -p rufin-controller`, using the same library and playback engine
+- Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with: 
+```bash
+export RUFIN_API_TOKEN="$(openssl rand -hex 32)"
+cargo run -p rufin-controller -- --listen
+```
+- Control playback, browse your library, manage sources and playlists, and view the queue & lyrics from a browser
+- Playback stays on the device running Rufin
+- Token-based authentication
+
 ## 🖥️ Interface
 
 - Fast GTK 4/libadwaita interface with light/dark themes and accent customization

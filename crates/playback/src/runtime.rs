@@ -611,7 +611,13 @@ fn apply_runtime_command(
             let _ = reply.send(value);
         }
         RuntimeCommand::ReserveMaterialization { placement, reply } => {
-            let _ = reply.send(runtime.reserve_materialization(placement));
+            let value = runtime
+                .reserve_materialization(placement, &sample)
+                .and_then(|(reservation, update)| {
+                    publish_optional_update(outputs, update)?;
+                    Ok(reservation)
+                });
+            let _ = reply.send(value);
         }
         RuntimeCommand::CompleteMaterialization {
             id,
@@ -640,7 +646,13 @@ fn apply_runtime_command(
             placement,
             reply,
         } => {
-            let _ = reply.send(runtime.cancel_materialization(id, placement));
+            let value = runtime
+                .cancel_materialization(id, placement, &sample)
+                .and_then(|(accepted, update)| {
+                    publish_optional_update(outputs, update)?;
+                    Ok(accepted)
+                });
+            let _ = reply.send(value);
         }
         RuntimeCommand::ResolveStream { run, stream, reply } => {
             reply_update(runtime.resolve_stream(run, stream, &sample), outputs, reply);
@@ -790,6 +802,35 @@ mod persistence_tests {
 
         fn drain_events(&mut self) -> Vec<BackendEvent> {
             Vec::new()
+        }
+    }
+
+    #[test]
+    fn canceled_queue_preparation_publishes_loading_completion() {
+        let mut runtime = PlaybackRuntime::new(
+            Sequence::new(),
+            "queue-preparation",
+            PlaybackSettings::default(),
+            false,
+            1,
+            SelectedPlaybackOutput::Local,
+            Box::new(IdleBackend),
+        );
+        let sample = ClockSample {
+            monotonic_millis: 0,
+            unix_seconds: 0,
+            local_period: "1970-01".into(),
+        };
+        for placement in [Placement::Now, Placement::End] {
+            let (reservation, started) =
+                runtime.reserve_materialization(placement, &sample).unwrap();
+            let view = started.unwrap().projection.unwrap().view;
+            assert!(view.queue_loading);
+            let (accepted, finished) = runtime
+                .cancel_materialization(reservation.id, placement, &sample)
+                .unwrap();
+            assert!(accepted);
+            assert!(!finished.unwrap().projection.unwrap().view.queue_loading);
         }
     }
 
@@ -1127,14 +1168,23 @@ impl PlaybackRuntime {
         {
             return Ok((None, Some(self.finish(update, sample)?)));
         }
-        Ok((Some(self.session.reserve_materialization(placement)), None))
+        self.reserve_materialization(placement, sample)
+            .map(|(reservation, update)| (Some(reservation), update))
     }
 
     fn reserve_materialization(
         &mut self,
         placement: Placement,
-    ) -> PlaybackResult<MaterializationReservation> {
-        Ok(self.session.reserve_materialization(placement))
+        sample: &ClockSample,
+    ) -> PlaybackResult<(MaterializationReservation, Option<PlaybackUpdate>)> {
+        let loading = self.session.queue_loading();
+        let reservation = self.session.reserve_materialization(placement);
+        let update = if loading != self.session.queue_loading() {
+            Some(self.finish(SessionUpdate::changed(), sample)?)
+        } else {
+            None
+        };
+        Ok((reservation, update))
     }
 
     fn complete_materialization(
@@ -1169,8 +1219,16 @@ impl PlaybackRuntime {
         &mut self,
         id: MaterializationId,
         placement: Placement,
-    ) -> PlaybackResult<bool> {
-        Ok(self.session.cancel_materialization(id, placement))
+        sample: &ClockSample,
+    ) -> PlaybackResult<(bool, Option<PlaybackUpdate>)> {
+        let loading = self.session.queue_loading();
+        let accepted = self.session.cancel_materialization(id, placement);
+        let update = if loading != self.session.queue_loading() {
+            Some(self.finish(SessionUpdate::changed(), sample)?)
+        } else {
+            None
+        };
+        Ok((accepted, update))
     }
 
     fn resolve_stream(

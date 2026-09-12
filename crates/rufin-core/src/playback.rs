@@ -947,8 +947,7 @@ impl TransportCommandPort for PlaybackOwner {
         self.send(SessionCommand::SetVolume(volume))
     }
     fn persist_volume(&self, volume: f64) {
-        self.set_volume(volume);
-        self.send(SessionCommand::PersistOutputState)
+        self.send(SessionCommand::PersistVolume(volume))
     }
     fn set_muted(&self, muted: bool) {
         self.send(SessionCommand::SetMuted(muted))

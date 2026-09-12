@@ -8,6 +8,257 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn artist_genre_and_smart_pages_keep_existing_membership_and_order() {
+    use library::{ArtistSort, GenreSort, SmartPlaylistListSort};
+    let fixture = fixture().await;
+    let db = &fixture.database;
+    let cancel = ReadCancellation::new();
+    for sort in [
+        ArtistSort::Title,
+        ArtistSort::AlbumCount,
+        ArtistSort::TrackCount,
+        ArtistSort::LastPlayed,
+        ArtistSort::PlayCount,
+        ArtistSort::Rating,
+        ArtistSort::Favorite,
+    ] {
+        for albums in [false, true] {
+            for descending in [false, true] {
+                for folder in [None, Some(fixture.folder)] {
+                    for filter in ["", "artist"] {
+                        let (order, _, _) = db
+                            .artist_route_page(
+                                fixture.source,
+                                folder,
+                                albums,
+                                false,
+                                filter,
+                                sort,
+                                descending,
+                                RouteSeedWindow::top(),
+                                &cancel,
+                            )
+                            .await
+                            .unwrap();
+                        let mut actual = Vec::new();
+                        for offset in 0..=order.len() {
+                            actual.extend(
+                                db.artist_page(
+                                    fixture.source,
+                                    folder,
+                                    albums,
+                                    false,
+                                    filter,
+                                    sort,
+                                    descending,
+                                    offset,
+                                    1,
+                                    &cancel,
+                                )
+                                .await
+                                .unwrap()
+                                .into_iter()
+                                .map(|row| row.artist_key),
+                            );
+                        }
+                        assert_eq!(actual, order);
+                    }
+                }
+            }
+        }
+    }
+    for sort in [
+        GenreSort::Title,
+        GenreSort::AlbumCount,
+        GenreSort::TrackCount,
+    ] {
+        for folder in [None, Some(fixture.folder)] {
+            let (order, _, _) = db
+                .genre_route_page(
+                    fixture.source,
+                    folder,
+                    "",
+                    sort,
+                    false,
+                    RouteSeedWindow::top(),
+                    &cancel,
+                )
+                .await
+                .unwrap();
+            let mut actual = Vec::new();
+            for offset in 0..=order.len() {
+                actual.extend(
+                    db.genre_page(fixture.source, folder, "", sort, false, offset, 1, &cancel)
+                        .await
+                        .unwrap()
+                        .into_iter()
+                        .map(|row| row.genre_key),
+                );
+            }
+            assert_eq!(actual, order, "Genre {sort:?}, folder {folder:?}");
+        }
+    }
+    let external = "https://example.test/outside-catalog.flac".to_string();
+    db.create_playlist(None, "Outside", std::slice::from_ref(&external))
+        .await
+        .unwrap();
+    let all = db
+        .create_smart_playlist("All", &SmartPlaylistDefinition::default())
+        .await
+        .unwrap();
+    db.create_smart_playlist(
+        "Current",
+        &SmartPlaylistDefinition {
+            current: true,
+            ..Default::default()
+        },
+    )
+    .await
+    .unwrap();
+    let limited = db
+        .create_smart_playlist(
+            "Limited",
+            &SmartPlaylistDefinition {
+                limit: Some(1),
+                ..Default::default()
+            },
+        )
+        .await
+        .unwrap();
+    for source in [None, Some(fixture.source)] {
+        for folder in [None, Some(fixture.folder)] {
+            for sort in [
+                SmartPlaylistListSort::Position,
+                SmartPlaylistListSort::Title,
+                SmartPlaylistListSort::TrackCount,
+                SmartPlaylistListSort::Duration,
+            ] {
+                for descending in [false, true] {
+                    let (order, _, _) = db
+                        .smart_playlist_route_page(
+                            source,
+                            folder,
+                            sort,
+                            descending,
+                            1000,
+                            RouteSeedWindow::top(),
+                            &cancel,
+                        )
+                        .await
+                        .unwrap();
+                    let mut actual = Vec::new();
+                    for offset in 0..=order.len() {
+                        actual.extend(
+                            db.smart_playlist_page(
+                                source, folder, sort, descending, "", 1000, offset, 1, &cancel,
+                            )
+                            .await
+                            .unwrap()
+                            .into_iter()
+                            .map(|row| row.smart_playlist_key),
+                        );
+                    }
+                    assert_eq!(actual, order, "{sort:?}");
+                }
+            }
+        }
+    }
+    let order = db
+        .smart_playlist_media_uri_order(Some(fixture.source), all, None, 1000, &cancel)
+        .await
+        .unwrap();
+    assert!(order.contains(&external));
+    let mut actual = Vec::new();
+    for offset in 0..=order.len() {
+        actual.extend(
+            db.smart_playlist_track_page(
+                Some(fixture.source),
+                all,
+                None,
+                "",
+                1000,
+                offset,
+                1,
+                &cancel,
+            )
+            .await
+            .unwrap()
+            .into_iter()
+            .map(|row| row.media_uri),
+        );
+    }
+    assert_eq!(actual, order);
+    assert!(
+        db.smart_playlist_track_page(
+            Some(fixture.source),
+            limited,
+            None,
+            "Beta",
+            1000,
+            0,
+            10,
+            &cancel
+        )
+        .await
+        .unwrap()
+        .is_empty()
+    );
+    let mut raw = connection(&fixture.path).await;
+    sqlx::query("UPDATE main.playlist_entries SET title='İSTANBUL' WHERE media_uri=?1")
+        .bind(&external)
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    drop(raw);
+    let filtered = db
+        .smart_playlist_track_page(
+            Some(fixture.source),
+            all,
+            None,
+            "i\u{307}st",
+            1000,
+            0,
+            10,
+            &cancel,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        filtered
+            .iter()
+            .map(|row| &row.media_uri)
+            .collect::<Vec<_>>(),
+        [&external]
+    );
+    let captured = super::support::resolve_queue(
+        db,
+        library::QueueInput::Query {
+            query: library::QueueQuery::Smart {
+                key: all,
+                source: Some(fixture.source),
+                now: 1000,
+            },
+            folder: None,
+            filter: "i\u{307}st".into(),
+            sort: library::TrackSort::Title,
+            descending: false,
+            context_id: "smart search".into(),
+            anchor_uri: None,
+        },
+        0,
+    )
+    .await;
+    assert_eq!(
+        captured
+            .entries
+            .iter()
+            .map(|row| row.media_uri.as_ref())
+            .collect::<Vec<_>>(),
+        [external.as_str()]
+    );
+}
+
+#[tokio::test]
 async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
     use library::{AlbumSort, PlaylistEntrySort, PlaylistSort};
     let fixture = fixture().await;
@@ -85,8 +336,8 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
             for offset in 0..=page.order.len() {
                 paged.extend(
                     database
-                        .album_tracks_page(
-                            *album,
+                        .collection_tracks_page(
+                            &library::QueueCollection::AlbumKey(*album),
                             folder,
                             "",
                             library::TrackSort::TrackNumber,

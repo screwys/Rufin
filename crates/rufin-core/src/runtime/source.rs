@@ -15,7 +15,7 @@ pub struct LocalAccessStatus {
     pub sample_source_path: Option<String>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct SourceSummary {
     pub id: SourceId,
     pub kind: String,
@@ -113,7 +113,7 @@ pub enum SourceSetup {
     },
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct CredentialPreset {
     pub source_name: String,
     pub server_url: String,
@@ -122,7 +122,7 @@ pub struct CredentialPreset {
     pub open_subsonic_authentication: Option<OpenSubsonicAuthentication>,
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
 pub struct EditableSource {
     pub plex_settings: Option<sources::PlexSettingsInput>,
     pub file_settings: Option<sources::FileSourceSettings>,
@@ -135,6 +135,10 @@ pub struct EditableSource {
 #[derive(Clone, Debug, Eq, PartialEq, serde::Deserialize)]
 #[serde(tag = "type", content = "data", rename_all = "snake_case")]
 pub enum SourceSettingsChange {
+    Local {
+        source_id: SourceId,
+        roots: Vec<PathBuf>,
+    },
     EmbyConnect {
         source_id: SourceId,
         server: sources::EmbyConnectServer,

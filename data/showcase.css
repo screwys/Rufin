@@ -1,0 +1,119 @@
+.seeded-gradient-showcase {
+  --showcase-primary: rgba(116, 82, 188, 0.78);
+  --showcase-secondary: rgba(83, 68, 143, 0.64);
+  --showcase-tertiary: rgba(155, 111, 210, 0.56);
+  border-radius: 8px;
+  color: var(--window-fg-color);
+  background: linear-gradient(135deg,
+    color-mix(in srgb, var(--showcase-primary) 58%, var(--window-bg-color)),
+    color-mix(in srgb, var(--showcase-secondary) 44%, var(--card-bg-color)) 58%,
+    color-mix(in srgb, var(--window-bg-color) 62%, var(--showcase-tertiary)));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 10%, transparent),
+    0 18px 42px rgba(0, 0, 0, 0.2);
+}
+
+.seeded-gradient-palette-0 {
+  --showcase-primary: rgba(176, 72, 88, 0.78);
+  --showcase-secondary: rgba(93, 60, 151, 0.64);
+  --showcase-tertiary: rgba(196, 129, 73, 0.56);
+}
+
+.seeded-gradient-palette-1 {
+  --showcase-primary: rgba(194, 116, 57, 0.78);
+  --showcase-secondary: rgba(129, 72, 53, 0.64);
+  --showcase-tertiary: rgba(208, 165, 79, 0.56);
+}
+
+.seeded-gradient-palette-2 {
+  --showcase-primary: rgba(143, 147, 61, 0.78);
+  --showcase-secondary: rgba(85, 113, 72, 0.64);
+  --showcase-tertiary: rgba(185, 156, 71, 0.56);
+}
+
+.seeded-gradient-palette-3 {
+  --showcase-primary: rgba(65, 150, 98, 0.78);
+  --showcase-secondary: rgba(53, 108, 103, 0.64);
+  --showcase-tertiary: rgba(126, 176, 92, 0.56);
+}
+
+.seeded-gradient-palette-4 {
+  --showcase-primary: rgba(55, 150, 145, 0.78);
+  --showcase-secondary: rgba(55, 102, 143, 0.64);
+  --showcase-tertiary: rgba(90, 181, 159, 0.56);
+}
+
+.seeded-gradient-palette-5 {
+  --showcase-primary: rgba(58, 135, 184, 0.78);
+  --showcase-secondary: rgba(62, 87, 151, 0.64);
+  --showcase-tertiary: rgba(89, 180, 195, 0.56);
+}
+
+.seeded-gradient-palette-6 {
+  --showcase-primary: rgba(72, 103, 187, 0.78);
+  --showcase-secondary: rgba(74, 66, 151, 0.64);
+  --showcase-tertiary: rgba(98, 143, 211, 0.56);
+}
+
+.seeded-gradient-palette-7 {
+  --showcase-primary: rgba(116, 82, 188, 0.78);
+  --showcase-secondary: rgba(83, 68, 143, 0.64);
+  --showcase-tertiary: rgba(155, 111, 210, 0.56);
+}
+
+.seeded-gradient-palette-8 {
+  --showcase-primary: rgba(156, 74, 177, 0.78);
+  --showcase-secondary: rgba(95, 66, 145, 0.64);
+  --showcase-tertiary: rgba(186, 104, 190, 0.56);
+}
+
+.seeded-gradient-palette-9 {
+  --showcase-primary: rgba(190, 71, 139, 0.78);
+  --showcase-secondary: rgba(117, 61, 126, 0.64);
+  --showcase-tertiary: rgba(207, 112, 157, 0.56);
+}
+
+.seeded-gradient-palette-10 {
+  --showcase-primary: rgba(203, 83, 104, 0.78);
+  --showcase-secondary: rgba(129, 61, 89, 0.64);
+  --showcase-tertiary: rgba(217, 130, 119, 0.56);
+}
+
+.seeded-gradient-palette-11 {
+  --showcase-primary: rgba(210, 101, 72, 0.78);
+  --showcase-secondary: rgba(143, 70, 64, 0.64);
+  --showcase-tertiary: rgba(221, 151, 105, 0.56);
+}
+
+.seeded-gradient-palette-12 {
+  --showcase-primary: rgba(165, 119, 73, 0.78);
+  --showcase-secondary: rgba(104, 77, 65, 0.64);
+  --showcase-tertiary: rgba(198, 158, 99, 0.56);
+}
+
+.seeded-gradient-palette-13 {
+  --showcase-primary: rgba(104, 147, 93, 0.78);
+  --showcase-secondary: rgba(66, 105, 81, 0.64);
+  --showcase-tertiary: rgba(155, 178, 112, 0.56);
+}
+
+.seeded-gradient-palette-14 {
+  --showcase-primary: rgba(93, 134, 153, 0.78);
+  --showcase-secondary: rgba(65, 91, 126, 0.64);
+  --showcase-tertiary: rgba(126, 165, 176, 0.56);
+}
+
+.seeded-gradient-palette-15 {
+  --showcase-primary: rgba(92, 89, 170, 0.78);
+  --showcase-secondary: rgba(70, 68, 128, 0.64);
+  --showcase-tertiary: rgba(135, 126, 197, 0.56);
+}
+
+.seeded-gradient-showcase .muted {
+  color: color-mix(in srgb, var(--window-fg-color) 95%, var(--window-bg-color));
+}
+
+.seeded-gradient-showcase .eyebrow {
+  color: color-mix(in srgb, var(--accent-color) 72%, var(--window-fg-color));
+}
+

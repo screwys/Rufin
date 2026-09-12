@@ -41,8 +41,6 @@ impl Shell {
 
 pub(crate) struct Shell {
     pub(crate) quitting: Rc<Cell<bool>>,
-    pub(crate) home_showcase_variation: Cell<i64>,
-    pub(crate) home_explore_variation: Cell<i64>,
     pub(crate) diagnostics: DiagnosticsHandle,
     pub(crate) appearance: crate::application::style::ApplicationAppearance,
     pub(crate) settings: Rc<SettingsState>,
@@ -59,6 +57,7 @@ pub(crate) struct Shell {
     pub(crate) artwork: Rc<ArtworkState>,
     pub(crate) selected_ui: SelectedUiState,
     pub(crate) products: ProductHandles,
+    pub(crate) web_controller: rufin_core::api::Controller,
     pub(crate) chrome: WindowChrome,
     layout_state: ShellLayoutState,
     pub(crate) navigation_view: NavigationWidgets,

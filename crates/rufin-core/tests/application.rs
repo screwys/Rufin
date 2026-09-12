@@ -68,7 +68,12 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
                 .expect("shared playback commands publish without GTK");
             });
             if !reopening {
-                runtime.block_on(exercise_http_api(inputs.products.clone(), directory.path()));
+                runtime.block_on(exercise_desktop_controller(&inputs));
+                runtime.block_on(exercise_http_api(
+                    inputs.products.clone(),
+                    inputs.settings.clone(),
+                    directory.path(),
+                ));
             }
             inputs.receivers.visualizer.close();
             drop(inputs.receivers);
@@ -78,7 +83,164 @@ fn application_starts_on_a_worker_and_reopens_saved_settings_without_a_ui() {
     }
 }
 
-async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: &std::path::Path) {
+async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs) {
+    use rufin_core::api::Controller;
+    inputs
+        .products
+        .source
+        .change_secret_storage(secrets::SecretStorageMode::ConfigFile)
+        .recv()
+        .await
+        .unwrap()
+        .unwrap();
+    let controller = Controller::new(inputs.products.clone());
+    let mut status = controller.status();
+    assert!(status.borrow().address.is_none());
+    let mut settings = inputs.settings.load();
+    assert!(!settings.web_controller.enabled);
+    assert_eq!(settings.web_controller.port, 1717);
+    settings.web_controller.enabled = true;
+    settings.web_controller.port = 0;
+    inputs.settings.save(&settings).unwrap();
+    let started = controller_status(&mut status, |state| state.address.is_some()).await;
+    assert_eq!(started.token.len(), 64);
+    let address = started.address.unwrap();
+    let client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(5))
+        .build()
+        .unwrap();
+    let url = format!("http://{address}/api/playback");
+    assert_eq!(
+        client.get(&url).send().await.unwrap().status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    let playback: serde_json::Value = client
+        .get(&url)
+        .bearer_auth(&started.token)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    assert_eq!(playback["muted"], true);
+    let mut events = client
+        .get(format!("http://{address}/api/events"))
+        .bearer_auth(&started.token)
+        .send()
+        .await
+        .unwrap();
+    assert!(events.chunk().await.unwrap().is_some());
+
+    let occupied = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    settings.web_controller.port = occupied.local_addr().unwrap().port();
+    inputs.settings.save(&settings).unwrap();
+    controller_status(&mut status, |state| state.error.is_some()).await;
+    assert!(
+        client
+            .get(&url)
+            .bearer_auth(&started.token)
+            .send()
+            .await
+            .is_err()
+    );
+    let closed = tokio::time::timeout(Duration::from_secs(5), async {
+        while let Ok(Some(_)) = events.chunk().await {}
+    })
+    .await;
+    assert!(closed.is_ok(), "rebinding closes existing event streams");
+
+    settings.web_controller.port = 0;
+    inputs.settings.save(&settings).unwrap();
+    let rebound = controller_status(&mut status, |state| state.address.is_some()).await;
+    assert_eq!(rebound.token, started.token);
+    let regenerated = controller.regenerate_token().await.unwrap().unwrap();
+    assert_ne!(regenerated, started.token);
+    assert_eq!(regenerated.len(), 64);
+    let renewed = controller_status(&mut status, |state| {
+        state.address.is_some() && state.token == regenerated
+    })
+    .await;
+    let url = format!("http://{}/api/playback", renewed.address.unwrap());
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth(&started.token)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::UNAUTHORIZED
+    );
+    assert_eq!(
+        client
+            .get(&url)
+            .bearer_auth(&regenerated)
+            .send()
+            .await
+            .unwrap()
+            .status(),
+        reqwest::StatusCode::OK
+    );
+    drop(controller);
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while status.changed().await.is_ok() {}
+    })
+    .await
+    .unwrap();
+    let controller = Controller::new(inputs.products.clone());
+    let mut status = controller.status();
+    let reopened = controller_status(&mut status, |state| state.address.is_some()).await;
+    assert_eq!(
+        reopened.token, regenerated,
+        "regenerated token survives host restart"
+    );
+    settings.web_controller.enabled = false;
+    inputs.settings.save(&settings).unwrap();
+    controller_status(&mut status, |state| state.address.is_none()).await;
+    assert!(
+        client
+            .get(format!("http://{}/api", reopened.address.unwrap()))
+            .send()
+            .await
+            .is_err()
+    );
+    let mut playback = inputs.products.playback.updates.subscribe();
+    for muted in [false, true] {
+        inputs.products.playback.transport.set_muted(muted);
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if playback
+                    .recv()
+                    .await
+                    .unwrap()
+                    .is_some_and(|state| state.view.controls.muted == muted)
+                {
+                    break;
+                }
+            }
+        })
+        .await
+        .expect("disabling web leaves playback running");
+    }
+}
+
+async fn controller_status(
+    status: &mut tokio::sync::watch::Receiver<rufin_core::api::ControllerStatus>,
+    predicate: impl Fn(&rufin_core::api::ControllerStatus) -> bool,
+) -> rufin_core::api::ControllerStatus {
+    tokio::time::timeout(Duration::from_secs(5), status.wait_for(predicate))
+        .await
+        .expect("controller status settled")
+        .unwrap()
+        .clone()
+}
+
+async fn exercise_http_api(
+    products: rufin_core::runtime::ProductHandles,
+    settings: rufin_core::SettingsHandle,
+    root: &std::path::Path,
+) {
     use serde_json::{Value, json};
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
@@ -130,6 +292,49 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .await
         .unwrap();
     assert!(help["routes"]["GET /api/playback"].is_string());
+    let page = client
+        .get(format!("http://{address}/"))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(page.status(), reqwest::StatusCode::OK);
+    let html = page.text().await.unwrap();
+    assert!(html.contains("id=\"login-dialog\""));
+    assert!(!html.contains(token));
+    for path in [
+        "events",
+        "lyrics",
+        "lyrics/events",
+        "artwork?uri=missing",
+        "artists?source=missing",
+        "smart-playlists",
+    ] {
+        assert_eq!(
+            client
+                .get(format!("{base}/{path}"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+    }
+    assert_eq!(
+        api(reqwest::Method::GET, "lyrics", Value::Null).await["state"],
+        "empty"
+    );
+    let mut combined = client
+        .get(format!("{base}/events"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    let initial = playback_event(&mut combined).await;
+    assert_eq!(initial["playback"]["muted"], true);
+    assert_eq!(initial["source"]["state"], "idle");
+    assert_eq!(initial["lyrics"]["state"], "empty");
+    drop(combined);
+    api(reqwest::Method::POST, "lyrics", json!({})).await;
 
     let mut first = client
         .get(format!("{base}/playback/events"))
@@ -232,6 +437,33 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
     }
     let selected = products.source.selected_library().unwrap().source_id;
     assert_eq!(selected.as_str(), sources[1]);
+    assert_eq!(
+        api(
+            reqwest::Method::GET,
+            &format!("artists?source={}", sources[0]),
+            Value::Null
+        )
+        .await["artists"],
+        json!([])
+    );
+    let smart = api(reqwest::Method::GET, "smart-playlists", Value::Null).await;
+    assert!(!smart["smart_playlists"].as_array().unwrap().is_empty());
+    let random = api(
+        reqwest::Method::GET,
+        &format!("random?source={}", sources[0]),
+        Value::Null,
+    )
+    .await;
+    assert_eq!(random["genres"], json!([]));
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "queue/random",
+            json!({"source":sources[0],"count":1,"mode":"replace"})
+        )
+        .await["empty"],
+        true
+    );
     let invalid = client
         .post(format!("{base}/sources/refresh"))
         .bearer_auth(token)
@@ -307,14 +539,53 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .await
         .unwrap();
     assert_eq!(queue["total"], 2);
+    let limited = api(reqwest::Method::GET, "queue?limit=1", Value::Null).await;
+    assert_eq!(limited["total"], 2);
+    assert_eq!(limited["window"].as_array().unwrap().len(), 1);
+    let moved = queue["window"][0]["id"].clone();
+    api(
+        reqwest::Method::POST,
+        "queue/reorder",
+        json!({"ids":[moved],"before":null}),
+    )
+    .await;
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if api(reqwest::Method::GET, "queue", Value::Null).await["current_index"] == 1 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
     let playlist = api(
         reqwest::Method::POST,
         "playlists",
-        json!({"name":"HTTP playlist","uris":items}),
+        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items}),
     )
     .await["id"]
         .clone();
     assert!(playlist.is_i64());
+    let html = client
+        .get(format!("{base}/playlists"))
+        .bearer_auth(token)
+        .header("HX-Request", "true")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(html.headers()["content-type"], "text/html; charset=utf-8");
+    assert_eq!(html.headers()["vary"], "HX-Request");
+    let html = html.text().await.unwrap();
+    assert!(html.contains("HTTP &#60;script&#62; playlist"));
+    assert!(!html.contains("<script>"));
+    assert!(
+        api(reqwest::Method::GET, "playlists", Value::Null).await["playlists"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|row| row["name"] == "HTTP <script> playlist & \"quotes\"")
+    );
     assert_eq!(
         api(
             reqwest::Method::PATCH,
@@ -390,13 +661,17 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
     api(
         reqwest::Method::POST,
         "queue/playlist",
-        json!({"id":playlist,"mode":"replace"}),
+        json!({"id":playlist,"mode":"replace","anchor_entry":entries[0]["id"]}),
     )
     .await;
     tokio::time::timeout(Duration::from_secs(5), async {
         loop {
             let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
-            if queue["window"][0]["track"]["uri"] == items[1] && queue["total"] == 2 {
+            let playing = api(reqwest::Method::GET, "playback", Value::Null).await;
+            if queue["window"][0]["track"]["uri"] == items[1]
+                && queue["total"] == 2
+                && playing["current"]["track"]["uri"] == items[0]
+            {
                 break;
             }
             tokio::time::sleep(Duration::from_millis(10)).await;
@@ -413,6 +688,104 @@ async fn exercise_http_api(products: rufin_core::runtime::ProductHandles, root: 
         .await["changed"],
         true
     );
+    let mut wav = b"RIFF".to_vec();
+    wav.extend(16036_u32.to_le_bytes());
+    wav.extend(b"WAVEfmt ");
+    wav.extend(16_u32.to_le_bytes());
+    wav.extend(1_u16.to_le_bytes());
+    wav.extend(1_u16.to_le_bytes());
+    wav.extend(8000_u32.to_le_bytes());
+    wav.extend(16000_u32.to_le_bytes());
+    wav.extend(2_u16.to_le_bytes());
+    wav.extend(16_u16.to_le_bytes());
+    wav.extend(b"data");
+    wav.extend(16000_u32.to_le_bytes());
+    wav.resize(16044, 0);
+    for index in 0..150 {
+        std::fs::write(
+            root.join("second").join(format!("random-{index:03}.wav")),
+            &wav,
+        )
+        .unwrap();
+    }
+    api(
+        reqwest::Method::POST,
+        "sources/refresh",
+        json!({"id":sources[1]}),
+    )
+    .await;
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "queue/random",
+            json!({"source":sources[1],"count":500,"mode":"replace"})
+        )
+        .await["empty"],
+        false
+    );
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            if api(reqwest::Method::GET, "queue", Value::Null).await["total"] == 150 {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    let tracks = api(
+        reqwest::Method::GET,
+        &format!("tracks?source={}", sources[1]),
+        Value::Null,
+    )
+    .await;
+    let home_route = format!("home?source={}&block=Explore", sources[1]);
+    let home = api(reqwest::Method::GET, &home_route, Value::Null).await;
+    assert_eq!(
+        home,
+        api(reqwest::Method::GET, &home_route, Value::Null).await
+    );
+    let uri = tracks["tracks"][0]["uri"].as_str().unwrap();
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "favorite",
+            json!({"kind":"track","uri":uri,"favorite":true})
+        )
+        .await["favorite"],
+        true
+    );
+    let metadata = client
+        .get(format!("{base}/media"))
+        .bearer_auth(token)
+        .query(&[("uri", uri)])
+        .send()
+        .await
+        .unwrap()
+        .json::<Value>()
+        .await
+        .unwrap();
+    assert_eq!(metadata["favorite"], true);
+    for include_current in [false, true] {
+        let mut saved = settings.load();
+        saved.clear_queue_includes_current = include_current;
+        settings.save(&saved).unwrap();
+        api(reqwest::Method::DELETE, "queue", Value::Null).await;
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if api(reqwest::Method::GET, "queue", Value::Null).await["total"]
+                    == if include_current { 0 } else { 1 }
+                {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("Clear follows the app's current-track setting");
+    }
+
     for id in &sources {
         let response = client
             .delete(format!("{base}/sources"))

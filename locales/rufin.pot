@@ -162,6 +162,9 @@ msgstr ""
 msgid "6 hours"
 msgstr ""
 
+msgid "API key (Subsonic)"
+msgstr ""
+
 msgid "API key"
 msgstr ""
 
@@ -172,6 +175,12 @@ msgid "About Rufin"
 msgstr ""
 
 msgid "Accent color"
+msgstr ""
+
+msgid "Access token"
+msgstr ""
+
+msgid "Actions"
 msgstr ""
 
 msgid "Activity"
@@ -187,6 +196,9 @@ msgid "Add a matching server prefix"
 msgstr ""
 
 msgid "Add a music folder"
+msgstr ""
+
+msgid "Add a music source to start listening."
 msgstr ""
 
 msgid "Add a new source"
@@ -222,6 +234,9 @@ msgstr ""
 msgid "Added to"
 msgstr ""
 
+msgid "Adding source"
+msgstr ""
+
 msgid "Album Artists"
 msgstr ""
 
@@ -238,6 +253,9 @@ msgid "Album title"
 msgstr ""
 
 msgid "Album tracks"
+msgstr ""
+
+msgid "Album unavailable"
 msgstr ""
 
 msgid "Album"
@@ -258,7 +276,16 @@ msgstr ""
 msgid "All"
 msgstr ""
 
+msgid "Allow remote connections"
+msgstr ""
+
 msgid "Alternate addresses"
+msgstr ""
+
+msgid "Anonymous (WebDAV / SMB)"
+msgstr ""
+
+msgid "Anonymous"
 msgstr ""
 
 msgid "Any genre"
@@ -300,10 +327,16 @@ msgstr ""
 msgid "Artist tracks"
 msgstr ""
 
+msgid "Artist unavailable"
+msgstr ""
+
 msgid "Artist"
 msgstr ""
 
 msgid "Artists"
+msgstr ""
+
+msgid "Artwork"
 msgstr ""
 
 msgid "Audio fade on play/pause"
@@ -374,6 +407,9 @@ msgstr ""
 msgid "Backups"
 msgstr ""
 
+msgid "Bearer token (WebDAV)"
+msgstr ""
+
 msgid "Bearer token"
 msgstr ""
 
@@ -416,6 +452,9 @@ msgstr ""
 msgid "Change Source"
 msgstr ""
 
+msgid "Change sort order"
+msgstr ""
+
 msgid "Change"
 msgstr ""
 
@@ -426,6 +465,9 @@ msgstr[0] ""
 msgstr[1] ""
 
 msgid "Changes take effect after restarting Rufin"
+msgstr ""
+
+msgid "Changing source"
 msgstr ""
 
 msgid "Check for updates every"
@@ -441,6 +483,9 @@ msgid "Choose Server"
 msgstr ""
 
 msgid "Choose a local music folder"
+msgstr ""
+
+msgid "Choose an address"
 msgstr ""
 
 msgid "Choose an existing local folder"
@@ -533,6 +578,12 @@ msgstr ""
 msgid "Connect manually"
 msgstr ""
 
+msgid "Connect to Rufin"
+msgstr ""
+
+msgid "Connect your music servers or local folders."
+msgstr ""
+
 msgid "Connect"
 msgstr ""
 
@@ -550,7 +601,13 @@ msgstr ""
 msgid "Connecting to {device}..."
 msgstr ""
 
+msgid "Connecting"
+msgstr ""
+
 msgid "Connection failed"
+msgstr ""
+
+msgid "Connection lost. Reconnecting..."
 msgstr ""
 
 msgid "Connection options"
@@ -571,11 +628,29 @@ msgstr ""
 msgid "Control notifications"
 msgstr ""
 
+msgid "Controller status"
+msgstr ""
+
+msgid "Controller"
+msgstr ""
+
+msgid "Copy access token"
+msgstr ""
+
+msgid "Copy link"
+msgstr ""
+
 msgid "Copy"
+msgstr ""
+
+msgid "Could not load this page"
 msgstr ""
 
 #, rust-format
 msgid "Could not open folder: {error}"
+msgstr ""
+
+msgid "Could not receive live updates"
 msgstr ""
 
 msgid "Could not save diagnostic log"
@@ -655,6 +730,7 @@ msgstr ""
 msgid "Delete Playlist"
 msgstr ""
 
+#, rust-format
 msgid "Delete \"{name}\"?"
 msgstr ""
 
@@ -682,6 +758,9 @@ msgstr ""
 msgid "Disable private mode"
 msgstr ""
 
+msgid "Disabled"
+msgstr ""
+
 msgid "Disc number"
 msgstr ""
 
@@ -689,6 +768,12 @@ msgid "Disc"
 msgstr ""
 
 msgid "Discography"
+msgstr ""
+
+msgid "Disconnect from Rufin?"
+msgstr ""
+
+msgid "Disconnect"
 msgstr ""
 
 msgid "Discord Rich Presence"
@@ -757,6 +842,9 @@ msgstr ""
 msgid "Edit Smart Playlist"
 msgstr ""
 
+msgid "Edit Source"
+msgstr ""
+
 msgid "Edit lyrics"
 msgstr ""
 
@@ -773,6 +861,9 @@ msgid "Emby Connect"
 msgstr ""
 
 msgid "Emby"
+msgstr ""
+
+msgid "Enable Controller"
 msgstr ""
 
 msgid "Enable EBU R128 Analysis?"
@@ -806,6 +897,9 @@ msgid "Enter a server address, username, and password"
 msgstr ""
 
 msgid "Enter your Nextcloud server address to sign in through your browser"
+msgstr ""
+
+msgid "Enter your Rufin access token."
 msgstr ""
 
 msgid "Entire Library"
@@ -859,6 +953,9 @@ msgstr ""
 msgid "Fade audio when playback is paused or resumed"
 msgstr ""
 
+msgid "Favorite current track"
+msgstr ""
+
 msgid "Favorite tracks"
 msgstr ""
 
@@ -880,10 +977,16 @@ msgstr ""
 msgid "Files need Mood/BPM tags written on them. Not supported for Jellyfin"
 msgstr ""
 
+msgid "Files"
+msgstr ""
+
 msgid "Find shares"
 msgstr ""
 
 msgid "Find your ListenBrainz user token"
+msgstr ""
+
+msgid "Finding lyrics..."
 msgstr ""
 
 msgid "Fixed position"
@@ -908,6 +1011,10 @@ msgid "For this import or export only. Leave empty for an unencrypted archive."
 msgstr ""
 
 msgid "Forget Source"
+msgstr ""
+
+#, rust-format
+msgid "Forget \"{name}\"?"
 msgstr ""
 
 msgid "Forward"
@@ -962,6 +1069,10 @@ msgid "Get token"
 msgstr ""
 
 msgid "Go to Album"
+msgstr ""
+
+#, rust-format
+msgid "Go to {artist}"
 msgstr ""
 
 msgid "Go to"
@@ -1105,6 +1216,12 @@ msgstr ""
 msgid "Legacy authorization"
 msgstr ""
 
+msgid "Legacy password (Subsonic)"
+msgstr ""
+
+msgid "Legacy password"
+msgstr ""
+
 msgid "Legacy"
 msgstr ""
 
@@ -1130,6 +1247,9 @@ msgid "ListenBrainz scrobbling"
 msgstr ""
 
 msgid "ListenBrainz"
+msgstr ""
+
+msgid "Loading..."
 msgstr ""
 
 msgid "Local File Access"
@@ -1196,6 +1316,9 @@ msgid "Lyrics settings"
 msgstr ""
 
 msgid "Lyrics storage"
+msgstr ""
+
+msgid "Lyrics will appear here."
 msgstr ""
 
 msgid "Lyrics"
@@ -1285,6 +1408,9 @@ msgstr ""
 msgid "Music Folder"
 msgstr ""
 
+msgid "Music folders on the Rufin machine"
+msgstr ""
+
 msgid "MusicBrainz + Last.fm"
 msgstr ""
 
@@ -1310,6 +1436,9 @@ msgid "Mute"
 msgstr ""
 
 msgid "Muted"
+msgstr ""
+
+msgid "My music"
 msgstr ""
 
 msgid "Name"
@@ -1411,6 +1540,9 @@ msgstr ""
 msgid "No local folders configured"
 msgstr ""
 
+msgid "No lyrics available."
+msgstr ""
+
 msgid "No lyrics"
 msgstr ""
 
@@ -1423,7 +1555,13 @@ msgstr ""
 msgid "No music from this artist yet"
 msgstr ""
 
+msgid "No network address available"
+msgstr ""
+
 msgid "No network devices found"
+msgstr ""
+
+msgid "No results"
 msgstr ""
 
 msgid "No servers found, add one manually or try again"
@@ -1504,10 +1642,16 @@ msgstr ""
 msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 
+msgid "One path per line"
+msgstr ""
+
 msgid "Only played tracks"
 msgstr ""
 
 msgid "Only unplayed tracks"
+msgstr ""
+
+msgid "Open Controller"
 msgstr ""
 
 msgid "Open Folder"
@@ -1562,6 +1706,9 @@ msgid "Other releases"
 msgstr ""
 
 msgid "Overview"
+msgstr ""
+
+msgid "Password or token"
 msgstr ""
 
 msgid "Password"
@@ -1639,6 +1786,12 @@ msgstr ""
 msgid "Play/Pause"
 msgstr ""
 
+msgid "Playback controls"
+msgstr ""
+
+msgid "Playback position"
+msgstr ""
+
 msgid "Playback speed"
 msgstr ""
 
@@ -1686,6 +1839,9 @@ msgid "Plex"
 msgstr ""
 
 msgid "Pop"
+msgstr ""
+
+msgid "Port"
 msgstr ""
 
 msgid "Position"
@@ -1760,6 +1916,9 @@ msgstr ""
 msgid "Queue and transitions"
 msgstr ""
 
+msgid "Queue tracks to show"
+msgstr ""
+
 msgid "Queue"
 msgstr ""
 
@@ -1805,7 +1964,16 @@ msgstr ""
 msgid "Refresh section"
 msgstr ""
 
+msgid "Refresh source"
+msgstr ""
+
 msgid "Refresh"
+msgstr ""
+
+msgid "Refreshing"
+msgstr ""
+
+msgid "Regenerate access token"
 msgstr ""
 
 msgid "Release date"
@@ -1899,6 +2067,10 @@ msgid "Replace saved custom headers"
 msgstr ""
 
 msgid "ReplayGain"
+msgstr ""
+
+#, rust-format
+msgid "Request failed ({status})"
 msgstr ""
 
 msgid "Require SMB encryption"
@@ -2021,13 +2193,22 @@ msgstr ""
 msgid "Search current folder"
 msgstr ""
 
+msgid "Search genres"
+msgstr ""
+
 msgid "Search in page"
 msgstr ""
 
 msgid "Search is unavailable"
 msgstr ""
 
+msgid "Search library"
+msgstr ""
+
 msgid "Search lyrics"
+msgstr ""
+
+msgid "Search playlists"
 msgstr ""
 
 msgid "Search preferences"
@@ -2036,7 +2217,13 @@ msgstr ""
 msgid "Search queue"
 msgstr ""
 
+msgid "Search tracks"
+msgstr ""
+
 msgid "Search"
+msgstr ""
+
+msgid "Search..."
 msgstr ""
 
 msgid "Searching Local Network"
@@ -2070,6 +2257,10 @@ msgstr ""
 msgid "Seek playback"
 msgstr ""
 
+#, rust-format
+msgid "Seek to {time}"
+msgstr ""
+
 msgid "Seekbar"
 msgstr ""
 
@@ -2086,6 +2277,10 @@ msgid "Select Source"
 msgstr ""
 
 msgid "Select all"
+msgstr ""
+
+#, rust-format
+msgid "Select {title}"
 msgstr ""
 
 msgid "Selected folders"
@@ -2188,6 +2383,9 @@ msgstr ""
 msgid "Show visualizer"
 msgstr ""
 
+msgid "Show"
+msgstr ""
+
 msgid "Show/hide lyrics"
 msgstr ""
 
@@ -2270,6 +2468,9 @@ msgstr ""
 msgid "Song"
 msgstr ""
 
+msgid "Sort by"
+msgstr ""
+
 msgid "Sort title"
 msgstr ""
 
@@ -2282,6 +2483,9 @@ msgstr ""
 msgid "Source to use for cover images and song/artist links"
 msgstr ""
 
+msgid "Source type"
+msgstr ""
+
 msgid "Source"
 msgstr ""
 
@@ -2289,6 +2493,9 @@ msgid "Sources"
 msgstr ""
 
 msgid "Start minimized"
+msgstr ""
+
+msgid "Starting..."
 msgstr ""
 
 msgid "Status display"
@@ -2334,6 +2541,9 @@ msgid "Template"
 msgstr ""
 
 msgid "Text"
+msgstr ""
+
+msgid "The API token was not accepted. Please connect again."
 msgstr ""
 
 msgid "Theme"
@@ -2395,6 +2605,9 @@ msgstr ""
 msgid "Troubleshooting"
 msgstr ""
 
+msgid "Trust self-signed certificate"
+msgstr ""
+
 msgid "Tuesday"
 msgstr ""
 
@@ -2425,7 +2638,16 @@ msgstr ""
 msgid "Undo"
 msgstr ""
 
+msgid "Unknown artist"
+msgstr ""
+
+msgid "Unmute"
+msgstr ""
+
 msgid "Unmuted"
+msgstr ""
+
+msgid "Untitled"
 msgstr ""
 
 msgid "Update"
@@ -2471,6 +2693,12 @@ msgid "Use listening activity"
 msgstr ""
 
 msgid "Use local files for playback, lyrics, and supported metadata editing"
+msgstr ""
+
+msgid "Use maximum year"
+msgstr ""
+
+msgid "Use minimum year"
 msgstr ""
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
@@ -2521,6 +2749,9 @@ msgstr ""
 msgid "Volume scale"
 msgstr ""
 
+msgid "Volume"
+msgstr ""
+
 msgid "Waiting for connection"
 msgstr ""
 
@@ -2552,6 +2783,12 @@ msgid "Yellow"
 msgstr ""
 
 msgid "Yes"
+msgstr ""
+
+msgid "Your music belongs here"
+msgstr ""
+
+msgid "Your queue is empty."
 msgstr ""
 
 msgid "above"
@@ -2658,6 +2895,10 @@ msgid "{count} year ago"
 msgid_plural "{count} years ago"
 msgstr[0] ""
 msgstr[1] ""
+
+#, rust-format
+msgid "{status} \302\267 {stage} {completed}{total}"
+msgstr ""
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"

@@ -406,37 +406,21 @@ async fn execute_random_task(
     request: RandomPlayRequest,
     queue: playback::QueueHandle,
 ) -> bool {
-    let cancellation = ReadCancellation::new();
-    let order = match selected
-        .database
-        .random_candidates(
-            selected.source_key,
-            selected.music_folder_key,
-            &request.criteria,
-            &[],
-            request.requested,
-            &cancellation,
-        )
-        .await
+    match rufin_core::radio::queue_random(
+        &selected.database,
+        selected.source_key,
+        selected.music_folder_key,
+        request,
+        &queue,
+    )
+    .await
     {
-        Ok(order) => Arc::<[String]>::from(order),
+        Ok(empty) => empty,
         Err(error) => {
             warn!(%error, "failed to select Random Play tracks");
-            return false;
+            false
         }
-    };
-    if order.is_empty() {
-        return true;
     }
-    let media = selected
-        .database
-        .queue_items_for_uris(&order, &cancellation)
-        .await
-        .unwrap_or_default();
-    if let Some(request) = playback::PlayRequest::random(media.into(), request.placement) {
-        queue.play(request);
-    }
-    false
 }
 
 fn random_variation() -> i64 {
