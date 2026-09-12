@@ -97,6 +97,10 @@ just i18n # regenerates the shared desktop and web translation template
 just i18n --check # checks the translation template without changing it
 ```
 
+The packaged executable also supports `rufin --headless [--listen]`.
+On Windows, use `start /wait "" rufin.exe --headless` in Command Prompt to wait
+for it to exit. `just debug headless` runs the separate GTK-free executable.
+
 To run the broader testing suite:
 
 ```bash

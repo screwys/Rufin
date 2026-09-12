@@ -32,6 +32,11 @@ pub struct Platform {
 
 impl Platform {
     #[cfg(target_os = "windows")]
+    pub fn attach_parent_console() {
+        let _ = winsafe::AttachConsole(winsafe::PidParent::Parent);
+    }
+
+    #[cfg(target_os = "windows")]
     pub fn allow_foreground_activation(process_id: u32) -> Result<(), String> {
         winsafe::AllowSetForegroundWindow(Some(process_id))
             .map_err(|error| format!("could not pass window activation to Rufin: {error}"))
