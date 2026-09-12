@@ -123,7 +123,7 @@ windows-native-keyring-store = { version = "1.1.0", default-features = false }
 windows-updater = { path = "crates/windows-updater" }
 windows = "0.62.2"
 windows-registry = "0.100.0"
-winsafe = { version = "0.0.28", features = ["kernel", "ole", "shell", "user"] }
+winsafe = { version = "0.0.29", features = ["kernel", "ole", "shell", "user"] }
 wiremock = "0.6.5"
 
 [workspace.lints.rust]
