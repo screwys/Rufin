@@ -7737,14 +7737,14 @@
     {
         "type": "archive",
         "archive-type": "tar-gzip",
-        "url": "https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.26.4.crate",
-        "sha256": "1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61",
-        "dest": "cargo/vendor/tokio-rustls-0.26.4"
+        "url": "https://static.crates.io/crates/tokio-rustls/tokio-rustls-0.26.5.crate",
+        "sha256": "b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67",
+        "dest": "cargo/vendor/tokio-rustls-0.26.5"
     },
     {
         "type": "inline",
-        "contents": "{\"package\": \"1729aa945f29d91ba541258c8df89027d5792d85a8841fb65e8bf0f4ede4ef61\", \"files\": {}}",
-        "dest": "cargo/vendor/tokio-rustls-0.26.4",
+        "contents": "{\"package\": \"b0c85f2c3ef0b1cd58b36682f4b17aaa995f0e5db534d85692b4903abce21f67\", \"files\": {}}",
+        "dest": "cargo/vendor/tokio-rustls-0.26.5",
         "dest-filename": ".cargo-checksum.json"
     },
     {
