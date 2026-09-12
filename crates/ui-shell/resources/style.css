@@ -1597,10 +1597,6 @@ link.inline-detail-link:focus:focus-visible {
 
 row.controller-token .edit-icon {
   opacity: 0;
-  min-width: 0;
-  min-height: 0;
-  padding: 0;
-  -gtk-icon-size: 0px;
 }
 
 button.download-queue-pause {

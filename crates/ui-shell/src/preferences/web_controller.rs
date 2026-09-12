@@ -47,12 +47,23 @@ pub(super) fn bind(
             return;
         };
         button.set_sensitive(false);
-        let task = shell.web_controller.regenerate_token();
         let button = button.downgrade();
         let token = token.clone();
         let status = status.clone();
         gtk::glib::spawn_future_local(async move {
-            let result = task
+            let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
+            let builder = ui_shared::ui_resource::builder(resource);
+            let dialog: adw::AlertDialog =
+                ui_shared::ui_resource::object(&builder, resource, "controller_regenerate");
+            if dialog.choose_future(Some(&shell.chrome.window)).await != "regenerate" {
+                if let Some(button) = button.upgrade() {
+                    button.set_sensitive(true);
+                }
+                return;
+            }
+            let result = shell
+                .web_controller
+                .regenerate_token()
                 .await
                 .map_err(|error| error.to_string())
                 .and_then(|result| result);

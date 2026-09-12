@@ -2,6 +2,16 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20"/>
   <requires lib="libadwaita" version="1.9"/>
+  <object class="AdwAlertDialog" id="controller_regenerate">
+    <property name="heading" translatable="yes">Regenerate access token?</property>
+    <property name="body" translatable="yes">This will disconnect connected browsers and scripts. They will need the new access token to reconnect.</property>
+    <property name="default-response">cancel</property>
+    <property name="close-response">cancel</property>
+    <responses>
+      <response id="cancel" translatable="yes">Cancel</response>
+      <response id="regenerate" appearance="destructive" translatable="yes">Regenerate access token</response>
+    </responses>
+  </object>
   <object class="AdwAlertDialog" id="controller_addresses">
     <property name="heading" translatable="yes">Copy link</property>
     <property name="body" translatable="yes">Choose an address</property>
@@ -41,7 +51,7 @@
             <property name="title" translatable="yes">Access token</property>
             <property name="editable">false</property>
             <style><class name="controller-token"/></style>
-            <child type="prefix"><object class="GtkButton" id="web_regenerate">
+            <child type="suffix"><object class="GtkButton" id="web_regenerate">
               <property name="icon-name">rufin-view-refresh-symbolic</property>
               <property name="tooltip-text" translatable="yes">Regenerate access token</property>
               <property name="valign">center</property>

@@ -117,6 +117,11 @@ msgid ""
 msgstr ""
 
 msgid ""
+"This will disconnect connected browsers and scripts. They will need the new "
+"access token to reconnect."
+msgstr ""
+
+msgid ""
 "This will log you out and clear your secrets including API ones. Your app "
 "cache is not touched."
 msgstr ""
@@ -1974,6 +1979,9 @@ msgid "Refreshing"
 msgstr ""
 
 msgid "Regenerate access token"
+msgstr ""
+
+msgid "Regenerate access token?"
 msgstr ""
 
 msgid "Release date"

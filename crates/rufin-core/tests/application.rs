@@ -154,7 +154,19 @@ async fn exercise_desktop_controller(inputs: &rufin_core::runtime::RuntimeInputs
     inputs.settings.save(&settings).unwrap();
     let rebound = controller_status(&mut status, |state| state.address.is_some()).await;
     assert_eq!(rebound.token, started.token);
+    let mut connected = client
+        .get(format!("http://{}/api/events", rebound.address.unwrap()))
+        .bearer_auth(&rebound.token)
+        .send()
+        .await
+        .unwrap();
+    assert!(connected.chunk().await.unwrap().is_some());
     let regenerated = controller.regenerate_token().await.unwrap().unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while let Ok(Some(_)) = connected.chunk().await {}
+    })
+    .await
+    .expect("regeneration disconnects existing controller clients");
     assert_ne!(regenerated, started.token);
     assert_eq!(regenerated.len(), 64);
     let renewed = controller_status(&mut status, |state| {
