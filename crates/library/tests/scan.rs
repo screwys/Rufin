@@ -1051,7 +1051,7 @@ async fn incomplete_collection_publishes_valid_pages_without_removal_authority()
 }
 
 #[tokio::test]
-async fn incomplete_and_point_scans_do_not_certify_a_full_catalog_digest() {
+async fn complete_scans_remove_unseen_items_after_partial_updates() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("library.sqlite");
     let database = Database::open(&path).await.unwrap();
@@ -1071,10 +1071,12 @@ async fn incomplete_and_point_scans_do_not_certify_a_full_catalog_digest() {
                 .await
                 .unwrap();
         }
-        assert!(matches!(
-            scan.finish().await.unwrap(),
-            ScanOutcome::Changed(_)
-        ));
+        let outcome = scan.finish().await.unwrap();
+        assert!(if authoritative {
+            matches!(outcome, ScanOutcome::Changed(_))
+        } else {
+            matches!(outcome, ScanOutcome::Identical(_))
+        });
         let mut reader = connection(&path).await;
         assert_eq!(
             sqlx::query_scalar::<_, i64>("SELECT count(*) FROM genres")
@@ -1109,7 +1111,7 @@ async fn incomplete_and_point_scans_do_not_certify_a_full_catalog_digest() {
             .await
             .unwrap(),
         "a",
-        "a point update cannot leave the previous full-catalog digest valid"
+        "a complete read replaces values from an earlier point update"
     );
 }
 

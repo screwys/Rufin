@@ -361,7 +361,7 @@ mod tests {
         assert_eq!(playlist_count, 2);
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(1,'catalog','Catalog','catalog',zeroblob(32),zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) VALUES(1,'song','https://example.test/song','Song','song','','','song',100,7);").execute(writer.as_mut().unwrap()).await.unwrap();
+            sqlx::raw_sql("INSERT INTO sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'catalog','Catalog','catalog',zeroblob(32)); INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis,local_play_count) VALUES(1,'song','https://example.test/song','Song','song','','','song',100,7);").execute(writer.as_mut().unwrap()).await.unwrap();
         }
         target
             .restore_state(staged.path(), all_groups(), playlist_count)
@@ -427,7 +427,7 @@ mod tests {
         seed(&target, 19).await;
         {
             let mut writer = target.writer().await.unwrap();
-            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(83,'remote','Remote','remote',zeroblob(32),zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
+            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (83,'remote','Remote','remote',zeroblob(32));INSERT INTO main.playlists(object_id,name,position) VALUES('retained','Keep me',0);")
                 .execute(writer.as_mut().unwrap()).await.unwrap();
         }
         let favorites = StateGroups {

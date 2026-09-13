@@ -8,6 +8,8 @@ use std::fmt;
 use std::future::Future;
 use std::pin::Pin;
 
+mod events;
+
 use library::Scan;
 use reqwest::Url;
 use reqwest::header::HeaderName;
@@ -130,7 +132,7 @@ impl SubsonicSource {
         }
     }
 
-    pub(super) fn has_navidrome_library(&self) -> bool {
+    pub(crate) fn has_navidrome_library(&self) -> bool {
         self.navidrome_library
     }
 
@@ -862,7 +864,7 @@ mod tests {
         .expect("open Navidrome source")
     }
 
-    fn navidrome_source_with_token(server: &MockServer, token: &str) -> SubsonicSource {
+    pub(super) fn navidrome_source_with_token(server: &MockServer, token: &str) -> SubsonicSource {
         let mut source = navidrome_source(&server.uri());
         source.navidrome_session = NavidromeSession(Mutex::new(Some(token.to_string())));
         source

@@ -1,6 +1,6 @@
 use library::{Database, Freshness, ReadCancellation, Scan, ScanLink, ScanOutcome};
 
-async fn track(scan: &mut Scan, favorite: Option<bool>) {
+async fn track(scan: &mut Scan, favorite: Option<bool>, play_count: Option<i64>) {
     scan.write_track(
         "track",
         Some("album"),
@@ -28,7 +28,7 @@ async fn track(scan: &mut Scan, favorite: Option<bool>) {
         favorite,
         Some(8),
         None,
-        None,
+        play_count,
         None,
         None,
         None,
@@ -83,7 +83,7 @@ async fn fixture() -> (tempfile::TempDir, Database) {
     )
     .await
     .unwrap();
-    track(&mut scan, Some(true)).await;
+    track(&mut scan, Some(true), None).await;
     scan.write_folder("folder", "Folder", "folder", "folder", None)
         .await
         .unwrap();
@@ -100,10 +100,10 @@ async fn point_metadata_preserves_folders_and_complete_memberships_can_clear_the
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for replace in [false, true] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
-        track(&mut scan, None).await;
+        track(&mut scan, None, None).await;
         if replace {
             scan.replace_track_folders("track", &[]).await.unwrap();
-            track(&mut scan, None).await;
+            track(&mut scan, None, None).await;
         }
         let outcome = scan.finish().await.unwrap();
         assert_eq!(matches!(outcome, ScanOutcome::Identical(_)), !replace);
@@ -136,9 +136,7 @@ async fn favorite_snapshots_replace_only_source_favorites_and_keep_catalog_fresh
                 Vec::new()
             }
         };
-        scan.replace_favorites(&ids("track"), &ids("album"), &ids("artist"))
-            .await
-            .unwrap();
+        scan.replace_favorites(&ids("track"), &ids("album"), &ids("artist"));
         let outcome = scan.finish().await.unwrap();
         assert_eq!(matches!(outcome, ScanOutcome::Changed(_)), changed);
         for table in ["tracks", "albums", "artists"] {
@@ -287,12 +285,97 @@ async fn incomplete_catalog_keeps_home_sections_when_their_refresh_fails() {
 }
 
 #[tokio::test]
+async fn growing_and_reordering_a_playlist_preserves_occurrence_keys() {
+    let (directory, database) = fixture().await;
+    let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
+    let mut original = std::collections::HashMap::new();
+    for ids in [
+        &["a", "b"][..],
+        &["x", "y", "z", "a", "b"][..],
+        &["b", "a"][..],
+    ] {
+        let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+        scan.write_playlist("playlist", "Playlist", "playlist", "playlist", None)
+            .await
+            .unwrap();
+        for (position, id) in ids.iter().enumerate() {
+            scan.write_playlist_entry("playlist", id, "track", position as i64)
+                .await
+                .unwrap();
+        }
+        assert!(matches!(
+            scan.finish().await.unwrap(),
+            ScanOutcome::PlaylistsChanged(_)
+        ));
+        let rows=sqlx::query_as::<_,(String,i64)>("SELECT object_id,playlist_entry_key FROM catalog.native_playlist_entries ORDER BY position")
+            .fetch_all(&mut raw).await.unwrap();
+        assert_eq!(
+            rows.iter().map(|(id, _)| id.as_str()).collect::<Vec<_>>(),
+            ids
+        );
+        for (id, key) in rows {
+            assert_eq!(*original.entry(id).or_insert(key), key);
+        }
+    }
+}
+
+#[tokio::test]
+async fn unchanged_point_reads_do_not_rewrite_tracks_or_albums() {
+    let (directory, database) = fixture().await;
+    let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
+    sqlx::raw_sql("CREATE TRIGGER catalog.no_track_rewrite BEFORE UPDATE ON tracks BEGIN SELECT RAISE(FAIL,'unchanged track rewritten'); END;
+        CREATE TRIGGER catalog.no_album_rewrite BEFORE UPDATE ON albums BEGIN SELECT RAISE(FAIL,'unchanged album rewritten'); END;")
+        .execute(&mut raw).await.unwrap();
+    let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+    track(&mut scan, None, None).await;
+    assert!(matches!(
+        scan.finish().await.unwrap(),
+        ScanOutcome::Identical(_)
+    ));
+}
+
+#[tokio::test]
+async fn first_activity_observation_publishes_without_invalidating_catalog_freshness() {
+    let (_directory, database) = fixture().await;
+    for changed in [true, false] {
+        let mut scan = Scan::begin_items(&database, "source").await.unwrap();
+        track(&mut scan, None, Some(5)).await;
+        assert_eq!(
+            matches!(scan.finish().await.unwrap(), ScanOutcome::Changed(_)),
+            changed
+        );
+        let cancellation = ReadCancellation::new();
+        let uri = library::source_entity_uri(&library::SourceId::new("source"), "track", "track");
+        assert_eq!(
+            database
+                .track_row_by_uri(&uri, &cancellation)
+                .await
+                .unwrap()
+                .unwrap()
+                .play_count,
+            5
+        );
+        assert!(
+            Scan::accept_freshness(
+                &database,
+                "source",
+                &Freshness::new(b"catalog".to_vec()).unwrap(),
+                &cancellation
+            )
+            .await
+            .unwrap()
+            .is_some()
+        );
+    }
+}
+
+#[tokio::test]
 async fn absent_favorites_preserve_known_state_and_explicit_false_clears_it() {
     let (directory, database) = fixture().await;
     let mut raw = super::support::connection(&directory.path().join("library.sqlite3")).await;
     for (favorite, expected) in [(None, true), (Some(false), false), (None, false)] {
         let mut scan = Scan::begin_items(&database, "source").await.unwrap();
-        track(&mut scan, favorite).await;
+        track(&mut scan, favorite, None).await;
         scan.finish().await.unwrap();
         assert_eq!(
             sqlx::query_scalar::<_, bool>("SELECT source_favorite FROM tracks")

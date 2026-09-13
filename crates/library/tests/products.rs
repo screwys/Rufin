@@ -657,7 +657,7 @@ async fn radio_resolves_playlist_ownership_and_filters_native_recommendations() 
     let fixture = fixture().await;
     let cancel = ReadCancellation::new();
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('other','Other','other',zeroblob(32),zeroblob(32))")
+    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32))")
         .execute(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_album,display_artist,sort_text,duration_millis) SELECT source_key,'track-2','test:other','Other','other','','','other',1000 FROM sources WHERE object_id='other'")
         .execute(&mut raw).await.unwrap();
@@ -955,7 +955,7 @@ async fn playlist_and_smart_rows_retain_exact_metadata_links_and_unavailable_ent
     let cancel = ReadCancellation::new();
     let local_uri = "file:///music/local.flac";
     let mut raw = connection(&fixture.path).await;
-    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('local','Local','local',zeroblob(32),zeroblob(32))")
+    sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('local','Local','local',zeroblob(32))")
         .execute(&mut raw)
         .await
         .unwrap();
@@ -1077,7 +1077,7 @@ async fn uri_artwork_is_identical_across_owner_projections_and_current_scopes() 
         .unwrap();
     let mut raw = connection(&fixture.path).await;
     let other: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('other','Other','other',zeroblob(32),zeroblob(32)) RETURNING source_key",
+        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32)) RETURNING source_key",
     ).fetch_one(&mut raw).await.unwrap();
     let empty_folder: library::FolderKey = sqlx::query_scalar(
         "INSERT INTO folders(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'empty','Empty','empty','empty') RETURNING folder_key",
@@ -1432,8 +1432,7 @@ async fn collection_rows_carry_their_own_stable_source_identity() {
         .unwrap()
         .0;
     let mut raw = connection(&fixture.path).await;
-    sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest)
-        VALUES(55,'other-source','Other','other',zeroblob(32),zeroblob(32));
+    sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (55,'other-source','Other','other',zeroblob(32));
         INSERT INTO catalog.genres(genre_key,source_key,object_id,name,normalized_name,sort_text)
         VALUES(55,55,'genre','Other genre','other genre','other genre');
         INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)

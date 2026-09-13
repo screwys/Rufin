@@ -972,7 +972,7 @@ mod tests {
         .await
         .unwrap();
         let source = sqlx::query_scalar::<_, SourceKey>(
-            "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES ('source','Source','source',zeroblob(32),zeroblob(32)) RETURNING source_key",
+            "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32)) RETURNING source_key",
         )
         .fetch_one(&mut connection)
         .await
@@ -1034,7 +1034,7 @@ mod tests {
         .await
         .unwrap();
         let source = sqlx::query_scalar::<_, SourceKey>(
-            "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES ('source','Source','source',zeroblob(32),zeroblob(32)) RETURNING source_key",
+            "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32)) RETURNING source_key",
         )
         .fetch_one(&mut connection)
         .await

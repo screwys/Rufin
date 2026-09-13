@@ -34,10 +34,9 @@ pub struct SelectedFeed {
 }
 
 enum SelectedFeedChange {
-    Plex(RemoteItemChange),
+    Remote(RemoteItemChange),
     Files(crate::file::remote::changes::FileChange),
     Local(LocalLiveChange),
-    JellyfinEmby(RemoteItemChange),
 }
 
 impl SelectedFeed {
@@ -62,12 +61,11 @@ impl SelectedFeed {
 impl SelectedFeedChange {
     fn merge(self, incoming: Self) -> Self {
         match (self, incoming) {
-            (Self::Plex(current), Self::Plex(incoming)) => Self::Plex(current.merge(incoming)),
+            (Self::Remote(current), Self::Remote(incoming)) => {
+                Self::Remote(current.merge(incoming))
+            }
             (Self::Files(current), Self::Files(incoming)) => Self::Files(current.merge(incoming)),
             (Self::Local(current), Self::Local(incoming)) => Self::Local(current.merge(incoming)),
-            (Self::JellyfinEmby(current), Self::JellyfinEmby(incoming)) => {
-                Self::JellyfinEmby(current.merge(incoming))
-            }
             (_, incoming) => incoming,
         }
     }
@@ -127,12 +125,24 @@ impl SelectedFeed {
                 "Selected feed has no pending change",
             ))?;
         match (&self.source.implementation, change) {
-            (Implementation::Plex(_), SelectedFeedChange::Plex(RemoteItemChange::BoundaryLost)) => {
-                Ok(None)
-            }
+            (
+                Implementation::OpenSubsonic(_),
+                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
+            ) => Ok(None),
+            (
+                Implementation::OpenSubsonic(source),
+                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, .. }),
+            ) => source
+                .apply_navidrome_changes(database, self.source.source_id.as_str(), upserts)
+                .await
+                .map(Some),
+            (
+                Implementation::Plex(_),
+                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
+            ) => Ok(None),
             (
                 Implementation::Plex(source),
-                SelectedFeedChange::Plex(RemoteItemChange::Items { upserts, removals }),
+                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }),
             ) => source
                 .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
                 .await
@@ -157,7 +167,7 @@ impl SelectedFeed {
             (Implementation::Local(_), SelectedFeedChange::Local(LocalLiveChange::Rescan))
             | (
                 Implementation::JellyfinEmby(_),
-                SelectedFeedChange::JellyfinEmby(RemoteItemChange::BoundaryLost),
+                SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost),
             ) => Ok(None),
             (
                 Implementation::Local(local),
@@ -174,14 +184,14 @@ impl SelectedFeed {
                 .map(Some),
             (
                 Implementation::JellyfinEmby(source),
-                SelectedFeedChange::JellyfinEmby(RemoteItemChange::UserData { upserts }),
+                SelectedFeedChange::Remote(RemoteItemChange::UserData { upserts }),
             ) => source
                 .apply_user_data(database, self.source.source_id.as_str(), upserts)
                 .await
                 .map(Some),
             (
                 Implementation::JellyfinEmby(source),
-                SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items { upserts, removals }),
+                SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }),
             ) => source
                 .apply_live_items(database, self.source.source_id.as_str(), upserts, removals)
                 .await
@@ -879,51 +889,36 @@ impl Source {
                 progress(value);
             }
         };
-        let Some(freshness) = self.freshness().await.ok().flatten() else {
-            if let Implementation::OpenSubsonic(source) = &self.implementation {
-                return source
-                    .refresh_user_collections(database, self.source_id.as_str(), &|| {
-                        cancelled.load(Ordering::Relaxed)
-                    })
-                    .await
-                    .map(Some);
-            }
-            return if matches!(&self.implementation, Implementation::Files(_)) {
-                self.refresh(database, display_name, &report, cancelled, None, false)
-                    .await
-                    .map(Some)
-            } else {
-                Ok(None)
-            };
-        };
+        let freshness = self.freshness().await.ok().flatten();
         let cancellation = library::ReadCancellation::new();
         if cancelled.load(Ordering::Relaxed) {
             cancellation.cancel();
         }
-        if let Some(publication) =
-            Scan::accept_freshness(database, self.source_id.as_str(), &freshness, &cancellation)
+        let accepted = if let Some(freshness) = &freshness {
+            Scan::accept_freshness(database, self.source_id.as_str(), freshness, &cancellation)
                 .await?
-        {
-            if let Implementation::OpenSubsonic(source) = &self.implementation {
-                return source
-                    .refresh_user_collections(database, self.source_id.as_str(), &|| {
-                        cancelled.load(Ordering::Relaxed)
-                    })
-                    .await
-                    .map(Some);
-            }
-            return Ok(Some(ScanOutcome::Identical(publication)));
+        } else {
+            None
+        };
+        if freshness.is_some() && accepted.is_none() {
+            return self
+                .refresh(database, display_name, &report, cancelled, freshness, false)
+                .await
+                .map(Some);
         }
-        self.refresh(
-            database,
-            display_name,
-            &report,
-            cancelled,
-            Some(freshness),
-            false,
-        )
-        .await
-        .map(Some)
+        match &self.implementation {
+            Implementation::OpenSubsonic(source) => source
+                .refresh_user_collections(database, self.source_id.as_str(), &|| {
+                    cancelled.load(Ordering::Relaxed)
+                })
+                .await
+                .map(Some),
+            Implementation::Files(_) if freshness.is_none() => self
+                .refresh(database, display_name, &report, cancelled, None, false)
+                .await
+                .map(Some),
+            _ => Ok(accepted.map(ScanOutcome::Identical)),
+        }
     }
 
     pub async fn manual_refresh(
@@ -2656,9 +2651,7 @@ impl Source {
         self: &Arc<Self>,
         runtime: &tokio::runtime::Handle,
     ) -> Option<Arc<SelectedFeed>> {
-        if matches!(self.implementation, Implementation::OpenSubsonic(_))
-            || matches!(&self.implementation, Implementation::Files(files) if !files.has_notifications())
-            || matches!(&self.implementation, Implementation::Local(local) if local.roots().is_empty())
+        if matches!(&self.implementation, Implementation::Local(local) if local.roots().is_empty())
         {
             return None;
         }
@@ -2701,7 +2694,7 @@ impl Source {
                     if let Implementation::Plex(source) = &producer.source.implementation {
                         source
                             .listen_library_changes(|change| {
-                                producer.submit(SelectedFeedChange::Plex(change))
+                                producer.submit(SelectedFeedChange::Remote(change))
                             })
                             .await;
                     }
@@ -2716,13 +2709,11 @@ impl Source {
                     let mut ready = move || !ready_feed.cancelled.load(Ordering::Acquire);
                     let gap_feed = Arc::clone(&producer);
                     let mut gap = move || {
-                        gap_feed.submit(SelectedFeedChange::JellyfinEmby(
-                            RemoteItemChange::BoundaryLost,
-                        ))
+                        gap_feed.submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
                     };
                     let change_feed = Arc::clone(&producer);
                     let mut changed =
-                        move |change| change_feed.submit(SelectedFeedChange::JellyfinEmby(change));
+                        move |change| change_feed.submit(SelectedFeedChange::Remote(change));
                     let result = match &producer.source.implementation {
                         Implementation::JellyfinEmby(provider) => {
                             provider
@@ -2737,16 +2728,14 @@ impl Source {
                     if let Err(error) = result {
                         tracing::warn!(%error, "Jellyfin library change feed stopped");
                     }
-                    producer.submit(SelectedFeedChange::JellyfinEmby(
-                        RemoteItemChange::BoundaryLost,
-                    ));
+                    producer.submit(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost));
                 });
                 *feed
                     .remote_task
                     .lock()
                     .unwrap_or_else(|poisoned| poisoned.into_inner()) = Some(task.abort_handle());
             }
-            Implementation::Files(_) => {
+            Implementation::Files(files) if files.has_notifications() => {
                 let producer = Arc::clone(&feed);
                 let task = runtime.spawn(async move {
                     if let Implementation::Files(files) = &producer.source.implementation {
@@ -2758,7 +2747,24 @@ impl Source {
                 *feed.remote_task.lock().unwrap_or_else(|p| p.into_inner()) =
                     Some(task.abort_handle());
             }
-            Implementation::OpenSubsonic(_) => unreachable!(),
+            Implementation::OpenSubsonic(source) if source.has_navidrome_library() => {
+                let producer = Arc::clone(&feed);
+                let task = runtime.spawn(async move {
+                    if let Implementation::OpenSubsonic(source) = &producer.source.implementation {
+                        if let Err(error) = source
+                            .listen_navidrome_changes(|change| {
+                                producer.submit(SelectedFeedChange::Remote(change))
+                            })
+                            .await
+                        {
+                            tracing::warn!(%error, "Navidrome change feed stopped");
+                        }
+                    }
+                });
+                *feed.remote_task.lock().unwrap_or_else(|p| p.into_inner()) =
+                    Some(task.abort_handle());
+            }
+            Implementation::Files(_) | Implementation::OpenSubsonic(_) => {}
         }
         Some(feed)
     }
@@ -3345,16 +3351,15 @@ mod refresh_laws {
 
     #[test]
     fn selected_feed_accumulates_exact_jellyfin_ids_with_one_bound() {
-        let merged = SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items {
+        let merged = SelectedFeedChange::Remote(RemoteItemChange::Items {
             upserts: vec!["two".to_string(), "one".to_string()],
             removals: Vec::new(),
         })
-        .merge(SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items {
+        .merge(SelectedFeedChange::Remote(RemoteItemChange::Items {
             upserts: vec!["one".to_string(), "three".to_string()],
             removals: vec!["gone".to_string()],
         }));
-        let SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items { upserts, removals }) =
-            merged
+        let SelectedFeedChange::Remote(RemoteItemChange::Items { upserts, removals }) = merged
         else {
             panic!("exact evidence widened unexpectedly");
         };
@@ -3364,38 +3369,37 @@ mod refresh_laws {
 
     #[test]
     fn selected_feed_overflow_coalesces_to_one_boundary_operation() {
-        let merged = SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items {
+        let merged = SelectedFeedChange::Remote(RemoteItemChange::Items {
             upserts: (0..LIVE_CHANGE_LIMIT)
                 .map(|index| format!("item-{index}"))
                 .collect(),
             removals: Vec::new(),
         })
-        .merge(SelectedFeedChange::JellyfinEmby(RemoteItemChange::Items {
+        .merge(SelectedFeedChange::Remote(RemoteItemChange::Items {
             upserts: vec!["overflow".to_string()],
             removals: Vec::new(),
         }));
         assert!(matches!(
             merged,
-            SelectedFeedChange::JellyfinEmby(RemoteItemChange::BoundaryLost)
+            SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)
         ));
     }
 
     #[test]
     fn repeated_boundary_evidence_admits_one_recovery() {
         let (wake, receiver) = async_channel::bounded(1);
-        let mut pending = Some(SelectedFeedChange::JellyfinEmby(
-            RemoteItemChange::BoundaryLost,
-        ));
-        pending = Some(pending.take().expect("first boundary").merge(
-            SelectedFeedChange::JellyfinEmby(RemoteItemChange::BoundaryLost),
-        ));
+        let mut pending = Some(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost));
+        pending = Some(
+            pending
+                .take()
+                .expect("first boundary")
+                .merge(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost)),
+        );
         assert!(wake.try_send(()).is_ok());
         let _ = wake.try_send(());
         assert!(matches!(
             pending.as_ref(),
-            Some(SelectedFeedChange::JellyfinEmby(
-                RemoteItemChange::BoundaryLost
-            ))
+            Some(SelectedFeedChange::Remote(RemoteItemChange::BoundaryLost))
         ));
         assert!(receiver.try_recv().is_ok());
         assert!(receiver.try_recv().is_err());

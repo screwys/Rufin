@@ -236,7 +236,6 @@ CREATE TABLE IF NOT EXISTS sources (
     source_key INTEGER PRIMARY KEY,
     object_id TEXT NOT NULL UNIQUE CHECK (object_id <> ''),
     display_name TEXT NOT NULL, normalized_name TEXT NOT NULL, freshness BLOB,
-    catalog_digest BLOB NOT NULL CHECK (length(catalog_digest) = 32),
     artwork_digest BLOB NOT NULL CHECK (length(artwork_digest) = 32),
     distinct_track_covers INTEGER NOT NULL DEFAULT 0 CHECK (distinct_track_covers IN (0,1)),
     catalog_revision INTEGER NOT NULL DEFAULT 0 CHECK (catalog_revision >= 0)
@@ -491,6 +490,8 @@ CREATE TABLE IF NOT EXISTS native_playlists (
     sort_text TEXT NOT NULL,
     artwork_binding BLOB,
     writable INTEGER NOT NULL DEFAULT 1,
+    provider_revision TEXT,
+    valid_until INTEGER,
     UNIQUE (source_key, object_id)
 ) STRICT;
 
@@ -681,8 +682,20 @@ pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> Lib
     sqlx::raw_sql(CATALOG_SCHEMA)
         .execute(&mut *transaction)
         .await?;
+    if sqlx::query_scalar::<_, bool>(
+        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sources') WHERE name='catalog_digest')",
+    )
+    .fetch_one(&mut *transaction)
+    .await?
+    {
+        sqlx::query("ALTER TABLE sources DROP COLUMN catalog_digest")
+            .execute(&mut *transaction)
+            .await?;
+    }
     for (table, column, definition) in [
         ("native_playlists", "writable", "INTEGER NOT NULL DEFAULT 1"),
+        ("native_playlists", "provider_revision", "TEXT"),
+        ("native_playlists", "valid_until", "INTEGER"),
         ("home_entries", "section_title", "TEXT"),
     ] {
         let present: bool =

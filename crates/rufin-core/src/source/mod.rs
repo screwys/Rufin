@@ -539,16 +539,6 @@ impl SourceOwner {
                 owner.select_source(source_id);
             }
         });
-        let owner = self.clone();
-        self.shared.runtime.spawn(async move {
-            let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
-            interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
-            interval.tick().await;
-            loop {
-                interval.tick().await;
-                owner.check_remote_freshness().await;
-            }
-        });
         Ok(())
     }
 
@@ -928,11 +918,25 @@ impl SourceOwner {
     }
 
     async fn consume_selected_feed(&self, session: Arc<ActiveSource>, observer: Arc<SelectedFeed>) {
-        while observer.wait_for_change().await {
+        let mut interval = tokio::time::interval(SOURCE_CHECK_INTERVAL);
+        interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
+        interval.tick().await;
+        loop {
+            let event = tokio::select! {
+                changed = observer.wait_for_change() => { if !changed { return; } true },
+                _ = interval.tick() => false,
+            };
             let _lane = self.shared.lane.lock().await;
+            if observer.cancellation().load(Ordering::Acquire) {
+                return;
+            }
             let Some(selected) = session.resolve() else {
                 return;
             };
+            if !event {
+                self.check_remote_freshness(&selected).await;
+                continue;
+            }
             match observer
                 .apply_pending(&selected.database, selected.source_key)
                 .await
@@ -1308,11 +1312,7 @@ impl SourceOwner {
         }
     }
 
-    async fn check_remote_freshness(&self) {
-        let _lane = self.shared.lane.lock().await;
-        let Some(selected) = self.shared.selected() else {
-            return;
-        };
+    async fn check_remote_freshness(&self, selected: &SelectedSourceState) {
         if selected.configuration.is_local() {
             return;
         }
@@ -2509,14 +2509,29 @@ impl ActiveSource {
                                         "recently-released"
                                     }
                                 });
-                            if let Err(error) = selected
-                                .database
-                                .replace_home_section(selected.source_key, section_id, &entries)
-                                .await
-                            {
-                                warn!(%error,"could not replace Home section");
-                                return Ok(());
+                            let result = async {
+                                let mut scan = library::Scan::begin_items(
+                                    &selected.database,
+                                    selected.source_id().as_str(),
+                                )
+                                .await?;
+                                scan.replace_home_section(section_id, &entries).await?;
+                                scan.finish().await
                             }
+                            .await;
+                            match result {
+                                Ok(outcome) => {
+                                    owner
+                                        .accept_scan(
+                                            selected.source_id(),
+                                            outcome,
+                                            CatalogChange::Home,
+                                        )
+                                        .await
+                                }
+                                Err(error) => warn!(%error,"could not replace Home section"),
+                            }
+                            return Ok(());
                         }
                         Err(error) => {
                             warn!(%error,"could not refresh Home section");

@@ -822,7 +822,7 @@ mod tests {
         let (_directory, database) = database().await;
         {
             let mut writer = database.writer().await.expect("acquire writer");
-            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES ('source','Source','source',zeroblob(32),zeroblob(32))")
+            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('source','Source','source',zeroblob(32))")
                 .execute(writer.as_mut().expect("writer available"))
                 .await
                 .expect("insert idempotent read row");
