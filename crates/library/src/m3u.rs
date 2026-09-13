@@ -368,7 +368,7 @@ mod tests {
         {
             let mut writer = database.writer().await.unwrap();
             let connection = writer.as_mut().unwrap();
-            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(5,'source','Source','source',zeroblob(32),zeroblob(32));
+            sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (5,'source','Source','source',zeroblob(32));
               INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text) VALUES(8,5,'native','Native','native','native');
               INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,title,position) VALUES(8,'one','https://example.test/song','Song',0),(8,'two','https://example.test/song','Song',1);")
               .execute(connection).await.unwrap();

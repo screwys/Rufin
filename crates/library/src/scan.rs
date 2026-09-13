@@ -3,10 +3,8 @@
 
 use blake3::Hasher;
 use sqlx::query::Query;
-use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteQueryResult, SqliteRow};
-use sqlx::{
-    Column, Connection, FromRow, QueryBuilder, Row, Sqlite, Transaction, TypeInfo, ValueRef,
-};
+use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteQueryResult};
+use sqlx::{Connection, FromRow, QueryBuilder, Row, Sqlite, Transaction};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
@@ -16,7 +14,7 @@ use crate::{
 
 const MAX_FRESHNESS_BYTES: usize = 64 * 1024;
 const MAX_STAGED_ROW_BYTES: usize = 8 * 1024 * 1024;
-const DIGEST_PAGE_ROWS: i64 = 256;
+const LOUDNESS_PAGE_ROWS: i64 = 256;
 
 /// A source-owned cheap fact used to accept an already-current catalog.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -106,8 +104,10 @@ pub struct Scan {
 
 #[derive(FromRow)]
 struct AcceptedSource {
-    source_key: i64,
-    catalog_digest: Vec<u8>,
+    display_name: String,
+    normalized_name: String,
+    freshness: Option<Vec<u8>>,
+    distinct_track_covers: bool,
     artwork_digest: Vec<u8>,
     catalog_revision: i64,
 }
@@ -267,10 +267,13 @@ impl Scan {
             .await?;
         self.stage(sqlx::query("DELETE FROM temp.scan_playlists"))
             .await?;
+        if self.point_update {
+            return Ok(());
+        }
         self.stage(
             sqlx::query(
                 "INSERT INTO temp.scan_playlists
-             SELECT object_id,name,normalized_name,sort_text,artwork_binding,writable
+             SELECT object_id,name,normalized_name,sort_text,artwork_binding,writable,provider_revision,valid_until,1
              FROM catalog.native_playlists WHERE source_key=?1",
             )
             .bind(self.existing_source_key),
@@ -1576,23 +1579,11 @@ impl Scan {
         self.write_track_folders(links).await
     }
 
-    pub async fn replace_favorites(
-        &mut self,
-        tracks: &[String],
-        albums: &[String],
-        artists: &[String],
-    ) -> LibraryResult<()> {
-        let favorites = [tracks, albums, artists]
-            .map(|ids| serde_json::to_string(ids).expect("favorite IDs serialize"));
-        for (table, ids) in ["tracks", "albums", "artists"].into_iter().zip(&favorites) {
-            let sql = format!(
-                "UPDATE temp.scan_{table} SET favorite=object_id IN (SELECT value FROM json_each(?1))"
-            );
-            self.stage(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(ids))
-                .await?;
-        }
-        self.favorites = Some(favorites);
-        Ok(())
+    pub fn replace_favorites(&mut self, tracks: &[String], albums: &[String], artists: &[String]) {
+        self.favorites = Some(
+            [tracks, albums, artists]
+                .map(|ids| serde_json::to_string(ids).expect("favorite IDs serialize")),
+        );
     }
 
     pub async fn remove_unstaged_playlists(&mut self) -> LibraryResult<()> {
@@ -1605,6 +1596,40 @@ impl Scan {
             .bind(self.existing_source_key),
         )
         .await
+    }
+
+    pub async fn retain_playlist_entries_if_fresh(
+        &mut self,
+        object_id: &str,
+        revision: &str,
+        now: i64,
+    ) -> LibraryResult<bool> {
+        let retained = self.stage_result(sqlx::query(
+            "UPDATE temp.scan_playlists AS staged SET provider_revision=cached.provider_revision,valid_until=cached.valid_until,entries_supplied=?5,
+             artwork_binding=COALESCE(staged.artwork_binding,cached.artwork_binding)
+             FROM catalog.native_playlists cached WHERE cached.source_key=?1 AND cached.object_id=?2
+             AND staged.object_id=cached.object_id AND cached.provider_revision=?3 AND cached.valid_until>?4",
+        ).bind(self.existing_source_key).bind(object_id).bind(revision).bind(now).bind(!self.point_update)).await?.rows_affected() == 1;
+        if retained && !self.point_update {
+            self.stage(sqlx::query(
+                "INSERT INTO temp.scan_playlist_entries
+                 SELECT playlist.object_id,entry.object_id,COALESCE(track.object_id,entry.media_uri),entry.media_uri,entry.position
+                 FROM catalog.native_playlist_entries entry JOIN catalog.native_playlists playlist USING(playlist_key)
+                 LEFT JOIN tracks track ON track.source_key=playlist.source_key AND track.media_uri=entry.media_uri
+                 WHERE playlist.source_key=?1 AND playlist.object_id=?2",
+            ).bind(self.existing_source_key).bind(object_id)).await?;
+        }
+        Ok(retained)
+    }
+
+    pub async fn write_playlist_freshness(
+        &mut self,
+        object_id: &str,
+        revision: Option<&str>,
+        valid_until: Option<i64>,
+    ) -> LibraryResult<()> {
+        self.stage(sqlx::query("UPDATE temp.scan_playlists SET provider_revision=?2,valid_until=?3 WHERE object_id=?1")
+            .bind(object_id).bind(revision).bind(valid_until)).await
     }
 
     pub async fn write_playlist(
@@ -1765,15 +1790,6 @@ impl Scan {
             self.database.release_scan(self.token);
             return Ok(ScanOutcome::Failed);
         }
-        for table in ["tracks", "albums", "artists"] {
-            let sql = format!(
-                "UPDATE temp.scan_{table} AS staged SET favorite=COALESCE(
-                     (SELECT source_favorite FROM {table} WHERE source_key=?1 AND object_id=staged.object_id),0)
-                 WHERE favorite IS NULL"
-            );
-            self.stage(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(self.existing_source_key))
-                .await?;
-        }
         normalize_staged_artwork(
             &self.database,
             self.token,
@@ -1784,26 +1800,12 @@ impl Scan {
             self.local_point_update,
         )
         .await?;
-        if self.point_update {
-            let mut writer = self.database.writer().await?;
-            let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-            let result = self.publish_items(connection).await;
-            let cleanup = drop_staging(connection).await;
-            drop(writer);
-            self.database.release_scan(self.token);
-            cleanup?;
-            return result;
+        if !self.point_update {
+            prepare_album_loudness_keys(&self.database, self.token).await?;
         }
-        prepare_album_loudness_keys(&self.database, self.token).await?;
-        let staged_digest = canonical_catalog_digest(&self.database, self.token).await?;
-        let catalog_digest =
-            digest_catalog_header(staged_digest, &self.display_name, &self.normalized_name);
-        let artwork_digest = canonical_artwork_digest(&self.database, self.token).await?;
         let mut writer = self.database.writer().await?;
         let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-        let result = self
-            .publish_staged(connection, catalog_digest, artwork_digest)
-            .await;
+        let result = self.publish(connection).await;
         if matches!(
             &result,
             Err(LibraryError::Sqlite(
@@ -1814,23 +1816,19 @@ impl Scan {
             self.database.writer_failed();
             return result;
         }
-        let cleanup = drop_staging(connection).await;
+        let cleanup = clear_staging(connection).await;
         drop(writer);
         self.database.release_scan(self.token);
         cleanup?;
         result
     }
 
-    async fn publish_staged(
-        &self,
-        connection: &mut sqlx::SqliteConnection,
-        catalog_digest: [u8; 32],
-        artwork_digest: [u8; 32],
-    ) -> LibraryResult<ScanOutcome> {
+    async fn publish(&self, connection: &mut SqliteConnection) -> LibraryResult<ScanOutcome> {
         if !self.database.scan_is_current(self.token) {
             return Ok(ScanOutcome::Failed);
         }
-        if !self.authoritative && self.expected_revision.is_none()
+        let full = self.authoritative && !self.point_update;
+        if !full && self.expected_revision.is_none()
             && !sqlx::query_scalar::<_, bool>("SELECT EXISTS(
                 SELECT 1 FROM temp.scan_tracks UNION ALL SELECT 1 FROM temp.scan_albums
                 UNION ALL SELECT 1 FROM temp.scan_artists UNION ALL SELECT 1 FROM temp.scan_genres
@@ -1840,235 +1838,105 @@ impl Scan {
             return Ok(ScanOutcome::Failed);
         }
         let mut transaction = connection.begin().await?;
+        let source = match self.existing_source_key {
+            Some(source) => source,
+            None => ensure_source_identity(&mut transaction, &self.source_id).await?,
+        };
         let current = sqlx::query_as::<_, AcceptedSource>(
-            "SELECT source_key,catalog_digest,artwork_digest,catalog_revision
-             FROM sources WHERE object_id=?1 AND catalog_revision>0",
-        )
-        .bind(&self.source_id)
-        .fetch_optional(&mut *transaction)
-        .await?;
-        if current.as_ref().map(|row| row.catalog_revision) != self.expected_revision {
-            transaction.rollback().await?;
+            "SELECT artwork_digest,catalog_revision,display_name,normalized_name,freshness,distinct_track_covers
+             FROM sources WHERE source_key=?1",
+        ).bind(source).fetch_optional(&mut *transaction).await?;
+        let Some(current) = current else {
+            return Ok(ScanOutcome::Stale);
+        };
+        if (current.catalog_revision > 0).then_some(current.catalog_revision)
+            != self.expected_revision
+        {
             return Ok(ScanOutcome::Stale);
         }
-        let favorites_changed = if let Some(source) = self.existing_source_key {
-            self.publish_favorites(&mut transaction, source).await?
-        } else {
-            false
-        };
-        if let Some(current) = &current {
-            if current.catalog_digest.as_slice() == catalog_digest && !favorites_changed {
-                if current.artwork_digest.as_slice() != artwork_digest {
-                    publish_artwork_bindings(
-                        &mut transaction,
-                        current.source_key,
-                        self.distinct_track_covers,
-                    )
+        if self.point_update {
+            sqlx::query(
+                "UPDATE temp.scan_albums AS staged SET
+                 source_loudness_analysis_key=(SELECT source_loudness_analysis_key FROM albums WHERE source_key=?1 AND object_id=staged.object_id),
+                 loudness_analysis_key=(SELECT loudness_analysis_key FROM albums WHERE source_key=?1 AND object_id=staged.object_id)
+                 WHERE EXISTS(SELECT 1 FROM albums WHERE source_key=?1 AND object_id=staged.object_id)",
+            ).bind(source).execute(&mut *transaction).await?;
+        }
+        let artwork_changed = staged_artwork_changed(&mut transaction, source, full).await?;
+        let mut metadata_changed = publish_entities(&mut transaction, source).await?;
+        let mut playlists_changed = publish_playlists(&mut transaction, source).await?;
+        let (removed, removed_playlists) = publish_removals(&mut transaction, source, full).await?;
+        metadata_changed |= removed;
+        playlists_changed |= removed_playlists;
+        if artwork_changed {
+            publish_artwork_bindings(&mut transaction, source, self.distinct_track_covers).await?;
+        }
+        let mut user_changed = publish_ratings(&mut transaction, source).await?;
+        user_changed |= self.publish_favorites(&mut transaction, source).await?;
+        metadata_changed |= publish_links(&mut transaction, source, full).await?;
+        playlists_changed |= publish_playlist_entries(&mut transaction, source).await?;
+        let home_changed = publish_home(&mut transaction, source, full).await?;
+        if self.point_update && metadata_changed {
+            let albums = sqlx::query_scalar::<_, crate::AlbumKey>(
+                "SELECT DISTINCT track.album_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id
+                 WHERE track.source_key=?1 AND track.album_key IS NOT NULL",
+            ).bind(source).fetch_all(&mut *transaction).await?;
+            for album in albums {
+                crate::loudness::recompute_album_source_and_current_keys(&mut transaction, album)
                     .await?;
-                    publish_local_files(&mut transaction, current.source_key, self.authoritative)
-                        .await?;
-                    sqlx::query(
-                        "UPDATE sources SET display_name=?2,normalized_name=?3,freshness=?4,artwork_digest=?5,distinct_track_covers=?6 WHERE source_key=?1",
-                    )
-                    .bind(current.source_key)
-                    .bind(&self.display_name)
-                    .bind(&self.normalized_name)
-                    .bind(self.freshness.as_ref().map(Freshness::as_bytes))
-                    .bind(artwork_digest.as_slice())
-                    .bind(self.distinct_track_covers)
-                    .execute(&mut *transaction)
-                    .await?;
-                    transaction.commit().await?;
-                    return Ok(ScanOutcome::ArtworkChanged(publication(
-                        current.source_key,
-                        current.catalog_revision,
-                        &artwork_digest,
-                    )?));
-                }
-                sqlx::query(
-                    "UPDATE sources
-                     SET display_name=?2, normalized_name=?3, freshness=?4,
-                         distinct_track_covers=?5
-                     WHERE source_key=?1",
-                )
-                .bind(current.source_key)
-                .bind(&self.display_name)
-                .bind(&self.normalized_name)
-                .bind(self.freshness.as_ref().map(Freshness::as_bytes))
-                .bind(self.distinct_track_covers)
-                .execute(&mut *transaction)
-                .await?;
-                publish_local_files(&mut transaction, current.source_key, self.authoritative)
-                    .await?;
-                transaction.commit().await?;
-                return Ok(ScanOutcome::Identical(publication(
-                    current.source_key,
-                    current.catalog_revision,
-                    &current.artwork_digest,
-                )?));
             }
         }
-
-        let source_key = if let Some(current) = current {
-            current.source_key
-        } else if let Some(source_key) = self.existing_source_key {
-            source_key
+        user_changed |= publish_activity_baseline(&mut transaction, source).await?;
+        metadata_changed |= publish_source_loudness(&mut transaction, source, full).await?;
+        if self.local_point_update
+            && (metadata_changed || user_changed || home_changed || playlists_changed)
+        {
+            prune_local_orphans(&mut transaction, source).await?;
+        }
+        publish_local_files(&mut transaction, source, full).await?;
+        publish_playlist_freshness(&mut transaction, source).await?;
+        metadata_changed |= current.catalog_revision == 0
+            || current.display_name != self.display_name
+            || current.normalized_name != self.normalized_name;
+        let changed = metadata_changed || user_changed || home_changed || playlists_changed;
+        let freshness = if !self.point_update {
+            self.freshness.as_ref().map(Freshness::as_bytes)
+        } else if metadata_changed {
+            None
         } else {
-            ensure_source_identity(&mut transaction, &self.source_id).await?
+            current.freshness.as_deref()
         };
-        publish_entities(&mut transaction, source_key, self.authoritative).await?;
-        if !self.authoritative {
-            publish_artwork_bindings(&mut transaction, source_key, self.distinct_track_covers)
-                .await?;
-        }
-        publish_activity_baseline(&mut transaction, source_key).await?;
-        publish_source_loudness(&mut transaction, source_key, self.authoritative).await?;
-        publish_links(&mut transaction, source_key, self.authoritative).await?;
-        publish_local_files(&mut transaction, source_key, self.authoritative).await?;
-        let revision = self.expected_revision.unwrap_or(0) + 1;
-        sqlx::query(
-            "UPDATE sources SET display_name=?2,normalized_name=?3,freshness=?4,
-                 catalog_digest=CASE WHEN ?9 THEN ?5 ELSE zeroblob(32) END,
-                 artwork_digest=?6,distinct_track_covers=?7,
-                 catalog_revision=?8 WHERE source_key=?1",
-        )
-        .bind(source_key)
-        .bind(&self.display_name)
-        .bind(&self.normalized_name)
-        .bind(self.freshness.as_ref().map(Freshness::as_bytes))
-        .bind(catalog_digest.as_slice())
-        .bind(artwork_digest.as_slice())
-        .bind(self.distinct_track_covers)
-        .bind(revision)
-        .bind(self.authoritative)
-        .execute(&mut *transaction)
-        .await?;
-        transaction.commit().await?;
-        sqlx::raw_sql("PRAGMA optimize=0x10002")
-            .execute(&mut *connection)
-            .await?;
-        Ok(ScanOutcome::Changed(publication(
-            source_key,
-            revision,
-            &artwork_digest,
-        )?))
-    }
-
-    async fn publish_items(
-        &self,
-        connection: &mut sqlx::SqliteConnection,
-    ) -> LibraryResult<ScanOutcome> {
-        let mut transaction = connection.begin().await?;
-        let Some((source_key, revision, mut artwork_digest)) =
-            sqlx::query_as::<_, (i64, i64, Vec<u8>)>(
-                "SELECT source_key,catalog_revision,artwork_digest FROM sources
-                 WHERE object_id=?1 AND catalog_revision>0",
-            )
-            .bind(&self.source_id)
-            .fetch_optional(&mut *transaction)
-            .await?
-        else {
-            transaction.rollback().await?;
-            return Err(LibraryError::InvalidRequest(
-                "live source is not cached".to_string(),
-            ));
-        };
-        if Some(revision) != self.expected_revision {
-            transaction.rollback().await?;
-            return Ok(ScanOutcome::Stale);
-        }
-        let artwork_changed = staged_artwork_changed(&mut transaction, source_key).await?;
-        sqlx::query(
-            "UPDATE temp.scan_albums AS staged SET
-                 source_loudness_analysis_key=(SELECT album.source_loudness_analysis_key FROM albums album WHERE album.source_key=?1 AND album.object_id=staged.object_id),
-                 loudness_analysis_key=(SELECT album.loudness_analysis_key FROM albums album WHERE album.source_key=?1 AND album.object_id=staged.object_id)
-             WHERE EXISTS (SELECT 1 FROM albums album WHERE album.source_key=?1 AND album.object_id=staged.object_id)",
-        )
-        .bind(source_key)
-        .execute(&mut *transaction)
-        .await?;
-        let playlists_changed = staged_playlists_changed(&mut transaction, source_key).await?;
-        let metadata_changed =
-            staged_non_playlist_catalog_changed(&mut transaction, source_key).await?;
-        let home_changed = symmetric_point_change(&mut transaction, source_key,
-            "SELECT owner_id,position,entity_kind,CASE entity_kind
-                WHEN 'track' THEN (SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=entity_object_id)
-                WHEN 'album' THEN (SELECT album_key FROM albums WHERE source_key=?1 AND object_id=entity_object_id)
-                WHEN 'artist' THEN (SELECT artist_key FROM artists WHERE source_key=?1 AND object_id=entity_object_id)
-                WHEN 'playlist' THEN (SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=entity_object_id)
-             END,title,subtitle,section_title FROM temp.scan_home_entries",
-            "SELECT section_id,position,entity_kind,entity_key,title,subtitle,section_title FROM home_entries
-             WHERE source_key=?1 AND section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home')"
-        ).await?;
-        let non_playlist_changed = self.publish_favorites(&mut transaction, source_key).await?
-            || metadata_changed
-            || home_changed;
-        if artwork_changed {
-            publish_artwork_bindings(&mut transaction, source_key, self.distinct_track_covers)
-                .await?;
-        }
-        if !playlists_changed && !non_playlist_changed {
-            publish_local_files(&mut transaction, source_key, false).await?;
-            if artwork_changed {
-                sqlx::query("UPDATE sources SET artwork_digest=randomblob(32) WHERE source_key=?1")
-                    .bind(source_key)
-                    .execute(&mut *transaction)
-                    .await?;
-                artwork_digest =
-                    sqlx::query_scalar("SELECT artwork_digest FROM sources WHERE source_key=?1")
-                        .bind(source_key)
-                        .fetch_one(&mut *transaction)
-                        .await?;
-            }
-            transaction.commit().await?;
-            return Ok(if artwork_changed {
-                ScanOutcome::ArtworkChanged(publication(source_key, revision, &artwork_digest)?)
-            } else {
-                ScanOutcome::Identical(publication(source_key, revision, &artwork_digest)?)
-            });
-        }
-        publish_entities(&mut transaction, source_key, false).await?;
-        let affected_albums = sqlx::query_scalar::<_, crate::AlbumKey>(
-            "SELECT DISTINCT track.album_key FROM tracks track
-             JOIN temp.scan_tracks staged ON staged.object_id=track.object_id
-             WHERE track.source_key=?1 AND track.album_key IS NOT NULL",
-        )
-        .bind(source_key)
-        .fetch_all(&mut *transaction)
-        .await?;
-        for album in affected_albums {
-            crate::loudness::recompute_album_source_and_current_keys(&mut transaction, album)
-                .await?;
-        }
-        publish_activity_baseline(&mut transaction, source_key).await?;
-        publish_source_loudness(&mut transaction, source_key, false).await?;
-        publish_links(&mut transaction, source_key, false).await?;
-        publish_removals(&mut transaction, source_key).await?;
-        if self.local_point_update {
-            prune_local_orphans(&mut transaction, source_key).await?;
-        }
-        publish_local_files(&mut transaction, source_key, false).await?;
-        let revision = revision + 1;
-        sqlx::query("UPDATE sources SET freshness=CASE WHEN ?4 THEN NULL ELSE freshness END,catalog_digest=zeroblob(32),catalog_revision=?2,artwork_digest=CASE WHEN ?3 THEN randomblob(32) ELSE artwork_digest END WHERE source_key=?1")
-            .bind(source_key)
-            .bind(revision)
-            .bind(artwork_changed)
-            .bind(metadata_changed)
-            .execute(&mut *transaction)
-            .await?;
-        if artwork_changed {
-            artwork_digest =
-                sqlx::query_scalar("SELECT artwork_digest FROM sources WHERE source_key=?1")
-                    .bind(source_key)
-                    .fetch_one(&mut *transaction)
-                    .await?;
-        }
-        transaction.commit().await?;
-        let publication = publication(source_key, revision, &artwork_digest)?;
-        Ok(if playlists_changed && !non_playlist_changed {
-            ScanOutcome::PlaylistsChanged(publication)
+        let revision = current.catalog_revision + i64::from(changed);
+        let artwork = if changed
+            || artwork_changed
+            || freshness != current.freshness.as_deref()
+            || self.distinct_track_covers != current.distinct_track_covers
+        {
+            sqlx::query_scalar::<_, Vec<u8>>(
+                "UPDATE sources SET display_name=?2,normalized_name=?3,freshness=?4,distinct_track_covers=?5,
+                 catalog_revision=?6,artwork_digest=CASE WHEN ?7 THEN randomblob(32) ELSE artwork_digest END
+                 WHERE source_key=?1 RETURNING artwork_digest",
+            ).bind(source).bind(&self.display_name).bind(&self.normalized_name).bind(freshness)
+                .bind(self.distinct_track_covers).bind(revision).bind(artwork_changed)
+                .fetch_one(&mut *transaction).await?
         } else {
+            current.artwork_digest
+        };
+        transaction.commit().await?;
+        if full {
+            sqlx::raw_sql("PRAGMA optimize=0x10002")
+                .execute(&mut *connection)
+                .await?;
+        }
+        let publication = publication(source, revision, &artwork)?;
+        Ok(if metadata_changed || user_changed || home_changed {
             ScanOutcome::Changed(publication)
+        } else if playlists_changed {
+            ScanOutcome::PlaylistsChanged(publication)
+        } else if artwork_changed {
+            ScanOutcome::ArtworkChanged(publication)
+        } else {
+            ScanOutcome::Identical(publication)
         })
     }
 
@@ -2077,11 +1945,21 @@ impl Scan {
         connection: &mut SqliteConnection,
         source: i64,
     ) -> LibraryResult<bool> {
-        let Some(favorites) = &self.favorites else {
-            return Ok(false);
-        };
         let mut changed = false;
-        for (table, ids) in ["tracks", "albums", "artists"].into_iter().zip(favorites) {
+        for (index, table) in ["tracks", "albums", "artists"].into_iter().enumerate() {
+            let Some(favorites) = &self.favorites else {
+                let sql = format!("UPDATE {table} AS current SET source_favorite=(SELECT favorite FROM temp.scan_{table} WHERE object_id=current.object_id)
+                    WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_{table} WHERE favorite IS NOT NULL)
+                    AND source_favorite IS NOT (SELECT favorite FROM temp.scan_{table} WHERE object_id=current.object_id)");
+                changed |= sqlx::query(sqlx::AssertSqlSafe(sql))
+                    .bind(source)
+                    .execute(&mut *connection)
+                    .await?
+                    .rows_affected()
+                    > 0;
+                continue;
+            };
+            let ids = &favorites[index];
             for (favorite, membership) in [(false, "NOT IN"), (true, "IN")] {
                 let sql = format!(
                     "UPDATE {table} SET source_favorite=?3 WHERE source_key=?1 AND source_favorite=?4
@@ -2104,7 +1982,7 @@ impl Scan {
     async fn cleanup(&self) -> LibraryResult<()> {
         if let Ok(mut writer) = self.database.writer().await {
             if let Some(connection) = writer.as_mut() {
-                drop_staging(connection).await?;
+                clear_staging(connection).await?;
             }
         }
         Ok(())
@@ -2440,12 +2318,12 @@ async fn publish_artwork_bindings(
     distinct_track_covers: bool,
 ) -> LibraryResult<()> {
     for sql in [
-        "UPDATE tracks SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_tracks)",
-        "UPDATE albums SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_albums staged WHERE staged.object_id=albums.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_albums)",
-        "UPDATE artists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_artists staged WHERE staged.object_id=artists.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_artists)",
-        "UPDATE genres SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_genres staged WHERE staged.object_id=genres.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_genres)",
-        "UPDATE folders SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_folders staged WHERE staged.object_id=folders.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_folders)",
-        "UPDATE catalog.native_playlists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_playlists staged WHERE staged.object_id=native_playlists.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_playlists)",
+        "UPDATE tracks SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_tracks) AND (tracks.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id))",
+        "UPDATE albums SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_albums staged WHERE staged.object_id=albums.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_albums) AND (albums.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_albums staged WHERE staged.object_id=albums.object_id))",
+        "UPDATE artists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_artists staged WHERE staged.object_id=artists.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_artists) AND (artists.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_artists staged WHERE staged.object_id=artists.object_id))",
+        "UPDATE genres SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_genres staged WHERE staged.object_id=genres.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_genres) AND (genres.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_genres staged WHERE staged.object_id=genres.object_id))",
+        "UPDATE folders SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_folders staged WHERE staged.object_id=folders.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_folders) AND (folders.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_folders staged WHERE staged.object_id=folders.object_id))",
+        "UPDATE catalog.native_playlists SET artwork_binding=(SELECT staged.artwork_binding FROM temp.scan_playlists staged WHERE staged.object_id=native_playlists.object_id) WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_playlists) AND (native_playlists.artwork_binding) IS NOT ((SELECT staged.artwork_binding FROM temp.scan_playlists staged WHERE staged.object_id=native_playlists.object_id))",
     ] {
         sqlx::query(sql)
             .bind(source_key)
@@ -2461,7 +2339,11 @@ async fn publish_artwork_bindings(
              ) WHERE source_key=?1 AND album_key IN (
                  SELECT album.album_key FROM temp.scan_albums staged
                  CROSS JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id
-             ) AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id)",
+             ) AND NOT EXISTS(SELECT 1 FROM temp.scan_tracks staged WHERE staged.object_id=tracks.object_id) AND (tracks.artwork_binding) IS NOT ((
+                 SELECT staged.artwork_binding FROM temp.scan_albums staged
+                 JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id
+                 WHERE album.album_key=tracks.album_key
+             ))",
         )
         .bind(source_key)
         .execute(&mut **transaction)
@@ -2476,7 +2358,7 @@ pub(crate) async fn metadata_publication(
     changed: bool,
 ) -> LibraryResult<ScanOutcome> {
     if changed {
-        sqlx::query("UPDATE sources SET freshness=NULL,catalog_digest=zeroblob(32),catalog_revision=catalog_revision+1 WHERE source_key=?1")
+        sqlx::query("UPDATE sources SET freshness=NULL,catalog_revision=catalog_revision+1 WHERE source_key=?1")
             .bind(source).execute(&mut *connection).await?;
     }
     let Some((revision, artwork)) = sqlx::query_as::<_, (i64, Vec<u8>)>(
@@ -2550,7 +2432,7 @@ impl Drop for Scan {
                 runtime.spawn(async move {
                     if let Some(connection) = writer.as_mut() {
                         let _ = sqlx::query("ROLLBACK").execute(&mut *connection).await;
-                        let _ = drop_staging(connection).await;
+                        let _ = clear_staging(connection).await;
                     }
                     database.release_scan(token);
                 });
@@ -2569,7 +2451,7 @@ impl Drop for Scan {
             runtime.spawn(async move {
                 if let Ok(mut writer) = database.writer().await {
                     if let Some(connection) = writer.as_mut() {
-                        let _ = drop_staging(connection).await;
+                        let _ = clear_staging(connection).await;
                     }
                 }
                 database.release_scan(token);
@@ -2637,9 +2519,8 @@ fn publication(
 }
 
 async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
-    drop_staging(connection).await?;
     sqlx::raw_sql(
-        "CREATE TEMP TABLE scan_albums(
+        "CREATE TEMP TABLE IF NOT EXISTS scan_albums(
              object_id TEXT PRIMARY KEY, media_uri TEXT NOT NULL UNIQUE, title TEXT NOT NULL,
              normalized_title TEXT NOT NULL, display_artist TEXT NOT NULL,
              sort_text TEXT NOT NULL, year INTEGER, release_date TEXT,
@@ -2653,7 +2534,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              source_integrated_lufs REAL, source_true_peak REAL,
              source_replay_gain_db REAL, source_replay_gain_peak REAL
          ) STRICT;
-         CREATE TEMP TABLE scan_tracks(
+         CREATE TEMP TABLE IF NOT EXISTS scan_tracks(
              object_id TEXT PRIMARY KEY, album_object_id TEXT,
              title TEXT NOT NULL, normalized_search TEXT NOT NULL,
              display_album TEXT NOT NULL, display_artist TEXT NOT NULL,
@@ -2671,99 +2552,100 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              source_integrated_lufs REAL, source_true_peak REAL,
              source_replay_gain_db REAL, source_replay_gain_peak REAL
          ) STRICT;
-         CREATE INDEX scan_tracks_album_loudness_idx ON scan_tracks(
+         CREATE INDEX IF NOT EXISTS scan_tracks_album_loudness_idx ON scan_tracks(
              album_object_id, disc_number, track_number, sort_text, object_id
          );
-         CREATE INDEX scan_tracks_source_path_idx ON scan_tracks(source_path);
-         CREATE TEMP TABLE scan_local_dependency_paths(
+         CREATE INDEX IF NOT EXISTS scan_tracks_source_path_idx ON scan_tracks(source_path);
+         CREATE TEMP TABLE IF NOT EXISTS scan_local_dependency_paths(
              path TEXT PRIMARY KEY
          ) STRICT;
-         CREATE TEMP TABLE scan_local_files(
+         CREATE TEMP TABLE IF NOT EXISTS scan_local_files(
              path TEXT PRIMARY KEY, root TEXT NOT NULL, relative_path TEXT NOT NULL,
              kind TEXT NOT NULL, size_bytes INTEGER, mtime_ns INTEGER NOT NULL,
              device_id INTEGER, inode INTEGER, native_id TEXT, revision TEXT, picture_index INTEGER, parse_version INTEGER, state TEXT NOT NULL
          ) STRICT;
-         CREATE INDEX scan_local_files_kind_path ON scan_local_files(kind,path);
-         CREATE INDEX scan_local_files_native_id ON scan_local_files(native_id,path) WHERE native_id IS NOT NULL;
-         CREATE TEMP TABLE scan_local_file_dependencies(
+         CREATE INDEX IF NOT EXISTS scan_local_files_kind_path ON scan_local_files(kind,path);
+         CREATE INDEX IF NOT EXISTS scan_local_files_native_id ON scan_local_files(native_id,path) WHERE native_id IS NOT NULL;
+         CREATE TEMP TABLE IF NOT EXISTS scan_local_file_dependencies(
              path TEXT NOT NULL, dependency_path TEXT NOT NULL, position INTEGER NOT NULL,
              PRIMARY KEY(path,dependency_path)
          ) STRICT;
-         CREATE TEMP TABLE scan_local_file_removals(path TEXT PRIMARY KEY) STRICT;
-         CREATE TEMP TABLE scan_retained_paths(path TEXT PRIMARY KEY) STRICT;
-         CREATE TEMP TABLE scan_local_component_paths(path TEXT PRIMARY KEY) STRICT;
-         CREATE TEMP TABLE scan_removals(
+         CREATE TEMP TABLE IF NOT EXISTS scan_local_file_removals(path TEXT PRIMARY KEY) STRICT;
+         CREATE TEMP TABLE IF NOT EXISTS scan_retained_paths(path TEXT PRIMARY KEY) STRICT;
+         CREATE TEMP TABLE IF NOT EXISTS scan_local_component_paths(path TEXT PRIMARY KEY) STRICT;
+         CREATE TEMP TABLE IF NOT EXISTS scan_removals(
              entity_kind TEXT NOT NULL,
              object_id TEXT NOT NULL,
              PRIMARY KEY(entity_kind,object_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_artists(
+         CREATE TEMP TABLE IF NOT EXISTS scan_artists(
              object_id TEXT PRIMARY KEY, media_uri TEXT NOT NULL UNIQUE, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
              musicbrainz_artist_id TEXT, artwork_binding BLOB,
              favorite INTEGER, rating INTEGER
          ) STRICT;
-         CREATE INDEX scan_artists_unresolved ON scan_artists(object_id) WHERE favorite IS NULL;
-         CREATE TEMP TABLE scan_genres(
+         CREATE INDEX IF NOT EXISTS scan_artists_unresolved ON scan_artists(object_id) WHERE favorite IS NULL;
+         CREATE TEMP TABLE IF NOT EXISTS scan_genres(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
              artwork_binding BLOB
          ) STRICT;
-         CREATE TEMP TABLE scan_moods(
+         CREATE TEMP TABLE IF NOT EXISTS scan_moods(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL
          ) STRICT;
-         CREATE TEMP TABLE scan_folders(
+         CREATE TEMP TABLE IF NOT EXISTS scan_folders(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
              artwork_binding BLOB
          ) STRICT;
-         CREATE TEMP TABLE scan_album_artists(
+         CREATE TEMP TABLE IF NOT EXISTS scan_album_artists(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_track_artists(
+         CREATE TEMP TABLE IF NOT EXISTS scan_track_artists(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_album_genres(
+         CREATE TEMP TABLE IF NOT EXISTS scan_album_genres(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_track_genres(
+         CREATE TEMP TABLE IF NOT EXISTS scan_track_genres(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_track_moods(
+         CREATE TEMP TABLE IF NOT EXISTS scan_track_moods(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_track_folders(
+         CREATE TEMP TABLE IF NOT EXISTS scan_track_folders(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_album_release_types(
+         CREATE TEMP TABLE IF NOT EXISTS scan_album_release_types(
              owner_id TEXT NOT NULL, related_id TEXT NOT NULL,
              position INTEGER NOT NULL,
              PRIMARY KEY(owner_id, related_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_playlists(
+        CREATE TEMP TABLE IF NOT EXISTS scan_playlists(
              object_id TEXT PRIMARY KEY, name TEXT NOT NULL,
              normalized_name TEXT NOT NULL, sort_text TEXT NOT NULL,
-             artwork_binding BLOB, writable INTEGER NOT NULL DEFAULT 1
+             artwork_binding BLOB, writable INTEGER NOT NULL DEFAULT 1,
+             provider_revision TEXT, valid_until INTEGER, entries_supplied INTEGER NOT NULL DEFAULT 1
          ) STRICT;
-         CREATE TEMP TABLE scan_playlist_entries(
+         CREATE TEMP TABLE IF NOT EXISTS scan_playlist_entries(
              playlist_id TEXT NOT NULL, object_id TEXT NOT NULL,
              track_id TEXT NOT NULL, media_uri TEXT NOT NULL, position INTEGER NOT NULL,
              PRIMARY KEY(playlist_id, object_id)
          ) STRICT;
-         CREATE TEMP TABLE scan_home_entries(
+         CREATE TEMP TABLE IF NOT EXISTS scan_home_entries(
              owner_id TEXT NOT NULL, position INTEGER NOT NULL,
              entity_kind TEXT NOT NULL CHECK (
                  entity_kind IN ('track', 'album', 'artist', 'playlist')
@@ -2772,36 +2654,36 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              PRIMARY KEY(owner_id, position)
          ) STRICT;",
     )
-    .execute(connection)
+    .execute(&mut *connection)
     .await?;
-    Ok(())
+    clear_staging(connection).await
 }
 
-async fn drop_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
+async fn clear_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResult<()> {
     sqlx::raw_sql(
-        "DROP TABLE IF EXISTS temp.scan_removals;
-         DROP TABLE IF EXISTS temp.scan_local_dependency_paths;
-         DROP TABLE IF EXISTS temp.scan_local_file_dependencies;
-         DROP TABLE IF EXISTS temp.scan_local_file_removals;
-         DROP TABLE IF EXISTS temp.scan_local_files;
-         DROP TABLE IF EXISTS temp.scan_retained_paths;
-         DROP TABLE IF EXISTS temp.scan_local_component_paths;
-         DROP TABLE IF EXISTS temp.scan_home_entries;
-         DROP TABLE IF EXISTS temp.scan_playlist_entries;
-         DROP TABLE IF EXISTS temp.scan_playlists;
-         DROP TABLE IF EXISTS temp.scan_album_release_types;
-         DROP TABLE IF EXISTS temp.scan_track_folders;
-         DROP TABLE IF EXISTS temp.scan_track_moods;
-         DROP TABLE IF EXISTS temp.scan_track_genres;
-         DROP TABLE IF EXISTS temp.scan_album_genres;
-         DROP TABLE IF EXISTS temp.scan_track_artists;
-         DROP TABLE IF EXISTS temp.scan_album_artists;
-         DROP TABLE IF EXISTS temp.scan_folders;
-         DROP TABLE IF EXISTS temp.scan_moods;
-         DROP TABLE IF EXISTS temp.scan_genres;
-         DROP TABLE IF EXISTS temp.scan_artists;
-         DROP TABLE IF EXISTS temp.scan_tracks;
-         DROP TABLE IF EXISTS temp.scan_albums;",
+        "DELETE FROM temp.scan_removals;
+         DELETE FROM temp.scan_local_dependency_paths;
+         DELETE FROM temp.scan_local_file_dependencies;
+         DELETE FROM temp.scan_local_file_removals;
+         DELETE FROM temp.scan_local_files;
+         DELETE FROM temp.scan_retained_paths;
+         DELETE FROM temp.scan_local_component_paths;
+         DELETE FROM temp.scan_home_entries;
+         DELETE FROM temp.scan_playlist_entries;
+         DELETE FROM temp.scan_playlists;
+         DELETE FROM temp.scan_album_release_types;
+         DELETE FROM temp.scan_track_folders;
+         DELETE FROM temp.scan_track_moods;
+         DELETE FROM temp.scan_track_genres;
+         DELETE FROM temp.scan_album_genres;
+         DELETE FROM temp.scan_track_artists;
+         DELETE FROM temp.scan_album_artists;
+         DELETE FROM temp.scan_folders;
+         DELETE FROM temp.scan_moods;
+         DELETE FROM temp.scan_genres;
+         DELETE FROM temp.scan_artists;
+         DELETE FROM temp.scan_tracks;
+         DELETE FROM temp.scan_albums;",
     )
     .execute(connection)
     .await?;
@@ -2833,7 +2715,7 @@ async fn prepare_album_loudness_keys(database: &Database, token: u64) -> Library
             let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
             sqlx::query_as::<_,StagedAlbumAudioKey>("SELECT track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id,track.source_loudness_analysis_key source_key,COALESCE((SELECT access.loudness_analysis_key FROM local_access_files access WHERE access.media_uri=track.media_uri ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,access.local_access_file_key LIMIT 1),track.source_loudness_analysis_key) current_key FROM temp.scan_tracks track WHERE track.album_object_id IS NOT NULL AND (track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id)>(?1,?2,?3,?4,?5) ORDER BY track.album_object_id,track.disc_number,track.track_number,track.sort_text,track.object_id LIMIT ?6")
                 .bind(&last.0).bind(last.1).bind(last.2).bind(&last.3).bind(&last.4)
-                .bind(DIGEST_PAGE_ROWS).fetch_all(&mut *connection).await?
+                .bind(LOUDNESS_PAGE_ROWS).fetch_all(&mut *connection).await?
         };
         let mut updates = Vec::new();
         if page.is_empty() {
@@ -2909,689 +2791,219 @@ async fn write_staged_album_loudness_keys(
     Ok(())
 }
 
-const OBJECT_DIGEST_QUERIES: &[(&str, &str)] = &[
-    (
-        "albums",
-        "SELECT * FROM temp.scan_albums
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "tracks",
-        "SELECT * FROM temp.scan_tracks
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "artists",
-        "SELECT * FROM temp.scan_artists
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "genres",
-        "SELECT * FROM temp.scan_genres
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "moods",
-        "SELECT * FROM temp.scan_moods
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "folders",
-        "SELECT * FROM temp.scan_folders
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "playlists",
-        "SELECT * FROM temp.scan_playlists
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-];
-
-const RELATION_DIGEST_QUERIES: &[(&str, &str)] = &[
-    (
-        "album_artists",
-        "SELECT * FROM temp.scan_album_artists
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "track_artists",
-        "SELECT * FROM temp.scan_track_artists
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "album_genres",
-        "SELECT * FROM temp.scan_album_genres
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "track_genres",
-        "SELECT * FROM temp.scan_track_genres
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "track_moods",
-        "SELECT * FROM temp.scan_track_moods
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "track_folders",
-        "SELECT * FROM temp.scan_track_folders
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "album_release_types",
-        "SELECT * FROM temp.scan_album_release_types
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-    (
-        "home_entries",
-        "SELECT * FROM temp.scan_home_entries
-         WHERE (owner_id, position) > (?1, ?2)
-         ORDER BY owner_id, position LIMIT ?3",
-    ),
-];
-
-const PLAYLIST_ENTRY_DIGEST_QUERY: &str =
-    "SELECT playlist_id,object_id,media_uri,position FROM temp.scan_playlist_entries
-     WHERE (playlist_id, position) > (?1, ?2)
-     ORDER BY playlist_id, position LIMIT ?3";
-
-const ARTWORK_DIGEST_QUERIES: &[(&str, &str)] = &[
-    (
-        "albums",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_albums
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "tracks",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_tracks
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "artists",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_artists
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "genres",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_genres
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "folders",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_folders
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-    (
-        "playlists",
-        "SELECT object_id, artwork_binding binding FROM temp.scan_playlists
-         WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
-    ),
-];
-
-async fn canonical_catalog_digest(database: &Database, token: u64) -> LibraryResult<[u8; 32]> {
-    let mut hasher = Hasher::new();
-    hash_object_pages(database, token, &mut hasher, OBJECT_DIGEST_QUERIES).await?;
-    hash_relation_pages(database, token, &mut hasher, RELATION_DIGEST_QUERIES).await?;
-    hash_bytes(&mut hasher, b"playlist_entries");
-    hash_playlist_entry_pages(database, token, &mut hasher).await?;
-    Ok(*hasher.finalize().as_bytes())
-}
-
-async fn canonical_artwork_digest(database: &Database, token: u64) -> LibraryResult<[u8; 32]> {
-    let mut hasher = Hasher::new();
-    hash_object_pages(database, token, &mut hasher, ARTWORK_DIGEST_QUERIES).await?;
-    Ok(*hasher.finalize().as_bytes())
-}
-
-async fn hash_object_pages(
-    database: &Database,
-    token: u64,
-    hasher: &mut Hasher,
-    queries: &'static [(&'static str, &'static str)],
+async fn publish_playlist_freshness(
+    connection: &mut SqliteConnection,
+    source: i64,
 ) -> LibraryResult<()> {
-    for (table, sql) in queries {
-        hash_bytes(hasher, table.as_bytes());
-        let mut last_object_id = String::new();
-        loop {
-            let rows = digest_page(
-                database,
-                token,
-                sqlx::query(*sql)
-                    .bind(&last_object_id)
-                    .bind(DIGEST_PAGE_ROWS),
-            )
-            .await?;
-            for row in &rows {
-                hash_row(hasher, row)?;
-            }
-            let Some(row) = rows.last() else {
-                break;
-            };
-            last_object_id = row.try_get("object_id")?;
-            if rows.len() < DIGEST_PAGE_ROWS as usize {
-                break;
-            }
-        }
-    }
+    sqlx::query(
+        "UPDATE catalog.native_playlists AS playlist SET provider_revision=staged.provider_revision,valid_until=staged.valid_until
+         FROM temp.scan_playlists staged WHERE playlist.source_key=?1 AND playlist.object_id=staged.object_id
+         AND (playlist.provider_revision IS NOT staged.provider_revision OR playlist.valid_until IS NOT staged.valid_until)",
+    ).bind(source).execute(connection).await?;
     Ok(())
-}
-
-async fn hash_relation_pages(
-    database: &Database,
-    token: u64,
-    hasher: &mut Hasher,
-    queries: &'static [(&'static str, &'static str)],
-) -> LibraryResult<()> {
-    for (table, sql) in queries {
-        hash_bytes(hasher, table.as_bytes());
-        let mut last_owner_id = String::new();
-        let mut last_position = -1_i64;
-        loop {
-            let rows = digest_page(
-                database,
-                token,
-                sqlx::query(*sql)
-                    .bind(&last_owner_id)
-                    .bind(last_position)
-                    .bind(DIGEST_PAGE_ROWS),
-            )
-            .await?;
-            for row in &rows {
-                hash_row(hasher, row)?;
-            }
-            let Some(row) = rows.last() else {
-                break;
-            };
-            last_owner_id = row.try_get("owner_id")?;
-            last_position = row.try_get("position")?;
-            if rows.len() < DIGEST_PAGE_ROWS as usize {
-                break;
-            }
-        }
-    }
-    Ok(())
-}
-
-async fn hash_playlist_entry_pages(
-    database: &Database,
-    token: u64,
-    hasher: &mut Hasher,
-) -> LibraryResult<()> {
-    let mut last_playlist_id = String::new();
-    let mut last_position = -1_i64;
-    loop {
-        let rows = digest_page(
-            database,
-            token,
-            sqlx::query(PLAYLIST_ENTRY_DIGEST_QUERY)
-                .bind(&last_playlist_id)
-                .bind(last_position)
-                .bind(DIGEST_PAGE_ROWS),
-        )
-        .await?;
-        for row in &rows {
-            hash_row(hasher, row)?;
-        }
-        let Some(row) = rows.last() else {
-            break;
-        };
-        last_playlist_id = row.try_get("playlist_id")?;
-        last_position = row.try_get("position")?;
-        if rows.len() < DIGEST_PAGE_ROWS as usize {
-            break;
-        }
-    }
-    Ok(())
-}
-
-async fn digest_page<'query>(
-    database: &Database,
-    token: u64,
-    query: Query<'query, Sqlite, SqliteArguments>,
-) -> LibraryResult<Vec<SqliteRow>> {
-    if !database.scan_is_current(token) {
-        return Err(LibraryError::ScanFailed);
-    }
-    let mut writer = database.writer().await?;
-    let connection = writer.as_mut().ok_or(LibraryError::WriterUnavailable)?;
-    let rows = query.persistent(false).fetch_all(&mut *connection).await;
-    if matches!(&rows, Err(sqlx::Error::WorkerCrashed | sqlx::Error::Io(_))) {
-        *writer = None;
-        database.writer_failed();
-    }
-    Ok(rows?)
-}
-
-fn hash_row(hasher: &mut Hasher, row: &SqliteRow) -> LibraryResult<()> {
-    hasher.update(&[0xff]);
-    for index in 0..row.columns().len() {
-        if row.columns()[index].name() == "artwork_binding" {
-            continue;
-        }
-        let value = row.try_get_raw(index)?;
-        if value.is_null() {
-            hasher.update(&[0]);
-            continue;
-        }
-        match value.type_info().name() {
-            "INTEGER" => {
-                hasher.update(&[1]);
-                hasher.update(&row.try_get::<i64, _>(index)?.to_be_bytes());
-            }
-            "REAL" => {
-                hasher.update(&[2]);
-                hasher.update(&row.try_get::<f64, _>(index)?.to_bits().to_be_bytes());
-            }
-            "TEXT" => {
-                hasher.update(&[3]);
-                hash_bytes(hasher, row.try_get::<String, _>(index)?.as_bytes());
-            }
-            "BLOB" => {
-                hasher.update(&[4]);
-                hash_bytes(hasher, &row.try_get::<Vec<u8>, _>(index)?);
-            }
-            kind => {
-                return Err(LibraryError::InvalidStore(format!(
-                    "unsupported canonical SQLite value {kind}"
-                )));
-            }
-        }
-    }
-    Ok(())
-}
-
-fn hash_bytes(hasher: &mut Hasher, value: &[u8]) {
-    hasher.update(&(value.len() as u64).to_be_bytes());
-    hasher.update(value);
-}
-
-async fn symmetric_point_change(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-    staged: &'static str,
-    current: &'static str,
-) -> LibraryResult<bool> {
-    let sql = format!(
-        "SELECT EXISTS(
-           SELECT * FROM (SELECT * FROM ({staged}) EXCEPT SELECT * FROM ({current}))
-           UNION ALL
-           SELECT * FROM (SELECT * FROM ({current}) EXCEPT SELECT * FROM ({staged}))
-         )"
-    );
-    Ok(sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql))
-        .bind(source_key)
-        .fetch_one(&mut **transaction)
-        .await?)
-}
-
-async fn staged_playlists_changed(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-) -> LibraryResult<bool> {
-    for (staged, current) in [
-        (
-            "SELECT object_id,name,normalized_name,sort_text,writable FROM temp.scan_playlists",
-            "SELECT object_id,name,normalized_name,sort_text,writable FROM playlists WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_playlists) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='playlist'))",
-        ),
-        (
-            "SELECT playlist_id,object_id,media_uri,position FROM temp.scan_playlist_entries",
-            "SELECT playlist.object_id,entry.object_id,entry.media_uri,entry.position FROM playlist_entries entry JOIN playlists playlist USING(playlist_key) WHERE playlist.source_key=?1 AND (playlist.object_id IN (SELECT object_id FROM temp.scan_playlists) OR playlist.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='playlist'))",
-        ),
-    ] {
-        if symmetric_point_change(transaction, source_key, staged, current).await? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
-}
-
-async fn staged_non_playlist_catalog_changed(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-) -> LibraryResult<bool> {
-    let entities = [
-        (
-            "SELECT staged.object_id,staged.media_uri,staged.title,staged.normalized_title,staged.display_artist,staged.sort_text,staged.year,staged.release_date,staged.date_added,staged.musicbrainz_release_id,staged.musicbrainz_release_group_id,staged.is_compilation,staged.favorite,staged.rating,COALESCE(current.first_seen_at,staged.first_seen_at),staged.source_loudness_analysis_key FROM temp.scan_albums staged LEFT JOIN albums current ON current.source_key=?1 AND current.object_id=staged.object_id",
-            "SELECT object_id,media_uri,title,normalized_title,display_artist,sort_text,year,release_date,date_added,musicbrainz_release_id,musicbrainz_release_group_id,is_compilation,source_favorite,source_rating,first_seen_at,source_loudness_analysis_key FROM albums WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_albums) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='album'))",
-        ),
-        (
-            "SELECT staged.object_id,staged.album_object_id,staged.title,staged.normalized_search,staged.display_album,staged.display_artist,staged.sort_text,staged.duration_millis,staged.disc_number,staged.track_number,staged.year,staged.release_date,staged.date_added,staged.media_uri,staged.source_path,staged.source_format,staged.comment,staged.bpm,staged.musicbrainz_recording_id,staged.musicbrainz_release_track_id,staged.cue_path,staged.cue_start_millis,staged.cue_end_millis,staged.favorite,staged.rating,COALESCE(current.first_seen_at,staged.first_seen_at),staged.source_loudness_analysis_key FROM temp.scan_tracks staged LEFT JOIN tracks current ON current.source_key=?1 AND current.object_id=staged.object_id",
-            "SELECT track.object_id,album.object_id,track.title,track.normalized_search,track.display_album,track.display_artist,track.sort_text,track.duration_millis,track.disc_number,track.track_number,track.year,track.release_date,track.date_added,track.media_uri,track.source_path,track.source_format,track.comment,track.bpm,track.musicbrainz_recording_id,track.musicbrainz_release_track_id,track.cue_path,track.cue_start_millis,track.cue_end_millis,track.source_favorite,track.source_rating,track.first_seen_at,track.source_loudness_analysis_key FROM tracks track LEFT JOIN albums album USING(album_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
-        ),
-        (
-            "SELECT object_id,media_uri,name,normalized_name,sort_text,musicbrainz_artist_id,favorite,rating FROM temp.scan_artists",
-            "SELECT object_id,media_uri,name,normalized_name,sort_text,musicbrainz_artist_id,source_favorite,source_rating FROM artists WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_artists) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='artist'))",
-        ),
-        (
-            "SELECT object_id,name,normalized_name,sort_text FROM temp.scan_genres",
-            "SELECT object_id,name,normalized_name,sort_text FROM genres WHERE source_key=?1 AND (object_id IN (SELECT object_id FROM temp.scan_genres) OR object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='genre'))",
-        ),
-        (
-            "SELECT object_id,name,normalized_name,sort_text FROM temp.scan_moods",
-            "SELECT object_id,name,normalized_name,sort_text FROM moods WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_moods)",
-        ),
-        (
-            "SELECT object_id,name,normalized_name,sort_text FROM temp.scan_folders",
-            "SELECT object_id,name,normalized_name,sort_text FROM folders WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_folders)",
-        ),
-    ];
-    for (staged, current) in entities {
-        if symmetric_point_change(transaction, source_key, staged, current).await? {
-            return Ok(true);
-        }
-    }
-
-    let relations = [
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_album_artists",
-            "SELECT album.object_id,artist.object_id,link.position FROM album_artists link JOIN albums album USING(album_key) JOIN artists artist USING(artist_key) WHERE album.source_key=?1 AND (album.object_id IN (SELECT object_id FROM temp.scan_albums) OR album.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='album'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_track_artists",
-            "SELECT track.object_id,artist.object_id,link.position FROM track_artists link JOIN tracks track USING(track_key) JOIN artists artist USING(artist_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_album_genres",
-            "SELECT album.object_id,genre.object_id,link.position FROM album_genres link JOIN albums album USING(album_key) JOIN genres genre USING(genre_key) WHERE album.source_key=?1 AND (album.object_id IN (SELECT object_id FROM temp.scan_albums) OR album.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='album'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_track_genres",
-            "SELECT track.object_id,genre.object_id,link.position FROM track_genres link JOIN tracks track USING(track_key) JOIN genres genre USING(genre_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_track_moods",
-            "SELECT track.object_id,mood.object_id,link.position FROM track_moods link JOIN tracks track USING(track_key) JOIN moods mood USING(mood_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_track_folders",
-            "SELECT track.object_id,folder.object_id,link.position FROM track_folders link JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key) WHERE track.source_key=?1 AND (track.object_id IN (SELECT object_id FROM temp.scan_tracks) OR track.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='track'))",
-        ),
-        (
-            "SELECT owner_id,related_id,position FROM temp.scan_album_release_types",
-            "SELECT album.object_id,link.release_type,link.position FROM album_release_types link JOIN albums album USING(album_key) WHERE album.source_key=?1 AND (album.object_id IN (SELECT object_id FROM temp.scan_albums) OR album.object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='album'))",
-        ),
-    ];
-    for (staged, current) in relations {
-        if symmetric_point_change(transaction, source_key, staged, current).await? {
-            return Ok(true);
-        }
-    }
-    Ok(false)
 }
 
 async fn publish_entities(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
-    full: bool,
-) -> LibraryResult<()> {
-    sqlx::query(
-        "INSERT INTO albums(
-             source_key, object_id, media_uri, title, normalized_title, display_artist,
-             sort_text, year, release_date, date_added,
-             musicbrainz_release_id, musicbrainz_release_group_id,
-             is_compilation,artwork_binding, source_favorite, source_rating, first_seen_at,
-             source_loudness_analysis_key,loudness_analysis_key
-         ) SELECT ?1, object_id, media_uri, title, normalized_title, display_artist,
-                  sort_text, year, release_date, date_added,
-                  musicbrainz_release_id, musicbrainz_release_group_id,
-                  is_compilation,artwork_binding, favorite, rating, first_seen_at,
-                  source_loudness_analysis_key,loudness_analysis_key
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for sql in [
+        "INSERT INTO albums(source_key, object_id, media_uri, title, normalized_title, display_artist, sort_text, year, release_date, date_added, musicbrainz_release_id, musicbrainz_release_group_id, is_compilation, first_seen_at, source_loudness_analysis_key, loudness_analysis_key) SELECT ?1, object_id, media_uri, title, normalized_title, display_artist, sort_text, year, release_date, date_added, musicbrainz_release_id, musicbrainz_release_group_id, is_compilation, first_seen_at, source_loudness_analysis_key, loudness_analysis_key
            FROM temp.scan_albums WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             media_uri = excluded.media_uri, title = excluded.title, normalized_title = excluded.normalized_title,
-             display_artist = excluded.display_artist, sort_text = excluded.sort_text,
-             year = excluded.year, release_date = excluded.release_date,
-             date_added = excluded.date_added,
-             musicbrainz_release_id = excluded.musicbrainz_release_id,
-             musicbrainz_release_group_id = excluded.musicbrainz_release_group_id,
+             media_uri=excluded.media_uri,
+             title=excluded.title,
+             normalized_title=excluded.normalized_title,
+             display_artist=excluded.display_artist,
+             sort_text=excluded.sort_text,
+             year=excluded.year,
+             release_date=excluded.release_date,
+             date_added=excluded.date_added,
+             musicbrainz_release_id=excluded.musicbrainz_release_id,
+             musicbrainz_release_group_id=excluded.musicbrainz_release_group_id,
              is_compilation=excluded.is_compilation,
-             artwork_binding = excluded.artwork_binding,
-             source_favorite = excluded.source_favorite,
-             source_rating = excluded.source_rating,
-             first_seen_at = COALESCE(albums.first_seen_at, excluded.first_seen_at),
+             first_seen_at=COALESCE(albums.first_seen_at, excluded.first_seen_at),
              source_loudness_analysis_key=excluded.source_loudness_analysis_key,
-             loudness_analysis_key=excluded.loudness_analysis_key",
-    )
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    for sql in [
-        "INSERT INTO artists(
-             source_key, object_id, media_uri, name, normalized_name, sort_text,
-             musicbrainz_artist_id, artwork_binding, source_favorite, source_rating
-         ) SELECT ?1, object_id, media_uri, name, normalized_name, sort_text,
-                  musicbrainz_artist_id, artwork_binding, favorite, rating
+             loudness_analysis_key=excluded.loudness_analysis_key
+         WHERE (albums.media_uri,albums.title,albums.normalized_title,albums.display_artist,albums.sort_text,albums.year,albums.release_date,albums.date_added,albums.musicbrainz_release_id,albums.musicbrainz_release_group_id,albums.is_compilation,albums.first_seen_at,albums.source_loudness_analysis_key,albums.loudness_analysis_key) IS NOT (excluded.media_uri,excluded.title,excluded.normalized_title,excluded.display_artist,excluded.sort_text,excluded.year,excluded.release_date,excluded.date_added,excluded.musicbrainz_release_id,excluded.musicbrainz_release_group_id,excluded.is_compilation,COALESCE(albums.first_seen_at, excluded.first_seen_at),excluded.source_loudness_analysis_key,excluded.loudness_analysis_key)",
+        "INSERT INTO artists(source_key, object_id, media_uri, name, normalized_name, sort_text, musicbrainz_artist_id) SELECT ?1, object_id, media_uri, name, normalized_name, sort_text, musicbrainz_artist_id
            FROM temp.scan_artists WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             media_uri=excluded.media_uri, name=excluded.name, normalized_name=excluded.normalized_name,
+             media_uri=excluded.media_uri,
+             name=excluded.name,
+             normalized_name=excluded.normalized_name,
              sort_text=excluded.sort_text,
-             musicbrainz_artist_id=excluded.musicbrainz_artist_id,
-             artwork_binding=excluded.artwork_binding,
-             source_favorite=excluded.source_favorite, source_rating=excluded.source_rating",
-        "INSERT INTO genres(
-             source_key, object_id, name, normalized_name, sort_text, artwork_binding
-         ) SELECT ?1, object_id, name, normalized_name, sort_text, artwork_binding
+             musicbrainz_artist_id=excluded.musicbrainz_artist_id
+         WHERE (artists.media_uri,artists.name,artists.normalized_name,artists.sort_text,artists.musicbrainz_artist_id) IS NOT (excluded.media_uri,excluded.name,excluded.normalized_name,excluded.sort_text,excluded.musicbrainz_artist_id)",
+        "INSERT INTO genres(source_key, object_id, name, normalized_name, sort_text) SELECT ?1, object_id, name, normalized_name, sort_text
            FROM temp.scan_genres WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             name=excluded.name, normalized_name=excluded.normalized_name,
-             sort_text=excluded.sort_text, artwork_binding=excluded.artwork_binding",
-        "INSERT INTO moods(source_key, object_id, name, normalized_name, sort_text)
-         SELECT ?1, object_id, name, normalized_name, sort_text FROM temp.scan_moods WHERE true
+             name=excluded.name,
+             normalized_name=excluded.normalized_name,
+             sort_text=excluded.sort_text
+         WHERE (genres.name,genres.normalized_name,genres.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)",
+        "INSERT INTO moods(source_key, object_id, name, normalized_name, sort_text) SELECT ?1, object_id, name, normalized_name, sort_text
+           FROM temp.scan_moods WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             name=excluded.name, normalized_name=excluded.normalized_name,
-             sort_text=excluded.sort_text",
-        "INSERT INTO folders(
-             source_key, object_id, name, normalized_name, sort_text, artwork_binding
-         ) SELECT ?1, object_id, name, normalized_name, sort_text, artwork_binding
+             name=excluded.name,
+             normalized_name=excluded.normalized_name,
+             sort_text=excluded.sort_text
+         WHERE (moods.name,moods.normalized_name,moods.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)",
+        "INSERT INTO folders(source_key, object_id, name, normalized_name, sort_text) SELECT ?1, object_id, name, normalized_name, sort_text
            FROM temp.scan_folders WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             name=excluded.name, normalized_name=excluded.normalized_name,
-             sort_text=excluded.sort_text, artwork_binding=excluded.artwork_binding",
-        "INSERT INTO main.playlists(source_key,object_id,position)
-         SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),object_id,COALESCE((SELECT max(position)+1 FROM main.playlists),0)
-                  +row_number() OVER(ORDER BY sort_text,object_id)-1
-         FROM temp.scan_playlists WHERE true
-         ON CONFLICT(source_key,object_id) DO NOTHING",
-        "INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text,artwork_binding,writable)
-         SELECT ?1,staged.object_id,staged.name,staged.normalized_name,staged.sort_text,staged.artwork_binding,staged.writable
-         FROM temp.scan_playlists staged
-         WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET
-           name=excluded.name,normalized_name=excluded.normalized_name,
-           sort_text=excluded.sort_text,artwork_binding=excluded.artwork_binding,writable=excluded.writable",
-    ] {
-        sqlx::query(sql)
-            .bind(source_key)
-            .execute(&mut **transaction)
-            .await?;
-    }
-    sqlx::query(
-        "INSERT INTO tracks(
-             source_key, object_id, album_key, title, normalized_search,
-             display_album, display_artist, sort_text, duration_millis,
-             disc_number, track_number, year, release_date, date_added, media_uri, source_path,
-             source_format, comment, bpm, musicbrainz_recording_id,
-             musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis,
-             artwork_binding, source_favorite, source_rating, first_seen_at,
-             source_loudness_analysis_key,loudness_analysis_key,local_play_count
-         ) SELECT ?1, item.object_id, album.album_key, item.title,
-                  item.normalized_search, item.display_album, item.display_artist,
-                  item.sort_text, item.duration_millis, item.disc_number,
-                  item.track_number, item.year, item.release_date, item.date_added,
-                  item.media_uri, item.source_path, item.source_format, item.comment, item.bpm,
-                  item.musicbrainz_recording_id, item.musicbrainz_release_track_id,
-                  item.cue_path, item.cue_start_millis, item.cue_end_millis,
-                  item.artwork_binding, item.favorite, item.rating, item.first_seen_at,
-                  item.source_loudness_analysis_key,
-                  COALESCE((SELECT access.loudness_analysis_key
+             name=excluded.name,
+             normalized_name=excluded.normalized_name,
+             sort_text=excluded.sort_text
+         WHERE (folders.name,folders.normalized_name,folders.sort_text) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text)",
+        "INSERT INTO tracks(source_key, object_id, album_key, title, normalized_search, display_album, display_artist, sort_text, duration_millis, disc_number, track_number, year, release_date, date_added, media_uri, source_path, source_format, comment, bpm, musicbrainz_recording_id, musicbrainz_release_track_id, cue_path, cue_start_millis, cue_end_millis, first_seen_at, source_loudness_analysis_key, loudness_analysis_key, local_play_count) SELECT ?1, item.object_id, album.album_key, item.title, item.normalized_search, item.display_album, item.display_artist, item.sort_text, item.duration_millis, item.disc_number, item.track_number, item.year, item.release_date, item.date_added, item.media_uri, item.source_path, item.source_format, item.comment, item.bpm, item.musicbrainz_recording_id, item.musicbrainz_release_track_id, item.cue_path, item.cue_start_millis, item.cue_end_millis, item.first_seen_at, item.source_loudness_analysis_key, COALESCE((SELECT access.loudness_analysis_key
                             FROM local_access_files AS access
                             WHERE access.media_uri=item.media_uri
                             ORDER BY CASE access.origin WHEN 'download' THEN 0 WHEN 'mapping' THEN 1 ELSE 2 END,
                                      access.local_access_file_key LIMIT 1),
-                           item.source_loudness_analysis_key),
-                  (SELECT count(*) FROM listens WHERE media_uri=item.media_uri)
+                           item.source_loudness_analysis_key), (SELECT count(*) FROM listens WHERE media_uri=item.media_uri)
            FROM temp.scan_tracks AS item
            LEFT JOIN albums AS album
              ON album.source_key = ?1 AND album.object_id = item.album_object_id
            WHERE true
          ON CONFLICT(source_key, object_id) DO UPDATE SET
-             album_key=excluded.album_key, title=excluded.title,
+             album_key=excluded.album_key,
+             title=excluded.title,
              normalized_search=excluded.normalized_search,
              display_album=excluded.display_album,
-             display_artist=excluded.display_artist, sort_text=excluded.sort_text,
+             display_artist=excluded.display_artist,
+             sort_text=excluded.sort_text,
              duration_millis=excluded.duration_millis,
-             disc_number=excluded.disc_number, track_number=excluded.track_number,
-             year=excluded.year, release_date=excluded.release_date,
-             date_added=excluded.date_added, media_uri=excluded.media_uri, source_path=excluded.source_path,
-             source_format=excluded.source_format, comment=excluded.comment,
-             bpm=excluded.bpm, musicbrainz_recording_id=excluded.musicbrainz_recording_id,
+             disc_number=excluded.disc_number,
+             track_number=excluded.track_number,
+             year=excluded.year,
+             release_date=excluded.release_date,
+             date_added=excluded.date_added,
+             media_uri=excluded.media_uri,
+             source_path=excluded.source_path,
+             source_format=excluded.source_format,
+             comment=excluded.comment,
+             bpm=excluded.bpm,
+             musicbrainz_recording_id=excluded.musicbrainz_recording_id,
              musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,
-             cue_path=excluded.cue_path, cue_start_millis=excluded.cue_start_millis,
+             cue_path=excluded.cue_path,
+             cue_start_millis=excluded.cue_start_millis,
              cue_end_millis=excluded.cue_end_millis,
-             artwork_binding=excluded.artwork_binding,
-             source_favorite=excluded.source_favorite, source_rating=excluded.source_rating,
              first_seen_at=COALESCE(tracks.first_seen_at, excluded.first_seen_at),
              source_loudness_analysis_key=excluded.source_loudness_analysis_key,
              loudness_analysis_key=excluded.loudness_analysis_key,
-             local_play_count=excluded.local_play_count",
-    )
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    {
-        sqlx::query("DELETE FROM home_entries WHERE source_key=?1 AND (?2 OR section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home'))")
-            .bind(source_key)
-            .bind(full)
-            .execute(&mut **transaction)
-            .await?;
-        sqlx::query(
-            "INSERT INTO home_entries(
-             source_key, section_id, position, entity_kind, entity_key,
-             title, subtitle, section_title
-         ) SELECT ?1, entry.owner_id, entry.position, entry.entity_kind,
-                  CASE entry.entity_kind
-                    WHEN 'track' THEN (SELECT track_key FROM tracks
-                      WHERE source_key=?1 AND object_id=entry.entity_object_id)
-                    WHEN 'album' THEN (SELECT album_key FROM albums
-                      WHERE source_key=?1 AND object_id=entry.entity_object_id)
-                    WHEN 'artist' THEN (SELECT artist_key FROM artists
-                      WHERE source_key=?1 AND object_id=entry.entity_object_id)
-                    WHEN 'playlist' THEN (SELECT playlist_key FROM playlists
-                      WHERE source_key=?1 AND object_id=entry.entity_object_id)
-                  END,
-                  entry.title, entry.subtitle, entry.section_title
-           FROM temp.scan_home_entries AS entry
-           WHERE ?2 OR entry.owner_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home')",
-        )
-        .bind(source_key)
-        .bind(full)
-        .execute(&mut **transaction)
-        .await?;
-    }
-    if !full {
-        return Ok(());
-    }
-    for sql in [
-        "DELETE FROM tracks WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_tracks WHERE scan_tracks.object_id=tracks.object_id
-         )",
-        "DELETE FROM albums WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_albums WHERE scan_albums.object_id=albums.object_id
-         )",
-        "DELETE FROM artists WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_artists WHERE scan_artists.object_id=artists.object_id
-         )",
-        "DELETE FROM genres WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_genres WHERE scan_genres.object_id=genres.object_id
-         )",
-        "DELETE FROM moods WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_moods WHERE scan_moods.object_id=moods.object_id
-         )",
-        "DELETE FROM folders WHERE source_key=?1 AND NOT EXISTS (
-             SELECT 1 FROM temp.scan_folders WHERE scan_folders.object_id=folders.object_id
-         )",
+             local_play_count=excluded.local_play_count
+         WHERE (tracks.album_key,tracks.title,tracks.normalized_search,tracks.display_album,tracks.display_artist,tracks.sort_text,tracks.duration_millis,tracks.disc_number,tracks.track_number,tracks.year,tracks.release_date,tracks.date_added,tracks.media_uri,tracks.source_path,tracks.source_format,tracks.comment,tracks.bpm,tracks.musicbrainz_recording_id,tracks.musicbrainz_release_track_id,tracks.cue_path,tracks.cue_start_millis,tracks.cue_end_millis,tracks.first_seen_at,tracks.source_loudness_analysis_key,tracks.loudness_analysis_key,tracks.local_play_count) IS NOT (excluded.album_key,excluded.title,excluded.normalized_search,excluded.display_album,excluded.display_artist,excluded.sort_text,excluded.duration_millis,excluded.disc_number,excluded.track_number,excluded.year,excluded.release_date,excluded.date_added,excluded.media_uri,excluded.source_path,excluded.source_format,excluded.comment,excluded.bpm,excluded.musicbrainz_recording_id,excluded.musicbrainz_release_track_id,excluded.cue_path,excluded.cue_start_millis,excluded.cue_end_millis,COALESCE(tracks.first_seen_at, excluded.first_seen_at),excluded.source_loudness_analysis_key,excluded.loudness_analysis_key,excluded.local_play_count)",
     ] {
-        sqlx::query(sql)
-            .bind(source_key)
-            .execute(&mut **transaction)
-            .await?;
+        changed |= sqlx::query(sql).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
     }
-    sqlx::query(
-        "DELETE FROM catalog.native_playlists
-         WHERE source_key=?1
-           AND NOT EXISTS (
-               SELECT 1 FROM temp.scan_playlists
-               WHERE scan_playlists.object_id=native_playlists.object_id
-           )",
-    )
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
+    Ok(changed)
+}
+
+async fn publish_playlists(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for sql in [
+        "INSERT INTO main.playlists(source_key,object_id,position)
+         SELECT (SELECT durable.source_key FROM main.source_ids durable JOIN catalog.sources source USING(object_id) WHERE source.source_key=?1),object_id,COALESCE((SELECT max(position)+1 FROM main.playlists),0)
+                  +row_number() OVER(ORDER BY sort_text,object_id)-1
+         FROM temp.scan_playlists WHERE true
+         ON CONFLICT(source_key,object_id) DO NOTHING",
+        "INSERT INTO catalog.native_playlists(source_key, object_id, name, normalized_name, sort_text, writable, provider_revision, valid_until) SELECT ?1, staged.object_id, staged.name, staged.normalized_name, staged.sort_text, staged.writable, staged.provider_revision, staged.valid_until
+           FROM temp.scan_playlists staged
+         WHERE true ON CONFLICT(source_key,object_id) DO UPDATE SET
+             name=excluded.name,
+             normalized_name=excluded.normalized_name,
+             sort_text=excluded.sort_text,
+             writable=excluded.writable
+         WHERE (native_playlists.name,native_playlists.normalized_name,native_playlists.sort_text,native_playlists.writable) IS NOT (excluded.name,excluded.normalized_name,excluded.sort_text,excluded.writable)",
+    ] {
+        changed |= sqlx::query(sql).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
+    }
+    Ok(changed)
 }
 
 async fn publish_source_loudness(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
     full: bool,
-) -> LibraryResult<()> {
+) -> LibraryResult<bool> {
+    let mut changed = false;
     let track_delete = if full {
         "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='track' AND origin='source' AND NOT EXISTS (SELECT 1 FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL AND track.track_key=loudness_measurements.entity_key)"
     } else {
-        "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='track' AND origin='source' AND entity_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1 AND staged.source_integrated_lufs IS NULL)"
+        "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='track' AND origin='source' AND entity_key IN (SELECT track.track_key FROM temp.scan_tracks staged CROSS JOIN tracks track ON track.object_id=staged.object_id WHERE track.source_key=?1 AND staged.source_integrated_lufs IS NULL)"
     };
     let album_delete = if full {
         "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='album' AND origin='source' AND NOT EXISTS (SELECT 1 FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL AND album.album_key=loudness_measurements.entity_key)"
     } else {
-        "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='album' AND origin='source' AND entity_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1 AND staged.source_integrated_lufs IS NULL)"
+        "DELETE FROM loudness_measurements WHERE source_key=?1 AND entity_kind='album' AND origin='source' AND entity_key IN (SELECT album.album_key FROM temp.scan_albums staged CROSS JOIN albums album ON album.object_id=staged.object_id WHERE album.source_key=?1 AND staged.source_integrated_lufs IS NULL)"
     };
     for sql in [
         track_delete,
         album_delete,
-        "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,'track',track.track_key,track.loudness_analysis_key,staged.source_integrated_lufs,staged.source_true_peak,'source' FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'",
-        "INSERT INTO loudness_measurements(source_key,entity_kind,entity_key,analysis_key,integrated_lufs,true_peak,origin) SELECT ?1,'album',album.album_key,album.loudness_analysis_key,staged.source_integrated_lufs,staged.source_true_peak,'source' FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,integrated_lufs=excluded.integrated_lufs,true_peak=excluded.true_peak,origin='source'",
+        "INSERT INTO loudness_measurements(source_key, entity_kind, entity_key, analysis_key, integrated_lufs, true_peak, origin) SELECT ?1, 'track', track.track_key, track.loudness_analysis_key, staged.source_integrated_lufs, staged.source_true_peak, 'source'
+           FROM temp.scan_tracks staged CROSS JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
+             analysis_key=excluded.analysis_key,
+             integrated_lufs=excluded.integrated_lufs,
+             true_peak=excluded.true_peak,
+             origin='source'
+         WHERE (loudness_measurements.analysis_key,loudness_measurements.integrated_lufs,loudness_measurements.true_peak,loudness_measurements.origin) IS NOT (excluded.analysis_key,excluded.integrated_lufs,excluded.true_peak,'source')",
+        "INSERT INTO loudness_measurements(source_key, entity_kind, entity_key, analysis_key, integrated_lufs, true_peak, origin) SELECT ?1, 'album', album.album_key, album.loudness_analysis_key, staged.source_integrated_lufs, staged.source_true_peak, 'source'
+           FROM temp.scan_albums staged CROSS JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_integrated_lufs IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
+             analysis_key=excluded.analysis_key,
+             integrated_lufs=excluded.integrated_lufs,
+             true_peak=excluded.true_peak,
+             origin='source'
+         WHERE (loudness_measurements.analysis_key,loudness_measurements.integrated_lufs,loudness_measurements.true_peak,loudness_measurements.origin) IS NOT (excluded.analysis_key,excluded.integrated_lufs,excluded.true_peak,'source')",
     ] {
-        sqlx::query(sql)
+        changed |= sqlx::query(sql)
             .bind(source_key)
             .execute(&mut **transaction)
-            .await?;
+            .await?.rows_affected() > 0;
     }
     let replay_track_delete = if full {
         "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='track' AND NOT EXISTS (SELECT 1 FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL AND track.track_key=replay_gain_measurements.entity_key)"
     } else {
-        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='track' AND entity_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='track' AND entity_key IN (SELECT track.track_key FROM temp.scan_tracks staged CROSS JOIN tracks track ON track.object_id=staged.object_id WHERE track.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
     };
     let replay_album_delete = if full {
         "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album' AND NOT EXISTS (SELECT 1 FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL AND album.album_key=replay_gain_measurements.entity_key)"
     } else {
-        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album' AND entity_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
+        "DELETE FROM replay_gain_measurements WHERE source_key=?1 AND entity_kind='album' AND entity_key IN (SELECT album.album_key FROM temp.scan_albums staged CROSS JOIN albums album ON album.object_id=staged.object_id WHERE album.source_key=?1 AND staged.source_replay_gain_db IS NULL)"
     };
     for sql in [
         replay_track_delete,
         replay_album_delete,
-        "INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db,peak) SELECT ?1,'track',track.track_key,track.loudness_analysis_key,staged.source_replay_gain_db,staged.source_replay_gain_peak FROM temp.scan_tracks staged JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,gain_db=excluded.gain_db,peak=excluded.peak",
-        "INSERT INTO replay_gain_measurements(source_key,entity_kind,entity_key,analysis_key,gain_db,peak) SELECT ?1,'album',album.album_key,album.loudness_analysis_key,staged.source_replay_gain_db,staged.source_replay_gain_peak FROM temp.scan_albums staged JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET analysis_key=excluded.analysis_key,gain_db=excluded.gain_db,peak=excluded.peak",
+        "INSERT INTO replay_gain_measurements(source_key, entity_kind, entity_key, analysis_key, gain_db, peak) SELECT ?1, 'track', track.track_key, track.loudness_analysis_key, staged.source_replay_gain_db, staged.source_replay_gain_peak
+           FROM temp.scan_tracks staged CROSS JOIN tracks track ON track.source_key=?1 AND track.object_id=staged.object_id AND track.source_loudness_analysis_key=track.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
+             analysis_key=excluded.analysis_key,
+             gain_db=excluded.gain_db,
+             peak=excluded.peak
+         WHERE (replay_gain_measurements.analysis_key,replay_gain_measurements.gain_db,replay_gain_measurements.peak) IS NOT (excluded.analysis_key,excluded.gain_db,excluded.peak)",
+        "INSERT INTO replay_gain_measurements(source_key, entity_kind, entity_key, analysis_key, gain_db, peak) SELECT ?1, 'album', album.album_key, album.loudness_analysis_key, staged.source_replay_gain_db, staged.source_replay_gain_peak
+           FROM temp.scan_albums staged CROSS JOIN albums album ON album.source_key=?1 AND album.object_id=staged.object_id AND album.source_loudness_analysis_key=album.loudness_analysis_key WHERE staged.source_replay_gain_db IS NOT NULL ON CONFLICT(source_key,entity_kind,entity_key) DO UPDATE SET
+             analysis_key=excluded.analysis_key,
+             gain_db=excluded.gain_db,
+             peak=excluded.peak
+         WHERE (replay_gain_measurements.analysis_key,replay_gain_measurements.gain_db,replay_gain_measurements.peak) IS NOT (excluded.analysis_key,excluded.gain_db,excluded.peak)",
     ] {
-        sqlx::query(sql)
+        changed |= sqlx::query(sql)
             .bind(source_key)
             .execute(&mut **transaction)
-            .await?;
+            .await?.rows_affected() > 0;
     }
-    Ok(())
+    Ok(changed)
 }
 
 async fn publish_activity_baseline(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
-) -> LibraryResult<()> {
-    sqlx::query(
+) -> LibraryResult<bool> {
+    let changed = sqlx::query(
         "INSERT INTO catalog.activity_baseline(
              source_key,track_object_id,play_count,skip_count,last_played_at
          )
@@ -3610,33 +3022,10 @@ async fn publish_activity_baseline(
     )
     .bind(source_key)
     .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-async fn publish_removals(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-) -> LibraryResult<()> {
-    for (kind, table, staged) in [
-        ("track", "tracks", "scan_tracks"),
-        ("album", "albums", "scan_albums"),
-        ("artist", "artists", "scan_artists"),
-        ("genre", "genres", "scan_genres"),
-        ("playlist", "catalog.native_playlists", "scan_playlists"),
-    ] {
-        let sql = format!(
-            "DELETE FROM {table} WHERE source_key=?1 AND object_id IN (
-                 SELECT object_id FROM temp.scan_removals WHERE entity_kind=?2
-             ) AND NOT EXISTS (SELECT 1 FROM temp.{staged} staged WHERE staged.object_id={table}.object_id)"
-        );
-        sqlx::query(sqlx::AssertSqlSafe(sql))
-            .bind(source_key)
-            .bind(kind)
-            .execute(&mut **transaction)
-            .await?;
-    }
-    Ok(())
+    .await?
+    .rows_affected()
+        > 0;
+    Ok(changed)
 }
 
 async fn publish_local_files(
@@ -3703,62 +3092,6 @@ async fn publish_local_files(
     Ok(())
 }
 
-async fn staged_artwork_changed(
-    transaction: &mut Transaction<'_, Sqlite>,
-    source_key: i64,
-) -> LibraryResult<bool> {
-    Ok(sqlx::query_scalar(
-        "SELECT EXISTS(
-           SELECT 1 FROM temp.scan_tracks staged
-           LEFT JOIN tracks current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_albums staged
-           LEFT JOIN albums current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_artists staged
-           LEFT JOIN artists current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_genres staged
-           LEFT JOIN genres current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_folders staged
-           LEFT JOIN folders current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_playlists staged
-           LEFT JOIN playlists current ON current.source_key=?1 AND current.object_id=staged.object_id
-           WHERE staged.artwork_binding IS NOT current.artwork_binding
-           UNION ALL
-           SELECT 1 FROM temp.scan_removals removal JOIN tracks current
-             ON removal.entity_kind='track' AND current.source_key=?1 AND current.object_id=removal.object_id
-           WHERE current.artwork_binding IS NOT NULL
-           UNION ALL
-           SELECT 1 FROM temp.scan_removals removal JOIN albums current
-             ON removal.entity_kind='album' AND current.source_key=?1 AND current.object_id=removal.object_id
-           WHERE current.artwork_binding IS NOT NULL
-           UNION ALL
-           SELECT 1 FROM temp.scan_removals removal JOIN artists current
-             ON removal.entity_kind='artist' AND current.source_key=?1 AND current.object_id=removal.object_id
-           WHERE current.artwork_binding IS NOT NULL
-           UNION ALL
-           SELECT 1 FROM temp.scan_removals removal JOIN genres current
-             ON removal.entity_kind='genre' AND current.source_key=?1 AND current.object_id=removal.object_id
-           WHERE current.artwork_binding IS NOT NULL
-           UNION ALL
-           SELECT 1 FROM temp.scan_removals removal JOIN playlists current
-             ON removal.entity_kind='playlist' AND current.source_key=?1 AND current.object_id=removal.object_id
-           WHERE current.artwork_binding IS NOT NULL
-         )",
-    )
-    .bind(source_key)
-    .fetch_one(&mut **transaction)
-    .await?)
-}
-
 async fn prune_local_orphans(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
@@ -3778,141 +3111,264 @@ async fn prune_local_orphans(
     Ok(())
 }
 
-async fn publish_links(
+async fn publish_ratings(connection: &mut SqliteConnection, source: i64) -> LibraryResult<bool> {
+    let mut changed = false;
+    for table in ["tracks", "albums", "artists"] {
+        let sql = format!(
+            "UPDATE {table} AS current SET source_rating=(SELECT rating FROM temp.scan_{table} WHERE object_id=current.object_id)
+             WHERE source_key=?1 AND object_id IN (SELECT object_id FROM temp.scan_{table})
+             AND source_rating IS NOT (SELECT rating FROM temp.scan_{table} WHERE object_id=current.object_id)"
+        );
+        changed |= sqlx::query(sqlx::AssertSqlSafe(sql))
+            .bind(source)
+            .execute(&mut *connection)
+            .await?
+            .rows_affected()
+            > 0;
+    }
+    Ok(changed)
+}
+
+async fn publish_removals(
     transaction: &mut Transaction<'_, Sqlite>,
     source_key: i64,
     full: bool,
-) -> LibraryResult<()> {
-    let full_deletes = [
-        "DELETE FROM album_artists WHERE album_key IN (
-             SELECT album_key FROM albums WHERE source_key=?1
-         )",
-        "DELETE FROM track_artists WHERE track_key IN (
-             SELECT track_key FROM tracks WHERE source_key=?1
-         )",
-        "DELETE FROM album_genres WHERE album_key IN (
-             SELECT album_key FROM albums WHERE source_key=?1
-         )",
-        "DELETE FROM track_genres WHERE track_key IN (
-             SELECT track_key FROM tracks WHERE source_key=?1
-         )",
-        "DELETE FROM track_moods WHERE track_key IN (
-             SELECT track_key FROM tracks WHERE source_key=?1
-         )",
-        "DELETE FROM track_folders WHERE track_key IN (
-             SELECT track_key FROM tracks WHERE source_key=?1
-         )",
-        "DELETE FROM album_release_types WHERE album_key IN (
-             SELECT album_key FROM albums WHERE source_key=?1
-         )",
-    ];
-    let point_deletes = [
-        "DELETE FROM album_artists WHERE album_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1)",
-        "DELETE FROM track_artists WHERE track_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1)",
-        "DELETE FROM album_genres WHERE album_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1)",
-        "DELETE FROM track_genres WHERE track_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1)",
-        "DELETE FROM track_moods WHERE track_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1)",
-        "DELETE FROM track_folders WHERE track_key IN (SELECT track.track_key FROM tracks track JOIN temp.scan_tracks staged ON staged.object_id=track.object_id WHERE track.source_key=?1)",
-        "DELETE FROM album_release_types WHERE album_key IN (SELECT album.album_key FROM albums album JOIN temp.scan_albums staged ON staged.object_id=album.object_id WHERE album.source_key=?1)",
-    ];
-    for sql in if full { &full_deletes } else { &point_deletes } {
-        sqlx::query(*sql)
-            .bind(source_key)
-            .execute(&mut **transaction)
-            .await?;
+) -> LibraryResult<(bool, bool)> {
+    let mut metadata = false;
+    let mut playlists = false;
+    for (kind, table, staged) in [
+        ("track", "tracks", "scan_tracks"),
+        ("album", "albums", "scan_albums"),
+        ("artist", "artists", "scan_artists"),
+        ("genre", "genres", "scan_genres"),
+        ("mood", "moods", "scan_moods"),
+        ("folder", "folders", "scan_folders"),
+        ("playlist", "catalog.native_playlists", "scan_playlists"),
+    ] {
+        let sql = format!(
+            "DELETE FROM {table} WHERE source_key=?1
+             {} AND object_id NOT IN (SELECT object_id FROM temp.{staged})",
+            if full {
+                ""
+            } else {
+                "AND object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind=?2)"
+            }
+        );
+        let mut query = sqlx::query(sqlx::AssertSqlSafe(sql)).bind(source_key);
+        if !full {
+            query = query.bind(kind);
+        }
+        let changed = query.execute(&mut **transaction).await?.rows_affected() > 0;
+        if kind == "playlist" {
+            playlists |= changed;
+        } else {
+            metadata |= changed;
+        }
     }
-    let playlist_position_offset = sqlx::query_scalar::<_, i64>(
-        "SELECT MAX(
-             COALESCE((
-                 SELECT MAX(entry.position)
-                 FROM catalog.native_playlist_entries AS entry
-                 JOIN catalog.native_playlists AS playlist USING (playlist_key)
-                 WHERE playlist.source_key=?1
-             ), 0),
-             COALESCE((SELECT MAX(position) FROM temp.scan_playlist_entries), 0)
-         ) + 1",
-    )
-    .bind(source_key)
-    .fetch_one(&mut **transaction)
-    .await?;
-    sqlx::query(if full {
-        "UPDATE catalog.native_playlist_entries
-         SET position=position + ?2
-         WHERE playlist_key IN (
-             SELECT playlist_key FROM catalog.native_playlists
-             WHERE source_key=?1
-         )"
-    } else {
-        "UPDATE catalog.native_playlist_entries
-         SET position=position + ?2
-         WHERE playlist_key IN (
-             SELECT playlist.playlist_key FROM catalog.native_playlists playlist
-             JOIN temp.scan_playlists staged ON staged.object_id=playlist.object_id
-             WHERE playlist.source_key=?1
-         )"
-    })
-    .bind(source_key)
-    .bind(playlist_position_offset)
-    .execute(&mut **transaction)
-    .await?;
-    for sql in [
-        "INSERT INTO album_artists(album_key, artist_key, position)
-         SELECT album.album_key, artist.artist_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_album_artists AS link
-         JOIN albums AS album ON album.source_key=?1 AND album.object_id=link.owner_id
-         JOIN artists AS artist ON artist.source_key=?1 AND artist.object_id=link.related_id",
-        "INSERT INTO track_artists(track_key, artist_key, position)
-         SELECT track.track_key, artist.artist_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_track_artists AS link
-         JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
-         JOIN artists AS artist ON artist.source_key=?1 AND artist.object_id=link.related_id",
-        "INSERT INTO album_genres(album_key, genre_key, position)
-         SELECT album.album_key, genre.genre_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_album_genres AS link
-         JOIN albums AS album ON album.source_key=?1 AND album.object_id=link.owner_id
-         JOIN genres AS genre ON genre.source_key=?1 AND genre.object_id=link.related_id",
-        "INSERT INTO track_genres(track_key, genre_key, position)
-         SELECT track.track_key, genre.genre_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_track_genres AS link
-         JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
-         JOIN genres AS genre ON genre.source_key=?1 AND genre.object_id=link.related_id",
-        "INSERT INTO track_moods(track_key, mood_key, position)
-         SELECT track.track_key, mood.mood_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_track_moods AS link
-         JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
-         JOIN moods AS mood ON mood.source_key=?1 AND mood.object_id=link.related_id",
-        "INSERT INTO track_folders(track_key, folder_key, position)
-         SELECT track.track_key, folder.folder_key,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_track_folders AS link
-         JOIN tracks AS track ON track.source_key=?1 AND track.object_id=link.owner_id
-         JOIN folders AS folder ON folder.source_key=?1 AND folder.object_id=link.related_id",
-        "INSERT INTO album_release_types(album_key, release_type, position)
-         SELECT album.album_key, link.related_id,
-                row_number() OVER (PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1
-         FROM temp.scan_album_release_types AS link
-         JOIN albums AS album ON album.source_key=?1 AND album.object_id=link.owner_id",
-        "INSERT INTO catalog.native_playlist_entries(
-             playlist_key,object_id,media_uri,title,artist,
-             album,album_display_artist,
-             duration_millis,disc_number,track_number,
-             year,release_date,source_format,
-             musicbrainz_recording_id,musicbrainz_release_track_id,position
-         ) SELECT playlist.playlist_key,entry.object_id,entry.media_uri,
-                  track.title,track.display_artist,track.display_album,album.display_artist,
-                  track.duration_millis,track.disc_number,
-                  track.track_number,track.year,track.release_date,track.source_format,
-                  track.musicbrainz_recording_id,track.musicbrainz_release_track_id,
-                  row_number() OVER (
+    Ok((metadata, playlists))
+}
+
+async fn staged_artwork_changed(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source: i64,
+    full: bool,
+) -> LibraryResult<bool> {
+    for (kind, table, staged) in [
+        ("track", "tracks", "scan_tracks"),
+        ("album", "albums", "scan_albums"),
+        ("artist", "artists", "scan_artists"),
+        ("genre", "genres", "scan_genres"),
+        ("folder", "folders", "scan_folders"),
+        ("playlist", "catalog.native_playlists", "scan_playlists"),
+    ] {
+        let sql = format!(
+            "SELECT EXISTS(SELECT 1 FROM temp.{staged} staged LEFT JOIN {table} current
+             ON current.source_key=?1 AND current.object_id=staged.object_id
+             WHERE staged.artwork_binding IS NOT current.artwork_binding
+             UNION ALL SELECT 1 FROM {table} current WHERE source_key=?1 AND artwork_binding IS NOT NULL
+             AND object_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind=?2)
+             AND object_id NOT IN (SELECT object_id FROM temp.{staged}))"
+        );
+        if sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql))
+            .bind(source)
+            .bind(kind)
+            .fetch_one(&mut **transaction)
+            .await?
+        {
+            return Ok(true);
+        }
+        if full {
+            let sql = format!("SELECT EXISTS(SELECT 1 FROM {table} WHERE source_key=?1 AND artwork_binding IS NOT NULL
+                AND object_id NOT IN (SELECT object_id FROM temp.{staged}))");
+            if sqlx::query_scalar::<_, bool>(sqlx::AssertSqlSafe(sql))
+                .bind(source)
+                .fetch_one(&mut **transaction)
+                .await?
+            {
+                return Ok(true);
+            }
+        }
+    }
+    Ok(false)
+}
+
+async fn publish_links(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source: i64,
+    full: bool,
+) -> LibraryResult<bool> {
+    let mut changed = false;
+    for (relation, owners, owner_key, targets, target_key) in [
+        (
+            "album_artists",
+            "albums",
+            "album_key",
+            "artists",
+            "artist_key",
+        ),
+        (
+            "track_artists",
+            "tracks",
+            "track_key",
+            "artists",
+            "artist_key",
+        ),
+        ("album_genres", "albums", "album_key", "genres", "genre_key"),
+        ("track_genres", "tracks", "track_key", "genres", "genre_key"),
+        ("track_moods", "tracks", "track_key", "moods", "mood_key"),
+        (
+            "track_folders",
+            "tracks",
+            "track_key",
+            "folders",
+            "folder_key",
+        ),
+        (
+            "album_release_types",
+            "albums",
+            "album_key",
+            "",
+            "release_type",
+        ),
+    ] {
+        let (target, join) = if targets.is_empty() {
+            ("link.related_id".to_string(), String::new())
+        } else {
+            (
+                format!("target.{target_key}"),
+                format!(
+                    "CROSS JOIN {targets} target ON target.source_key=?1 AND target.object_id=link.related_id"
+                ),
+            )
+        };
+        let rows = format!(
+            "SELECT owner.{owner_key} AS owner,{target} AS target,
+             row_number() OVER(PARTITION BY link.owner_id ORDER BY link.position,link.related_id)-1 AS position
+             FROM temp.scan_{relation} link CROSS JOIN {owners} owner ON owner.source_key=?1 AND owner.object_id=link.owner_id {join}"
+        );
+        let delete = format!(
+            "WITH expected AS MATERIALIZED ({rows}) DELETE FROM {relation} AS current
+             WHERE {owner_key} IN (SELECT {owner_key} FROM {owners} WHERE source_key=?1 {})
+             AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.owner=current.{owner_key}
+                 AND expected.target=current.{target_key} AND expected.position=current.position)",
+            if full {
+                String::new()
+            } else {
+                format!("AND object_id IN (SELECT object_id FROM temp.scan_{owners})")
+            }
+        );
+        changed |= sqlx::query(sqlx::AssertSqlSafe(delete))
+            .bind(source)
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected()
+            > 0;
+        let insert =
+            format!("INSERT OR IGNORE INTO {relation}({owner_key},{target_key},position) {rows}");
+        changed |= sqlx::query(sqlx::AssertSqlSafe(insert))
+            .bind(source)
+            .execute(&mut **transaction)
+            .await?
+            .rows_affected()
+            > 0;
+    }
+    Ok(changed)
+}
+
+async fn publish_home(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source: i64,
+    full: bool,
+) -> LibraryResult<bool> {
+    let rows = "SELECT ?1 AS source_key,entry.owner_id AS section_id,entry.position,entry.entity_kind,
+        CASE entry.entity_kind
+          WHEN 'track' THEN (SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=entry.entity_object_id)
+          WHEN 'album' THEN (SELECT album_key FROM albums WHERE source_key=?1 AND object_id=entry.entity_object_id)
+          WHEN 'artist' THEN (SELECT artist_key FROM artists WHERE source_key=?1 AND object_id=entry.entity_object_id)
+          WHEN 'playlist' THEN (SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=entry.entity_object_id)
+        END AS entity_key,entry.title,entry.subtitle,entry.section_title
+        FROM temp.scan_home_entries entry";
+    let delete = format!("WITH expected AS MATERIALIZED ({rows}) DELETE FROM home_entries AS current WHERE source_key=?1
+        AND (?2 OR section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home'))
+        AND NOT EXISTS(SELECT 1 FROM expected WHERE expected.section_id=current.section_id AND expected.position=current.position AND expected.entity_key IS NOT NULL)");
+    let mut changed = sqlx::query(sqlx::AssertSqlSafe(delete))
+        .bind(source)
+        .bind(full)
+        .execute(&mut **transaction)
+        .await?
+        .rows_affected()
+        > 0;
+    let insert = format!("WITH expected AS ({rows}) INSERT INTO home_entries(source_key,section_id,position,entity_kind,entity_key,title,subtitle,section_title)
+        SELECT * FROM expected WHERE entity_key IS NOT NULL ON CONFLICT(source_key,section_id,position) DO UPDATE SET
+        entity_kind=excluded.entity_kind,entity_key=excluded.entity_key,title=excluded.title,subtitle=excluded.subtitle,section_title=excluded.section_title
+        WHERE (home_entries.entity_kind,home_entries.entity_key,home_entries.title,home_entries.subtitle,home_entries.section_title)
+        IS NOT (excluded.entity_kind,excluded.entity_key,excluded.title,excluded.subtitle,excluded.section_title)");
+    changed |= sqlx::query(sqlx::AssertSqlSafe(insert))
+        .bind(source)
+        .execute(&mut **transaction)
+        .await?
+        .rows_affected()
+        > 0;
+    Ok(changed)
+}
+
+async fn publish_playlist_entries(
+    transaction: &mut Transaction<'_, Sqlite>,
+    source_key: i64,
+) -> LibraryResult<bool> {
+    sqlx::query("WITH ranked AS (
+        SELECT playlist_id,object_id,row_number() OVER(PARTITION BY playlist_id ORDER BY position,object_id)-1 AS position
+        FROM temp.scan_playlist_entries)
+        UPDATE temp.scan_playlist_entries AS entry SET position=ranked.position FROM ranked
+        WHERE entry.playlist_id=ranked.playlist_id AND entry.object_id=ranked.object_id AND entry.position IS NOT ranked.position")
+        .execute(&mut **transaction).await?;
+    let mut changed = sqlx::query(
+        "WITH moved AS MATERIALIZED (
+             SELECT playlist.playlist_key,max(
+                 (SELECT coalesce(max(position),0) FROM catalog.native_playlist_entries existing WHERE existing.playlist_key=playlist.playlist_key),
+                 (SELECT coalesce(max(position),0) FROM temp.scan_playlist_entries entry WHERE entry.playlist_id=playlist.object_id)
+             )+1 AS offset
+             FROM temp.scan_playlists staged CROSS JOIN catalog.native_playlists playlist ON playlist.object_id=staged.object_id
+             WHERE playlist.source_key=?1 AND staged.entries_supplied AND EXISTS(
+                 SELECT 1 FROM temp.scan_playlist_entries entry LEFT JOIN catalog.native_playlist_entries current
+                 ON current.playlist_key=playlist.playlist_key AND current.object_id=entry.object_id
+                 WHERE entry.playlist_id=playlist.object_id AND entry.position IS NOT current.position)
+         ) UPDATE catalog.native_playlist_entries SET position=position + (SELECT offset FROM moved WHERE moved.playlist_key=native_playlist_entries.playlist_key)
+         WHERE playlist_entry_key IN (SELECT entry.playlist_entry_key FROM moved CROSS JOIN catalog.native_playlist_entries entry ON entry.playlist_key=moved.playlist_key)",
+    ).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
+    changed |= sqlx::query(
+        "DELETE FROM catalog.native_playlist_entries WHERE playlist_entry_key IN (
+             SELECT entry.playlist_entry_key FROM temp.scan_playlists staged CROSS JOIN catalog.native_playlists playlist
+             ON playlist.source_key=?1 AND playlist.object_id=staged.object_id
+             CROSS JOIN catalog.native_playlist_entries entry ON entry.playlist_key=playlist.playlist_key
+             WHERE staged.entries_supplied AND NOT EXISTS(SELECT 1 FROM temp.scan_playlist_entries supplied
+                 WHERE supplied.playlist_id=staged.object_id AND supplied.object_id=entry.object_id))",
+    ).bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
+    changed |= sqlx::query("INSERT INTO catalog.native_playlist_entries(playlist_key, object_id, media_uri, title, artist, album, album_display_artist, duration_millis, disc_number, track_number, year, release_date, source_format, musicbrainz_recording_id, musicbrainz_release_track_id, position) SELECT playlist.playlist_key, entry.object_id, entry.media_uri, track.title, track.display_artist, track.display_album, album.display_artist, track.duration_millis, track.disc_number, track.track_number, track.year, track.release_date, track.source_format, track.musicbrainz_recording_id, track.musicbrainz_release_track_id, row_number() OVER (
                     PARTITION BY entry.playlist_id ORDER BY entry.position,entry.object_id
                   )-1
            FROM temp.scan_playlist_entries AS entry
-           JOIN catalog.native_playlists AS playlist
+           CROSS JOIN catalog.native_playlists AS playlist
              ON playlist.source_key=?1
             AND playlist.object_id=entry.playlist_id
            LEFT JOIN tracks AS track
@@ -3933,60 +3389,9 @@ async fn publish_links(
              source_format=excluded.source_format,
              musicbrainz_recording_id=excluded.musicbrainz_recording_id,
              musicbrainz_release_track_id=excluded.musicbrainz_release_track_id,
-             position=excluded.position",
-    ] {
-        sqlx::query(sql)
-            .bind(source_key)
-            .execute(&mut **transaction)
-            .await?;
-    }
-    sqlx::query(if full {
-        "DELETE FROM catalog.native_playlist_entries
-         WHERE playlist_key IN (
-             SELECT playlist_key FROM catalog.native_playlists
-             WHERE source_key=?1
-         )
-           AND NOT EXISTS (
-               SELECT 1
-               FROM catalog.native_playlists AS playlist
-               JOIN temp.scan_playlist_entries AS staged
-                 ON staged.playlist_id=playlist.object_id
-                AND staged.object_id=native_playlist_entries.object_id
-               WHERE playlist.playlist_key=native_playlist_entries.playlist_key
-           )"
-    } else {
-        "DELETE FROM catalog.native_playlist_entries
-         WHERE playlist_key IN (
-             SELECT playlist.playlist_key FROM catalog.native_playlists playlist
-             JOIN temp.scan_playlists staged ON staged.object_id=playlist.object_id
-             WHERE playlist.source_key=?1
-         )
-           AND NOT EXISTS (
-               SELECT 1
-               FROM catalog.native_playlists AS playlist
-               JOIN temp.scan_playlist_entries AS staged
-                 ON staged.playlist_id=playlist.object_id
-                AND staged.object_id=native_playlist_entries.object_id
-               WHERE playlist.playlist_key=native_playlist_entries.playlist_key
-           )"
-    })
-    .bind(source_key)
-    .execute(&mut **transaction)
-    .await?;
-    Ok(())
-}
-
-fn digest_catalog_header(
-    staged_digest: [u8; 32],
-    display_name: &str,
-    normalized_name: &str,
-) -> [u8; 32] {
-    let mut hasher = Hasher::new();
-    hash_bytes(&mut hasher, b"source");
-    hash_bytes(&mut hasher, display_name.as_bytes());
-    hash_bytes(&mut hasher, normalized_name.as_bytes());
-    hash_bytes(&mut hasher, &staged_digest);
-    *hasher.finalize().as_bytes()
+             position=excluded.position
+         WHERE (native_playlist_entries.media_uri,native_playlist_entries.title,native_playlist_entries.artist,native_playlist_entries.album,native_playlist_entries.album_display_artist,native_playlist_entries.duration_millis,native_playlist_entries.disc_number,native_playlist_entries.track_number,native_playlist_entries.year,native_playlist_entries.release_date,native_playlist_entries.source_format,native_playlist_entries.musicbrainz_recording_id,native_playlist_entries.musicbrainz_release_track_id,native_playlist_entries.position) IS NOT (excluded.media_uri,excluded.title,excluded.artist,excluded.album,excluded.album_display_artist,excluded.duration_millis,excluded.disc_number,excluded.track_number,excluded.year,excluded.release_date,excluded.source_format,excluded.musicbrainz_recording_id,excluded.musicbrainz_release_track_id,excluded.position)").bind(source_key).execute(&mut **transaction).await?.rows_affected() > 0;
+    Ok(changed)
 }
 
 #[cfg(test)]
@@ -4065,7 +3470,7 @@ mod tests {
                 .await
                 .expect("acquire released writer");
             let _ = acquired_send.send(());
-            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES ('batch-point','Batch point','batch point',zeroblob(32),zeroblob(32))")
+            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('batch-point','Batch point','batch point',zeroblob(32))")
                 .execute(writer.as_mut().expect("writer available"))
                 .await
                 .expect("interleave after bounded batch");
@@ -4094,7 +3499,7 @@ mod tests {
                  WHERE object_id > ?1 ORDER BY object_id LIMIT ?2",
             )
             .bind("")
-            .bind(DIGEST_PAGE_ROWS)
+            .bind(LOUDNESS_PAGE_ROWS)
             .fetch_one(&mut *writer)
             .await
             .expect("read object keyset plan")
@@ -4129,7 +3534,7 @@ mod tests {
             .bind(-1_i64)
             .bind("")
             .bind("")
-            .bind(DIGEST_PAGE_ROWS)
+            .bind(LOUDNESS_PAGE_ROWS)
             .fetch_all(&mut *writer)
             .await
             .expect("read Album loudness keyset plan")
@@ -4149,7 +3554,7 @@ mod tests {
             )
             .bind("")
             .bind(-1_i64)
-            .bind(DIGEST_PAGE_ROWS)
+            .bind(LOUDNESS_PAGE_ROWS)
             .fetch_one(&mut *writer)
             .await
             .expect("read relationship keyset plan")
@@ -4167,7 +3572,7 @@ mod tests {
             )
             .bind("")
             .bind(-1_i64)
-            .bind(DIGEST_PAGE_ROWS)
+            .bind(LOUDNESS_PAGE_ROWS)
             .fetch_one(&mut *writer)
             .await
             .expect("read playlist keyset plan")
@@ -4178,7 +3583,7 @@ mod tests {
                     && !playlist_plan.contains("SCAN"),
                 "{playlist_plan}"
             );
-            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES ('point-source','Point source','point source',zeroblob(32),zeroblob(32))")
+            sqlx::query("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('point-source','Point source','point source',zeroblob(32))")
                 .execute(&mut *writer)
                 .await
                 .expect("interleave point write");
@@ -4195,7 +3600,7 @@ async fn ensure_source_identity(
     source_id: &str,
 ) -> LibraryResult<i64> {
     crate::db::write_source_identity(connection, source_id).await?;
-    sqlx::query("INSERT INTO catalog.sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES(?1,?1,lower(?1),zeroblob(32),zeroblob(32)) ON CONFLICT(object_id) DO NOTHING")
+    sqlx::query("INSERT INTO catalog.sources(object_id,display_name,normalized_name,artwork_digest) VALUES (?1,?1,lower(?1),zeroblob(32)) ON CONFLICT(object_id) DO NOTHING")
         .bind(source_id).execute(&mut *connection).await?;
     Ok(
         sqlx::query_scalar("SELECT source_key FROM catalog.sources WHERE object_id=?1")

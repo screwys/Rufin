@@ -1126,8 +1126,7 @@ mod point_projection_tests {
             .unwrap();
         let mut writer = database.writer().await.unwrap();
         let connection = writer.as_mut().unwrap();
-        sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,catalog_digest,artwork_digest)
-          VALUES(1,'source','Source','source',zeroblob(32),zeroblob(32));
+        sqlx::raw_sql("INSERT INTO catalog.sources(source_key,object_id,display_name,normalized_name,artwork_digest) VALUES (1,'source','Source','source',zeroblob(32));
           INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)
           VALUES(1,1,'small','Small','small','small'),(2,1,'large','Large','large','large');
           WITH RECURSIVE n(x) AS (VALUES(1) UNION ALL SELECT x+1 FROM n WHERE x<15)

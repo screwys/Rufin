@@ -153,6 +153,9 @@ struct Playlist {
     duration_seconds: u32,
     track_count: usize,
     image_ref: Option<ImageRef>,
+    revision: Option<String>,
+    valid_until: Option<i64>,
+    writable: bool,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct PlaylistEntry {

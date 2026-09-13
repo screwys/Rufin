@@ -69,8 +69,7 @@ impl SubsonicSource {
             &ids("song", "track"),
             &ids("album", "album"),
             &ids("artist", "artist"),
-        )
-        .await?;
+        );
         Ok(())
     }
 
@@ -82,20 +81,32 @@ impl SubsonicSource {
     ) -> SourceResult<library::ScanOutcome> {
         check_cancelled(cancelled)?;
         let mut scan = Scan::begin_items(database, source_id).await?;
-        if let Err(error) = self.stage_favorites(&mut scan).await {
+        self.stage_user_collections(&mut scan, &|_| {}, cancelled)
+            .await?;
+        Ok(scan.finish().await?)
+    }
+
+    async fn stage_user_collections(
+        &self,
+        scan: &mut Scan,
+        progress: &(dyn Fn(SourceReadProgress) + Send + Sync),
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<()> {
+        if let Err(error) = self.stage_favorites(scan).await {
             crate::source::optional_collection_error(error)?;
         }
         check_cancelled(cancelled)?;
-        match self.emit_playlists(&mut scan, &|_| {}, cancelled).await {
+        progress(stage(SourceReadStage::Playlists, 0));
+        match self.emit_playlists(scan, progress, cancelled).await {
             Ok(()) => scan.remove_unstaged_playlists().await?,
             Err(error) => {
                 crate::source::optional_collection_error(error)?;
                 scan.retain_playlists().await?;
             }
         }
-        self.stage_home(&mut scan).await?;
+        self.stage_home(scan).await?;
         check_cancelled(cancelled)?;
-        Ok(scan.finish().await?)
+        Ok(())
     }
 
     pub(crate) async fn stage_playlist_snapshot(
@@ -104,21 +115,8 @@ impl SubsonicSource {
         playlist_id: &str,
     ) -> SourceResult<()> {
         let snapshot = self.read_playlist(playlist_id).await?;
-        let artwork = snapshot
-            .playlist
-            .image_ref
-            .as_ref()
-            .map(|image| crate::native_artwork_binding(scan.source_id(), image))
-            .transpose()?;
         scan.begin_batch().await?;
-        scan.write_playlist(
-            &snapshot.playlist.id,
-            &snapshot.playlist.name,
-            &snapshot.playlist.name.to_lowercase(),
-            &snapshot.playlist.name.to_lowercase(),
-            artwork.as_deref(),
-        )
-        .await?;
+        stage_playlist_header(scan, &snapshot.playlist).await?;
         for (position, entry) in snapshot.entries.iter().enumerate() {
             scan.write_playlist_entry(
                 &snapshot.playlist.id,
@@ -128,6 +126,12 @@ impl SubsonicSource {
             )
             .await?;
         }
+        scan.write_playlist_freshness(
+            &snapshot.playlist.id,
+            snapshot.playlist.revision.as_deref(),
+            snapshot.playlist.valid_until,
+        )
+        .await?;
         scan.finish_batch().await?;
         Ok(())
     }
@@ -227,11 +231,6 @@ impl SubsonicSource {
         }
 
         check_cancelled(cancelled)?;
-        if let Err(error) = self.stage_favorites(scan).await {
-            crate::source::optional_collection_error(error)?;
-        }
-
-        check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Genres, 0));
         let genres = match self.read_genres().await {
             Ok(genres) => genres,
@@ -248,12 +247,8 @@ impl SubsonicSource {
         scan.finish_batch().await?;
 
         check_cancelled(cancelled)?;
-        progress(stage(SourceReadStage::Playlists, 0));
-        if let Err(error) = self.emit_playlists(scan, progress, cancelled).await {
-            crate::source::optional_collection_error(error)?;
-            scan.retain_playlists().await?;
-        }
-        self.stage_home(scan).await?;
+        self.stage_user_collections(scan, progress, cancelled)
+            .await?;
 
         check_cancelled(cancelled)?;
         progress(stage(SourceReadStage::Finalizing, 0));
@@ -404,11 +399,25 @@ impl SubsonicSource {
         let total = playlists.len();
         for (position, playlist) in playlists.iter().enumerate() {
             check_cancelled(cancelled)?;
-            let Some(raw_id) = json::id(&playlist["id"]) else {
+            let Some(playlist) = playlist_from_json(self, playlist) else {
                 continue;
             };
-            let id = self.id("playlist", &raw_id);
-            self.stage_playlist_snapshot(scan, &id).await?;
+            stage_playlist_header(scan, &playlist).await?;
+            let now = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap_or_default()
+                .as_secs() as i64;
+            let retained = if let Some(revision) = playlist.revision.as_deref()
+                && playlist.valid_until.is_some_and(|deadline| deadline > now)
+            {
+                scan.retain_playlist_entries_if_fresh(&playlist.id, revision, now)
+                    .await?
+            } else {
+                false
+            };
+            if !retained {
+                self.stage_playlist_snapshot(scan, &playlist.id).await?;
+            }
             progress(SourceReadProgress {
                 stage: SourceReadStage::Playlists,
                 completed: position + 1,
@@ -462,7 +471,7 @@ impl SubsonicSource {
         }
     }
 
-    async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
+    pub(super) async fn stage_home(&self, scan: &mut Scan) -> SourceResult<()> {
         for section in [
             crate::SourceHomeSection::MostPlayed,
             crate::SourceHomeSection::NewlyAdded,
@@ -605,6 +614,102 @@ mod tests {
         let mut scanning = status(41, "2026-08-27T00:01:00Z");
         scanning.scanning = true;
         assert_eq!(completed_freshness(scanning), None);
+    }
+
+    #[tokio::test]
+    async fn playlist_expiry_controls_reuse_without_hiding_header_changes_or_removals() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let server = MockServer::start().await;
+        let state = Arc::new(AtomicUsize::new(0));
+        let reads = Arc::new(AtomicUsize::new(0));
+        let response_state = state.clone();
+        Mock::given(method("GET")).and(path("/rest/getPlaylists.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                let state = response_state.load(Ordering::Relaxed);
+                let mut playlist = serde_json::json!({"id":"playlist","name":if state==1 {"Renamed"} else {"Playlist"},
+                    "changed":if state==4 {"revision-2"} else {"revision-1"},"validUntil":"2099-01-01T00:00:00Z"});
+                if state==2 { playlist["validUntil"] = "2000-01-01T00:00:00Z".into(); }
+                if state==0 { playlist["coverArt"] = "cover".into(); }
+                if state==3 || state==6 { playlist.as_object_mut().unwrap().remove("validUntil"); }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","playlists":{
+                    "playlist":if state==5 {vec![]} else {vec![playlist]}
+                }}}))
+            }).mount(&server).await;
+        let response_state = state.clone();
+        let response_reads = reads.clone();
+        Mock::given(method("GET")).and(path("/rest/getPlaylist.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                response_reads.fetch_add(1,Ordering::Relaxed);
+                let state=response_state.load(Ordering::Relaxed);
+                if state==6 { return ResponseTemplate::new(500); }
+                let mut playlist=serde_json::json!({"id":"playlist","name":"Playlist","changed":if state==4 {"revision-2"} else {"revision-1"},
+                    "validUntil":"2099-01-01T00:00:00Z","entry":if state==4 {vec![]} else {vec![serde_json::json!({"id":"track"})]}});
+                if state==2 { playlist["validUntil"]="2000-01-01T00:00:00Z".into(); }
+                if state==0 { playlist["coverArt"] = "cover".into(); }
+                if state==3 { playlist.as_object_mut().unwrap().remove("validUntil"); }
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({"subsonic-response":{"status":"ok","playlist":playlist}}))
+            }).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::LegacyPassword,
+            },
+            super::SubsonicCredential::LegacyPassword("password".into()).serialize(),
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let scan = library::Scan::begin(&database, "source", "Source", "source", None)
+            .await
+            .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial source")
+        };
+        let cancellation = library::ReadCancellation::new();
+        for (next, expected_reads) in [(0, 1), (1, 1), (2, 2), (3, 3), (6, 4), (4, 5), (5, 5)] {
+            state.store(next, Ordering::Relaxed);
+            source
+                .refresh_user_collections(&database, "source", &|| false)
+                .await
+                .unwrap();
+            assert_eq!(reads.load(Ordering::Relaxed), expected_reads);
+            let playlist = database
+                .playlist_key_by_object(
+                    publication.source,
+                    "subsonic:playlist:playlist",
+                    &cancellation,
+                )
+                .await
+                .unwrap();
+            if next == 5 {
+                assert!(playlist.is_none());
+                continue;
+            }
+            let playlist = playlist.unwrap();
+            let rows = database
+                .playlist_rows(&[playlist], &cancellation)
+                .await
+                .unwrap();
+            assert_eq!(rows[0].name, if next == 1 { "Renamed" } else { "Playlist" });
+            assert_eq!(rows[0].artwork_binding.is_some(), next <= 1);
+            assert_eq!(
+                database
+                    .playlist_media_uri_order(playlist, None, &cancellation)
+                    .await
+                    .unwrap()
+                    .len(),
+                if next == 4 { 0 } else { 1 }
+            );
+        }
     }
 
     #[tokio::test]

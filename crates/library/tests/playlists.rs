@@ -15,7 +15,7 @@ async fn playlist_pin_import_reads_only_the_owning_sources_identities() {
     let mut raw = connection(&fixture.path).await;
     sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'native','A native','a native','a native')")
         .bind(fixture.source).execute(&mut raw).await.unwrap();
-    let other: library::SourceKey = sqlx::query_scalar("INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('emby','Emby','emby',zeroblob(32),zeroblob(32)) RETURNING source_key")
+    let other: library::SourceKey = sqlx::query_scalar("INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('emby','Emby','emby',zeroblob(32)) RETURNING source_key")
         .fetch_one(&mut raw).await.unwrap();
     sqlx::query("INSERT INTO catalog.native_playlists(source_key,object_id,name,normalized_name,sort_text) VALUES(?1,'other','Other','other','other')")
         .bind(other).execute(&mut raw).await.unwrap();
@@ -46,7 +46,7 @@ async fn playlist_destinations_keep_global_rank_without_a_current_source() {
         .await
         .unwrap();
     let other: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest) VALUES('other','Other','other',zeroblob(32),zeroblob(32)) RETURNING source_key",
+        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('other','Other','other',zeroblob(32)) RETURNING source_key",
     ).fetch_one(&mut raw).await.expect("other configured source");
     drop(raw);
     let mut keys = Vec::new();
@@ -612,8 +612,7 @@ async fn source_owned_playlist_additions_report_the_destination_without_partial_
         .await
         .unwrap();
     let destination: library::SourceKey = sqlx::query_scalar(
-        "INSERT INTO sources(object_id,display_name,normalized_name,catalog_digest,artwork_digest)
-         VALUES('destination','Destination','destination',zeroblob(32),zeroblob(32)) RETURNING source_key",
+        "INSERT INTO sources(object_id,display_name,normalized_name,artwork_digest) VALUES ('destination','Destination','destination',zeroblob(32)) RETURNING source_key",
     ).fetch_one(&mut raw).await.unwrap();
     let own_uri = "test:destination-track".to_string();
     sqlx::query("INSERT INTO tracks(source_key,object_id,media_uri,title,normalized_search,display_artist,display_album,sort_text,duration_millis)

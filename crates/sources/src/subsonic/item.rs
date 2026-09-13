@@ -569,5 +569,29 @@ pub(super) fn playlist_from_json(source: &SubsonicSource, playlist: &Value) -> O
         image_ref: image_ref(source, json::id(&playlist["coverArt"])),
         duration_seconds: 0,
         track_count: json::items(&playlist["entry"]).len(),
+        revision: json::field::<String>(playlist, "changed").filter(|value| !value.is_empty()),
+        valid_until: crate::policy::unix_seconds(json::field(playlist, "validUntil")),
+        writable: !json::boolean(&playlist["readonly"]).unwrap_or(false),
     })
+}
+
+pub(super) async fn stage_playlist_header(
+    scan: &mut library::Scan,
+    playlist: &Playlist,
+) -> library::LibraryResult<()> {
+    let artwork = playlist
+        .image_ref
+        .as_ref()
+        .map(|image| crate::native_artwork_binding(scan.source_id(), image))
+        .transpose()?;
+    scan.write_playlist(
+        &playlist.id,
+        &playlist.name,
+        &playlist.name.to_lowercase(),
+        &playlist.name.to_lowercase(),
+        artwork.as_deref(),
+    )
+    .await?;
+    scan.write_playlist_writable(&playlist.id, playlist.writable)
+        .await
 }
