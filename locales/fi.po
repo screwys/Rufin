@@ -948,9 +948,6 @@ msgstr "Syötä palvelimen osoite, käyttäjätunnus ja salasana"
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr "Kirjoita Nextcloud-palvelimesi osoite kirjautuaksesi selaimella"
 
-msgid "Enter your Rufin access token."
-msgstr ""
-
 msgid "Entire Library"
 msgstr "Koko kirjasto"
 

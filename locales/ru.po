@@ -951,9 +951,6 @@ msgstr "Введите адрес сервера, имя пользовател�
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr "Введите адрес вашего сервера Nextcloud, чтобы войти через браузер"
 
-msgid "Enter your Rufin access token."
-msgstr "Введите свой токен доступа к Rufin."
-
 msgid "Entire Library"
 msgstr "Вся библиотека"
 
@@ -3060,6 +3057,9 @@ msgstr "Параметр автоматического обновления {ap
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
 msgstr "Добро пожаловать в программу установки Rufin"
+
+#~ msgid "Enter your Rufin access token."
+#~ msgstr "Введите свой токен доступа к Rufin."
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
