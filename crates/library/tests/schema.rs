@@ -32,6 +32,233 @@ async fn scan_publication_and_reopening_an_unanalyzed_catalog_populate_statistic
     reopened.close().await.unwrap();
 }
 
+#[tokio::test]
+async fn removing_obsolete_catalog_digest_preserves_tracks_and_reconciles_sources() {
+    let fixture = super::support::fixture().await;
+    fixture.database.close().await.unwrap();
+    let before = durable_rows(&fixture.path).await;
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::raw_sql("ALTER TABLE catalog.sources ADD COLUMN catalog_digest BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000'")
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    raw.close().await.unwrap();
+
+    let reopened = Database::open(&fixture.path).await.unwrap();
+    assert_eq!(durable_rows(&fixture.path).await, before);
+    for source in ["source", "new-source"] {
+        reopened
+            .reconcile_source(&SourceId::new(source))
+            .await
+            .unwrap();
+    }
+    let mut raw = super::support::connection(&fixture.path).await;
+    let tracks: Vec<i64> =
+        sqlx::query_scalar("SELECT track_key FROM catalog.tracks ORDER BY track_key")
+            .fetch_all(&mut raw)
+            .await
+            .unwrap();
+    assert_eq!(tracks.len(), fixture.tracks.len());
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT count(*) FROM pragma_table_info('sources','catalog') WHERE name='catalog_digest'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        0
+    );
+    raw.close().await.unwrap();
+    reopened.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn missing_columns_are_repaired_from_declarations_before_indexes() {
+    let fixture = super::support::fixture().await;
+    fixture.database.close().await.unwrap();
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::raw_sql("
+        DROP VIEW temp.playlist_entries;
+        DROP VIEW temp.playlists;
+        DROP VIEW temp.local_access_files;
+        DROP VIEW temp.activity_baseline;
+        DROP INDEX main.playlist_entries_media_idx;
+        ALTER TABLE main.playlist_entries DROP COLUMN title;
+        ALTER TABLE main.playlist_entries ADD COLUMN newer_field TEXT;
+        ALTER TABLE main.queue_occurrences DROP COLUMN origin_position;
+        INSERT INTO main.queue_state(singleton) VALUES(1);
+        ALTER TABLE main.queue_state DROP COLUMN repeat_mode;
+        ALTER TABLE catalog.albums DROP COLUMN source_rating;
+        DROP INDEX catalog.tracks_source_favorites_idx;
+        ALTER TABLE catalog.tracks DROP COLUMN source_favorite;
+        ALTER TABLE catalog.native_playlists DROP COLUMN writable;
+        ALTER TABLE catalog.home_entries DROP COLUMN section_title;
+        ALTER TABLE catalog.local_files DROP COLUMN revision;
+        ALTER TABLE catalog.activity_baseline DROP COLUMN last_played_at;
+        ALTER TABLE catalog.activity_baseline ADD COLUMN newer_field TEXT;
+        INSERT INTO main.playlists(playlist_key,object_id,name,position) VALUES(99,'saved','Saved',0);
+        INSERT INTO main.playlist_entries(playlist_key,object_id,media_uri,artist,position)
+            VALUES(99,'saved-song','https://example.test/saved','Saved artist',0);
+        INSERT INTO catalog.native_playlists(playlist_key,source_key,object_id,name,normalized_name,sort_text)
+            VALUES(91,1,'native','Native','native','native');
+        INSERT INTO catalog.native_playlist_entries(playlist_key,object_id,media_uri,title,artist,position)
+            VALUES(91,'native-song','https://example.test/native','Native title','Native artist',0);
+        INSERT INTO catalog.activity_baseline(source_key,period,item_kind,track_object_id,play_count,skip_count)
+            VALUES(1,'lifetime','track','track-a',7,2);
+        INSERT INTO main.legacy_activity VALUES('source','lifetime','track','legacy',4,1,90);
+    ").execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+
+    let database = Database::open(&fixture.path).await.unwrap();
+    assert!(!database.fresh_start());
+    let mut raw = super::support::connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_as::<_, (String, String)>(
+            "SELECT title,artist FROM playlist_entries WHERE object_id='native-song'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        ("Native title".into(), "Native artist".into())
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (Option<String>, String)>(
+            "SELECT title,artist FROM playlist_entries WHERE object_id='saved-song'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        (None, "Saved artist".into())
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64, Option<i64>)>("SELECT play_count,skip_count,last_played_at FROM activity_baseline WHERE track_object_id='legacy'")
+            .fetch_one(&mut raw).await.unwrap(),
+        (4, 1, Some(90))
+    );
+    assert_eq!(
+        sqlx::query_as::<_, (i64, i64, Option<i64>)>("SELECT play_count,skip_count,last_played_at FROM activity_baseline WHERE track_object_id='track-a'")
+            .fetch_one(&mut raw).await.unwrap(),
+        (7, 2, None)
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM catalog.tracks WHERE source_favorite=0")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        fixture.tracks.len() as i64
+    );
+    assert!(
+        sqlx::query("UPDATE catalog.tracks SET source_favorite=2")
+            .execute(&mut raw)
+            .await
+            .is_err()
+    );
+    assert!(
+        sqlx::query("UPDATE catalog.albums SET source_rating=101")
+            .execute(&mut raw)
+            .await
+            .is_err()
+    );
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>(
+            "SELECT writable FROM catalog.native_playlists WHERE object_id='native'"
+        )
+        .fetch_one(&mut raw)
+        .await
+        .unwrap(),
+        1
+    );
+    sqlx::raw_sql(
+        "SELECT origin_position FROM main.queue_occurrences;
+        SELECT section_title FROM catalog.home_entries;
+        SELECT revision FROM catalog.local_files;",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT repeat_mode FROM main.queue_state")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        "none"
+    );
+    assert!(
+        sqlx::query("UPDATE main.queue_state SET repeat_mode='invalid'")
+            .execute(&mut raw)
+            .await
+            .is_err()
+    );
+    raw.close().await.unwrap();
+    database.close().await.unwrap();
+    // Reopening is a no-op for the repaired data and accepts retained newer fields.
+    let database = Database::open(&fixture.path).await.unwrap();
+    assert!(!database.fresh_start());
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn attached_catalog_setup_failure_recovers_catalog_without_replacing_store() {
+    let fixture = super::support::fixture().await;
+    fixture
+        .database
+        .create_playlist(None, "Keep me", &[])
+        .await
+        .unwrap();
+    fixture.database.close().await.unwrap();
+    let before = durable_rows(&fixture.path).await;
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::raw_sql(
+        "DROP INDEX catalog.tracks_local_shuffle_idx;
+        CREATE TABLE catalog.tracks_local_shuffle_idx(value TEXT);",
+    )
+    .execute(&mut raw)
+    .await
+    .unwrap();
+    raw.close().await.unwrap();
+    let database = Database::open(&fixture.path).await.unwrap();
+    assert!(!database.fresh_start());
+    assert_eq!(durable_rows(&fixture.path).await, before);
+    database
+        .reconcile_source(&SourceId::new("source"))
+        .await
+        .unwrap();
+    database.close().await.unwrap();
+}
+
+#[tokio::test]
+async fn malformed_store_schema_is_preserved_even_when_opening_the_writer_fails() {
+    let fixture = super::support::fixture().await;
+    fixture.database.close().await.unwrap();
+    let mut raw = super::support::connection(&fixture.path).await;
+    sqlx::raw_sql("PRAGMA writable_schema=ON;
+        UPDATE main.sqlite_schema SET sql=replace(sql,'CREATE TABLE','BROKEN TABLE') WHERE name='source_ids';")
+        .execute(&mut raw).await.unwrap();
+    raw.close().await.unwrap();
+    let bytes = std::fs::read(&fixture.path).unwrap();
+    let database = Database::open(&fixture.path).await.unwrap();
+    assert!(database.fresh_start());
+    let preserved = std::fs::read_dir(fixture.path.parent().unwrap())
+        .unwrap()
+        .map(|entry| entry.unwrap().path())
+        .find(|path| {
+            path.extension()
+                .is_some_and(|extension| extension.to_string_lossy().starts_with("unusable-"))
+        })
+        .unwrap();
+    assert_eq!(std::fs::read(preserved).unwrap(), bytes);
+    let mut raw = super::support::connection(&fixture.path).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, i64>("SELECT count(*) FROM catalog.tracks")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        fixture.tracks.len() as i64
+    );
+    raw.close().await.unwrap();
+    database.close().await.unwrap();
+}
+
 const SCHEMA_43: &str = r#"BEGIN IMMEDIATE;
 PRAGMA application_id = 1381320270;
 PRAGMA user_version = 43;
@@ -1972,15 +2199,27 @@ async fn unused_fields_and_version_stamp_do_not_replace_usable_state() {
 }
 
 #[tokio::test]
-async fn missing_required_index_column_opens_fresh_without_catalog_rescan() {
+async fn missing_nullable_index_column_is_repaired_without_replacing_store_or_catalog() {
     let fixture = super::support::fixture().await;
+    fixture
+        .database
+        .create_playlist(None, "Keep me", &[])
+        .await
+        .unwrap();
     fixture.database.close().await.unwrap();
     let mut raw = connection(&fixture.path, false).await;
     sqlx::raw_sql("DROP VIEW temp.playlist_entries; DROP VIEW temp.playlists; DROP VIEW temp.local_access_files; DROP VIEW temp.activity_baseline; DROP INDEX listens_media_idx; ALTER TABLE listens DROP COLUMN media_uri;").execute(&mut raw).await.unwrap();
     raw.close().await.unwrap();
     let database = Database::open(&fixture.path).await.unwrap();
-    assert!(database.fresh_start());
+    assert!(!database.fresh_start());
     let mut raw = connection(&fixture.path, false).await;
+    assert_eq!(
+        sqlx::query_scalar::<_, String>("SELECT name FROM main.playlists WHERE name IS NOT NULL")
+            .fetch_one(&mut raw)
+            .await
+            .unwrap(),
+        "Keep me"
+    );
     assert_eq!(
         sqlx::query_scalar::<_, i64>("SELECT count(*) FROM tracks")
             .fetch_one(&mut raw)

@@ -628,92 +628,103 @@ CREATE INDEX IF NOT EXISTS local_access_match_uri_idx ON local_access_metadata(n
 "#;
 
 pub(crate) async fn initialize_durable(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let mut transaction = connection.begin().await?;
-    sqlx::raw_sql(STORE_SCHEMA)
-        .execute(&mut *transaction)
-        .await?;
-    for (column, kind) in [
-        ("origin_source", "INTEGER"),
-        ("origin_position", "INTEGER"),
-        ("playlist_entry_id", "TEXT"),
-    ] {
-        let exists: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('queue_occurrences') WHERE name=?1)",
-        )
-        .bind(column)
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !exists {
-            sqlx::query(sqlx::AssertSqlSafe(format!(
-                "ALTER TABLE queue_occurrences ADD COLUMN {column} {kind}"
-            )))
-            .execute(&mut *transaction)
-            .await?;
-        }
-    }
-    transaction.commit().await?;
-    Ok(())
+    initialize(connection, STORE_SCHEMA).await
 }
+
 pub(crate) async fn initialize_catalog(connection: &mut SqliteConnection) -> LibraryResult<()> {
-    let mut transaction = connection.begin().await?;
-    // Preserve the accepted Local inventory when adding remote-file observations.
-    let has_files: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM sqlite_schema WHERE name='local_files' AND type='table')",
-    )
-    .fetch_one(&mut *transaction)
-    .await?;
-    if has_files {
-        let has_revision: bool = sqlx::query_scalar(
-            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_files') WHERE name='revision')",
-        )
-        .fetch_one(&mut *transaction)
-        .await?;
-        if !has_revision {
-            sqlx::raw_sql("ALTER TABLE local_files ADD COLUMN native_id TEXT; ALTER TABLE local_files ADD COLUMN revision TEXT;")
-                .execute(&mut *transaction).await?;
-        }
-        let has_picture: bool = sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info('local_files') WHERE name='picture_index')").fetch_one(&mut *transaction).await?;
-        if !has_picture {
-            sqlx::raw_sql("ALTER TABLE local_files ADD COLUMN picture_index INTEGER;")
-                .execute(&mut *transaction)
-                .await?;
-        }
-    }
-    sqlx::raw_sql(CATALOG_SCHEMA)
-        .execute(&mut *transaction)
-        .await?;
+    initialize(connection, CATALOG_SCHEMA).await?;
     if sqlx::query_scalar::<_, bool>(
         "SELECT EXISTS(SELECT 1 FROM pragma_table_info('sources') WHERE name='catalog_digest')",
     )
-    .fetch_one(&mut *transaction)
+    .fetch_one(&mut *connection)
     .await?
     {
         sqlx::query("ALTER TABLE sources DROP COLUMN catalog_digest")
-            .execute(&mut *transaction)
+            .execute(connection)
             .await?;
     }
-    for (table, column, definition) in [
-        ("native_playlists", "writable", "INTEGER NOT NULL DEFAULT 1"),
-        ("native_playlists", "provider_revision", "TEXT"),
-        ("native_playlists", "valid_until", "INTEGER"),
-        ("home_entries", "section_title", "TEXT"),
-    ] {
-        let present: bool =
-            sqlx::query_scalar("SELECT EXISTS(SELECT 1 FROM pragma_table_info(?1) WHERE name=?2)")
-                .bind(table)
-                .bind(column)
-                .fetch_one(&mut *transaction)
-                .await?;
-        if !present {
+    Ok(())
+}
+
+async fn initialize(connection: &mut SqliteConnection, schema: &'static str) -> LibraryResult<()> {
+    let mut transaction = connection.begin().await?;
+    for statement in sql_parts(schema, ';') {
+        let Some(table) = statement.strip_prefix("CREATE TABLE IF NOT EXISTS ") else {
+            continue;
+        };
+        let (name, columns) = table.split_once('(').expect("table declaration");
+        let name = name.trim();
+        let existing: Vec<String> = sqlx::query_scalar("SELECT name FROM pragma_table_info(?1)")
+            .bind(name)
+            .fetch_all(&mut *transaction)
+            .await?;
+        if existing.is_empty() {
+            continue;
+        }
+        let (columns, _) = columns.rsplit_once(')').expect("table columns");
+        for definition in sql_parts(columns, ',') {
+            let column = definition
+                .split(|c: char| c.is_whitespace() || c == '(')
+                .next()
+                .expect("column definition");
+            if matches!(
+                column,
+                "PRIMARY" | "UNIQUE" | "CHECK" | "FOREIGN" | "CONSTRAINT"
+            ) || existing.iter().any(|name| name == column)
+            {
+                continue;
+            }
             sqlx::query(sqlx::AssertSqlSafe(format!(
-                "ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                "ALTER TABLE {name} ADD COLUMN {definition}"
             )))
             .execute(&mut *transaction)
             .await?;
         }
     }
+    sqlx::raw_sql(schema).execute(&mut *transaction).await?;
     transaction.commit().await?;
     Ok(())
+}
+
+/// Split our schema declarations without splitting quoted values or SQL expressions.
+fn sql_parts(sql: &str, separator: char) -> Vec<&str> {
+    let mut parts = Vec::new();
+    let mut start = 0;
+    let mut depth = 0;
+    let mut quote = None;
+    let mut chars = sql.char_indices().peekable();
+    while let Some((position, character)) = chars.next() {
+        if let Some(end) = quote {
+            if character == end {
+                if chars.peek().is_some_and(|(_, next)| *next == end) {
+                    chars.next();
+                } else {
+                    quote = None;
+                }
+            }
+            continue;
+        }
+        match character {
+            '\'' | '"' | '`' => quote = Some(character),
+            '[' => quote = Some(']'),
+            '(' => depth += 1,
+            ')' => depth -= 1,
+            value if value == separator && depth == 0 => {
+                parts.push(
+                    sql.get(start..position)
+                        .expect("character boundaries")
+                        .trim(),
+                );
+                start = position + character.len_utf8();
+            }
+            _ => {}
+        }
+    }
+    let tail = sql.get(start..).expect("character boundary").trim();
+    if !tail.is_empty() {
+        parts.push(tail);
+    }
+    parts
 }
 pub(crate) async fn attach_catalog(
     connection: &mut SqliteConnection,
@@ -738,13 +749,6 @@ pub(crate) async fn initialize_local_activity(
     ).fetch_one(&mut *connection).await?;
     let mut transaction = connection.begin().await?;
     if !indexed {
-        let has_count: bool = sqlx::query_scalar(
-        "SELECT EXISTS(SELECT 1 FROM pragma_table_info('tracks','catalog') WHERE name='local_play_count')",
-    ).fetch_one(&mut *transaction).await?;
-        if !has_count {
-            sqlx::query("ALTER TABLE catalog.tracks ADD COLUMN local_play_count INTEGER NOT NULL DEFAULT 0 CHECK(local_play_count>=0)")
-            .execute(&mut *transaction).await?;
-        }
         sqlx::raw_sql("UPDATE catalog.tracks SET local_play_count=(SELECT count(*) FROM main.listens WHERE listens.media_uri=tracks.media_uri);
         CREATE INDEX catalog.tracks_local_play_count_idx ON tracks(source_key,local_play_count,sort_text,media_uri);
         CREATE INDEX catalog.tracks_global_local_play_count_idx ON tracks(local_play_count,sort_text,media_uri);")
@@ -777,7 +781,10 @@ const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           LEFT JOIN main.playlists identity ON identity.source_key=durable.source_key
             AND identity.object_id=observed.object_id AND identity.name IS NULL;
         CREATE TEMP VIEW playlist_entries AS
-          SELECT * FROM main.playlist_entries
+          SELECT playlist_entry_key,playlist_key,object_id,media_uri,title,artist,album,
+                 album_display_artist,snapshot_at,duration_millis,disc_number,track_number,
+                 year,release_date,source_format,musicbrainz_recording_id,
+                 musicbrainz_release_track_id,position FROM main.playlist_entries
           UNION ALL
           SELECT -playlist_entry_key,-playlist_key,object_id,media_uri,title,artist,album,
                  album_display_artist,snapshot_at,duration_millis,disc_number,track_number,
@@ -799,7 +806,8 @@ const CONNECTION_VIEWS: &str = r#"CREATE TEMP VIEW playlists AS
           LEFT JOIN catalog.sources source ON source.object_id=identity.object_id
           LEFT JOIN catalog.local_access_metadata metadata USING(access_uri);
 CREATE TEMP VIEW activity_baseline AS
-  SELECT * FROM catalog.activity_baseline
+  SELECT source_key,period,item_kind,track_object_id,play_count,skip_count,last_played_at
+  FROM catalog.activity_baseline
   UNION ALL
   SELECT source.source_key,old.period,old.item_kind,old.track_object_id,old.play_count,
          old.skip_count,old.last_played_at
