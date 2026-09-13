@@ -89,7 +89,7 @@ jobs:
 
     steps:
       - name: Install bootstrap tools
-        run: pacman -Syu --noconfirm --needed base-devel git
+        run: pacman -Syu --noconfirm --needed base-devel curl git
 
       - name: Check out repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
@@ -149,7 +149,7 @@ jobs:
           fi
           test "$(uname -m)" = "x86_64"
 
-      - name: Build release payload
+      - name: Select payload version
         env:
           RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
         run: |
@@ -167,6 +167,12 @@ jobs:
           fi
           echo "PACKAGE_VERSION=$version" >> "$GITHUB_ENV"
 
+      - name: Build release payload
+        if: ${{ !inputs.publish }}
+        run: |
+          set -euo pipefail
+          source_dir="$GITHUB_WORKSPACE"
+          version="$PACKAGE_VERSION"
           staging="/home/builder/package-root"
           target_dir="/home/builder/target"
           install -d -o builder -g builder "$staging"
@@ -206,6 +212,17 @@ jobs:
             -cf "$GITHUB_WORKSPACE/dist/rufin-${version}-archlinux-x86_64.tar.zst" \
             -C "$staging" \
             usr
+
+      - name: Download published release payload
+        if: inputs.publish
+        env:
+          RELEASE_TAG: ${{ needs.prepare.outputs.release_tag }}
+        run: |
+          set -euo pipefail
+          archive="rufin-${PACKAGE_VERSION}-archlinux-x86_64.tar.zst"
+          curl --fail --location \
+            --output "$GITHUB_WORKSPACE/dist/$archive" \
+            "$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/releases/download/$RELEASE_TAG/$archive"
 
       - name: Render and build rufin-bin
         run: |
@@ -251,6 +268,7 @@ jobs:
           pacman -Rns --noconfirm rufin-bin
 
       - name: Upload Arch payload
+        if: ${{ !inputs.publish }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: archlinux-x86_64

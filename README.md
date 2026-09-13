@@ -251,7 +251,7 @@ pacman -S --needed base-devel git \
 ```bash
 brew install \
   rust cmake just pkgconf gettext gtk4 libadwaita gstreamer \
-  librsvg game-music-emu libopenmpt libsoup meson ninja openssl@3 wavpack
+  librsvg game-music-emu libnice-gstreamer libopenmpt libsoup meson ninja openssl@3 wavpack
 ```
 
 **Building:** After you installed dependencies for your operating system, you can build and run:
@@ -301,20 +301,6 @@ RUST_LOG=debug rufin # for native packages
 ```bash
 just debug  # for local build
 ```
-
-To test if Rufin can play a specific media (reading metadata and actual GStreamer audio decoding):
-
-```bash
-flatpak run --filesystem=host:ro io.github.screwys.Rufin --verify-media (realpath "media_path.format")
-  ```
-```bash
-rufin --verify-media "media_path.format"
-  ```
-
-```bash
-cargo run -p rufin -- --verify-media "media_path.format"
-```
-If should exit silently if the media can be played.
 
 ## Uninstallation
 

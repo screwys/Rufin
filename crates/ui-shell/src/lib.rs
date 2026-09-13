@@ -14,8 +14,4 @@ pub use application::{
     run_application, run_application_after_update, run_startup_error_application,
 };
 
-pub fn verify_interface_resources() -> Result<(), String> {
-    application::verify_interface_resources()
-}
-
 use rufin_core::settings::*;

@@ -20,6 +20,7 @@ pub(crate) fn run(mut args: Vec<String>) -> Result<()> {
 
     match args.remove(0).as_str() {
         "package-layout" => package_layout(args),
+        "packaged-playback" => crate::packaged_playback::run(args),
         "release-metadata" => release_metadata(args),
         "release-tag" => release_tag(args),
         command => Err(format!("unknown verify command: {command}").into()),

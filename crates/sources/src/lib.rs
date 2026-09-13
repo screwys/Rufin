@@ -58,9 +58,7 @@ pub use operations::{
 pub use source::*;
 
 pub use discovery::{DiscoveredServer, DiscoveryProvider, discover_servers};
-pub use file::local::{
-    LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_local_image, verify_local_media_file,
-};
+pub use file::local::{LOCAL_LIBRARY_SOURCE_ID, LOCAL_SOURCE_ID, read_local_image};
 pub use plex::{
     PLEX_QUEUE_WINDOW, PlexCompanionContext, PlexCompanionPlayer, PlexQueueItem, PlexQueueMutation,
     PlexQueuePlacement, PlexQueueWindow, plex_queue_write_batches,

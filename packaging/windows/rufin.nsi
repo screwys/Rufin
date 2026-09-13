@@ -308,9 +308,6 @@ Function DetectPreviousInstall
     StrCpy $LegacyInstallDir "$LOCALAPPDATA\Programs\${RUFIN_PROJECT_NAME}"
 previous_install_found:
     StrCmp $LegacyInstallDir "" legacy_install_done
-    GetFullPathName $LegacyInstallDir "$LegacyInstallDir"
-    GetFullPathName $INSTDIR "$INSTDIR"
-    StrCmp $LegacyInstallDir $INSTDIR legacy_install_done
     IfFileExists "$LegacyInstallDir\Uninstall.exe" 0 legacy_install_done
     IfFileExists "$LegacyInstallDir\rufin.ico" 0 legacy_install_done
     IfFileExists "$LegacyInstallDir\bin\rufin.exe" legacy_install_owned
@@ -327,8 +324,13 @@ Function ValidateDestination
     ; Moving into or above the old installation would make its cleanup remove
     ; the new payload. Both folders must be separate when changing location.
     StrCmp $LegacyInstallOwned 1 0 destination_valid
-    GetFullPathName $0 "$INSTDIR\"
-    GetFullPathName $1 "$LegacyInstallDir\"
+    ; Compare normalized directories without changing NSIS's chosen destination.
+    System::Call 'kernel32::GetFullPathNameW(w "$INSTDIR\.\", i ${NSIS_MAX_STRLEN}, w .r0, p 0)'
+    System::Call 'kernel32::GetFullPathNameW(w "$LegacyInstallDir\.\", i ${NSIS_MAX_STRLEN}, w .r1, p 0)'
+    ${If} $0 == $1
+        StrCpy $LegacyInstallOwned 0
+        Goto destination_valid
+    ${EndIf}
     StrLen $2 $0
     StrCpy $3 $1 $2
     StrCmp $3 $0 invalid_destination

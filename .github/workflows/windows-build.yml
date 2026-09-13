@@ -113,10 +113,29 @@ jobs:
           set -euo pipefail
           RUFIN_ARTIFACT_ROOT="$PWD/dist" just _build-native-package stable
 
-      - name: Verify packaged executable startup
+      - name: Verify installation, upgrade, and executable startup
         shell: pwsh
         run: |
-          $stage = Join-Path $env:GITHUB_WORKSPACE '.local/build/cmake/release-package/Rufin'
+          $stage = Join-Path $env:LOCALAPPDATA 'Programs/Rufin'
+          if (Test-Path $stage) {
+            throw 'Fresh-install check requires an empty destination'
+          }
+          $installer = (Get-ChildItem (Join-Path $env:GITHUB_WORKSPACE 'dist/Rufin-*-setup.exe')).FullName
+          foreach ($operation in @('installation', 'upgrade')) {
+            $process = Start-Process -FilePath $installer -ArgumentList '/S' -PassThru
+            if (-not $process.WaitForExit(120000)) {
+              $process.Kill()
+              throw "Rufin $operation did not finish within two minutes"
+            }
+            if ($process.ExitCode -ne 0) {
+              throw "Rufin $operation exited with code $($process.ExitCode)"
+            }
+            foreach ($name in @('LICENSE', 'bin/rufin.exe', 'Uninstall.exe')) {
+              if (-not (Test-Path (Join-Path $stage $name))) {
+                throw "Installed file is missing: $name"
+              }
+            }
+          }
           foreach ($name in @('bcrypt.dll', 'kernel32.dll', 'ntdll.dll')) {
             if (Test-Path (Join-Path $stage "bin/$name")) {
               throw "Windows system DLL was bundled: $name"
@@ -137,6 +156,12 @@ jobs:
           if ($process.ExitCode -ne 0) {
             throw "Packaged Rufin exited with code $($process.ExitCode)"
           }
+
+      - name: Verify installed headless playback
+        timeout-minutes: 2
+        shell: msys2 {0}
+        run: |
+          cargo run --locked -p xtask -- verify packaged-playback "$LOCALAPPDATA/Programs/Rufin/bin/rufin.exe"
 
       - name: Retain executable symbols
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
