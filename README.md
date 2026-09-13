@@ -8,7 +8,7 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. 
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="108"> Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. It can be run headless, scripted, or controlled from its Web UI.
 
 <br clear="left">
 
@@ -133,12 +133,17 @@ sudo dnf install rufin
 
 ## AUR
 
-- `rufin-bin` installs the release binary. `rufin-git` builds the current source.
+Latest binary releases:
 
 ```bash
 yay -S rufin-bin
-yay -S rufin-git
 ```
+
+Building from the source:
+```bash
+yay -S rufin-git 
+```
+
 
 ## Nix
 
