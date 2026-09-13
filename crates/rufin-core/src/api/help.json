@@ -1,6 +1,10 @@
 {
   "routes": {
     "GET /api/playback": "Playback status and the current track",
+    "GET /api/pins": "Read shared sidebar pins and their resolved items in saved order.",
+    "POST /api/pins": "Set a pin with {pin,pinned}. Pin is Album {source_id,album_id}, Artist {source_id,artist_id,album_artist}, Genre {source_id,genre_id}, Playlist {source_id,playlist_id}, or SmartPlaylist {playlist_id}, wrapped in its type name. IDs are object_id values, not numeric database keys; omit source_id for a local playlist.",
+    "PATCH /api/pins": "Reorder with {moved,target}, each a pin identity. Uses the desktop drag order: before when moving upward, after when moving downward.",
+    "Queue drop position": "POST /api/queue and its collection routes accept mode insert with before or after (queue occurrence ID). Omit both to insert at the end. Uses the desktop drop operation without starting playback. POST /api/queue/reorder also accepts before or after.",
     "GET /api/playback/events": "Follow playback changes",
     "POST /api/playback/play": {},
     "POST /api/playback/pause": {},
@@ -75,6 +79,7 @@
       "source": null,
       "uris": ["track URI"]
     },
+    "Playlist ownership": "POST /api/playlists accepts source (owner, null for Rufin), selection_source (origin of a collection being added), and current (optional saved destination preference). Newly created playlists are pinned like in the desktop app.",
     "PATCH /api/playlists": {
       "id": 1,
       "name": "New name"

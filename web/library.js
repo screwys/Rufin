@@ -8,7 +8,8 @@ import {
   notice,
   run,
   showFavorite,
-  cover,
+  coverGroup,
+  bindHoverControls,
 } from "./ui.js";
 
 import { api, fragment, session, state } from "./connection.js";
@@ -24,6 +25,8 @@ import {
 } from "./menus.js";
 
 import { renderSources, sources } from "./sources.js";
+import { pinAction, refreshPins, markPins } from "./pins.js";
+import { bindDrag, mediaSelection, queueMedia } from "./drag.js";
 
 const titles = {
   home: tr("Home"),
@@ -205,6 +208,7 @@ async function loadLibrary(path, parameters, signal) {
 function navigate(next, selected = null) {
   route = next;
   detail = selected;
+  markPins();
   offset = 0;
   $("search").value = "";
   $("descending").setAttribute("aria-pressed", "false");
@@ -309,6 +313,7 @@ function empty(title, description, action) {
 }
 
 async function loadView() {
+  run(refreshPins);
   for (const name of ["role", "aria-label", "aria-multiselectable"])
     $("content").removeAttribute(name);
   selectionRequest?.abort();
@@ -522,6 +527,18 @@ function bindTracks(host, start, signal) {
     const index = start + position,
       row = mediaRow(tr);
     tr.dataset.index = index;
+    bindDrag(
+      tr,
+      async () => {
+        const media = mediaSelection("track", row);
+        await selectionPending;
+        media.uris = selectedTracks.has(index)
+          ? selectedRows().map((item) => item.uri)
+          : [row.uri];
+        return media;
+      },
+      false,
+    );
     if (selectedTracks.has(index)) selectedTracks.set(index, row);
     const selected = selectedTracks.has(index);
     tr.classList.toggle("selected", selected);
@@ -690,14 +707,17 @@ function init() {
     }),
   );
   $("play-collection").addEventListener("click", () => run(playCollection));
-  $("new-playlist").addEventListener("click", () => openName());
+  $("new-playlist").addEventListener("click", () => run(() => openName()));
   setSort();
 }
 
 function bindCards(host) {
   for (const card of host.querySelectorAll("[data-row][data-kind]")) {
+    bindHoverControls(card);
     const row = mediaRow(card),
       kind = card.dataset.kind;
+    if (!card.classList.contains("pin-row"))
+      bindDrag(card, () => mediaSelection(kind, row), kind !== "track");
     const open = () => {
       if (kind !== "track")
         return navigate(
@@ -715,28 +735,37 @@ function bindCards(host) {
         .forEach((node) => node.classList.remove("selected"));
       card.classList.add("selected");
     };
-    const play = (mode) =>
-      kind === "track"
-        ? playUris([row.uri], mode)
-        : api(`/queue/${kind}`, "POST", {
-            id: row.id,
-            source: state.source || null,
-            folder: state.selectedLibrary,
-            mode,
-          });
+    const play = (mode) => queueMedia(mediaSelection(kind, row), mode);
     const menu = async (anchor, event) => {
       const actions = [
         [tr("Play"), () => play("replace")],
         [tr("Play Next"), () => play("next")],
         [tr("Play Later"), () => play("append")],
       ];
-      if (kind !== "smart-playlist") actions.push(radioMenu(row, kind));
+      if (["track", "album", "artist", "playlist"].includes(kind))
+        actions.push(
+          radioMenu(
+            row,
+            kind === "artist" && row.album_artists ? "album_artist" : kind,
+          ),
+        );
       actions.push(
         null,
         playlistMenu(
           kind === "track"
             ? { uris: [row.uri] }
-            : { selection: { kind: kind.replaceAll("-", "_"), id: row.id } },
+            : {
+                selection: {
+                  kind: kind.replaceAll("-", "_"),
+                  id: row.id,
+                  album_artists: !!row.album_artists,
+                },
+                source: row.source ?? state.source,
+                folder:
+                  row.source && row.source !== state.source
+                    ? null
+                    : state.selectedLibrary,
+              },
         ),
       );
       if (["track", "album", "artist"].includes(kind))
@@ -744,6 +773,8 @@ function bindCards(host) {
           row.favorite ? tr("Remove from Favorites") : tr("Add to Favorites"),
           () => setFavorite([row], kind),
         ]);
+      const pin = pinAction(kind, row, row.source ?? state.source);
+      if (pin) actions.push(pin);
       if (row.writable)
         actions.push(
           [tr("Rename Playlist"), () => openName(row)],
@@ -782,13 +813,14 @@ function bindCards(host) {
         button.blur();
       }
     });
-    if (kind === "track") {
+    if (kind === "track" || card.classList.contains("pin-row")) {
       card.addEventListener("dblclick", (event) => {
-        if (event.target.closest(".cover-open, .collection-title"))
+        if (event.target.closest(".cover-open, .collection-title, .pin-open"))
           run(() => play("replace"));
       });
       card.addEventListener("keydown", (event) => {
         if (
+          kind === "track" &&
           event.key === "Enter" &&
           event.target.closest('[data-action="open"]')
         ) {
@@ -797,7 +829,7 @@ function bindCards(host) {
         }
       });
     }
-    if (kind !== "genre")
+    if (kind !== "genre" || card.classList.contains("pin-row"))
       card.addEventListener("contextmenu", (event) => {
         event.preventDefault();
         run(() => menu(card, event));
@@ -831,7 +863,12 @@ function loadCardCovers(host, signal) {
                     : {}),
                 }
               : row.uri;
-        await cover(card.querySelector(".cover"), query, signal);
+        await coverGroup(
+          card.querySelector(".cover"),
+          query,
+          row.artwork_count || 1,
+          signal,
+        );
       }
     });
   releaseCovers();
@@ -942,7 +979,9 @@ export {
   navigate,
   playUris,
   route,
+  detail,
   setFavorite,
   viewRequest,
   disposeHome,
+  bindCards,
 };

@@ -6,6 +6,7 @@ import { init as sources } from "./sources.js";
 import { init as menus } from "./menus.js";
 import { init as random } from "./random.js";
 import { init as connection } from "./connection.js";
+import { initPins } from "./pins.js";
 
 ui();
 library();
@@ -14,4 +15,5 @@ queue();
 sources();
 menus();
 random();
+initPins();
 connection();

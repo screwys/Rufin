@@ -113,6 +113,7 @@ struct HomeAlbumFact {
 #[derive(Clone, Debug, FromRow, PartialEq)]
 pub struct HomeGenreRow {
     pub genre_key: GenreKey,
+    pub object_id: String,
     pub name: String,
     pub artwork_binding: Option<Vec<u8>>,
     pub album_count: i64,
@@ -378,7 +379,7 @@ impl Database {
 
         let genres = if blocks.contains(&HomeBlockKind::Genres) {
             sqlx::query_as::<_, HomeGenreRow>(
-                "SELECT genre.genre_key,genre.name,genre.artwork_binding,
+                "SELECT genre.genre_key,genre.object_id,genre.name,genre.artwork_binding,
                     count(DISTINCT track.album_key) album_count,
                     count(DISTINCT relation.track_key) track_count
              FROM genres genre

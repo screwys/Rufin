@@ -574,11 +574,133 @@ async fn exercise_http_api(
     let playlist = api(
         reqwest::Method::POST,
         "playlists",
-        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items}),
+        json!({"name":"HTTP <script> playlist & \"quotes\"","uris":items,"current":false}),
     )
     .await["id"]
         .clone();
     assert!(playlist.is_i64());
+    let mut cover_row = products
+        .library
+        .playlist_rows(
+            &[serde_json::from_value(playlist.clone()).unwrap()],
+            &library::ReadCancellation::new(),
+        )
+        .await
+        .unwrap()
+        .pop()
+        .unwrap();
+    cover_row.artwork_binding = Some(vec![1]);
+    cover_row.representative_artwork = vec![vec![2], vec![3]];
+    assert_eq!(
+        rufin_core::playlists::playlist_artwork_bindings(&cover_row, true),
+        &[vec![1]]
+    );
+    assert_eq!(
+        rufin_core::playlists::playlist_artwork_bindings(&cover_row, false),
+        &[vec![2], vec![3]]
+    );
+    cover_row.artwork_binding = None;
+    assert_eq!(
+        rufin_core::playlists::playlist_artwork_bindings(&cover_row, true),
+        &[vec![2], vec![3]]
+    );
+    let listed = api(reqwest::Method::GET, "playlists", Value::Null).await;
+    let row = listed["playlists"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|row| row["id"] == playlist)
+        .unwrap();
+    let playlist_pin = json!({"Playlist":{"playlist_id":row["object_id"]}});
+    let mut sidebar = settings.sidebar_changes();
+    assert_eq!(
+        serde_json::to_value(&settings.load().sidebar.pins).unwrap(),
+        json!([playlist_pin])
+    );
+    assert_eq!(
+        api(reqwest::Method::GET, "sources", Value::Null).await["new_playlist_current"],
+        false
+    );
+    api(
+        reqwest::Method::POST,
+        "pins",
+        json!({"pin":playlist_pin,"pinned":false}),
+    )
+    .await;
+    sidebar.borrow_and_update();
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "pins",
+            json!({"pin":playlist_pin,"pinned":true})
+        )
+        .await["changed"],
+        true
+    );
+    assert!(sidebar.has_changed().unwrap());
+    sidebar.borrow_and_update();
+    assert_eq!(
+        api(
+            reqwest::Method::POST,
+            "pins",
+            json!({"pin":playlist_pin,"pinned":true})
+        )
+        .await["changed"],
+        false
+    );
+    assert!(!sidebar.has_changed().unwrap());
+    let pinned = api(reqwest::Method::GET, "pins", Value::Null).await;
+    assert_eq!(pinned["items"][0]["id"], playlist);
+    assert_eq!(pinned["items"][0]["name"], row["name"]);
+    let smart = api(reqwest::Method::GET, "smart-playlists", Value::Null).await;
+    let smart_pin =
+        json!({"SmartPlaylist":{"playlist_id":smart["smart_playlists"][0]["object_id"]}});
+    api(
+        reqwest::Method::POST,
+        "pins",
+        json!({"pin":smart_pin,"pinned":true}),
+    )
+    .await;
+    api(
+        reqwest::Method::PATCH,
+        "pins",
+        json!({"moved":smart_pin,"target":playlist_pin}),
+    )
+    .await;
+    assert_eq!(
+        api(reqwest::Method::GET, "pins", Value::Null).await["pins"],
+        json!([smart_pin, playlist_pin])
+    );
+    assert_eq!(
+        serde_json::to_value(&settings.load().sidebar.pins).unwrap(),
+        json!([smart_pin, playlist_pin])
+    );
+    let mut pin_events = client
+        .get(format!("{base}/events"))
+        .bearer_auth(token)
+        .send()
+        .await
+        .unwrap();
+    playback_event(&mut pin_events).await;
+    let mut saved = settings.load();
+    saved.sidebar.pins.reverse();
+    settings.save(&saved).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while playback_event(&mut pin_events).await["pins_changed"] != true {}
+    })
+    .await
+    .unwrap();
+    drop(pin_events);
+    assert_eq!(
+        api(reqwest::Method::GET, "pins", Value::Null).await["pins"],
+        json!([playlist_pin, smart_pin])
+    );
+    api(
+        reqwest::Method::POST,
+        "pins",
+        json!({"pin":smart_pin,"pinned":false}),
+    )
+    .await;
     let html = client
         .get(format!("{base}/playlists"))
         .bearer_auth(token)
@@ -701,6 +823,8 @@ async fn exercise_http_api(
         true
     );
     let mut wav = b"RIFF".to_vec();
+    let pinned = api(reqwest::Method::GET, "pins", Value::Null).await;
+    assert!(pinned["items"].as_array().unwrap().is_empty());
     wav.extend(16036_u32.to_le_bytes());
     wav.extend(b"WAVEfmt ");
     wav.extend(16_u32.to_le_bytes());
@@ -798,6 +922,61 @@ async fn exercise_http_api(
         .expect("Clear follows the app's current-track setting");
     }
 
+    // Dropping media uses insertion, preserving playback and the row-side position.
+    let previous_playback = api(reqwest::Method::GET, "playback", Value::Null).await;
+    api(
+        reqwest::Method::POST,
+        "queue",
+        json!({"mode":"insert","uris":[items[0]]}),
+    )
+    .await;
+    let inserted = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
+            if queue["total"] == 1 {
+                break queue;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let anchor = inserted["window"][0]["id"].clone();
+    let first_drop = api(reqwest::Method::GET, "playback", Value::Null).await;
+    api(
+        reqwest::Method::POST,
+        "queue",
+        json!({"mode":"insert","uris":[items[1]],"before":anchor}),
+    )
+    .await;
+    api(
+        reqwest::Method::POST,
+        "queue",
+        json!({"mode":"insert","uris":[uri],"after":anchor}),
+    )
+    .await;
+    let inserted = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let queue = api(reqwest::Method::GET, "queue", Value::Null).await;
+            if queue["total"] == 3 {
+                break queue;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+    let uris = inserted["window"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|row| row["track"]["uri"].clone())
+        .collect::<Vec<_>>();
+    assert_eq!(uris, vec![json!(items[1]), json!(items[0]), json!(uri)]);
+    let after_drop = api(reqwest::Method::GET, "playback", Value::Null).await;
+    assert_eq!(after_drop["state"], previous_playback["state"]);
+    assert_eq!(after_drop["current"], first_drop["current"]);
+
     for id in &sources {
         let response = client
             .delete(format!("{base}/sources"))
@@ -834,6 +1013,29 @@ async fn exercise_http_api(
         .await
         .unwrap();
     assert!(stopped.is_null());
+    // Failures are counted across connections; forwarded headers do not change the peer.
+    for _ in 0..10 {
+        assert_eq!(
+            client.get(&base).send().await.unwrap().status(),
+            reqwest::StatusCode::UNAUTHORIZED
+        );
+    }
+    let rejected = reqwest::Client::new()
+        .get(&base)
+        .bearer_auth(token)
+        .header("X-Forwarded-For", "192.0.2.1")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(rejected.status(), reqwest::StatusCode::TOO_MANY_REQUESTS);
+    assert!(
+        rejected.headers()["retry-after"]
+            .to_str()
+            .unwrap()
+            .parse::<u64>()
+            .unwrap()
+            > 0
+    );
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
     assert!(tokio::net::TcpStream::connect(address).await.is_err());

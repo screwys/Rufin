@@ -3,18 +3,21 @@
 mod catalog;
 mod controller;
 mod media;
+mod pins;
 mod playlists;
 mod source;
 mod web;
 pub use controller::{Controller, ControllerSettings, ControllerStatus};
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::convert::Infallible;
+use std::net::{IpAddr, SocketAddr};
 use std::path::PathBuf;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
+use std::time::{Duration, Instant};
 
 use axum::{
-    Router,
+    Extension, Router,
     body::Body,
     extract::{Query, State},
     middleware::{self, Next},
@@ -47,7 +50,10 @@ pub async fn serve(
             "An API token is required",
         ));
     }
-    let authorization = Arc::new(format!("Bearer {token}"));
+    let authorization = Arc::new(Authorization {
+        token: format!("Bearer {token}"),
+        failures: Mutex::new(VecDeque::new()),
+    });
     let router = routes()
         .merge(media::routes())
         .route_layer(middleware::from_fn_with_state(authorization, authorize))
@@ -57,8 +63,8 @@ pub async fn serve(
     loop {
         tokio::select! {
             accepted = listener.accept() => {
-                let (stream, _) = accepted?;
-                let service = TowerToHyperService::new(router.clone());
+                let (stream, peer) = accepted?;
+                let service = TowerToHyperService::new(router.clone().layer(Extension(peer)));
                 connections.spawn(async move {
                     let _ = hyper::server::conn::http1::Builder::new()
                         .serve_connection(TokioIo::new(stream), service).await;
@@ -91,6 +97,7 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/playback/{action}", post(playback_command))
         .merge(source::routes())
         .merge(playlists::routes())
+        .merge(pins::routes())
         .merge(catalog::routes())
 }
 
@@ -193,6 +200,8 @@ async fn queue_play(
     #[derive(Deserialize)]
     struct Input {
         mode: String,
+        before: Option<playback::OccurrenceId>,
+        after: Option<playback::OccurrenceId>,
         #[serde(flatten)]
         selection: Value,
     }
@@ -227,9 +236,13 @@ async fn queue_play(
             .is_none_or(Value::is_null);
     let placement = match input.mode.as_str() {
         "replace" => playback::QueuePlacement::Replace { anchor_index: 0 },
-        "append" => playback::QueuePlacement::End,
+        "append" | "insert" => playback::QueuePlacement::End,
         "next" => playback::QueuePlacement::AfterCurrent,
-        _ => return Err(bad_request("Queue mode must be replace, append or next")),
+        _ => {
+            return Err(bad_request(
+                "Queue mode must be replace, append, next or insert",
+            ));
+        }
     };
     let selection = match path.as_str() {
         "/api/queue" => {
@@ -374,6 +387,10 @@ async fn queue_play(
     };
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
+        if input.mode == "insert" {
+            queue.insert(selection, queue_drop_target(input.before, input.after));
+            return;
+        }
         queue.play(playback::PlayRequest::ordered(
             selection,
             0,
@@ -384,6 +401,17 @@ async fn queue_play(
     .await
     .map_err(internal)?;
     Ok(accepted())
+}
+
+fn queue_drop_target(
+    before: Option<playback::OccurrenceId>,
+    after: Option<playback::OccurrenceId>,
+) -> playback::QueueReorderTarget {
+    match (before, after) {
+        (Some(id), _) => playback::QueueReorderTarget::Before(id),
+        (_, Some(id)) => playback::QueueReorderTarget::After(id),
+        _ => playback::QueueReorderTarget::End,
+    }
 }
 
 async fn queue_clear(State(products): State<ProductHandles>) -> Result<Response<Body>, Error> {
@@ -635,18 +663,143 @@ fn json_response(status: StatusCode, value: Value) -> Response<Body> {
 fn error(status: StatusCode, message: impl std::fmt::Display) -> Error {
     (status, axum::Json(json!({"error":message.to_string()})))
 }
+struct Authorization {
+    token: String,
+    failures: Mutex<VecDeque<(IpAddr, Instant, u8)>>,
+}
+
+#[cfg(test)]
+mod authentication_tests {
+    use super::*;
+
+    #[test]
+    fn failed_attempts_expire_and_are_separate_for_each_address() {
+        let authorization = Authorization {
+            token: "Bearer valid".into(),
+            failures: Mutex::new(VecDeque::new()),
+        };
+        let address = "127.0.0.1".parse().unwrap();
+        let now = Instant::now();
+        for _ in 0..10 {
+            assert_eq!(
+                authorization
+                    .check(address, None, now)
+                    .unwrap_err()
+                    .status(),
+                StatusCode::UNAUTHORIZED
+            );
+        }
+        let rejected = authorization
+            .check(address, Some("Bearer valid"), now)
+            .unwrap_err();
+        assert_eq!(rejected.status(), StatusCode::TOO_MANY_REQUESTS);
+        assert_eq!(rejected.headers()["retry-after"], "60");
+        assert!(
+            authorization
+                .check("::1".parse().unwrap(), Some("Bearer valid"), now)
+                .is_ok()
+        );
+        let rejected = authorization
+            .check(address, None, now + Duration::from_secs(59))
+            .unwrap_err();
+        assert_eq!(rejected.headers()["retry-after"], "1");
+        assert!(
+            authorization
+                .check(address, Some("Bearer valid"), now + Duration::from_secs(60))
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn successful_authentication_clears_previous_failures() {
+        let authorization = Authorization {
+            token: "Bearer valid".into(),
+            failures: Mutex::new(VecDeque::new()),
+        };
+        let address = "127.0.0.1".parse().unwrap();
+        let now = Instant::now();
+        for _ in 0..2 {
+            for _ in 0..9 {
+                assert_eq!(
+                    authorization
+                        .check(address, None, now)
+                        .unwrap_err()
+                        .status(),
+                    StatusCode::UNAUTHORIZED
+                );
+            }
+            assert!(
+                authorization
+                    .check(address, Some("Bearer valid"), now)
+                    .is_ok()
+            );
+        }
+    }
+}
+
+impl Authorization {
+    fn check(
+        &self,
+        address: IpAddr,
+        token: Option<&str>,
+        now: Instant,
+    ) -> Result<(), Box<Response<Body>>> {
+        let window = Duration::from_secs(60);
+        let mut failures = self.failures.lock().expect("authentication failures");
+        failures.retain(|(_, start, _)| now.duration_since(*start) < window);
+        let previous = failures.iter().position(|(ip, _, _)| *ip == address);
+        if let Some(index) = previous {
+            let (_, start, count) = failures[index];
+            if count >= 10 {
+                let seconds = (window - now.duration_since(start)).as_secs().max(1);
+                let mut response = error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "Too many failed authentication attempts. Try again shortly.",
+                )
+                .into_response();
+                response
+                    .headers_mut()
+                    .insert(hyper::header::RETRY_AFTER, seconds.into());
+                return Err(Box::new(response));
+            }
+        }
+        if token == Some(self.token.as_str()) {
+            if let Some(index) = previous {
+                failures.remove(index);
+            }
+            return Ok(());
+        }
+        if let Some(index) = previous {
+            let (_, start, count) = &mut failures[index];
+            *count += 1;
+            if *count == 10 {
+                *start = now;
+            }
+        } else {
+            // Keep failed requests from growing the address history without bound.
+            if failures.len() == 1024 {
+                failures.pop_front();
+            }
+            failures.push_back((address, now, 1));
+        }
+        Err(Box::new(
+            error(StatusCode::UNAUTHORIZED, "A valid Bearer token is required").into_response(),
+        ))
+    }
+}
+
 async fn authorize(
-    State(authorization): State<Arc<String>>,
+    State(authorization): State<Arc<Authorization>>,
+    Extension(peer): Extension<SocketAddr>,
     request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
-    if request
+    let token = request
         .headers()
         .get(hyper::header::AUTHORIZATION)
-        .and_then(|h| h.to_str().ok())
-        != Some(authorization.as_str())
-    {
-        return error(StatusCode::UNAUTHORIZED, "A valid Bearer token is required").into_response();
+        .and_then(|h| h.to_str().ok());
+    if let Err(response) = authorization.check(peer.ip(), token, Instant::now()) {
+        return *response;
     }
     next.run(request).await
 }
@@ -669,13 +822,25 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
         products.source.operation(),
         products.lyrics.current(),
         products.appearance.subscribe(),
+        products.source.shared.settings.sidebar_changes(),
+        products.source.catalog_changes(),
         products.source.shared.settings.clone(),
         true,
         None,
     );
     let stream = futures_util::stream::unfold(
         receivers,
-        |(mut playback, mut source, mut lyrics, mut appearance, settings, first, mut previous)| async move {
+        |(
+            mut playback,
+            mut source,
+            mut lyrics,
+            mut appearance,
+            mut sidebar,
+            mut catalog,
+            settings,
+            first,
+            mut previous,
+        )| async move {
             let value = if first {
                 let publication = playback.recv().await.ok()?;
                 let mut value = playback_event_json(publication, &mut previous, true);
@@ -683,6 +848,9 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                 value["lyrics"] =
                     media::lyrics_json(&lyrics.borrow_and_update(), &settings.load().ui.lyrics);
                 value["appearance"] = json!(*appearance.borrow_and_update());
+                sidebar.borrow_and_update();
+                catalog.borrow_and_update();
+                value["pins_changed"] = json!(true);
                 value
             } else {
                 tokio::select! {
@@ -690,6 +858,8 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     changed = source.changed() => { changed.ok()?; json!({"source":*source.borrow_and_update()}) },
                     changed = lyrics.changed() => { changed.ok()?; json!({"lyrics":media::lyrics_json(&lyrics.borrow_and_update(), &settings.load().ui.lyrics)}) },
                     changed = appearance.changed() => { changed.ok()?; json!({"appearance":*appearance.borrow_and_update()}) },
+                    changed = sidebar.changed() => { changed.ok()?; json!({"pins_changed":true}) },
+                    changed = catalog.changed() => { changed.ok()?; json!({"pins_changed":true}) },
                 }
             };
             Some((
@@ -697,7 +867,8 @@ async fn events(State(products): State<ProductHandles>) -> Response<Body> {
                     "event: update\ndata: {value}\n\n"
                 )))),
                 (
-                    playback, source, lyrics, appearance, settings, false, previous,
+                    playback, source, lyrics, appearance, sidebar, catalog, settings, false,
+                    previous,
                 ),
             ))
         },

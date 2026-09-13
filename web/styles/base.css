@@ -263,6 +263,26 @@ dialog textarea {
   margin-top: 18px;
 }
 
+.playlist-name-field {
+  position: relative;
+}
+.playlist-name-field:has(#playlist-owner:not([hidden])) input {
+  padding-inline-end: 44px;
+}
+#playlist-owner {
+  position: absolute;
+  right: 4px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 32px;
+  height: 32px;
+  padding: 4px;
+}
+#playlist-owner .source-icon {
+  width: 24px;
+  height: 24px;
+}
+
 .dialog-actions {
   display: flex;
   justify-content: flex-end;

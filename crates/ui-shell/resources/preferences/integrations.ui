@@ -12,11 +12,29 @@
       <response id="regenerate" appearance="destructive" translatable="yes">Regenerate access token</response>
     </responses>
   </object>
-  <object class="AdwAlertDialog" id="controller_addresses">
-    <property name="heading" translatable="yes">Copy link</property>
-    <property name="body" translatable="yes">Choose an address</property>
-    <property name="close-response">cancel</property>
-    <responses><response id="cancel" translatable="yes">Cancel</response></responses>
+  <object class="GtkPopover" id="controller_addresses">
+    <property name="autohide">true</property>
+    <property name="child">
+      <object class="GtkBox">
+        <property name="orientation">vertical</property>
+        <property name="spacing">12</property>
+        <property name="margin-top">12</property>
+        <property name="margin-bottom">12</property>
+        <property name="margin-start">12</property>
+        <property name="margin-end">12</property>
+        <child><object class="GtkLabel">
+          <property name="label" translatable="yes">Choose an address</property>
+          <style><class name="heading"/></style>
+        </object></child>
+        <child><object class="GtkBox" id="controller_address_list">
+          <property name="orientation">vertical</property>
+          <property name="spacing">6</property>
+        </object></child>
+        <child><object class="GtkButton" id="controller_address_cancel">
+          <property name="label" translatable="yes">Cancel</property>
+        </object></child>
+      </object>
+    </property>
   </object>
 
   <object class="AdwPreferencesPage" id="integrations_page">
@@ -47,10 +65,8 @@
           </object>
         </child>
         <child>
-          <object class="AdwEntryRow" id="web_token">
+          <object class="AdwActionRow" id="web_token">
             <property name="title" translatable="yes">Access token</property>
-            <property name="editable">false</property>
-            <style><class name="controller-token"/></style>
             <child type="suffix"><object class="GtkButton" id="web_regenerate">
               <property name="icon-name">rufin-view-refresh-symbolic</property>
               <property name="tooltip-text" translatable="yes">Regenerate access token</property>
@@ -58,7 +74,9 @@
               <style><class name="flat"/></style>
             </object></child>
             <child type="suffix"><object class="GtkButton" id="web_copy_token">
-              <property name="icon-name">rufin-edit-copy-symbolic</property>
+              <property name="child"><object class="GtkImage" id="web_copy_token_icon">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+              </object></property>
               <property name="tooltip-text" translatable="yes">Copy access token</property>
               <property name="valign">center</property>
               <style><class name="flat"/></style>
@@ -75,8 +93,10 @@
               <property name="valign">center</property>
               <style><class name="flat"/></style>
             </object></child>
-            <child type="suffix"><object class="GtkButton" id="web_copy_link">
-              <property name="icon-name">rufin-edit-copy-symbolic</property>
+            <child type="suffix"><object class="GtkMenuButton" id="web_copy_link">
+              <property name="child"><object class="GtkImage" id="web_copy_link_icon">
+                <property name="icon-name">rufin-edit-copy-symbolic</property>
+              </object></property>
               <property name="tooltip-text" translatable="yes">Copy link</property>
               <property name="valign">center</property>
               <style><class name="flat"/></style>

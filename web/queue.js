@@ -6,6 +6,13 @@ import { setFavorite, goToMedia } from "./library.js";
 import { playlistMenu, radioMenu, showMenu, goToMenu } from "./menus.js";
 
 import { $, button, el, run } from "./ui.js";
+import {
+  bindDrag,
+  acceptsMedia,
+  draggedMedia,
+  mediaSelection,
+  queueMedia,
+} from "./drag.js";
 
 let queueSelection = null;
 
@@ -161,27 +168,42 @@ function showQueue(value) {
       metadata,
       menu,
     );
-    li.addEventListener("dragstart", (event) => {
-      event.dataTransfer.setData("text/plain", row.id);
-      event.dataTransfer.effectAllowed = "move";
-    });
+    bindDrag(
+      li,
+      () => ({ ...mediaSelection("track", row.track), queueIds: [row.id] }),
+      false,
+    );
     li.addEventListener("dragover", (event) => {
+      if (!acceptsMedia(event)) return;
       event.preventDefault();
       li.classList.add("drag-over");
     });
     li.addEventListener("dragleave", () => li.classList.remove("drag-over"));
     li.addEventListener("drop", (event) => {
+      if (!acceptsMedia(event)) return;
       event.preventDefault();
+      event.stopPropagation();
       li.classList.remove("drag-over");
-      const id = event.dataTransfer.getData("text/plain");
-      if (id && id !== row.id)
-        run(() => api("/queue/reorder", "POST", { ids: [id], before: row.id }));
+      const rect = li.getBoundingClientRect();
+      dropMedia(
+        event.clientY < rect.top + rect.height / 2
+          ? { before: row.id }
+          : { after: row.id },
+      );
     });
     $("queue").append(li);
   }
 }
 
 function init() {
+  $("queue").addEventListener("dragover", (event) => {
+    if (acceptsMedia(event)) event.preventDefault();
+  });
+  $("queue").addEventListener("drop", (event) => {
+    if (!acceptsMedia(event)) return;
+    event.preventDefault();
+    dropMedia({});
+  });
   $("queue-limit").value = [5, 10, 25, 50, 100].includes(savedQueueLimit)
     ? String(savedQueueLimit)
     : "5";
@@ -191,6 +213,20 @@ function init() {
   $("queue-limit").addEventListener("change", () => {
     localStorage.setItem("rufin-queue-limit", $("queue-limit").value);
     showQueue(latestQueue);
+  });
+}
+
+function dropMedia(position) {
+  const payload = draggedMedia();
+  run(async () => {
+    const media = await payload;
+    if (media.queueIds) {
+      if (!media.queueIds.includes(position.before || position.after))
+        await api("/queue/reorder", "POST", {
+          ids: media.queueIds,
+          ...position,
+        });
+    } else await queueMedia(media, "insert", position);
   });
 }
 

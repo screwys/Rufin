@@ -17,6 +17,7 @@ async fn translations() -> Response<Body> {
             include_str!("../../../../web/sources.js"),
             include_str!("../../../../web/menus.js"),
             include_str!("../../../../web/random.js"),
+            include_str!("../../../../web/pins.js"),
         ]
         .into_iter()
         .flat_map(web_gettext::messages)
@@ -257,6 +258,8 @@ async fn script(
         file!("menus.js"),
         file!("random.js"),
         file!("queue.js"),
+        file!("pins.js"),
+        file!("drag.js"),
     ];
     let bytes = files
         .iter()

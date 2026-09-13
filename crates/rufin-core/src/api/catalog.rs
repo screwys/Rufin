@@ -127,7 +127,7 @@ async fn home(
             HomeBlockKind::NewlyAdded => ("Newly added", home_rows(&page.newly_added)),
             HomeBlockKind::RecentlyPlayed => ("Recently played", home_rows(&page.recently_played)),
             HomeBlockKind::RecentlyReleased => ("Recently released", home_rows(&page.recently_released)),
-            HomeBlockKind::Genres => ("Featured genres", page.genres.iter().map(|row|json!({"kind":"genre","id":row.genre_key,"name":row.name,"track_count":row.track_count})).collect()),
+            HomeBlockKind::Genres => ("Featured genres", page.genres.iter().map(|row|json!({"kind":"genre","id":row.genre_key,"object_id":row.object_id,"name":row.name,"track_count":row.track_count})).collect()),
         };
         if !items.is_empty() {
             sections.push(json!({"block":block,"title":title,"items":items}));
@@ -223,7 +223,7 @@ async fn artists(
     web::page(
         &headers,
         &parameters,
-        json!({"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
+        json!({"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(&parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
     )
 }
 
@@ -318,7 +318,7 @@ async fn smart_playlists(
     web::page(
         &headers,
         &parameters,
-        json!({"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"name":row.name,"track_count":row.track_count,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
+        json!({"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":crate::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
     )
 }
 
@@ -407,7 +407,7 @@ async fn albums(
         &headers,
         &parameters,
         json!({"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
-                "id":row.album_key,"uri":row.media_uri,"title":row.title,"artist":row.display_artist,
+                "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.title,"artist":row.display_artist,
                 "year":row.year,"track_count":row.track_count,"duration_ms":row.duration_millis,"favorite":row.favorite,"rating":row.rating
             })).collect::<Vec<_>>()}),
     )

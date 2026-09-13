@@ -433,4 +433,11 @@ function sourceInput() {
   }
   return input;
 }
-export { renderSources, showSourceProgress, sources, updateSources, init };
+export {
+  renderSources,
+  showSourceProgress,
+  sources,
+  sourceIcon,
+  updateSources,
+  init,
+};

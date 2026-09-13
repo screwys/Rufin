@@ -333,16 +333,14 @@ async fn reorder(
     struct Input {
         ids: Vec<playback::OccurrenceId>,
         before: Option<playback::OccurrenceId>,
+        after: Option<playback::OccurrenceId>,
     }
     let input: Input = body(request).await?;
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
         queue.reorder(playback::QueueReorderRequest {
             occurrences: input.ids,
-            target: input.before.map_or(
-                playback::QueueReorderTarget::End,
-                playback::QueueReorderTarget::Before,
-            ),
+            target: queue_drop_target(input.before, input.after),
         })
     })
     .await
@@ -355,7 +353,19 @@ async fn artwork(
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
     let cancel = library::ReadCancellation::new();
-    let binding = if parameters.contains_key("playlist") {
+    let binding = if parameters.contains_key("genre") {
+        let (source, _) = catalog::scope(&products, &parameters).await?;
+        products
+            .library
+            .genre_rows(source, &[key(&parameters, "genre")?], None, &cancel)
+            .await
+            .map_err(internal)?
+            .pop()
+            .and_then(|row| {
+                row.artwork_binding
+                    .or_else(|| row.representative_artwork.into_iter().next())
+            })
+    } else if parameters.contains_key("playlist") {
         products
             .library
             .playlist_rows(&[key(&parameters, "playlist")?], &cancel)
@@ -364,21 +374,37 @@ async fn artwork(
             .into_iter()
             .next()
             .and_then(|row| {
-                row.artwork_binding
-                    .or_else(|| row.representative_artwork.into_iter().next())
+                crate::playlists::playlist_artwork_bindings(
+                    &row,
+                    products
+                        .source
+                        .shared
+                        .settings
+                        .load()
+                        .ui
+                        .prefer_server_playlist_covers,
+                )
+                .get(
+                    parameters
+                        .get("part")
+                        .and_then(|part| part.parse::<usize>().ok())
+                        .unwrap_or(0),
+                )
+                .cloned()
             })
     } else if parameters.contains_key("smart_playlist") {
-        let source = if parameters.contains_key("source") {
-            Some(catalog::scope(&products, &parameters).await?.0)
+        let (source, folder) = if parameters.contains_key("source") {
+            let (source, folder) = catalog::scope(&products, &parameters).await?;
+            (Some(source), folder)
         } else {
-            None
+            (None, None)
         };
         products
             .library
             .smart_playlist_rows(
                 source,
                 &[key(&parameters, "smart_playlist")?],
-                None,
+                folder,
                 catalog::now(),
                 &cancel,
             )
@@ -386,7 +412,16 @@ async fn artwork(
             .map_err(internal)?
             .into_iter()
             .next()
-            .and_then(|row| row.artwork_bindings.into_iter().next())
+            .and_then(|row| {
+                row.artwork_bindings
+                    .get(
+                        parameters
+                            .get("part")
+                            .and_then(|part| part.parse::<usize>().ok())
+                            .unwrap_or(0),
+                    )
+                    .cloned()
+            })
     } else {
         let uri = required(&parameters, "uri")?;
         if library::source_entity_parts(uri).is_some_and(|(_, kind, _)| kind == "artist") {

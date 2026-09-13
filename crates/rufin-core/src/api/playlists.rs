@@ -15,6 +15,9 @@ enum MediaSelection {
     Playlist {
         id: PlaylistKey,
     },
+    Genre {
+        id: library::GenreKey,
+    },
     SmartPlaylist {
         id: library::SmartPlaylistKey,
     },
@@ -36,6 +39,7 @@ async fn selected_uris(
             crate::playback::PlaybackTarget::ArtistKey(id, album_artists)
         }
         MediaSelection::Playlist { id } => crate::playback::PlaybackTarget::Playlist(id),
+        MediaSelection::Genre { id } => crate::playback::PlaybackTarget::Genre(id),
         MediaSelection::SmartPlaylist { id } => crate::playback::PlaybackTarget::SmartPlaylist(id),
     };
     let (source, folder) = if let Some(source) = source {
@@ -91,6 +95,13 @@ async fn list(
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let parameters = &parameters;
+    let prefer_server_covers = products
+        .source
+        .shared
+        .settings
+        .load()
+        .ui
+        .prefer_server_playlist_covers;
     let cancellation = library::ReadCancellation::new();
     let (source, folder) = if parameters.contains_key("source") {
         let (source, folder) = catalog::scope(products, parameters).await?;
@@ -128,7 +139,7 @@ async fn list(
     web::page(
         &headers,
         &parameters,
-        json!({"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
+        json!({"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":crate::playlists::playlist_artwork_bindings(row, prefer_server_covers).len()})).collect::<Vec<_>>()}),
     )
 }
 
@@ -184,6 +195,8 @@ async fn create(
     #[derive(Deserialize)]
     struct Input {
         source: Option<sources::SourceId>,
+        selection_source: Option<String>,
+        current: Option<bool>,
         name: String,
         #[serde(default)]
         uris: Vec<String>,
@@ -196,7 +209,9 @@ async fn create(
         products,
         input.uris,
         input.selection,
-        input.source.as_ref().map(|id| id.as_str().to_owned()),
+        input
+            .selection_source
+            .or_else(|| input.source.as_ref().map(|id| id.as_str().to_owned())),
         input.folder,
     )
     .await?;
@@ -207,7 +222,26 @@ async fn create(
         uris,
     ))
     .await?;
+    let mut settings_error = None;
     let id = if let Some(object) = object_id.as_deref() {
+        let settings = products.source.shared.settings.clone();
+        let pin = crate::settings::SidebarPin::Playlist {
+            source_id: source.clone(),
+            playlist_id: object.to_owned(),
+        };
+        settings_error = tokio::task::spawn_blocking(move || {
+            settings.update(|stored| {
+                stored.ui.sidebar.set_pinned(pin, true);
+                if let Some(current) = input.current {
+                    stored.ui.new_playlist_current = current;
+                }
+                Ok(())
+            })
+        })
+        .await
+        .map_err(|error| error.to_string())
+        .and_then(|result| result)
+        .err();
         products
             .library
             .playlist_key_by_identity(source.as_ref(), object, &cancellation)
@@ -218,7 +252,7 @@ async fn create(
     };
     Ok(json_response(
         StatusCode::OK,
-        json!({"id":id,"object_id":object_id}),
+        json!({"id":id,"object_id":object_id,"settings_error":settings_error}),
     ))
 }
 
