@@ -3,7 +3,7 @@
 
 use blake3::Hasher;
 use sqlx::query::Query;
-use sqlx::sqlite::{SqliteArguments, SqliteQueryResult, SqliteRow};
+use sqlx::sqlite::{SqliteArguments, SqliteConnection, SqliteQueryResult, SqliteRow};
 use sqlx::{
     Column, Connection, FromRow, QueryBuilder, Row, Sqlite, Transaction, TypeInfo, ValueRef,
 };
@@ -101,6 +101,7 @@ pub struct Scan {
     authoritative: bool,
     distinct_track_covers: bool,
     failed: bool,
+    favorites: Option<[String; 3]>,
 }
 
 #[derive(FromRow)]
@@ -223,6 +224,7 @@ impl Scan {
             authoritative: true,
             distinct_track_covers: database.distinct_track_covers(),
             failed: false,
+            favorites: None,
         })
     }
 
@@ -285,6 +287,9 @@ impl Scan {
     }
 
     pub async fn retain_home_section(&mut self, section: &str) -> LibraryResult<()> {
+        if self.point_update {
+            return Ok(());
+        }
         self.stage(sqlx::query(
             "INSERT OR IGNORE INTO temp.scan_home_entries
              SELECT entry.section_id,entry.position,entry.entity_kind,
@@ -513,7 +518,7 @@ impl Scan {
         musicbrainz_release_group_id: Option<&str>,
         is_compilation: Option<bool>,
         artwork_binding: Option<&[u8]>,
-        favorite: bool,
+        favorite: impl Into<Option<bool>>,
         rating: Option<i64>,
         first_seen_at: Option<i64>,
     ) -> LibraryResult<()> {
@@ -555,7 +560,7 @@ impl Scan {
                     WHEN scan_albums.is_compilation=0 OR excluded.is_compilation=0 THEN 0
                     ELSE NULL END,
                 artwork_binding=COALESCE(scan_albums.artwork_binding,excluded.artwork_binding),
-                favorite=max(scan_albums.favorite,excluded.favorite),
+                favorite=COALESCE(excluded.favorite,scan_albums.favorite),
                 rating=COALESCE(scan_albums.rating,excluded.rating),
                 first_seen_at=COALESCE(scan_albums.first_seen_at,excluded.first_seen_at)",
             )
@@ -572,7 +577,7 @@ impl Scan {
             .bind(musicbrainz_release_group_id)
             .bind(is_compilation)
             .bind(artwork_binding)
-            .bind(favorite)
+            .bind(favorite.into())
             .bind(rating)
             .bind(first_seen_at),
         )
@@ -605,7 +610,7 @@ impl Scan {
         cue_start_millis: Option<i64>,
         cue_end_millis: Option<i64>,
         artwork_binding: Option<&[u8]>,
-        favorite: bool,
+        favorite: impl Into<Option<bool>>,
         rating: Option<i64>,
         first_seen_at: Option<i64>,
         baseline_play_count: Option<i64>,
@@ -658,7 +663,7 @@ impl Scan {
             artwork_binding.unwrap_or_default(),
             loudness_analysis_key.as_slice(),
         ])?;
-        Ok(self
+        let inserted = self
             .stage_result(
                 sqlx::query(
                     "INSERT INTO temp.scan_tracks(
@@ -702,7 +707,7 @@ impl Scan {
                 .bind(cue_start_millis)
                 .bind(cue_end_millis)
                 .bind(artwork_binding)
-                .bind(favorite)
+                .bind(favorite.into())
                 .bind(rating)
                 .bind(first_seen_at)
                 .bind(baseline_play_count)
@@ -712,7 +717,21 @@ impl Scan {
             )
             .await?
             .rows_affected()
-            == 1)
+            == 1;
+        if inserted && self.point_update {
+            self.stage(
+                sqlx::query(
+                    "INSERT OR IGNORE INTO temp.scan_track_folders(owner_id,related_id,position)
+                 SELECT track.object_id,folder.object_id,link.position FROM track_folders link
+                 JOIN tracks track USING(track_key) JOIN folders folder USING(folder_key)
+                 WHERE track.source_key=?1 AND track.object_id=?2",
+                )
+                .bind(self.existing_source_key)
+                .bind(object_id),
+            )
+            .await?;
+        }
+        Ok(inserted)
     }
 
     pub async fn write_track_source_loudness(
@@ -1545,6 +1564,49 @@ impl Scan {
         .await
     }
 
+    pub async fn replace_track_folders(
+        &mut self,
+        object_id: &str,
+        links: &[ScanLink<'_>],
+    ) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query("DELETE FROM temp.scan_track_folders WHERE owner_id=?1").bind(object_id),
+        )
+        .await?;
+        self.write_track_folders(links).await
+    }
+
+    pub async fn replace_favorites(
+        &mut self,
+        tracks: &[String],
+        albums: &[String],
+        artists: &[String],
+    ) -> LibraryResult<()> {
+        let favorites = [tracks, albums, artists]
+            .map(|ids| serde_json::to_string(ids).expect("favorite IDs serialize"));
+        for (table, ids) in ["tracks", "albums", "artists"].into_iter().zip(&favorites) {
+            let sql = format!(
+                "UPDATE temp.scan_{table} SET favorite=object_id IN (SELECT value FROM json_each(?1))"
+            );
+            self.stage(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(ids))
+                .await?;
+        }
+        self.favorites = Some(favorites);
+        Ok(())
+    }
+
+    pub async fn remove_unstaged_playlists(&mut self) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query(
+                "INSERT OR IGNORE INTO temp.scan_removals(entity_kind,object_id)
+             SELECT 'playlist',object_id FROM catalog.native_playlists WHERE source_key=?1
+             AND object_id NOT IN (SELECT object_id FROM temp.scan_playlists)",
+            )
+            .bind(self.existing_source_key),
+        )
+        .await
+    }
+
     pub async fn write_playlist(
         &mut self,
         object_id: &str,
@@ -1637,10 +1699,10 @@ impl Scan {
             sqlx::query(
                 "INSERT INTO temp.scan_home_entries SELECT ?1, ?2, ?3, ?4, ?5, ?6, NULL
                 WHERE CASE ?3
-                  WHEN 'track' THEN EXISTS(SELECT 1 FROM temp.scan_tracks WHERE object_id=?4)
-                  WHEN 'album' THEN EXISTS(SELECT 1 FROM temp.scan_albums WHERE object_id=?4)
-                  WHEN 'artist' THEN EXISTS(SELECT 1 FROM temp.scan_artists WHERE object_id=?4)
-                  WHEN 'playlist' THEN EXISTS(SELECT 1 FROM temp.scan_playlists WHERE object_id=?4)
+                  WHEN 'track' THEN EXISTS(SELECT 1 FROM temp.scan_tracks WHERE object_id=?4) OR EXISTS(SELECT 1 FROM tracks WHERE source_key=?7 AND object_id=?4)
+                  WHEN 'album' THEN EXISTS(SELECT 1 FROM temp.scan_albums WHERE object_id=?4) OR EXISTS(SELECT 1 FROM albums WHERE source_key=?7 AND object_id=?4)
+                  WHEN 'artist' THEN EXISTS(SELECT 1 FROM temp.scan_artists WHERE object_id=?4) OR EXISTS(SELECT 1 FROM artists WHERE source_key=?7 AND object_id=?4)
+                  WHEN 'playlist' THEN EXISTS(SELECT 1 FROM temp.scan_playlists WHERE object_id=?4) OR EXISTS(SELECT 1 FROM playlists WHERE source_key=?7 AND object_id=?4)
                 END",
             )
             .bind(&input.section_id)
@@ -1648,7 +1710,8 @@ impl Scan {
             .bind(input.kind.as_str())
             .bind(&input.entity_object_id)
             .bind(&input.title)
-            .bind(&input.subtitle),
+            .bind(&input.subtitle)
+            .bind(self.existing_source_key.filter(|_| self.point_update || !self.authoritative)),
         )
         .await
     }
@@ -1667,6 +1730,26 @@ impl Scan {
         .await
     }
 
+    pub async fn replace_home_section(
+        &mut self,
+        section: &str,
+        entries: &[HomeEntryInput],
+    ) -> LibraryResult<()> {
+        self.stage(
+            sqlx::query("INSERT OR IGNORE INTO temp.scan_removals VALUES ('home',?1)")
+                .bind(section),
+        )
+        .await?;
+        self.stage(
+            sqlx::query("DELETE FROM temp.scan_home_entries WHERE owner_id=?1").bind(section),
+        )
+        .await?;
+        for entry in entries {
+            self.write_home_entry(entry).await?;
+        }
+        Ok(())
+    }
+
     /// Canonicalizes staging and atomically accepts, ignores, or rejects it.
     pub async fn finish(mut self) -> LibraryResult<ScanOutcome> {
         if self.batch_writer.is_some() {
@@ -1682,11 +1765,15 @@ impl Scan {
             self.database.release_scan(self.token);
             return Ok(ScanOutcome::Failed);
         }
-        self.stage(sqlx::query(
-            "UPDATE temp.scan_artists AS staged SET favorite=COALESCE(
-                 (SELECT source_favorite FROM artists WHERE source_key=?1 AND object_id=staged.object_id),0)
-             WHERE favorite IS NULL",
-        ).bind(self.existing_source_key)).await?;
+        for table in ["tracks", "albums", "artists"] {
+            let sql = format!(
+                "UPDATE temp.scan_{table} AS staged SET favorite=COALESCE(
+                     (SELECT source_favorite FROM {table} WHERE source_key=?1 AND object_id=staged.object_id),0)
+                 WHERE favorite IS NULL"
+            );
+            self.stage(sqlx::query(sqlx::AssertSqlSafe(sql)).bind(self.existing_source_key))
+                .await?;
+        }
         normalize_staged_artwork(
             &self.database,
             self.token,
@@ -1764,8 +1851,13 @@ impl Scan {
             transaction.rollback().await?;
             return Ok(ScanOutcome::Stale);
         }
+        let favorites_changed = if let Some(source) = self.existing_source_key {
+            self.publish_favorites(&mut transaction, source).await?
+        } else {
+            false
+        };
         if let Some(current) = &current {
-            if current.catalog_digest.as_slice() == catalog_digest {
+            if current.catalog_digest.as_slice() == catalog_digest && !favorites_changed {
                 if current.artwork_digest.as_slice() != artwork_digest {
                     publish_artwork_bindings(
                         &mut transaction,
@@ -1896,8 +1988,21 @@ impl Scan {
         .execute(&mut *transaction)
         .await?;
         let playlists_changed = staged_playlists_changed(&mut transaction, source_key).await?;
-        let non_playlist_changed =
+        let metadata_changed =
             staged_non_playlist_catalog_changed(&mut transaction, source_key).await?;
+        let home_changed = symmetric_point_change(&mut transaction, source_key,
+            "SELECT owner_id,position,entity_kind,CASE entity_kind
+                WHEN 'track' THEN (SELECT track_key FROM tracks WHERE source_key=?1 AND object_id=entity_object_id)
+                WHEN 'album' THEN (SELECT album_key FROM albums WHERE source_key=?1 AND object_id=entity_object_id)
+                WHEN 'artist' THEN (SELECT artist_key FROM artists WHERE source_key=?1 AND object_id=entity_object_id)
+                WHEN 'playlist' THEN (SELECT playlist_key FROM playlists WHERE source_key=?1 AND object_id=entity_object_id)
+             END,title,subtitle,section_title FROM temp.scan_home_entries",
+            "SELECT section_id,position,entity_kind,entity_key,title,subtitle,section_title FROM home_entries
+             WHERE source_key=?1 AND section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home')"
+        ).await?;
+        let non_playlist_changed = self.publish_favorites(&mut transaction, source_key).await?
+            || metadata_changed
+            || home_changed;
         if artwork_changed {
             publish_artwork_bindings(&mut transaction, source_key, self.distinct_track_covers)
                 .await?;
@@ -1944,10 +2049,11 @@ impl Scan {
         }
         publish_local_files(&mut transaction, source_key, false).await?;
         let revision = revision + 1;
-        sqlx::query("UPDATE sources SET freshness=NULL,catalog_digest=zeroblob(32),catalog_revision=?2,artwork_digest=CASE WHEN ?3 THEN randomblob(32) ELSE artwork_digest END WHERE source_key=?1")
+        sqlx::query("UPDATE sources SET freshness=CASE WHEN ?4 THEN NULL ELSE freshness END,catalog_digest=zeroblob(32),catalog_revision=?2,artwork_digest=CASE WHEN ?3 THEN randomblob(32) ELSE artwork_digest END WHERE source_key=?1")
             .bind(source_key)
             .bind(revision)
             .bind(artwork_changed)
+            .bind(metadata_changed)
             .execute(&mut *transaction)
             .await?;
         if artwork_changed {
@@ -1964,6 +2070,35 @@ impl Scan {
         } else {
             ScanOutcome::Changed(publication)
         })
+    }
+
+    async fn publish_favorites(
+        &self,
+        connection: &mut SqliteConnection,
+        source: i64,
+    ) -> LibraryResult<bool> {
+        let Some(favorites) = &self.favorites else {
+            return Ok(false);
+        };
+        let mut changed = false;
+        for (table, ids) in ["tracks", "albums", "artists"].into_iter().zip(favorites) {
+            for (favorite, membership) in [(false, "NOT IN"), (true, "IN")] {
+                let sql = format!(
+                    "UPDATE {table} SET source_favorite=?3 WHERE source_key=?1 AND source_favorite=?4
+                     AND object_id {membership} (SELECT value FROM json_each(?2))"
+                );
+                changed |= sqlx::query(sqlx::AssertSqlSafe(sql))
+                    .bind(source)
+                    .bind(ids)
+                    .bind(favorite)
+                    .bind(!favorite)
+                    .execute(&mut *connection)
+                    .await?
+                    .rows_affected()
+                    > 0;
+            }
+        }
+        Ok(changed)
     }
 
     async fn cleanup(&self) -> LibraryResult<()> {
@@ -2511,7 +2646,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              date_added TEXT, musicbrainz_release_id TEXT,
              musicbrainz_release_group_id TEXT, is_compilation INTEGER,
              artwork_binding BLOB,
-             favorite INTEGER NOT NULL,
+             favorite INTEGER,
              rating INTEGER, first_seen_at INTEGER,
              source_loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000',
              loudness_analysis_key BLOB NOT NULL DEFAULT X'0000000000000000000000000000000000000000000000000000000000000000',
@@ -2528,7 +2663,7 @@ async fn create_staging(connection: &mut sqlx::SqliteConnection) -> LibraryResul
              source_path TEXT, source_format TEXT, comment TEXT, bpm INTEGER,
              musicbrainz_recording_id TEXT, musicbrainz_release_track_id TEXT,
              cue_path TEXT, cue_start_millis INTEGER, cue_end_millis INTEGER,
-             artwork_binding BLOB, favorite INTEGER NOT NULL,
+             artwork_binding BLOB, favorite INTEGER,
              rating INTEGER, first_seen_at INTEGER,
              baseline_play_count INTEGER, baseline_skip_count INTEGER,
              baseline_last_played INTEGER,
@@ -3330,9 +3465,10 @@ async fn publish_entities(
     .bind(source_key)
     .execute(&mut **transaction)
     .await?;
-    if full {
-        sqlx::query("DELETE FROM home_entries WHERE source_key=?1")
+    {
+        sqlx::query("DELETE FROM home_entries WHERE source_key=?1 AND (?2 OR section_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home'))")
             .bind(source_key)
+            .bind(full)
             .execute(&mut **transaction)
             .await?;
         sqlx::query(
@@ -3351,9 +3487,11 @@ async fn publish_entities(
                       WHERE source_key=?1 AND object_id=entry.entity_object_id)
                   END,
                   entry.title, entry.subtitle, entry.section_title
-           FROM temp.scan_home_entries AS entry",
+           FROM temp.scan_home_entries AS entry
+           WHERE ?2 OR entry.owner_id IN (SELECT object_id FROM temp.scan_removals WHERE entity_kind='home')",
         )
         .bind(source_key)
+        .bind(full)
         .execute(&mut **transaction)
         .await?;
     }

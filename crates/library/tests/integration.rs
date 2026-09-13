@@ -12,6 +12,7 @@ mod entities;
 mod laws;
 mod playlists;
 mod products;
+mod provider_updates;
 mod queue;
 mod scan;
 mod schema;
