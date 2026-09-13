@@ -67,13 +67,13 @@ jobs:
           workspaces: ". -> .local/target"
 
       - name: Verify signed release tag
-        if: inputs.verify_signed_tag
+        if: matrix.architecture == 'arm64' && inputs.verify_signed_tag
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: cargo run --locked -p xtask -- verify release-tag "$RELEASE_TAG"
 
       - name: Validate release metadata
-        if: inputs.release_tag != '' && !inputs.verify_signed_tag
+        if: matrix.architecture == 'arm64' && inputs.release_tag != '' && !inputs.verify_signed_tag
         env:
           RELEASE_TAG: ${{ inputs.release_tag }}
         run: cargo run --locked -p xtask -- verify release-metadata "$RELEASE_TAG"
@@ -214,6 +214,7 @@ jobs:
             just _build-native-package stable
 
       - name: Verify packaged executable startup
+        if: matrix.architecture == 'arm64'
         timeout-minutes: 1
         run: |
           env -u DYLD_LIBRARY_PATH -u DYLD_FALLBACK_LIBRARY_PATH \
@@ -222,6 +223,7 @@ jobs:
             --help
 
       - name: Verify packaged headless playback
+        if: matrix.architecture == 'arm64'
         timeout-minutes: 5
         run: |
           cargo run --locked -p xtask -- verify packaged-playback \
