@@ -1634,13 +1634,11 @@ fn genius_page_chrome_line_count<'a>(lines: impl IntoIterator<Item = &'a str>) -
 }
 fn genius_contributors_heading(line: &str) -> bool {
     let line = line.trim();
-    let count_end = line
-        .find(|character: char| !character.is_ascii_digit())
-        .unwrap_or(0);
-    if count_end == 0 {
+    let heading = line.trim_start_matches(|character: char| character.is_ascii_digit());
+    if heading.len() == line.len() {
         return false;
     }
-    let heading = line[count_end..].trim_start().to_ascii_lowercase();
+    let heading = heading.trim_start().to_ascii_lowercase();
     ["contributors", "contributor"].iter().any(|label| {
         heading
             .strip_prefix(label)
