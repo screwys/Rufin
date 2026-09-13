@@ -45,7 +45,9 @@ file(GLOB_RECURSE RUFIN_BUNDLED_MODULES
   "${RUFIN_CONTENTS}/Resources/lib/gdk-pixbuf-2.0/loaders/*.so"
   "${RUFIN_CONTENTS}/Resources/lib/gio/modules/*.so"
   "${RUFIN_CONTENTS}/Resources/lib/gstreamer-1.0/*.dylib"
+  "${RUFIN_CONTENTS}/Resources/lib/gstreamer-1.0/*.so"
 )
+list(APPEND RUFIN_BUNDLED_MODULES "${RUFIN_CONTENTS}/Frameworks/libsoup-3.0.0.dylib")
 fixup_bundle(
   "${RUFIN_APP}"
   "${RUFIN_BUNDLED_MODULES}"

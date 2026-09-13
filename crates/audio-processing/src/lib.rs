@@ -5,6 +5,8 @@ use gstreamer as gst;
 use std::sync::OnceLock;
 
 mod loudness;
+#[cfg(target_os = "macos")]
+mod tls;
 mod transcode;
 mod visualizer;
 mod waveform;
@@ -21,7 +23,14 @@ pub use visualizer::VisualizerFft;
 pub fn ensure_gstreamer_initialized() -> Result<(), String> {
     static INITIALIZED: OnceLock<Result<(), String>> = OnceLock::new();
     INITIALIZED
-        .get_or_init(|| gst::init().map_err(|error| error.to_string()))
+        .get_or_init(|| {
+            gst::init().map_err(|error| error.to_string())?;
+            #[cfg(target_os = "macos")]
+            if let Err(error) = tls::configure_native_trust() {
+                tracing::warn!(%error, "Could not load native certificates for media HTTPS");
+            }
+            Ok(())
+        })
         .clone()
 }
 

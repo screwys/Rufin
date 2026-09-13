@@ -476,13 +476,17 @@ checksum = "21e4227379beff4205943696e6c3e0cd809bacdf3f0edd6e3dd153e2269571a4"
 name = "audio-processing"
 version = "0.15.3"
 dependencies = [
+ "base64 0.23.1",
  "ebur128",
+ "gio",
  "gstreamer",
  "gstreamer-app",
  "gstreamer-audio",
  "playback",
  "rustfft",
+ "rustls-native-certs",
  "tempfile",
+ "tracing",
 ]
 
 [[package]]
@@ -8095,10 +8099,12 @@ dependencies = [
 name = "xtask"
 version = "0.15.3"
 dependencies = [
+ "directories",
  "proc-macro2",
  "roxmltree",
  "serde_json",
  "syn 2.0.119",
+ "tempfile",
 ]
 
 [[package]]

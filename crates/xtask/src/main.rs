@@ -7,6 +7,7 @@ mod generate;
 mod i18n;
 mod linux_packaging;
 mod media;
+mod packaged_playback;
 mod process;
 mod release;
 mod rpm;
@@ -56,6 +57,7 @@ fn print_usage() {
   cargo run --locked -p xtask -- release create-tag [--base TAG] [--dry-run] [--replace] [--skip-flathub] VERSION SUMMARY
   cargo run --locked -p xtask -- release update-flathub-manifest [--manifest PATH] TAG
   cargo run --locked -p xtask -- verify package-layout ROOT [PREFIX]
+  cargo run --locked -p xtask -- verify packaged-playback EXECUTABLE
   cargo run --locked -p xtask -- verify release-metadata TAG
   cargo run --locked -p xtask -- verify release-tag TAG"
     );
