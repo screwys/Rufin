@@ -743,7 +743,7 @@ impl Authorization {
         address: IpAddr,
         token: Option<&str>,
         now: Instant,
-    ) -> Result<(), Response<Body>> {
+    ) -> Result<(), Box<Response<Body>>> {
         let window = Duration::from_secs(60);
         let mut failures = self.failures.lock().expect("authentication failures");
         failures.retain(|(_, start, _)| now.duration_since(*start) < window);
@@ -760,7 +760,7 @@ impl Authorization {
                 response
                     .headers_mut()
                     .insert(hyper::header::RETRY_AFTER, seconds.into());
-                return Err(response);
+                return Err(Box::new(response));
             }
         }
         if token == Some(self.token.as_str()) {
@@ -782,7 +782,9 @@ impl Authorization {
             }
             failures.push_back((address, now, 1));
         }
-        Err(error(StatusCode::UNAUTHORIZED, "A valid Bearer token is required").into_response())
+        Err(Box::new(
+            error(StatusCode::UNAUTHORIZED, "A valid Bearer token is required").into_response(),
+        ))
     }
 }
 
@@ -797,7 +799,7 @@ async fn authorize(
         .get(hyper::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
     if let Err(response) = authorization.check(peer.ip(), token, Instant::now()) {
-        return response;
+        return *response;
     }
     next.run(request).await
 }

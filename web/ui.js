@@ -276,13 +276,18 @@ function init() {
 function bindHoverControls(row) {
   if (!row.querySelector(".cover-controls, .pin-controls")) return;
   let revealTouch = false;
+  let pointerType = "mouse";
   row.addEventListener("pointerenter", (event) => {
-    if (event.pointerType === "mouse") row.classList.add("controls-visible");
+    if (event.pointerType === "mouse") {
+      pointerType = "mouse";
+      row.classList.add("controls-visible");
+    }
   });
   row.addEventListener("pointerleave", (event) => {
     if (event.pointerType === "mouse") row.classList.remove("controls-visible");
   });
   row.addEventListener("pointerdown", (event) => {
+    pointerType = event.pointerType;
     if (event.pointerType === "mouse") return;
     revealTouch = !row.classList.contains("controls-visible");
     row.classList.add("controls-visible");
@@ -305,7 +310,7 @@ function bindHoverControls(row) {
         event.target.closest(".cover-controls button, .pin-controls button")
       ) {
         event.target.closest("button").blur();
-        row.classList.remove("controls-visible");
+        if (pointerType !== "mouse") row.classList.remove("controls-visible");
       }
     },
     true,
@@ -315,7 +320,10 @@ function bindHoverControls(row) {
       row.classList.add("controls-visible");
   });
   row.addEventListener("focusout", (event) => {
-    if (!row.contains(event.relatedTarget))
+    if (
+      !row.contains(event.relatedTarget) &&
+      (pointerType !== "mouse" || !row.matches(":hover"))
+    )
       row.classList.remove("controls-visible");
   });
 }
