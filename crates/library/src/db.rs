@@ -161,17 +161,7 @@ impl Database {
                 return Ok(database);
             }
         }
-        match Self::open_final(path, catalog).await {
-            Ok(database) => Ok(database),
-            Err(error) if is_store_content_failure(&error) => {
-                tracing::warn!(%error, "could not use Store; opening fresh state");
-                preserve_store(path)?;
-                let mut database = Self::open_final(path, catalog).await?;
-                database.fresh_start = true;
-                Ok(database)
-            }
-            Err(error) => Err(error),
-        }
+        Self::open_final(path, catalog).await
     }
 
     pub async fn open_installation(
@@ -231,20 +221,25 @@ impl Database {
     }
 
     pub(crate) async fn open_final(path: &Path, catalog: &Path) -> LibraryResult<Self> {
-        let mut writer = open_writer(path).await?;
-        if let Err(error) = schema::initialize_durable(&mut writer).await {
-            writer.close().await?;
-            return Err(error);
+        async fn open_store(path: &Path) -> LibraryResult<SqliteConnection> {
+            let mut writer = open_writer(path).await?;
+            if let Err(error) = schema::initialize_durable(&mut writer).await {
+                writer.close().await?;
+                return Err(error);
+            }
+            Ok(writer)
         }
-        let (catalog, temporary_catalog) = prepare_catalog(catalog).await?;
-        schema::attach_catalog(&mut writer, &catalog).await?;
-        sqlx::query("PRAGMA catalog.synchronous=NORMAL")
-            .execute(&mut writer)
-            .await?;
-        schema::initialize_local_activity(&mut writer).await?;
-        sqlx::raw_sql("PRAGMA optimize=0x10002")
-            .execute(&mut writer)
-            .await?;
+        let (writer, fresh_start) = match open_store(path).await {
+            Ok(writer) => (writer, false),
+            Err(error) if is_store_content_failure(&error) => {
+                tracing::warn!(%error, "could not use Store; opening fresh state");
+                preserve_store(path)?;
+                (open_store(path).await?, true)
+            }
+            Err(error) => return Err(error),
+        };
+        writer.close().await?;
+        let (catalog, temporary_catalog, writer) = prepare_catalog(path, catalog).await?;
         let readers = open_readers(path, &catalog).await?;
         Ok(Self {
             inner: Arc::new(DatabaseInner {
@@ -256,7 +251,7 @@ impl Database {
                 distinct_track_covers: AtomicBool::new(false),
                 _temporary_catalog: temporary_catalog,
             }),
-            fresh_start: false,
+            fresh_start,
         })
     }
 
@@ -485,19 +480,42 @@ async fn open_readers(path: &Path, catalog: &Path) -> LibraryResult<SqlitePool> 
 }
 
 async fn prepare_catalog(
+    store: &Path,
     path: &Path,
-) -> LibraryResult<(std::path::PathBuf, Option<tempfile::TempDir>)> {
-    async fn open(path: &Path) -> LibraryResult<()> {
+) -> LibraryResult<(
+    std::path::PathBuf,
+    Option<tempfile::TempDir>,
+    SqliteConnection,
+)> {
+    async fn open(store: &Path, path: &Path) -> LibraryResult<SqliteConnection> {
         if let Some(parent) = path.parent() {
             std::fs::create_dir_all(parent)?;
         }
         let mut connection = open_writer(path).await?;
         let result = schema::initialize_catalog(&mut connection).await;
         connection.close().await?;
-        result
+        result?;
+        let mut writer = open_writer(store).await?;
+        let result = async {
+            schema::attach_catalog(&mut writer, path).await?;
+            sqlx::query("PRAGMA catalog.synchronous=NORMAL")
+                .execute(&mut writer)
+                .await?;
+            schema::initialize_local_activity(&mut writer).await?;
+            sqlx::raw_sql("PRAGMA optimize=0x10002")
+                .execute(&mut writer)
+                .await?;
+            LibraryResult::Ok(())
+        }
+        .await;
+        if let Err(error) = result {
+            writer.close().await?;
+            return Err(error);
+        }
+        Ok(writer)
     }
-    match open(path).await {
-        Ok(()) => return Ok((path.to_path_buf(), None)),
+    match open(store, path).await {
+        Ok(writer) => return Ok((path.to_path_buf(), None, writer)),
         Err(error) if is_store_content_failure(&error) => {
             for suffix in ["", "-wal", "-shm"] {
                 let mut name = path.as_os_str().to_os_string();
@@ -508,8 +526,8 @@ async fn prepare_catalog(
                     Err(_) => break,
                 }
             }
-            if open(path).await.is_ok() {
-                return Ok((path.to_path_buf(), None));
+            if let Ok(writer) = open(store, path).await {
+                return Ok((path.to_path_buf(), None, writer));
             }
         }
         Err(_) => {}
@@ -518,8 +536,8 @@ async fn prepare_catalog(
         .prefix("rufin-catalog-")
         .tempdir()?;
     let path = directory.path().join("catalog.sqlite");
-    open(&path).await?;
-    Ok((path, Some(directory)))
+    let writer = open(store, &path).await?;
+    Ok((path, Some(directory), writer))
 }
 
 pub(crate) fn preserve_store(path: &Path) -> std::io::Result<()> {
