@@ -764,6 +764,9 @@ msgstr ""
 msgid "Disc number"
 msgstr ""
 
+msgid "Disc {number}"
+msgstr ""
+
 msgid "Disc"
 msgstr ""
 
@@ -2626,6 +2629,9 @@ msgid "Undo"
 msgstr ""
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 msgid "Unmute"

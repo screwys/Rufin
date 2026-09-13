@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin 0.6.0\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-13 10:05+0000\n"
+"PO-Revision-Date: 2026-09-13 12:15+0000\n"
 "Last-Translator: Александр Стельмах <aguhadug@gmail.com>\n"
 "Language-Team: Russian <https://hosted.weblate.org/projects/rufin/app/ru/>\n"
 "Language: ru\n"
@@ -815,6 +815,9 @@ msgstr "Отключено"
 
 msgid "Disc number"
 msgstr "Номер диска"
+
+msgid "Disc {number}"
+msgstr "Диск {number}"
 
 msgid "Disc"
 msgstr "Диск"
@@ -2714,6 +2717,9 @@ msgstr "Отменить"
 
 msgid "Unknown artist"
 msgstr "Неизвестный исполнитель"
+
+msgid "Unknown disc"
+msgstr "Неизвестный диск"
 
 msgid "Unmute"
 msgstr "Включить звук"

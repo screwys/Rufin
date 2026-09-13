@@ -870,6 +870,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "Číslo disku"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "Číslo disku"
+
 msgid "Disc"
 msgstr "Disk"
 
@@ -2924,6 +2929,9 @@ msgid "Undo"
 msgstr "Vrátit zpět"
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 #, fuzzy

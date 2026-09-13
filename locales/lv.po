@@ -862,6 +862,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "Diska numurs"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "Diska numurs"
+
 msgid "Disc"
 msgstr "Disks"
 
@@ -2873,6 +2878,9 @@ msgid "Undo"
 msgstr "Atcelt"
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 #, fuzzy

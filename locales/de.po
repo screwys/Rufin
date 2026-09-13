@@ -850,6 +850,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "CD-Nummer"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "CD-Nummer"
+
 msgid "Disc"
 msgstr "CD"
 
@@ -2816,6 +2821,9 @@ msgid "Undo"
 msgstr "Rückgängig machen"
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 #, fuzzy

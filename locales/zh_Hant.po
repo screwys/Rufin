@@ -838,6 +838,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "光碟編號"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "光碟編號"
+
 msgid "Disc"
 msgstr "光碟"
 
@@ -2857,6 +2862,9 @@ msgid "Undo"
 msgstr ""
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 msgid "Unmute"
