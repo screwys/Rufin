@@ -6,8 +6,7 @@ use playback::ResolvedStream;
 use playback::*;
 use std::collections::VecDeque;
 use std::f64::consts::FRAC_PI_2;
-use std::path::Path;
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex};
 use std::thread;
@@ -25,88 +24,6 @@ pub use audio::available_audio_outputs;
 pub use engine::GStreamerPlaybackBackend;
 #[cfg(unix)]
 pub use process::restart_with_http1;
-pub fn verify_audio_file(path: &Path) -> Result<(), String> {
-    ensure_gstreamer_initialized()?;
-    if gst::ElementFactory::find("souphttpsrc").is_none() {
-        return Err("GStreamer HTTP playback support (souphttpsrc) is unavailable".to_string());
-    }
-    let uri = glib::filename_to_uri(path, None).map_err(|error| error.to_string())?;
-    let pipeline = pipeline::make_playbin("rufin-media-verification")?;
-    let bus = pipeline
-        .bus()
-        .ok_or_else(|| "GStreamer media verification has no message bus".to_string())?;
-    let video_sink = gst::ElementFactory::make("fakesink")
-        .name("rufin-verification-video-output")
-        .build()
-        .map_err(|error| error.to_string())?;
-    let settings = BackendAudioSettings {
-        audio_output: Some("fakesink".to_string()),
-        ..BackendAudioSettings::default()
-    };
-    let stream = Arc::new(Mutex::new(PreparedStream::from(ResolvedStream::new(
-        uri.as_str(),
-    ))));
-    let audio_graph = audio::AudioGraph::new(
-        &settings,
-        DEFAULT_PLAYBACK_RATE,
-        TrackLoudness::default(),
-        stream,
-    )?;
-    let decoded_audio_buffers = Arc::new(AtomicUsize::new(0));
-    let decoded_audio_buffers_for_probe = Arc::clone(&decoded_audio_buffers);
-    audio_graph
-        .root()
-        .static_pad("sink")
-        .ok_or_else(|| "GStreamer media verification audio chain has no input pad".to_string())?
-        .add_probe(
-            gst::PadProbeType::BUFFER | gst::PadProbeType::BUFFER_LIST,
-            move |_, _| {
-                decoded_audio_buffers_for_probe.fetch_add(1, Ordering::Relaxed);
-                gst::PadProbeReturn::Ok
-            },
-        );
-    pipeline::configure_playbin_for_audio(&pipeline);
-    pipeline.set_property("video-sink", &video_sink);
-    pipeline.set_property("audio-sink", audio_graph.root());
-    pipeline.set_property("uri", uri.as_str());
-
-    let result = match pipeline.set_state(gst::State::Playing) {
-        Err(error) => Err(bus
-            .pop_filtered(&[gst::MessageType::Error])
-            .and_then(|message| {
-                gstreamer_error_details(&message, "media verification startup", Some("fakesink"))
-            })
-            .unwrap_or_else(|| format!("GStreamer media verification could not start: {error}"))),
-        Ok(_) => match bus.timed_pop_filtered(
-            gst::ClockTime::from_seconds(30),
-            &[gst::MessageType::Eos, gst::MessageType::Error],
-        ) {
-            Some(message) if matches!(message.view(), gst::MessageView::Eos(_)) => {
-                verified_eos(decoded_audio_buffers.load(Ordering::Relaxed))
-            }
-            Some(message) => {
-                Err(
-                    gstreamer_error_details(&message, "media verification", Some("fakesink"))
-                        .unwrap_or_else(|| "GStreamer media verification failed".to_string()),
-                )
-            }
-            None => {
-                Err("GStreamer media verification did not finish within 30 seconds".to_string())
-            }
-        },
-    };
-    let _ = pipeline.set_state(gst::State::Null);
-    result
-}
-
-fn verified_eos(decoded_audio_buffers: usize) -> Result<(), String> {
-    if decoded_audio_buffers == 0 {
-        return Err(
-            "GStreamer media verification reached end of stream without decoded audio".to_string(),
-        );
-    }
-    Ok(())
-}
 
 fn gstreamer_error_details(
     message: &gst::Message,
@@ -140,21 +57,4 @@ fn lock_recover<T>(mutex: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
     mutex
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner)
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn media_verification_requires_decoded_audio_before_end_of_stream() {
-        assert!(verified_eos(1).is_ok());
-        assert_eq!(
-            verified_eos(0),
-            Err(
-                "GStreamer media verification reached end of stream without decoded audio"
-                    .to_string()
-            )
-        );
-    }
 }

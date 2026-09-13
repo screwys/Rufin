@@ -499,7 +499,7 @@ pub fn validate_local_access_path(
     if !server_prefix.is_empty() {
         return match projected {
             Some(path) => {
-                let message = path.to_string_lossy().into_owned();
+                let message = crate::path_display::display_path(&path);
                 let saveable = mapped_file_exists(folder, &path);
                 LocalAccessPathValidation {
                     message,
@@ -520,14 +520,14 @@ pub fn validate_local_access_path(
         let path = projected.unwrap_or_else(|| folder.join(sample_path));
         let saveable = mapped_file_exists(folder, &path);
         return LocalAccessPathValidation {
-            message: path.to_string_lossy().into_owned(),
+            message: crate::path_display::display_path(&path),
             projected: Some(path),
             saveable,
         };
     }
     if sample_path.starts_with(folder) {
         return LocalAccessPathValidation {
-            message: sample.to_string(),
+            message: crate::path_display::display_path(sample_path),
             projected: Some(sample_path.to_path_buf()),
             saveable: mapped_file_exists(folder, sample_path),
         };

@@ -1,4 +1,5 @@
 pub(crate) const BASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/style.css";
+#[cfg(test)]
 pub(crate) const SHOWCASE_CSS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/showcase.css";
 pub(crate) const ABOUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/application/about.ui";
 pub(crate) const WINDOWS_TITLE_RESOURCE: &str =
@@ -21,12 +22,14 @@ pub(crate) const LIBRARY_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/library.ui";
 pub(crate) const PLAYLIST_FILE_DIALOG_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/playlist_file.ui";
+#[cfg(test)]
 pub(crate) const RELEASE_NOTE_ROW_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/release_note_row.ui";
 pub(crate) const RELEASE_NOTES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/dialogs/release_notes.ui";
 pub(crate) const PLAYBACK_PREFERENCES_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/playback.ui";
+#[cfg(test)]
 pub(crate) const PREFERENCES_REORDER_ROW_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/preferences/reorder_row.ui";
 pub(crate) const CONNECTION_PROGRESS_RESOURCE: &str =
@@ -60,6 +63,7 @@ pub(crate) const CONTENT_CHROME_RESOURCE: &str =
 pub(crate) const NAVIGATION_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/navigation.ui";
 pub(crate) const SHELL_ROOT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/root.ui";
 pub(crate) const SHORTCUTS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/shortcuts.ui";
+#[cfg(test)]
 pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     WINDOWS_TITLE_RESOURCE,
     BASE_CSS_RESOURCE,

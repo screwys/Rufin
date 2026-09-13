@@ -162,6 +162,9 @@ jobs:
                 cmake/RufinMacOSAudio.cmake)
                   add_jobs workspace_macos macos
                   ;;
+                crates/xtask/src/packaged_playback.rs|crates/xtask/src/media.rs)
+                  add_jobs macos windows
+                  ;;
                 cmake/RufinMacOS*)
                   add_jobs macos
                   ;;

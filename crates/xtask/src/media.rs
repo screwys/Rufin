@@ -36,6 +36,14 @@ const GST_MEDIA_FILES: &[(&str, &[&str])] = &[
 ];
 const OPENMPT_GME_MEDIA_FILES: &[&str] = &[OPENMPT_FILE, GME_FILE];
 
+pub(crate) fn playback_fixture(directory: &Path) -> Result<()> {
+    run_command(
+        directory,
+        GST_LAUNCH,
+        gst_arguments(&["wavenc"], "Björk – проверка.wav", 300),
+    )
+}
+
 pub(crate) fn verification_files_command(args: Vec<String>) -> Result<()> {
     let usage = "Usage: cargo run --locked -p xtask -- generate media-verification-files OUTPUT [--with-openmpt-gme]";
     if matches!(args.as_slice(), [arg] if arg == "-h" || arg == "--help") {
@@ -153,15 +161,15 @@ fn gst_file(output_directory: &Path, pipeline: &[&str], filename: &str) -> Resul
     run_command(
         output_directory,
         GST_LAUNCH,
-        gst_arguments(pipeline, filename),
+        gst_arguments(pipeline, filename, 20),
     )
 }
 
-fn gst_arguments(pipeline: &[&str], filename: &str) -> Vec<OsString> {
+fn gst_arguments(pipeline: &[&str], filename: &str, buffers: u32) -> Vec<OsString> {
     let mut args = [
         "-q",
         "audiotestsrc",
-        "num-buffers=20",
+        &format!("num-buffers={buffers}"),
         "!",
         "audioconvert",
         "!",
@@ -218,7 +226,7 @@ mod tests {
 
     #[test]
     fn media_tools_receive_filenames_relative_to_the_output_directory() {
-        let gst = gst_arguments(&["wavenc"], WAV_FILE);
+        let gst = gst_arguments(&["wavenc"], WAV_FILE, 20);
         assert_has_no_directory(gst.last().expect("GStreamer output argument"));
 
         let wavpack = wavpack_arguments();

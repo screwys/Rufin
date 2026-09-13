@@ -302,20 +302,6 @@ RUST_LOG=debug rufin # for native packages
 just debug  # for local build
 ```
 
-To test if Rufin can play a specific media (reading metadata and actual GStreamer audio decoding):
-
-```bash
-flatpak run --filesystem=host:ro io.github.screwys.Rufin --verify-media (realpath "media_path.format")
-  ```
-```bash
-rufin --verify-media "media_path.format"
-  ```
-
-```bash
-cargo run -p rufin -- --verify-media "media_path.format"
-```
-If should exit silently if the media can be played.
-
 ## Uninstallation
 
 You can remove Rufin with your package manager, use the uninstaller included with the Windows

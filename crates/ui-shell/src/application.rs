@@ -384,7 +384,8 @@ fn register_resources() -> Result<(), String> {
         .clone()
 }
 
-pub(crate) fn verify_interface_resources() -> Result<(), String> {
+#[cfg(test)]
+fn verify_interface_resources() -> Result<(), String> {
     register_resources()?;
     ui_shared::ui_resource::verify_icons()?;
     for path in crate::ui_resource::INTERFACE_RESOURCE_PATHS

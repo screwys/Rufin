@@ -5,7 +5,7 @@
 //! queryable music library beside Library's selected collection.
 
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 
 use serde::Deserialize;
 
@@ -15,7 +15,6 @@ use crate::{
     SourceError, SourceResult,
 };
 
-use crate::file::media::{MediaRead, Worker};
 pub(crate) mod artwork;
 pub(crate) mod media;
 pub(crate) mod scan;
@@ -273,25 +272,6 @@ pub(crate) fn edit(
     Ok(SourceEditResult::Connected(Box::new(
         ConnectedSource::local(configuration, source),
     )))
-}
-
-pub fn verify_local_media_file(path: &Path) -> SourceResult<()> {
-    let path = fs::canonicalize(path).map_err(|error| {
-        SourceError::Other(format!("Could not read {}: {error}", path.display()))
-    })?;
-    let mut worker = Worker::default();
-    let read = media::read_media(&mut worker, path.clone(), None);
-    let MediaRead::Accepted(scanned) = read else {
-        return Err(SourceError::Other(format!(
-            "Could not read {}",
-            path.display()
-        )));
-    };
-    if let Some(reference) = &scanned.local_artwork {
-        let root = path.parent().ok_or(SourceError::NotFound)?.to_path_buf();
-        LocalSource { roots: vec![root] }.image_bytes(reference)?;
-    }
-    Ok(())
 }
 
 pub(crate) fn configured_roots(roots: Vec<PathBuf>) -> SourceResult<Vec<PathBuf>> {

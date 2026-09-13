@@ -220,6 +220,12 @@ jobs:
             "$PWD/.local/build/cmake/release-package/stage/Rufin.app/Contents/MacOS/rufin" \
             --help
 
+      - name: Verify packaged headless playback
+        timeout-minutes: 5
+        run: |
+          cargo run --locked -p xtask -- verify packaged-playback \
+            "$PWD/.local/build/cmake/release-package/stage/Rufin.app/Contents/MacOS/rufin"
+
       - name: Remove code-signing keychain
         if: always()
         run: |
