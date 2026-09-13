@@ -105,6 +105,55 @@ struct Library<'a> {
     rows: Vec<Row<'a>>,
     kind: &'a str,
     offset: usize,
+    album_tracks: bool,
+    disc_headers: HashMap<usize, String>,
+}
+
+impl Library<'_> {
+    fn disc_heading(&self, index: &usize) -> Option<&str> {
+        self.disc_headers
+            .get(&(self.offset + index))
+            .map(String::as_str)
+    }
+}
+
+#[cfg(test)]
+mod disc_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn album_disc_headers_keep_page_counts_and_track_numbers() {
+        let mut headers = hyper::HeaderMap::new();
+        headers.insert("HX-Request", "true".parse().unwrap());
+        for (offset, sections, has_header) in [
+            (0, json!([]), false),
+            (0, json!([[0, 1], [2, 2]]), true),
+            (1, json!([[0, 1], [2, 2]]), false),
+            (2, json!([[0, 1], [2, 2]]), true),
+        ] {
+            let parameters = HashMap::from([("offset".into(), offset.to_string())]);
+            let response = page(
+                &headers,
+                &parameters,
+                json!({
+                    "album_tracks": true, "disc_sections": sections,
+                    "tracks": [{"uri":"file:///track", "title":"Track", "track_number":7}]
+                }),
+            )
+            .unwrap();
+            let html = String::from_utf8(
+                axum::body::to_bytes(response.into_body(), usize::MAX)
+                    .await
+                    .unwrap()
+                    .to_vec(),
+            )
+            .unwrap();
+            assert_eq!(html.contains("class=\"disc-header\""), has_header);
+            assert!(html.contains("data-count=\"1\""));
+            assert_eq!(html.matches("data-row=").count(), 1);
+            assert!(html.contains("class=\"number\">7</td>"));
+        }
+    }
 }
 
 struct Section<'a> {
@@ -166,6 +215,22 @@ pub(super) fn page(
                     .collect(),
                 kind,
                 offset: number(parameters, "offset", 0)?,
+                album_tracks: value["album_tracks"].as_bool().unwrap_or(false),
+                disc_headers: value["disc_sections"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|section| {
+                        let start = section[0].as_u64()? as usize;
+                        let disc = section[1].as_i64()?;
+                        let title = if disc > 0 {
+                            localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+                        } else {
+                            localization::tr("Unknown disc")
+                        };
+                        Some((start, title))
+                    })
+                    .collect(),
             }
             .render()
         }

@@ -850,6 +850,7 @@ impl Shell {
             },
             move |shell, page, selected| {
                 let library::TrackRoutePage {
+                    disc_sections: _,
                     order,
                     first_row_position,
                     first_rows,
@@ -1225,6 +1226,7 @@ impl Shell {
             },
             move |shell, (summary, page)| {
                 let library::TrackRoutePage {
+                    disc_sections: _,
                     order,
                     first_row_position,
                     first_rows,

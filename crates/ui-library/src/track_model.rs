@@ -29,6 +29,7 @@ impl TrackProjectionRequest {
 #[derive(Clone)]
 pub struct PreparedTrackProjection<T = TrackRow> {
     pub order: Vec<String>,
+    pub disc_sections: Vec<(u32, i64)>,
     pub first_row_position: usize,
     pub first_rows: Vec<T>,
     pub request: TrackProjectionRequest,
@@ -157,6 +158,7 @@ impl<T: TrackPresentation> TrackCollectionModel<T> {
             prepared.order,
             prepared.first_row_position,
             prepared.first_rows,
+            prepared.disc_sections,
             |row| row.media_uri().to_string(),
         )
     }
@@ -312,6 +314,7 @@ mod tests {
         let mut updated = row;
         updated.title = "After".into();
         let prepared = PreparedTrackProjection {
+            disc_sections: Vec::new(),
             order: vec![updated.media_uri.clone()],
             first_row_position: 0,
             first_rows: vec![updated.clone()],
@@ -324,6 +327,7 @@ mod tests {
         // A later catalog publication has the same query but new row data.
         updated.title = "Catalog update".into();
         assert!(model.replace_prepared(PreparedTrackProjection {
+            disc_sections: Vec::new(),
             first_rows: vec![updated],
             ..prepared.clone()
         }));

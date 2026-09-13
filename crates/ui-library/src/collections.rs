@@ -74,6 +74,9 @@ impl CollectionTableProjection {
                 .set_preferred_widths(&self.preferred_widths(fields));
             return;
         }
+        // GTK adds new column cells to section headers as well as track rows.
+        let header_factory = self.table.header_factory();
+        self.table.set_header_factory(None::<&gtk::ListItemFactory>);
         while let Some(column) = self
             .table
             .columns()
@@ -93,6 +96,7 @@ impl CollectionTableProjection {
         }
         *self.fields.borrow_mut() = fields.to_vec();
         self.width_fit.replace(active);
+        self.table.set_header_factory(header_factory.as_ref());
     }
 
     pub fn fit_scroller_allocation(&self, scroller: &gtk::ScrolledWindow, width: i32) {
@@ -1007,6 +1011,39 @@ pub fn track_table<T: TrackPresentation>(
         column_view_initial_width(shell, options.content_inset),
     );
     table.table.add_css_class("track-list");
+    if key == LibraryListKey::AlbumDetailTracks {
+        table.table.add_css_class("album-track-table");
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(|_, header| {
+            let header = header
+                .downcast_ref::<gtk::ListHeader>()
+                .expect("list header");
+            let resource = crate::ui_resource::DISC_HEADER_RESOURCE;
+            let builder = ui_shared::ui_resource::builder(resource);
+            let label: gtk::Label = ui_shared::ui_resource::object(&builder, resource, "heading");
+            header.set_child(Some(&label));
+        });
+        let sections = model.list_model();
+        factory.connect_bind(move |_, header| {
+            let header = header
+                .downcast_ref::<gtk::ListHeader>()
+                .expect("list header");
+            let label = header
+                .child()
+                .and_downcast::<gtk::Label>()
+                .expect("disc heading");
+            let disc = sections.section_value(header.start());
+            label.set_visible(disc.is_some());
+            if let Some(disc) = disc {
+                label.set_label(&if disc > 0 {
+                    localization::tr("Disc {number}").replace("{number}", &disc.to_string())
+                } else {
+                    localization::tr("Unknown disc")
+                });
+            }
+        });
+        table.table.set_header_factory(Some(&factory));
+    }
     table
 }
 
@@ -1195,6 +1232,81 @@ pub fn collection_grid_field_label(value: &str, field: LibraryField) -> (gtk::Wi
 #[cfg(test)]
 mod layout_policy_tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn changing_columns_keeps_disc_headers_free_of_track_cells() {
+        gtk::init().expect("GTK display");
+        let model =
+            ui_shared::sparse_model::SparseObjectModel::new::<u32, String>(vec![0, 1, 2, 3], 64);
+        model.set_sections(vec![(0, 1), (2, 2)]);
+        let selection = ui_shared::selection::PositionSelectionModel::new(model.clone());
+        selection.select_item(1, true);
+        let column = |field| {
+            (
+                super::super::columns::text_column::<String, _>(field, 100, Clone::clone),
+                100,
+            )
+        };
+        let (table, width_fit, navigation) = collection_table_with_width::<String, _>(
+            model,
+            vec![column(LibraryField::Title)],
+            400,
+            false,
+            None,
+            Some(selection.clone().upcast()),
+        );
+        let projection = CollectionTableProjection {
+            table: table.clone(),
+            navigation,
+            width_fit,
+            fields: Rc::new(RefCell::new(vec![LibraryField::Title])),
+            fixed_columns: Rc::new(Vec::new()),
+            column_for_field: Rc::new(column),
+            width_for_field: Rc::new(|_| 100),
+        };
+        let labels = Rc::new(RefCell::new(Vec::<glib::WeakRef<gtk::Label>>::new()));
+        let setup_labels = labels.clone();
+        let factory = gtk::SignalListItemFactory::new();
+        factory.connect_setup(move |_, header| {
+            let label = gtk::Label::new(Some("Disc"));
+            setup_labels.borrow_mut().push(label.downgrade());
+            header
+                .downcast_ref::<gtk::ListHeader>()
+                .unwrap()
+                .set_child(Some(&label));
+        });
+        table.set_header_factory(Some(&factory));
+        let window = gtk::Window::new();
+        window.set_default_size(400, 400);
+        window.set_child(Some(&table));
+        window.present();
+        while glib::MainContext::default().iteration(false) {}
+        for fields in [
+            vec![LibraryField::Title, LibraryField::Favorite],
+            vec![LibraryField::Favorite, LibraryField::Title],
+            vec![LibraryField::Title],
+        ] {
+            projection.apply_fields(&fields);
+            while glib::MainContext::default().iteration(false) {}
+            assert_eq!(table.columns().n_items(), fields.len() as u32);
+            assert!(selection.is_selected(1));
+            let live = labels
+                .borrow()
+                .iter()
+                .filter_map(glib::WeakRef::upgrade)
+                .collect::<Vec<_>>();
+            assert_eq!(live.len(), 2);
+            for label in live {
+                assert_eq!(
+                    label.parent().unwrap().observe_children().n_items(),
+                    1,
+                    "disc headers must contain only their label after column changes"
+                );
+            }
+        }
+        window.destroy();
+    }
 
     #[test]
     fn contextual_playback_target_uses_the_route_context() {

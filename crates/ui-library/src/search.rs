@@ -1015,7 +1015,9 @@ fn search_column(
             return super::columns::mapped_track_row_index_column_with_width::<SearchItem, _>(
                 super::columns::track_column_width(category.key(), field),
                 playing.clone(),
-                |item| matches!(item, SearchItem::Track(_)),
+                |position, item| {
+                    matches!(item, SearchItem::Track(_)).then(|| (position + 1).to_string())
+                },
             );
         }
         return super::columns::row_index_column_with_width(column_width(field));

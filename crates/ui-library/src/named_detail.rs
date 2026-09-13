@@ -351,6 +351,7 @@ fn request_named_order(
         }
         if let Some(page) = page {
             projection.replace_prepared(PreparedTrackProjection {
+                disc_sections: Vec::new(),
                 order: page.order,
                 first_row_position: page.first_row_position,
                 first_rows: page.first_rows,
@@ -379,6 +380,7 @@ pub async fn load_named_detail(
         return Ok((
             None,
             library::TrackRoutePage {
+                disc_sections: Vec::new(),
                 order: Vec::new(),
                 first_row_position: 0,
                 first_rows: Vec::new(),

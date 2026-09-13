@@ -22,6 +22,7 @@ pub trait TrackPresentation: Clone + PartialEq + Send + Sync + 'static {
     fn downloaded(&self) -> bool;
     fn set_downloaded(&mut self, value: bool);
     fn field(&self, field: LibraryField) -> String;
+    fn track_number(&self) -> Option<i64>;
     fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
         crate::detail_links::DetailLinks::text(&self.field(field))
     }
@@ -57,6 +58,9 @@ macro_rules! track_presentation_fields {
 }
 
 impl TrackPresentation for TrackRow {
+    fn track_number(&self) -> Option<i64> {
+        Some(self.track_number)
+    }
     track_presentation_fields!();
     fn field(&self, field: LibraryField) -> String {
         track_field(self, field)
@@ -73,6 +77,9 @@ impl TrackPresentation for TrackRow {
 }
 
 impl TrackPresentation for library::HistoryRow {
+    fn track_number(&self) -> Option<i64> {
+        self.track_number
+    }
     track_presentation_fields!();
     fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
         crate::detail_links::metadata_links(
@@ -112,6 +119,9 @@ impl TrackPresentation for library::HistoryRow {
 }
 
 impl TrackPresentation for library::SmartPlaylistTrackRow {
+    fn track_number(&self) -> Option<i64> {
+        self.track_number
+    }
     track_presentation_fields!();
     fn links(&self, field: LibraryField) -> crate::detail_links::DetailLinks {
         crate::detail_links::metadata_links(

@@ -256,6 +256,7 @@ impl<'row> FromRow<'row, SqliteRow> for TrackRow {
 #[derive(Clone, Debug)]
 pub struct TrackRoutePage {
     pub order: Vec<String>,
+    pub disc_sections: Vec<(u32, i64)>,
     pub first_row_position: usize,
     pub first_rows: Vec<TrackRow>,
 }
@@ -532,6 +533,7 @@ impl Database {
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(TrackRoutePage {
+            disc_sections: Vec::new(),
             order,
             first_row_position,
             first_rows,

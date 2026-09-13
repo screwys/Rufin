@@ -368,6 +368,11 @@ scrolledwindow.sidebar-scroller overshoot,
   background: transparent;
 }
 
+.album-track-table > listview > header {
+  padding: 6px 0;
+  min-height: 0;
+}
+
 .track-toolbar button.library-toolbar-icon-button {
   min-width: 34px;
   min-height: 34px;

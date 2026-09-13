@@ -70,7 +70,7 @@
     "DELETE /api/sources?id=...": "Forget a source",
     "GET /api/tracks?source=...&offset=0&limit=100&q=...": "Browse tracks from a source, up to 256 at a time. You can also set folder, sort, descending and favorites.",
     "GET /api/albums?source=...&offset=0&limit=100": "Browse albums, up to 128 at a time. You can also set folder, q, sort, descending and favorites.",
-    "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too.",
+    "GET /api/albums/tracks?id=...&offset=0&limit=100": "Browse tracks in an album, up to 128 at a time. You can also set q, sort, descending and favorites. To filter by folder, include source too. The response includes album_tracks and disc_sections: pairs of zero-based track position and disc number in the filtered result. Sections are empty for a single known disc or a sort other than track_number; disc number 0 means unknown.",
     "GET /api/folders?source=...": "Browse folders saved in Rufin, up to 128 at a time. Set parent to open a folder, or folder to choose where browsing starts. Use the folder IDs returned by this API.",
     "GET /api/folders/live?source=...": "Browse folders directly on the server. You can set parent and folder. Returned track_ids match object_id in track results.",
     "GET /api/playlists?offset=0&limit=100": "Browse playlists that are not tied to a source. Set source to include its playlists too. Up to 128 at a time; you can also set folder, q, sort and descending.",

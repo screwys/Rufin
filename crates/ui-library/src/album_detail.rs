@@ -254,8 +254,13 @@ impl AlbumCollectionModels {
             let AlbumCollectionOrder::Rows(order) = order else {
                 return false;
             };
-            return rows
-                .replace_prepared_at(order, first_row_position, first_rows, |row| row.album_key);
+            return rows.replace_prepared_at(
+                order,
+                first_row_position,
+                first_rows,
+                Vec::new(),
+                |row| row.album_key,
+            );
         }
         if !first_rows.is_empty() {
             return false;

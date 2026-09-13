@@ -1,5 +1,6 @@
 pub const ROUTE_PLACEHOLDER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/placeholder.ui";
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
+    DISC_HEADER_RESOURCE,
     SEARCH_ROUTE_RESOURCE,
     LIBRARY_TOOLBAR_RESOURCE,
     LIBRARY_PAGE_RESOURCE,
@@ -11,6 +12,7 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     COLLECTION_GRID_CARD_RESOURCE,
     ROUTE_PLACEHOLDER_RESOURCE,
 ];
+pub const DISC_HEADER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/disc_header.ui";
 pub const SEARCH_ROUTE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/search.ui";
 pub const LIBRARY_TOOLBAR_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/library_toolbar.ui";
 pub const LIBRARY_PAGE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/routes/library_page.ui";

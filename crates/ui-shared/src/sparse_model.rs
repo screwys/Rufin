@@ -387,6 +387,7 @@ mod imp {
         pub(super) state: RefCell<Option<Box<dyn SparseObjectState>>>,
         pub(super) demand: RefCell<Option<Rc<dyn Fn(u32)>>>,
         pub(super) ready_handler: RefCell<Option<Rc<dyn Fn(u32, u32)>>>,
+        pub(super) sections: RefCell<Vec<(u32, i64)>>,
     }
 
     #[glib::object_subclass]
@@ -396,7 +397,19 @@ mod imp {
         type Interfaces = (gio::ListModel,);
     }
 
-    impl ObjectImpl for SparseObjectModel {}
+    impl ObjectImpl for SparseObjectModel {
+        fn signals() -> &'static [glib::subclass::Signal] {
+            static SIGNALS: std::sync::OnceLock<Vec<glib::subclass::Signal>> =
+                std::sync::OnceLock::new();
+            SIGNALS.get_or_init(|| {
+                vec![
+                    glib::subclass::Signal::builder("sections-changed")
+                        .param_types([u32::static_type(), u32::static_type()])
+                        .build(),
+                ]
+            })
+        }
+    }
 
     impl ListModelImpl for SparseObjectModel {
         fn item_type(&self) -> glib::Type {
@@ -434,6 +447,57 @@ glib::wrapper! {
 }
 
 impl SparseObjectModel {
+    pub fn section(&self, position: u32) -> (u32, u32) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        if position >= self.n_items() {
+            return (self.n_items(), u32::MAX);
+        }
+        let sections = self.imp().sections.borrow();
+        let next = sections.partition_point(|(start, _)| *start <= position);
+        let start = next.checked_sub(1).map_or(0, |index| sections[index].0);
+        let end = sections
+            .get(next)
+            .map_or(self.n_items(), |section| section.0);
+        (start, end)
+    }
+
+    fn sections_changed(&self, position: u32, count: u32) {
+        self.emit_by_name::<()>("sections-changed", &[&position, &count]);
+    }
+
+    pub fn connect_sections_changed(
+        &self,
+        handler: impl Fn(u32, u32) + 'static,
+    ) -> glib::SignalHandlerId {
+        self.connect_local("sections-changed", false, move |values| {
+            handler(
+                values[1].get().expect("section position"),
+                values[2].get().expect("section count"),
+            );
+            None
+        })
+    }
+
+    pub fn set_sections(&self, sections: Vec<(u32, i64)>) {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        if *self.imp().sections.borrow() == sections {
+            return;
+        }
+        self.imp().sections.replace(sections);
+        if self.n_items() > 0 {
+            self.sections_changed(0, self.n_items());
+        }
+    }
+
+    pub fn section_value(&self, start: u32) -> Option<i64> {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        let sections = self.imp().sections.borrow();
+        sections
+            .binary_search_by_key(&start, |section| section.0)
+            .ok()
+            .map(|index| sections[index].1)
+    }
+
     pub fn new<K, R>(order: Vec<K>, overscan: usize) -> Self
     where
         K: Clone + 'static,
@@ -573,6 +637,8 @@ impl SparseObjectModel {
         K: Clone + 'static,
         R: 'static,
     {
+        use glib::subclass::prelude::ObjectSubclassIsExt;
+        self.imp().sections.borrow_mut().clear();
         let old_len = self.n_items();
         self.with_typed_mut::<K, R, _>(|state| {
             state.sparse.replace_order(order);
@@ -581,14 +647,21 @@ impl SparseObjectModel {
         self.items_changed(0, old_len, self.n_items());
     }
 
-    fn replace_prepared<K, R>(&self, order: Vec<K>, first: usize, rows: Vec<R>)
-    where
+    fn replace_prepared<K, R>(
+        &self,
+        order: Vec<K>,
+        first: usize,
+        rows: Vec<R>,
+        sections: Vec<(u32, i64)>,
+    ) where
         K: Clone + Eq + 'static,
         R: Clone + PartialEq + 'static,
     {
         use glib::subclass::prelude::ObjectSubclassIsExt;
 
         let old_len = self.n_items();
+        let sections_changed = *self.imp().sections.borrow() != sections;
+        self.imp().sections.replace(sections);
         let (same_order, updates) = self.with_typed_mut::<K, R, _>(|state| {
             let same_order = state.sparse.order.as_ref() == order.as_slice();
             state.sparse.replace_order(order);
@@ -615,6 +688,9 @@ impl SparseObjectModel {
         if !same_order {
             self.items_changed(0, old_len, self.n_items());
             return;
+        }
+        if sections_changed && self.n_items() > 0 {
+            self.sections_changed(0, self.n_items());
         }
         for (position, item, value, ready) in updates {
             item.replace_sparse(value, ready);
@@ -821,7 +897,7 @@ where
     where
         R: PartialEq,
     {
-        self.replace_prepared_at(order, 0, rows, key)
+        self.replace_prepared_at(order, 0, rows, Vec::new(), key)
     }
 
     pub fn replace_prepared_at(
@@ -829,6 +905,7 @@ where
         order: Vec<K>,
         first: usize,
         rows: Vec<R>,
+        sections: Vec<(u32, i64)>,
         key: impl Fn(&R) -> K,
     ) -> bool
     where
@@ -842,7 +919,8 @@ where
             return false;
         }
         self.cancel();
-        self.model.replace_prepared::<K, R>(order, first, rows);
+        self.model
+            .replace_prepared::<K, R>(order, first, rows, sections);
         true
     }
 
@@ -1320,6 +1398,7 @@ mod tests {
             order,
             0,
             (0..100).map(|value| format!("filtered {value}")).collect(),
+            Vec::new(),
         );
         assert!(model.hydrate::<u64, String>(64..100).is_none());
         assert!(
@@ -1518,6 +1597,7 @@ mod tests {
             vec![10, 11],
             0,
             vec!["ten".to_string(), "eleven".to_string()],
+            Vec::new(),
         );
 
         let first = model
@@ -1525,6 +1605,29 @@ mod tests {
             .and_then(|item| item.downcast::<SparseObjectItem>().ok())
             .and_then(|item| item.typed_value::<u64, String>());
         assert!(matches!(first, Some(SparseItem::Ready(value)) if value.as_str() == "ten"));
+    }
+
+    #[test]
+    fn disc_sections_change_atomically_with_tracks() {
+        let model = SparseObjectModel::new::<u64, String>((0..24).collect(), SPARSE_WINDOW_SIZE);
+        model.set_sections(vec![(0, 1), (12, 2)]);
+        assert_eq!(model.section(15), (12, 24));
+        let notifications = Rc::new(Cell::new(0));
+        let changed = notifications.clone();
+        model.connect_sections_changed(move |_, _| changed.set(changed.get() + 1));
+        model.connect_items_changed(|model, _, _, _| {
+            assert_eq!(model.n_items(), 3);
+            assert_eq!(model.section(0), (0, 3));
+            assert_eq!(model.section(3), (3, u32::MAX));
+        });
+        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), Vec::new());
+        assert_eq!(notifications.get(), 0);
+        assert_eq!(model.section_value(0), None);
+        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), vec![(0, 1), (2, 2)]);
+        assert_eq!(notifications.get(), 1);
+        assert_eq!(model.section(2), (2, 3));
+        model.replace_prepared::<u64, String>(vec![0, 1, 2], 0, Vec::new(), vec![(0, 1), (2, 2)]);
+        assert_eq!(notifications.get(), 1);
     }
 
     #[test]
@@ -1546,6 +1649,7 @@ mod tests {
             vec![1, 2],
             0,
             vec!["one".to_string(), "two".to_string()],
+            Vec::new(),
         );
 
         let current = model
@@ -1580,6 +1684,7 @@ mod tests {
             vec![1, 2],
             0,
             vec!["one".to_string(), "changed".to_string()],
+            Vec::new(),
         );
 
         assert_eq!(first_renders.get(), 0);
@@ -1614,6 +1719,7 @@ mod tests {
             order,
             0,
             (0..64).map(|value| value.to_string()).collect(),
+            Vec::new(),
         );
 
         assert!(matches!(

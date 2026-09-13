@@ -227,6 +227,7 @@ impl CatalogUi {
                         }
                         header.replace(&shell, detail.summary.clone());
                         favorite.replace_prepared(PreparedTrackProjection {
+                            disc_sections: Vec::new(),
                             order: detail.favorite_tracks,
                             first_row_position: 0,
                             first_rows: detail.favorite_first_rows,
@@ -660,6 +661,7 @@ fn request_artist_order(
         }
         if let Some(page) = page {
             projection.replace_prepared(PreparedTrackProjection {
+                disc_sections: Vec::new(),
                 order: page.order,
                 first_row_position: page.first_row_position,
                 first_rows: page.first_rows,

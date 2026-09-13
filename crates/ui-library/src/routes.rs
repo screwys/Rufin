@@ -619,6 +619,7 @@ impl CatalogUi {
                         .await
                         .map_err(|error| error.to_string())?;
                     Ok::<_, String>(PreparedTrackProjection {
+                        disc_sections: Vec::new(),
                         order: rows.iter().map(|row| row.media_uri.clone()).collect(),
                         first_row_position: 0,
                         first_rows: rows,
@@ -749,6 +750,7 @@ impl CatalogUi {
                                 order,
                                 first_row_position,
                                 first_rows,
+                                Vec::new(),
                                 |row| row.artist_key,
                             ) {
                                 warn!("rejected a mismatched prepared Artist page");
@@ -1106,6 +1108,7 @@ impl CatalogUi {
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok::<PreparedTrackProjection, String>(PreparedTrackProjection {
+                    disc_sections: Vec::new(),
                     order: page.order,
                     first_row_position: page.first_row_position,
                     first_rows: page.first_rows,
