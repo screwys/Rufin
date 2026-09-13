@@ -465,9 +465,10 @@ pub fn track_column_width(key: LibraryListKey, field: LibraryField) -> i32 {
             | LibraryListKey::SmartPlaylistTracks
     ) {
         match field {
-            LibraryField::RowIndex | LibraryField::Duration => {
+            LibraryField::RowIndex => {
                 return DETAIL_TRACK_UTILITY_COLUMN_WIDTH;
             }
+            LibraryField::Duration => return track_list_column_width(field),
             LibraryField::Favorite => return FAVORITE_COLUMN_WIDTH,
             _ => {}
         }
