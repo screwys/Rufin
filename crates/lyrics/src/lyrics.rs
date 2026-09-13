@@ -231,7 +231,35 @@ fn lrc_tag_value<'a>(line: &'a str, tag: &str) -> Option<&'a str> {
 fn provider_line_has_content(provider: ExternalLyricsProvider, line: &LyricLine) -> bool {
     const NETEASE_INSTRUMENTAL_TEXT: &str = "纯音乐，请欣赏";
     const NETEASE_NO_TEXT_LYRICS_MARKER: &str = "暂无文本歌词";
-    const NETEASE_CREDIT_LABELS: &[&str] = &["作词", "作曲", "编曲", "制作人"];
+    const NETEASE_CREDIT_LABELS: &[&str] = &[
+        "作词",
+        "作詞",
+        "作曲",
+        "编曲",
+        "制作人",
+        "作曲、编曲",
+        "专集",
+        "监制",
+        "弦乐编写",
+        "弦乐监制",
+        "弦乐",
+        "弦乐录音",
+        "人声录音",
+        "音乐制作助理",
+        "和声编写",
+        "和声",
+        "音频编辑",
+        "混音师",
+        "母带工程师",
+        "混音工作室",
+        "母带工作室",
+        "co-arrangement",
+        "acoustic piano",
+        "strings",
+        "backing vocals",
+        "recording & mixing engineer",
+        "vocal recording engineer",
+    ];
     if provider != ExternalLyricsProvider::Netease {
         return true;
     }
@@ -1593,25 +1621,29 @@ fn genius_page_chrome_line_count<'a>(lines: impl IntoIterator<Item = &'a str>) -
     let Some(contributors) = lines.next() else {
         return 0;
     };
+    if !genius_contributors_heading(contributors) {
+        return 0;
+    }
     let Some(translations) = lines.next() else {
-        return 0;
+        return 1;
     };
-    if !genius_contributors_heading(contributors)
-        || !translations.trim().eq_ignore_ascii_case("translations")
-    {
-        return 0;
+    if !translations.trim().eq_ignore_ascii_case("translations") {
+        return 1;
     }
     2 + usize::from(lines.next().is_some())
 }
 fn genius_contributors_heading(line: &str) -> bool {
-    let mut words = line.split_whitespace();
-    words
-        .next()
-        .is_some_and(|count| count.chars().all(|character| character.is_ascii_digit()))
-        && words.next().is_some_and(|label| {
-            label.eq_ignore_ascii_case("contributor") || label.eq_ignore_ascii_case("contributors")
-        })
-        && words.next().is_none()
+    let line = line.trim();
+    let heading = line.trim_start_matches(|character: char| character.is_ascii_digit());
+    if heading.len() == line.len() {
+        return false;
+    }
+    let heading = heading.trim_start().to_ascii_lowercase();
+    ["contributors", "contributor"].iter().any(|label| {
+        heading
+            .strip_prefix(label)
+            .is_some_and(|tail| tail.trim().is_empty() || tail.ends_with(" lyrics"))
+    })
 }
 fn strip_html_tags(value: &str) -> String {
     let mut stripped = String::new();
@@ -1909,6 +1941,55 @@ fn bytes_to_mib(bytes: usize) -> usize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn provider_cleanup_removes_headers_and_credits_preserving_timed_words() {
+        for heading in [
+            "1 Contributor",
+            "3 Contributors桜花 (ouka) Lyrics",
+            "1 Contributor歌の中で (Uta no Naka de) Lyrics",
+        ] {
+            let origin = LyricsOrigin::External(ExternalLyricsProvider::Genius);
+            let content = format!("{heading}\n[00:01.000]<00:01.100>Keep <00:01.600>singing");
+            let raw = lyrics_from_text_content(origin, &content);
+            let expected = raw.documents()[0].lines[1].clone();
+            let cleaned = lyrics_with_displayable_content(raw).unwrap();
+            assert_eq!(cleaned.documents()[0].lines, vec![expected]);
+            assert!(
+                lyrics_with_displayable_content(lyrics_from_text_content(origin, heading))
+                    .is_none()
+            );
+        }
+        let response = serde_json::json!({
+            "lrc": {"lyric": "[00:01.00]监制：Someone\n[00:02.00]音乐制作助理：Someone\n[00:03.00]Keep singing\n[00:04.00]vocal recording engineer：Someone"},
+            "romalrc": {"lyric": "[00:03.00]Keep singing\n[00:04.00]vocal recording engineer:Someone"},
+            "tlyric": {"lyric": "[00:03.00]继续唱歌"}
+        });
+        let cleaned = lyrics_from_netease_response(response).unwrap();
+        assert_eq!(cleaned.documents().len(), 3);
+        for document in cleaned.documents() {
+            assert_eq!(document.lines.len(), 1);
+            assert_eq!(document.lines[0].start_millis, Some(3_000));
+        }
+        for text in [
+            "作曲家在唱歌",
+            "Contributors keep singing",
+            "3 contributors keep singing",
+            "Strings hold us together",
+        ] {
+            for provider in [
+                ExternalLyricsProvider::Genius,
+                ExternalLyricsProvider::Netease,
+            ] {
+                let cleaned = lyrics_with_displayable_content(lyrics_from_text_content(
+                    LyricsOrigin::External(provider),
+                    text,
+                ))
+                .unwrap();
+                assert_eq!(cleaned.documents()[0].lines[0].text, text);
+            }
+        }
+    }
 
     #[test]
     fn provider_searches_keep_valid_siblings_and_independent_metadata() {
