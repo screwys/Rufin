@@ -23,7 +23,7 @@
           workspaceManifest = builtins.fromTOML (builtins.readFile ./Cargo.toml);
         in
         rec {
-          rufin = pkgs.rustPlatform.buildRustPackage {
+          rufin = pkgs.stdenv.mkDerivation {
             pname = "rufin";
             version = workspaceManifest.workspace.package.version;
 
@@ -46,17 +46,20 @@
               ];
             };
 
-            cargoLock = {
+            cargoDeps = pkgs.rustPlatform.importCargoLock {
               lockFile = ./Cargo.lock;
             };
 
             strictDeps = true;
 
             nativeBuildInputs = with pkgs; [
+              cargo
               cmake
               gettext
               ninja
               pkg-config
+              rustPlatform.cargoSetupHook
+              rustc
               wrapGAppsHook4
             ];
 
@@ -83,30 +86,14 @@
 
             SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
 
-            buildPhase = ''
-              runHook preBuild
+            cmakeFlags = [
+              (lib.cmakeFeature "RUFIN_BUILD_IDENTITY" "stable")
+              (lib.cmakeBool "RUFIN_CARGO_FROZEN" true)
+            ];
 
-              cmake \
-                -S . \
-                -B build-cmake \
-                -G Ninja \
-                -DCMAKE_BUILD_TYPE=Release \
-                -DCMAKE_INSTALL_PREFIX="$out" \
-                -DRUFIN_BUILD_IDENTITY=stable \
-                -DRUFIN_CARGO_FROZEN=ON
-              cmake --build build-cmake --target rufin
-
-              runHook postBuild
-            '';
-
-            installPhase = ''
-              runHook preInstall
-
-              cmake --install build-cmake
+            postInstall = ''
               substituteInPlace "$out/share/applications/io.github.screwys.Rufin.desktop" \
                 --replace-fail "Exec=rufin" "Exec=$out/bin/rufin"
-
-              runHook postInstall
             '';
 
             preFixup = ''
