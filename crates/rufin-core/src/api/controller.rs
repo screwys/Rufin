@@ -1,4 +1,4 @@
-use std::net::{IpAddr, Ipv4Addr, SocketAddr};
+use std::net::{IpAddr, Ipv4Addr, Ipv6Addr, SocketAddr};
 use std::sync::Arc;
 
 use secrets::{SecretKey, SecretStore};
@@ -45,6 +45,12 @@ impl ControllerStatus {
             .filter(|ip| ip.is_ipv4() == address.is_ipv4())
             .map(|ip| SocketAddr::new(ip, address.port()))
             .collect::<Vec<_>>();
+        let loopback = if address.is_ipv4() {
+            Ipv4Addr::LOCALHOST.into()
+        } else {
+            Ipv6Addr::LOCALHOST.into()
+        };
+        addresses.push(SocketAddr::new(loopback, address.port()));
         addresses.sort_unstable();
         addresses.dedup();
         Ok(addresses)
