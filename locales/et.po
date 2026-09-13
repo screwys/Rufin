@@ -854,6 +854,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "Plaadi number"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "Plaadi number"
+
 msgid "Disc"
 msgstr "Plaat"
 
@@ -2858,6 +2863,9 @@ msgid "Undo"
 msgstr "Võta tegevus tagasi"
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 #, fuzzy

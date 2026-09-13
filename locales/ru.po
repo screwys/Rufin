@@ -816,6 +816,11 @@ msgstr "Отключено"
 msgid "Disc number"
 msgstr "Номер диска"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "Номер диска"
+
 msgid "Disc"
 msgstr "Диск"
 
@@ -2713,6 +2718,11 @@ msgid "Undo"
 msgstr "Отменить"
 
 msgid "Unknown artist"
+msgstr "Неизвестный исполнитель"
+
+#, fuzzy
+#| msgid "Unknown artist"
+msgid "Unknown disc"
 msgstr "Неизвестный исполнитель"
 
 msgid "Unmute"

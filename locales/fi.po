@@ -807,6 +807,11 @@ msgstr ""
 msgid "Disc number"
 msgstr "Levynumero"
 
+#, fuzzy
+#| msgid "Disc number"
+msgid "Disc {number}"
+msgstr "Levynumero"
+
 msgid "Disc"
 msgstr "Levy"
 
@@ -2734,6 +2739,9 @@ msgid "Undo"
 msgstr "Kumoa"
 
 msgid "Unknown artist"
+msgstr ""
+
+msgid "Unknown disc"
 msgstr ""
 
 #, fuzzy
