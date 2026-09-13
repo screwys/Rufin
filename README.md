@@ -8,29 +8,27 @@
   <a href="https://hosted.weblate.org/projects/rufin/"><img alt="Translate Rufin on Weblate" src="https://img.shields.io/badge/translate-Weblate-2ECCAA?logo=weblate&amp;logoColor=white"></a>
 </h1>
 
-<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use GTK4/libadwaita music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. 
+<img align="left" alt="Rufin" src="data/icons/hicolor/512x512/apps/io.github.screwys.Rufin.png" width="96"> Rufin is a powerful, fast and easy to use native music player for local/remote folders and music servers, available on [multiple platforms](#installation). You can bring music from any combination of sources into a single listening session with app-wide playlists and smart playlists. Rufin offers a rich library browsing and management experience while making the most of each source's unique features. 
 
 <br clear="left">
 
 ![Rufin](data/screenshots/Rufin_full.png)
 
-# 📂 Sources
+## 📂 Sources
 
-<img src="data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
+- <img src="data/icons/hicolor/symbolic/apps/io.github.screwys.Rufin-symbolic.svg" width="20" height="20" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Local libraries</strong>: Rufin provides favorites, playlists, activity history, Auto DJ recommendations and metadata editing.
 
-<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
+- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.jellyfin.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Jellyfin</strong>: Supports library separation, Jellyfin WebSocket for incremental scans, metadata editing over API and Instant Mix.
 
-<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
+- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.navidrome.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Navidrome</strong> / <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.opensubsonic.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>OpenSubsonic</strong>: Supports API key authorization, normal/legacy passwords, Navidrome's own API and OpenSubsonic v2 APIs. Metadata editing is available if library can be matched to local files.
 
-<img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.emby.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
+- <img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.emby.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Emby</strong>: Supports library separation, incremental scans, metadata editing, and Instant Mix. Ratings are saved locally.
 
-<img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.plex.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
+- <img src="data/icons/hicolor/scalable/apps/io.github.screwys.Rufin.source.plex.svg" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>Plex</strong>: Supports password and browser sign-in, shared libraries and Plex Home profiles, library separation, incremental scans, server playlists and ratings, and locally stored favorites. Includes Plex recommendations for Auto DJ, downloads where permitted, Plex Companion controls and queue handoff.
 
-<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
+- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.webdav.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>WebDAV</strong>: Direct read/write access to WebDAV and Nextcloud libraries without filesystem mounts, including downloads, tags/ lyrics editing. Supports HTTPS, custom certificates and headers, password or bearer-token authentication, Nextcloud browser sign-in, and alternate addresses for LAN, VPN, or Tailscale connections.
 
-<img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
-
-# Features
+- <img src="data/icons/hicolor/64x64/apps/io.github.screwys.Rufin.source.smb.png" width="18" height="18" align="absmiddle" alt="">&nbsp;&nbsp;<strong>SMB / Samba</strong>: Direct read/write access to Windows, Samba, and NAS shares without filesystem mounts, including downloads, tags/lyrics editing. Supports share discovery, guest and domain-qualified logins, signing and encryption, and alternate addresses for LAN, VPN, or Tailscale connections.
 
 ## 🎵 Playback
 
@@ -79,7 +77,7 @@
 - Secure storage for server credentials and API secrets by default
 - Casting support for UPnP and Chromecast, plus Plex Companion queue control and playback handoff in both directions
 
-## 🖧 Headless mode and Controller
+## 🛰️ Headless mode and Controller
 
 - Run release binaries without the desktop interface with `rufin --headless`; use `cargo run -p rufin-controller` for the separate GTK-free build
 - Enable the Controller for browser access or scripting through the HTTP API, inside the app or from terminal with: 
@@ -341,6 +339,15 @@ Icon is designed by [Commenter25](https://commenter.cc) and it is licensed under
 - German translation by [sevachka](https://github.com/sevachka)
 - Chezch translation by [Jakub Cabal](https://github.com/jakubcabal)
 - Chinese (Traditional) translation by [Tsung-Ying Yu](https://github.com/an920107)
+- Finnish translation by Jiri Grönroos
+
+## Sponsors 
+
+If you would like to contribute financially, you can do so on [Github](https://github.com/sponsors/screwys). I would like to thank everyone who has made a donation:
+
+### Past Sponsors
+
+[gf3](https://github.com/gf3), [aguhadug](https://github.com/aguhadug) and 1 private sponsor
 
 # License
 
