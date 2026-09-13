@@ -19,7 +19,7 @@ pub(super) fn bind(
         web_regenerate: gtk::Button,
         web_copy_token: gtk::Button,
         web_copy_token_icon: gtk::Image,
-        web_copy_link: gtk::MenuButton,
+        web_copy_link: gtk::Button,
         web_copy_link_icon: gtk::Image,
         web_status: adw::ActionRow,
         web_open: gtk::Button,
@@ -107,77 +107,19 @@ pub(super) fn bind(
         }
     });
 
+    bind_address_action(
+        shell,
+        &web_status,
+        &web_copy_link,
+        copy_action(web_copy_link.upcast_ref(), &web_copy_link_icon),
+    );
     let weak = Rc::downgrade(shell);
     let status = web_status.downgrade();
-    let copy_link = Rc::new(copy_action(web_copy_link.upcast_ref(), &web_copy_link_icon));
-    web_copy_link.set_create_popup_func(move |button| {
-        let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) else {
-            button.set_active(false);
-            return;
-        };
-        let state = shell.web_controller.status().borrow().clone();
-        let addresses = match state.addresses() {
-            Ok(addresses) => addresses,
-            Err(error) => {
-                status.set_subtitle(&error);
-                button.set_active(false);
-                return;
-            }
-        };
-        if addresses.is_empty() {
-            status.set_subtitle(&tr("No network address available"));
-            button.set_active(false);
-            return;
-        }
-        if let [address] = addresses.as_slice() {
-            copy_link(&format!("http://{address}/#token={}", state.token));
-            button.set_active(false);
-            return;
-        }
-        let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
-        let builder = ui_shared::ui_resource::builder(resource);
-        let popover: gtk::Popover =
-            ui_shared::ui_resource::object(&builder, resource, "controller_addresses");
-        let list: gtk::Box =
-            ui_shared::ui_resource::object(&builder, resource, "controller_address_list");
-        let cancel: gtk::Button =
-            ui_shared::ui_resource::object(&builder, resource, "controller_address_cancel");
-        for address in addresses {
-            let choice = gtk::Button::with_label(&address.to_string());
-            let link = format!("http://{address}/#token={}", state.token);
-            let copy_link = copy_link.clone();
-            let popover = popover.downgrade();
-            choice.connect_clicked(move |_| {
-                copy_link(&link);
-                if let Some(popover) = popover.upgrade() {
-                    popover.popdown();
-                }
-            });
-            list.append(&choice);
-        }
-        let weak = popover.downgrade();
-        cancel.connect_clicked(move |_| {
-            if let Some(popover) = weak.upgrade() {
-                popover.popdown();
-            }
-        });
-        button.set_popover(Some(&popover));
-        let weak = button.downgrade();
-        popover.connect_closed(move |_| {
-            if let Some(button) = weak.upgrade() {
-                button.set_popover(None::<&gtk::Popover>);
-            }
-        });
-    });
-    let weak = Rc::downgrade(shell);
-    let status = web_status.downgrade();
-    web_open.connect_clicked(move |_| {
+    bind_address_action(shell, &web_status, &web_open, move |link| {
         let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) else {
             return;
         };
-        let Some(link) = controller_link(&shell) else {
-            return;
-        };
+        let link = link.to_owned();
         gtk::glib::spawn_future_local(async move {
             if let Err(error) = gtk::UriLauncher::new(&link)
                 .launch_future(Some(&shell.chrome.window))
@@ -235,6 +177,53 @@ pub(super) fn bind(
     });
 }
 
+fn bind_address_action(
+    shell: &Rc<Shell>,
+    status: &adw::ActionRow,
+    button: &gtk::Button,
+    action: impl Fn(&str) + 'static,
+) {
+    let weak = Rc::downgrade(shell);
+    let status = status.downgrade();
+    let action = Rc::new(action);
+    button.connect_clicked(move |_| {
+        let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) else {
+            return;
+        };
+        let state = shell.web_controller.status().borrow().clone();
+        let addresses = match state.addresses() {
+            Ok(addresses) => addresses,
+            Err(error) => {
+                status.set_subtitle(&error);
+                return;
+            }
+        };
+        if addresses.is_empty() {
+            status.set_subtitle(&tr("No network address available"));
+            return;
+        }
+        if let [address] = addresses.as_slice() {
+            action(&format!("http://{address}/#token={}", state.token));
+            return;
+        }
+        let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
+        let builder = ui_shared::ui_resource::builder(resource);
+        let dialog: adw::AlertDialog =
+            ui_shared::ui_resource::object(&builder, resource, "controller_addresses");
+        for address in addresses {
+            let address = address.to_string();
+            dialog.add_response(&address, &address);
+        }
+        let action = action.clone();
+        dialog.connect_response(None, move |_, address| {
+            if address != "cancel" {
+                action(&format!("http://{address}/#token={}", state.token));
+            }
+        });
+        ui_shared::popup::present_light_dismiss_dialog(&dialog, &shell.chrome.window);
+    });
+}
+
 fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&str) + use<> {
     let reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
     let pending = reset.clone();
@@ -281,20 +270,6 @@ fn save(shell: &Shell, status: &adw::ActionRow, update: impl FnOnce(&mut Control
         Ok(settings) => *shell.settings.current.borrow_mut() = settings,
         Err(error) => status.set_subtitle(&error),
     }
-}
-
-fn controller_link(shell: &Shell) -> Option<String> {
-    let status = shell.web_controller.status();
-    let state = status.borrow();
-    let mut address = state.address?;
-    if address.ip().is_unspecified() {
-        address.set_ip(if address.is_ipv4() {
-            std::net::Ipv4Addr::LOCALHOST.into()
-        } else {
-            std::net::Ipv6Addr::LOCALHOST.into()
-        });
-    }
-    Some(format!("http://{address}/#token={}", state.token))
 }
 
 impl Shell {
