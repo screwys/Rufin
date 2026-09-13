@@ -137,8 +137,8 @@ endforeach()
 file(GLOB RUFIN_MACOS_PLUGIN_FILES CONFIGURE_DEPENDS
   "${RUFIN_GSTREAMER_PLUGIN_DIR}/*.dylib"
   "${RUFIN_GSTREAMER_PLUGIN_DIR}/*.so")
-# Rufin does not host Python plugins; that loader requires a Python application runtime.
-list(FILTER RUFIN_MACOS_PLUGIN_FILES EXCLUDE REGEX "/libgstpython\\.(dylib|so)$")
+# Python needs its own application runtime; the GTK 3 video sink conflicts with GTK 4.
+list(FILTER RUFIN_MACOS_PLUGIN_FILES EXCLUDE REGEX "/libgst(python|gtk)\\.(dylib|so)$")
 foreach(RUFIN_MACOS_PLUGIN
   ${RUFIN_MACOS_PLUGIN_FILES}
   "${RUFIN_WAVPACK_PLUGIN}"

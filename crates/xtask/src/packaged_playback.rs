@@ -36,7 +36,8 @@ pub(crate) fn run(args: Vec<String>) -> Result<()> {
         .map(serde_json::from_slice)
         .transpose()?
         .unwrap_or_else(|| json!({}));
-    settings["playback"]["audio_output"] = json!("fakesink");
+    // Unlike fakesink, fakeaudiosink follows the clock so progress can be observed.
+    settings["playback"]["audio_output"] = json!("fakeaudiosink");
     settings["secret_storage_mode"] = json!("config-file");
     fs::create_dir_all(directories.config_dir())?;
     let result = (|| {
@@ -134,7 +135,10 @@ fn check(executable: &Path) -> Result<()> {
                 break;
             }
             if Instant::now() >= deadline {
-                return Err("The scanned track did not reach advancing playback".into());
+                return Err(format!(
+                    "The scanned track did not reach advancing playback: {status}"
+                )
+                .into());
             }
             thread::sleep(Duration::from_millis(100));
         }
