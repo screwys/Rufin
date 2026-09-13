@@ -13,7 +13,6 @@ find_program(RUFIN_WINDOWS_STRIP strip REQUIRED)
 pkg_get_variable(RUFIN_WINDOWS_GLIB_PREFIX glib-2.0 prefix)
 pkg_get_variable(RUFIN_WINDOWS_GTK_PREFIX gtk4 prefix)
 pkg_get_variable(RUFIN_WINDOWS_GSTREAMER_PREFIX gstreamer-1.0 prefix)
-pkg_get_variable(RUFIN_WINDOWS_GSTREAMER_PLUGIN_DIR gstreamer-1.0 pluginsdir)
 pkg_get_variable(RUFIN_WINDOWS_PIXBUF_PREFIX gdk-pixbuf-2.0 prefix)
 pkg_get_variable(RUFIN_WINDOWS_PIXBUF_MODULE_DIR gdk-pixbuf-2.0 gdk_pixbuf_moduledir)
 pkg_get_variable(RUFIN_WINDOWS_GIO_MODULE_DIR gio-2.0 giomoduledir)
@@ -48,9 +47,7 @@ endif()
 
 install(FILES LICENSE packaging/windows/assets/rufin.ico DESTINATION .)
 install(FILES ${RUFIN_WINDOWS_GSPAWN_HELPERS} DESTINATION bin)
-install(DIRECTORY "${RUFIN_WINDOWS_GSTREAMER_PLUGIN_DIR}/"
-  DESTINATION lib/gstreamer-1.0 FILES_MATCHING PATTERN "*.dll"
-  PATTERN "libgstpython.dll" EXCLUDE)
+install(FILES ${RUFIN_GSTREAMER_PLUGIN_FILES} DESTINATION lib/gstreamer-1.0)
 install(DIRECTORY
   "${RUFIN_WINDOWS_PIXBUF_ROOT}/"
   DESTINATION lib/gdk-pixbuf-2.0
