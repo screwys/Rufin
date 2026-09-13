@@ -51,7 +51,6 @@ endfunction()
 
 pkg_check_modules(RUFIN_PIXBUF REQUIRED gdk-pixbuf-2.0)
 pkg_check_modules(RUFIN_SOUP REQUIRED libsoup-3.0)
-pkg_get_variable(RUFIN_GSTREAMER_PLUGIN_DIR gstreamer-1.0 pluginsdir)
 pkg_get_variable(RUFIN_GSTREAMER_SCANNER_DIR gstreamer-1.0 pluginscannerdir)
 pkg_get_variable(RUFIN_PIXBUF_MODULE_DIR gdk-pixbuf-2.0 gdk_pixbuf_moduledir)
 pkg_get_variable(RUFIN_PIXBUF_QUERY_LOADERS gdk-pixbuf-2.0 gdk_pixbuf_query_loaders)
@@ -134,16 +133,7 @@ foreach(RUFIN_MACOS_EXECUTABLE
   rufin_macos_install_file("${RUFIN_MACOS_EXECUTABLE}"
     "${RUFIN_MACOS_CONTENTS}/MacOS/${RUFIN_MACOS_EXECUTABLE_NAME}")
 endforeach()
-file(GLOB RUFIN_MACOS_PLUGIN_FILES CONFIGURE_DEPENDS
-  "${RUFIN_GSTREAMER_PLUGIN_DIR}/*.dylib"
-  "${RUFIN_GSTREAMER_PLUGIN_DIR}/*.so")
-# Python needs its own application runtime; the GTK 3 video sink conflicts with GTK 4.
-list(FILTER RUFIN_MACOS_PLUGIN_FILES EXCLUDE REGEX "/libgst(python|gtk)\\.(dylib|so)$")
-foreach(RUFIN_MACOS_PLUGIN
-  ${RUFIN_MACOS_PLUGIN_FILES}
-  "${RUFIN_WAVPACK_PLUGIN}"
-  "${RUFIN_GME_PLUGIN}"
-  "${RUFIN_OPENMPT_PLUGIN}")
+foreach(RUFIN_MACOS_PLUGIN IN LISTS RUFIN_GSTREAMER_PLUGIN_FILES)
   get_filename_component(RUFIN_MACOS_PLUGIN_NAME "${RUFIN_MACOS_PLUGIN}" NAME)
   rufin_macos_install_file("${RUFIN_MACOS_PLUGIN}"
     "${RUFIN_MACOS_CONTENTS}/Resources/lib/gstreamer-1.0/${RUFIN_MACOS_PLUGIN_NAME}")

@@ -34,49 +34,6 @@ else()
   set(RUFIN_APP_ID io.github.screwys.Rufin)
   set(RUFIN_DESKTOP_FILE data/io.github.screwys.Rufin.desktop)
 endif()
-set(RUFIN_REQUIRED_GSTREAMER_PLUGINS
-  aiff
-  alaw
-  apetag
-  asf
-  audiobuffersplit
-  audioconvert
-  audiofx
-  audioparsers
-  audioresample
-  autodetect
-  coreelements
-  equalizer
-  fdkaac
-  flac
-  gme
-  id3demux
-  isomp4
-  level
-  libav
-  matroska
-  mpg123
-  musepack
-  mulaw
-  ogg
-  openmpt
-  opus
-  opusparse
-  pbtypes
-  playback
-  replaygain
-  soup
-  speex
-  typefindfunctions
-  volume
-  vorbis
-  wavpack
-  wavparse
-)
-if(APPLE)
-  # Homebrew no longer ships FDK-AAC; libav already provides the preferred AAC decoder.
-  list(REMOVE_ITEM RUFIN_REQUIRED_GSTREAMER_PLUGINS fdkaac)
-endif()
 
 if(NOT CMAKE_BUILD_TYPE)
   set(CMAKE_BUILD_TYPE Debug CACHE STRING "Build type" FORCE)
@@ -128,6 +85,75 @@ pkg_check_modules(RUFIN_GSTREAMER REQUIRED IMPORTED_TARGET
 
 if(APPLE)
   include(cmake/RufinMacOSAudio.cmake)
+endif()
+# This minimum covers documented formats and the factories Rufin uses directly.
+set(RUFIN_REQUIRED_GSTREAMER_PLUGINS
+  coreelements playback typefindfunctions
+  app audiobuffersplit audioconvert audioresample audiofx equalizer level volume
+  lame debugutilsbad
+  soup hls mpegtsdemux rtp rtpmanager rtsp srtp udp
+  aiff alaw apetag asf audioparsers autodetect fdkaac flac gme id3demux
+  isomp4 libav matroska mpg123 musepack mulaw ogg openmpt opus opusparse
+  pbtypes replaygain speex vorbis wavpack wavparse
+)
+if(APPLE)
+  # Homebrew's libav supplies AAC; its package does not include FDK-AAC.
+  list(REMOVE_ITEM RUFIN_REQUIRED_GSTREAMER_PLUGINS fdkaac)
+  list(APPEND RUFIN_REQUIRED_GSTREAMER_PLUGINS osxaudio)
+elseif(WIN32)
+  list(APPEND RUFIN_REQUIRED_GSTREAMER_PLUGINS directsound wasapi)
+endif()
+
+if((APPLE OR WIN32) AND (RUFIN_ENABLE_PACKAGING OR RUFIN_VALIDATE_DEVELOPMENT_RUNTIME))
+  find_program(RUFIN_GST_INSPECT gst-inspect-1.0 REQUIRED)
+  # Retain installed audio and container providers. Class tokens are unordered.
+  foreach(RUFIN_PLUGIN_ROLE Decoder/Audio Parser/Audio Sink/Audio Demuxer Depayloader Decoder/Image Parser/Image)
+    execute_process(
+      COMMAND "${RUFIN_GST_INSPECT}" --no-colors "--types=${RUFIN_PLUGIN_ROLE}"
+      OUTPUT_VARIABLE RUFIN_ROLE_PROVIDERS
+      COMMAND_ERROR_IS_FATAL ANY
+    )
+    string(REGEX MATCHALL "(^|\n)[A-Za-z0-9_-]+:" RUFIN_ROLE_PLUGINS "${RUFIN_ROLE_PROVIDERS}")
+    foreach(RUFIN_ROLE_PLUGIN IN LISTS RUFIN_ROLE_PLUGINS)
+      string(STRIP "${RUFIN_ROLE_PLUGIN}" RUFIN_ROLE_PLUGIN)
+      string(REGEX REPLACE ":$" "" RUFIN_ROLE_PLUGIN "${RUFIN_ROLE_PLUGIN}")
+      list(APPEND RUFIN_REQUIRED_GSTREAMER_PLUGINS "${RUFIN_ROLE_PLUGIN}")
+    endforeach()
+  endforeach()
+  list(REMOVE_DUPLICATES RUFIN_REQUIRED_GSTREAMER_PLUGINS)
+  list(SORT RUFIN_REQUIRED_GSTREAMER_PLUGINS)
+endif()
+
+if(RUFIN_ENABLE_PACKAGING AND (APPLE OR WIN32))
+  set(RUFIN_GSTREAMER_PLUGIN_FILES)
+  foreach(RUFIN_PLUGIN IN LISTS RUFIN_REQUIRED_GSTREAMER_PLUGINS)
+    if(APPLE AND RUFIN_PLUGIN STREQUAL "gme")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_GME_PLUGIN}")
+    elseif(APPLE AND RUFIN_PLUGIN STREQUAL "openmpt")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_OPENMPT_PLUGIN}")
+    elseif(APPLE AND RUFIN_PLUGIN STREQUAL "wavpack")
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_WAVPACK_PLUGIN}")
+    else()
+      execute_process(
+        COMMAND "${RUFIN_GST_INSPECT}" --no-colors --plugin "${RUFIN_PLUGIN}"
+        OUTPUT_VARIABLE RUFIN_PLUGIN_DETAILS
+        COMMAND_ERROR_IS_FATAL ANY
+      )
+      string(REGEX MATCH "Filename[ \t]+([^\r\n]+)" _ "${RUFIN_PLUGIN_DETAILS}")
+      string(STRIP "${CMAKE_MATCH_1}" RUFIN_PLUGIN_FILE)
+      # Statically registered factories already reside in a linked library.
+      if(RUFIN_PLUGIN_FILE STREQUAL "(null)")
+        continue()
+      endif()
+      if(WIN32)
+        file(TO_CMAKE_PATH "${RUFIN_PLUGIN_FILE}" RUFIN_PLUGIN_FILE)
+      endif()
+      if(NOT EXISTS "${RUFIN_PLUGIN_FILE}")
+        message(FATAL_ERROR "Cannot locate GStreamer plugin ${RUFIN_PLUGIN}: ${RUFIN_PLUGIN_FILE}")
+      endif()
+      list(APPEND RUFIN_GSTREAMER_PLUGIN_FILES "${RUFIN_PLUGIN_FILE}")
+    endif()
+  endforeach()
 endif()
 
 if(RUFIN_VALIDATE_DEVELOPMENT_RUNTIME)
