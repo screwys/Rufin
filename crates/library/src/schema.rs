@@ -710,13 +710,17 @@ fn sql_parts(sql: &str, separator: char) -> Vec<&str> {
             '(' => depth += 1,
             ')' => depth -= 1,
             value if value == separator && depth == 0 => {
-                parts.push(sql[start..position].trim());
+                parts.push(
+                    sql.get(start..position)
+                        .expect("character boundaries")
+                        .trim(),
+                );
                 start = position + character.len_utf8();
             }
             _ => {}
         }
     }
-    let tail = sql[start..].trim();
+    let tail = sql.get(start..).expect("character boundary").trim();
     if !tail.is_empty() {
         parts.push(tail);
     }
