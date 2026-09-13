@@ -37,51 +37,51 @@
   <screenshots>
     <screenshot type="default">
       <caption>Browse your music library</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/Rufin.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/Rufin.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse all albums</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/albums.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/albums.png</image>
     </screenshot>
     <screenshot>
       <caption>View artist details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/artist_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/artist_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>View album details</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/album_detail.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/album_detail.png</image>
     </screenshot>
     <screenshot>
       <caption>Browse genres</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/genres.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/genres.png</image>
     </screenshot>
     <screenshot>
       <caption>Create smart playlists</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/smart_playlists.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/smart_playlists.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the appearance</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/appearance_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/appearance_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Customize the display</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/customize_display.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/customize_display.png</image>
     </screenshot>
     <screenshot>
       <caption>Manage downloads</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/download_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/download_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>Configure playback</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/playback_settings.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/playback_settings.png</image>
     </screenshot>
     <screenshot>
       <caption>View keyboard shortcuts</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/keyboard_shortcuts.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/keyboard_shortcuts.png</image>
     </screenshot>
     <screenshot>
       <caption>Use the fullscreen player</caption>
-      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.3/data/screenshots/visualizer.png</image>
+      <image type="source" width="1000" height="700">https://raw.githubusercontent.com/screwys/Rufin/v0.15.4/data/screenshots/visualizer.png</image>
     </screenshot>
   </screenshots>
   <launchable type="desktop-id">io.github.screwys.Rufin.desktop</launchable>
@@ -92,6 +92,23 @@
     <control>touch</control>
   </supports>
   <releases>
+    <release version="0.15.4" date="2026-09-13">
+      <description>
+        <p>Rufin can now expose its API for headless controls and can also be controlled from a web UI. You can enable Controller through Preferences -&gt; Integrations. The access token is generated automatically; open/copy actions write the token to the link so you don't need to enter the API key each time.</p>
+        <ul>
+          <li>The web UI is similar to the desktop app even though it is not the exact copy. It supports a substantial number of operations: source switching, adding/removing a source, refreshes, library browsing, drag/multi-selection controls for both pins and queue. It also uses the resolved colors of the app, so your system-level GTK theme overrides work. Application-level settings belong to the app.</li>
+        </ul>
+        <ul>
+          <li>Library refreshes are in a much better place now. You can see changes from another client in Rufin almost instantly thanks to native APIs. Some OpenSubsonic servers do not include each change, which requires a full resync (for example, Funkwhale does not include ratings in this limited refresh API).</li>
+        </ul>
+        <ul>
+          <li>Added disc separation for album detail route.</li>
+        </ul>
+        <ul>
+          <li>Fixed several packaging defects affecting the Windows installer, HTTPS playback for macOS and nixpkgs packages, and stale hash in the AUR binary.</li>
+        </ul>
+      </description>
+    </release>
     <release version="0.15.3" date="2026-09-10">
       <description>
         <p>Since 0.15.2 did not reach Flathub, this release intends to be its replacement, plus some additions:</p>
