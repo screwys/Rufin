@@ -128,6 +128,7 @@ impl ArtworkState {
 
         let grid = gtk::Grid::new();
         grid.add_css_class("cover-tile");
+        grid.add_css_class("cover-mosaic");
         grid.add_css_class("card");
         grid.set_overflow(gtk::Overflow::Hidden);
         grid.set_row_homogeneous(true);
@@ -145,7 +146,12 @@ impl ArtworkState {
                     let tile = cell_size
                         .map(ArtworkTile::new)
                         .unwrap_or_else(ArtworkTile::new_elastic_square);
-                    grid.attach(&tile.widget(), (index % 2) as i32, (index / 2) as i32, 1, 1);
+                    let widget = tile.widget();
+                    widget.set_hexpand(true);
+                    widget.set_vexpand(true);
+                    widget.set_halign(gtk::Align::Fill);
+                    widget.set_valign(gtk::Align::Fill);
+                    grid.attach(&widget, (index % 2) as i32, (index / 2) as i32, 1, 1);
                     tile
                 })
                 .collect::<Vec<_>>(),

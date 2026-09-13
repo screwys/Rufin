@@ -16,10 +16,11 @@ pub(super) fn bind(
         web_enabled: adw::SwitchRow,
         web_allow_remote: adw::SwitchRow,
         web_port: adw::SpinRow,
-        web_token: adw::EntryRow,
         web_regenerate: gtk::Button,
         web_copy_token: gtk::Button,
-        web_copy_link: gtk::Button,
+        web_copy_token_icon: gtk::Image,
+        web_copy_link: gtk::MenuButton,
+        web_copy_link_icon: gtk::Image,
         web_status: adw::ActionRow,
         web_open: gtk::Button,
     });
@@ -27,20 +28,14 @@ pub(super) fn bind(
     web_enabled.set_active(config.enabled);
     web_allow_remote.set_active(!config.address.is_loopback());
     web_port.set_value(f64::from(config.port));
-    web_token
-        .delegate()
-        .and_downcast::<gtk::Text>()
-        .expect("entry text")
-        .set_visibility(false);
-    let token = web_token.downgrade();
-    let copy_token = copy_action(&web_copy_token);
+    let access_token = Rc::new(RefCell::new(String::new()));
+    let token = access_token.clone();
+    let copy_token = copy_action(web_copy_token.upcast_ref(), &web_copy_token_icon);
     web_copy_token.connect_clicked(move |_| {
-        if let Some(token) = token.upgrade() {
-            copy_token(&token.text());
-        }
+        copy_token(&token.borrow());
     });
     let weak = Rc::downgrade(shell);
-    let token = web_token.downgrade();
+    let token = access_token.clone();
     let status = web_status.downgrade();
     web_regenerate.connect_clicked(move |button| {
         let Some(shell) = weak.upgrade() else {
@@ -72,9 +67,7 @@ pub(super) fn bind(
             }
             match result {
                 Ok(value) => {
-                    if let Some(token) = token.upgrade() {
-                        token.set_text(&value);
-                    }
+                    *token.borrow_mut() = value;
                 }
                 Err(error) => {
                     if let Some(status) = status.upgrade() {
@@ -116,9 +109,10 @@ pub(super) fn bind(
 
     let weak = Rc::downgrade(shell);
     let status = web_status.downgrade();
-    let copy_link = Rc::new(copy_action(&web_copy_link));
-    web_copy_link.connect_clicked(move |_| {
+    let copy_link = Rc::new(copy_action(web_copy_link.upcast_ref(), &web_copy_link_icon));
+    web_copy_link.set_create_popup_func(move |button| {
         let (Some(shell), Some(status)) = (weak.upgrade(), status.upgrade()) else {
+            button.set_active(false);
             return;
         };
         let state = shell.web_controller.status().borrow().clone();
@@ -126,31 +120,52 @@ pub(super) fn bind(
             Ok(addresses) => addresses,
             Err(error) => {
                 status.set_subtitle(&error);
+                button.set_active(false);
                 return;
             }
         };
         if addresses.is_empty() {
             status.set_subtitle(&tr("No network address available"));
+            button.set_active(false);
             return;
         }
         if let [address] = addresses.as_slice() {
             copy_link(&format!("http://{address}/#token={}", state.token));
+            button.set_active(false);
             return;
         }
         let resource = crate::ui_resource::INTEGRATIONS_RESOURCE;
         let builder = ui_shared::ui_resource::builder(resource);
-        let dialog: adw::AlertDialog =
+        let popover: gtk::Popover =
             ui_shared::ui_resource::object(&builder, resource, "controller_addresses");
-        for (index, address) in addresses.iter().enumerate() {
-            dialog.add_response(&index.to_string(), &address.to_string());
+        let list: gtk::Box =
+            ui_shared::ui_resource::object(&builder, resource, "controller_address_list");
+        let cancel: gtk::Button =
+            ui_shared::ui_resource::object(&builder, resource, "controller_address_cancel");
+        for address in addresses {
+            let choice = gtk::Button::with_label(&address.to_string());
+            let link = format!("http://{address}/#token={}", state.token);
+            let copy_link = copy_link.clone();
+            let popover = popover.downgrade();
+            choice.connect_clicked(move |_| {
+                copy_link(&link);
+                if let Some(popover) = popover.upgrade() {
+                    popover.popdown();
+                }
+            });
+            list.append(&choice);
         }
-        let copy_link = copy_link.clone();
-        gtk::glib::spawn_future_local(async move {
-            let choice = dialog.choose_future(Some(&shell.chrome.window)).await;
-            if let Ok(index) = choice.parse::<usize>()
-                && let Some(address) = addresses.get(index)
-            {
-                copy_link(&format!("http://{address}/#token={}", state.token));
+        let weak = popover.downgrade();
+        cancel.connect_clicked(move |_| {
+            if let Some(popover) = weak.upgrade() {
+                popover.popdown();
+            }
+        });
+        button.set_popover(Some(&popover));
+        let weak = button.downgrade();
+        popover.connect_closed(move |_| {
+            if let Some(button) = weak.upgrade() {
+                button.set_popover(None::<&gtk::Popover>);
             }
         });
     });
@@ -178,25 +193,23 @@ pub(super) fn bind(
     let updates = shell.web_controller.status();
     let settings = shell.settings.persistence.clone();
     let status = web_status.downgrade();
-    let token = web_token.downgrade();
+    let token = access_token;
     let copy = web_copy_link.downgrade();
     let open = web_open.downgrade();
     page.connect_map(move |_| {
-        let (Some(status), Some(token), Some(copy), Some(open)) = (
-            status.upgrade(),
-            token.upgrade(),
-            copy.upgrade(),
-            open.upgrade(),
-        ) else {
+        let (Some(status), Some(copy), Some(open)) =
+            (status.upgrade(), copy.upgrade(), open.upgrade())
+        else {
             return;
         };
         let mut updates = updates.clone();
         let settings = settings.clone();
+        let token = token.clone();
         *running.borrow_mut() = Some(gtk::glib::spawn_future_local(async move {
             loop {
                 let state = updates.borrow_and_update().clone();
                 if !state.token.is_empty() {
-                    token.set_text(&state.token);
+                    *token.borrow_mut() = state.token.clone();
                 }
                 copy.set_sensitive(!state.token.is_empty());
                 open.set_sensitive(state.address.is_some());
@@ -222,16 +235,20 @@ pub(super) fn bind(
     });
 }
 
-fn copy_action(button: &gtk::Button) -> impl Fn(&str) + use<> {
+fn copy_action(button: &gtk::Widget, icon: &gtk::Image) -> impl Fn(&str) + use<> {
     let reset = Rc::new(RefCell::new(None::<gtk::glib::SourceId>));
     let pending = reset.clone();
-    button.connect_unrealize(move |button| {
+    let image = icon.downgrade();
+    button.connect_unrealize(move |_| {
         if let Some(source) = pending.borrow_mut().take() {
             source.remove();
         }
-        button.set_icon_name("rufin-edit-copy-symbolic");
+        if let Some(image) = image.upgrade() {
+            image.set_icon_name(Some("rufin-edit-copy-symbolic"));
+        }
     });
     let button = button.downgrade();
+    let icon = icon.downgrade();
     move |text| {
         let Some(button) = button.upgrade() else {
             return;
@@ -240,15 +257,17 @@ fn copy_action(button: &gtk::Button) -> impl Fn(&str) + use<> {
         if let Some(source) = reset.borrow_mut().take() {
             source.remove();
         }
-        button.set_icon_name("rufin-object-select-symbolic");
-        let button = button.downgrade();
+        if let Some(icon) = icon.upgrade() {
+            icon.set_icon_name(Some("rufin-object-select-symbolic"));
+        }
+        let icon = icon.clone();
         let pending = reset.clone();
         reset.replace(Some(gtk::glib::timeout_add_local_once(
             std::time::Duration::from_millis(1500),
             move || {
                 pending.borrow_mut().take();
-                if let Some(button) = button.upgrade() {
-                    button.set_icon_name("rufin-edit-copy-symbolic");
+                if let Some(icon) = icon.upgrade() {
+                    icon.set_icon_name(Some("rufin-edit-copy-symbolic"));
                 }
             },
         )));

@@ -57,6 +57,131 @@ nav button:hover,
   gap: 3px;
 }
 
+.navigation-content {
+  min-height: 0;
+  overflow-y: auto;
+}
+
+#pins h2 {
+  font-size: 12px;
+  color: var(--muted);
+  margin: 20px 13px 8px;
+}
+
+#pins {
+  padding-bottom: 16px;
+}
+
+.pin-row {
+  position: relative;
+  display: flex;
+  align-items: center;
+  border-radius: 7px;
+}
+
+.pin-row:hover,
+.pin-row:focus-within,
+.pin-row:has([aria-current="page"]) {
+  background: var(--hover);
+}
+
+.pin-row .pin-open {
+  flex: 1;
+  min-width: 0;
+  justify-content: flex-start;
+  background: transparent;
+  padding: 6px;
+}
+
+.pin-cover {
+  width: 40px;
+  height: 40px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  border-radius: 4px;
+  background: var(--surface);
+}
+
+.pin-cover img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.pin-label {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  flex: 1;
+  gap: 2px;
+  min-width: 0;
+  text-align: start;
+}
+.pin-metadata {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--muted);
+  white-space: nowrap;
+  overflow: hidden;
+}
+.pin-metadata .icon {
+  width: 12px;
+  height: 12px;
+  flex-shrink: 0;
+}
+.pin-metadata [data-icon="duration"] {
+  margin-left: 5px;
+}
+.pin-metadata .source-icon {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  min-width: 12px;
+  margin-left: 5px;
+  object-fit: contain;
+}
+
+.pin-duration {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.pin-controls {
+  display: flex;
+  position: absolute;
+  right: 2px;
+  gap: 5px;
+  padding: 3px;
+  background: var(--sidebar);
+  border-radius: 6px;
+  visibility: hidden;
+}
+
+.pin-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.pin-controls > .icon-button {
+  flex-shrink: 0;
+  width: 28px;
+  min-width: 28px;
+  padding: 5px;
+}
+
+.pin-row.controls-visible .pin-controls,
+.pin-row.menu-open .pin-controls {
+  visibility: visible;
+}
+
+.pin-drop {
+  outline: 2px solid var(--accent);
+}
+
 .version {
   font-size: 11px;
   color: var(--muted);
@@ -132,11 +257,22 @@ main {
   grid-template-columns: 218px minmax(320px, 1fr) !important;
 }
 
-#login-form > .rufin-icon {
-  width: 44px;
-  height: 44px;
-  color: var(--accent);
+.login-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
   margin-bottom: 20px;
+}
+
+.login-heading h1 {
+  margin: 0;
+}
+
+.login-heading > .rufin-icon {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  color: var(--accent);
 }
 
 @media (min-width: 1450px) {
@@ -229,13 +365,18 @@ main {
   height: 18px;
 }
 
-.app-title #source-menu-button, .app-title #close-navigation {
+.app-title #source-menu-button,
+.app-title #close-navigation {
   position: absolute;
   right: 5px;
   top: 50%;
   transform: translateY(-50%);
 }
-@media (max-width: 580px) { .app-title #source-menu-button { right: 39px; } }
+@media (max-width: 580px) {
+  .app-title #source-menu-button {
+    right: 39px;
+  }
+}
 
 .app-title .mobile {
   margin-left: 0;

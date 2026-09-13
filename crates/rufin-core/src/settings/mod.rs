@@ -290,6 +290,7 @@ fn default_home_sections() -> Vec<HomeSectionKind> {
 
 #[derive(Clone)]
 pub struct SettingsFile {
+    sidebar: tokio::sync::watch::Sender<SidebarSettings>,
     web_controller: tokio::sync::watch::Sender<crate::api::ControllerSettings>,
     path: Option<PathBuf>,
     config_dir: PathBuf,
@@ -301,6 +302,10 @@ pub struct SettingsFile {
 }
 
 impl SettingsFile {
+    pub(crate) fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
+        self.sidebar.subscribe()
+    }
+
     pub(crate) fn config_dir(&self) -> &Path {
         &self.config_dir
     }
@@ -318,6 +323,7 @@ impl SettingsFile {
             }
         }
         let file = Self {
+            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir: path
                 .parent()
@@ -347,6 +353,7 @@ impl SettingsFile {
         value.jellyfin_device_id = random_identity("rufin-").unwrap_or_default();
         Self {
             path: None,
+            sidebar: tokio::sync::watch::channel(value.ui.sidebar.clone()).0,
             web_controller: tokio::sync::watch::channel(value.ui.web_controller.clone()).0,
             config_dir,
             value: Arc::new(Mutex::new(value)),
@@ -401,7 +408,7 @@ impl SettingsFile {
             write_settings(path, &next)?;
         }
         *current = next;
-        self.publish_web_controller(&current);
+        self.publish_changes(&current);
         Ok(output)
     }
 
@@ -413,7 +420,7 @@ impl SettingsFile {
             .value
             .lock()
             .unwrap_or_else(|poisoned| poisoned.into_inner()) = value.clone();
-        self.publish_web_controller(value);
+        self.publish_changes(value);
         Ok(())
     }
 }
@@ -464,7 +471,14 @@ impl SettingsOwner {
 }
 
 impl SettingsFile {
-    fn publish_web_controller(&self, stored: &StoredSettings) {
+    fn publish_changes(&self, stored: &StoredSettings) {
+        self.sidebar.send_if_modified(|current| {
+            if *current == stored.ui.sidebar {
+                return false;
+            }
+            *current = stored.ui.sidebar.clone();
+            true
+        });
         let next = stored.ui.web_controller.clone();
         self.web_controller.send_if_modified(|current| {
             if *current == next {
@@ -490,6 +504,10 @@ impl SettingsFile {
 impl SettingsOwner {
     pub fn load(&self) -> UiSettings {
         self.file.load().ui
+    }
+
+    pub fn sidebar_changes(&self) -> tokio::sync::watch::Receiver<SidebarSettings> {
+        self.file.sidebar_changes()
     }
 
     pub fn save(&self, settings: &UiSettings) -> Result<UiSettings, String> {

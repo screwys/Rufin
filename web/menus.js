@@ -3,7 +3,8 @@ import { api, state } from "./connection.js";
 
 import { loadView, openMediaLink } from "./library.js";
 
-import { $, button, el, icon, run } from "./ui.js";
+import { $, button, el, icon, run, notice } from "./ui.js";
+import { sourceIcon } from "./sources.js";
 
 function playRadio(row, kind = "track", mode = "replace") {
   return api("/queue/radio", "POST", { kind, id: row.id, uri: row.uri, mode });
@@ -16,7 +17,9 @@ let submenuAnchor = null;
 let submenuRequest = null;
 
 function closeMenus() {
-  menuAnchor?.closest(".album-card")?.classList.remove("menu-open");
+  menuAnchor
+    ?.closest(".album-card, .pin-row")
+    ?.classList.remove("menu-open", "controls-visible");
   submenuRequest?.abort();
   for (const id of ["context-submenu", "track-menu"])
     if ($(id).matches(":popover-open")) $(id).hidePopover();
@@ -83,7 +86,7 @@ function menuItems(menu, actions) {
 function showMenu(actions, anchor, event) {
   closeMenus();
   menuAnchor = anchor;
-  anchor.closest(".album-card")?.classList.add("menu-open");
+  anchor.closest(".album-card, .pin-row")?.classList.add("menu-open");
   submenuAnchor = null;
   const menu = $("track-menu");
   menuItems(menu, actions);
@@ -191,7 +194,7 @@ function renderPlaylistSubmenu(menu, target, signal) {
       tr("New Playlist"),
       () => {
         closeMenus();
-        openName(null, target);
+        return openName(null, target);
       },
       "add",
       "menu-item",
@@ -224,9 +227,9 @@ function renderPlaylistSubmenu(menu, target, signal) {
         async () => {
           await api("/playlists/entries", "POST", {
             id: row.id,
-            ...target,
             source: state.source,
             folder: state.selectedLibrary,
+            ...target,
           });
           closeMenus();
         },
@@ -263,19 +266,59 @@ function renderPlaylistSubmenu(menu, target, signal) {
 let renamePlaylist = null;
 
 let newPlaylistUris = { uris: [] };
+let playlistSource = null;
 
-function openName(playlist = null, uris = []) {
+async function openName(playlist = null, uris = []) {
   renamePlaylist = playlist;
   newPlaylistUris = Array.isArray(uris) ? { uris } : uris;
   $("name-title").textContent = playlist
     ? tr("Rename Playlist")
     : tr("New Playlist");
   $("playlist-name").value = playlist?.name || "";
+  $("playlist-owner").hidden = !!playlist;
+  if (!playlist) {
+    const configured = await api("/sources");
+    playlistSource =
+      configured.sources.find((source) => source.id === state.source) || null;
+    $("playlist-owner").disabled = !playlistSource;
+    $("playlist-owner").setAttribute(
+      "aria-pressed",
+      String(!!playlistSource && configured.new_playlist_current),
+    );
+    showPlaylistOwner();
+  }
   $("name-dialog").showModal();
   $("playlist-name").focus();
 }
 
+function showPlaylistOwner() {
+  const owner = $("playlist-owner");
+  const current = owner.getAttribute("aria-pressed") === "true";
+  const image = current
+    ? sourceIcon(playlistSource.kind)
+    : el("img", "source-icon");
+  if (!current) image.src = "/icons/rufin.svg";
+  owner.replaceChildren(image);
+  owner.title = current
+    ? tr(
+        "This is owned by {source}. Regular playlists are synced to your remote.",
+        { source: playlistSource.name },
+      )
+    : tr(
+        "This is owned by Rufin. It can include entries from all configured sources but it is not synced to remotes.",
+      );
+  owner.setAttribute("aria-label", owner.title);
+}
+
 function init() {
+  $("playlist-owner").addEventListener("click", () => {
+    const owner = $("playlist-owner");
+    owner.setAttribute(
+      "aria-pressed",
+      String(owner.getAttribute("aria-pressed") !== "true"),
+    );
+    showPlaylistOwner();
+  });
   for (const id of ["track-menu", "context-submenu"]) {
     $(id).addEventListener("keydown", (event) => {
       if (event.key === "ArrowLeft" && id === "context-submenu") {
@@ -313,14 +356,25 @@ function init() {
     run(async () => {
       const name = $("playlist-name").value.trim();
       if (!name) return;
-      await api(
+      const result = await api(
         "/playlists",
         renamePlaylist ? "PATCH" : "POST",
         renamePlaylist
           ? { id: renamePlaylist.id, name }
-          : { name, ...newPlaylistUris },
+          : {
+              name,
+              ...newPlaylistUris,
+              selection_source: newPlaylistUris.source ?? state.source,
+              source:
+                $("playlist-owner").getAttribute("aria-pressed") === "true"
+                  ? playlistSource.id
+                  : null,
+              current:
+                $("playlist-owner").getAttribute("aria-pressed") === "true",
+            },
       );
       $("name-dialog").close();
+      if (result.settings_error) notice(result.settings_error);
       await loadView();
     });
   });

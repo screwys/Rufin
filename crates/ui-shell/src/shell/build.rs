@@ -505,6 +505,7 @@ pub async fn build(
 
     shell.connect_operation_feedback();
     shell.bind_controller_appearance();
+    shell.bind_sidebar_settings();
     let weak = Rc::downgrade(&shell);
     app.connect_shutdown(move |_| {
         if let Some(shell) = weak.upgrade() {

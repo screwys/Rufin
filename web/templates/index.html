@@ -14,9 +14,10 @@
   <body>
     <dialog id="login-dialog" aria-labelledby="login-title">
       <form id="login-form">
-        <img class="rufin-icon" src="/icons/rufin.svg" alt="" />
-        <h1 id="login-title">{{ localization::tr("Connect to Rufin") }}</h1>
-        <p>{{ localization::tr("Enter your Rufin access token.") }}</p>
+        <div class="login-heading">
+          <img class="rufin-icon" src="/icons/rufin.svg" alt="" />
+          <h1 id="login-title">{{ localization::tr("Connect to Rufin") }}</h1>
+        </div>
         <label for="token">{{ localization::tr("Access token") }}</label>
         <input
           id="token"
@@ -59,6 +60,7 @@
           role="menu"
           aria-label="{{ localization::tr("Sources") }}"
         ></div>
+        <div class="navigation-content">
         <nav aria-label="{{ localization::tr("Library") }}">
           <button data-route="home" aria-current="page">
             <span class="icon" data-icon="home"></span>{{ localization::tr("Home") }}</button>
@@ -75,6 +77,11 @@
           <button data-route="smart-playlists">
             <span class="icon" data-icon="smart-playlists"></span>{{ localization::tr("Smart Playlists") }}</button>
         </nav>
+        <section id="pins" aria-labelledby="pins-title" hidden>
+          <h2 id="pins-title">{{ localization::tr("Pins") }}</h2>
+          <div id="pin-list"></div>
+        </section>
+        </div>
         <div class="nav-bottom">
           <span class="version">Rufin {{ version }}</span>
           <button
@@ -416,8 +423,11 @@
     <dialog id="name-dialog" aria-labelledby="name-title">
       <form id="name-form">
         <h2 id="name-title">{{ localization::tr("New Playlist") }}</h2>
-        <label for="playlist-name">{{ localization::tr("Name") }}</label
-        ><input id="playlist-name" required />
+        <label for="playlist-name">{{ localization::tr("Name") }}</label>
+        <div class="playlist-name-field">
+          <input id="playlist-name" required />
+          <button type="button" id="playlist-owner" class="icon-button" aria-pressed="false"></button>
+        </div>
         <div class="dialog-actions">
           <button type="button" data-close="name-dialog">{{ localization::tr("Cancel") }}</button
           ><button class="primary">{{ localization::tr("Save") }}</button>

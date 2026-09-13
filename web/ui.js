@@ -178,6 +178,20 @@ function releaseCovers() {
     }
 }
 
+async function coverGroup(node, query, count, signal) {
+  node.classList.toggle("cover-mosaic", count > 1);
+  if (count <= 1) return cover(node, query, signal);
+  node.replaceChildren();
+  await Promise.all(
+    Array.from({ length: 4 }, (_, index) => {
+      const tile = el("span", "cover-quadrant");
+      tile.append(icon("cover-fallback"));
+      node.append(tile);
+      return cover(tile, { ...query, part: index % count }, signal);
+    }),
+  );
+}
+
 function initLayout() {
   const divider = $("queue-lyrics-divider");
   const panel = $("right-panel");
@@ -249,9 +263,61 @@ function initLayout() {
 }
 
 function init() {
+  document.addEventListener("pointerdown", (event) => {
+    for (const row of document.querySelectorAll(".controls-visible")) {
+      if (!row.contains(event.target)) row.classList.remove("controls-visible");
+    }
+  });
   initDialogs();
   initAppearance();
   initLayout();
+}
+
+function bindHoverControls(row) {
+  if (!row.querySelector(".cover-controls, .pin-controls")) return;
+  let revealTouch = false;
+  row.addEventListener("pointerenter", (event) => {
+    if (event.pointerType === "mouse") row.classList.add("controls-visible");
+  });
+  row.addEventListener("pointerleave", (event) => {
+    if (event.pointerType === "mouse") row.classList.remove("controls-visible");
+  });
+  row.addEventListener("pointerdown", (event) => {
+    if (event.pointerType === "mouse") return;
+    revealTouch = !row.classList.contains("controls-visible");
+    row.classList.add("controls-visible");
+  });
+  row.addEventListener("pointercancel", () => {
+    revealTouch = false;
+    row.classList.remove("controls-visible");
+  });
+  row.addEventListener(
+    "click",
+    (event) => {
+      if (revealTouch) {
+        revealTouch = false;
+        event.preventDefault();
+        event.stopImmediatePropagation();
+        return;
+      }
+      if (
+        event.detail &&
+        event.target.closest(".cover-controls button, .pin-controls button")
+      ) {
+        event.target.closest("button").blur();
+        row.classList.remove("controls-visible");
+      }
+    },
+    true,
+  );
+  row.addEventListener("focusin", (event) => {
+    if (event.target.matches(":focus-visible"))
+      row.classList.add("controls-visible");
+  });
+  row.addEventListener("focusout", (event) => {
+    if (!row.contains(event.relatedTarget))
+      row.classList.remove("controls-visible");
+  });
 }
 
 export {
@@ -269,7 +335,9 @@ export {
   applyAppearance,
   applyColors,
   cover,
+  coverGroup,
   coverUrls,
   releaseCovers,
+  bindHoverControls,
   init,
 };

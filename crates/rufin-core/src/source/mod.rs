@@ -314,6 +314,7 @@ pub(crate) struct Shared {
     runtime: tokio::runtime::Handle,
     outputs: SourceOutputs,
     operation: tokio::sync::watch::Sender<SourceOperation>,
+    catalog_changed: tokio::sync::watch::Sender<()>,
     selected: Mutex<Option<Arc<ActiveSource>>>,
     catalog_counts: Mutex<HashMap<SourceId, (usize, usize)>>,
     observer: Mutex<Option<Arc<SelectedFeed>>>,
@@ -383,6 +384,10 @@ impl Shared {
     }
 
     pub(crate) async fn send(&self, event: SourceEvent) {
+        if matches!(&event, SourceEvent::CatalogPublished(publication) if publication.change != CatalogChange::Home)
+        {
+            self.catalog_changed.send_replace(());
+        }
         let _ = self.outputs.events.send(event).await;
     }
 
@@ -489,6 +494,7 @@ impl SourceOwner {
             .duration_since(std::time::UNIX_EPOCH)
             .map_or(0, |elapsed| elapsed.as_nanos() as i64);
         let shared = Arc::new(Shared {
+            catalog_changed: tokio::sync::watch::channel(()).0,
             home_showcase_variation: home_variation,
             home_explore_variation: std::sync::atomic::AtomicI64::new(home_variation),
             artwork,
@@ -1660,6 +1666,10 @@ impl SourceOwner {
 
     pub fn operation(&self) -> tokio::sync::watch::Receiver<SourceOperation> {
         self.shared.operation.subscribe()
+    }
+
+    pub(crate) fn catalog_changes(&self) -> tokio::sync::watch::Receiver<()> {
+        self.shared.catalog_changed.subscribe()
     }
 
     pub fn selected_library(&self) -> Option<SelectedLibrary> {

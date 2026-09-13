@@ -104,6 +104,44 @@
   padding: 8px;
 }
 
+.drag-preview {
+  position: fixed;
+  z-index: 10000;
+  pointer-events: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 180px;
+  height: 44px;
+  padding: 4px;
+  border-radius: 10px;
+  background: var(--surface);
+  color: var(--text);
+  border: 1px solid var(--line);
+  box-shadow: 0 8px 20px #0005;
+}
+
+.drag-preview-cover {
+  width: 36px;
+  height: 36px;
+  flex-shrink: 0;
+  overflow: hidden;
+  display: grid;
+  place-items: center;
+}
+
+.drag-preview .drag-preview-cover > :not(.icon) {
+  width: 100%;
+  height: 100%;
+}
+.drag-preview-title {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
 .album-card {
   min-width: 0;
 }
@@ -131,6 +169,32 @@
 .cover > .icon {
   width: 75%;
   height: 75%;
+}
+
+.cover-mosaic {
+  grid-template-columns: 1fr 1fr;
+  grid-template-rows: 1fr 1fr;
+  gap: 0;
+}
+.cover-quadrant {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 100%;
+  height: 100%;
+  overflow: hidden;
+  min-width: 0;
+  min-height: 0;
+}
+.cover-quadrant > .icon {
+  width: 75%;
+  height: 75%;
+}
+.cover-quadrant img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: 0;
 }
 
 .cover img {
@@ -271,7 +335,7 @@
 }
 
 .cover-controls {
-  --cover-gap: clamp(3px, calc(50% - 65px), 8px);
+  --cover-gap: clamp(5px, calc(50% - 63px), 12px);
   position: absolute;
   inset: 0;
   opacity: 0;
@@ -280,8 +344,7 @@
   border-radius: 12px;
 }
 
-.album-card:hover .cover-controls,
-.album-card:focus-within .cover-controls,
+.album-card.controls-visible .cover-controls,
 .album-card.menu-open .cover-controls {
   opacity: 1;
 }
@@ -305,8 +368,7 @@
   pointer-events: none;
 }
 
-.album-card:hover .cover-controls button,
-.album-card:focus-within .cover-controls button,
+.album-card.controls-visible .cover-controls button,
 .album-card.menu-open .cover-controls button {
   pointer-events: auto;
 }
@@ -381,15 +443,6 @@
   font-size: 13px;
   overflow: hidden;
   text-overflow: ellipsis;
-}
-
-@media (hover: none) {
-  .cover-controls {
-    opacity: 1;
-  }
-  .cover-controls button {
-    pointer-events: auto;
-  }
 }
 
 [data-favorite-uri][aria-pressed="true"] {

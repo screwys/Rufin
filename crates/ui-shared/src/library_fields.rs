@@ -169,14 +169,7 @@ pub fn add_field_skeleton_class(widget: &impl IsA<gtk::Widget>, field: LibraryFi
     widget.add_css_class(class);
 }
 
-pub fn smart_playlist_display_name(playlist: &SmartPlaylistRow) -> String {
-    match playlist.object_id.as_str() {
-        "builtin:most_played" => tr(msgid("Most Played")),
-        "builtin:never_played" => tr(msgid("Never Played")),
-        "builtin:most_skipped" => tr(msgid("Most Skipped")),
-        _ => playlist.name.clone(),
-    }
-}
+pub use rufin_core::playlists::smart_playlist_display_name;
 
 pub fn album_item_field(album: &AlbumRow, field: LibraryField) -> String {
     match field {
@@ -236,21 +229,7 @@ pub fn playlist_field(playlist: &PlaylistRow, field: LibraryField) -> String {
 }
 
 pub fn playlist_artwork(playlist: &PlaylistRow, prefer_server: bool) -> Vec<ArtworkBinding> {
-    let bindings: &[Vec<u8>] = if prefer_server {
-        playlist
-            .artwork_binding
-            .as_ref()
-            .map(std::slice::from_ref)
-            .unwrap_or(&playlist.representative_artwork)
-    } else if playlist.representative_artwork.is_empty() {
-        playlist
-            .artwork_binding
-            .as_ref()
-            .map(std::slice::from_ref)
-            .unwrap_or_default()
-    } else {
-        &playlist.representative_artwork
-    };
+    let bindings = rufin_core::playlists::playlist_artwork_bindings(playlist, prefer_server);
     bindings
         .iter()
         .map(|binding| ArtworkBinding::opaque(binding))

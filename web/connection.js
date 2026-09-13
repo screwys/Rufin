@@ -16,6 +16,7 @@ import { closeMenus } from "./menus.js";
 import { coverRequest, showLyrics, showPlayback } from "./player.js";
 
 import { showSourceProgress, updateSources } from "./sources.js";
+import { refreshPins, resetPins } from "./pins.js";
 
 let token =
   new URLSearchParams(location.hash.slice(1)).get("token") ||
@@ -93,6 +94,7 @@ function disconnect() {
   viewRequest?.abort();
   coverRequest?.abort();
   session = null;
+  resetPins();
   token = "";
   sessionStorage.removeItem("rufin-token");
   for (const url of coverUrls.values()) URL.revokeObjectURL(url);
@@ -129,6 +131,7 @@ async function connect() {
       if (value.source) showSourceProgress(value.source);
       if (value.lyrics) showLyrics(value.lyrics);
       if (value.appearance) applyColors(value.appearance);
+      if (value.pins_changed) run(refreshPins);
     },
     session.signal,
   );
@@ -137,6 +140,7 @@ async function connect() {
 async function stream(path, receive, signal) {
   let interrupted = false;
   while (!signal.aborted) {
+    let retryAfter = 1500;
     try {
       const response = await fetch(`/api${path}`, {
         signal,
@@ -146,6 +150,8 @@ async function stream(path, receive, signal) {
         disconnect();
         return;
       }
+      if (response.status === 429)
+        retryAfter = Number(response.headers.get("Retry-After")) * 1000 || 1500;
       if (!response.ok) throw new Error(tr("Could not receive live updates"));
       if (interrupted) {
         state.randomSource = null;
@@ -182,7 +188,7 @@ async function stream(path, receive, signal) {
     }
     if (!signal.aborted)
       await new Promise((resolve) => {
-        const timer = setTimeout(done, 1500);
+        const timer = setTimeout(done, retryAfter);
         function done() {
           clearTimeout(timer);
           signal.removeEventListener("abort", done);

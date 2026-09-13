@@ -164,6 +164,22 @@ pub(super) fn rebuild_navigation(shell: &Rc<Shell>) {
 }
 
 impl Shell {
+    pub(crate) fn bind_sidebar_settings(self: &Rc<Self>) {
+        let mut changes = self.settings.persistence.sidebar_changes();
+        let weak = Rc::downgrade(self);
+        glib::spawn_future_local(async move {
+            while changes.changed().await.is_ok() {
+                let Some(shell) = weak.upgrade() else { break };
+                let next = changes.borrow_and_update().clone();
+                if shell.settings.current.borrow().sidebar == next {
+                    continue;
+                }
+                shell.settings.current.borrow_mut().sidebar = next;
+                shell.rebuild_sidebar_navigation();
+            }
+        });
+    }
+
     pub(crate) fn rebuild_sidebar_navigation(self: &Rc<Self>) {
         rebuild_navigation(self);
         self.update_layout();

@@ -49,7 +49,7 @@ impl Shell {
         let dialog = ui_shared::playlists::new_playlist_dialog(
             &name,
             selected,
-            self.settings.current.borrow().new_playlist_current,
+            self.settings.persistence.load().new_playlist_current,
             move |name, current, source_id| {
                 if let Some(shell) = shell.upgrade() {
                     shell

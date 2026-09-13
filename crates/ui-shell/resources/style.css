@@ -1077,6 +1077,11 @@ dialog.alert.playlist-delete-dialog .message-area {
   background-size: 75% 75%;
 }
 
+.cover-mosaic > .cover-tile {
+  border-radius: 0;
+  box-shadow: none;
+}
+
 .cover-hover-layer {
   border-radius: 12px;
   background: color-mix(in srgb, black 34%, transparent);
@@ -1593,10 +1598,6 @@ link.inline-detail-link:focus:focus-visible {
 .icon-button {
   min-width: 34px;
   min-height: 34px;
-}
-
-row.controller-token .edit-icon {
-  opacity: 0;
 }
 
 button.download-queue-pause {
