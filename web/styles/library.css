@@ -29,6 +29,16 @@
   text-align: center;
 }
 
+.track-list .disc-header th {
+  position: static;
+  width: auto;
+  text-align: left;
+  padding: 6px 9px;
+  font-size: 12px;
+  font-weight: 600;
+  border-bottom: 0;
+}
+
 .track-list th:nth-child(3) {
   width: 25%;
 }

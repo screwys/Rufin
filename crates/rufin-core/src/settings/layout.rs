@@ -357,7 +357,8 @@ impl LibraryListKey {
     pub fn supports_layout(self, layout: LibraryLayout) -> bool {
         match layout {
             LibraryLayout::Detail => matches!(self, Self::Albums),
-            LibraryLayout::Row | LibraryLayout::Grid => true,
+            LibraryLayout::Grid => self != Self::AlbumDetailTracks,
+            LibraryLayout::Row => true,
         }
     }
 
@@ -1155,4 +1156,21 @@ fn row_field_is_usable(field: LibraryField) -> bool {
             | LibraryField::DiscNumber
             | LibraryField::Favorite
     )
+}
+
+#[cfg(test)]
+mod disc_tests {
+    use super::*;
+    #[test]
+    fn album_detail_uses_rows_when_grid_was_saved() {
+        let mut settings = LibraryListSettings::for_key(LibraryListKey::AlbumDetailTracks);
+        settings.layout = LibraryLayout::Grid;
+        let fields = settings.row_fields.clone();
+        settings.sanitize(LibraryListKey::AlbumDetailTracks);
+        assert_eq!(settings.layout, LibraryLayout::Row);
+        assert_eq!(settings.row_fields, fields);
+        assert!(!LibraryListKey::AlbumDetailTracks.supports_layout(LibraryLayout::Grid));
+        assert!(LibraryListKey::Tracks.supports_layout(LibraryLayout::Grid));
+        assert!(LibraryListKey::Albums.supports_layout(LibraryLayout::Grid));
+    }
 }

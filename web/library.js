@@ -522,7 +522,7 @@ async function showTrackMenu(index, row, anchor, event) {
 }
 
 function bindTracks(host, start, signal) {
-  const nodes = [...host.querySelectorAll("tbody tr")];
+  const nodes = [...host.querySelectorAll("tbody tr[data-row]")];
   for (const [position, tr] of nodes.entries()) {
     const index = start + position,
       row = mediaRow(tr);

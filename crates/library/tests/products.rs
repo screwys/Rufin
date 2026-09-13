@@ -349,6 +349,7 @@ async fn collection_pages_preserve_native_orders_and_duplicate_entries() {
                         )
                         .await
                         .unwrap()
+                        .0
                         .into_iter()
                         .map(|row| row.media_uri),
                 );

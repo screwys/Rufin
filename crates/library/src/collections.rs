@@ -478,6 +478,7 @@ pub struct FolderRow {
 pub struct AlbumDetail {
     pub album: AlbumRow,
     pub track_order: Vec<String>,
+    pub disc_sections: Vec<(u32, i64)>,
     pub artists: Vec<ArtistKey>,
     pub genres: Vec<GenreKey>,
     pub release_types: Vec<String>,
@@ -1142,22 +1143,19 @@ impl Database {
     ) -> LibraryResult<TrackRoutePage> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
-        let query = collection_track_query(
+        let mut query = collection_track_query(
             source,
             sort,
             descending,
             &crate::QueueCollection::AlbumKey(album),
         );
-        let order = finish_collection_track_order(
-            query,
-            folder,
-            filter,
-            sort,
-            descending,
-            &mut transaction,
-        )
-        .await?;
-        let page = finish_track_route_page(&mut transaction, order, window).await?;
+        crate::tracks::track_filter(&mut query, folder, filter, false);
+        let disc_sections = album_disc_sections(&query, sort, descending, &mut transaction).await?;
+        let order =
+            finish_collection_track_order(query, None, "", sort, descending, &mut transaction)
+                .await?;
+        let mut page = finish_track_route_page(&mut transaction, order, window).await?;
+        page.disc_sections = disc_sections;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
         Ok(page)
@@ -1548,7 +1546,7 @@ impl Database {
         offset: usize,
         limit: usize,
         cancellation: &ReadCancellation,
-    ) -> LibraryResult<Vec<TrackRow>> {
+    ) -> LibraryResult<(Vec<TrackRow>, Vec<(u32, i64)>)> {
         let (_permit, mut connection) = self.acquire_general(cancellation).await?;
         let mut transaction = connection.begin().await?;
         let query = playback_query(
@@ -1561,6 +1559,11 @@ impl Database {
             favorites_only,
         )
         .await?;
+        let disc_sections = if matches!(collection, crate::QueueCollection::AlbumKey(_)) {
+            album_disc_sections(&query, sort, descending, &mut transaction).await?
+        } else {
+            Vec::new()
+        };
         let sql = format!("{} LIMIT ?1 OFFSET ?2", query.select("track.track_key"));
         let keys = sqlx::query_scalar::<_, TrackKey>(sqlx::AssertSqlSafe(sql))
             .bind(limit.min(256) as i64)
@@ -1571,7 +1574,7 @@ impl Database {
         let rows = load_track_rows(&mut transaction, &keys).await?;
         transaction.commit().await?;
         Database::clear_progress(&mut connection).await?;
-        Ok(rows)
+        Ok((rows, disc_sections))
     }
 
     pub async fn album_detail(
@@ -1608,6 +1611,7 @@ impl Database {
             descending,
             &crate::QueueCollection::AlbumKey(key),
         );
+        let disc_sections = album_disc_sections(&query, sort, descending, &mut transaction).await?;
         let track_order =
             finish_collection_track_order(query, None, "", sort, descending, &mut transaction)
                 .await?;
@@ -1622,6 +1626,7 @@ impl Database {
         Database::clear_progress(&mut connection).await?;
         Ok(Some(AlbumDetail {
             album,
+            disc_sections,
             track_order: track_order.into_iter().map(|(_, uri)| uri).collect(),
             artists,
             genres,
@@ -2100,6 +2105,34 @@ pub(crate) async fn playback_query(
     Ok(query)
 }
 
+async fn album_disc_sections(
+    query: &crate::source_window::SourceQuery,
+    sort: TrackSort,
+    descending: bool,
+    connection: &mut SqliteConnection,
+) -> LibraryResult<Vec<(u32, i64)>> {
+    if sort != TrackSort::TrackNumber {
+        return Ok(Vec::new());
+    }
+    let direction = if descending { "DESC" } else { "ASC" };
+    let counts = sqlx::query_as::<_, (i64, i64)>(sqlx::AssertSqlSafe(format!(
+        "SELECT track.disc_number,COUNT(*) FROM {} WHERE {} GROUP BY track.disc_number ORDER BY track.disc_number {direction}",
+        query.from, query.predicate,
+    ))).fetch_all(connection).await?;
+    if counts.iter().filter(|(disc, _)| *disc > 0).count() <= 1 {
+        return Ok(Vec::new());
+    }
+    let mut position = 0;
+    Ok(counts
+        .into_iter()
+        .map(|(disc, count)| {
+            let start = position;
+            position += count as u32;
+            (start, disc)
+        })
+        .collect())
+}
+
 async fn finish_collection_track_order(
     mut query: crate::source_window::SourceQuery,
     folder: Option<FolderKey>,
@@ -2130,6 +2163,7 @@ async fn finish_track_route_page(
     let first_rows = load_track_rows(transaction, &first_keys).await?;
     let order = order.into_iter().map(|(_, media_uri)| media_uri).collect();
     Ok(TrackRoutePage {
+        disc_sections: Vec::new(),
         order,
         first_row_position,
         first_rows,

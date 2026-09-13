@@ -348,9 +348,20 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
 ) -> gtk::ColumnViewColumn {
     let width = track_column_width(key, field);
     match field {
-        LibraryField::RowIndex => {
-            mapped_track_row_index_column_with_width::<T, _>(width, playing.clone(), |_| true)
-        }
+        LibraryField::RowIndex => mapped_track_row_index_column_with_width::<T, _>(
+            width,
+            playing.clone(),
+            move |position, item| {
+                Some(if key == LibraryListKey::AlbumDetailTracks {
+                    item.track_number()
+                        .filter(|number| *number > 0)
+                        .map(|number| number.to_string())
+                        .unwrap_or_else(|| (position + 1).to_string())
+                } else {
+                    (position + 1).to_string()
+                })
+            },
+        ),
         LibraryField::Image => mapped_track_image_column::<T, _, _>(
             shell,
             "Image",
@@ -438,7 +449,15 @@ pub fn song_column_for_key<T: ui_shared::library_fields::TrackPresentation>(
             None,
             |item: &T| Some(item.media_uri().to_string()),
             |item: &T| item.downloaded(),
-            move |_, item: &T| item.field(field),
+            move |_, item: &T| {
+                if key == LibraryListKey::AlbumDetailTracks && field == LibraryField::TrackNumber {
+                    item.track_number()
+                        .map(|number| number.to_string())
+                        .unwrap_or_default()
+                } else {
+                    item.field(field)
+                }
+            },
         ),
     }
 }
@@ -659,14 +678,14 @@ pub fn mapped_row_index_column<T: Clone + 'static>(width: i32) -> gtk::ColumnVie
     column
 }
 
-pub fn mapped_track_row_index_column_with_width<T, Ready>(
+pub fn mapped_track_row_index_column_with_width<T, Number>(
     width: i32,
     playing: TrackRowPlayingIndicator,
-    is_ready: Ready,
+    number: Number,
 ) -> gtk::ColumnViewColumn
 where
     T: Clone + 'static,
-    Ready: Fn(&T) -> bool + 'static,
+    Number: Fn(u32, &T) -> Option<String> + 'static,
 {
     let factory = gtk::SignalListItemFactory::new();
     factory.connect_setup(|_, item| {
@@ -685,12 +704,12 @@ where
         else {
             return;
         };
-        let ready = item
+        let text = item
             .item()
-            .and_then(|object| object_item::<T, _>(object, &is_ready))
-            .unwrap_or(false);
-        if ready {
-            set_track_row_index_text(&cell, &(item.position() + 1).to_string());
+            .and_then(|object| object_item::<T, _>(object, |row| number(item.position(), row)))
+            .flatten();
+        if let Some(text) = text {
+            set_track_row_index_text(&cell, &text);
             bind_playing.bind(cell.upcast_ref(), item.position());
         } else {
             set_track_row_index_text(&cell, "");

@@ -74,12 +74,14 @@ impl CatalogUi {
                 .borrow()
                 .library_list(LibraryListKey::AlbumDetailTracks),
         );
+        model.list_model().set_sections(detail.disc_sections);
         let (tracks_widget, track_projection, track_toolbar) = self.scrolling_track_projection(
             model,
             LibraryListKey::AlbumDetailTracks,
             "album-detail",
             context_id.clone(),
         );
+        track_toolbar.set_layout_control_visible(false);
         let cover_size = detail_showcase_cover_size(inner_content_width);
         let cover = media_cover_projection(
             self,
@@ -234,6 +236,7 @@ impl CatalogUi {
                     .await
                     .map_err(|error| error.to_string())?;
                 Ok::<_, String>(PreparedTrackProjection {
+                    disc_sections: page.disc_sections,
                     order: page.order,
                     first_row_position: page.first_row_position,
                     first_rows: page.first_rows,

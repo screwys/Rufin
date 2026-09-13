@@ -155,7 +155,7 @@ async fn genre_tracks(
     } else {
         None
     };
-    let rows = products
+    let (rows, _) = products
         .library
         .collection_tracks_page(
             &library::QueueCollection::Genre(key(&parameters, "id")?),
@@ -243,7 +243,7 @@ async fn artist_tracks(
     };
     let offset = number(&parameters, "offset", 0)?;
     let limit = number(&parameters, "limit", 48)?.min(256);
-    let rows = products
+    let (rows, _) = products
         .library
         .collection_tracks_page(
             &collection,
@@ -438,7 +438,7 @@ async fn album_tracks(
             .map(String::as_str)
             .unwrap_or("track_number"),
     )?;
-    let rows = products
+    let (rows, disc_sections) = products
         .library
         .collection_tracks_page(
             &library::QueueCollection::AlbumKey(album),
@@ -456,7 +456,7 @@ async fn album_tracks(
     web::page(
         &headers,
         &parameters,
-        json!({"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
+        json!({"album_tracks":true,"disc_sections":disc_sections,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
 

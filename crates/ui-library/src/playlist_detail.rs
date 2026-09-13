@@ -763,6 +763,7 @@ async fn prepare_smart_playlist_projection(
         .await
         .map_err(|error| error.to_string())?;
     Ok(PreparedTrackProjection {
+        disc_sections: Vec::new(),
         order,
         first_row_position,
         first_rows,

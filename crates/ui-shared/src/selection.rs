@@ -9,6 +9,7 @@ mod position_selection_imp {
     pub struct PositionSelectionModel {
         pub(super) model: RefCell<Option<gio::ListModel>>,
         pub(super) model_handler: RefCell<Option<glib::SignalHandlerId>>,
+        pub(super) section_handler: RefCell<Option<glib::SignalHandlerId>>,
         pub(super) selected: RefCell<Option<gtk::Bitset>>,
     }
 
@@ -16,7 +17,7 @@ mod position_selection_imp {
     impl ObjectSubclass for PositionSelectionModel {
         const NAME: &'static str = "RufinPositionSelectionModel";
         type Type = super::PositionSelectionModel;
-        type Interfaces = (gio::ListModel, gtk::SelectionModel);
+        type Interfaces = (gio::ListModel, gtk::SelectionModel, gtk::SectionModel);
     }
 
     impl ObjectImpl for PositionSelectionModel {
@@ -24,6 +25,12 @@ mod position_selection_imp {
             if let (Some(model), Some(handler)) = (
                 self.model.borrow().as_ref(),
                 self.model_handler.borrow_mut().take(),
+            ) {
+                model.disconnect(handler);
+            }
+            if let (Some(model), Some(handler)) = (
+                self.model.borrow().as_ref(),
+                self.section_handler.borrow_mut().take(),
             ) {
                 model.disconnect(handler);
             }
@@ -49,6 +56,25 @@ mod position_selection_imp {
 
         fn item(&self, position: u32) -> Option<glib::Object> {
             self.model.borrow().as_ref()?.item(position)
+        }
+    }
+
+    impl SectionModelImpl for PositionSelectionModel {
+        fn section(&self, position: u32) -> (u32, u32) {
+            self.model
+                .borrow()
+                .as_ref()
+                .and_then(|model| model.downcast_ref::<crate::sparse_model::SparseObjectModel>())
+                .map_or_else(
+                    || {
+                        if position >= self.n_items() {
+                            (self.n_items(), u32::MAX)
+                        } else {
+                            (0, self.n_items())
+                        }
+                    },
+                    |model| model.section(position),
+                )
         }
     }
 
@@ -153,7 +179,7 @@ mod position_selection_imp {
 
 glib::wrapper! {
     pub struct PositionSelectionModel(ObjectSubclass<position_selection_imp::PositionSelectionModel>)
-        @implements gio::ListModel, gtk::SelectionModel;
+        @implements gio::ListModel, gtk::SelectionModel, gtk::SectionModel;
 }
 
 impl PositionSelectionModel {
@@ -176,6 +202,15 @@ impl PositionSelectionModel {
             selection.items_changed(position, removed, added);
         });
         selection.imp().model_handler.replace(Some(handler));
+        if let Some(model) = model.downcast_ref::<crate::sparse_model::SparseObjectModel>() {
+            let weak = selection.downgrade();
+            let handler = model.connect_sections_changed(move |position, count| {
+                if let Some(selection) = weak.upgrade() {
+                    selection.sections_changed(position, count);
+                }
+            });
+            selection.imp().section_handler.replace(Some(handler));
+        }
         selection
     }
 
@@ -264,6 +299,24 @@ fn keys_at_positions<T: Clone>(order: &[T], positions: impl Iterator<Item = u32>
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    #[ignore = "requires a GTK display"]
+    fn disc_sections_preserve_selection_without_reordering() {
+        gtk::init().expect("GTK display");
+        let model =
+            crate::sparse_model::SparseObjectModel::new::<u64, String>((0..24).collect(), 64);
+        model.set_sections(vec![(0, 1), (12, 2)]);
+        let selection = PositionSelectionModel::new(model.clone());
+        assert_eq!(selection.section(15), (12, 24));
+        selection.select_item(15, true);
+        model.set_sections(vec![(0, 1), (10, 2)]);
+        assert!(selection.is_selected(15));
+        assert_eq!(selection.section(15), (10, 24));
+        model.replace_order::<u64, String>(vec![0, 1, 2]);
+        assert!(selection.selection().is_empty());
+        assert_eq!(selection.section(0), (0, 3));
+    }
 
     #[test]
     fn selected_positions_follow_visible_track_order() {

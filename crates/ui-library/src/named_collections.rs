@@ -222,6 +222,7 @@ impl CatalogUi {
                                 order,
                                 first_row_position,
                                 first_rows,
+                                Vec::new(),
                                 move |row| row_key(row),
                             ) {
                                 tracing::warn!("rejected a mismatched prepared named page");

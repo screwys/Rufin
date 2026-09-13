@@ -7,6 +7,112 @@ use library::{
 use super::support::{connection, fixture};
 
 #[tokio::test]
+async fn album_disc_sections_follow_filtered_order_and_page_boundaries() {
+    let fixture = fixture().await;
+    let cancel = ReadCancellation::new();
+    let mut raw = connection(&fixture.path).await;
+    for (index, disc) in [(0, 1), (1, 2), (2, 0)] {
+        sqlx::query(
+            "UPDATE tracks SET album_key=?1,disc_number=?2,track_number=1 WHERE track_key=?3",
+        )
+        .bind(fixture.albums[0])
+        .bind(disc)
+        .bind(fixture.tracks[index])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    }
+    for (descending, expected) in [
+        (false, vec![(0, 0), (1, 1), (2, 2)]),
+        (true, vec![(0, 2), (1, 1), (2, 0)]),
+    ] {
+        let detail = fixture
+            .database
+            .album_detail(
+                &fixture.album_uris[0],
+                TrackSort::TrackNumber,
+                descending,
+                &cancel,
+            )
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(detail.disc_sections, expected);
+        let route = fixture
+            .database
+            .album_track_route_page(
+                fixture.source,
+                fixture.albums[0],
+                None,
+                "",
+                TrackSort::TrackNumber,
+                descending,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert_eq!(route.disc_sections, expected);
+        assert_eq!(route.order, detail.track_order);
+        for offset in 0..3 {
+            let (rows, sections) = fixture
+                .database
+                .collection_tracks_page(
+                    &library::QueueCollection::AlbumKey(fixture.albums[0]),
+                    None,
+                    "",
+                    TrackSort::TrackNumber,
+                    descending,
+                    false,
+                    offset,
+                    1,
+                    &cancel,
+                )
+                .await
+                .unwrap();
+            assert_eq!(sections, expected);
+            assert_eq!(rows.len(), 1);
+            assert_eq!(rows[0].media_uri, route.order[offset]);
+        }
+    }
+    for (filter, sort) in [("Alpha", TrackSort::TrackNumber), ("", TrackSort::Title)] {
+        let route = fixture
+            .database
+            .album_track_route_page(
+                fixture.source,
+                fixture.albums[0],
+                None,
+                filter,
+                sort,
+                false,
+                RouteSeedWindow::top(),
+                &cancel,
+            )
+            .await
+            .unwrap();
+        assert!(route.disc_sections.is_empty());
+    }
+    // One known disc, even if numbered 2 or accompanied by unknown tracks, needs no heading.
+    sqlx::query("UPDATE tracks SET disc_number=2 WHERE album_key=?1 AND disc_number>0")
+        .bind(fixture.albums[0])
+        .execute(&mut raw)
+        .await
+        .unwrap();
+    let detail = fixture
+        .database
+        .album_detail(
+            &fixture.album_uris[0],
+            TrackSort::TrackNumber,
+            false,
+            &cancel,
+        )
+        .await
+        .unwrap()
+        .unwrap();
+    assert!(detail.disc_sections.is_empty());
+}
+
+#[tokio::test]
 async fn track_sorts_keep_nulls_last_and_title_ties_in_both_directions() {
     let fixture = fixture().await;
     let mut raw = connection(&fixture.path).await;
