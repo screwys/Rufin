@@ -122,7 +122,7 @@ jobs:
                 crates/ui-shell/resources/*|crates/ui-shared/resources/*|crates/ui-library/resources/*|crates/ui-player/resources/*)
                   add_jobs "${workspace_jobs[@]}"
                   ;;
-                LICENSE|data|data/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
+                LICENSE|data|data/*|web|web/*|locales/*|*.md|*.ui|*.xml|.github/FUNDING.yml|.github/ISSUE_TEMPLATE/*)
                   continue
                   ;;
               esac

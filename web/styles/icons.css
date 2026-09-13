@@ -81,10 +81,6 @@
   mask-image: url("/icons/rufin-sidebar-show-symbolic.svg");
 }
 
-.icon[data-icon="menu"] {
-  mask-image: url("/icons/rufin-open-menu-symbolic.svg");
-}
-
 .icon[data-icon="artists"] {
   mask-image: url("/icons/rufin-artists-symbolic.svg");
 }

@@ -15,8 +15,9 @@ function updateSources(configured) {
     state.source = configured.selected || sources[0]?.id || "";
   libraries = configured.libraries || [];
   state.selectedLibrary = configured.library || null;
-  $("source-name").textContent =
-    sources.find((item) => item.id === state.source)?.name || tr("Library");
+  const current = sources.find((item) => item.id === state.source);
+  $("source-name").textContent = current?.name || tr("Library");
+  $("source-menu-button").replaceChildren(sourceIcon(current?.kind));
 }
 
 function sourceIcon(kind) {
