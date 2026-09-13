@@ -235,6 +235,7 @@ impl CatalogUi {
                         let present = !favorite.source_is_empty();
                         releases.set_favorite_present(present);
                         let height = 30 + favorite.source_count().min(4) as i32 * 64;
+                        favorite_scroller.set_max_content_height(-1);
                         favorite_scroller.set_min_content_height(height);
                         favorite_scroller.set_max_content_height(height);
                         releases.replace_orders(
