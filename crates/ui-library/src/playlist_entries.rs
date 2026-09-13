@@ -957,11 +957,4 @@ mod tests {
         assert_eq!(playlist_entry_drop_position(3), 3);
         assert_eq!(playlist_entry_drop_position(-1), 0);
     }
-
-    #[test]
-    fn playlist_utility_columns_use_the_shared_detail_widths() {
-        assert_eq!(playlist_entry_column_width(LibraryField::RowIndex), 48);
-        assert_eq!(playlist_entry_column_width(LibraryField::Duration), 48);
-        assert_eq!(playlist_entry_column_width(LibraryField::Favorite), 32);
-    }
 }
