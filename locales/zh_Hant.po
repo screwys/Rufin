@@ -991,9 +991,6 @@ msgstr "輸入伺服器位置、使用者名稱與密碼"
 msgid "Enter your Nextcloud server address to sign in through your browser"
 msgstr ""
 
-msgid "Enter your Rufin access token."
-msgstr ""
-
 msgid "Entire Library"
 msgstr "整個媒體庫"
 

@@ -995,9 +995,6 @@ msgstr ""
 "Gib die Adresse deines Nextcloud-Servers ein, um dich über den Browser "
 "anzumelden"
 
-msgid "Enter your Rufin access token."
-msgstr ""
-
 msgid "Entire Library"
 msgstr "Gesamte Bibliothek"
 
