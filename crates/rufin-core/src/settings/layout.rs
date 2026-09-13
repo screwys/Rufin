@@ -1,13 +1,5 @@
-use std::collections::HashSet;
-
 use serde::{Deserialize, Deserializer, Serialize};
-use sources::SourceId;
 
-use super::sidebar::{
-    available_detail_track_fields, available_sort_fields, default_descending,
-    default_detail_track_fields, default_grid_fields, default_row_fields, default_sort_key,
-    ensure_usable_row_field, sanitize_optional_fields, sanitize_required_fields,
-};
 pub const LIBRARY_LIST_LAYOUT_VERSION: u8 = 9;
 pub const DEFAULT_WINDOW_WIDTH: i32 = 1_500;
 pub const DEFAULT_WINDOW_HEIGHT: i32 = 900;
@@ -15,15 +7,23 @@ pub const MIN_RESTORED_WINDOW_WIDTH: i32 = 450;
 pub const MIN_RESTORED_WINDOW_HEIGHT: i32 = 400;
 pub const MAX_RESTORED_WINDOW_WIDTH: i32 = 3_400;
 pub const MAX_RESTORED_WINDOW_HEIGHT: i32 = 2_000;
-pub(super) fn default_true() -> bool {
-    true
-}
 fn default_narrow_layout_enabled() -> bool {
     true
 }
 fn default_narrow_layout_threshold() -> i32 {
     1_300
 }
+pub fn sanitized_window_size(width: Option<i32>, height: Option<i32>) -> Option<(i32, i32)> {
+    let (width, height) = (width?, height?);
+    if width < MIN_RESTORED_WINDOW_WIDTH || height < MIN_RESTORED_WINDOW_HEIGHT {
+        return None;
+    }
+    Some((
+        width.clamp(MIN_RESTORED_WINDOW_WIDTH, MAX_RESTORED_WINDOW_WIDTH),
+        height.clamp(MIN_RESTORED_WINDOW_HEIGHT, MAX_RESTORED_WINDOW_HEIGHT),
+    ))
+}
+
 pub const MIN_NARROW_LAYOUT_THRESHOLD: i32 = 700;
 pub const MAX_NARROW_LAYOUT_THRESHOLD: i32 = 3_400;
 pub const DEFAULT_LEFT_SIDEBAR_WIDTH: i32 = 230;
@@ -256,238 +256,6 @@ impl<'de> Deserialize<'de> for LayoutSettings {
         settings.sanitize();
         Ok(settings)
     }
-}
-#[derive(Clone, Copy, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum SidebarRouteItem {
-    Home,
-    Search,
-    Favorites,
-    Albums,
-    Tracks,
-    Artists,
-    AlbumArtists,
-    Genres,
-    Moods,
-    Folders,
-    Playlists,
-    SmartPlaylists,
-    History,
-}
-impl SidebarRouteItem {
-    pub fn from_stable_id(stable_id: &str) -> Option<Self> {
-        serde_json::from_value(serde_json::Value::String(stable_id.to_owned())).ok()
-    }
-
-    pub fn all() -> [Self; 13] {
-        [
-            Self::Home,
-            Self::Search,
-            Self::Favorites,
-            Self::Albums,
-            Self::Tracks,
-            Self::Artists,
-            Self::AlbumArtists,
-            Self::Genres,
-            Self::Moods,
-            Self::History,
-            Self::Folders,
-            Self::Playlists,
-            Self::SmartPlaylists,
-        ]
-    }
-
-    fn default_visible(self) -> bool {
-        !matches!(self, Self::Search | Self::Moods)
-    }
-}
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SidebarRouteItemSettings {
-    pub item: SidebarRouteItem,
-    pub visible: bool,
-}
-#[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
-pub enum SidebarPin {
-    Album {
-        source_id: SourceId,
-        album_id: String,
-    },
-    Artist {
-        source_id: SourceId,
-        artist_id: String,
-        #[serde(default, skip_serializing_if = "is_false")]
-        album_artist: bool,
-    },
-    Genre {
-        source_id: SourceId,
-        genre_id: String,
-    },
-    Playlist {
-        #[serde(default, skip_serializing_if = "Option::is_none")]
-        source_id: Option<SourceId>,
-        playlist_id: String,
-    },
-    SmartPlaylist {
-        playlist_id: String,
-    },
-}
-
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub struct SidebarSettings {
-    #[serde(default = "default_sidebar_route_items")]
-    pub route_items: Vec<SidebarRouteItemSettings>,
-    #[serde(default = "default_true")]
-    pub pins_visible: bool,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub pins: Vec<SidebarPin>,
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub playlist_pin_imported_sources: Vec<SourceId>,
-    #[serde(default = "default_true")]
-    pub server_visible: bool,
-}
-impl Default for SidebarSettings {
-    fn default() -> Self {
-        Self {
-            route_items: default_sidebar_route_items(),
-            pins_visible: true,
-            pins: Vec::new(),
-            playlist_pin_imported_sources: Vec::new(),
-            server_visible: true,
-        }
-    }
-}
-impl SidebarSettings {
-    pub fn sanitize(&mut self) {
-        let mut sanitized = Vec::with_capacity(SidebarRouteItem::all().len());
-        for entry in &self.route_items {
-            if !SidebarRouteItem::all().contains(&entry.item)
-                || sanitized
-                    .iter()
-                    .any(|existing: &SidebarRouteItemSettings| existing.item == entry.item)
-            {
-                continue;
-            }
-            sanitized.push(entry.clone());
-        }
-        for item in SidebarRouteItem::all() {
-            if !sanitized.iter().any(|entry| entry.item == item) {
-                insert_sidebar_route_item_in_default_order(
-                    &mut sanitized,
-                    SidebarRouteItemSettings {
-                        item,
-                        visible: item.default_visible(),
-                    },
-                );
-            }
-        }
-        if !sanitized.iter().any(|entry| entry.visible)
-            && let Some(home) = sanitized
-                .iter_mut()
-                .find(|entry| entry.item == SidebarRouteItem::Home)
-        {
-            home.visible = true;
-        }
-        self.route_items = sanitized;
-        let mut seen = HashSet::new();
-        self.pins.retain(|pin| seen.insert(pin.clone()));
-        let mut seen = HashSet::new();
-        self.playlist_pin_imported_sources
-            .retain(|source| seen.insert(source.clone()));
-    }
-
-    pub fn is_pinned(&self, pin: &SidebarPin) -> bool {
-        self.pins.contains(pin)
-    }
-
-    pub fn set_pinned(&mut self, pin: SidebarPin, pinned: bool) -> bool {
-        if pinned {
-            if self.pins.contains(&pin) {
-                return false;
-            }
-            self.pins.push(pin);
-            return true;
-        }
-        let previous_len = self.pins.len();
-        self.pins.retain(|stored| stored != &pin);
-        self.pins.len() != previous_len
-    }
-
-    pub fn reorder_pin(&mut self, moved: &SidebarPin, target: &SidebarPin, after: bool) -> bool {
-        if moved == target {
-            return false;
-        }
-        let Some(moved_index) = self.pins.iter().position(|pin| pin == moved) else {
-            return false;
-        };
-        let mut reordered = self.pins.clone();
-        let moved = reordered.remove(moved_index);
-        let Some(target_index) = reordered.iter().position(|pin| pin == target) else {
-            return false;
-        };
-        reordered.insert(target_index + usize::from(after), moved);
-        if reordered == self.pins {
-            return false;
-        }
-        self.pins = reordered;
-        true
-    }
-
-    pub fn pin_drop_after(&self, moved: &SidebarPin, target: &SidebarPin) -> Option<bool> {
-        let moved_index = self.pins.iter().position(|pin| pin == moved)?;
-        let target_index = self.pins.iter().position(|pin| pin == target)?;
-        (moved_index != target_index).then_some(moved_index < target_index)
-    }
-    pub fn import_playlist_pins_once(
-        &mut self,
-        source_id: SourceId,
-        playlist_ids: impl IntoIterator<Item = String>,
-    ) -> bool {
-        if self.playlist_pin_imported_sources.contains(&source_id) {
-            return false;
-        }
-        for playlist_id in playlist_ids {
-            self.set_pinned(
-                SidebarPin::Playlist {
-                    source_id: Some(source_id.clone()),
-                    playlist_id,
-                },
-                true,
-            );
-        }
-        self.playlist_pin_imported_sources.push(source_id);
-        true
-    }
-}
-fn insert_sidebar_route_item_in_default_order(
-    items: &mut Vec<SidebarRouteItemSettings>,
-    entry: SidebarRouteItemSettings,
-) {
-    let default_order = SidebarRouteItem::all();
-    let Some(entry_index) = default_order.iter().position(|item| *item == entry.item) else {
-        items.push(entry);
-        return;
-    };
-    let insert_index = items
-        .iter()
-        .position(|existing| {
-            default_order
-                .iter()
-                .position(|item| *item == existing.item)
-                .is_some_and(|existing_index| existing_index > entry_index)
-        })
-        .unwrap_or(items.len());
-    items.insert(insert_index, entry);
-}
-fn default_sidebar_route_items() -> Vec<SidebarRouteItemSettings> {
-    SidebarRouteItem::all()
-        .into_iter()
-        .map(|item| SidebarRouteItemSettings {
-            item,
-            visible: item.default_visible(),
-        })
-        .collect()
 }
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ThemePreference {
@@ -1112,133 +880,279 @@ pub fn available_grid_fields(key: LibraryListKey) -> &'static [LibraryField] {
     }
 }
 
-#[cfg(test)]
-mod sidebar_tests {
-    use super::*;
-
-    #[test]
-    fn route_defaults_and_sanitization_preserve_saved_behavior() {
-        let defaults = SidebarSettings::default();
-        assert_eq!(
-            defaults
-                .route_items
-                .iter()
-                .map(|entry| entry.item)
-                .collect::<Vec<_>>(),
-            SidebarRouteItem::all()
-        );
-        assert_eq!(
-            defaults
-                .route_items
-                .iter()
-                .filter(|entry| !entry.visible)
-                .map(|entry| entry.item)
-                .collect::<Vec<_>>(),
-            [SidebarRouteItem::Search, SidebarRouteItem::Moods]
-        );
-
-        let mut saved = defaults.clone();
-        saved.route_items.rotate_left(4);
-        saved.route_items[0].visible = false;
-        let expected = saved.route_items.clone();
-        saved.sanitize();
-        assert_eq!(saved.route_items, expected);
+pub fn available_sort_fields(key: LibraryListKey) -> &'static [LibraryField] {
+    match key {
+        LibraryListKey::Albums | LibraryListKey::ArtistAlbums => &[
+            LibraryField::Title,
+            LibraryField::AlbumArtist,
+            LibraryField::Year,
+            LibraryField::ReleaseDate,
+            LibraryField::DateAdded,
+            LibraryField::LastPlayed,
+            LibraryField::PlayCount,
+            LibraryField::UserRating,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::Artists | LibraryListKey::AlbumArtists => &[
+            LibraryField::Title,
+            LibraryField::AlbumCount,
+            LibraryField::SongCount,
+            LibraryField::LastPlayed,
+            LibraryField::PlayCount,
+            LibraryField::UserRating,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::Genres => &[
+            LibraryField::Title,
+            LibraryField::AlbumCount,
+            LibraryField::SongCount,
+        ],
+        LibraryListKey::Moods => &[
+            LibraryField::Title,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+        ],
+        LibraryListKey::Playlists => &[
+            LibraryField::RowIndex,
+            LibraryField::Title,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+        ],
+        LibraryListKey::SmartPlaylists => &[
+            LibraryField::RowIndex,
+            LibraryField::Title,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+        ],
+        LibraryListKey::PlaylistTracks => &[
+            LibraryField::RowIndex,
+            LibraryField::Title,
+            LibraryField::Artist,
+            LibraryField::Album,
+        ],
+        LibraryListKey::History => &[LibraryField::LastPlayed],
+        LibraryListKey::Tracks
+        | LibraryListKey::FavoriteTracks
+        | LibraryListKey::AlbumDetailTracks
+        | LibraryListKey::ArtistTracks
+        | LibraryListKey::GenreTracks
+        | LibraryListKey::MoodTracks
+        | LibraryListKey::SmartPlaylistTracks => &[
+            LibraryField::TrackNumber,
+            LibraryField::Title,
+            LibraryField::Artist,
+            LibraryField::AlbumArtist,
+            LibraryField::Album,
+            LibraryField::Year,
+            LibraryField::ReleaseDate,
+            LibraryField::DateAdded,
+            LibraryField::LastPlayed,
+            LibraryField::PlayCount,
+            LibraryField::UserRating,
+            LibraryField::Genre,
+            LibraryField::Bpm,
+            LibraryField::Duration,
+            LibraryField::Favorite,
+        ],
     }
-
-    fn pin(id: &str) -> SidebarPin {
-        SidebarPin::Playlist {
-            source_id: Some(SourceId::new("test:source")),
-            playlist_id: id.to_string(),
+}
+fn default_row_fields(key: LibraryListKey) -> Vec<LibraryField> {
+    match key {
+        LibraryListKey::Albums | LibraryListKey::ArtistAlbums => vec![
+            LibraryField::TitleMerged,
+            LibraryField::PlayCount,
+            LibraryField::Year,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::Artists | LibraryListKey::AlbumArtists => vec![
+            LibraryField::Image,
+            LibraryField::Title,
+            LibraryField::AlbumCount,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::Genres => vec![
+            LibraryField::Title,
+            LibraryField::AlbumCount,
+            LibraryField::SongCount,
+        ],
+        LibraryListKey::Moods => vec![
+            LibraryField::Title,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+        ],
+        LibraryListKey::Playlists => vec![
+            LibraryField::Image,
+            LibraryField::Title,
+            LibraryField::SongCount,
+        ],
+        LibraryListKey::SmartPlaylists => vec![
+            LibraryField::Image,
+            LibraryField::Title,
+            LibraryField::SongCount,
+            LibraryField::Duration,
+        ],
+        LibraryListKey::Tracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::Year,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::FavoriteTracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::Year,
+            LibraryField::PlayCount,
+        ],
+        LibraryListKey::History => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::LastPlayed,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::AlbumDetailTracks => default_detail_track_fields(),
+        LibraryListKey::ArtistTracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::Year,
+            LibraryField::PlayCount,
+            LibraryField::Favorite,
+        ],
+        LibraryListKey::GenreTracks
+        | LibraryListKey::MoodTracks
+        | LibraryListKey::PlaylistTracks => {
+            vec![
+                LibraryField::RowIndex,
+                LibraryField::TitleMerged,
+                LibraryField::Album,
+                LibraryField::Duration,
+                LibraryField::Favorite,
+            ]
+        }
+        LibraryListKey::SmartPlaylistTracks => vec![
+            LibraryField::RowIndex,
+            LibraryField::TitleMerged,
+            LibraryField::Album,
+            LibraryField::PlayCount,
+            LibraryField::Favorite,
+        ],
+    }
+}
+fn default_grid_fields(key: LibraryListKey) -> Vec<LibraryField> {
+    match key {
+        LibraryListKey::Albums | LibraryListKey::ArtistAlbums => {
+            vec![LibraryField::AlbumArtist, LibraryField::Year]
+        }
+        LibraryListKey::Artists | LibraryListKey::AlbumArtists => Vec::new(),
+        LibraryListKey::Genres => Vec::new(),
+        LibraryListKey::Moods => vec![LibraryField::SongCount, LibraryField::Duration],
+        LibraryListKey::Playlists => vec![LibraryField::SongCount],
+        LibraryListKey::SmartPlaylists => vec![LibraryField::SongCount, LibraryField::Duration],
+        LibraryListKey::History => vec![
+            LibraryField::Artist,
+            LibraryField::Album,
+            LibraryField::LastPlayed,
+        ],
+        LibraryListKey::Tracks
+        | LibraryListKey::FavoriteTracks
+        | LibraryListKey::AlbumDetailTracks
+        | LibraryListKey::ArtistTracks
+        | LibraryListKey::GenreTracks
+        | LibraryListKey::MoodTracks
+        | LibraryListKey::PlaylistTracks
+        | LibraryListKey::SmartPlaylistTracks => {
+            vec![
+                LibraryField::Artist,
+                LibraryField::Album,
+                LibraryField::Duration,
+            ]
         }
     }
-
-    #[test]
-    fn saved_pins_keep_cross_source_identity_and_global_order() {
-        let first = SidebarPin::Genre {
-            source_id: SourceId::new("first"),
-            genre_id: "rock".into(),
-        };
-        let second = SidebarPin::Genre {
-            source_id: SourceId::new("second"),
-            genre_id: "rock".into(),
-        };
-        let global = SidebarPin::Playlist {
-            source_id: None,
-            playlist_id: "mix".into(),
-        };
-        let saved = serde_json::json!({
-            "pins": [first, second, global, first],
-            "playlist_pin_imported_sources": ["first", "second"]
-        });
-        let mut settings: SidebarSettings = serde_json::from_value(saved).unwrap();
-        settings.sanitize();
-        assert_eq!(
-            settings.pins,
-            [first.clone(), second.clone(), global.clone()]
-        );
-        assert!(settings.reorder_pin(&second, &global, true));
-        assert_eq!(settings.pins, [first, global, second]);
-        let encoded = serde_json::to_value(&settings).unwrap();
-        assert_eq!(
-            encoded["playlist_pin_imported_sources"],
-            serde_json::json!(["first", "second"])
-        );
-        assert_eq!(
-            serde_json::from_value::<SidebarSettings>(encoded).unwrap(),
-            settings
-        );
+}
+pub fn available_detail_track_fields() -> &'static [LibraryField] {
+    &[
+        LibraryField::RowIndex,
+        LibraryField::TrackNumber,
+        LibraryField::Title,
+        LibraryField::Duration,
+        LibraryField::Favorite,
+    ]
+}
+fn default_detail_track_fields() -> Vec<LibraryField> {
+    vec![
+        LibraryField::RowIndex,
+        LibraryField::Title,
+        LibraryField::Duration,
+        LibraryField::Favorite,
+    ]
+}
+fn default_sort_key(key: LibraryListKey) -> LibraryField {
+    match key {
+        LibraryListKey::Albums
+        | LibraryListKey::Artists
+        | LibraryListKey::AlbumArtists
+        | LibraryListKey::Genres
+        | LibraryListKey::Moods
+        | LibraryListKey::ArtistAlbums
+        | LibraryListKey::Tracks
+        | LibraryListKey::FavoriteTracks => LibraryField::Title,
+        LibraryListKey::History => LibraryField::LastPlayed,
+        LibraryListKey::Playlists
+        | LibraryListKey::SmartPlaylists
+        | LibraryListKey::PlaylistTracks => LibraryField::RowIndex,
+        LibraryListKey::AlbumDetailTracks
+        | LibraryListKey::ArtistTracks
+        | LibraryListKey::GenreTracks
+        | LibraryListKey::MoodTracks
+        | LibraryListKey::SmartPlaylistTracks => LibraryField::TrackNumber,
     }
-
-    #[test]
-    fn playlist_import_appends_globally_once_and_preserves_unpinning() {
-        let first = SourceId::new("plex");
-        let second = SourceId::new("emby");
-        let mut settings = SidebarSettings::default();
-        assert!(settings.import_playlist_pins_once(first.clone(), ["mix".into()]));
-        assert!(settings.import_playlist_pins_once(second.clone(), ["mix".into()]));
-        let removed = settings.pins[0].clone();
-        let retained = settings.pins[1].clone();
-        settings.set_pinned(removed, false);
-        let mut restored: SidebarSettings =
-            serde_json::from_str(&serde_json::to_string(&settings).unwrap()).unwrap();
-        assert!(!restored.import_playlist_pins_once(first, ["mix".into()]));
-        assert!(!restored.import_playlist_pins_once(second, ["mix".into()]));
-        assert_eq!(restored.pins, [retained]);
+}
+fn default_descending(key: LibraryListKey) -> bool {
+    key == LibraryListKey::History
+}
+fn sanitize_optional_fields(fields: &mut Vec<LibraryField>, available: &[LibraryField]) {
+    let mut seen = Vec::new();
+    fields.retain(|field| {
+        if !available.contains(field) || seen.contains(field) {
+            return false;
+        }
+        seen.push(*field);
+        true
+    });
+}
+fn sanitize_required_fields(
+    fields: &mut Vec<LibraryField>,
+    available: &[LibraryField],
+    fallback: Vec<LibraryField>,
+) {
+    sanitize_optional_fields(fields, available);
+    if fields.is_empty() {
+        *fields = fallback;
     }
-
-    #[test]
-    fn reorder_pin_places_relative_to_the_target_and_ignores_no_ops() {
-        let first = pin("first");
-        let second = pin("second");
-        let third = pin("third");
-        let mut settings = SidebarSettings {
-            pins: vec![first.clone(), second.clone(), third.clone()],
-            ..SidebarSettings::default()
-        };
-
-        assert!(settings.reorder_pin(&first, &second, true));
-        assert_eq!(
-            settings.pins,
-            [second.clone(), first.clone(), third.clone()]
-        );
-        assert!(settings.reorder_pin(&third, &second, false));
-        assert_eq!(settings.pins, [third, second.clone(), first]);
-        assert!(!settings.reorder_pin(&second, &second, false));
+}
+fn ensure_usable_row_field(fields: &mut Vec<LibraryField>, fallback: Vec<LibraryField>) {
+    if fields.iter().any(|field| row_field_is_usable(*field)) {
+        return;
     }
-
-    #[test]
-    fn pin_drop_direction_follows_the_existing_order() {
-        let first = pin("first");
-        let second = pin("second");
-        let third = pin("third");
-        let settings = SidebarSettings {
-            pins: vec![first.clone(), second.clone(), third.clone()],
-            ..SidebarSettings::default()
-        };
-
-        assert_eq!(settings.pin_drop_after(&first, &second), Some(true));
-        assert_eq!(settings.pin_drop_after(&third, &second), Some(false));
-        assert_eq!(settings.pin_drop_after(&second, &second), None);
-        assert_eq!(settings.pin_drop_after(&pin("missing"), &second), None);
+    if let Some(field) = fallback
+        .into_iter()
+        .find(|field| row_field_is_usable(*field))
+    {
+        fields.push(field);
     }
+}
+fn row_field_is_usable(field: LibraryField) -> bool {
+    !matches!(
+        field,
+        LibraryField::RowIndex
+            | LibraryField::Image
+            | LibraryField::TrackNumber
+            | LibraryField::DiscNumber
+            | LibraryField::Favorite
+    )
 }
