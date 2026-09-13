@@ -251,7 +251,7 @@ pacman -S --needed base-devel git \
 ```bash
 brew install \
   rust cmake just pkgconf gettext gtk4 libadwaita gstreamer \
-  librsvg game-music-emu libopenmpt libsoup meson ninja openssl@3 wavpack
+  librsvg game-music-emu libnice-gstreamer libopenmpt libsoup meson ninja openssl@3 wavpack
 ```
 
 **Building:** After you installed dependencies for your operating system, you can build and run:

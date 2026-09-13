@@ -93,6 +93,7 @@ jobs:
             gtk4 \
             just \
             libadwaita \
+            libnice-gstreamer \
             libopenmpt \
             libsoup \
             librsvg \

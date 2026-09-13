@@ -493,7 +493,7 @@ jobs:
       - name: Install test dependencies
         run: |
           brew install adwaita-icon-theme cmake gettext game-music-emu gstreamer \
-            gtk4 libadwaita libopenmpt libsoup librsvg meson ninja openssl@3 \
+            gtk4 libadwaita libnice-gstreamer libopenmpt libsoup librsvg meson ninja openssl@3 \
             pkgconf shared-mime-info wavpack
           gettext_prefix="$(brew --prefix gettext)"
           echo "GETTEXT_DIR=$gettext_prefix" >> "$GITHUB_ENV"
