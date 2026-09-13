@@ -389,7 +389,7 @@ pub fn available_fields_for_set(
 ) -> &'static [LibraryField] {
     match field_set {
         LibraryFieldSet::Grid => rufin_core::settings::layout::available_grid_fields(key),
-        LibraryFieldSet::Detail => rufin_core::settings::sidebar::available_detail_track_fields(),
+        LibraryFieldSet::Detail => rufin_core::settings::available_detail_track_fields(),
         LibraryFieldSet::Row => rufin_core::settings::layout::available_row_fields(key),
     }
 }

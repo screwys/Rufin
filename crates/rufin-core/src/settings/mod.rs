@@ -6,8 +6,8 @@ pub use secret_storage::KeyringSecretStore;
 pub mod sidebar;
 
 pub use app::{
-    HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection, RandomPlaySettings, Settings,
-    SettingsHandle, default_home_blocks,
+    ExternalSiteLinkSettings, HomeBlockKind, HomeSectionKind, RandomPlayGenreSelection,
+    RandomPlaySettings, Settings, SettingsHandle, default_home_blocks,
 };
 pub use context_menu::{ContextMenuItem, ContextMenuItemSettings, ContextMenuSettings};
 pub use downloads::DownloadRule;
@@ -19,14 +19,11 @@ pub use layout::{
     MAX_LEFT_SIDEBAR_WIDTH, MAX_NARROW_LAYOUT_THRESHOLD, MAX_RESTORED_WINDOW_HEIGHT,
     MAX_RESTORED_WINDOW_WIDTH, MAX_RIGHT_SIDEBAR_WIDTH, MAX_TABLE_COLUMN_WIDTH,
     MIN_LEFT_SIDEBAR_WIDTH, MIN_NARROW_LAYOUT_THRESHOLD, MIN_RIGHT_SIDEBAR_WIDTH,
-    MIN_TABLE_COLUMN_WIDTH, RightSidebarMode, SidebarPin, SidebarRouteItem,
-    SidebarRouteItemSettings, SidebarSettings, ThemePreference, available_grid_fields,
-    available_row_fields, default_library_list_settings,
+    MIN_TABLE_COLUMN_WIDTH, RightSidebarMode, ThemePreference, available_detail_track_fields,
+    available_grid_fields, available_row_fields, available_sort_fields,
+    default_library_list_settings, sanitized_window_size,
 };
-pub use sidebar::{
-    ExternalSiteLinkSettings, available_detail_track_fields, available_sort_fields,
-    sanitized_window_size,
-};
+pub use sidebar::{SidebarPin, SidebarRouteItem, SidebarRouteItemSettings, SidebarSettings};
 
 use std::ffi::OsString;
 use std::fs;

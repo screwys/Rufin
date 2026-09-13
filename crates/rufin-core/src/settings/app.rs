@@ -15,10 +15,33 @@ use serde::{Deserialize, Serialize};
 use sources::SourceId;
 
 use super::{
-    AccentPreference, ContextMenuSettings, ExternalSiteLinkSettings, LayoutSettings,
-    LibraryListKey, LibraryListSettings, LibraryListSettingsEntry, SidebarSettings,
-    ThemePreference, default_library_list_settings, sanitized_window_size,
+    AccentPreference, ContextMenuSettings, LayoutSettings, LibraryListKey, LibraryListSettings,
+    LibraryListSettingsEntry, SidebarSettings, ThemePreference, default_library_list_settings,
+    sanitized_window_size,
 };
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ExternalSiteLinkSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default = "default_true")]
+    pub lastfm: bool,
+    #[serde(default = "default_true")]
+    pub musicbrainz: bool,
+    #[serde(default = "default_true")]
+    pub server: bool,
+}
+
+impl Default for ExternalSiteLinkSettings {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            lastfm: true,
+            musicbrainz: true,
+            server: true,
+        }
+    }
+}
 
 const DEFAULT_RANDOM_PLAY_LIMIT: usize = 100;
 const MIN_RANDOM_PLAY_LIMIT: usize = 1;

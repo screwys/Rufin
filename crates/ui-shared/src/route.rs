@@ -2,7 +2,7 @@ use library::{GenreKey, MoodKey, PlaylistKey, SmartPlaylistKey};
 use localization::msgid;
 use serde::{Deserialize, Serialize};
 
-use rufin_core::settings::layout::SidebarRouteItem;
+use rufin_core::settings::SidebarRouteItem;
 
 #[derive(Clone, Debug, Deserialize, Eq, Hash, PartialEq, Serialize)]
 pub struct FolderPathItem {
@@ -156,9 +156,7 @@ impl CollectionCategory {
 
     pub fn sort_fields(self) -> &'static [LibraryField] {
         match self {
-            Self::Tracks => {
-                rufin_core::settings::sidebar::available_sort_fields(LibraryListKey::Tracks)
-            }
+            Self::Tracks => rufin_core::settings::available_sort_fields(LibraryListKey::Tracks),
             Self::Albums => &[
                 LibraryField::Title,
                 LibraryField::AlbumArtist,
