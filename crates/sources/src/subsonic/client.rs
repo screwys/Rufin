@@ -138,31 +138,24 @@ impl SubsonicSource {
         let source = scan
             .existing_source()
             .ok_or(SourceError::InvalidRequest("Search source is unavailable"))?;
+        let (artists, albums, tracks) = tokio::try_join!(
+            self.read_artists(json::items(&results["artist"])),
+            self.read_albums(json::items(&results["album"])),
+            self.read_tracks(json::items(&results["song"])),
+        )?;
         scan.begin_batch().await?;
         let mut artist_ids = Vec::new();
         let mut album_ids = Vec::new();
         let mut track_ids = Vec::new();
-        for artist in json::items(&results["artist"])
-            .iter()
-            .filter_map(|value| artist_from_json(self, value))
-            .take(limit.clamp(1, 100))
-        {
+        for artist in artists.into_iter().take(limit.clamp(1, 100)) {
             artist_ids.push(artist.id.clone());
             stage_artist(&mut scan, artist).await?;
         }
-        for album in json::items(&results["album"])
-            .iter()
-            .filter_map(|value| album_from_json(self, value))
-            .take(limit.clamp(1, 100))
-        {
+        for album in albums.into_iter().take(limit.clamp(1, 100)) {
             album_ids.push(album.id.clone());
             stage_album(&mut scan, album).await?;
         }
-        for track in json::items(&results["song"])
-            .iter()
-            .filter_map(|value| track_from_json(self, value))
-            .take(limit.clamp(1, 100))
-        {
+        for track in tracks.into_iter().take(limit.clamp(1, 100)) {
             track_ids.push(track.id.clone());
             stage_track(&mut scan, track).await?;
         }
@@ -189,37 +182,34 @@ impl SubsonicSource {
         scan: &mut library::Scan,
         collection: &crate::SourceCollection,
     ) -> SourceResult<()> {
-        let album_ids = match collection {
-            crate::SourceCollection::Album(id) => vec![raw_item_id(id).to_string()],
+        let albums = match collection {
+            crate::SourceCollection::Album(id) => vec![serde_json::json!({"id": raw_item_id(id)})],
             crate::SourceCollection::Artist(id) => {
                 let body: Value = self
                     .get_json("getArtist", &[("id", raw_item_id(id).to_string())])
                     .await?;
-                let mut ids = Vec::new();
-                for page in json::items(&body["artist"]["album"]).chunks(100) {
-                    scan.begin_batch().await?;
-                    for album in page {
-                        if let Some(album) = album_from_json(self, album) {
-                            ids.push(raw_item_id(&album.id).to_string());
-                            stage_album(scan, album).await?;
-                        }
-                    }
-                    scan.finish_batch().await?;
-                }
-                ids
+                json::items(&body["artist"]["album"])
+                    .iter()
+                    .filter(|album| json::id(&album["id"]).is_some())
+                    .cloned()
+                    .collect()
             }
         };
-        for album_id in album_ids {
-            let body: serde_json::Value = self.get_json("getAlbum", &[("id", album_id)]).await?;
-            let album = &body["album"];
-            if let Some(metadata) = album_from_json(self, album) {
+        for mut album in albums {
+            let album_id = json::id(&album["id"]).expect("album identity");
+            let mut body = self.get_json("getAlbum", &[("id", album_id)]).await?;
+            if let Value::Object(detail) = body["album"].take() {
+                album.as_object_mut().expect("album summary").extend(detail);
+            }
+            for metadata in self.read_albums(std::slice::from_ref(&album)).await? {
                 scan.begin_batch().await?;
                 stage_album(scan, metadata).await?;
                 scan.finish_batch().await?;
             }
             for page in json::items(&album["song"]).chunks(100) {
+                let tracks = self.read_tracks(page).await?;
                 scan.begin_batch().await?;
-                for song in page.iter().filter_map(|song| track_from_json(self, song)) {
+                for song in tracks {
                     stage_track(scan, song).await?;
                 }
                 scan.finish_batch().await?;
@@ -1051,15 +1041,12 @@ pub(super) fn random_salt() -> String {
 pub(super) fn color_seed(id: &str) -> u32 {
     (stable_hash(id) & 0xffff_ffff) as u32
 }
-pub(super) fn favorite(value: &Option<serde_json::Value>) -> bool {
-    value.as_ref().is_some_and(|value| match value {
-        serde_json::Value::Bool(value) => *value,
-        serde_json::Value::String(value) => !value.trim().is_empty(),
-        serde_json::Value::Null
-        | serde_json::Value::Number(_)
-        | serde_json::Value::Array(_)
-        | serde_json::Value::Object(_) => false,
-    })
+pub(super) fn favorite(value: &Option<serde_json::Value>) -> Option<bool> {
+    match value.as_ref()? {
+        serde_json::Value::Bool(value) => Some(*value),
+        serde_json::Value::String(value) => Some(!value.trim().is_empty()),
+        _ => None,
+    }
 }
 
 impl SubsonicSource {

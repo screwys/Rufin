@@ -276,6 +276,7 @@ CREATE TABLE IF NOT EXISTS albums (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS albums_order_idx ON albums(source_key, sort_text, album_key);
+CREATE INDEX IF NOT EXISTS albums_source_favorites_idx ON albums(source_key, object_id) WHERE source_favorite=1;
 
 CREATE INDEX IF NOT EXISTS albums_key_idx ON albums(source_key, album_key);
 
@@ -334,6 +335,7 @@ CREATE TABLE IF NOT EXISTS tracks (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS tracks_order_idx ON tracks(source_key, sort_text, track_key);
+CREATE INDEX IF NOT EXISTS tracks_source_favorites_idx ON tracks(source_key, object_id) WHERE source_favorite=1;
 
 CREATE INDEX IF NOT EXISTS tracks_key_idx ON tracks(source_key, track_key);
 CREATE INDEX IF NOT EXISTS tracks_source_path_idx ON tracks(source_key, source_path, album_key);
@@ -363,6 +365,7 @@ CREATE TABLE IF NOT EXISTS artists (
 ) STRICT;
 
 CREATE INDEX IF NOT EXISTS artists_order_idx ON artists(source_key, sort_text, artist_key);
+CREATE INDEX IF NOT EXISTS artists_source_favorites_idx ON artists(source_key, object_id) WHERE source_favorite=1;
 
 CREATE INDEX IF NOT EXISTS artists_artwork_idx ON artists(source_key, artwork_binding)
     WHERE artwork_binding IS NOT NULL;

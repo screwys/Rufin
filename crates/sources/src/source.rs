@@ -880,6 +880,14 @@ impl Source {
             }
         };
         let Some(freshness) = self.freshness().await.ok().flatten() else {
+            if let Implementation::OpenSubsonic(source) = &self.implementation {
+                return source
+                    .refresh_user_collections(database, self.source_id.as_str(), &|| {
+                        cancelled.load(Ordering::Relaxed)
+                    })
+                    .await
+                    .map(Some);
+            }
             return if matches!(&self.implementation, Implementation::Files(_)) {
                 self.refresh(database, display_name, &report, cancelled, None, false)
                     .await
@@ -896,6 +904,14 @@ impl Source {
             Scan::accept_freshness(database, self.source_id.as_str(), &freshness, &cancellation)
                 .await?
         {
+            if let Implementation::OpenSubsonic(source) = &self.implementation {
+                return source
+                    .refresh_user_collections(database, self.source_id.as_str(), &|| {
+                        cancelled.load(Ordering::Relaxed)
+                    })
+                    .await
+                    .map(Some);
+            }
             return Ok(Some(ScanOutcome::Identical(publication)));
         }
         self.refresh(

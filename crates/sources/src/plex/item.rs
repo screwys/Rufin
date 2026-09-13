@@ -211,8 +211,11 @@ pub(super) async fn stage_item(scan: &mut Scan, item: &Value) -> SourceResult<()
                 } else {
                     scan.write_folder_reference(&folder_id).await?;
                 }
-                scan.write_track_folders(&[library::ScanLink::new(&object, &folder_id, 0)])
-                    .await?;
+                scan.replace_track_folders(
+                    &object,
+                    &[library::ScanLink::new(&object, &folder_id, 0)],
+                )
+                .await?;
             }
         }
         "playlist" => {

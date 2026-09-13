@@ -266,7 +266,8 @@ impl JellyfinEmbySource {
             folders.push((folder_id, position as i64));
         }
         let track_id = self.kind.object_id("track", raw_track_id);
-        scan.write_track_folders(
+        scan.replace_track_folders(
+            &track_id,
             &folders
                 .iter()
                 .map(|(folder_id, position)| {

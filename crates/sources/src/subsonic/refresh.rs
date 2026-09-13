@@ -50,6 +50,54 @@ impl ScanStatus {
 }
 
 impl SubsonicSource {
+    async fn stage_favorites(&self, scan: &mut Scan) -> SourceResult<()> {
+        let body = self.get_json("getStarred2", &[]).await?;
+        let starred = body
+            .get("starred2")
+            .filter(|value| value.is_object())
+            .ok_or_else(|| {
+                SourceError::Other("Subsonic favorites response is unavailable".into())
+            })?;
+        let ids = |field, kind| {
+            json::items(&starred[field])
+                .iter()
+                .filter_map(|item| json::id(&item["id"]))
+                .map(|id| self.id(kind, &id))
+                .collect::<Vec<_>>()
+        };
+        scan.replace_favorites(
+            &ids("song", "track"),
+            &ids("album", "album"),
+            &ids("artist", "artist"),
+        )
+        .await?;
+        Ok(())
+    }
+
+    pub(crate) async fn refresh_user_collections(
+        &self,
+        database: &library::Database,
+        source_id: &str,
+        cancelled: &(dyn Fn() -> bool + Send + Sync),
+    ) -> SourceResult<library::ScanOutcome> {
+        check_cancelled(cancelled)?;
+        let mut scan = Scan::begin_items(database, source_id).await?;
+        if let Err(error) = self.stage_favorites(&mut scan).await {
+            crate::source::optional_collection_error(error)?;
+        }
+        check_cancelled(cancelled)?;
+        match self.emit_playlists(&mut scan, &|_| {}, cancelled).await {
+            Ok(()) => scan.remove_unstaged_playlists().await?,
+            Err(error) => {
+                crate::source::optional_collection_error(error)?;
+                scan.retain_playlists().await?;
+            }
+        }
+        self.stage_home(&mut scan).await?;
+        check_cancelled(cancelled)?;
+        Ok(scan.finish().await?)
+    }
+
     pub(crate) async fn stage_playlist_snapshot(
         &self,
         scan: &mut Scan,
@@ -176,6 +224,11 @@ impl SubsonicSource {
             if let Err(error) = self.stage_artists(scan, progress, cancelled).await {
                 incomplete_collection(scan, error)?;
             }
+        }
+
+        check_cancelled(cancelled)?;
+        if let Err(error) = self.stage_favorites(scan).await {
+            crate::source::optional_collection_error(error)?;
         }
 
         check_cancelled(cancelled)?;
@@ -425,9 +478,7 @@ impl SubsonicSource {
                 }
             };
             scan.begin_batch().await?;
-            for entry in entries {
-                scan.write_home_entry(&entry).await?;
-            }
+            scan.replace_home_section(section.id(), &entries).await?;
             scan.finish_batch().await?;
         }
         Ok(())
@@ -554,6 +605,157 @@ mod tests {
         let mut scanning = status(41, "2026-08-27T00:01:00Z");
         scanning.scanning = true;
         assert_eq!(completed_freshness(scanning), None);
+    }
+
+    #[tokio::test]
+    async fn favorites_and_playlists_refresh_without_replacing_catalog_metadata() {
+        use std::sync::{
+            Arc,
+            atomic::{AtomicUsize, Ordering},
+        };
+        let server = MockServer::start().await;
+        let state = Arc::new(AtomicUsize::new(0));
+        let response_state = state.clone();
+        Mock::given(method("GET")).and(path("/rest/getStarred2.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                match response_state.load(Ordering::Relaxed) {
+                    2 => ResponseTemplate::new(500),
+                    1 => ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subsonic-response":{"status":"ok","starred2":{}}
+                    })),
+                    _ => ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                        "subsonic-response":{"status":"ok","starred2":{
+                            "song":[{"id":"track"}],"album":[{"id":"album"}],"artist":[{"id":"artist"}]
+                        }}
+                    })),
+                }
+            }).mount(&server).await;
+        let response_state = state.clone();
+        Mock::given(method("GET"))
+            .and(path("/rest/getPlaylists.view"))
+            .respond_with(move |_: &wiremock::Request| {
+                ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "subsonic-response":{"status":"ok","playlists":{"playlist":
+                        if response_state.load(Ordering::Relaxed) == 1 { serde_json::json!([]) }
+                        else { serde_json::json!([{"id":"playlist","name":"Playlist"}]) }
+                    }}
+                }))
+            })
+            .mount(&server)
+            .await;
+        Mock::given(method("GET")).and(path("/rest/getPlaylist.view"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "subsonic-response":{"status":"ok","playlist":{"id":"playlist","name":"Playlist","entry":[{"id":"track"}]}}
+            }))).mount(&server).await;
+        let source = SubsonicSource::open(
+            SubsonicFlavor::Subsonic,
+            SubsonicSourceConfig {
+                base_url: server.uri(),
+                username: "listener".into(),
+                trust_invalid_cert: false,
+                navidrome_library_version: 0,
+                authentication: SubsonicAuthentication::LegacyPassword,
+            },
+            super::SubsonicCredential::LegacyPassword("password".into()).serialize(),
+        )
+        .unwrap();
+        let directory = tempfile::tempdir().unwrap();
+        let database = library::Database::open(directory.path().join("library.sqlite"))
+            .await
+            .unwrap();
+        let marker = library::Freshness::new(b"unchanged catalog".to_vec()).unwrap();
+        let mut scan = library::Scan::begin(
+            &database,
+            "source",
+            "Source",
+            "source",
+            Some(marker.clone()),
+        )
+        .await
+        .unwrap();
+        super::stage_album(
+            &mut scan,
+            super::album_from_json(
+                &source,
+                &serde_json::json!({"id":"album","name":"Album","userRating":4}),
+            )
+            .unwrap(),
+        )
+        .await
+        .unwrap();
+        super::stage_artist(
+            &mut scan,
+            super::artist_from_json(&source, &serde_json::json!({"id":"artist","name":"Artist"}))
+                .unwrap(),
+        )
+        .await
+        .unwrap();
+        super::stage_track(&mut scan, super::track_from_json(&source, &serde_json::json!({"id":"track","title":"Track","albumId":"album","comment":"Keep","duration":42,"userRating":4})).unwrap()).await.unwrap();
+        source.stage_favorites(&mut scan).await.unwrap();
+        source
+            .stage_playlist_snapshot(&mut scan, "subsonic:playlist:playlist")
+            .await
+            .unwrap();
+        let library::ScanOutcome::Changed(publication) = scan.finish().await.unwrap() else {
+            panic!("initial publication")
+        };
+        for (next, expected) in [(2, true), (1, false), (0, true)] {
+            state.store(next, Ordering::Relaxed);
+            source
+                .refresh_user_collections(&database, "source", &|| false)
+                .await
+                .unwrap();
+            for (kind, id) in [("track", "track"), ("album", "album"), ("artist", "artist")] {
+                let uri = library::source_entity_uri(
+                    &crate::SourceId::new("source"),
+                    kind,
+                    &format!("subsonic:{kind}:{id}"),
+                );
+                let target = match kind {
+                    "track" => library::FavoriteTarget::Track(uri),
+                    "album" => library::FavoriteTarget::Album(uri),
+                    _ => library::FavoriteTarget::Artist(uri),
+                };
+                assert_eq!(database.favorite(&target).await.unwrap(), expected);
+            }
+            let cancellation = library::ReadCancellation::new();
+            let uri = library::source_entity_uri(
+                &crate::SourceId::new("source"),
+                "track",
+                "subsonic:track:track",
+            );
+            let row = database
+                .track_row_by_uri(&uri, &cancellation)
+                .await
+                .unwrap()
+                .unwrap();
+            assert_eq!(row.comment.as_deref(), Some("Keep"));
+            assert!(
+                library::Scan::accept_freshness(&database, "source", &marker, &cancellation)
+                    .await
+                    .unwrap()
+                    .is_some()
+            );
+            assert_eq!(
+                database
+                    .playlist_key_by_object(
+                        publication.source,
+                        "subsonic:playlist:playlist",
+                        &cancellation
+                    )
+                    .await
+                    .unwrap()
+                    .is_some(),
+                next != 1
+            );
+        }
+        assert!(matches!(
+            source
+                .refresh_user_collections(&database, "source", &|| false)
+                .await
+                .unwrap(),
+            library::ScanOutcome::Identical(_)
+        ));
     }
 
     #[tokio::test]

@@ -195,6 +195,16 @@ pub(super) async fn stage_track(
             .collect::<Vec<_>>(),
     )
     .await?;
+    if let Some(folders) = &track.relations.music_folders {
+        scan.replace_track_folders(
+            &track.id,
+            &folders
+                .iter()
+                .map(|folder| library::ScanLink::new(&track.id, folder, 0))
+                .collect::<Vec<_>>(),
+        )
+        .await?;
+    }
     Ok(inserted)
 }
 
@@ -220,7 +230,7 @@ pub(super) async fn stage_artist(
         ),
         artist.musicbrainz_artist_id.as_deref(),
         artwork.as_deref(),
-        Some(artist.favorite),
+        artist.favorite,
         artist.user_rating.map(i64::from),
     )
     .await
@@ -487,7 +497,7 @@ pub(super) fn track_from_json(source: &SubsonicSource, song: &Value) -> Option<T
             album_artists: artist_credits_from_item(source, &song["albumArtists"]),
             genres: genre_credits_from_item(source, song),
             moods: moods_from_item(source, json::strings(&song["moods"])),
-            music_folders: Vec::new(),
+            music_folders: None,
         },
     })
 }

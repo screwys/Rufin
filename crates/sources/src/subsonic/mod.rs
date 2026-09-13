@@ -62,7 +62,7 @@ struct TrackRelations {
     album_artists: Vec<ArtistCredit>,
     genres: Vec<GenreCredit>,
     moods: Vec<MoodCredit>,
-    music_folders: Vec<MusicFolderId>,
+    music_folders: Option<Vec<MusicFolderId>>,
 }
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct Album {
@@ -76,7 +76,7 @@ struct Album {
     last_played: Option<String>,
     play_count: Option<u32>,
     user_rating: Option<u8>,
-    favorite: bool,
+    favorite: Option<bool>,
     color_seed: u32,
     image_ref: Option<ImageRef>,
     local_artwork: Option<()>,
@@ -101,7 +101,7 @@ struct Track {
     play_count: Option<u32>,
     user_rating: Option<u8>,
     duration_seconds: u32,
-    favorite: bool,
+    favorite: Option<bool>,
     disc_number: u16,
     track_number: u16,
     image_ref: Option<ImageRef>,
@@ -125,7 +125,7 @@ struct Artist {
     id: ArtistId,
     name: String,
     sort_name: Option<String>,
-    favorite: bool,
+    favorite: Option<bool>,
     last_played: Option<String>,
     play_count: Option<u32>,
     user_rating: Option<u8>,
