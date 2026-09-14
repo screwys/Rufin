@@ -7,7 +7,7 @@ msgstr ""
 "Project-Id-Version: Rufin\n"
 "Report-Msgid-Bugs-To: https://github.com/screwys/Rufin/issues\n"
 "POT-Creation-Date: YEAR-MO-DA HO:MI+ZONE\n"
-"PO-Revision-Date: 2026-09-08 11:58+0000\n"
+"PO-Revision-Date: 2026-09-15 16:51+0000\n"
 "Last-Translator: Sebastian <sevachka@users.noreply.hosted.weblate.org>\n"
 "Language-Team: German <https://hosted.weblate.org/projects/rufin/app/de/>\n"
 "Language: de\n"
@@ -15,7 +15,7 @@ msgstr ""
 "Content-Type: text/plain; charset=UTF-8\n"
 "Content-Transfer-Encoding: 8bit\n"
 "Plural-Forms: nplurals=2; plural=n != 1;\n"
-"X-Generator: Weblate 2026.9.1\n"
+"X-Generator: Weblate 2026.10.dev0\n"
 
 msgid ""
 "Backup file may contain sensitive information. Do you want to set a password?"
@@ -58,6 +58,9 @@ msgid ""
 "No secret service found. Rufin will use a file to store its credentials. "
 "Cancelling will not save credentials at all."
 msgstr ""
+"Kein Schlüsselbunddienst gefunden. Rufin wird eine Datei verwenden, um seine "
+"Anmeldedaten zu speichern. Bei Abbruch werden die Anmeldedaten überhaupt "
+"nicht gespeichert."
 
 msgid ""
 "Only downloads from this rule will be deleted. Shared and manual downloads "
@@ -145,6 +148,8 @@ msgid ""
 "This is owned by Rufin. It can include entries from all configured sources "
 "but it is not synced to remotes."
 msgstr ""
+"Dies wird von Rufin verwaltet. Es kann Einträge aus allen konfigurierten "
+"Quellen enthalten, wird aber nicht mit Remotes synchronisiert."
 
 msgid ""
 "This removes the server, cached library metadata, queue snapshot, and saved "
@@ -180,6 +185,8 @@ msgstr ""
 msgid ""
 "You will need to reconnect through the clients you use with the new API key."
 msgstr ""
+"Du musst dich über die Clients, die du verwendest, mit dem neuen API-"
+"Schlüssel neu verbinden."
 
 msgid ". You only need to fill email and an application name parts"
 msgstr ""
@@ -187,10 +194,10 @@ msgstr ""
 "ausfüllen"
 
 msgid "1 hour"
-msgstr ""
+msgstr "eine Stunde"
 
 msgid "12 hours"
-msgstr ""
+msgstr "12 Stunden"
 
 msgid "128 kbps"
 msgstr "128 kbps"
@@ -199,7 +206,7 @@ msgid "192 kbps"
 msgstr "192 kbps"
 
 msgid "24 hours"
-msgstr ""
+msgstr "24 Stunden"
 
 msgid "256 kbps"
 msgstr "256 kbps"
@@ -211,12 +218,10 @@ msgid "5 Latest Albums"
 msgstr "5 neueste Alben"
 
 msgid "6 hours"
-msgstr ""
+msgstr "sechs Stunden"
 
-#, fuzzy
-#| msgid "API keys"
 msgid "API key (Subsonic)"
-msgstr "API-Schlüssel"
+msgstr "API-Schlüssel (Subsonic)"
 
 msgid "API key"
 msgstr "API Schlüssel"
@@ -230,15 +235,11 @@ msgstr "Über Rufin"
 msgid "Accent color"
 msgstr "Akzentfarbe"
 
-#, fuzzy
-#| msgid "Get token"
 msgid "Access token"
-msgstr "Token abrufen"
+msgstr "Zugriffstoken"
 
-#, fuzzy
-#| msgid "Server Actions"
 msgid "Actions"
-msgstr "Server-Aktionen"
+msgstr "Aktionen"
 
 msgid "Activity"
 msgstr "Aktivität"
@@ -255,10 +256,8 @@ msgstr "Passendes Server-Präfix hinzufügen"
 msgid "Add a music folder"
 msgstr "Musikordner hinzufügen"
 
-#, fuzzy
-#| msgid "Add music to start a queue."
 msgid "Add a music source to start listening."
-msgstr "Musik hinzufügen, um eine Warteschlange zu starten."
+msgstr "Füge eine Musikquelle hinzu, um mit dem Hören zu beginnen."
 
 msgid "Add a new source"
 msgstr "Neue Quelle hinzufügen"
@@ -293,10 +292,8 @@ msgstr "Zu Favoriten hinzugefügt"
 msgid "Added to"
 msgstr "Hinzugefügt zu"
 
-#, fuzzy
-#| msgid "Add Source"
 msgid "Adding source"
-msgstr "Quelle hinzufügen"
+msgstr "Quelle wird hinzugefügt"
 
 msgid "Album Artists"
 msgstr "Album-Künstler"
@@ -316,10 +313,8 @@ msgstr "Albumtitel"
 msgid "Album tracks"
 msgstr "Album-Titel"
 
-#, fuzzy
-#| msgid "Album title"
 msgid "Album unavailable"
-msgstr "Albumtitel"
+msgstr "Album nicht verfügbar"
 
 msgid "Album"
 msgstr "Album"
@@ -340,16 +335,16 @@ msgid "All"
 msgstr "Alle"
 
 msgid "Allow remote connections"
-msgstr ""
+msgstr "Remote-Verbindungen erlauben"
 
 msgid "Alternate addresses"
 msgstr "Alternative Adressen"
 
 msgid "Anonymous (WebDAV / SMB)"
-msgstr ""
+msgstr "Anonym (WebDAV / SMB)"
 
 msgid "Anonymous"
-msgstr ""
+msgstr "Anonym"
 
 msgid "Any genre"
 msgstr "Beliebiges Genre"
@@ -372,10 +367,8 @@ msgstr "Anwendungsname"
 msgid "Apply Template"
 msgstr "Vorlage anwenden"
 
-#, fuzzy
-#| msgid "Complete sign-in in your browser"
 msgid "Approve sign-in in your browser"
-msgstr "Anmeldung in deinem Browser abschließen"
+msgstr "Bestätige die Anmeldung in deinem Browser"
 
 msgid "Artist / Album"
 msgstr "Künstler / Album"
@@ -392,10 +385,8 @@ msgstr "Künstler-Radio"
 msgid "Artist tracks"
 msgstr "Künstler-Titel"
 
-#, fuzzy
-#| msgid "Search is unavailable"
 msgid "Artist unavailable"
-msgstr "Suche ist nicht verfügbar"
+msgstr "Künstler nicht verfügbar"
 
 msgid "Artist"
 msgstr "Künstler"
@@ -404,7 +395,7 @@ msgid "Artists"
 msgstr "Künstler"
 
 msgid "Artwork"
-msgstr ""
+msgstr "Artwork"
 
 msgid "Audio fade on play/pause"
 msgstr "Sanftes Ein-/Ausblenden bei Play/Pause"
@@ -472,10 +463,8 @@ msgstr "Sicherung wiederhergestellt"
 msgid "Backups"
 msgstr "Sicherungen"
 
-#, fuzzy
-#| msgid "Bearer token"
 msgid "Bearer token (WebDAV)"
-msgstr "Zugriffstoken"
+msgstr "Bearer-Token (WebDAV)"
 
 msgid "Bearer token"
 msgstr "Zugriffstoken"
@@ -533,16 +522,14 @@ msgstr[1] "Änderungen werden auf {count} Titel angewendet"
 msgid "Changes take effect after restarting Rufin"
 msgstr "Änderungen werden nach einem Neustart von Rufin wirksam"
 
-#, fuzzy
-#| msgid "Change Source"
 msgid "Changing source"
-msgstr "Quelle ändern"
+msgstr "Quelle wird geändert"
 
 msgid "Check for updates every"
-msgstr ""
+msgstr "Nach Updates suchen: alle"
 
 msgid "Check for updates"
-msgstr ""
+msgstr "Nach Updates suchen"
 
 msgid "Choose Folder"
 msgstr "Ordner auswählen"
@@ -553,10 +540,8 @@ msgstr "Server auswählen"
 msgid "Choose a local music folder"
 msgstr "Lokalen Musikordner auswählen"
 
-#, fuzzy
-#| msgid "Choose a local prefix."
 msgid "Choose an address"
-msgstr "Lokales Präfix wählen."
+msgstr "Adresse auswählen"
 
 msgid "Choose an existing local folder"
 msgstr "Vorhandenen lokalen Ordner auswählen"
@@ -647,20 +632,14 @@ msgstr "Anmeldung in deinem Browser abschließen"
 msgid "Confirm"
 msgstr "Bestätigen"
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connect manually"
-msgstr "Verbindung"
+msgstr "Manuell verbinden"
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connect to Rufin"
-msgstr "Verbindung"
+msgstr "Mit Rufin verbinden"
 
-#, fuzzy
-#| msgid "Connecting to music server..."
 msgid "Connect your music servers or local folders."
-msgstr "Mit Musikserver verbinden..."
+msgstr "Verbinde deine Musikserver oder lokalen Ordner."
 
 msgid "Connect"
 msgstr "Verbinden"
@@ -677,18 +656,14 @@ msgstr "Mit Musikserver verbinden..."
 msgid "Connecting to {device}..."
 msgstr "Verbindung mit {device} wird hergestellt …"
 
-#, fuzzy
-#| msgid "Connection"
 msgid "Connecting"
-msgstr "Verbindung"
+msgstr "Verbindung wird hergestellt"
 
 msgid "Connection failed"
 msgstr "Verbindung fehlgeschlagen"
 
-#, fuzzy
-#| msgid "Connecting to {device}..."
 msgid "Connection lost. Reconnecting..."
-msgstr "Verbindung mit {device} wird hergestellt …"
+msgstr "Verbindung verloren. Verbindung wird wiederhergestellt …"
 
 msgid "Connection options"
 msgstr "Verbindungsoptionen"
@@ -708,45 +683,35 @@ msgstr "Fortfahren"
 msgid "Control notifications"
 msgstr "Benachrichtigungen verwalten"
 
-#, fuzzy
-#| msgid "Control notifications"
 msgid "Controller status"
-msgstr "Benachrichtigungen verwalten"
+msgstr "Status der Steuerung"
 
 msgid "Controller"
-msgstr ""
+msgstr "Steuerung"
 
 msgid "Copy access token"
-msgstr ""
+msgstr "Zugriffstoken kopieren"
 
-#, fuzzy
-#| msgid "Copy"
 msgid "Copy link"
-msgstr "Kopie"
+msgstr "Link kopieren"
 
 msgid "Copy"
 msgstr "Kopie"
 
-#, fuzzy
-#| msgid "Couldn't load this folder"
 msgid "Could not load this page"
-msgstr "Dieser Ordner konnte nicht geladen werden"
+msgstr "Diese Seite konnte nicht geladen werden"
 
 msgid "Could not open folder: {error}"
 msgstr "Ordner konnte nicht geöffnet werden: {error}"
 
-#, fuzzy
-#| msgid "Could not update favorites"
 msgid "Could not receive live updates"
-msgstr "Favoriten konnten nicht aktualisiert werden"
+msgstr "Live-Updates konnten nicht empfangen werden"
 
 msgid "Could not save diagnostic log"
 msgstr "Diagnoseprotokoll konnte nicht gespeichert werden"
 
-#, fuzzy
-#| msgid "Could not update favorites"
 msgid "Could not update Rufin to {version}"
-msgstr "Favoriten konnten nicht aktualisiert werden"
+msgstr "Rufin konnte nicht auf {version} aktualisiert werden"
 
 msgid "Could not update favorites"
 msgstr "Favoriten konnten nicht aktualisiert werden"
@@ -818,7 +783,7 @@ msgid "Delete Playlist"
 msgstr "Playlist löschen"
 
 msgid "Delete \"{name}\"?"
-msgstr ""
+msgstr "Lösche \"{name}\"?"
 
 msgid "Delete"
 msgstr "Löschen"
@@ -845,15 +810,13 @@ msgid "Disable private mode"
 msgstr "Privaten Modus deaktivieren"
 
 msgid "Disabled"
-msgstr ""
+msgstr "Deaktiviert"
 
 msgid "Disc number"
 msgstr "CD-Nummer"
 
-#, fuzzy
-#| msgid "Disc number"
 msgid "Disc {number}"
-msgstr "CD-Nummer"
+msgstr "CD {number}"
 
 msgid "Disc"
 msgstr "CD"
@@ -862,12 +825,10 @@ msgid "Discography"
 msgstr "Diskografie"
 
 msgid "Disconnect from Rufin?"
-msgstr ""
+msgstr "Verbindung mit Rufin trennen?"
 
-#, fuzzy
-#| msgid "Reconnect"
 msgid "Disconnect"
-msgstr "Erneut verbinden"
+msgstr "Verbindung trennen"
 
 msgid "Discord Rich Presence"
 msgstr "Discord Rich Presence"
@@ -935,10 +896,8 @@ msgstr "Liedtexte bearbeiten"
 msgid "Edit Smart Playlist"
 msgstr "Smart-Playlist bearbeiten"
 
-#, fuzzy
-#| msgid "Add Source"
 msgid "Edit Source"
-msgstr "Quelle hinzufügen"
+msgstr "Musikquelle bearbeiten"
 
 msgid "Edit lyrics"
 msgstr "Liedtexte bearbeiten"
@@ -952,18 +911,14 @@ msgstr "Bearbeiten"
 msgid "Embed in track"
 msgstr "In Titel einbetten"
 
-#, fuzzy
-#| msgid "Connect"
 msgid "Emby Connect"
-msgstr "Verbinden"
+msgstr "Emby Connect"
 
 msgid "Emby"
-msgstr ""
+msgstr "Emby"
 
-#, fuzzy
-#| msgid "Enable equalizer"
 msgid "Enable Controller"
-msgstr "Equalizer einschalten"
+msgstr "Steuerung aktivieren"
 
 msgid "Enable EBU R128 Analysis?"
 msgstr "EBU-R128-Analyse aktivieren?"
@@ -1052,10 +1007,8 @@ msgid "Fade audio when playback is paused or resumed"
 msgstr ""
 "Audio beim Pausieren oder Fortsetzen der Wiedergabe sanft ein- und ausblenden"
 
-#, fuzzy
-#| msgid "Favorite tracks"
 msgid "Favorite current track"
-msgstr "Lieblingstitel"
+msgstr "Aktuellen Titel zu Favoriten hinzufügen"
 
 msgid "Favorite tracks"
 msgstr "Lieblingstitel"
@@ -1083,7 +1036,7 @@ msgstr ""
 "unterstützt"
 
 msgid "Files"
-msgstr ""
+msgstr "Dateien"
 
 msgid "Find shares"
 msgstr "Freigaben suchen"
@@ -1091,10 +1044,8 @@ msgstr "Freigaben suchen"
 msgid "Find your ListenBrainz user token"
 msgstr "Finden Sie Ihr ListenBrainz-Benutzer-Token"
 
-#, fuzzy
-#| msgid "Edit lyrics"
 msgid "Finding lyrics..."
-msgstr "Liedtexte bearbeiten"
+msgstr "Liedtext wird gesucht …"
 
 msgid "Fixed position"
 msgstr "Feste Position"
@@ -1123,7 +1074,7 @@ msgid "Forget Source"
 msgstr "Quelle vergessen"
 
 msgid "Forget \"{name}\"?"
-msgstr ""
+msgstr "„{name}“ vergessen?"
 
 msgid "Forward"
 msgstr "Vorwärts"
@@ -1179,10 +1130,8 @@ msgstr "Token abrufen"
 msgid "Go to Album"
 msgstr "Zum Album gehen"
 
-#, fuzzy
-#| msgid "Go to Artist"
 msgid "Go to {artist}"
-msgstr "Zum Künstler springen"
+msgstr "Zu {artist} gehen"
 
 msgid "Go to"
 msgstr "Gehe zu"
@@ -1329,12 +1278,10 @@ msgid "Legacy authorization"
 msgstr "Legacy-Autorisierung"
 
 msgid "Legacy password (Subsonic)"
-msgstr ""
+msgstr "Legacy-Passwort (Subsonic)"
 
-#, fuzzy
-#| msgid "Backup Password"
 msgid "Legacy password"
-msgstr "Sicherungspasswort"
+msgstr "Legacy-Passwort"
 
 msgid "Legacy"
 msgstr "Legacy"
@@ -1363,10 +1310,8 @@ msgstr "ListenBrainz scrobbling"
 msgid "ListenBrainz"
 msgstr "ListenBrainz"
 
-#, fuzzy
-#| msgid "Saving..."
 msgid "Loading..."
-msgstr "Wird gespeichert …"
+msgstr "Lädt …"
 
 msgid "Local File Access"
 msgstr "Zugriff auf lokale Dateien"
@@ -1436,7 +1381,7 @@ msgid "Lyrics storage"
 msgstr "Liedtext-Speicher"
 
 msgid "Lyrics will appear here."
-msgstr ""
+msgstr "Liedtext wird hier angezeigt."
 
 msgid "Lyrics"
 msgstr "Songtexte"
@@ -1526,7 +1471,7 @@ msgid "Music Folder"
 msgstr "Musikordner"
 
 msgid "Music folders on the Rufin machine"
-msgstr ""
+msgstr "Musikordner auf dem Rufin-Rechner"
 
 msgid "MusicBrainz + Last.fm"
 msgstr "MusicBrainz + Last.fm"
@@ -1556,7 +1501,7 @@ msgid "Muted"
 msgstr "Stummgeschaltet"
 
 msgid "My music"
-msgstr ""
+msgstr "Meine Musik"
 
 msgid "Name"
 msgstr "Name"
@@ -1617,10 +1562,8 @@ msgstr "Nächstes Audiogerät"
 msgid "Next page"
 msgstr "Nächste Seite"
 
-#, fuzzy
-#| msgid "No source"
 msgid "Next source"
-msgstr "Keine Quelle"
+msgstr "Nächste Quelle"
 
 msgid "Next"
 msgstr "Nächster Titel"
@@ -1652,10 +1595,8 @@ msgstr "Keine Ordner ausgewählt"
 msgid "No limit"
 msgstr "Unbegrenzt"
 
-#, fuzzy
-#| msgid "No Servers Found"
 msgid "No linked servers found"
-msgstr "Keine Server entdeckt"
+msgstr "Keine verbundenen Server gefunden"
 
 msgid "No local file mapping"
 msgstr "Keine Zuordnung lokaler Dateien"
@@ -1663,18 +1604,14 @@ msgstr "Keine Zuordnung lokaler Dateien"
 msgid "No local folders configured"
 msgstr "Keine lokalen Ordner konfiguriert"
 
-#, fuzzy
-#| msgid "This isn't available"
 msgid "No lyrics available."
-msgstr "Dies ist nicht verfügbar"
+msgstr "Kein Liedtext verfügbar."
 
 msgid "No lyrics"
 msgstr "Keine Songtexte"
 
-#, fuzzy
-#| msgid "No matching tracks"
 msgid "No matching tracks found"
-msgstr "Keine passenden Titel"
+msgstr "Keine passenden Titel gefunden"
 
 msgid "No matching tracks"
 msgstr "Keine passenden Titel"
@@ -1682,19 +1619,14 @@ msgstr "Keine passenden Titel"
 msgid "No music from this artist yet"
 msgstr "Noch keine Musik von diesem Künstler"
 
-#, fuzzy
-#| msgid "No network devices found"
 msgid "No network address available"
-msgstr "Keine Netzwerkgeräte gefunden"
+msgstr "Keine Netzwerkadresse verfügbar"
 
 msgid "No network devices found"
 msgstr "Keine Netzwerkgeräte gefunden"
 
-#, fuzzy
-#| msgid "{count} result"
-#| msgid_plural "{count} results"
 msgid "No results"
-msgstr "{count} Ergebnis"
+msgstr "Keine Ergebnisse"
 
 msgid "No servers found, add one manually or try again"
 msgstr ""
@@ -1777,10 +1709,8 @@ msgid "One folder path per line; leave empty to include the whole collection"
 msgstr ""
 "Ein Ordnerpfad pro Zeile; leer lassen, um die gesamte Sammlung einzuschließen"
 
-#, fuzzy
-#| msgid "One Name: Value header per line"
 msgid "One path per line"
-msgstr "Eine Name-Wert-Zeile pro Header"
+msgstr "Ein Pfad pro Zeile"
 
 msgid "Only played tracks"
 msgstr "Nur gespielte Titel"
@@ -1788,24 +1718,20 @@ msgstr "Nur gespielte Titel"
 msgid "Only unplayed tracks"
 msgstr "Nur ungespielte Titel"
 
-#, fuzzy
-#| msgid "Open Folder"
 msgid "Open Controller"
-msgstr "Ordner öffnen"
+msgstr "Controller öffnen"
 
 msgid "Open Folder"
 msgstr "Ordner öffnen"
 
 msgid "Open approval page"
-msgstr ""
+msgstr "Bestätigungsseite öffnen"
 
 msgid "Open fullscreen player"
 msgstr "Vollbildmodus aktivieren"
 
-#, fuzzy
-#| msgid "Open on Last.fm"
 msgid "Open on Emby"
-msgstr "In Last.fm öffnen"
+msgstr "In Emby öffnen"
 
 msgid "Open on Jellyfin"
 msgstr "In Jellyfin öffnen"
@@ -1819,23 +1745,17 @@ msgstr "In MusicBrainz öffnen"
 msgid "Open on Navidrome"
 msgstr "In Navidrome öffnen"
 
-#, fuzzy
-#| msgid "Open Folder"
 msgid "Open on Plex"
-msgstr "Ordner öffnen"
+msgstr "In Plex öffnen"
 
-#, fuzzy
-#| msgid "Open on Navidrome"
 msgid "Open on server"
-msgstr "In Navidrome öffnen"
+msgstr "Auf dem Server öffnen"
 
 msgid "Open release notes"
 msgstr "Versionshinweise öffnen"
 
-#, fuzzy
-#| msgid "App settings"
 msgid "Open settings"
-msgstr "App-Einstellungen"
+msgstr "Einstellungen öffnen"
 
 msgid "OpenSubsonic"
 msgstr "OpenSubsonic"
@@ -1858,10 +1778,8 @@ msgstr "Andere Veröffentlichungen"
 msgid "Overview"
 msgstr "Übersicht"
 
-#, fuzzy
-#| msgid "Password"
 msgid "Password or token"
-msgstr "Passwort"
+msgstr "Passwort oder Token"
 
 msgid "Password"
 msgstr "Passwort"
@@ -1940,15 +1858,11 @@ msgstr "Abspielen"
 msgid "Play/Pause"
 msgstr "Wiedergabe/Pause"
 
-#, fuzzy
-#| msgid "Play count"
 msgid "Playback controls"
-msgstr "Wiedergabezähler"
+msgstr "Wiedergabesteuerung"
 
-#, fuzzy
-#| msgid "Playback speed"
 msgid "Playback position"
-msgstr "Wiedergabegeschwindigkeit"
+msgstr "Wiedergabeposition"
 
 msgid "Playback speed"
 msgstr "Wiedergabegeschwindigkeit"
@@ -1999,7 +1913,7 @@ msgid "Pop"
 msgstr "Pop"
 
 msgid "Port"
-msgstr ""
+msgstr "Port"
 
 msgid "Position"
 msgstr "Position"
@@ -2074,10 +1988,8 @@ msgstr "Titel einreihen zum Starten"
 msgid "Queue and transitions"
 msgstr "Warteschlange und Übergänge"
 
-#, fuzzy
-#| msgid "Queue a track to begin"
 msgid "Queue tracks to show"
-msgstr "Titel einreihen zum Starten"
+msgstr "Anzuzeigende Titel in der Warteschlange"
 
 msgid "Queue"
 msgstr "Warteschlange"
@@ -2085,10 +1997,8 @@ msgstr "Warteschlange"
 msgid "Queued"
 msgstr "In Warteschlange"
 
-#, fuzzy
-#| msgid "Connect"
 msgid "Quick Connect"
-msgstr "Verbinden"
+msgstr "Quick Connect"
 
 msgid "Quit Rufin"
 msgstr "Rufin beenden"
@@ -2126,24 +2036,20 @@ msgstr "Wiederholen"
 msgid "Refresh section"
 msgstr "Bereich aktualisieren"
 
-#, fuzzy
-#| msgid "Refresh section"
 msgid "Refresh source"
-msgstr "Bereich aktualisieren"
+msgstr "Quelle aktualisieren"
 
 msgid "Refresh"
 msgstr "Aktualisieren"
 
-#, fuzzy
-#| msgid "Refresh"
 msgid "Refreshing"
-msgstr "Aktualisieren"
+msgstr "Wird aktualisiert …"
 
 msgid "Regenerate access token"
-msgstr ""
+msgstr "Zugriffstoken neu generieren"
 
 msgid "Regenerate access token?"
-msgstr ""
+msgstr "Zugriffstoken neu generieren?"
 
 msgid "Release date"
 msgstr "Veröffentlichungsdatum"
@@ -2239,7 +2145,7 @@ msgid "ReplayGain"
 msgstr "ReplayGain"
 
 msgid "Request failed ({status})"
-msgstr ""
+msgstr "Anfrage fehlgeschlagen ({status})"
 
 msgid "Require SMB encryption"
 msgstr "SMB-Verschlüsselung anfordern"
@@ -2361,10 +2267,8 @@ msgstr "Songtext-Suche"
 msgid "Search current folder"
 msgstr "Aktuellen Ordner durchsuchen"
 
-#, fuzzy
-#| msgid "Search Again"
 msgid "Search genres"
-msgstr "Erneut suchen"
+msgstr "Genres suchen"
 
 msgid "Search in page"
 msgstr "Auf der Seite suchen"
@@ -2372,18 +2276,14 @@ msgstr "Auf der Seite suchen"
 msgid "Search is unavailable"
 msgstr "Suche ist nicht verfügbar"
 
-#, fuzzy
-#| msgid "Server Library"
 msgid "Search library"
-msgstr "Server-Bibliothek"
+msgstr "Bibliothek durchsuchen"
 
 msgid "Search lyrics"
 msgstr "Songtexte durchsuchen"
 
-#, fuzzy
-#| msgid "Smart playlists"
 msgid "Search playlists"
-msgstr "Smart-Playlists"
+msgstr "Wiedergabelisten durchsuchen"
 
 msgid "Search preferences"
 msgstr "Sucheinstellungen"
@@ -2391,18 +2291,14 @@ msgstr "Sucheinstellungen"
 msgid "Search queue"
 msgstr "Warteschlange durchsuchen"
 
-#, fuzzy
-#| msgid "Search Lyrics"
 msgid "Search tracks"
-msgstr "Songtext-Suche"
+msgstr "Titel durchsuchen"
 
 msgid "Search"
 msgstr "Suche"
 
-#, fuzzy
-#| msgid "Searching..."
 msgid "Search..."
-msgstr "Suche..."
+msgstr "Suchen …"
 
 msgid "Searching Local Network"
 msgstr "Lokales Netzwerk durchsuchen"
@@ -2435,7 +2331,7 @@ msgid "Seek playback"
 msgstr "Spulen"
 
 msgid "Seek to {time}"
-msgstr ""
+msgstr "Zu {time} springen"
 
 msgid "Seekbar"
 msgstr "Wiedergabeleiste"
@@ -2455,10 +2351,8 @@ msgstr "Quelle auswählen"
 msgid "Select all"
 msgstr "Alle auswählen"
 
-#, fuzzy
-#| msgid "Select All"
 msgid "Select {title}"
-msgstr "Alle auswählen"
+msgstr "{title} auswählen"
 
 msgid "Selected folders"
 msgstr "Ausgewählte Ordner"
@@ -2559,10 +2453,8 @@ msgstr "Visualizer im rechten Bereich anzeigen"
 msgid "Show visualizer"
 msgstr "Visualizer anzeigen"
 
-#, fuzzy
-#| msgid "Showcase"
 msgid "Show"
-msgstr "Im Rampenlicht"
+msgstr "Anzeigen"
 
 msgid "Show/hide lyrics"
 msgstr "Songtexte anzeigen/ausblenden"
@@ -2600,13 +2492,11 @@ msgstr "Mit Passwort anmelden"
 msgid "Sign in with Nextcloud"
 msgstr "Mit Nextcloud anmelden"
 
-#, fuzzy
-#| msgid "Sign in with Nextcloud"
 msgid "Sign in with a code"
-msgstr "Mit Nextcloud anmelden"
+msgstr "Mit einem Code anmelden"
 
 msgid "Sign in"
-msgstr ""
+msgstr "Anmelden"
 
 msgid "SimpMusic"
 msgstr "SimpMusic"
@@ -2647,10 +2537,8 @@ msgstr "Songtitel"
 msgid "Song"
 msgstr "Song"
 
-#, fuzzy
-#| msgid "Sort"
 msgid "Sort by"
-msgstr "Sortieren"
+msgstr "Sortieren nach"
 
 msgid "Sort title"
 msgstr "Sortiertitel"
@@ -2658,18 +2546,14 @@ msgstr "Sortiertitel"
 msgid "Sort"
 msgstr "Sortieren"
 
-#, fuzzy
-#| msgid "Sidebar route by position"
 msgid "Source by position"
-msgstr "Seitenleistenroute nach Position"
+msgstr "Quelle nach Position"
 
 msgid "Source to use for cover images and song/artist links"
 msgstr "Quelle für Coverbilder und Titel-/Künstlerlinks"
 
-#, fuzzy
-#| msgid "Source"
 msgid "Source type"
-msgstr "Quelle"
+msgstr "Quellentyp"
 
 msgid "Source"
 msgstr "Quelle"
@@ -2678,15 +2562,13 @@ msgid "Sources"
 msgstr "Quellen"
 
 msgid "Sponsor"
-msgstr ""
+msgstr "Sponsor"
 
 msgid "Start minimized"
 msgstr "Minimiert starten"
 
-#, fuzzy
-#| msgid "Saving..."
 msgid "Starting..."
-msgstr "Wird gespeichert …"
+msgstr "Wird gestartet …"
 
 msgid "Status display"
 msgstr "Statusanzeige"
@@ -2734,7 +2616,7 @@ msgid "Text"
 msgstr "Text"
 
 msgid "The API token was not accepted. Please connect again."
-msgstr ""
+msgstr "Das API-Token wurde nicht akzeptiert. Bitte erneut verbinden."
 
 msgid "Theme"
 msgstr "Darstellung"
@@ -2744,12 +2626,14 @@ msgstr "Dieses Gerät"
 
 msgid "This is owned by {source}. Regular playlists are synced to your remote."
 msgstr ""
+"Dies wird von {source} verwaltet. Normale Wiedergabelisten werden mit deinem "
+"Remote synchronisiert."
 
 msgid "This isn't available"
 msgstr "Dies ist nicht verfügbar"
 
 msgid "This playlist only accepts {source} tracks"
-msgstr ""
+msgstr "Diese Wiedergabeliste akzeptiert nur Titel von {source}"
 
 msgid "This source cannot edit this field"
 msgstr "Diese Quelle kann dieses Feld nicht bearbeiten"
@@ -2793,10 +2677,8 @@ msgstr "Übersetzungssprache"
 msgid "Troubleshooting"
 msgstr "Fehlerbehebung"
 
-#, fuzzy
-#| msgid "Verify server certificate"
 msgid "Trust self-signed certificate"
-msgstr "Serverzertifikat überprüfen"
+msgstr "Selbstsigniertem Zertifikat vertrauen"
 
 msgid "Tuesday"
 msgstr "Dienstag"
@@ -2829,43 +2711,39 @@ msgid "Undo"
 msgstr "Rückgängig machen"
 
 msgid "Unknown artist"
-msgstr ""
+msgstr "Unbekannter Künstler"
 
 msgid "Unknown disc"
-msgstr ""
+msgstr "Unbekannte CD"
 
-#, fuzzy
-#| msgid "Unmuted"
 msgid "Unmute"
-msgstr "Stummschaltung aufgehoben"
+msgstr "Stummschaltung aufheben"
 
 msgid "Unmuted"
 msgstr "Stummschaltung aufgehoben"
 
-#, fuzzy
-#| msgid "Song title"
 msgid "Untitled"
-msgstr "Songtitel"
+msgstr "Ohne Titel"
 
 msgid "Update"
 msgstr "Update"
 
 msgid "Updated Rufin to {version}"
-msgstr ""
+msgstr "Rufin wurde auf {version} aktualisiert"
 
 msgid "Updated Rufin to {version}. Restart to apply."
 msgstr ""
+"Rufin wurde auf {version} aktualisiert. Neu starten, um die Änderungen zu "
+"übernehmen."
 
 msgid "Updating Rufin to {version}..."
-msgstr ""
+msgstr "Rufin wird auf {version} aktualisiert …"
 
 msgid "Use API key"
 msgstr "API-Schlüssel verwenden"
 
-#, fuzzy
-#| msgid "Use Jellyfin Instant Mix for recommendations"
 msgid "Use Instant Mix for recommendations"
-msgstr "Jellyfin Instant-Mix für Empfehlungen verwenden"
+msgstr "Instant Mix für Empfehlungen verwenden"
 
 msgid "Use Rufin data folder"
 msgstr "Rufin-Datenordner verwenden"
@@ -2893,18 +2771,14 @@ msgstr ""
 "Lokale Dateien für die Wiedergabe, Liedtexte und die unterstützte "
 "Bearbeitung von Metadaten verwenden"
 
-#, fuzzy
-#| msgid "Maximum year"
 msgid "Use maximum year"
-msgstr "Maximaljahr"
+msgstr "Maximales Jahr verwenden"
 
-#, fuzzy
-#| msgid "Minimum year"
 msgid "Use minimum year"
-msgstr "Mindestjahr"
+msgstr "Minimales Jahr verwenden"
 
 msgid "Use the server's Instant Mix for Radio and Auto DJ."
-msgstr ""
+msgstr "Instant Mix des Servers für Radio und Auto-DJ verwenden."
 
 msgid "User token"
 msgstr "Benutzer-Token"
@@ -2915,10 +2789,8 @@ msgstr "Benutzer"
 msgid "Username and password"
 msgstr "Benutzername und Passwort"
 
-#, fuzzy
-#| msgid "Username"
 msgid "Username or email"
-msgstr "Benutzername"
+msgstr "Benutzername oder E-Mail"
 
 msgid "Username"
 msgstr "Benutzername"
@@ -2954,10 +2826,8 @@ msgstr "Lautstärke erhöhen"
 msgid "Volume scale"
 msgstr "Lautstärkeskala"
 
-#, fuzzy
-#| msgid "Volume Up"
 msgid "Volume"
-msgstr "Lautstärke erhöhen"
+msgstr "Lautstärke"
 
 msgid "Waiting for connection"
 msgstr "Warten auf Verbindung"
@@ -2993,10 +2863,10 @@ msgid "Yes"
 msgstr "Ja"
 
 msgid "Your music belongs here"
-msgstr ""
+msgstr "Deine Musik gehört hierhin"
 
 msgid "Your queue is empty."
-msgstr ""
+msgstr "Deine Warteschlange ist leer."
 
 msgid "above"
 msgstr "größer als"
@@ -3096,7 +2966,7 @@ msgstr[0] "vor {count} Jahr"
 msgstr[1] "vor {count} Jahren"
 
 msgid "{status} · {stage} {completed}{total}"
-msgstr ""
+msgstr "{status} · {stage} {completed}{total}"
 
 #. Windows installer: FinishText.
 msgctxt "Windows installer"
@@ -3105,6 +2975,9 @@ msgid ""
 "\n"
 "Click Finish to finalize Setup."
 msgstr ""
+"Rufin wurde auf deinem Computer installiert.\n"
+"\n"
+"Klicke auf Fertigstellen, um die Einrichtung abzuschließen."
 
 #. Windows installer: WelcomeText.
 msgctxt "Windows installer"
@@ -3117,59 +2990,68 @@ msgid ""
 "\n"
 "Click Next to continue."
 msgstr ""
+"Rufin ist ein nativer Musikplayer für Jellyfin-, Navidrome/OpenSubsonic-, "
+"Plex- und Emby-Server; lokale Ordner; WebDAV einschließlich eines direkten "
+"Nextcloud-Browser-Anmeldepfads; Samba- und NAS-Freigaben.\n"
+"\n"
+"Dieses Setup installiert Rufin auf deinem Computer.\n"
+"\n"
+"Klicke auf Weiter, um fortzufahren."
 
 #. Windows installer: CleanupFailed.
 msgctxt "Windows installer"
 msgid ""
 "Setup could not remove the existing Rufin files. Close Rufin and try again."
 msgstr ""
+"Das Setup konnte die vorhandenen Rufin-Dateien nicht entfernen. Beende Rufin "
+"und versuche es erneut."
 
 #. Windows installer: DirectoryConflict.
-#, fuzzy
-#| msgid "Choose an existing local folder"
 msgctxt "Windows installer"
 msgid "Choose a separate installation folder."
-msgstr "Vorhandenen lokalen Ordner auswählen"
+msgstr "Wähle einen separaten Installationsordner."
 
 #. Windows installer: CloseToInstall. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the installation again."
-msgstr ""
+msgstr "Beende {app_name} und versuche die Installation erneut."
 
 #. Windows installer: CloseToUninstall. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Close {app_name} and try the uninstall again."
-msgstr ""
+msgstr "Beende {app_name} und versuche die Deinstallation erneut."
 
 #. Windows installer: FinishTitle.
 msgctxt "Windows installer"
 msgid "Completing Rufin Setup"
-msgstr ""
+msgstr "Rufin-Setup wird abgeschlossen"
 
 #. Windows installer: DesktopShortcut.
 msgctxt "Windows installer"
 msgid "Create desktop shortcut"
-msgstr ""
+msgstr "Desktop-Verknüpfung erstellen"
 
 #. Windows installer: RemoveCache. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "Remove {app_name}'s cache"
-msgstr ""
+msgstr "Cache von {app_name} entfernen"
 
 #. Windows installer: InstallWriteFailed.
 msgctxt "Windows installer"
 msgid "Setup could not complete the installation. Please try again."
 msgstr ""
+"Das Setup konnte die Installation nicht abschließen. Bitte versuche es "
+"erneut."
 
 #. Windows installer: InvalidUpdate. {app_name} is the application display name.
 msgctxt "Windows installer"
 msgid "The {app_name} automatic update option is invalid."
-msgstr ""
+msgstr "Die Option für automatische Updates von {app_name} ist ungültig."
 
 #. Windows installer: WelcomeTitle.
 msgctxt "Windows installer"
 msgid "Welcome to Rufin Setup"
-msgstr ""
+msgstr "Willkommen beim Rufin-Setup"
 
 #~ msgid ""
 #~ "This uses Jellyfin API for play radio, necessary if you want "
