@@ -7,7 +7,7 @@ use ui_player::state::playback_window_title;
 use localization::tr;
 use ui_shared::layout::configure_fill_width_clip;
 
-pub(super) const RIGHT_RESIZE_HANDLE_WIDTH: i32 = 4;
+pub(super) const RIGHT_RESIZE_HANDLE_WIDTH: i32 = 8;
 pub(crate) struct WindowChrome {
     pub(crate) application: adw::Application,
     pub(crate) window: gtk::ApplicationWindow,

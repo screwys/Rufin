@@ -265,7 +265,7 @@ impl CatalogUi {
     pub fn library_toolbar_projection_without_detail(
         self: &Rc<Self>,
         key: LibraryListKey,
-        search: gtk::SearchEntry,
+        search: Option<gtk::SearchEntry>,
         sort_fields: &'static [LibraryField],
     ) -> LibraryToolbarProjection {
         self.library_toolbar_projection_with_options(key, search, false, sort_fields, 12)
@@ -279,7 +279,7 @@ impl CatalogUi {
     ) -> LibraryToolbarProjection {
         self.library_toolbar_projection_with_options(
             key,
-            search,
+            Some(search),
             include_detail,
             available_sort_fields(key),
             12,
@@ -289,16 +289,20 @@ impl CatalogUi {
     fn library_toolbar_projection_with_options(
         self: &Rc<Self>,
         key: LibraryListKey,
-        search: gtk::SearchEntry,
+        search: Option<gtk::SearchEntry>,
         include_detail: bool,
         sort_fields: &'static [LibraryField],
         outer_spacing: i32,
     ) -> LibraryToolbarProjection {
         let toolbar = LibraryToolbarView::new();
         toolbar.set_spacing(outer_spacing);
-        search.set_hexpand(true);
-        search.set_width_request(1);
-        toolbar.imp().search_host.append(&search);
+        let has_search = search.is_some();
+        toolbar.imp().search_host.set_visible(has_search);
+        if let Some(search) = search {
+            search.set_hexpand(true);
+            search.set_width_request(1);
+            toolbar.imp().search_host.append(&search);
+        }
         let toolbar_state = Rc::new(RefCell::new(LibraryToolbarState {
             key,
             include_detail,
@@ -356,8 +360,12 @@ impl CatalogUi {
         );
         configure_sort_dropdown_factory(&sort_dropdown);
         sort_dropdown.set_sensitive(sort_fields.len() > 1);
-        sort_dropdown.set_hexpand(false);
-        sort_dropdown.set_halign(gtk::Align::End);
+        sort_dropdown.set_hexpand(!has_search);
+        sort_dropdown.set_halign(if has_search {
+            gtk::Align::End
+        } else {
+            gtk::Align::Fill
+        });
         let syncing = Rc::new(Cell::new(false));
         sort_dropdown.set_selected(
             sort_fields

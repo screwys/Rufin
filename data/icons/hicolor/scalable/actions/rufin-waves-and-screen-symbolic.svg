@@ -1,0 +1,24 @@
+<?xml version='1.0' encoding='utf-8'?>
+<svg gpa:rendering="symbolic" xmlns="http://www.w3.org/2000/svg" xmlns:cc="http://creativecommons.org/ns#" xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:gpa="https://www.gtk.org/grappa" xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#" width="16" height="16" gpa:version="1" gpa:state="0" gpa:state-names="outline empty">
+<path d="M 1 8 C 4.31370831 8, 7 10.6862917, 7 14 M 2 5 L 2 4 C 2 2.89543056, 2.89543056 2, 4 2 L 13 2 C 14.1045694 2, 15 2.89543056, 15 4 L 15 11 C 15 12.1045694, 14.1045694 13, 13 13 L 10 13 M 1 11 C 2.65685415 11, 4 12.3431454, 4 14 M 1 14 L 1 14.0010004" id="path12" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" stroke="rgb(0,0,0)" fill="none" class="foreground-stroke transparent-fill" gpa:states="outline" gpa:stroke="foreground" gpa:stroke-minwidth="25%" gpa:stroke-maxwidth="150%" >
+    </path>
+  <path d="M 4.5 4 C 4.22386885 4.00002766, 4.00002766 4.22386885, 4 4.5 L 4 6.26171875 C 4.00003052 6.45771837, 4.11456537 6.63562918, 4.29296875 6.71679688 C 6.05169344 7.52102041, 7.47897959 8.94830704, 8.28320312 10.7070312 C 8.36437035 10.8854342, 8.54228115 10.9999695, 8.73828125 11 L 12.5 11 C 12.7761307 10.9999723, 12.9999723 10.7761307, 13 10.5 L 13 4.5 C 12.9999723 4.22386885, 12.7761307 4.00002766, 12.5 4 L 4.5 4 Z" id="path1" stroke="none" fill-rule="nonzero" fill-opacity="0.35" fill="rgb(0,0,0)" class="foreground-fill" gpa:states="outline" gpa:fill="foreground">
+    </path>
+  <metadata>
+    <rdf:RDF>
+      <cc:Work>
+        <cc:license rdf:resource="https://creativecommons.org/publicdomain/zero/1.0/" />
+        <dc:subject>
+          <rdf:Bag>
+            <rdf:li>display screen sharing remote desktop cast screen-shared waves-and-screen</rdf:li>
+          </rdf:Bag>
+        </dc:subject>
+        <dc:creator>
+          <cc:Agent>
+            <dc:title>Wartybix</dc:title>
+          </cc:Agent>
+        </dc:creator>
+      </cc:Work>
+    </rdf:RDF>
+  </metadata>
+</svg>

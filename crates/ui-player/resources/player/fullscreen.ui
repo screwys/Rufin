@@ -37,28 +37,28 @@
                       <object class="GtkToggleButton" id="queue_tab">
                         <property name="tooltip-text" translatable="yes">Queue</property><property name="valign">center</property>
                         <accessibility><property name="label" translatable="yes">Queue</property></accessibility>
-                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-view-list-ordered-symbolic</property></object></child><child><object class="GtkLabel" id="queue_tab_label"><property name="label" translatable="yes">Queue</property></object></child></object></property>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-queue-symbolic</property></object></child><child><object class="GtkLabel" id="queue_tab_label"><property name="label" translatable="yes">Queue</property></object></child></object></property>
                       </object>
                     </child>
                     <child>
                       <object class="GtkToggleButton" id="lyrics_tab">
                         <property name="tooltip-text" translatable="yes">Lyrics</property><property name="valign">center</property><property name="active">true</property>
                         <accessibility><property name="label" translatable="yes">Lyrics</property></accessibility>
-                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="lyrics_tab_icon"/></child><child><object class="GtkLabel" id="lyrics_tab_label"><property name="label" translatable="yes">Lyrics</property></object></child></object></property>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-text-justify-center-symbolic</property><property name="pixel-size">18</property></object></child><child><object class="GtkLabel" id="lyrics_tab_label"><property name="label" translatable="yes">Lyrics</property></object></child></object></property>
                       </object>
                     </child>
                     <child>
                       <object class="GtkToggleButton" id="visualizer_tab">
                         <property name="tooltip-text" translatable="yes">Visualizer</property><property name="valign">center</property>
                         <accessibility><property name="label" translatable="yes">Visualizer</property></accessibility>
-                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="visualizer_tab_icon"/></child><child><object class="GtkLabel" id="visualizer_tab_label"><property name="label" translatable="yes">Visualizer</property></object></child></object></property>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-sound-symbolic</property><property name="pixel-size">18</property></object></child><child><object class="GtkLabel" id="visualizer_tab_label"><property name="label" translatable="yes">Visualizer</property></object></child></object></property>
                       </object>
                     </child>
                     <child>
                       <object class="GtkToggleButton" id="equalizer_tab">
                         <property name="tooltip-text" translatable="yes">Equalizer</property><property name="valign">center</property>
                         <accessibility><property name="label" translatable="yes">Equalizer</property></accessibility>
-                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkBox" id="equalizer_tab_icon"/></child><child><object class="GtkLabel" id="equalizer_tab_label"><property name="label" translatable="yes">Equalizer</property></object></child></object></property>
+                        <property name="child"><object class="GtkBox"><property name="spacing">6</property><property name="halign">center</property><property name="valign">center</property><child><object class="GtkImage"><property name="icon-name">rufin-sliders-vertical-symbolic</property><property name="pixel-size">18</property></object></child><child><object class="GtkLabel" id="equalizer_tab_label"><property name="label" translatable="yes">Equalizer</property></object></child></object></property>
                       </object>
                     </child>
                   </object>

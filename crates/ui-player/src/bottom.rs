@@ -1338,7 +1338,7 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::PlayerUi>)
     let popover = gtk::Popover::new();
     popover.add_css_class("playback-output-popover");
     popover.set_autohide(true);
-    popover.set_position(gtk::PositionType::Top);
+    popover.set_position(gtk::PositionType::Bottom);
     popover.set_parent(anchor);
 
     let content = gtk::Box::new(gtk::Orientation::Vertical, 0);
@@ -1347,16 +1347,6 @@ pub fn present_output_popover(anchor: &gtk::Button, shell: &Rc<crate::PlayerUi>)
     content.set_margin_start(2);
     content.set_margin_end(2);
     content.set_width_request(300);
-
-    let resource = crate::ui_resource::OUTPUT_RESOURCE;
-    let builder = ui_shared::ui_resource::builder(resource);
-    ui_shared::objects!(builder, resource, {
-        local_output_group: gtk::Box,
-    });
-    let device = crate::outputs::audio_output_dropdown(shell, 150);
-    local_output_group.append(&device);
-    local_output_group.set_sensitive(selected.is_local());
-    content.append(&local_output_group);
 
     let outputs = adw::PreferencesGroup::new();
     outputs.set_title(&tr("Casting"));

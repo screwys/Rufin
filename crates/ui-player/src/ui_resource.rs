@@ -1,6 +1,5 @@
 pub const LYRICS_PANE_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/lyrics/pane.ui";
 pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
-    OUTPUT_RESOURCE,
     PLAYBACK_SETTINGS_POPOVER_RESOURCE,
     LYRICS_COLOR_CHOOSER_RESOURCE,
     LYRICS_SETTINGS_RESOURCE,
@@ -17,7 +16,6 @@ pub const INTERFACE_RESOURCE_PATHS: &[&str] = &[
 ];
 
 pub const BOTTOM_PLAYER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/bottom.ui";
-pub const OUTPUT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/output.ui";
 
 pub const FULLSCREEN_PLAYER_RESOURCE: &str = "/io/github/screwys/Rufin/ui/player/fullscreen.ui";
 

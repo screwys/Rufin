@@ -1,4 +1,4 @@
-use super::{equalizer::EqualizerSurface, icons::lyrics_icon_area};
+use super::equalizer::EqualizerSurface;
 use adw::prelude::*;
 use localization::tr;
 use playback::{EqualizerSettings, PlaybackView};
@@ -18,7 +18,6 @@ pub const FULLSCREEN_PLAYER_PANE_RESERVED_HEIGHT: i32 = 260;
 pub const FULLSCREEN_PLAYER_TINY_COVER_SIZE: i32 = 64;
 pub const FULLSCREEN_PLAYER_MIN_SIDE_DETAILS_WIDTH: i32 = 120;
 pub const FULLSCREEN_PLAYER_HERO_LINE_SPACING: i32 = 12;
-pub const FULLSCREEN_ICON_SIZE: i32 = 18;
 pub struct FullscreenPlayerParts {
     pub root: gtk::Overlay,
     pub visible: Cell<bool>,
@@ -78,13 +77,10 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
         queue_tab: gtk::ToggleButton,
         queue_tab_label: gtk::Label,
         lyrics_tab: gtk::ToggleButton,
-        lyrics_tab_icon: gtk::Box,
         lyrics_tab_label: gtk::Label,
         visualizer_tab: gtk::ToggleButton,
-        visualizer_tab_icon: gtk::Box,
         visualizer_tab_label: gtk::Label,
         equalizer_tab: gtk::ToggleButton,
-        equalizer_tab_icon: gtk::Box,
         equalizer_tab_label: gtk::Label,
         inline_start: gtk::Box,
         inline_end: gtk::Box,
@@ -127,9 +123,6 @@ pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> Fullscreen
     stack.set_visible_child_name("lyrics");
 
     inline_start.append(&inline_close_button);
-    lyrics_tab_icon.append(&lyrics_icon_area(Rc::new(Cell::new(true))));
-    visualizer_tab_icon.append(&fullscreen_visualizer_icon());
-    equalizer_tab_icon.append(&fullscreen_equalizer_icon());
     let tabs = connect_fullscreen_player_switcher(
         &stack,
         [
@@ -198,34 +191,6 @@ pub fn connect_fullscreen_player_switcher(
         }
     });
     labels
-}
-
-pub fn fullscreen_visualizer_icon() -> gtk::DrawingArea {
-    let area = gtk::DrawingArea::new();
-    area.set_content_width(FULLSCREEN_ICON_SIZE);
-    area.set_content_height(FULLSCREEN_ICON_SIZE);
-    area.set_draw_func(|area, context, width, height| {
-        let color = area.color();
-        context.set_line_cap(gtk::cairo::LineCap::Round);
-        context.set_source_rgba(
-            f64::from(color.red()),
-            f64::from(color.green()),
-            f64::from(color.blue()),
-            0.9,
-        );
-        context.set_line_width(1.6);
-        let center = f64::from(height) * 0.5;
-        let bars = [0.38, 0.74, 0.48, 0.92, 0.56];
-        let step = f64::from(width) / (bars.len() + 1) as f64;
-        for (index, level) in bars.iter().enumerate() {
-            let x = step * (index + 1) as f64;
-            let half = f64::from(height) * level * 0.36;
-            context.move_to(x, center - half);
-            context.line_to(x, center + half);
-            let _ = context.stroke();
-        }
-    });
-    area
 }
 
 use crate::{bottom::BOTTOM_PLAYER_HEIGHT, state::NowPlayingPresentation};
@@ -997,45 +962,4 @@ mod playback_refresh_tests {
             },
         }
     }
-}
-
-pub fn fullscreen_equalizer_icon() -> gtk::DrawingArea {
-    let area = gtk::DrawingArea::new();
-    area.set_content_width(FULLSCREEN_ICON_SIZE);
-    area.set_content_height(FULLSCREEN_ICON_SIZE);
-    area.set_draw_func(|area, context, width, height| {
-        let color = area.color();
-        context.set_line_cap(gtk::cairo::LineCap::Round);
-        context.set_source_rgba(
-            f64::from(color.red()),
-            f64::from(color.green()),
-            f64::from(color.blue()),
-            0.92,
-        );
-        let width = f64::from(width);
-        let height = f64::from(height);
-        let tracks = [
-            (width * 0.24, height * 0.38),
-            (width * 0.5, height * 0.58),
-            (width * 0.76, height * 0.38),
-        ];
-        context.set_line_width(2.2);
-        for (x, _) in tracks {
-            context.move_to(x, 2.6);
-            context.line_to(x, height - 2.6);
-            let _ = context.stroke();
-        }
-
-        context.set_source_rgba(
-            f64::from(color.red()),
-            f64::from(color.green()),
-            f64::from(color.blue()),
-            0.92,
-        );
-        for (x, y) in tracks {
-            context.rectangle(x - 2.4, y - 1.7, 4.8, 3.4);
-            let _ = context.fill();
-        }
-    });
-    area
 }

@@ -5,7 +5,7 @@
 
   <object class="GtkPopover" id="popover">
     <property name="autohide">true</property>
-    <property name="position">bottom</property>
+    <property name="position">top</property>
     <style><class name="playback-settings-popover"/></style>
     <property name="child">
       <object class="GtkScrolledWindow">
@@ -21,7 +21,11 @@
             <property name="margin-top">2</property><property name="margin-bottom">2</property>
             <property name="margin-start">2</property><property name="margin-end">2</property>
             <property name="width-request">400</property>
-            <child><object class="AdwPreferencesGroup" id="settings_group"/></child>
+            <child><object class="AdwPreferencesGroup" id="settings_group">
+              <child><object class="AdwActionRow" id="audio_output">
+                <property name="title" translatable="yes">Audio output</property>
+              </object></child>
+            </object></child>
           </object>
         </property>
       </object>

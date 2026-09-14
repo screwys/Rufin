@@ -58,7 +58,7 @@
     </property>
     <child type="overlay">
       <object class="GtkBox" id="right_resize_handle">
-        <property name="orientation">vertical</property><property name="width-request">4</property>
+        <property name="orientation">vertical</property><property name="width-request">8</property>
         <property name="halign">start</property><property name="valign">fill</property><property name="vexpand">true</property>
         <property name="focusable">false</property><property name="visible">false</property>
         <style><class name="right-sidebar-resize-handle"/></style>

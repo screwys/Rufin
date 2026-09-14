@@ -212,10 +212,7 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     let navigate_search_accels = &["<Control>k"][..];
     add_window_action(shell, "navigate-search", navigate_search_accels, {
         let shell = Rc::clone(shell);
-        move || {
-            shell.navigate(ui_shared::route::Route::Search);
-            shell.chrome.topbar.search.grab_focus();
-        }
+        move || shell.focus_topbar_search()
     });
     #[cfg(target_os = "macos")]
     let cycle_layout_accels = &["<Meta>j"][..];

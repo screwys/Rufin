@@ -19,7 +19,7 @@ use ui_shared::layout::{
 use ui_shared::popup::present_light_dismiss_dialog;
 
 mod context_menu;
-mod controller;
+pub(crate) mod controller;
 pub(crate) mod dialogs;
 mod general;
 mod layout;

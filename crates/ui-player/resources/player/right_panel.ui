@@ -2,6 +2,7 @@
 <interface domain="rufin">
   <requires lib="gtk" version="4.20" />
   <object class="GtkBox" id="root">
+    <property name="overflow">hidden</property>
     <property name="orientation">vertical</property>
     <property name="hexpand">true</property>
     <property name="vexpand">true</property>

@@ -28,7 +28,13 @@
         <accessibility><property name="label" translatable="yes">Forward</property></accessibility>
         <style><class name="flat"/><class name="topbar-button"/></style>
       </object></child>
-      <child><object class="GtkBox" id="playback_host"/></child>
+      <child><object class="GtkMenuButton" id="controller">
+        <property name="icon-name">rufin-phonelink-symbolic</property>
+        <property name="tooltip-text" translatable="yes">Controller</property>
+        <accessibility><property name="label" translatable="yes">Controller</property></accessibility>
+        <style><class name="flat"/><class name="topbar-button"/></style>
+      </object></child>
+      <child><object class="GtkBox" id="casting_host"/></child>
     </object></child>
     <property name="title-widget"><object class="GtkSearchEntry" id="search">
       <property name="hexpand">false</property>
@@ -42,7 +48,7 @@
     <child type="end"><object class="GtkBox">
       <property name="spacing">2</property>
       <child><object class="GtkMenuButton" id="source">
-        <property name="icon-name">rufin-network-server-symbolic</property>
+        <property name="icon-name">rufin-library-symbolic</property>
         <property name="tooltip-text" translatable="yes">Select Source</property>
         <accessibility><property name="label" translatable="yes">Select Source</property></accessibility>
         <style><class name="flat"/><class name="topbar-button"/></style>

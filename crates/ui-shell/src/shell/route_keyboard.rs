@@ -22,12 +22,18 @@ enum SelectionShortcut {
 }
 impl Shell {
     pub(crate) fn focus_current_route_search(&self) {
-        if !self.route_keyboard_available() {
-            return;
-        }
-        if let Some(search) = self.current_route_search() {
+        if self.route_keyboard_available()
+            && let Some(search) = self.current_route_search()
+        {
             search.focus();
         }
+    }
+
+    pub(crate) fn focus_topbar_search(&self) {
+        if self.transient_route_input_active() {
+            return;
+        }
+        self.chrome.topbar.search.grab_focus();
     }
 
     fn route_keyboard_available(&self) -> bool {

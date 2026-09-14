@@ -1692,6 +1692,9 @@ msgstr ""
 msgid "Open release notes"
 msgstr ""
 
+msgid "Open settings"
+msgstr ""
+
 msgid "OpenSubsonic"
 msgstr ""
 

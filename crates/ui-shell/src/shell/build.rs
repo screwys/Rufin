@@ -249,9 +249,7 @@ pub async fn build(
     let right_resize_handle = content_chrome.right_resize_handle;
     let fullscreen_player = build_fullscreen_player(&visualizer.fullscreen_area);
     let player_controls = build_bottom_player();
-    topbar
-        .playback_host
-        .append(&player_controls.settings_button);
+    topbar.casting_host.append(&player_controls.output_button);
 
     content_row.append(&content_chrome.root);
 

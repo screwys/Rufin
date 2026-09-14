@@ -34,6 +34,7 @@
     <file compressed="true">shell/content_chrome.ui</file>
     <file compressed="true">shell/navigation.ui</file>
     <file compressed="true">shell/topbar.ui</file>
+    <file compressed="true">shell/controller.ui</file>
     <file compressed="true">shell/root.ui</file>
     <file compressed="true">shell/shortcuts.ui</file>
     <file compressed="true">style.css</file>

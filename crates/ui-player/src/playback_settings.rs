@@ -50,10 +50,15 @@ fn playback_settings_popover(
         settings_group: adw::PreferencesGroup,
         lyrics: adw::SwitchRow,
         visualizer: adw::SwitchRow,
+        audio_output: adw::ActionRow,
     });
     if !local_output {
         settings_group.set_description(Some(&tr("Audio processing is unavailable while casting")));
     }
+    let device = crate::outputs::audio_output_dropdown(shell, 180);
+    audio_output.add_suffix(&device);
+    audio_output.set_activatable_widget(Some(&device));
+    audio_output.set_sensitive(local_output);
     let crossfade_row = crossfade_duration_row(
         shell,
         playback.crossfade_seconds,

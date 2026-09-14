@@ -59,6 +59,8 @@ pub(crate) const DIAGNOSTICS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell
 pub(crate) const CONTENT_CHROME_RESOURCE: &str =
     "/io/github/screwys/Rufin/ui/shell/content_chrome.ui";
 pub(crate) const TOPBAR_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/topbar.ui";
+pub(crate) const CONTROLLER_POPOVER_RESOURCE: &str =
+    "/io/github/screwys/Rufin/ui/shell/controller.ui";
 pub(crate) const NAVIGATION_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/navigation.ui";
 pub(crate) const SHELL_ROOT_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/root.ui";
 pub(crate) const SHORTCUTS_RESOURCE: &str = "/io/github/screwys/Rufin/ui/shell/shortcuts.ui";
@@ -93,6 +95,7 @@ pub(crate) const INTERFACE_RESOURCE_PATHS: &[&str] = &[
     LOCAL_SETUP_RESOURCE,
     SERVER_ACTIONS_RESOURCE,
     TOPBAR_RESOURCE,
+    CONTROLLER_POPOVER_RESOURCE,
     NAVIGATION_RESOURCE,
     SHELL_ROOT_RESOURCE,
     SETUP_SCAFFOLD_RESOURCE,

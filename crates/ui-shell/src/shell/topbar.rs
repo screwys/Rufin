@@ -13,7 +13,8 @@ pub(crate) struct Topbar {
     pub menu: gtk::MenuButton,
     sidebar: gtk::Button,
     source: gtk::MenuButton,
-    pub playback_host: gtk::Box,
+    controller: gtk::MenuButton,
+    pub casting_host: gtk::Box,
 }
 
 impl Topbar {
@@ -28,7 +29,8 @@ impl Topbar {
             menu: gtk::MenuButton,
             sidebar: gtk::Button,
             source: gtk::MenuButton,
-            playback_host: gtk::Box,
+            controller: gtk::MenuButton,
+            casting_host: gtk::Box,
         });
         Self {
             window_content,
@@ -38,12 +40,14 @@ impl Topbar {
             menu,
             sidebar,
             source,
-            playback_host,
+            controller,
+            casting_host,
         }
     }
 
     pub fn bind(&self, shell: &Rc<Shell>) {
         super::navigation::install_primary_menu(&self.menu, shell);
+        crate::preferences::controller::bind_popover(shell, &self.controller);
         let weak = Rc::downgrade(shell);
         self.source.set_create_popup_func(move |button| {
             if let Some(shell) = weak.upgrade() {
@@ -71,10 +75,10 @@ impl Topbar {
             }
         });
         let weak = Rc::downgrade(shell);
-        self.search.connect_search_changed(move |entry| {
+        self.search.connect_activate(move |_| {
             if let Some(shell) = weak.upgrade() {
                 let searching = shell.navigation.routes.borrow().current() == &Route::Search;
-                if !searching && !entry.text().trim().is_empty() {
+                if !searching {
                     shell.navigate(Route::Search);
                 }
             }

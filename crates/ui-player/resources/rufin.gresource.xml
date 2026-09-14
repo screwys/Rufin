@@ -14,6 +14,5 @@
     <file compressed="true">player/lyrics/settings.ui</file>
     <file compressed="true">player/lyrics/color_chooser.ui</file>
     <file compressed="true">player/playback_settings.ui</file>
-    <file compressed="true">player/output.ui</file>
   </gresource>
 </gresources>

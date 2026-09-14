@@ -67,7 +67,7 @@ impl CatalogUi {
         search.set_placeholder_text(Some(&tr("Search current folder")));
         let toolbar = self.library_toolbar_projection_without_detail(
             LibraryListKey::Tracks,
-            search.clone(),
+            Some(search.clone()),
             crate::available_sort_fields(LibraryListKey::Tracks),
         );
         toolbar.set_layout_control_visible(false);

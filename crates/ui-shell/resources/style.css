@@ -245,8 +245,8 @@ button.release-note-update:hover {
 }
 
 .app-root {
-  background: var(--view-bg-color);
-  color: var(--view-fg-color);
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
 }
 
 .preference-selection-buttons {
@@ -266,13 +266,20 @@ button.release-note-update:hover {
 .compact-rail-slot,
 .wide-sidebar,
 .compact-rail {
-  background: var(--sidebar-bg-color);
-  color: var(--sidebar-fg-color);
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
 .wide-sidebar-slot,
 .compact-rail-slot {
-  border-right: 1px solid var(--shell-separator-color);
+  border-right: none;
+  border-radius: 8px;
+  box-shadow: none;
+}
+
+overlay-split-view > .sidebar-pane {
+  background: transparent;
+  box-shadow: none;
 }
 
 .sidebar-resize-handle {
@@ -283,15 +290,15 @@ button.release-note-update:hover {
 
 .right-pane-split > separator,
 .right-pane-split > separator.wide {
-  min-width: 1px;
+  min-width: 8px;
   padding: 0;
   border: 0;
-  background: var(--shell-separator-color);
+  background: transparent;
   box-shadow: none;
 }
 
 .right-sidebar-resize-handle {
-  min-width: 4px;
+  min-width: 8px;
   padding: 0;
   background: transparent;
 }
@@ -301,13 +308,17 @@ button.release-note-update:hover {
 }
 
 .compact-rail {
-  padding: 0 0 4px;
+  padding: 6px 0 4px;
 }
 
 .main-area,
 .route-content {
   background: var(--view-bg-color);
   color: var(--view-fg-color);
+}
+
+.main-area {
+  border-radius: 8px;
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical,
@@ -332,6 +343,15 @@ scrolledwindow.sidebar-scroller scrollbar.vertical > range > trough,
   background: transparent;
   border: none;
   box-shadow: none;
+}
+
+scrolledwindow scrollbar.overlay-indicator {
+  transition: opacity 150ms ease-out;
+}
+
+scrolledwindow:not(:hover) scrollbar.overlay-indicator:not(.hovering):not(:focus-visible) {
+  opacity: 0;
+  transition: opacity 200ms ease-out 1s;
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical > range > trough > slider,
@@ -448,9 +468,9 @@ row:focus {
 }
 
 headerbar.shared-topbar {
-  background: var(--headerbar-bg-color);
-  color: var(--headerbar-fg-color);
-  border-bottom: 1px solid var(--shell-separator-color);
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
+  border-bottom: none;
   box-shadow: none;
 }
 
@@ -579,8 +599,9 @@ headerbar.shared-topbar searchentry {
 }
 
 .right-panel {
-  background: var(--sidebar-bg-color);
-  color: var(--sidebar-fg-color);
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
+  border-radius: 8px;
 }
 
 .sidebar-header {
@@ -776,7 +797,7 @@ headerbar.shared-topbar searchentry {
   min-height: 40px;
   padding-left: 4px;
   border-radius: 7px;
-  background: color-mix(in srgb, currentColor 8%, var(--sidebar-bg-color));
+  background: color-mix(in srgb, currentColor 8%, var(--view-bg-color));
 }
 
 .icon-button.sidebar-pin-control {
@@ -1870,7 +1891,7 @@ button.download-queue-pause image {
 }
 
 .queue-lyrics-surface {
-  background: var(--sidebar-bg-color);
+  background: var(--view-bg-color);
 }
 
 .queue-lyrics-split > separator {
@@ -2049,7 +2070,7 @@ entry.lyrics-offset-value.flat:focus-within {
   min-height: 34px;
   padding: 0 3px;
   border-radius: 4px;
-  background-color: var(--sidebar-bg-color);
+  background-color: var(--view-bg-color);
   background-image: none;
   border: none;
   box-shadow: none;
@@ -2057,13 +2078,13 @@ entry.lyrics-offset-value.flat:focus-within {
 
 .bottom-player {
   padding: 2px 8px;
-  background: var(--headerbar-bg-color);
-  color: var(--headerbar-fg-color);
-  border-top: 1px solid var(--shell-separator-color);
+  background: var(--window-bg-color);
+  color: var(--window-fg-color);
+  border-top: none;
 }
 
 .app-content-stack {
-  background: var(--view-bg-color);
+  background: transparent;
 }
 
 .fullscreen-player {
