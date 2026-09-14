@@ -93,13 +93,24 @@ fn home_rows(rows: &library::HomeSectionRows) -> Vec<Value> {
         .collect()
 }
 
-pub(super) async fn home(
+async fn home(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
+    web::page(
+        &headers,
+        &parameters,
+        home_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn home_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     use library::HomeBlockKind;
-    let (source, folder) = scope(&products, &parameters).await?;
+    let (source, folder) = scope(products, parameters).await?;
     let mut blocks = products.source.shared.settings.load().ui.home_blocks;
     if let Some(block) = parameters.get("block") {
         let selected: HomeBlockKind =
@@ -143,23 +154,34 @@ pub(super) async fn home(
             sections.push(json!({"title":section.title.unwrap_or_else(||"From your server".into()),"items":items}));
         }
     }
-    web::page(&headers, &parameters, json!({"sections":sections}))
+    Ok(json!({"sections":sections}))
 }
 
-pub(super) async fn genre_tracks(
+async fn genre_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
+    web::page(
+        &headers,
+        &parameters,
+        genre_tracks_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn genre_tracks_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let folder = if parameters.contains_key("folder") {
-        scope(&products, &parameters).await?.1
+        scope(products, parameters).await?.1
     } else {
         None
     };
     let (rows, _) = products
         .library
         .collection_tracks_page(
-            &library::QueueCollection::Genre(key(&parameters, "id")?),
+            &library::QueueCollection::Genre(key(parameters, "id")?),
             folder,
             parameters.get("q").map(String::as_str).unwrap_or(""),
             track_sort(
@@ -168,27 +190,34 @@ pub(super) async fn genre_tracks(
                     .map(String::as_str)
                     .unwrap_or("title"),
             )?,
-            boolean(&parameters, "descending")?,
+            boolean(parameters, "descending")?,
             false,
-            number(&parameters, "offset", 0)?,
-            number(&parameters, "limit", 48)?.min(256),
+            number(parameters, "offset", 0)?,
+            number(parameters, "limit", 48)?.min(256),
             &ReadCancellation::new(),
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
-        json!({"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
-    )
+    Ok(json!({"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}))
 }
 
-pub(super) async fn artists(
+async fn artists(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let (source, folder) = scope(&products, &parameters).await?;
+    web::page(
+        &headers,
+        &parameters,
+        artists_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn artists_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
+    let (source, folder) = scope(products, parameters).await?;
     let sort = match parameters
         .get("sort")
         .map(String::as_str)
@@ -203,47 +232,56 @@ pub(super) async fn artists(
         "favorite" => library::ArtistSort::Favorite,
         _ => return Err(bad_request("Unknown artist sort")),
     };
-    let offset = number(&parameters, "offset", 0)?;
-    let limit = number(&parameters, "limit", 48)?.min(128);
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 48)?.min(128);
     let rows = products
         .library
         .artist_page(
             source,
             folder,
-            boolean(&parameters, "album_artists")?,
-            boolean(&parameters, "favorites")?,
+            boolean(parameters, "album_artists")?,
+            boolean(parameters, "favorites")?,
             parameters.get("q").map(String::as_str).unwrap_or(""),
             sort,
-            boolean(&parameters, "descending")?,
+            boolean(parameters, "descending")?,
             offset,
             limit,
             &ReadCancellation::new(),
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
-        json!({"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(&parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
+    Ok(
+        json!({"offset":offset,"limit":limit,"artists":rows.iter().map(|row|json!({"id":row.artist_key,"object_id":row.object_id,"album_artists":boolean(parameters,"album_artists").unwrap_or(false),"uri":row.media_uri,"name":row.name,"favorite":row.favorite,"album_count":row.album_count,"track_count":row.track_count})).collect::<Vec<_>>()}),
     )
 }
 
-pub(super) async fn artist_tracks(
+async fn artist_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
+    web::page(
+        &headers,
+        &parameters,
+        artist_tracks_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn artist_tracks_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let folder = if parameters.contains_key("folder") {
-        scope(&products, &parameters).await?.1
+        scope(products, parameters).await?.1
     } else {
         None
     };
     let collection = library::QueueCollection::ArtistKey {
-        key: key(&parameters, "id")?,
-        album_artist: boolean(&parameters, "album_artists")?,
+        key: key(parameters, "id")?,
+        album_artist: boolean(parameters, "album_artists")?,
     };
-    let offset = number(&parameters, "offset", 0)?;
-    let limit = number(&parameters, "limit", 48)?.min(256);
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 48)?.min(256);
     let (rows, _) = products
         .library
         .collection_tracks_page(
@@ -256,17 +294,15 @@ pub(super) async fn artist_tracks(
                     .map(String::as_str)
                     .unwrap_or("title"),
             )?,
-            boolean(&parameters, "descending")?,
-            boolean(&parameters, "favorites")?,
+            boolean(parameters, "descending")?,
+            boolean(parameters, "favorites")?,
             offset,
             limit,
             &ReadCancellation::new(),
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }
@@ -277,13 +313,24 @@ pub(super) fn now() -> i64 {
         .map_or(0, |elapsed| elapsed.as_secs() as i64)
 }
 
-pub(super) async fn smart_playlists(
+async fn smart_playlists(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
+    web::page(
+        &headers,
+        &parameters,
+        smart_playlists_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn smart_playlists_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let (source, folder) = if parameters.contains_key("source") {
-        let (s, f) = scope(&products, &parameters).await?;
+        let (s, f) = scope(products, parameters).await?;
         (Some(s), f)
     } else {
         (None, None)
@@ -299,15 +346,15 @@ pub(super) async fn smart_playlists(
         "duration" => library::SmartPlaylistListSort::Duration,
         _ => return Err(bad_request("Unknown smart playlist sort")),
     };
-    let offset = number(&parameters, "offset", 0)?;
-    let limit = number(&parameters, "limit", 48)?.min(64);
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 48)?.min(64);
     let rows = products
         .library
         .smart_playlist_page(
             source,
             folder,
             sort,
-            boolean(&parameters, "descending")?,
+            boolean(parameters, "descending")?,
             parameters.get("q").map(String::as_str).unwrap_or(""),
             now(),
             offset,
@@ -316,31 +363,40 @@ pub(super) async fn smart_playlists(
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"smart_playlists":rows.iter().map(|row|json!({"id":row.smart_playlist_key,"object_id":row.object_id,"name":crate::playlists::smart_playlist_display_name(row),"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":row.artwork_bindings.len()})).collect::<Vec<_>>()}),
     )
 }
 
-pub(super) async fn smart_tracks(
+async fn smart_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
+    web::page(
+        &headers,
+        &parameters,
+        smart_tracks_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn smart_tracks_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let (source, folder) = if parameters.contains_key("source") {
-        let (s, f) = scope(&products, &parameters).await?;
+        let (s, f) = scope(products, parameters).await?;
         (Some(s), f)
     } else {
         (None, None)
     };
-    let offset = number(&parameters, "offset", 0)?;
-    let limit = number(&parameters, "limit", 48)?.min(256);
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 48)?.min(256);
     let rows = products
         .library
         .smart_playlist_track_page(
             source,
-            key(&parameters, "id")?,
+            key(parameters, "id")?,
             folder,
             parameters.get("q").map(String::as_str).unwrap_or(""),
             now(),
@@ -350,20 +406,27 @@ pub(super) async fn smart_tracks(
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"tracks":rows.iter().map(|row|json!({"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
     )
 }
 
-pub(super) async fn albums(
+async fn albums(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let products = &products;
-    let parameters = &parameters;
+    web::page(
+        &headers,
+        &parameters,
+        albums_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn albums_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let filter = parameters.get("q").map(String::as_str).unwrap_or("");
@@ -404,9 +467,7 @@ pub(super) async fn albums(
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"albums":rows.iter().map(|row| json!({
                 "id":row.album_key,"object_id":row.object_id,"uri":row.media_uri,"title":row.title,"artist":row.display_artist,
                 "year":row.year,"track_count":row.track_count,"duration_ms":row.duration_millis,"favorite":row.favorite,"rating":row.rating
@@ -414,13 +475,22 @@ pub(super) async fn albums(
     )
 }
 
-pub(super) async fn album_tracks(
+async fn album_tracks(
     State(products): State<ProductHandles>,
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let products = &products;
-    let parameters = &parameters;
+    web::page(
+        &headers,
+        &parameters,
+        album_tracks_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn album_tracks_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let offset = number(parameters, "offset", 0)?;
     let limit = number(parameters, "limit", 100)?.min(128);
     let filter = parameters.get("q").map(String::as_str).unwrap_or("");
@@ -454,9 +524,7 @@ pub(super) async fn album_tracks(
         )
         .await
         .map_err(bad_request)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"album_tracks":true,"disc_sections":disc_sections,"offset":offset,"limit":limit,"tracks":rows.iter().map(track_row_json).collect::<Vec<_>>()}),
     )
 }

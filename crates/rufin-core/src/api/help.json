@@ -122,6 +122,7 @@
       "favorites": false,
       "mode": "replace | append | next"
     },
+    "POST /api/queue/clear": "Clear the queue, including from a browser form.",
     "DELETE /api/queue": "Clear the queue using the app's setting for keeping the current song.",
     "GET /api/media?uri=...": "Get a track's album, artists and favorite state. Album URIs return their artists.",
     "POST /api/favorite": "Set favorite with {kind: track, album or artist, uri, favorite: true or false}. Returns the effective favorite state.",
@@ -129,6 +130,7 @@
     "POST /api/queue/activate": {
       "id": "queue track ID"
     },
+    "POST /api/queue/item": "Remove a queue occurrence with {id}, including from a browser form.",
     "DELETE /api/queue/item?id=...": "Remove a track from the queue",
     "GET /api/lyrics": "Lyrics for the current track, with line and word timings when available.",
     "POST /api/lyrics": "Load lyrics for the current track using your lyrics settings.",
@@ -305,7 +307,7 @@
   },
   "browsing": "Use offset to skip results, limit to choose how many to return, q to search, sort to choose the order, descending to reverse it, and favorites to show only favorites. Browsing or refreshing a source does not switch the source currently in use.",
   "events": "Update routes use server-sent events (SSE). Each data line contains JSON. The combined events route also follows theme changes.",
-  "browser": "GET / serves full HTML pages for login, browsing and playback without JavaScript. POST /session accepts a token form field and sets an HttpOnly, SameSite=Lax session cookie. It survives controller restarts while the API token is unchanged. Signing out clears the browser cookie; changing the API token invalidates existing cookies. Accept: application/json returns the browser CSRF token. Cookie-authenticated API writes require X-Rufin-CSRF; browser action and logout forms require csrf. API clients can continue using Authorization: Bearer without cookies.",
+  "browser": "GET / serves full HTML pages for login, browsing and playback without JavaScript. POST /session accepts a token form field and sets an HttpOnly, SameSite=Lax session cookie. It survives controller restarts while the API token is unchanged. Signing out clears the browser cookie; changing the API token invalidates existing cookies. Accept: application/json returns the browser CSRF token. Cookie-authenticated API writes require X-Rufin-CSRF for JSON requests or a csrf form field. The same API routes accept browser forms and redirect after success; logout forms also require csrf. API clients can continue using Authorization: Bearer without cookies.",
   "html": "Library browsing routes return HTML for the web page when HX-Request is true. Other callers receive JSON.",
   "playlist_selection": "When creating a playlist or adding entries, selection can replace uris: {kind: album, artist, playlist or smart_playlist, id}. Source and folder select the library for the tracks.",
   "queue_modes": {

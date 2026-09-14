@@ -1172,13 +1172,9 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
         (csrf, StatusCode::SEE_OTHER),
     ] {
         let response = client
-            .post(format!("{origin}/action"))
+            .post(format!("{origin}/api/playback/volume"))
             .header("Cookie", cookie)
-            .form(&[
-                ("csrf", csrf_field),
-                ("action", "volume"),
-                ("volume", "0.37"),
-            ])
+            .form(&[("csrf", csrf_field), ("volume", "0.37")])
             .send()
             .await
             .unwrap();
@@ -1208,13 +1204,9 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     let selection = json!({"kind":"track", "uris":[uri]}).to_string();
     assert_eq!(
         client
-            .post(format!("{origin}/action"))
+            .post(format!("{origin}/api/queue"))
             .header("Cookie", cookie)
-            .form(&[
-                ("csrf", csrf),
-                ("action", "replace"),
-                ("selection", &selection)
-            ])
+            .form(&[("csrf", csrf), ("mode", "replace"), ("payload", &selection)])
             .send()
             .await
             .unwrap()
@@ -1240,6 +1232,70 @@ async fn exercise_browser(origin: &str, token: &str, source: &str, uri: &str) {
     })
     .await
     .unwrap();
+    for (action, payload, field, expected) in [
+        ("shuffle", json!({"enabled":true}), "shuffle", json!(true)),
+        ("repeat", json!({"mode":"all"}), "repeat", json!("all")),
+        ("mute", json!({"muted":true}), "muted", json!(true)),
+    ] {
+        let response = client
+            .post(format!("{origin}/api/playback/{action}"))
+            .header("Cookie", cookie)
+            .form(&[
+                ("csrf", csrf),
+                ("payload", &payload.to_string()),
+                ("return", "/?view=tracks"),
+            ])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER);
+        assert_eq!(response.headers()["location"], "/?view=tracks");
+        tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                let state: Value = client
+                    .get(format!("{origin}/api/playback"))
+                    .header("Cookie", cookie)
+                    .send()
+                    .await
+                    .unwrap()
+                    .json()
+                    .await
+                    .unwrap();
+                if state[field] == expected {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .unwrap();
+    }
+    let queue: Value = client
+        .get(format!("{origin}/api/queue"))
+        .header("Cookie", cookie)
+        .send()
+        .await
+        .unwrap()
+        .json()
+        .await
+        .unwrap();
+    let id = queue["window"][0]["id"].as_str().unwrap();
+    for (route, payload) in [
+        ("activate", json!({"id":id})),
+        ("next", json!({"id":id})),
+        ("reorder", json!({"ids":[id]})),
+        ("item", json!({"id":id})),
+        ("clear", json!({})),
+    ] {
+        let response = client
+            .post(format!("{origin}/api/queue/{route}"))
+            .header("Cookie", cookie)
+            .form(&[("csrf", csrf), ("payload", &payload.to_string())])
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::SEE_OTHER, "{route}");
+    }
     // Script login uses the same endpoint and issues a fresh signed cookie.
     let login: reqwest::Response = client
         .post(format!("{origin}/session"))

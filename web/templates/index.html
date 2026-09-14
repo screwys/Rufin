@@ -66,19 +66,17 @@
           role="menu"
           aria-label="{{ localization::tr("Sources") }}"
         >
-          <form method="post" action="/action">
+          <form method="post" action="/api/sources/select">
             <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-            <input type="hidden" name="action" value="source" />
-            {% for (id, name) in page.sources %}<button class="menu-item" name="source" value="{{ id }}">{{ name }}</button>{% endfor %}
+            {% for (id, name) in page.sources %}<button class="menu-item" name="id" value="{{ id }}">{{ name }}</button>{% endfor %}
           </form>
           {% if !page.folders.is_empty() %}
-          <form method="post" action="/action">
+          <form method="post" action="/api/sources/library">
             <input type="hidden" name="csrf" value="{{ page.csrf }}" />
-            <input type="hidden" name="action" value="folder" />
             <input type="hidden" name="source" value="{{ page.source }}" />
             <p class="menu-heading">{{ localization::tr("Server Library") }}</p>
-            <button class="menu-item" name="folder" value="">{{ localization::tr("All Music") }}</button>
-            {% for (id, name) in page.folders %}<button class="menu-item" name="folder" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder() }}">{{ name }}</button>{% endfor %}
+            <button class="menu-item" name="library" value="">{{ localization::tr("All Music") }}</button>
+            {% for (id, name) in page.folders %}<button class="menu-item" name="library" value="{{ id }}" aria-pressed="{{ id.as_str() == page.folder() }}">{{ name }}</button>{% endfor %}
           </form>
           {% endif %}
         </div>
@@ -134,7 +132,7 @@
           </div>
           <button
             class="icon-button"
-            id="refresh" form="transport-form" name="action" value="refresh"
+            id="refresh" form="transport-form" formaction="/api/sources/refresh"
             title="{{ localization::tr("Refresh source") }}"
             aria-label="{{ localization::tr("Refresh source") }}"
           >
@@ -200,7 +198,7 @@
               <option>100</option>
             </select></label
           >
-          <button id="clear-queue" form="transport-form" name="action" value="clear-queue" class="icon-button" title="{{ localization::tr("Clear queue") }}" aria-label="{{ localization::tr("Clear queue") }}"><span class="icon" data-icon="clear" aria-hidden="true"></span></button>
+          <button id="clear-queue" form="transport-form" formaction="/api/queue/clear" class="icon-button" title="{{ localization::tr("Clear queue") }}" aria-label="{{ localization::tr("Clear queue") }}"><span class="icon" data-icon="clear" aria-hidden="true"></span></button>
           <a
             id="close-right"
             class="icon-button mobile"
@@ -213,11 +211,11 @@
           {% for row in page.queue %}
           <li class="queue-row" data-id="{{ row.id }}">
             <span class="number">{{ loop.index }}</span>
-            <form class="queue-track" method="post" action="/action">
+            <form class="queue-track" method="post" action="/api/queue/activate">
               <input type="hidden" name="csrf" value="{{ page.csrf }}" />
               <input type="hidden" name="return" value="{{ page.current() }}" />
               <input type="hidden" name="id" value="{{ row.id }}" />
-              <button class="queue-select" name="action" value="activate"><strong>{{ row.title }}</strong></button>
+              <button class="queue-select" formaction="/api/queue/activate"><strong>{{ row.title }}</strong></button>
               <span class="metadata-link queue-artist">{{ row.artist }}</span>
             </form>
           </li>
@@ -231,16 +229,16 @@
         </section>
       </aside>
 
-      <form id="transport-form" data-enhanced-form method="post" action="/action">
-        <input type="hidden" name="source" value="{{ page.source }}" />
+      <form id="transport-form" data-enhanced-form method="post" action="/api/queue/activate">
+        <input type="hidden" name="id" value="{{ page.source }}" />
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
         <input type="hidden" name="return" value="{{ page.current() }}" />
       </form>
-      <form id="current-track-form" data-enhanced-form method="post" action="/action" hidden>
+      <form id="current-track-form" data-enhanced-form method="post" action="/api/queue/activate" hidden>
         <input type="hidden" name="csrf" value="{{ page.csrf }}" />
         <input type="hidden" name="return" value="{{ page.current() }}" />
         <input type="hidden" name="id" value="{{ page.current_id() }}" />
-        <input type="hidden" name="selection" value="{{ page.current_selection() }}" />
+        <input type="hidden" name="payload" value="{{ page.current_selection() }}" />
       </form>
       <footer class="player" aria-label="{{ localization::tr("Playback controls") }}">
         <div class="player-track">
@@ -261,7 +259,7 @@
         <div class="transport">
           <div class="transport-buttons">
             <button
-              id="auto-dj" form="transport-form" name="action" value="auto-dj"
+              id="auto-dj" form="transport-form" formaction="/api/playback/auto-dj"
               class="icon-button"
               aria-label="{{ localization::tr("Auto DJ") }}"
               aria-pressed="{{ page.enabled("auto_dj") }}"
@@ -270,7 +268,7 @@
               <span class="icon" data-icon="auto-dj"></span>
             </button>
             <button
-              id="shuffle" form="transport-form" name="action" value="shuffle"
+              id="shuffle" form="transport-form" formaction="/api/playback/shuffle" name="payload" value='{"enabled":{{ !page.enabled("shuffle") }}}'
               class="icon-button"
               aria-label="{{ localization::tr("Shuffle") }}"
               aria-pressed="{{ page.enabled("shuffle") }}"
@@ -279,20 +277,20 @@
               <span class="icon" data-icon="shuffle"></span>
             </button>
             <button
-              id="previous" form="transport-form" name="action" value="previous"
+              id="previous" form="transport-form" formaction="/api/playback/previous"
               class="icon-button"
               aria-label="{{ localization::tr("Previous") }}"
             >
               <span class="icon" data-icon="previous"></span>
             </button>
-            <button id="play-pause" form="transport-form" name="action" value="{% if page.paused %}play{% else %}pause{% endif %}" class="play-button" aria-label="{% if page.paused %}{{ localization::tr("Play") }}{% else %}{{ localization::tr("Pause") }}{% endif %}">
+            <button id="play-pause" form="transport-form" formaction="/api/playback/{% if page.paused %}play{% else %}pause{% endif %}" class="play-button" aria-label="{% if page.paused %}{{ localization::tr("Play") }}{% else %}{{ localization::tr("Pause") }}{% endif %}">
               <span class="icon" data-icon="{% if page.paused %}play{% else %}pause{% endif %}"></span>
             </button>
-            <button id="next" form="transport-form" name="action" value="next" class="icon-button" aria-label="{{ localization::tr("Next") }}">
+            <button id="next" form="transport-form" formaction="/api/playback/next" class="icon-button" aria-label="{{ localization::tr("Next") }}">
               <span class="icon" data-icon="next"></span>
             </button>
             <button
-              id="repeat" form="transport-form" name="action" value="repeat"
+              id="repeat" form="transport-form" formaction="/api/playback/repeat" name="payload" value='{"mode":"{% if page.controls["repeat"] == "off" %}all{% else if page.controls["repeat"] == "all" %}one{% else %}off{% endif %}"}'
               class="icon-button"
               aria-label="{{ page.repeat_title() }}"
               aria-pressed="false"
@@ -322,12 +320,12 @@
               step="1000"
               value="{{ page.position }}"
               aria-label="{{ localization::tr("Playback position") }}"
-            /><time id="duration">{{ page.duration_time() }}</time><noscript><button class="without-js" form="transport-form" name="action" value="seek">{{ localization::tr("Save") }}</button></noscript>
+            /><time id="duration">{{ page.duration_time() }}</time><noscript><button class="without-js" form="transport-form" formaction="/api/playback/seek">{{ localization::tr("Save") }}</button></noscript>
           </div>
         </div>
         <div class="volume">
           <button
-            id="current-favorite" form="current-track-form" name="action" value="favorite"
+            id="current-favorite" form="current-track-form" formaction="/api/favorite"
             class="icon-button"
             aria-label="{{ localization::tr("Favorite current track") }}"
             aria-pressed="{{ page.current_favorite }}"
@@ -344,7 +342,7 @@
             <span class="icon" data-icon="collapse-right"></span>
           </a>
           <button
-            id="mute" form="transport-form" name="action" value="mute"
+            id="mute" form="transport-form" formaction="/api/playback/mute" name="payload" value='{"muted":{{ !page.enabled("muted") }}}'
             class="icon-button"
             aria-label="{{ localization::tr("Mute") }}"
             aria-pressed="{{ page.enabled("muted") }}"
@@ -358,7 +356,7 @@
             step="0.01"
             value="{{ page.volume }}"
             aria-label="{{ localization::tr("Volume") }}"
-          /><noscript><button class="without-js" form="transport-form" name="action" value="volume">{{ localization::tr("Save") }}</button></noscript>
+          /><noscript><button class="without-js" form="transport-form" formaction="/api/playback/volume">{{ localization::tr("Save") }}</button></noscript>
         </div>
       </footer>
       <div id="toast" role="status" hidden></div>
@@ -509,11 +507,11 @@
       role="menu"
       aria-label="{{ localization::tr("More actions") }}"
     >
-      <button class="menu-item" role="menuitem" form="current-track-form" name="action" value="activate">{{ localization::tr("Play") }}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" name="action" value="queue-next">{{ localization::tr("Play Next") }}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" name="action" value="queue-later">{{ localization::tr("Play Later") }}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" name="action" value="favorite">{% if page.current_favorite %}{{ localization::tr("Remove from Favorites") }}{% else %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
-      <button class="menu-item" role="menuitem" form="current-track-form" name="action" value="queue-remove">{{ localization::tr("Remove from Queue") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/activate">{{ localization::tr("Play") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/next">{{ localization::tr("Play Next") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/reorder" name="payload" value='{"ids":["{{ page.current_id() }}"]}'>{{ localization::tr("Play Later") }}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/favorite">{% if page.current_favorite %}{{ localization::tr("Remove from Favorites") }}{% else %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
+      <button class="menu-item" role="menuitem" form="current-track-form" formaction="/api/queue/item">{{ localization::tr("Remove from Queue") }}</button>
     </div>
     <div
       id="context-submenu"

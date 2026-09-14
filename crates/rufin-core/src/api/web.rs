@@ -39,9 +39,9 @@ async fn translations() -> Response<Body> {
 
 #[derive(Template)]
 #[template(path = "index.html")]
-pub(super) struct Index<'a> {
+struct Index<'a> {
     pub version: &'static str,
-    pub page: &'a browser::Page,
+    pub page: &'a Page,
 }
 
 struct Row<'a> {
@@ -63,7 +63,7 @@ impl Row<'_> {
             "id".into(),
             self.data["id"].to_string().trim_matches('"').into(),
         );
-        browser::link(&query)
+        link(&query)
     }
     fn artwork(&self, kind: &str) -> String {
         let mut query = HashMap::new();
@@ -87,7 +87,7 @@ impl Row<'_> {
         )
     }
     fn return_to(&self) -> String {
-        browser::link(self.parameters)
+        link(self.parameters)
     }
     fn selection(&self, kind: &str) -> String {
         let mut value = json!({"kind":kind,"id":self.data["id"],"uri":self.data["uri"],"favorite":!self.favorite()});
@@ -338,6 +338,9 @@ pub(super) fn page(
 
 pub(super) fn routes() -> Router<ProductHandles> {
     Router::new()
+        .route("/", get(index))
+        .route("/session", post(login))
+        .route("/session/logout", post(logout))
         .route("/translations.js", get(translations))
         .route(
             "/showcase.css",
@@ -597,4 +600,370 @@ async fn icon(
         .map(|(_, bytes)| *bytes)
         .ok_or_else(|| error(StatusCode::NOT_FOUND, "Icon not found"))?;
     Ok(asset("image/svg+xml", bytes))
+}
+
+struct QueueRow {
+    pub id: String,
+    pub title: String,
+    pub artist: String,
+}
+
+struct Page {
+    pub connected: bool,
+    pub appearance: Value,
+    pub csrf: String,
+    pub error: String,
+    pub source: String,
+    pub sources: Vec<(String, String)>,
+    pub parameters: HashMap<String, String>,
+    pub content: String,
+    pub previous: Option<String>,
+    pub next: Option<String>,
+    pub playing: String,
+    pub current_favorite: bool,
+    pub artist: String,
+    pub album: String,
+    pub controls: Value,
+    pub position: u64,
+    pub duration: u64,
+    pub queue: Vec<QueueRow>,
+    pub queue_total: usize,
+    pub paused: bool,
+    pub volume: f64,
+    pub folders: Vec<(String, String)>,
+}
+
+fn link(parameters: &HashMap<String, String>) -> String {
+    format!(
+        "/?{}",
+        url::form_urlencoded::Serializer::new(String::new())
+            .extend_pairs(parameters)
+            .finish()
+    )
+}
+
+impl Page {
+    pub fn theme(&self) -> String {
+        self.appearance["colors"]["color-scheme"]
+            .as_str()
+            .unwrap_or_else(|| self.appearance["theme"].as_str().unwrap_or("System"))
+            .to_lowercase()
+    }
+    pub fn color_style(&self) -> String {
+        self.appearance["colors"]
+            .as_object()
+            .into_iter()
+            .flatten()
+            .filter_map(|(name, value)| value.as_str().map(|value| format!("{name}:{value};")))
+            .collect()
+    }
+    pub fn parent_view(&self) -> &str {
+        match self.view() {
+            "album" => "albums",
+            "artist" => "artists",
+            "genre" => "home",
+            "playlist" => "playlists",
+            "smart-playlist" => "smart-playlists",
+            _ => "",
+        }
+    }
+    pub fn can_play_collection(&self) -> bool {
+        !self.parent_view().is_empty()
+            || (!self.source.is_empty() && matches!(self.view(), "tracks" | "favorites"))
+    }
+    pub fn needs_source(&self) -> bool {
+        self.source.is_empty()
+            && !matches!(
+                self.view(),
+                "playlists" | "playlist" | "smart-playlists" | "smart-playlist"
+            )
+    }
+
+    pub fn current_id(&self) -> &str {
+        self.controls["current"]["id"].as_str().unwrap_or_default()
+    }
+    pub fn has_current(&self) -> bool {
+        !self.controls["current"].is_null()
+    }
+    pub fn current_selection(&self) -> String {
+        json!({"kind":"track", "uri":self.controls["current"]["track"]["uri"], "favorite":!self.current_favorite}).to_string()
+    }
+    pub fn position_time(&self) -> String {
+        format!("{}:{:02}", self.position / 60000, self.position / 1000 % 60)
+    }
+    pub fn duration_time(&self) -> String {
+        format!("{}:{:02}", self.duration / 60000, self.duration / 1000 % 60)
+    }
+    pub fn nav(&self, view: &str) -> String {
+        let mut parameters = HashMap::from([("view".into(), view.into())]);
+        if !self.source.is_empty() {
+            parameters.insert("source".into(), self.source.clone());
+        }
+        if let Some(folder) = self.parameters.get("folder") {
+            parameters.insert("folder".into(), folder.clone());
+        }
+        link(&parameters)
+    }
+    pub fn current(&self) -> String {
+        link(&self.parameters)
+    }
+    pub fn view(&self) -> &str {
+        self.parameters
+            .get("view")
+            .map(String::as_str)
+            .unwrap_or("home")
+    }
+    pub fn query(&self) -> &str {
+        self.parameters.get("q").map(String::as_str).unwrap_or("")
+    }
+    pub fn folder(&self) -> &str {
+        self.parameters
+            .get("folder")
+            .map(String::as_str)
+            .unwrap_or("")
+    }
+    pub fn source_name(&self) -> &str {
+        self.sources
+            .iter()
+            .find(|(id, _)| id == &self.source)
+            .map(|(_, name)| name.as_str())
+            .unwrap_or("")
+    }
+    pub fn sort(&self) -> &str {
+        self.parameters
+            .get("sort")
+            .map(String::as_str)
+            .unwrap_or(match self.view() {
+                "album" => "track_number",
+                "playlist" => "position",
+                _ => "title",
+            })
+    }
+    pub fn descending(&self) -> bool {
+        self.parameters
+            .get("descending")
+            .is_some_and(|v| v == "true")
+    }
+    pub fn enabled(&self, name: &str) -> bool {
+        self.controls[name].as_bool().unwrap_or(false)
+    }
+    pub fn repeat_title(&self) -> String {
+        localization::tr(match self.controls["repeat"].as_str() {
+            Some("all") => "Repeat all",
+            Some("one") => "Repeat one",
+            _ => "Repeat off",
+        })
+    }
+    pub fn title(&self) -> String {
+        if let Some(title) = self.parameters.get("title") {
+            return title.clone();
+        }
+        localization::tr(match self.view() {
+            "home" => "Home",
+            "favorites" => "Favorites",
+            "albums" => "Albums",
+            "artists" => "Artists",
+            "playlists" => "Playlists",
+            "smart-playlists" => "Smart Playlists",
+            _ => "Tracks",
+        })
+    }
+}
+
+async fn index(
+    State(products): State<ProductHandles>,
+    Extension(auth): Extension<Arc<Authorization>>,
+    headers: hyper::HeaderMap,
+    Query(mut parameters): Query<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    if parameters.remove("reverse").is_some() {
+        parameters.insert(
+            "descending".into(),
+            (!boolean(&parameters, "descending")?).to_string(),
+        );
+    }
+    let csrf = session(&auth, &headers);
+    let mut page = Page {
+        connected: csrf.is_some(),
+        appearance: if csrf.is_some() {
+            catalog::appearance_data(&products)
+        } else {
+            json!({"theme":"System", "accent":"System", "colors":{}})
+        },
+        csrf: csrf.unwrap_or_default(),
+        error: if parameters.get("login").is_some_and(|v| v == "failed") {
+            localization::tr("The API token was not accepted. Please connect again.")
+        } else {
+            String::new()
+        },
+        source: String::new(),
+        sources: vec![],
+        parameters: HashMap::new(),
+        content: String::new(),
+        previous: None,
+        next: None,
+        playing: String::new(),
+        current_favorite: false,
+        artist: String::new(),
+        album: String::new(),
+        controls: Value::Null,
+        position: 0,
+        duration: 0,
+        queue: vec![],
+        queue_total: 0,
+        paused: true,
+        volume: 1.0,
+        folders: vec![],
+    };
+    if page.connected {
+        let configured = products.source.list_sources();
+        page.sources = configured
+            .sources
+            .iter()
+            .map(|s| (s.id.to_string(), s.name.clone()))
+            .collect();
+        if parameters.get("source").is_some_and(|s| s.is_empty()) {
+            parameters.remove("source");
+        }
+        if !parameters.contains_key("source") {
+            if let Some(source) = configured
+                .selected_source_id
+                .as_ref()
+                .map(ToString::to_string)
+                .or_else(|| page.sources.first().map(|s| s.0.clone()))
+            {
+                parameters.insert("source".into(), source);
+            }
+        }
+        page.source = parameters.get("source").cloned().unwrap_or_default();
+        if let Some(selected) = products
+            .source
+            .selected_library()
+            .filter(|s| s.source_id.as_str() == page.source)
+        {
+            page.folders = selected
+                .music_folders
+                .iter()
+                .map(|f| (f.object_id.clone(), f.name.clone()))
+                .collect();
+            if !parameters.contains_key("folder") {
+                if let Some(folder) = &selected.music_folder_object_id {
+                    parameters.insert("folder".into(), folder.clone());
+                }
+            }
+        }
+        parameters.insert("limit".into(), "48".into());
+        page.parameters = parameters.clone();
+        let current = products.playback.updates.current();
+        let playback = playback_json(current.as_deref());
+        page.position = playback["position_ms"].as_u64().unwrap_or_default();
+        page.duration = playback["duration_ms"].as_u64().unwrap_or_default();
+        let queue = queue_json(current.as_deref(), 5);
+        page.queue_total = queue["total"].as_u64().unwrap_or_default() as usize;
+        page.queue = queue["window"]
+            .as_array()
+            .into_iter()
+            .flatten()
+            .map(|row| QueueRow {
+                id: row["id"].as_str().unwrap_or_default().into(),
+                title: row["track"]["title"].as_str().unwrap_or_default().into(),
+                artist: row["track"]["artist"].as_str().unwrap_or_default().into(),
+            })
+            .collect();
+        page.artist = playback["current"]["track"]["artist"]
+            .as_str()
+            .unwrap_or_default()
+            .into();
+        page.album = playback["current"]["track"]["album"]
+            .as_str()
+            .unwrap_or_default()
+            .into();
+        page.paused = !matches!(
+            playback["state"].as_str(),
+            Some("playing" | "resolving" | "buffering")
+        );
+        if let Some(uri) = playback["current"]["track"]["uri"].as_str() {
+            page.current_favorite = products
+                .library
+                .favorite(&library::FavoriteTarget::Track(uri.into()))
+                .await
+                .map_err(internal)?;
+        }
+        page.controls = playback.clone();
+        page.volume = playback["volume"].as_f64().unwrap_or(1.0);
+        page.playing = playback["current"]["track"]["title"]
+            .as_str()
+            .unwrap_or_default()
+            .into();
+        if !page.needs_source() {
+            match catalog_page(products, parameters.clone()).await {
+                Ok(value) => {
+                    let count = [
+                        "tracks",
+                        "entries",
+                        "albums",
+                        "artists",
+                        "playlists",
+                        "smart_playlists",
+                    ]
+                    .iter()
+                    .find_map(|key| value[*key].as_array().map(Vec::len))
+                    .unwrap_or(0);
+                    let offset = number(&parameters, "offset", 0)?;
+                    let mut target = parameters.clone();
+                    if offset > 0 {
+                        target.insert("offset".into(), offset.saturating_sub(48).to_string());
+                        page.previous = Some(link(&target));
+                    }
+                    if count == 48 {
+                        target.insert("offset".into(), offset.saturating_add(48).to_string());
+                        page.next = Some(link(&target));
+                    }
+                    page.content = render(&parameters, &value, &page.csrf)?;
+                }
+                Err((_, message)) => {
+                    page.error = message.0["error"].as_str().unwrap_or_default().into()
+                }
+            }
+        }
+    }
+    let html = Index {
+        version: env!("CARGO_PKG_VERSION"),
+        page: &page,
+    }
+    .render()
+    .map_err(internal)?;
+    Ok(Response::builder()
+        .header("content-type", "text/html; charset=utf-8")
+        .header("cache-control", "no-store")
+        .header("referrer-policy", "same-origin")
+        .body(Body::from(html))
+        .expect("page headers"))
+}
+
+async fn catalog_page(
+    products: ProductHandles,
+    mut parameters: HashMap<String, String>,
+) -> Result<Value, Error> {
+    let view = parameters
+        .get("view")
+        .cloned()
+        .unwrap_or_else(|| "home".into());
+    if view == "favorites" {
+        parameters.insert("favorites".into(), "true".into());
+    }
+    match view.as_str() {
+        "home" => catalog::home_data(&products, &parameters).await,
+        "tracks" | "favorites" => tracks_data(&products, &parameters).await,
+        "albums" => catalog::albums_data(&products, &parameters).await,
+        "album" => catalog::album_tracks_data(&products, &parameters).await,
+        "artists" => catalog::artists_data(&products, &parameters).await,
+        "artist" => catalog::artist_tracks_data(&products, &parameters).await,
+        "genre" => catalog::genre_tracks_data(&products, &parameters).await,
+        "playlists" => playlists::list_data(&products, &parameters).await,
+        "playlist" => playlists::entries_data(&products, &parameters).await,
+        "smart-playlists" => catalog::smart_playlists_data(&products, &parameters).await,
+        "smart-playlist" => catalog::smart_tracks_data(&products, &parameters).await,
+        _ => Err(bad_request("Unknown library view")),
+    }
 }

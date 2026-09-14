@@ -1,36 +1,37 @@
 {% macro icon(name) %}<span class="icon" data-icon="{{ name }}" aria-hidden="true"></span>{% endmacro %}
 {% macro action(label, name, action, class) %}<button type="button" class="{{ class }}" data-action="{{ action }}" title="{{ label }}" aria-label="{{ label }}"{% if action == "menu" %} aria-haspopup="menu"{% endif %}>{% call icon(name) %}{% endcall %}</button>{% endmacro %}
-{% macro favorite(row, class, embedded) %}{% if !embedded %}<form method="post" action="/action" data-enhanced-form><input type="hidden" name="csrf" value="{{ row.csrf }}" /><input type="hidden" name="return" value="{{ row.return_to() }}" /><input type="hidden" name="selection" value="{{ row.selection("track") }}" />{% endif %}<button type="submit" name="action" value="favorite" class="{{ class }}" data-action="favorite" data-favorite-uri="{{ row.text("uri") }}" title="{{ localization::tr("Favorite") }}" aria-label="{{ localization::tr("Favorite") }}" aria-pressed="{{ row.favorite() }}">{% if row.favorite() %}{% call icon("favorite-filled") %}{% endcall %}{% else %}{% call icon("favorite") %}{% endcall %}{% endif %}</button>{% if !embedded %}</form>{% endif %}{% endmacro %}
+{% macro favorite(row, kind, class, embedded) %}{% if !embedded %}<form method="post" action="/api/queue" data-enhanced-form><input type="hidden" name="csrf" value="{{ row.csrf }}" /><input type="hidden" name="return" value="{{ row.return_to() }}" />{% endif %}<button type="submit" formaction="/api/favorite" name="payload" value="{{ row.selection(kind) }}" class="{{ class }}" data-action="favorite" data-favorite-uri="{{ row.text("uri") }}" title="{{ localization::tr("Favorite") }}" aria-label="{{ localization::tr("Favorite") }}" aria-pressed="{{ row.favorite() }}">{% if row.favorite() %}{% call icon("favorite-filled") %}{% endcall %}{% else %}{% call icon("favorite") %}{% endcall %}{% endif %}</button>{% if !embedded %}</form>{% endif %}{% endmacro %}
 {% macro menu_button(row, class) %}
 <button type="button" class="{{ class }}" data-action="menu" popovertarget="{{ row.menu_id }}" aria-haspopup="menu" aria-label="{{ localization::tr("More actions") }}" title="{{ localization::tr("More actions") }}">{% call icon("more") %}{% endcall %}</button>
 {% endmacro %}
 {% macro media_menu(row, kind) %}
 <div id="{{ row.menu_id }}" class="media-menu" popover="auto" role="menu" aria-label="{{ localization::tr("More actions") }}">
-  <button class="menu-item" role="menuitem" name="action" value="replace">{% call icon("play") %}{% endcall %}{{ localization::tr("Play") }}</button>
-  <button class="menu-item" role="menuitem" name="action" value="next">{% call icon("play-next") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
-  <button class="menu-item" role="menuitem" name="action" value="append">{% call icon("play-last") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
+  <button class="menu-item" role="menuitem" name="mode" value="replace">{% call icon("play") %}{% endcall %}{{ localization::tr("Play") }}</button>
+  <button class="menu-item" role="menuitem" name="mode" value="next">{% call icon("play-next") %}{% endcall %}{{ localization::tr("Play Next") }}</button>
+  <button class="menu-item" role="menuitem" name="mode" value="append">{% call icon("play-last") %}{% endcall %}{{ localization::tr("Play Later") }}</button>
   {% if kind == "track" || kind == "album" || kind == "artist" %}
-  <button class="menu-item" role="menuitem" name="action" value="favorite">{% if row.favorite() %}{% call icon("favorite-filled") %}{% endcall %}{{ localization::tr("Remove from Favorites") }}{% else %}{% call icon("favorite") %}{% endcall %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
+  <button class="menu-item" role="menuitem" formaction="/api/favorite" name="payload" value="{{ row.selection(kind) }}">{% if row.favorite() %}{% call icon("favorite-filled") %}{% endcall %}{{ localization::tr("Remove from Favorites") }}{% else %}{% call icon("favorite") %}{% endcall %}{{ localization::tr("Add to Favorites") }}{% endif %}</button>
   {% endif %}
 </div>
 {% endmacro %}
 {% macro card(row, kind) %}
 <article class="album-card" data-row="{{ row.data }}" data-kind="{{ kind }}">
-  <form method="post" action="/action" data-enhanced-form>
+  <form method="post" action="/api/queue" data-enhanced-form>
     <input type="hidden" name="csrf" value="{{ row.csrf }}" />
     <input type="hidden" name="return" value="{{ row.return_to() }}" />
-    <input type="hidden" name="selection" value="{{ row.selection(kind) }}" />
+    <input type="hidden" name="payload" value="{{ row.selection(kind) }}" />
+
   <div class="cover-wrap">
-    {% if kind == "track" %}<button type="submit" name="action" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% else %}<a href="{{ row.href(kind) }}" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% endif %}<div class="cover">{% call icon("cover-fallback") %}{% endcall %}<noscript><img src="{{ row.artwork(kind) }}" loading="lazy" alt="" /></noscript></div>{% if kind == "track" %}</button>{% else %}</a>{% endif %}
+    {% if kind == "track" %}<button type="submit" name="mode" value="replace" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% else %}<a href="{{ row.href(kind) }}" class="cover-open" data-action="open" aria-label="{{ row.title() }}">{% endif %}<div class="cover">{% call icon("cover-fallback") %}{% endcall %}<noscript><img src="{{ row.artwork(kind) }}" loading="lazy" alt="" /></noscript></div>{% if kind == "track" %}</button>{% else %}</a>{% endif %}
     <div class="cover-controls">
-      <button type="submit" name="action" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("play-next") %}{% endcall %}</button>
-      <button type="submit" name="action" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("play") %}{% endcall %}</button>
-      <button type="submit" name="action" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("play-last") %}{% endcall %}</button>
-      {% if kind == "track" || kind == "album" || kind == "artist" %}{% call favorite(row, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
+      <button type="submit" name="mode" value="next" data-action="next" class="cover-next" aria-label="{{ localization::tr("Play Next") }}">{% call icon("play-next") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="replace" data-action="replace" class="cover-play" aria-label="{{ localization::tr("Play") }}">{% call icon("play") %}{% endcall %}</button>
+      <button type="submit" name="mode" value="append" data-action="append" class="cover-last" aria-label="{{ localization::tr("Play Later") }}">{% call icon("play-last") %}{% endcall %}</button>
+      {% if kind == "track" || kind == "album" || kind == "artist" %}{% call favorite(row, kind, "icon-button cover-favorite", true) %}{% endcall %}{% endif %}
       {% call menu_button(row, "cover-menu") %}{% endcall %}
     </div>
   </div>
-  {% if kind == "track" %}<button type="submit" name="action" value="replace" class="collection-title" data-action="open">{{ row.title() }}</button>{% else %}<a class="collection-title" href="{{ row.href(kind) }}" data-action="open">{{ row.title() }}</a>{% endif %}
+  {% if kind == "track" %}<button type="submit" name="mode" value="replace" class="collection-title" data-action="open">{{ row.title() }}</button>{% else %}<a class="collection-title" href="{{ row.href(kind) }}" data-action="open">{{ row.title() }}</a>{% endif %}
   {% if row.text("artist") != "" %}<button type="button" class="metadata-link" data-action="artists">{{ row.text("artist") }}</button>{% else %}<p>{{ row.track_count() }}</p>{% endif %}
   {% if kind == "track" %}<button type="button" class="metadata-link" data-action="albums">{{ row.text("album") }}</button>{% endif %}
   {% call media_menu(row, kind) %}{% endcall %}
