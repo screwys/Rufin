@@ -214,6 +214,11 @@ impl EqualizerSurface {
                 syncing: Rc::new(Cell::new(false)),
             }),
         };
+        // Keep callback state alive until the mounted widget is released.
+        let controls = Rc::clone(&surface.controls);
+        let _ = surface
+            .root
+            .add_weak_ref_notify_local(move || drop(controls));
         surface.set_settings(settings);
         surface
     }
@@ -454,7 +459,11 @@ mod tests {
         gtk::init().expect("GTK display");
         crate::register_resources().expect("Rufin resources");
         let surface = EqualizerSurface::new(&playback::EqualizerSettings::default());
-        surface.connect_changed(|_| {});
+        let changes = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let recorded = std::rc::Rc::clone(&changes);
+        surface.connect_changed(move |settings| recorded.borrow_mut().push(settings));
+        let mounted = surface.root.clone();
+        let state = std::rc::Rc::downgrade(&surface.controls);
         let root = surface.root.downgrade();
         let controls = surface
             .controls
@@ -463,7 +472,14 @@ mod tests {
             .map(gtk::prelude::ObjectExt::downgrade)
             .collect::<Vec<_>>();
         drop(surface);
+        let retained = state.upgrade().expect("mounted equalizer controls");
+        retained.preset.set_selected(2);
+        assert_eq!(changes.borrow().len(), 1);
+        assert_eq!(changes.borrow()[0], retained.settings());
+        drop(retained);
+        drop(mounted);
         while gtk::glib::MainContext::default().iteration(false) {}
+        assert!(state.upgrade().is_none());
         assert!(root.upgrade().is_none());
         assert!(controls.iter().all(|control| control.upgrade().is_none()));
     }
