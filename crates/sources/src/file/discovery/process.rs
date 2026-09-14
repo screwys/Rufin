@@ -275,16 +275,22 @@ mod tests {
             .mount(&server)
             .await;
         Mock::given(path("/audio"))
-            .respond_with(ResponseTemplate::new(200).set_body_bytes(bytes.clone()))
+            .respond_with(
+                ResponseTemplate::new(200)
+                    .set_body_bytes(bytes.clone())
+                    .set_delay(Duration::from_secs(2)),
+            )
             .mount(&server)
             .await;
         let slow_uri = format!("{}/slow", server.uri());
         let audio_uri = format!("{}/audio", server.uri());
         tokio::task::spawn_blocking(move || {
-            let mut reader = Reader::default();
+            let mut reader = Reader::network();
+            let network_timeout = reader.timeout_seconds.replace(1);
             let mut input = std::io::Cursor::new(bytes);
             let error = reader.read_input(&mut input, &slow_uri).unwrap_err();
             assert_eq!(error.kind(), std::io::ErrorKind::TimedOut);
+            reader.timeout_seconds = network_timeout;
             assert!(reader.read_input(&mut input, &audio_uri).unwrap().is_some());
         })
         .await
