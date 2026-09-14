@@ -23,7 +23,7 @@
       {% if section.block != "Genres" %}<div class="home-paging">{% call m::action(localization::tr("Previous"), "back", "previous-home", "icon-button") %}{% endcall %}{% call m::action(localization::tr("Next"), "forward", "next-home", "icon-button") %}{% endcall %}</div>{% endif %}
     </div>
     {% if section.block == "Genres" %}
-      <div class="home-genres">{% for row in section.items %}<button type="button" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title() }}</button>{% endfor %}</div>
+      <div class="home-genres">{% for row in section.items %}<a href="{{ row.href("genre") }}" data-row="{{ row.data }}" data-kind="genre" data-action="open">{{ row.title() }}</a>{% endfor %}</div>
     {% else %}
       <div class="home-row" hx-sync="this:replace"><div class="album-grid">{% for row in section.items %}{% call m::card(row, row.text("kind")) %}{% endcall %}{% endfor %}</div></div>
     {% endif %}

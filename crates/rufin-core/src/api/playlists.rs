@@ -93,8 +93,17 @@ async fn list(
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let products = &products;
-    let parameters = &parameters;
+    web::page(
+        &headers,
+        &parameters,
+        list_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn list_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let prefer_server_covers = products
         .source
         .shared
@@ -136,9 +145,7 @@ async fn list(
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"playlists":rows.iter().map(|row| json!({"id":row.playlist_key,"object_id":row.object_id,"source":row.source_id,"name":row.name,"writable":row.writable,"track_count":row.track_count,"duration_ms":row.duration_millis,"artwork_count":crate::playlists::playlist_artwork_bindings(row, prefer_server_covers).len()})).collect::<Vec<_>>()}),
     )
 }
@@ -148,8 +155,17 @@ async fn entries(
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let products = &products;
-    let parameters = &parameters;
+    web::page(
+        &headers,
+        &parameters,
+        entries_data(&products, &parameters).await?,
+    )
+}
+
+pub(super) async fn entries_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
     let cancellation = library::ReadCancellation::new();
     let id = key(parameters, "id")?;
     let sort = entry_sort(
@@ -179,9 +195,7 @@ async fn entries(
         )
         .await
         .map_err(internal)?;
-    web::page(
-        &headers,
-        &parameters,
+    Ok(
         json!({"offset":offset,"limit":limit,"entries":rows.iter().map(|row| json!({"id":row.playlist_entry_key,"position":row.position,"uri":row.media_uri,"title":row.title,"artist":row.artist,"album":row.album,"favorite":row.favorite,"duration_ms":row.duration_millis})).collect::<Vec<_>>()}),
     )
 }

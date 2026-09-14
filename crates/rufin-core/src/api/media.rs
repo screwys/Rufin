@@ -73,7 +73,7 @@ async fn metadata(
     ))
 }
 
-async fn favorite(
+pub(super) async fn favorite(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -245,7 +245,7 @@ async fn random(
     Ok(json_response(StatusCode::OK, json!({"empty":empty})))
 }
 
-async fn play_next(
+pub(super) async fn play_next(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
@@ -325,7 +325,7 @@ pub(super) fn lyrics_json(current: &CurrentLyrics, settings: &lyrics::Settings) 
     value
 }
 
-async fn reorder(
+pub(super) async fn reorder(
     State(products): State<ProductHandles>,
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {

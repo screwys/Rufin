@@ -50,14 +50,15 @@ pub async fn serve(
             "An API token is required",
         ));
     }
-    let authorization = Arc::new(Authorization {
-        token: format!("Bearer {token}"),
-        failures: Mutex::new(VecDeque::new()),
-    });
+    let authorization = Arc::new(Authorization::new(&token));
     let router = routes()
         .merge(media::routes())
-        .route_layer(middleware::from_fn_with_state(authorization, authorize))
+        .route_layer(middleware::from_fn_with_state(
+            authorization.clone(),
+            authorize,
+        ))
         .merge(web::routes())
+        .layer(Extension(authorization))
         .with_state(products);
     let mut connections = JoinSet::new();
     loop {
@@ -93,7 +94,8 @@ pub(super) fn routes() -> Router<ProductHandles> {
         .route("/api/queue/smart-playlist", post(queue_play))
         .route("/api/queue/source", post(queue_play))
         .route("/api/queue/activate", post(queue_activate))
-        .route("/api/queue/item", delete(queue_remove))
+        .route("/api/queue/item", delete(queue_remove).post(queue_remove))
+        .route("/api/queue/clear", post(queue_clear))
         .route("/api/playback/{action}", post(playback_command))
         .merge(source::routes())
         .merge(playlists::routes())
@@ -133,24 +135,33 @@ async fn tracks(
     headers: hyper::HeaderMap,
     Query(parameters): Query<HashMap<String, String>>,
 ) -> Result<Response<Body>, Error> {
-    let products = &products;
-    let parameters = &parameters;
-    let offset = number(&parameters, "offset", 0)?;
-    let limit = number(&parameters, "limit", 100)?.min(256);
+    web::page(
+        &headers,
+        &parameters,
+        tracks_data(&products, &parameters).await?,
+    )
+}
+
+async fn tracks_data(
+    products: &ProductHandles,
+    parameters: &HashMap<String, String>,
+) -> Result<Value, Error> {
+    let offset = number(parameters, "offset", 0)?;
+    let limit = number(parameters, "limit", 100)?.min(256);
     let rows = products
         .source
         .tracks(
-            sources::SourceId::new(required(&parameters, "source")?),
+            sources::SourceId::new(required(parameters, "source")?),
             parameters.get("folder").cloned(),
             parameters.get("q").cloned().unwrap_or_default(),
-            boolean(&parameters, "favorites")?,
+            boolean(parameters, "favorites")?,
             track_sort(
                 parameters
                     .get("sort")
                     .map(String::as_str)
                     .unwrap_or("title"),
             )?,
-            boolean(&parameters, "descending")?,
+            boolean(parameters, "descending")?,
             offset,
             limit,
         )
@@ -159,11 +170,7 @@ async fn tracks(
         .map_err(internal)?
         .map_err(bad_request)?;
     let rows = rows.iter().map(track_row_json).collect::<Vec<_>>();
-    web::page(
-        &headers,
-        &parameters,
-        json!({"offset":offset,"limit":limit,"tracks":rows}),
-    )
+    Ok(json!({"offset":offset,"limit":limit,"tracks":rows}))
 }
 
 async fn queue_state(
@@ -196,7 +203,16 @@ async fn queue_play(
     request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
-    let path = request.uri().path().to_owned();
+    let form_return = request
+        .extensions()
+        .get::<SubmittedForm>()
+        .map(|form| form.0.get("return").cloned().unwrap_or_default());
+    let mut kind = request
+        .uri()
+        .path()
+        .strip_prefix("/api/queue/")
+        .unwrap_or("track")
+        .to_owned();
     #[derive(Deserialize)]
     struct Input {
         mode: String,
@@ -205,8 +221,57 @@ async fn queue_play(
         #[serde(flatten)]
         selection: Value,
     }
-    let input: Input = body(request).await?;
-    let folder = if path != "/api/queue/source" {
+    let mut input: Input = body(request).await?;
+    if form_return.is_some() {
+        kind = input.selection["kind"].as_str().unwrap_or(&kind).to_owned();
+    }
+    if let Some(form_return) = form_return.filter(|_| input.mode == "replace") {
+        let parameters: HashMap<String, String> = url::form_urlencoded::parse(
+            form_return
+                .strip_prefix("/?")
+                .unwrap_or_default()
+                .as_bytes(),
+        )
+        .into_owned()
+        .collect();
+        let selection = &mut input.selection;
+        if selection["kind"] == "track" {
+            let view = parameters.get("view").map(String::as_str).unwrap_or("home");
+            if matches!(
+                view,
+                "tracks"
+                    | "favorites"
+                    | "album"
+                    | "artist"
+                    | "genre"
+                    | "playlist"
+                    | "smart-playlist"
+            ) {
+                selection["anchor_uri"] = selection["uris"][0].clone();
+                if view == "playlist" {
+                    selection["anchor_entry"] = selection["id"].clone();
+                }
+                selection["kind"] = json!(if matches!(view, "tracks" | "favorites") {
+                    "source"
+                } else {
+                    view
+                });
+                for key in ["source", "folder", "q", "sort"] {
+                    if let Some(value) = parameters.get(key) {
+                        selection[key] = json!(value);
+                    }
+                }
+                if let Some(id) = parameters.get("id") {
+                    selection["id"] = serde_json::from_str(id).map_err(bad_request)?;
+                }
+                selection["favorites"] = json!(view == "favorites");
+                selection["descending"] =
+                    json!(parameters.get("descending").is_some_and(|v| v == "true"));
+            }
+        }
+        kind = selection["kind"].as_str().unwrap_or(&kind).to_owned();
+    }
+    let folder = if kind != "source" {
         if let Some(folder) = input.selection.get("folder").and_then(Value::as_str) {
             let source = input
                 .selection
@@ -228,7 +293,7 @@ async fn queue_play(
     } else {
         None
     };
-    let shuffled_start = path != "/api/queue"
+    let shuffled_start = kind != "track"
         && input.selection.get("anchor_uri").is_none_or(Value::is_null)
         && input
             .selection
@@ -244,8 +309,8 @@ async fn queue_play(
             ));
         }
     };
-    let selection = match path.as_str() {
-        "/api/queue" => {
+    let selection = match kind.as_str() {
+        "track" => {
             #[derive(Deserialize)]
             struct Uris {
                 uris: Vec<String>,
@@ -256,7 +321,7 @@ async fn queue_play(
                 provenance: playback::Provenance::Manual,
             }
         }
-        "/api/queue/album" | "/api/queue/playlist" | "/api/queue/artist" | "/api/queue/genre" => {
+        "album" | "playlist" | "artist" | "genre" => {
             #[derive(Deserialize)]
             struct Collection {
                 id: Value,
@@ -271,13 +336,13 @@ async fn queue_play(
                 album_artists: bool,
             }
             let input: Collection = serde_json::from_value(input.selection).map_err(bad_request)?;
-            if !path.ends_with("/playlist") {
-                let collection = if path.ends_with("/artist") {
+            if !(kind == "playlist") {
+                let collection = if kind == "artist" {
                     library::QueueCollection::ArtistKey {
                         key: serde_json::from_value(input.id).map_err(bad_request)?,
                         album_artist: input.album_artists,
                     }
-                } else if path.ends_with("/genre") {
+                } else if kind == "genre" {
                     library::QueueCollection::Genre(
                         serde_json::from_value(input.id).map_err(bad_request)?,
                     )
@@ -294,13 +359,11 @@ async fn queue_play(
                     folder,
                     context_id: "api".into(),
                     filter: input.q,
-                    sort: track_sort(input.sort.as_deref().unwrap_or(
-                        if path.ends_with("/artist") {
-                            "title"
-                        } else {
-                            "track_number"
-                        },
-                    ))?,
+                    sort: track_sort(input.sort.as_deref().unwrap_or(if kind == "artist" {
+                        "title"
+                    } else {
+                        "track_number"
+                    }))?,
                     descending: input.descending,
                     anchor_uri: input.anchor_uri,
                 }
@@ -317,7 +380,7 @@ async fn queue_play(
                 }
             }
         }
-        "/api/queue/smart-playlist" => {
+        "smart-playlist" => {
             #[derive(Deserialize)]
             struct Smart {
                 id: library::SmartPlaylistKey,
@@ -350,7 +413,7 @@ async fn queue_play(
                 anchor_uri: input.anchor_uri,
             }
         }
-        _ => {
+        "source" => {
             #[derive(Deserialize)]
             struct Source {
                 source: String,
@@ -384,6 +447,7 @@ async fn queue_play(
                 anchor_uri: input.anchor_uri,
             }
         }
+        _ => return Err(bad_request("Unknown media kind")),
     };
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || {
@@ -449,10 +513,15 @@ async fn queue_activate(
 async fn queue_remove(
     State(products): State<ProductHandles>,
     Query(parameters): Query<HashMap<String, String>>,
+    request: Request<Body>,
 ) -> Result<Response<Body>, Error> {
     let products = &products;
     let parameters = &parameters;
-    let id = required(&parameters, "id")?.to_owned();
+    let id = if request.method() == hyper::Method::POST {
+        body::<Identifier>(request).await?.id
+    } else {
+        required(&parameters, "id")?.to_owned()
+    };
     let queue = products.playback.queue.clone();
     tokio::task::spawn_blocking(move || queue.remove(playback::OccurrenceId::new(id)))
         .await
@@ -537,7 +606,34 @@ struct Identifier {
     id: String,
 }
 
-async fn body<T: serde::de::DeserializeOwned>(request: Request<Body>) -> Result<T, Error> {
+async fn body<T: serde::de::DeserializeOwned>(mut request: Request<Body>) -> Result<T, Error> {
+    if let Some(SubmittedForm(fields)) = request.extensions_mut().remove::<SubmittedForm>() {
+        let mut value = match fields.get("payload") {
+            Some(payload) => {
+                match serde_json::from_str::<serde_json::Map<String, Value>>(payload) {
+                    Ok(value) => Value::Object(value),
+                    Err(error) => return Err(bad_request(error)),
+                }
+            }
+            None => json!({}),
+        };
+        for (name, text) in &fields {
+            if matches!(name.as_str(), "csrf" | "return" | "payload") {
+                continue;
+            }
+            value[name] = if matches!(name.as_str(), "volume" | "position_ms") {
+                match serde_json::from_str(text) {
+                    Ok(value) => value,
+                    Err(error) => return Err(bad_request(error)),
+                }
+            } else if name == "library" && text.is_empty() {
+                Value::Null
+            } else {
+                Value::String(text.clone())
+            };
+        }
+        return serde_json::from_value(value).map_err(bad_request);
+    }
     let bytes = request
         .into_body()
         .collect()
@@ -666,6 +762,7 @@ fn error(status: StatusCode, message: impl std::fmt::Display) -> Error {
 struct Authorization {
     token: String,
     failures: Mutex<VecDeque<(IpAddr, Instant, u8)>>,
+    browser_key: [u8; 32],
 }
 
 #[cfg(test)]
@@ -674,10 +771,7 @@ mod authentication_tests {
 
     #[test]
     fn failed_attempts_expire_and_are_separate_for_each_address() {
-        let authorization = Authorization {
-            token: "Bearer valid".into(),
-            failures: Mutex::new(VecDeque::new()),
-        };
+        let authorization = Authorization::new("valid");
         let address = "127.0.0.1".parse().unwrap();
         let now = Instant::now();
         for _ in 0..10 {
@@ -712,10 +806,7 @@ mod authentication_tests {
 
     #[test]
     fn successful_authentication_clears_previous_failures() {
-        let authorization = Authorization {
-            token: "Bearer valid".into(),
-            failures: Mutex::new(VecDeque::new()),
-        };
+        let authorization = Authorization::new("valid");
         let address = "127.0.0.1".parse().unwrap();
         let now = Instant::now();
         for _ in 0..2 {
@@ -738,6 +829,14 @@ mod authentication_tests {
 }
 
 impl Authorization {
+    fn new(token: &str) -> Self {
+        Self {
+            token: format!("Bearer {token}"),
+            failures: Mutex::new(VecDeque::new()),
+            browser_key: blake3::derive_key("Rufin browser authentication v1", token.as_bytes()),
+        }
+    }
+
     fn check(
         &self,
         address: IpAddr,
@@ -788,20 +887,75 @@ impl Authorization {
     }
 }
 
+#[derive(Clone)]
+struct SubmittedForm(HashMap<String, String>);
+
 async fn authorize(
     State(authorization): State<Arc<Authorization>>,
     Extension(peer): Extension<SocketAddr>,
-    request: Request<Body>,
+    mut request: Request<Body>,
     next: Next,
 ) -> Response<Body> {
+    let is_form = request
+        .headers()
+        .get(hyper::header::CONTENT_TYPE)
+        .and_then(|h| h.to_str().ok())
+        .is_some_and(|h| h.split(';').next() == Some("application/x-www-form-urlencoded"));
+    let form = if is_form {
+        let body = std::mem::replace(request.body_mut(), Body::empty());
+        let fields = match axum::body::to_bytes(body, usize::MAX).await {
+            Ok(bytes) => url::form_urlencoded::parse(&bytes)
+                .into_owned()
+                .collect::<HashMap<String, String>>(),
+            Err(error) => return bad_request(error).into_response(),
+        };
+        Some(SubmittedForm(fields))
+    } else {
+        None
+    };
     let token = request
         .headers()
         .get(hyper::header::AUTHORIZATION)
         .and_then(|h| h.to_str().ok());
-    if let Err(response) = authorization.check(peer.ip(), token, Instant::now()) {
+    if let Some(csrf) = token
+        .is_none()
+        .then(|| session(&authorization, request.headers()))
+        .flatten()
+    {
+        if !matches!(*request.method(), hyper::Method::GET | hyper::Method::HEAD) {
+            let submitted = form
+                .as_ref()
+                .and_then(|form| form.0.get("csrf").map(String::as_str))
+                .or_else(|| {
+                    request
+                        .headers()
+                        .get("x-rufin-csrf")
+                        .and_then(|v| v.to_str().ok())
+                });
+            if submitted != Some(csrf.as_str()) {
+                return error(StatusCode::FORBIDDEN, "Invalid form token").into_response();
+            }
+        }
+    } else if let Err(response) = authorization.check(peer.ip(), token, Instant::now()) {
         return *response;
     }
-    next.run(request).await
+    let target = form.as_ref().map(|form| {
+        form.0
+            .get("return")
+            .filter(|v| v.starts_with("/?") && !v.contains(['\r', '\n']))
+            .cloned()
+            .unwrap_or_else(|| "/".into())
+    });
+    if let Some(form) = form {
+        request.extensions_mut().insert(form);
+    }
+    let response = next.run(request).await;
+    if response.status().is_success() {
+        if let Some(target) = target {
+            return axum::response::Redirect::to(&target).into_response();
+        }
+    }
+    response
 }
 
 fn publication_json(publication: Option<&playback::PlaybackProjection>) -> Value {
@@ -897,4 +1051,130 @@ fn playback_event_json(
     }
     *previous = publication.map(|publication| publication.view);
     value
+}
+
+fn random_secret() -> Result<String, Error> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(internal)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn cookie_name(headers: &hyper::HeaderMap) -> String {
+    let port = headers
+        .get(hyper::header::HOST)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.parse::<axum::http::uri::Authority>().ok())
+        .and_then(|v| v.port_u16())
+        .unwrap_or(0);
+    format!("rufin-session-{port}")
+}
+
+fn cookie(headers: &hyper::HeaderMap) -> Option<&str> {
+    let cookie_name = cookie_name(headers);
+    headers
+        .get_all(hyper::header::COOKIE)
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(';'))
+        .filter_map(|v| v.trim().split_once('='))
+        .find_map(|(name, value)| (name == cookie_name).then_some(value))
+}
+
+fn session(auth: &Authorization, headers: &hyper::HeaderMap) -> Option<String> {
+    let (nonce, signature) = cookie(headers)?.split_once('.')?;
+    let signature = blake3::Hash::from_hex(signature).ok()?;
+    let expected = blake3::keyed_hash(&auth.browser_key, nonce.as_bytes());
+    (signature == expected).then(|| nonce.to_owned())
+}
+
+fn form_session(
+    auth: &Authorization,
+    headers: &hyper::HeaderMap,
+    form: &HashMap<String, String>,
+) -> Result<(), Error> {
+    let csrf = session(auth, headers)
+        .ok_or_else(|| error(StatusCode::UNAUTHORIZED, "Please connect again"))?;
+    if form.get("csrf") != Some(&csrf) {
+        return Err(error(StatusCode::FORBIDDEN, "Invalid form token"));
+    }
+    Ok(())
+}
+
+fn set_cookie(
+    response: &mut Response<Body>,
+    headers: &hyper::HeaderMap,
+    value: &str,
+    age: Option<u64>,
+) {
+    let name = cookie_name(headers);
+    let lifetime = age
+        .map(|age| format!("; Max-Age={age}"))
+        .unwrap_or_default();
+    let secure = headers
+        .get(hyper::header::ORIGIN)
+        .is_some_and(|v| v.as_bytes().starts_with(b"https://"));
+    response.headers_mut().insert(
+        hyper::header::SET_COOKIE,
+        format!(
+            "{name}={value}; Path=/; HttpOnly; SameSite=Lax{lifetime}{}",
+            if secure { "; Secure" } else { "" }
+        )
+        .parse()
+        .expect("session cookie"),
+    );
+    response
+        .headers_mut()
+        .insert(hyper::header::CACHE_CONTROL, "no-store".parse().unwrap());
+}
+
+async fn login(
+    Extension(auth): Extension<Arc<Authorization>>,
+    Extension(peer): Extension<SocketAddr>,
+    headers: hyper::HeaderMap,
+    axum::Form(form): axum::Form<HashMap<String, String>>,
+) -> Response<Body> {
+    // The submitted API token authenticates login; an existing cookie does not.
+    let token = format!(
+        "Bearer {}",
+        form.get("token").map(String::as_str).unwrap_or_default()
+    );
+    if let Err(response) = auth.check(peer.ip(), Some(&token), Instant::now()) {
+        if headers
+            .get(hyper::header::ACCEPT)
+            .is_some_and(|v| v == "application/json")
+        {
+            return *response;
+        }
+        if response.status() == StatusCode::UNAUTHORIZED {
+            return axum::response::Redirect::to("/?login=failed").into_response();
+        }
+        return *response;
+    }
+    let csrf = match random_secret() {
+        Ok(nonce) => nonce,
+        Err(error) => return error.into_response(),
+    };
+    let signature = blake3::keyed_hash(&auth.browser_key, csrf.as_bytes());
+    let value = format!("{csrf}.{}", signature.to_hex());
+    let mut response = if headers
+        .get(hyper::header::ACCEPT)
+        .is_some_and(|v| v == "application/json")
+    {
+        json_response(StatusCode::OK, json!({"csrf":csrf}))
+    } else {
+        axum::response::Redirect::to("/").into_response()
+    };
+    set_cookie(&mut response, &headers, &value, None);
+    response
+}
+
+async fn logout(
+    Extension(auth): Extension<Arc<Authorization>>,
+    headers: hyper::HeaderMap,
+    axum::Form(form): axum::Form<HashMap<String, String>>,
+) -> Result<Response<Body>, Error> {
+    form_session(&auth, &headers, &form)?;
+    let mut response = axum::response::Redirect::to("/").into_response();
+    set_cookie(&mut response, &headers, "", Some(0));
+    Ok(response)
 }

@@ -15,6 +15,7 @@ import {
 import { api, session, state } from "./connection.js";
 
 import { goToMedia, markCurrent, setFavorite } from "./library.js";
+import { showQueueMenu } from "./queue.js";
 
 let receivedAt = 0;
 
@@ -43,6 +44,7 @@ function showPlayback(value) {
   state.playback = value;
   receivedAt = performance.now();
   const track = value?.current?.track;
+  $("player-menu").disabled = !track;
   $("player-title").textContent = track?.title || tr("Nothing playing");
   $("player-artist").textContent = track?.artist || "";
   $("player-album").textContent = track?.album || "";
@@ -283,6 +285,11 @@ async function setVolume(persist) {
 }
 
 function init() {
+  $("player-menu").removeAttribute("popovertarget");
+  $("player-menu").addEventListener("click", () => {
+    if (state.playback?.current)
+      run(() => showQueueMenu(state.playback.current, $("player-menu")));
+  });
   new ResizeObserver(scrollLyrics).observe($("lyrics"));
   for (const [id, kind] of [
     ["player-artist", "artists"],

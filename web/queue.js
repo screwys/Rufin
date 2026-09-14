@@ -111,45 +111,8 @@ function showQueue(value) {
         run(() => api("/queue/activate", "POST", { id: row.id }));
       }
     });
-    const showActions = async (anchor, event) => {
-      const metadata = await api(
-        `/media?${new URLSearchParams({ uri: row.track.uri })}`,
-      );
-      const track = { ...row.track, favorite: metadata.favorite };
-      const destination = await goToMenu(track, "track", metadata);
-      showMenu(
-        [
-          [tr("Play"), () => api("/queue/activate", "POST", { id: row.id })],
-          [tr("Play Next"), () => api("/queue/next", "POST", { id: row.id })],
-          [
-            tr("Play Later"),
-            () =>
-              api("/queue/reorder", "POST", { ids: [row.id], before: null }),
-          ],
-          radioMenu(track),
-          null,
-          playlistMenu({ uris: [track.uri] }),
-          [
-            track.favorite
-              ? tr("Remove from Favorites")
-              : tr("Add to Favorites"),
-            () => setFavorite([track]),
-          ],
+    const showActions = (anchor, event) => showQueueMenu(row, anchor, event);
 
-          [
-            tr("Remove from Queue"),
-            () =>
-              api(
-                `/queue/item?${new URLSearchParams({ id: row.id })}`,
-                "DELETE",
-              ),
-          ],
-          ...(destination ? [null, destination] : []),
-        ],
-        anchor,
-        event,
-      );
-    };
     li.addEventListener("contextmenu", (event) => {
       event.preventDefault();
       open.click();
@@ -195,6 +158,46 @@ function showQueue(value) {
   }
 }
 
+async function showQueueMenu(row, anchor, event) {
+  const metadata = await api(
+    `/media?${new URLSearchParams({ uri: row.track.uri })}`,
+  );
+  const track = { ...row.track, favorite: metadata.favorite };
+  const destination = await goToMenu(track, "track", metadata);
+  showMenu(
+    [
+      [tr("Play"), () => api("/queue/activate", "POST", { id: row.id })],
+      [tr("Play Next"), () => api("/queue/next", "POST", { id: row.id })],
+      [
+        tr("Play Later"),
+        () =>
+          api("/queue/reorder", "POST", { ids: [row.id], before: null }),
+      ],
+      radioMenu(track),
+      null,
+      playlistMenu({ uris: [track.uri] }),
+      [
+        track.favorite
+          ? tr("Remove from Favorites")
+          : tr("Add to Favorites"),
+        () => setFavorite([track]),
+      ],
+
+      [
+        tr("Remove from Queue"),
+        () =>
+          api(
+            `/queue/item?${new URLSearchParams({ id: row.id })}`,
+            "DELETE",
+          ),
+      ],
+      ...(destination ? [null, destination] : []),
+    ],
+    anchor,
+    event,
+  );
+}
+
 function init() {
   $("queue").addEventListener("dragover", (event) => {
     if (acceptsMedia(event)) event.preventDefault();
@@ -230,4 +233,4 @@ function dropMedia(position) {
   });
 }
 
-export { showQueue, init };
+export { showQueue, showQueueMenu, init };
