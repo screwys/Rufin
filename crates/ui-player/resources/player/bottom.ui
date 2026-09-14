@@ -171,12 +171,6 @@
             <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-output-button"/></style>
           </object>
         </child>
-        <child>
-          <object class="GtkMenuButton" id="settings_button">
-            <property name="icon-name">rufin-preferences-system-symbolic</property><property name="direction">up</property><property name="has-frame">false</property><property name="valign">center</property>
-            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-settings-button"/></style>
-          </object>
-        </child>
         <child><object class="GtkBox" id="volume_group"><property name="orientation">horizontal</property><property name="spacing">0</property><property name="valign">center</property></object></child>
       </object>
     </property>
@@ -188,4 +182,9 @@
     <property name="adjustment"><object class="GtkAdjustment"><property name="lower">0</property><property name="upper">1</property><property name="value">1</property><property name="step-increment">0.01</property><property name="page-increment">0.1</property></object></property>
     <style><class name="volume-slider"/></style>
   </object>
+          <object class="GtkMenuButton" id="settings_button">
+            <property name="icon-name">rufin-music-queue-symbolic</property><property name="direction">down</property><property name="has-frame">false</property><property name="valign">center</property>
+            <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="player-settings-button"/><class name="topbar-button"/></style>
+          </object>
+
 </interface>

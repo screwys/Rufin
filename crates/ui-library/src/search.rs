@@ -449,6 +449,7 @@ struct SearchRouteProjection {
     shell: Weak<CatalogUi>,
     selected: SelectedLibrary,
     search: gtk::SearchEntry,
+    header_binding: glib::Binding,
     status: gtk::Stack,
     results: adw::ViewStack,
     result_page: gtk::Stack,
@@ -488,6 +489,12 @@ impl SearchRouteProjection {
         search.set_hexpand(true);
         search.set_width_request(1);
         bind_search_placeholder(&search, "Search");
+        let header_binding = shell
+            .global_search
+            .bind_property("text", &search, "text")
+            .bidirectional()
+            .sync_create()
+            .build();
 
         let models = CollectionCategory::ALL.map(|_| gio::ListStore::new::<SparseObjectItem>());
         let category_pages =
@@ -504,6 +511,7 @@ impl SearchRouteProjection {
             shell: Rc::downgrade(shell),
             selected: selected.clone(),
             search,
+            header_binding,
             status,
             results,
             result_page,
@@ -518,6 +526,10 @@ impl SearchRouteProjection {
         projection.connect();
         projection.mount_category(CollectionCategory::default());
         projection.register_now_playing(shell);
+        let query = projection.search.text().trim().to_owned();
+        if !query.is_empty() {
+            projection.submit(query);
+        }
         projection
     }
 
@@ -766,6 +778,7 @@ impl SearchRouteProjection {
 
 impl Drop for SearchRouteProjection {
     fn drop(&mut self) {
+        self.header_binding.unbind();
         if let Some(source) = self.debounce.get_mut().take() {
             source.remove();
         }

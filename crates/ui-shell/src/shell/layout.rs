@@ -415,12 +415,18 @@ pub(crate) fn route_content_width(shell: &Shell) -> i32 {
 
 impl Shell {
     pub(crate) fn left_sidebar_mode(&self) -> ResolvedLeftSidebarMode {
-        if !self.navigation_view.split_view.is_collapsed() {
-            ResolvedLeftSidebarMode::Full
-        } else if self.navigation_view.compact_nav_slot.get_visible() {
+        if self.navigation_view.split_view.is_collapsed() {
+            ResolvedLeftSidebarMode::Hidden
+        } else if self
+            .navigation_view
+            .sidebar_modes
+            .visible_child_name()
+            .as_deref()
+            == Some("compact")
+        {
             ResolvedLeftSidebarMode::Compact
         } else {
-            ResolvedLeftSidebarMode::Hidden
+            ResolvedLeftSidebarMode::Full
         }
     }
 
@@ -459,15 +465,8 @@ impl Shell {
         let previous_right_visible = self.right_sidebar_visible();
 
         let app_active = true;
-        let full_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Full;
         let hidden_sidebar = resolved.left_sidebar == ResolvedLeftSidebarMode::Hidden;
         let right_visible = app_active && resolved.right_sidebar.is_visible();
-        self.chrome
-            .window_controls
-            .set_full_controls_allowed(!app_active || full_sidebar, !app_active || right_visible);
-        self.chrome.window_controls.set_compact_start_alignment(
-            app_active && resolved.left_sidebar == ResolvedLeftSidebarMode::Compact,
-        );
         let overlay_sidebar_width = if hidden_sidebar {
             self.settings
                 .current
@@ -490,8 +489,15 @@ impl Shell {
         }
         self.apply_fullscreen_topology(app_active);
 
-        let collapsed = !app_active || !full_sidebar;
-        let show_sidebar = app_active && full_sidebar;
+        self.navigation_view.sidebar_modes.set_visible_child_name(
+            if resolved.left_sidebar == ResolvedLeftSidebarMode::Compact {
+                "compact"
+            } else {
+                "full"
+            },
+        );
+        let collapsed = !app_active || hidden_sidebar;
+        let show_sidebar = app_active && !hidden_sidebar;
         if show_sidebar {
             if !self.navigation_view.split_view.shows_sidebar() {
                 self.navigation_view.split_view.set_show_sidebar(true);
@@ -501,7 +507,7 @@ impl Shell {
             }
         } else {
             // While the responsive presentation is hidden, show-sidebar is
-            // transient overlay state owned by the floating button and
+            // transient overlay state owned by the header button and
             // libadwaita. Rewriting it during allocation cancels its reveal.
             if (!app_active || !hidden_sidebar) && self.navigation_view.split_view.shows_sidebar() {
                 self.navigation_view.split_view.set_show_sidebar(false);
@@ -512,18 +518,11 @@ impl Shell {
         }
         set_widget_visible(&self.navigation_view.normal_nav_panel, app_active);
         set_widget_visible(
-            &self.navigation_view.compact_nav_slot,
-            app_active && resolved.left_sidebar == ResolvedLeftSidebarMode::Compact,
-        );
-        set_widget_visible(
-            &self.navigation_view.tiny_nav_button,
-            app_active && hidden_sidebar,
-        );
-        set_widget_visible(
             &self.navigation_view.left_resize_handle,
             app_active && !hidden_sidebar,
         );
         let right_visibility_changed = previous_right_visible != right_visible;
+        self.chrome.topbar.update_sidebar(self.left_sidebar_mode());
         set_widget_visible(&self.right_panel.right_panel_slot, right_visible);
         set_widget_visible(&self.player_ui.right_panel.root, right_visible);
         set_widget_visible(&self.right_panel.right_resize_handle, right_visible);
@@ -650,7 +649,8 @@ impl Shell {
     }
 
     pub(crate) fn preview_left_sidebar_width(&self, width: i32) {
-        let width = width.max(1);
+        // The split view allocates the sidebar content and its border together.
+        let width = width.max(1) + LEFT_PANE_SEPARATOR_WIDTH;
         self.navigation_view
             .split_view
             .set_min_sidebar_width(f64::from(width));
@@ -661,10 +661,10 @@ impl Shell {
     }
 
     fn sync_left_resize_handle_to_allocation(&self) {
-        let width = match self.left_sidebar_mode() {
-            ResolvedLeftSidebarMode::Full => self.navigation_view.normal_nav_panel.width(),
-            ResolvedLeftSidebarMode::Compact => self.navigation_view.compact_nav_slot.width(),
-            ResolvedLeftSidebarMode::Hidden => 0,
+        let width = if self.left_sidebar_mode() == ResolvedLeftSidebarMode::Hidden {
+            0
+        } else {
+            self.navigation_view.sidebar_modes.width()
         };
         position_left_resize_handle(&self.navigation_view.left_resize_handle, width);
     }

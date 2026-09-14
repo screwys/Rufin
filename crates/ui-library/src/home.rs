@@ -24,7 +24,7 @@ use ui_shared::mounted_route::MountedRoute;
 use super::collections::library_route_inset;
 use super::detail_showcase::{
     DetailShowcaseView, MediaShowcase, detail_playback_controls, detail_radio_button,
-    home_album_cover_projection, media_showcase,
+    fit_detail_text, home_album_cover_projection, media_showcase,
 };
 use super::grid_cells::{
     AlbumGridCell, FixedPageCollectionRow, ReusableCollectionGridCell, TrackGridCell,
@@ -714,6 +714,7 @@ impl CatalogUi {
         artist.set_width_request(1);
         artist.set_width_chars(1);
         artist.set_max_width_chars(32);
+        fit_detail_text(&artist, &album.display_artist);
         DetailLinkBinding::new(&artist, self.route_navigation()).bind(album_artist_links(&album));
         showcase_view.append_detail(&artist);
         showcase_view.replace_summary(&[
@@ -741,7 +742,7 @@ impl CatalogUi {
             context_menu: Some(context_menu),
             actions_min_cover_size: Some(HOME_SHOWCASE_ACTION_MIN_COVER_SIZE),
         });
-        ui_shared::controls::window_drag_handle(&showcase).upcast()
+        showcase.upcast()
     }
 
     fn home_genres(self: &Rc<Self>, genres: &[HomeGenreRow]) -> Option<gtk::Widget> {

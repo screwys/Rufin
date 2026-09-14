@@ -64,16 +64,5 @@
         <style><class name="right-sidebar-resize-handle"/></style>
       </object>
     </child>
-    <child type="overlay">
-      <object class="GtkButton" id="tiny_nav_button">
-        <property name="visible">false</property>
-        <property name="icon-name">rufin-sidebar-show-symbolic</property>
-        <property name="tooltip-text" translatable="yes">Show sidebar</property>
-        <property name="halign">start</property><property name="valign">end</property>
-        <property name="margin-start">8</property><property name="margin-bottom">8</property>
-        <accessibility><property name="label" translatable="yes">Show sidebar</property></accessibility>
-        <style><class name="icon-button"/><class name="flat"/><class name="circular"/><class name="tiny-sidebar-button"/></style>
-      </object>
-    </child>
   </object>
 </interface>

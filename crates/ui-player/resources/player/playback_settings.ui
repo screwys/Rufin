@@ -5,7 +5,7 @@
 
   <object class="GtkPopover" id="popover">
     <property name="autohide">true</property>
-    <property name="position">top</property>
+    <property name="position">bottom</property>
     <style><class name="playback-settings-popover"/></style>
     <property name="child">
       <object class="GtkScrolledWindow">
@@ -28,9 +28,6 @@
     </property>
   </object>
 
-  <object class="AdwActionRow" id="output_row">
-    <property name="title" translatable="yes">Audio output</property>
-  </object>
   <object class="AdwSwitchRow" id="lyrics">
     <property name="title" translatable="yes">Show lyrics</property>
   </object>

@@ -58,14 +58,7 @@ impl FullscreenPlayerParts {
     }
 }
 
-pub fn build_fullscreen_player(
-    hero_start_controls: &impl IsA<gtk::Widget>,
-    hero_end_controls: &impl IsA<gtk::Widget>,
-    inline_start_controls: &impl IsA<gtk::Widget>,
-    inline_end_controls: &impl IsA<gtk::Widget>,
-    visualizer_area: &gtk::DrawingArea,
-    drag_handle: &gtk::WindowHandle,
-) -> FullscreenPlayerParts {
+pub fn build_fullscreen_player(visualizer_area: &gtk::DrawingArea) -> FullscreenPlayerParts {
     let resource = crate::ui_resource::FULLSCREEN_PLAYER_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     ui_shared::objects!(builder, resource, {
@@ -106,7 +99,6 @@ pub fn build_fullscreen_player(
     });
     hero.set_spacing(FULLSCREEN_PLAYER_HERO_SPACING);
     hero_content.set_child_spacing(FULLSCREEN_PLAYER_HERO_SPACING);
-    hero.append(hero_start_controls);
     hero.append(&close_button);
 
     let cover = ArtworkTile::new(FULLSCREEN_PLAYER_DEFAULT_COVER_SIZE);
@@ -115,7 +107,6 @@ pub fn build_fullscreen_player(
     cover.area.set_valign(gtk::Align::Center);
     hero_content.prepend(&cover.area);
     hero.append(&hero_content);
-    hero.append(hero_end_controls);
     let queue_header = super::queue::fullscreen_queue_column_owner(
         &fullscreen_queue_header,
         super::queue::QueueFullscreenColumnWidgets {
@@ -135,9 +126,7 @@ pub fn build_fullscreen_player(
     stack.add_titled(&equalizer_panel, Some("equalizer"), &tr("Equalizer"));
     stack.set_visible_child_name("lyrics");
 
-    inline_start.append(inline_start_controls);
     inline_start.append(&inline_close_button);
-    inline_end.append(inline_end_controls);
     lyrics_tab_icon.append(&lyrics_icon_area(Rc::new(Cell::new(true))));
     visualizer_tab_icon.append(&fullscreen_visualizer_icon());
     equalizer_tab_icon.append(&fullscreen_equalizer_icon());
@@ -153,8 +142,6 @@ pub fn build_fullscreen_player(
     switcher_bar.set_measure_overlay(&inline_start, false);
     switcher_bar.set_measure_overlay(&inline_end, false);
     let tabs_labeled_width = Rc::new(Cell::new(0));
-    root.add_overlay(drag_handle);
-    root.set_measure_overlay(drag_handle, false);
 
     FullscreenPlayerParts {
         root,

@@ -2,11 +2,13 @@
 
 :root {
   --dim-opacity: 70%;
+  --shell-separator-color: color-mix(in srgb, var(--window-fg-color) 4%, transparent);
 }
 
 @media (prefers-contrast: more) {
   :root {
     --dim-opacity: 90%;
+    --shell-separator-color: var(--sidebar-border-color);
   }
 }
 
@@ -243,7 +245,8 @@ button.release-note-update:hover {
 }
 
 .app-root {
-  background: var(--window-bg-color);
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
 .preference-selection-buttons {
@@ -269,7 +272,7 @@ button.release-note-update:hover {
 
 .wide-sidebar-slot,
 .compact-rail-slot {
-  border-right: 1px solid var(--sidebar-border-color);
+  border-right: 1px solid var(--shell-separator-color);
 }
 
 .sidebar-resize-handle {
@@ -283,7 +286,7 @@ button.release-note-update:hover {
   min-width: 1px;
   padding: 0;
   border: 0;
-  background: var(--border-color);
+  background: var(--shell-separator-color);
   box-shadow: none;
 }
 
@@ -303,7 +306,8 @@ button.release-note-update:hover {
 
 .main-area,
 .route-content {
-  background: var(--window-bg-color);
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
 scrolledwindow.route-scroll-owner scrollbar.vertical,
@@ -443,103 +447,22 @@ row:focus {
   box-shadow: none;
 }
 
-.platform-window-bar {
-  min-height: 24px;
-  padding: 0;
-  background: var(--window-bg-color);
-  border-bottom: 1px solid color-mix(in srgb, var(--window-fg-color) 14%, transparent);
-}
-
-.platform-window-bar > windowhandle > box {
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.platform-window-bar windowcontrols > button {
-  min-height: 24px;
-  padding-top: 0;
-  padding-bottom: 0;
-}
-
-.platform-window-bar windowcontrols > button > image {
-  padding: 3px;
-}
-
-.platform-window-bar-title {
-  margin: 0 8px;
-  /* Keep Japanese and Latin in one UI font instead of legacy CJK fallback. */
-  font-family: "Yu Gothic UI", "Hiragino Sans", sans-serif;
-  font-size: 12px;
-  font-weight: 600;
-}
-
-.macos-window-bar-preview-controls {
-  margin-left: 12px;
-}
-
-.macos-window-bar-preview-control {
-  min-width: 12px;
-  min-height: 12px;
-  border-radius: 999px;
-  box-shadow: inset 0 0 0 1px rgb(0 0 0 / 18%);
-}
-
-.macos-window-bar-preview-control.close {
-  background: #ff5f57;
-}
-
-.macos-window-bar-preview-control.minimize {
-  background: #febc2e;
-}
-
-.macos-window-bar-preview-control.maximize {
-  background: #28c840;
-}
-
-.platform-window-bar.windows-window-bar > windowhandle > box {
-  padding: 0;
-}
-
-.windows-window-bar windowcontrols {
-  border-spacing: 0;
-}
-
-.windows-window-bar .platform-window-bar-title {
-  margin: 0;
-}
-
-.windows-window-bar windowcontrols > button {
-  min-width: 46px;
-  min-height: 24px;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
+headerbar.shared-topbar {
+  background: var(--headerbar-bg-color);
+  color: var(--headerbar-fg-color);
+  border-bottom: 1px solid var(--shell-separator-color);
   box-shadow: none;
 }
 
-.windows-window-bar windowcontrols > button:hover {
-  background: rgb(125 125 125 / 30%);
+headerbar.shared-topbar button.topbar-button,
+headerbar.shared-topbar menubutton.topbar-button > button {
+  min-width: 28px;
+  min-height: 28px;
+  padding: 2px;
 }
 
-.windows-window-bar windowcontrols > button.close:hover {
-  background: #e81123;
-  color: white;
-}
-
-.windows-window-bar windowcontrols > button > image {
-  -gtk-icon-size: 16px;
-  padding: 0;
-  border-radius: 0;
-  background: transparent;
-  box-shadow: none;
-}
-
-.windows-window-bar windowcontrols > button.maximize > image {
-  -gtk-icon-size: 12px;
-}
-
-.left-opening-primary-menu arrow.right {
-  -gtk-icon-source: -gtk-icontheme("rufin-go-previous-symbolic");
+headerbar.shared-topbar searchentry {
+  min-width: 60px;
 }
 
 .album-detail-track-cells {
@@ -643,7 +566,7 @@ row:focus {
 }
 
 .startup-loading-root {
-  background: var(--window-bg-color);
+  background: var(--view-bg-color);
 }
 
 .startup-loading-status {
@@ -656,8 +579,8 @@ row:focus {
 }
 
 .right-panel {
-  background: color-mix(in srgb, var(--window-bg-color) 96%, var(--card-bg-color));
-  color: var(--window-fg-color);
+  background: var(--sidebar-bg-color);
+  color: var(--sidebar-fg-color);
 }
 
 .sidebar-header {
@@ -1717,7 +1640,7 @@ button.download-queue-pause image {
   font-size: 34px;
 }
 
-.album-detail-showcase .eyebrow {
+.detail-showcase .eyebrow {
   font-size: 13px;
 }
 
@@ -1743,39 +1666,6 @@ button.download-queue-pause image {
 
 .detail-showcase-actions {
   margin-top: 4px;
-}
-
-.detail-back-button,
-.tiny-sidebar-button {
-  min-width: 30px;
-  min-height: 30px;
-  padding: 0;
-  color: color-mix(in srgb, var(--window-fg-color) 92%, transparent);
-  background: color-mix(in srgb, var(--window-bg-color) 18%, transparent);
-  border-radius: 999px;
-  box-shadow:
-    0 8px 22px rgba(0, 0, 0, 0.24),
-    inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 18%, transparent);
-}
-
-.tiny-sidebar-button {
-  min-width: 38px;
-  min-height: 38px;
-  color: var(--window-fg-color);
-  background: color-mix(in srgb, var(--accent-bg-color) 42%, var(--window-bg-color));
-  box-shadow:
-    0 6px 18px rgba(0, 0, 0, 0.32),
-    inset 0 0 0 1px color-mix(in srgb, var(--window-fg-color) 26%, transparent);
-  -gtk-icon-size: 17px;
-}
-
-.detail-back-button:hover,
-.tiny-sidebar-button:hover {
-  background: color-mix(in srgb, var(--window-bg-color) 30%, transparent);
-}
-
-.tiny-sidebar-button:hover {
-  background: color-mix(in srgb, var(--accent-bg-color) 56%, var(--window-bg-color));
 }
 
 .detail-showcase-action-button {
@@ -1980,13 +1870,13 @@ button.download-queue-pause image {
 }
 
 .queue-lyrics-surface {
-  background: var(--window-bg-color);
+  background: var(--sidebar-bg-color);
 }
 
 .queue-lyrics-split > separator {
   min-height: 10px;
   background: transparent;
-  box-shadow: inset 0 1px var(--border-color);
+  box-shadow: inset 0 1px var(--shell-separator-color);
 }
 
 .queue-row {
@@ -2167,18 +2057,18 @@ entry.lyrics-offset-value.flat:focus-within {
 
 .bottom-player {
   padding: 2px 8px;
-  background: color-mix(in srgb, var(--window-bg-color) 96%, transparent);
-  color: var(--window-fg-color);
-  border-top: 1px solid var(--border-color);
+  background: var(--headerbar-bg-color);
+  color: var(--headerbar-fg-color);
+  border-top: 1px solid var(--shell-separator-color);
 }
 
 .app-content-stack {
-  background: var(--window-bg-color);
+  background: var(--view-bg-color);
 }
 
 .fullscreen-player {
-  background: var(--window-bg-color);
-  color: var(--window-fg-color);
+  background: var(--view-bg-color);
+  color: var(--view-fg-color);
 }
 
 .fullscreen-player-close-button {

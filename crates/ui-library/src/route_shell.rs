@@ -70,7 +70,6 @@ ui_shared::composite_box!(
         direction: gtk::Button,
         layout: gtk::Button,
         configure: gtk::Button,
-        reservation_host: gtk::Box,
     }
 );
 
@@ -269,7 +268,7 @@ impl CatalogUi {
         search: gtk::SearchEntry,
         sort_fields: &'static [LibraryField],
     ) -> LibraryToolbarProjection {
-        self.library_toolbar_projection_with_options(key, search, false, sort_fields, 6)
+        self.library_toolbar_projection_with_options(key, search, false, sort_fields, 12)
     }
 
     fn library_toolbar_projection_with_detail(
@@ -450,7 +449,6 @@ impl CatalogUi {
                 shell.present_library_config_dialog_with_detail(state.key, state.include_detail);
             });
         }
-        (self.reserve_window_controls)(&toolbar.imp().reservation_host, outer_spacing);
         let command_compact = Cell::new(false);
         apply_library_command_button_layout(&command_button, &command_compact, 1);
         let applied_sort_width = Cell::new(sort_dropdown.width_request());
@@ -465,7 +463,7 @@ impl CatalogUi {
                 sort_dropdown_for_width.set_width_request(sort_width);
             }
         });
-        let widget = ui_shared::controls::window_drag_handle(&owner).upcast();
+        let widget = owner.upcast();
         let projection = LibraryToolbarProjection {
             state: toolbar_state,
             widget,

@@ -212,7 +212,10 @@ pub(crate) fn install_window_actions(shell: &Rc<Shell>) {
     let navigate_search_accels = &["<Control>k"][..];
     add_window_action(shell, "navigate-search", navigate_search_accels, {
         let shell = Rc::clone(shell);
-        move || shell.navigate(ui_shared::route::Route::Search)
+        move || {
+            shell.navigate(ui_shared::route::Route::Search);
+            shell.chrome.topbar.search.grab_focus();
+        }
     });
     #[cfg(target_os = "macos")]
     let cycle_layout_accels = &["<Meta>j"][..];
@@ -847,6 +850,28 @@ fn show_about_dialog(shell: &Shell) {
     let resource = crate::ui_resource::ABOUT_RESOURCE;
     let builder = ui_shared::ui_resource::builder(resource);
     let dialog: adw::AboutDialog = ui_shared::ui_resource::object(&builder, resource, "dialog");
+    let sponsor: gtk::LinkButton = ui_shared::ui_resource::object(&builder, resource, "sponsor");
+    let sponsor_uri = sponsor.uri();
+    dialog.set_support_url(&sponsor_uri);
+    // AboutDialog exposes the URL but not the label of its main-page support action.
+    let mut pending = vec![dialog.child().expect("AboutDialog content")];
+    let mut support = None;
+    while let Some(widget) = pending.pop() {
+        if let Some(row) = widget.downcast_ref::<adw::ActionRow>()
+            && row.tooltip_text().as_deref() == Some(sponsor_uri.as_str())
+        {
+            support = Some(row.clone());
+            break;
+        }
+        let mut child = widget.first_child();
+        while let Some(widget) = child {
+            child = widget.next_sibling();
+            pending.push(widget);
+        }
+    }
+    support
+        .expect("AboutDialog support action")
+        .set_title(&sponsor.label().expect("sponsor link label"));
     dialog.set_application_name(DISPLAY_NAME);
     dialog.set_application_icon(APP_ID);
     dialog.set_translator_credits(TRANSLATOR_CREDITS);

@@ -2500,6 +2500,9 @@ msgstr ""
 msgid "Sources"
 msgstr ""
 
+msgid "Sponsor"
+msgstr ""
+
 msgid "Start minimized"
 msgstr ""
 

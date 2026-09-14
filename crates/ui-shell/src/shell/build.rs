@@ -36,16 +36,15 @@ use super::Shell;
 use super::actions::connect_shell_actions;
 use ui_shared::feedback::ControlFeedbackState;
 
-use super::chrome::{WindowChrome, WindowControlLayout, build_content_chrome};
+use super::chrome::{WindowChrome, build_content_chrome};
 use super::events::install_product_event_receivers;
 use super::layout::{
     COMPACT_RAIL_WIDTH, MIN_APP_WINDOW_HEIGHT, MIN_APP_WINDOW_WIDTH, NORMAL_SIDEBAR_WIDTH,
     ShellLayoutState,
 };
 use super::navigation::{
-    NavigationState, NavigationWidgets, NormalPrimaryMenuWidgets, PrimaryMenuWidgets,
-    build_compact_navigation, build_normal_navigation, install_normal_navigation_activation,
-    normal_primary_menu_button,
+    NavigationState, NavigationWidgets, build_compact_navigation, build_normal_navigation,
+    install_normal_navigation_activation,
 };
 use super::route::RouteViewport;
 use super::selected_ui::SelectedUiState;
@@ -67,8 +66,7 @@ pub async fn build(
     appearance.apply(&settings);
     let (window_width, window_height) =
         initial_window_size(settings.window_width, settings.window_height);
-    let window_bar_platform = crate::application::platform_window_bar(window_bar_preview);
-    let window_controls = WindowControlLayout::new(window_bar_platform.is_some());
+    let topbar = super::topbar::Topbar::new();
 
     let shell_root_resource = crate::ui_resource::SHELL_ROOT_RESOURCE;
     let shell_root_builder = ui_shared::ui_resource::builder(shell_root_resource);
@@ -96,23 +94,25 @@ pub async fn build(
         startup_loading_status: gtk::Label,
     });
     root_stack.set_width_request(MIN_APP_WINDOW_WIDTH);
-    root_stack.set_height_request(MIN_APP_WINDOW_HEIGHT);
+    root_stack.set_height_request(
+        (MIN_APP_WINDOW_HEIGHT - topbar.header.measure(gtk::Orientation::Vertical, -1).0).max(1),
+    );
     left_resize_handle.set_cursor_from_name(Some("col-resize"));
 
     let layout_state = ShellLayoutState::new(&root_stack);
     let toast_overlay = adw::ToastOverlay::new();
     toast_overlay.add_css_class("app-toast-overlay");
-    let window_content = window_controls.wrap_content(&layout_state.owner);
-    toast_overlay.set_child(Some(&window_content));
+    toast_overlay.set_child(Some(&layout_state.owner));
+    topbar.content_host.set_child(Some(&toast_overlay));
     let window = crate::application::application_window(
         app,
         DISPLAY_NAME,
         window_width,
         window_height,
-        &toast_overlay,
+        &topbar.window_content,
+        &topbar.header,
         window_bar_preview,
     );
-    window_controls.bind_window(&window);
 
     startup_loading_host.set_visible(true);
     let closing_app = app.clone();
@@ -219,33 +219,19 @@ pub async fn build(
     let navigation_builder = ui_shared::ui_resource::builder(navigation_resource);
     ui_shared::objects!(navigation_builder, navigation_resource, {
         normal_nav_panel: gtk::Box,
+        sidebar_modes: gtk::Stack,
         normal_nav_routes: adw::Sidebar,
         normal_nav_pins: gtk::Box,
         compact_nav_slot: gtk::Box,
         compact_nav_scroller: gtk::ScrolledWindow,
         compact_nav: gtk::Box,
-        normal_window_controls_host: gtk::Box,
-        compact_window_controls_host: gtk::Box,
-        normal_search: gtk::Button,
-        normal_sidebar_title: gtk::Label,
-        normal_main_menu: gtk::MenuButton,
-        compact_main_menu: gtk::Button,
-        compact_main_menu_label: gtk::Label,
     });
     compact_nav_slot.set_width_request(COMPACT_RAIL_WIDTH);
     compact_nav_scroller.set_min_content_width(COMPACT_RAIL_WIDTH);
     compact_nav_scroller.set_max_content_width(COMPACT_RAIL_WIDTH);
     compact_nav.set_width_request(COMPACT_RAIL_WIDTH);
-    normal_sidebar_title.set_label(DISPLAY_NAME);
-    compact_main_menu_label.set_label(&crate::shell::navigation::compact_sidebar_label_text(
-        "Menu",
-    ));
-    normal_window_controls_host.append(&window_controls.start_width_reservation());
-    compact_window_controls_host.append(&window_controls.compact_start_reservation());
-
     let visualizer = build_visualizer();
-    let queue_window_controls = window_controls.end_width_reservation();
-    let right_panel_parts = build_right_panel(&queue_window_controls, &visualizer.sidebar_area);
+    let right_panel_parts = build_right_panel(&visualizer.sidebar_area);
     let right_panel = right_panel_parts.root;
     let queue_header_host = right_panel_parts.queue_header_host;
     let queue_panel = right_panel_parts.queue_panel;
@@ -261,27 +247,19 @@ pub async fn build(
     let right_split = content_chrome.right_split;
     let right_panel_slot = content_chrome.right_panel_slot;
     let right_resize_handle = content_chrome.right_resize_handle;
-    let tiny_nav_button = content_chrome.tiny_nav_button;
-    let fullscreen_hero_start_controls = window_controls.start_width_reservation();
-    let fullscreen_hero_end_controls = window_controls.end_width_reservation();
-    let fullscreen_inline_start_controls = window_controls.start_width_reservation();
-    let fullscreen_inline_end_controls = window_controls.end_width_reservation();
-    let fullscreen_player = build_fullscreen_player(
-        &fullscreen_hero_start_controls,
-        &fullscreen_hero_end_controls,
-        &fullscreen_inline_start_controls,
-        &fullscreen_inline_end_controls,
-        &visualizer.fullscreen_area,
-        &super::chrome::top_window_drag_handle("fullscreen-player-drag-handle"),
-    );
+    let fullscreen_player = build_fullscreen_player(&visualizer.fullscreen_area);
     let player_controls = build_bottom_player();
+    topbar
+        .playback_host
+        .append(&player_controls.settings_button);
 
-    content_row.append(&compact_nav_slot);
     content_row.append(&content_chrome.root);
 
     split_view.set_min_sidebar_width(NORMAL_SIDEBAR_WIDTH as f64);
     split_view.set_max_sidebar_width(NORMAL_SIDEBAR_WIDTH as f64);
-    split_view.set_sidebar(Some(&normal_nav_panel));
+    sidebar_modes.add_named(&normal_nav_panel, Some("full"));
+    sidebar_modes.add_named(&compact_nav_slot, Some("compact"));
+    split_view.set_sidebar(Some(&sidebar_modes));
     app_content_overlay.add_overlay(&fullscreen_player.root);
     app_content_overlay.set_measure_overlay(&fullscreen_player.root, false);
     app_content_overlay.set_clip_overlay(&fullscreen_player.root, true);
@@ -307,7 +285,7 @@ pub async fn build(
     let chrome = WindowChrome {
         application: app.clone(),
         window,
-        window_controls,
+        topbar,
         toast_overlay,
         control_feedback_label,
         source_refresh_feedback,
@@ -325,22 +303,13 @@ pub async fn build(
         startup_loading_status,
     };
     let navigation_view = NavigationWidgets {
+        sidebar_modes,
         split_view,
         left_resize_handle,
         normal_nav_panel,
-        compact_nav_slot,
-        tiny_nav_button,
         normal_nav_routes,
         normal_nav_pins,
         compact_nav,
-        normal_main_menu: NormalPrimaryMenuWidgets {
-            button: normal_main_menu,
-            popover: RefCell::new(None),
-        },
-        compact_main_menu: PrimaryMenuWidgets {
-            button: compact_main_menu,
-            popover: RefCell::new(None),
-        },
     };
     let route_viewport = RouteViewport::new(route_host, route_loading);
     let player_right_panel = ui_player::right_panel::RightPanelWidgets {
@@ -518,26 +487,11 @@ pub async fn build(
             crate::preferences::backup::import_dialog(&shell);
         }
     });
-    normal_primary_menu_button(
-        &shell.navigation_view.normal_main_menu.button,
-        &shell.navigation_view.normal_main_menu.popover,
-        &shell,
-    );
-    let search_shell = Rc::clone(&shell);
-    normal_search.connect_clicked(move |_| {
-        search_shell.navigate(ui_shared::route::Route::Search);
-    });
     install_normal_navigation_activation(&shell);
     build_normal_navigation(&shell);
     build_compact_navigation(&shell);
-    {
-        let split_view = shell.navigation_view.split_view.clone();
-        shell
-            .navigation_view
-            .tiny_nav_button
-            .connect_clicked(move |_| split_view.set_show_sidebar(true));
-    }
     connect_shell_actions(&shell);
+    shell.chrome.topbar.bind(&shell);
     install_application_quit(&shell);
     install_desktop_lifecycle(&shell);
     connect_queue_panel_controls(&shell.player_ui);
@@ -656,19 +610,24 @@ pub(crate) fn connect_transient_entry_focus_dismissal(shell: &Shell) {
 }
 
 fn install_focus_dismissal(window: &gtk::ApplicationWindow, targets: Vec<gtk::Widget>) {
-    let click_root = window.clone();
+    let click_root = window.downgrade();
     let click = gtk::GestureClick::new();
     click.set_button(0);
     click.set_propagation_phase(gtk::PropagationPhase::Capture);
     click.connect_pressed(move |gesture, _, x, y| {
         gesture.set_state(gtk::EventSequenceState::Denied);
+        let Some(click_root) = click_root.upgrade() else {
+            return;
+        };
         let Some(focus) = gtk::prelude::RootExt::focus(&click_root) else {
             return;
         };
-        let Some(target) = targets
-            .iter()
-            .find(|target| target.has_focus() || focus.is_ancestor(*target))
-        else {
+        let Some(target) = focus.ancestor(gtk::SearchEntry::static_type()).or_else(|| {
+            targets
+                .iter()
+                .find(|target| target.has_focus() || focus.is_ancestor(*target))
+                .cloned()
+        }) else {
             return;
         };
         if target.compute_bounds(&click_root).is_none_or(|bounds| {
